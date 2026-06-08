@@ -128,6 +128,8 @@ Invoke-NativeStep "Simple crawl top-up and media policy check" $nodePath @("scri
 Invoke-NativeStep "Source safety filter check" $nodePath @("scripts/harness/source_safety_filter_check.mjs")
 Invoke-NativeStep "Simple config sync check" $nodePath @("scripts/harness/simple_config_sync_check.mjs")
 Invoke-NativeStep "Crawl strategy save check" $nodePath @("scripts/harness/crawl_strategy_save_check.mjs")
+Invoke-NativeStep "Link import check" $nodePath @("scripts/harness/link_import_check.mjs")
+Invoke-NativeStep "Simple link run check" $nodePath @("scripts/harness/simple_link_run_check.mjs")
 Invoke-NativeStep "Simple queue and Feishu chunking check" $nodePath @("scripts/harness/simple_queue_check.mjs")
 Invoke-NativeStep "Title prompt guard check" $nodePath @("scripts/harness/title_prompt_guard_check.mjs")
 Invoke-NativeStep "Image prompt guard check" $nodePath @("scripts/harness/image_prompt_guard_check.mjs")

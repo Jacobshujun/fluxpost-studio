@@ -7,6 +7,7 @@ Last updated: 2026-06-05
 - UI entry stays under `src/app/page.tsx` and shared styling under `src/app/globals.css` unless a task explicitly scopes a component split.
 - API routes under `src/app/api/**/route.ts` should stay thin and delegate domain work to `src/lib/*`.
 - Platform crawling belongs in `src/lib/tikhub.ts`.
+- Source link batch-import orchestration belongs in `src/lib/source-link-import.ts`; the API route should stay thin and delegate to that helper. Reusable source-link resolution for simple-run link mode also belongs in this module. TikHub platform detail/share endpoint construction and response normalization for source links still belong in `src/lib/tikhub.ts`.
 - Content pool persistence belongs in `src/lib/content-pool.ts`.
 - Batch production persistence belongs in `src/lib/batch-production.ts`.
 - Generated post persistence belongs in `src/lib/generated-posts.ts`.
@@ -43,6 +44,7 @@ Last updated: 2026-06-05
 - Do not wrap a task in the same pool that its nested HTTP request also needs, because that can deadlock when the outer fan-out fills the pool. Platform fan-out can be locally bounded while each TikHub HTTP request acquires the crawl pool.
 - Do not add broad catch-and-ignore behavior around external calls. Return or record actionable errors.
 - Crawl request parameters belong before provider calls. Do not add post-crawl local keyword relevance filters, Xiaohongshu image/video post-filters, all-type fallback searches, or cross-platform result drops in the ingest path; after crawling, only dedupe, slice, cache media, content safety assessment/filtering, tag, and persist. Content safety filtering is limited to profanity, insult, strong negative sentiment, and competitor bashing and must not become a keyword relevance filter.
+- Link batch import is an exact-source ingest path, not keyword search. It should not mutate keyword crawl request mapping. Advanced `/api/crawl/links` persists imported items into the content pool, while simple-run link mode must enqueue through `/api/simple/runs`, resolve links server-side, skip keyword platform search/top-up, and then reuse the same media cache, source safety, source tagging, content-pool ingest, production, and publish boundaries as keyword simple runs.
 - Douyin `content_type=2` image requests are allowed a narrow media-normalization guard: keep true raw carousel/image records, skip video-cover-only records returned by the provider, and strip direct video media from kept image records so image-only crawls do not generate video frames.
 - Weibo App search normalization must use a dedicated `mblog` extractor and content-image field extraction. Do not rely on generic likely-array selection or broad raw-record image fallback for Weibo, because App payloads include layout objects, avatars, and ad/icon media near the actual post records.
 - Source visual tagging must preflight remote HTTP(S) image assets and sniff local app-served image bytes before model calls: use shared media request headers, validate supported JPEG/PNG/GIF/WebP content, convert valid images to inline data URLs, and record per-asset skips for invalid/unsupported assets.

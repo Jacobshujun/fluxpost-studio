@@ -97,6 +97,8 @@ type PreviewState =
 
 type PoolStatusFilter = SourceUsageStatus | "all";
 type PoolPlatformFilter = Platform | "all";
+type CrawlInputMode = "keyword" | "links";
+type LinkImportPlatform = Platform | "auto";
 type PoolSortMode =
   | "hot_desc"
   | "published_desc"
@@ -111,6 +113,7 @@ type ThemeMode = "professional" | "editorial" | "creator";
 type ActiveModule = "content" | "production" | "materials";
 type WorkspaceMode = "compact" | "simple" | "advanced";
 type SimpleWorkspaceVariant = "standard" | "compact";
+type SimpleSourceMode = "keyword" | "links";
 type TaskProgressStatus = "running" | "success" | "error";
 
 type TaskProgressSnapshot = {
@@ -130,6 +133,41 @@ type PublishStatusSnapshot = {
   detail: string;
   progress: number;
   notification?: string;
+};
+
+type LinkImportResultStatus = "imported" | "filtered" | "duplicate" | "unsupported" | "failed";
+
+type LinkImportResult = {
+  url: string;
+  platform?: Platform;
+  status: LinkImportResultStatus;
+  sourceId?: string;
+  itemId?: string;
+  title?: string;
+  error?: string;
+};
+
+type LinkImportSummary = {
+  total: number;
+  valid: number;
+  imported: number;
+  filteredUnsafe: number;
+  duplicates: number;
+  unsupported: number;
+  failed: number;
+  taggedContent: number;
+  taggedVisual: number;
+  localImages: number;
+  videoFrames: number;
+};
+
+type LinkImportResponse = {
+  query?: string;
+  items?: NormalizedSourceItem[];
+  project?: ContentProject;
+  results?: LinkImportResult[];
+  summary?: LinkImportSummary;
+  error?: string;
 };
 
 type FeishuPublishResponse = {
@@ -385,13 +423,21 @@ export default function Home() {
   const theme = useSyncExternalStore(subscribeTheme, getStoredTheme, () => "professional" as ThemeMode);
   const [workspaceMode, setWorkspaceMode] = useState<WorkspaceMode>("compact");
   const [workspaceSettings, setWorkspaceSettings] = useState<WorkspacePromptSettings>(defaultWorkspaceSettings);
+  const [simpleSourceMode, setSimpleSourceMode] = useState<SimpleSourceMode>("keyword");
   const [simpleKeyword, setSimpleKeyword] = useState("");
   const [simpleTargetCount, setSimpleTargetCount] = useState(20);
   const [simplePlatforms, setSimplePlatforms] = useState<Platform[]>(platforms.map((item) => item.value));
+  const [simpleLinkPlatform, setSimpleLinkPlatform] = useState<LinkImportPlatform>("auto");
+  const [simpleLinkText, setSimpleLinkText] = useState("");
   const [simpleRuns, setSimpleRuns] = useState<SimpleRun[]>([]);
   const [activeSimpleRunId, setActiveSimpleRunId] = useState("");
   const [activeModule, setActiveModule] = useState<ActiveModule>("content");
+  const [crawlInputMode, setCrawlInputMode] = useState<CrawlInputMode>("keyword");
   const [platform, setPlatform] = useState<Platform>("xiaohongshu");
+  const [linkImportPlatform, setLinkImportPlatform] = useState<LinkImportPlatform>("auto");
+  const [linkImportText, setLinkImportText] = useState("");
+  const [linkImportResults, setLinkImportResults] = useState<LinkImportResult[]>([]);
+  const [linkImportSummary, setLinkImportSummary] = useState<LinkImportSummary | null>(null);
   const [query, setQuery] = useState("");
   const [targetCount, setTargetCount] = useState(20);
   const [sort, setSort] = useState(defaultPlatformCrawlSettings.xiaohongshu.sort || "general");
@@ -468,6 +514,7 @@ export default function Home() {
     | "simpleRun"
     | null
   >(null);
+  const [terminatingSimpleRunId, setTerminatingSimpleRunId] = useState("");
   const [crawlProgress, setCrawlProgress] = useState<TaskProgressSnapshot | null>(null);
   const [generateProgress, setGenerateProgress] = useState<TaskProgressSnapshot | null>(null);
   const [batchProgress, setBatchProgress] = useState<TaskProgressSnapshot | null>(null);
@@ -525,6 +572,7 @@ export default function Home() {
     () => simpleRuns.find((run) => run.id === activeSimpleRunId) || simpleRuns[0] || null,
     [activeSimpleRunId, simpleRuns],
   );
+  const simpleLinkCount = useMemo(() => splitLines(simpleLinkText).length, [simpleLinkText]);
 
   const projectStats = useMemo(() => buildProjectStats(activeProject), [activeProject]);
   const selectedSourceImages = useMemo(() => (selectedSource ? getDisplayImages(selectedSource) : []), [selectedSource]);
@@ -893,14 +941,36 @@ export default function Home() {
     setSimplePlatforms((current) => (current.includes(value) ? current.filter((item) => item !== value) : [...current, value]));
   }
 
+  function changeSimpleSourceMode(value: SimpleSourceMode) {
+    setSimpleSourceMode(value);
+    if (value === "links") {
+      const linkCount = splitLines(simpleLinkText).length;
+      if (linkCount) setSimpleTargetCount(Math.min(linkCount, 500));
+    }
+  }
+
+  function updateSimpleLinkText(value: string) {
+    setSimpleLinkText(value);
+    if (simpleSourceMode === "links") {
+      const linkCount = splitLines(value).length;
+      if (linkCount) setSimpleTargetCount(Math.min(linkCount, 500));
+    }
+  }
+
   async function startSimpleRun() {
     const keyword = simpleKeyword.trim();
+    const sourceMode = simpleSourceMode;
+    const links = splitLines(simpleLinkText);
     if (!keyword) {
-      setMessage("请先输入关键词");
+      setMessage(sourceMode === "links" ? "请先输入归属关键词 / 内容池项目" : "请先输入关键词");
       return;
     }
-    if (!simplePlatforms.length) {
+    if (sourceMode === "keyword" && !simplePlatforms.length) {
       setMessage("请至少选择一个采集平台");
+      return;
+    }
+    if (sourceMode === "links" && !links.length) {
+      setMessage("请先粘贴需要导入的一行一个链接");
       return;
     }
     const textInstruction = workspaceSettings.textInstruction.trim();
@@ -940,9 +1010,12 @@ export default function Home() {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
+          sourceMode,
           keyword,
-          targetCount: simpleTargetCount,
-          platforms: simplePlatforms,
+          targetCount: sourceMode === "links" ? Math.min(simpleTargetCount, links.length) : simpleTargetCount,
+          platforms: sourceMode === "keyword" ? simplePlatforms : [],
+          links: sourceMode === "links" ? links : undefined,
+          linkPlatform: sourceMode === "links" ? simpleLinkPlatform : undefined,
           materialPaths: productionMaterialPaths,
           settings: settingsForRun,
         }),
@@ -961,6 +1034,34 @@ export default function Home() {
     } finally {
       setBusy(null);
       await loadSimpleRuns();
+    }
+  }
+
+  async function terminateSimpleRunFromUi(runId: string) {
+    if (!runId || terminatingSimpleRunId) return;
+    const run = simpleRuns.find((item) => item.id === runId);
+    const label = run?.input.keyword || runId;
+    if (!window.confirm(`确定要强制终止任务“${label}”吗？这会关闭本地队列状态，并允许后续任务继续执行。`)) return;
+
+    setTerminatingSimpleRunId(runId);
+    setMessage("");
+    try {
+      const res = await fetch("/api/simple/runs", {
+        method: "DELETE",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ runId }),
+      });
+      const data = (await res.json()) as { run?: SimpleRun; error?: string };
+      if (!res.ok || !data.run) throw new Error(data.error || "强制终止任务失败");
+      setSimpleRuns((current) => [data.run!, ...current.filter((item) => item.id !== data.run!.id)]);
+      setActiveSimpleRunId(data.run.id);
+      await loadExecutionLogs();
+      setMessage("已强制终止该任务，可以发起新的任务。");
+    } catch (error) {
+      setMessage(error instanceof Error ? error.message : "强制终止任务失败");
+    } finally {
+      setTerminatingSimpleRunId("");
+      await loadSimpleRuns(runId);
     }
   }
 
@@ -1039,6 +1140,89 @@ export default function Home() {
         value: 100,
         status: "error",
         total: targetCount,
+        completed: 0,
+      });
+      setMessage(errorMessage);
+    } finally {
+      setBusy(null);
+    }
+  }
+
+  async function startLinkImport() {
+    const links = splitLines(linkImportText);
+    const importQuery = query.trim();
+    if (!importQuery) {
+      setMessage("请先填写归属关键词 / 内容池项目");
+      return;
+    }
+    if (!links.length) {
+      setMessage("请粘贴需要导入的链接");
+      return;
+    }
+
+    setBusy("crawl");
+    setMessage("");
+    setLinkImportResults([]);
+    setLinkImportSummary(null);
+    setCrawlProgress({
+      title: "链接导入进度",
+      label: "正在解析来源链接",
+      detail: `待处理 ${links.length} 条链接`,
+      value: 24,
+      status: "running",
+      total: links.length,
+      completed: 0,
+    });
+    try {
+      const res = await fetch("/api/crawl/links", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          query: importQuery,
+          links,
+          platform: linkImportPlatform === "auto" ? undefined : linkImportPlatform,
+          cookie: linkImportPlatform === "douyin" ? cookie : undefined,
+        }),
+      });
+      const data = (await res.json()) as LinkImportResponse;
+      if (!res.ok) throw new Error(data.error || "链接导入失败");
+
+      const importedItems = data.items || [];
+      const nextSources = data.project?.items?.length ? data.project.items : importedItems;
+      const firstImported = importedItems[0] || nextSources[0];
+      setLinkImportResults(data.results || []);
+      setLinkImportSummary(data.summary || null);
+      setJob(null);
+      setSources(nextSources);
+      setActiveProject(data.project || null);
+      setSelectedSourceId(firstImported?.id || "");
+      setPoolStatusFilter("all");
+      const importedPlatforms = Array.from(new Set(importedItems.map((item) => item.platform)));
+      setPoolPlatformFilter(importedPlatforms.length === 1 ? importedPlatforms[0] : "all");
+      setPost(null);
+      await loadContentPool(importQuery);
+      await loadExecutionLogs();
+      setCrawlProgress({
+        title: "链接导入进度",
+        label: "链接导入完成",
+        detail: `成功 ${data.summary?.imported || 0} 条，失败 ${data.summary?.failed || 0} 条，过滤 ${data.summary?.filteredUnsafe || 0} 条`,
+        value: 100,
+        status: data.summary?.imported ? "success" : "error",
+        total: data.summary?.total || links.length,
+        completed: data.summary?.imported || 0,
+      });
+      setMessage(
+        `链接导入完成：成功 ${data.summary?.imported || 0} 条，重复 ${data.summary?.duplicates || 0} 条，失败 ${data.summary?.failed || 0} 条`,
+      );
+    } catch (error) {
+      const errorMessage = error instanceof Error ? error.message : "链接导入失败";
+      setCrawlProgress({
+        title: "链接导入进度",
+        label: "链接导入失败",
+        detail: errorMessage,
+        value: 100,
+        status: "error",
+        total: links.length,
         completed: 0,
       });
       setMessage(errorMessage);
@@ -2025,6 +2209,7 @@ export default function Home() {
         ))}
       </datalist>
       <div className="studio-frame mx-auto flex w-full max-w-[1680px] flex-col text-sm text-white">
+        <div className="studio-topbar">
         <header className="design-header mb-4 flex flex-col gap-4 px-4 py-4 lg:flex-row lg:items-center lg:justify-between">
           <div className="flex min-w-0 items-center gap-3">
             <div className="brand-mark grid h-12 w-12 shrink-0 place-items-center rounded-[8px]">
@@ -2060,38 +2245,54 @@ export default function Home() {
 
         <WorkspaceModeSwitcher mode={workspaceMode} onChange={setWorkspaceMode} />
 
+          {workspaceMode === "advanced" ? (
+            <div className="advanced-command-dock">
+              <StudioCommandBar
+                activeProject={activeProject}
+                visibleCount={activeModule === "production" ? productionSources.length : visibleSources.length}
+                totalCount={sources.length}
+                job={job}
+                post={post}
+              />
+
+              <ModuleSwitcher activeModule={activeModule} onChange={setActiveModule} />
+            </div>
+          ) : null}
+        </div>
+
+        <div className="studio-body">
+
         {workspaceMode === "compact" || workspaceMode === "simple" ? (
           <SimpleWorkspace
             variant={workspaceMode === "compact" ? "compact" : "standard"}
+            sourceMode={simpleSourceMode}
             keyword={simpleKeyword}
             targetCount={simpleTargetCount}
             selectedPlatforms={simplePlatforms}
+            linkText={simpleLinkText}
+            linkPlatform={simpleLinkPlatform}
+            linkCount={simpleLinkCount}
             materialPathCount={productionMaterialPaths.length}
             settings={workspaceSettings}
             runs={simpleRuns}
             activeRun={activeSimpleRun}
             busy={busy === "simpleRun"}
+            terminatingRunId={terminatingSimpleRunId}
             settingsBusy={busy === "settings"}
+            onSourceModeChange={changeSimpleSourceMode}
             onKeywordChange={setSimpleKeyword}
             onTargetCountChange={setSimpleTargetCount}
             onTogglePlatform={toggleSimplePlatform}
+            onLinkTextChange={updateSimpleLinkText}
+            onLinkPlatformChange={setSimpleLinkPlatform}
             onSettingsChange={updateWorkspaceSettingsDraft}
             onSaveSettings={() => saveWorkspaceSettingsPatch(workspaceSettings)}
             onStart={startSimpleRun}
+            onTerminateRun={terminateSimpleRunFromUi}
             onSelectRun={setActiveSimpleRunId}
           />
         ) : (
           <>
-        <StudioCommandBar
-          activeProject={activeProject}
-          visibleCount={activeModule === "production" ? productionSources.length : visibleSources.length}
-          totalCount={sources.length}
-          job={job}
-          post={post}
-        />
-
-        <ModuleSwitcher activeModule={activeModule} onChange={setActiveModule} />
-
         {activeModule === "materials" ? (
           <section className="studio-workspace materials-workspace">
             <MaterialLibraryWorkspace
@@ -2210,6 +2411,29 @@ export default function Home() {
         <section className="studio-workspace">
           <aside className="glass ops-panel studio-pane thin-scrollbar rounded-[8px] p-3 sm:p-4">
             <PanelTitle icon={<Radio className="h-4 w-4" />} title="采集任务" />
+            <div className="mt-4 grid grid-cols-2 gap-2">
+              <button
+                className={`soft-button flex h-10 items-center justify-center gap-2 text-xs font-semibold ${crawlInputMode === "keyword" ? "platform-card-active" : ""}`}
+                type="button"
+                aria-pressed={crawlInputMode === "keyword"}
+                onClick={() => setCrawlInputMode("keyword")}
+              >
+                <Search className="h-3.5 w-3.5" />
+                关键词
+              </button>
+              <button
+                className={`soft-button flex h-10 items-center justify-center gap-2 text-xs font-semibold ${crawlInputMode === "links" ? "platform-card-active" : ""}`}
+                type="button"
+                aria-pressed={crawlInputMode === "links"}
+                onClick={() => setCrawlInputMode("links")}
+              >
+                <UploadCloud className="h-3.5 w-3.5" />
+                链接
+              </button>
+            </div>
+
+            {crawlInputMode === "keyword" ? (
+              <>
             <div className="mt-4 grid grid-cols-2 gap-2">
               {platforms.map((item) => (
                 <button
@@ -2384,6 +2608,74 @@ export default function Home() {
               </button>
               {crawlProgress ? <TaskProgressCard progress={crawlProgress} /> : null}
             </div>
+              </>
+            ) : (
+              <div className="mt-4 space-y-3">
+                <div>
+                  <FieldLabel label="归属关键词 / 内容池项目" />
+                  <input className="field" value={query} onChange={(event) => setQuery(event.target.value)} />
+                </div>
+                <div>
+                  <FieldLabel label="平台" />
+                  <select className="field" value={linkImportPlatform} onChange={(event) => setLinkImportPlatform(event.target.value as LinkImportPlatform)}>
+                    <option value="auto">自动识别</option>
+                    {platforms.map((item) => (
+                      <option key={item.value} value={item.value}>
+                        {item.label}
+                      </option>
+                    ))}
+                  </select>
+                </div>
+                <div>
+                  <FieldLabel label="链接列表" />
+                  <textarea
+                    className="field min-h-36 resize-y"
+                    value={linkImportText}
+                    onChange={(event) => setLinkImportText(event.target.value)}
+                    placeholder="https://..."
+                  />
+                </div>
+                {linkImportPlatform === "douyin" ? (
+                  <div>
+                    <FieldLabel label="Cookie" />
+                    <textarea className="field min-h-16 resize-none" value={cookie} onChange={(event) => setCookie(event.target.value)} />
+                  </div>
+                ) : null}
+                <button
+                  className="primary-button flex h-11 w-full items-center justify-center gap-2"
+                  type="button"
+                  onClick={startLinkImport}
+                  disabled={Boolean(busy)}
+                >
+                  {busy === "crawl" ? <Loader2 className="h-4 w-4 animate-spin" /> : <UploadCloud className="h-4 w-4" />}
+                  导入链接
+                </button>
+                {crawlProgress ? <TaskProgressCard progress={crawlProgress} /> : null}
+                {linkImportSummary ? (
+                  <div className="grid grid-cols-2 gap-2">
+                    <PoolMetric label="成功" value={linkImportSummary.imported} />
+                    <PoolMetric label="失败" value={linkImportSummary.failed} />
+                    <PoolMetric label="过滤" value={linkImportSummary.filteredUnsafe} />
+                    <PoolMetric label="重复" value={linkImportSummary.duplicates} />
+                  </div>
+                ) : null}
+                {linkImportResults.length ? (
+                  <div className="thin-scrollbar max-h-44 space-y-2 overflow-y-auto">
+                    {linkImportResults.slice(0, 24).map((result, index) => (
+                      <div key={`${result.url}-${index}`} className="rounded-[8px] border border-white/10 bg-white/[0.045] p-2">
+                        <div className="flex items-center justify-between gap-2">
+                          <span className="min-w-0 truncate text-[11px] font-semibold text-white/70">{result.title || result.sourceId || result.url}</span>
+                          <span className={`status-badge shrink-0 text-[10px] ${getLinkImportStatusClass(result.status)}`}>
+                            {formatLinkImportStatus(result.status)}
+                          </span>
+                        </div>
+                        <p className="mt-1 truncate text-[10px] text-white/38">{result.error || result.url}</p>
+                      </div>
+                    ))}
+                  </div>
+                ) : null}
+              </div>
+            )}
 
             <div className="section-divider" />
 
@@ -2821,6 +3113,7 @@ export default function Home() {
         )}
           </>
         )}
+        </div>
 
         <footer className="mt-4 flex min-h-10 flex-wrap items-center justify-between gap-3 text-xs text-white/45">
           <span>{message || "本地 MVP 已就绪"}</span>
@@ -3044,39 +3337,57 @@ function WorkspaceModeSwitcher({ mode, onChange }: { mode: WorkspaceMode; onChan
 
 function SimpleWorkspace({
   variant = "standard",
+  sourceMode,
   keyword,
   targetCount,
   selectedPlatforms,
+  linkText,
+  linkPlatform,
+  linkCount,
   materialPathCount,
   settings,
   runs,
   activeRun,
   busy,
+  terminatingRunId,
   settingsBusy,
+  onSourceModeChange,
   onKeywordChange,
   onTargetCountChange,
   onTogglePlatform,
+  onLinkTextChange,
+  onLinkPlatformChange,
   onSettingsChange,
   onSaveSettings,
   onStart,
+  onTerminateRun,
   onSelectRun,
 }: {
   variant?: SimpleWorkspaceVariant;
+  sourceMode: SimpleSourceMode;
   keyword: string;
   targetCount: number;
   selectedPlatforms: Platform[];
+  linkText: string;
+  linkPlatform: LinkImportPlatform;
+  linkCount: number;
   materialPathCount: number;
   settings: WorkspacePromptSettings;
   runs: SimpleRun[];
   activeRun: SimpleRun | null;
   busy: boolean;
+  terminatingRunId: string;
   settingsBusy: boolean;
+  onSourceModeChange: (value: SimpleSourceMode) => void;
   onKeywordChange: (value: string) => void;
   onTargetCountChange: (value: number) => void;
   onTogglePlatform: (platform: Platform) => void;
+  onLinkTextChange: (value: string) => void;
+  onLinkPlatformChange: (value: LinkImportPlatform) => void;
   onSettingsChange: (patch: Partial<WorkspacePromptSettings>) => void;
   onSaveSettings: () => void;
   onStart: () => void;
+  onTerminateRun: (runId: string) => void;
   onSelectRun: (runId: string) => void;
 }) {
   const isCompact = variant === "compact";
@@ -3086,6 +3397,12 @@ function SimpleWorkspace({
   const selectedPlatformLabels = selectedPlatforms
     .map((value) => platforms.find((platform) => platform.value === value)?.label || value)
     .join("、");
+  const sourceDetail = sourceMode === "links" ? `链接 ${linkCount} 条` : `平台 ${selectedPlatformLabels || "未选择"}`;
+  const canStart =
+    Boolean(keyword.trim()) &&
+    (sourceMode === "links" ? linkCount > 0 : selectedPlatforms.length > 0) &&
+    Boolean(settings.textInstruction.trim()) &&
+    !getMissingImageStrategyPrompt(settings);
 
   return (
     <section className={`simple-workspace ${isCompact ? "simple-workspace-compact" : ""}`}>
@@ -3096,31 +3413,87 @@ function SimpleWorkspace({
         </div>
 
         <div className={`mt-5 space-y-4 ${isCompact ? "simple-control-grid" : ""}`}>
+          <div className="simple-source-mode-toggle" role="group" aria-label="简单版来源方式">
+            <button
+              className={`soft-button flex h-10 items-center justify-center gap-2 text-xs font-semibold ${sourceMode === "keyword" ? "platform-card-active" : ""}`}
+              type="button"
+              aria-pressed={sourceMode === "keyword"}
+              onClick={() => onSourceModeChange("keyword")}
+              disabled={busy || settingsBusy}
+            >
+              <Search className="h-3.5 w-3.5" />
+              关键词采集
+            </button>
+            <button
+              className={`soft-button flex h-10 items-center justify-center gap-2 text-xs font-semibold ${sourceMode === "links" ? "platform-card-active" : ""}`}
+              type="button"
+              aria-pressed={sourceMode === "links"}
+              onClick={() => onSourceModeChange("links")}
+              disabled={busy || settingsBusy}
+            >
+              <UploadCloud className="h-3.5 w-3.5" />
+              批量导入链接
+            </button>
+          </div>
+
           <div>
-            <FieldLabel label="关键词" />
+            <FieldLabel label={sourceMode === "links" ? "归属关键词 / 内容池项目" : "关键词"} />
             <div className="relative mt-2">
               <Search className="pointer-events-none absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-white/35" />
               <input
                 className="field search-field"
                 value={keyword}
                 onChange={(event) => onKeywordChange(event.target.value)}
-                placeholder="例如：小鹏GX"
+                placeholder={sourceMode === "links" ? "例如：小鹏GX 链接导入" : "例如：小鹏GX"}
               />
             </div>
           </div>
 
           <div>
-            <FieldLabel label="抓取数量" />
+            <FieldLabel label={sourceMode === "links" ? "生产上限" : "抓取数量"} />
             <input
               className="field mt-2"
               min={1}
-              max={500}
+              max={sourceMode === "links" ? Math.max(1, linkCount || 1) : 500}
               type="number"
               value={targetCount}
               onChange={(event) => onTargetCountChange(Number(event.target.value))}
             />
           </div>
 
+          {sourceMode === "links" ? (
+          <div className="simple-link-panel">
+            <div className="mb-2 flex flex-wrap items-center justify-between gap-3">
+              <FieldLabel label="批量链接" />
+              <span className="status-badge text-[10px] text-white/45">{linkCount} 条</span>
+            </div>
+            <div className="grid gap-3 sm:grid-cols-[minmax(0,1fr)_180px]">
+              <textarea
+                className="field simple-link-textarea"
+                value={linkText}
+                onChange={(event) => onLinkTextChange(event.target.value)}
+                placeholder="每行一个小红书、抖音、微博或视频号链接"
+                disabled={busy || settingsBusy}
+              />
+              <div>
+                <FieldLabel label="平台识别" />
+                <select
+                  className="field mt-2"
+                  value={linkPlatform}
+                  onChange={(event) => onLinkPlatformChange(event.target.value as LinkImportPlatform)}
+                  disabled={busy || settingsBusy}
+                >
+                  <option value="auto">自动识别</option>
+                  {platforms.map((item) => (
+                    <option key={item.value} value={item.value}>
+                      {item.label}
+                    </option>
+                  ))}
+                </select>
+              </div>
+            </div>
+          </div>
+          ) : (
           <div>
             <div className="mb-2 flex items-center justify-between gap-3">
               <FieldLabel label="采集平台" />
@@ -3145,6 +3518,7 @@ function SimpleWorkspace({
               })}
             </div>
           </div>
+          )}
 
           <div className="simple-policy-preview">
             <div className="flex items-center justify-between gap-3">
@@ -3205,10 +3579,10 @@ function SimpleWorkspace({
             className="primary-button flex h-12 w-full items-center justify-center gap-2"
             type="button"
             onClick={onStart}
-            disabled={busy || settingsBusy || !keyword.trim() || !selectedPlatforms.length || !settings.textInstruction.trim() || Boolean(getMissingImageStrategyPrompt(settings))}
+            disabled={busy || settingsBusy || !canStart}
           >
-            {busy ? <Loader2 className="h-4 w-4 animate-spin" /> : <Send className="h-4 w-4" />}
-            {busy ? "正在自动执行" : "开始全自动生产并写入飞书"}
+            {busy ? <Loader2 className="h-4 w-4 animate-spin" /> : sourceMode === "links" ? <UploadCloud className="h-4 w-4" /> : <Send className="h-4 w-4" />}
+            {busy ? "正在自动执行" : sourceMode === "links" ? "导入链接并一键生产内容" : "开始全自动生产并写入飞书"}
           </button>
         </div>
 
@@ -3218,7 +3592,7 @@ function SimpleWorkspace({
             progress={{
               title: "简单版自动流程",
               label: "后端正在顺序执行",
-              detail: `平台 ${selectedPlatformLabels || "未选择"} · 采集、打标、生成、写入飞书会依次完成。`,
+              detail: `${sourceDetail} · 采集、打标、生成、写入飞书会依次完成。`,
               value: 48,
               status: "running",
               total: targetCount,
@@ -3232,8 +3606,10 @@ function SimpleWorkspace({
         <SimpleOverallProgressBar
           run={runForSummary}
           busy={busy}
-          selectedPlatformLabels={selectedPlatformLabels}
+          terminatingRunId={terminatingRunId}
+          sourceDetail={sourceDetail}
           targetCount={targetCount}
+          onTerminateRun={onTerminateRun}
         />
       ) : (
         <section className="glass-strong ops-panel simple-run-panel thin-scrollbar rounded-[8px] p-4">
@@ -3259,12 +3635,25 @@ function SimpleWorkspace({
                   <div className="min-w-0">
                     <p className="truncate text-lg font-black text-white">{runForSummary.input.keyword}</p>
                     <p className="mt-1 text-xs text-white/45">
-                      {formatShortTime(runForSummary.createdAt)} · {runForSummary.input.targetCount} 条 · {formatSimpleRunStatus(runForSummary.status)}
+                      {formatShortTime(runForSummary.createdAt)} · {formatSimpleRunSource(runForSummary)} · {runForSummary.input.targetCount} 条 · {formatSimpleRunStatus(runForSummary.status)}
                     </p>
                   </div>
-                  <span className={`status-badge text-[11px] ${getSimpleRunStatusClass(runForSummary.status)}`}>
-                    {formatSimpleRunStatus(runForSummary.status)}
-                  </span>
+                  <div className="simple-run-summary-actions">
+                    <span className={`status-badge text-[11px] ${getSimpleRunStatusClass(runForSummary.status)}`}>
+                      {formatSimpleRunStatus(runForSummary.status)}
+                    </span>
+                    {canForceTerminateSimpleRun(runForSummary) ? (
+                      <button
+                        className="simple-force-terminate-button"
+                        type="button"
+                        onClick={() => onTerminateRun(runForSummary.id)}
+                        disabled={terminatingRunId === runForSummary.id}
+                      >
+                        {terminatingRunId === runForSummary.id ? <Loader2 className="h-3.5 w-3.5 animate-spin" /> : <X className="h-3.5 w-3.5" />}
+                        强制终止
+                      </button>
+                    ) : null}
+                  </div>
                 </div>
 
                 <div className="simple-stage-list mt-4">
@@ -3305,7 +3694,7 @@ function SimpleWorkspace({
 
             <aside className="space-y-4">
               <article className="content-cluster">
-                <PanelTitle icon={<BarChart3 className="h-4 w-4" />} title="平台结果" />
+                <PanelTitle icon={<BarChart3 className="h-4 w-4" />} title={isSimpleLinkRun(runForSummary) ? "来源结果" : "平台结果"} />
                 <div className="mt-3 space-y-2">
                   {runForSummary.platformResults.length ? (
                     runForSummary.platformResults.map((result) => (
@@ -3324,6 +3713,27 @@ function SimpleWorkspace({
                   )}
                 </div>
               </article>
+
+              {runForSummary.linkResults?.length ? (
+              <article className="content-cluster">
+                <PanelTitle icon={<UploadCloud className="h-4 w-4" />} title="链接结果" />
+                <div className="mt-3 space-y-2">
+                  {runForSummary.linkResults.slice(0, 10).map((result, index) => (
+                    <div key={`${result.url}-${index}`} className="simple-platform-row">
+                      <div className="min-w-0">
+                        <p className="truncate text-xs font-black text-white">{result.title || result.sourceId || result.url}</p>
+                        <p className="mt-1 truncate text-[11px] text-white/42">
+                          {result.platform ? platforms.find((item) => item.value === result.platform)?.label || result.platform : "未知平台"} · {result.error || result.url}
+                        </p>
+                      </div>
+                      <span className={`status-badge shrink-0 text-[10px] ${getSimpleLinkStatusClass(result.status)}`}>
+                        {formatSimpleLinkStatus(result.status)}
+                      </span>
+                    </div>
+                  ))}
+                </div>
+              </article>
+              ) : null}
 
               <article className="content-cluster">
                 <PanelTitle icon={<UploadCloud className="h-4 w-4" />} title="飞书写入" />
@@ -3353,7 +3763,7 @@ function SimpleWorkspace({
                       <span className="min-w-0">
                         <span className="block truncate text-xs font-black">{run.input.keyword}</span>
                         <span className="mt-1 block truncate text-[11px] opacity-55">
-                          {formatShortTime(run.createdAt)} · {run.posts.length} 条
+                          {formatShortTime(run.createdAt)} · {formatSimpleRunSource(run)} · {run.posts.length} 条
                         </span>
                       </span>
                       <span className={`status-badge shrink-0 text-[10px] ${getSimpleRunStatusClass(run.status)}`}>
@@ -3377,16 +3787,21 @@ function SimpleWorkspace({
 function SimpleOverallProgressBar({
   run,
   busy,
-  selectedPlatformLabels,
+  terminatingRunId,
+  sourceDetail,
   targetCount,
+  onTerminateRun,
 }: {
   run: SimpleRun | null;
   busy: boolean;
-  selectedPlatformLabels: string;
+  terminatingRunId: string;
+  sourceDetail: string;
   targetCount: number;
+  onTerminateRun: (runId: string) => void;
 }) {
-  const summary = buildSimpleOverallProgressSummary(run, busy, selectedPlatformLabels, targetCount);
+  const summary = buildSimpleOverallProgressSummary(run, busy, sourceDetail, targetCount);
   const toneClass = `simple-overall-progress-${summary.tone}`;
+  const showTerminate = canForceTerminateSimpleRun(run);
 
   return (
     <section className={`simple-overall-progress glass-strong ${toneClass}`} aria-label="简单版整体进度">
@@ -3409,19 +3824,32 @@ function SimpleOverallProgressBar({
           </div>
         </div>
 
-        <div className="simple-overall-metrics" aria-label="任务结果概览">
-          <span>
-            <strong>{summary.crawled}</strong>
-            <em>抓取</em>
-          </span>
-          <span>
-            <strong>{summary.produced}</strong>
-            <em>生成</em>
-          </span>
-          <span>
-            <strong>{summary.published}</strong>
-            <em>发布</em>
-          </span>
+        <div className="simple-overall-side">
+          {showTerminate && run ? (
+            <button
+              className="simple-force-terminate-button simple-force-terminate-button-compact"
+              type="button"
+              onClick={() => onTerminateRun(run.id)}
+              disabled={terminatingRunId === run.id}
+            >
+              {terminatingRunId === run.id ? <Loader2 className="h-3.5 w-3.5 animate-spin" /> : <X className="h-3.5 w-3.5" />}
+              强制终止
+            </button>
+          ) : null}
+          <div className="simple-overall-metrics" aria-label="任务结果概览">
+            <span>
+              <strong>{summary.crawled}</strong>
+              <em>抓取</em>
+            </span>
+            <span>
+              <strong>{summary.produced}</strong>
+              <em>生成</em>
+            </span>
+            <span>
+              <strong>{summary.published}</strong>
+              <em>发布</em>
+            </span>
+          </div>
         </div>
       </div>
 
@@ -5179,14 +5607,14 @@ function clampProgressValue(value: number) {
 
 type SimpleOverallProgressTone = "idle" | "running" | "success" | "warning" | "error";
 
-function buildSimpleOverallProgressSummary(run: SimpleRun | null, busy: boolean, selectedPlatformLabels: string, targetCount: number) {
+function buildSimpleOverallProgressSummary(run: SimpleRun | null, busy: boolean, sourceDetail: string, targetCount: number) {
   if (!run) {
     return {
       title: "整体进度",
       label: busy ? "正在提交任务" : "等待任务发起",
       detail: busy
-        ? `平台 ${selectedPlatformLabels || "未选择"} · 目标 ${targetCount} 条 · 正在创建全自动任务。`
-        : `平台 ${selectedPlatformLabels || "未选择"} · 目标 ${targetCount} 条 · 填写关键词后开始全自动生产。`,
+        ? `${sourceDetail} · 目标 ${targetCount} 条 · 正在创建全自动任务。`
+        : `${sourceDetail} · 目标 ${targetCount} 条 · 填写后开始全自动生产。`,
       value: busy ? 8 : 0,
       tone: busy ? ("running" as const) : ("idle" as const),
       crawled: 0,
@@ -5212,7 +5640,7 @@ function buildSimpleOverallProgressSummary(run: SimpleRun | null, busy: boolean,
     activeStage?.message ||
     run.publish?.message ||
     run.errors[0] ||
-    `采集 ${crawled}/${run.input.targetCount} 条 · 生成 ${produced} 条 · 飞书 ${formatSimplePublishStatus(run.publish?.status)}`;
+    `${isSimpleLinkRun(run) ? "导入" : "采集"} ${crawled}/${run.input.targetCount} 条 · 生成 ${produced} 条 · 飞书 ${formatSimplePublishStatus(run.publish?.status)}`;
 
   return {
     title: run.input.keyword || "整体进度",
@@ -6240,11 +6668,29 @@ function formatReviewStatus(value: GeneratedPost["status"]) {
 function buildSimpleRunMessage(run: SimpleRun) {
   const crawledCount = run.platformResults.reduce((sum, result) => sum + result.crawled, 0);
   const publishLabel = formatSimplePublishStatus(run.publish?.status);
-  return `简单版任务完成：采集 ${crawledCount} 条，生成 ${run.posts.length} 条，飞书 ${publishLabel}`;
+  return `简单版任务完成：${isSimpleLinkRun(run) ? "导入" : "采集"} ${crawledCount} 条，生成 ${run.posts.length} 条，飞书 ${publishLabel}`;
 }
 
 function isSimpleRunLive(run: SimpleRun) {
   return run.status === "queued" || run.status === "running" || run.stages.some((stage) => stage.status === "running");
+}
+
+function isSimpleRunForceTerminated(run: SimpleRun) {
+  return run.errors.some((error) => error.includes("强制终止") || /force terminated/i.test(error));
+}
+
+function canForceTerminateSimpleRun(run: SimpleRun | null) {
+  if (!run || isSimpleRunForceTerminated(run)) return false;
+  return run.status === "queued" || run.status === "running" || run.status === "failed" || run.stages.some((stage) => stage.status === "running");
+}
+
+function isSimpleLinkRun(run: SimpleRun) {
+  return run.input.sourceMode === "links";
+}
+
+function formatSimpleRunSource(run: SimpleRun) {
+  if (!isSimpleLinkRun(run)) return `${run.input.platforms.length} 平台`;
+  return `链接 ${run.input.links?.length || run.linkResults?.length || 0} 条`;
 }
 
 function formatSimpleRunStatus(value: SimpleRun["status"]) {
@@ -6256,6 +6702,23 @@ function formatSimpleRunStatus(value: SimpleRun["status"]) {
     failed: "失败",
   };
   return labels[value];
+}
+
+function formatSimpleLinkStatus(value: NonNullable<SimpleRun["linkResults"]>[number]["status"]) {
+  const labels: Record<NonNullable<SimpleRun["linkResults"]>[number]["status"], string> = {
+    imported: "成功",
+    filtered: "过滤",
+    duplicate: "重复",
+    unsupported: "不支持",
+    failed: "失败",
+  };
+  return labels[value];
+}
+
+function getSimpleLinkStatusClass(value: NonNullable<SimpleRun["linkResults"]>[number]["status"]) {
+  if (value === "imported") return "text-[var(--mint)]";
+  if (value === "filtered" || value === "duplicate") return "text-[var(--amber)]";
+  return "text-[var(--rose-bright)]";
 }
 
 function getSimpleRunStatusClass(value: SimpleRun["status"]) {
@@ -6607,4 +7070,22 @@ function formatSourceSafetyCategory(value: NonNullable<NormalizedSourceItem["saf
     competitor_bashing: "拉踩竞品",
   };
   return labels[value];
+}
+
+function formatLinkImportStatus(value: LinkImportResultStatus) {
+  const labels: Record<LinkImportResultStatus, string> = {
+    imported: "已导入",
+    filtered: "已过滤",
+    duplicate: "重复",
+    unsupported: "不支持",
+    failed: "失败",
+  };
+  return labels[value];
+}
+
+function getLinkImportStatusClass(value: LinkImportResultStatus) {
+  if (value === "imported") return "text-[var(--mint)]";
+  if (value === "filtered" || value === "duplicate") return "text-[var(--amber)]";
+  if (value === "failed" || value === "unsupported") return "text-[var(--rose)]";
+  return "text-white/45";
 }

@@ -395,10 +395,23 @@ export type BatchProductionJob = {
 };
 
 export type SimpleRunInput = {
+  sourceMode?: "keyword" | "links";
   keyword: string;
   targetCount: number;
   platforms: Platform[];
   materialPaths: string[];
+  links?: string[];
+  linkPlatform?: Platform | "auto";
+};
+
+export type SimpleRunLinkResult = {
+  url: string;
+  platform?: Platform;
+  status: "imported" | "filtered" | "duplicate" | "unsupported" | "failed";
+  sourceId?: string;
+  itemId?: string;
+  title?: string;
+  error?: string;
 };
 
 export type SimpleRunStage = {
@@ -458,6 +471,7 @@ export type SimpleRun = {
   platformCrawlSettings?: PlatformCrawlSettings;
   stages: SimpleRunStage[];
   platformResults: SimpleRunPlatformResult[];
+  linkResults?: SimpleRunLinkResult[];
   posts: SimpleRunPostResult[];
   publish?: SimpleRunPublishResult;
   errors: string[];

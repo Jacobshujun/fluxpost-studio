@@ -20,6 +20,7 @@ import { generateImagesFromPrompt } from "./image-generation";
 import { generatePost } from "./openai";
 import { buildProductionPlan } from "./production-plan";
 import { savePost } from "./store";
+import { resolveSourceLinks, type SourceLinkImportResult } from "./source-link-import";
 import { filterUnsafeSourceItems } from "./source-safety";
 import { tagSourceItems } from "./source-tagging";
 import { crawlTikHub } from "./tikhub";
@@ -31,6 +32,7 @@ import type {
   Platform,
   SimpleRun,
   SimpleRunInput,
+  SimpleRunLinkResult,
   SimpleRunStage,
   SimpleRunStageId,
   SimpleRunStageStatus,
@@ -38,8 +40,13 @@ import type {
   WorkspacePromptSettings,
 } from "./types";
 
-type CreateSimpleRunInput = Omit<SimpleRunInput, "materialPaths"> & {
+type CreateSimpleRunInput = Omit<SimpleRunInput, "materialPaths" | "platforms" | "targetCount" | "links" | "linkPlatform" | "sourceMode"> & {
+  sourceMode?: SimpleRunInput["sourceMode"];
+  targetCount?: number;
+  platforms?: Platform[];
   materialPaths?: string[];
+  links?: string[] | string;
+  linkPlatform?: SimpleRunInput["linkPlatform"];
   settings?: Partial<WorkspacePromptSettings>;
 };
 
@@ -48,6 +55,7 @@ const maxSimpleImageTasksPerPost = 9;
 const simpleRunQueueWorkerConcurrency = readBoundedIntegerEnv("SIMPLE_RUN_WORKER_CONCURRENCY", 2, 1, 10);
 const simpleRunQueueLockMs = 5 * 60_000;
 const simpleRunQueueHeartbeatMs = 30_000;
+const simpleRunForceTerminateMessage = "用户已强制终止该任务。";
 
 const stageTitles: Record<SimpleRunStageId, string> = {
   crawl: "采集内容",
@@ -78,6 +86,43 @@ export async function startSimpleRun(input: CreateSimpleRunInput) {
   return context.run;
 }
 
+export async function terminateSimpleRun(runId: string, reason = simpleRunForceTerminateMessage) {
+  const trimmedRunId = runId.trim();
+  if (!trimmedRunId) throw new Error("Simple run id is required");
+
+  const run = await getSimpleRunFromDb(trimmedRunId);
+  if (!run) throw new Error(`Simple run ${trimmedRunId} was not found.`);
+
+  const message = reason.trim() || simpleRunForceTerminateMessage;
+  await failSimpleRunQueueItemByRunId(run.id, message);
+
+  const nextRun =
+    run.status === "queued" ||
+    run.status === "running" ||
+    run.stages.some((stage) => stage.status === "running" || stage.status === "queued")
+      ? buildInterruptedRun(run, message)
+      : {
+          ...run,
+          errors: run.errors.includes(message) ? run.errors : [...run.errors, message],
+          updatedAt: new Date().toISOString(),
+        };
+
+  await saveSimpleRunToDb(nextRun);
+  await recordExecutionLog({
+    scope: "simple/run",
+    action: "Simple run force terminated",
+    status: "error",
+    message,
+    details: {
+      runId: run.id,
+      previousStatus: run.status,
+    },
+  });
+
+  ensureSimpleRunQueueWorker();
+  return nextRun;
+}
+
 async function prepareSimpleRun(input: CreateSimpleRunInput) {
   const startedAt = Date.now();
   const normalizedInput = normalizeSimpleRunInput(input);
@@ -89,12 +134,17 @@ async function prepareSimpleRun(input: CreateSimpleRunInput) {
     scope: "simple/run",
     action: "开始简单版全自动流程",
     status: "running",
-    message: `关键词 ${normalizedInput.keyword}，目标 ${normalizedInput.targetCount} 条，平台 ${normalizedInput.platforms.length} 个`,
+    message: isSimpleRunLinkMode(normalizedInput)
+      ? `关键词 ${normalizedInput.keyword}，导入链接 ${normalizedInput.links?.length || 0} 条，目标 ${normalizedInput.targetCount} 条`
+      : `关键词 ${normalizedInput.keyword}，目标 ${normalizedInput.targetCount} 条，平台 ${normalizedInput.platforms.length} 个`,
     details: {
       runId: run.id,
+      sourceMode: normalizedInput.sourceMode || "keyword",
       keyword: normalizedInput.keyword,
       targetCount: normalizedInput.targetCount,
       platforms: normalizedInput.platforms.join(","),
+      linkCount: normalizedInput.links?.length || 0,
+      linkPlatform: normalizedInput.linkPlatform || "",
       materialCount: normalizedInput.materialPaths.length,
     },
   });
@@ -173,77 +223,41 @@ function settingsFromRun(run: SimpleRun): WorkspacePromptSettings {
   };
 }
 
+function isSimpleRunLinkMode(input: SimpleRunInput) {
+  return input.sourceMode === "links";
+}
+
 async function runSimpleRunWorkflow(
   run: SimpleRun,
   normalizedInput: SimpleRunInput,
   settings: WorkspacePromptSettings,
   startedAt: number,
 ) {
+  await assertSimpleRunNotForceTerminated(run.id);
   const crawledItems: NormalizedSourceItem[] = [];
-  run = await setStage(run, "crawl", {
-    status: "running",
-    total: normalizedInput.platforms.length,
-    message: "正在按平台调用 TikHub 并缓存媒体",
-  });
-
-  const perPlatformTarget = Math.max(1, Math.ceil(normalizedInput.targetCount / normalizedInput.platforms.length));
-  const crawlRunUpdates = createRunUpdateQueue(run);
-  await mapWithConcurrency(normalizedInput.platforms, concurrencyConfig.crawl, async (platform) => {
-    try {
-      const items = (await crawlTikHub(buildDefaultCrawlInput(platform, normalizedInput.keyword, perPlatformTarget, settings))).slice(0, perPlatformTarget);
-      crawledItems.push(...items);
-      await crawlRunUpdates.update(async (latestRun) => {
-        const withPlatform = await addPlatformResult(latestRun, {
-          platform,
-          requested: perPlatformTarget,
-          crawled: items.length,
-          taggedContent: 0,
-          taggedVisual: 0,
-        });
-        return incrementStage(withPlatform, "crawl", { completed: 1 });
-      });
-    } catch (error) {
-      const message = compactError(error);
-      await crawlRunUpdates.update(async (latestRun) => {
-        const withPlatform = await addPlatformResult(latestRun, {
-          platform,
-          requested: perPlatformTarget,
-          crawled: 0,
-          taggedContent: 0,
-          taggedVisual: 0,
-          error: message,
-        });
-        return incrementStage(withPlatform, "crawl", { failed: 1 }, message);
-      });
-      await recordExecutionLog({
-        scope: "simple/run",
-        action: "简单版单平台采集失败",
-        status: "error",
-        message,
-        details: {
-          runId: run.id,
-          platform,
-        },
-      });
-    }
-  });
-  run = crawlRunUpdates.current();
-  run = await topUpSimpleCrawlIfNeeded(run, crawledItems, normalizedInput, settings, perPlatformTarget);
+  run = isSimpleRunLinkMode(normalizedInput)
+    ? await collectSimpleLinkItems(run, crawledItems, normalizedInput)
+    : await collectSimpleKeywordItems(run, crawledItems, normalizedInput, settings);
+  await assertSimpleRunNotForceTerminated(run.id);
   const safetyResult = await filterUnsafeSourceItems(crawledItems, {
     scope: "simple/run",
     query: normalizedInput.keyword,
     runId: run.id,
   });
+  await assertSimpleRunNotForceTerminated(run.id);
   run = await applyUnsafeFilterPlatformCounts(run, safetyResult.filtered);
+  if (isSimpleRunLinkMode(normalizedInput)) {
+    run = await applyUnsafeFilterLinkResults(run, safetyResult.filtered);
+  }
   const safeCrawledItems = dedupeItems(safetyResult.items).slice(0, normalizedInput.targetCount);
 
   run = await setStage(run, "crawl", {
     status: resolveStageTerminalStatus(run, "crawl"),
-    message: `已采集 ${crawledItems.length} 条候选内容`,
+    message: `${isSimpleRunLinkMode(normalizedInput) ? "已导入" : "已采集"} ${crawledItems.length} 条候选内容`,
   });
 
   run = await setStage(run, "crawl", {
-    message: `已采集 ${crawledItems.length} 条候选内容，内容安全过滤 ${safetyResult.filtered.length} 条，保留 ${safeCrawledItems.length} 条`,
+    message: `${isSimpleRunLinkMode(normalizedInput) ? "已导入" : "已采集"} ${crawledItems.length} 条候选内容，内容安全过滤 ${safetyResult.filtered.length} 条，保留 ${safeCrawledItems.length} 条`,
   });
 
   if (!safeCrawledItems.length) {
@@ -252,6 +266,7 @@ async function runSimpleRunWorkflow(
   }
 
   const tagCandidates = safeCrawledItems;
+  await assertSimpleRunNotForceTerminated(run.id);
   run = await setStage(run, "tag", {
     status: "running",
     total: tagCandidates.length,
@@ -261,6 +276,7 @@ async function runSimpleRunWorkflow(
   let taggedItems: NormalizedSourceItem[] = [];
   try {
     taggedItems = await tagSourceItems(tagCandidates);
+    await assertSimpleRunNotForceTerminated(run.id);
     await ingestCrawlItems(normalizedInput.keyword, taggedItems);
     const taggedContent = taggedItems.filter((item) => item.contentTagging?.status === "success").length;
     const taggedVisual = taggedItems.reduce((sum, item) => sum + (item.visualTagging?.assets.length || 0), 0);
@@ -303,6 +319,7 @@ async function runSimpleRunWorkflow(
     .sort((a, b) => b.score - a.score);
   const { productionItems, noMediaItems } = selectSimpleProductionItems(rankedProductionCandidates, normalizedInput.targetCount);
 
+  await assertSimpleRunNotForceTerminated(run.id);
   run = await setStage(run, "produce", {
     status: "running",
     total: productionItems.length + noMediaItems.length,
@@ -404,6 +421,7 @@ async function runSimpleRunWorkflow(
     }
     }),
   );
+  await assertSimpleRunNotForceTerminated(run.id);
   run = produceRunUpdates.current();
 
   run = await setStage(run, "produce", {
@@ -421,6 +439,7 @@ async function runSimpleRunWorkflow(
     return finishSimpleRun(run, startedAt);
   }
 
+  await assertSimpleRunNotForceTerminated(run.id);
   run = await setStage(run, "publish", {
     status: "running",
     total: completedPosts.length,
@@ -433,6 +452,7 @@ async function runSimpleRunWorkflow(
       status: "approved" as const,
       updatedAt: new Date().toISOString(),
     }));
+    await assertSimpleRunNotForceTerminated(run.id);
     await Promise.all(
       approvedPosts.map(async (post) => {
         await savePost(post);
@@ -442,6 +462,7 @@ async function runSimpleRunWorkflow(
     );
 
     const publishResult = await publishPostsToFeishu(approvedPosts);
+    await assertSimpleRunNotForceTerminated(run.id);
     const nextStatus = publishResult.status === "published" ? ("published" as const) : ("approved" as const);
     const feishuStateByPostId = new Map((publishResult.postStates || []).map((item) => [item.postId, item.feishu]));
     const finalPosts = approvedPosts.map((post) => ({
@@ -585,6 +606,201 @@ function buildInterruptedRun(run: SimpleRun, message: string): SimpleRun {
     completedAt: now,
     updatedAt: now,
   };
+}
+
+function isSimpleRunForceTerminated(run: SimpleRun) {
+  return run.errors.some((error) => error.includes("强制终止") || /force terminated/i.test(error));
+}
+
+async function getForceTerminatedSimpleRun(runId: string) {
+  const currentRun = await getSimpleRunFromDb(runId);
+  return currentRun && isSimpleRunForceTerminated(currentRun) ? currentRun : undefined;
+}
+
+async function assertSimpleRunNotForceTerminated(runId: string) {
+  const terminatedRun = await getForceTerminatedSimpleRun(runId);
+  if (terminatedRun) {
+    throw new Error(simpleRunForceTerminateMessage);
+  }
+}
+
+async function collectSimpleKeywordItems(
+  run: SimpleRun,
+  crawledItems: NormalizedSourceItem[],
+  normalizedInput: SimpleRunInput,
+  settings: WorkspacePromptSettings,
+) {
+  run = await setStage(run, "crawl", {
+    status: "running",
+    total: normalizedInput.platforms.length,
+    message: "正在按平台调用 TikHub 并缓存媒体",
+  });
+
+  const perPlatformTarget = Math.max(1, Math.ceil(normalizedInput.targetCount / normalizedInput.platforms.length));
+  const crawlRunUpdates = createRunUpdateQueue(run);
+  await mapWithConcurrency(normalizedInput.platforms, concurrencyConfig.crawl, async (platform) => {
+    try {
+      const items = (await crawlTikHub(buildDefaultCrawlInput(platform, normalizedInput.keyword, perPlatformTarget, settings))).slice(0, perPlatformTarget);
+      crawledItems.push(...items);
+      await crawlRunUpdates.update(async (latestRun) => {
+        const withPlatform = await addPlatformResult(latestRun, {
+          platform,
+          requested: perPlatformTarget,
+          crawled: items.length,
+          taggedContent: 0,
+          taggedVisual: 0,
+        });
+        return incrementStage(withPlatform, "crawl", { completed: 1 });
+      });
+    } catch (error) {
+      const message = compactError(error);
+      await crawlRunUpdates.update(async (latestRun) => {
+        const withPlatform = await addPlatformResult(latestRun, {
+          platform,
+          requested: perPlatformTarget,
+          crawled: 0,
+          taggedContent: 0,
+          taggedVisual: 0,
+          error: message,
+        });
+        return incrementStage(withPlatform, "crawl", { failed: 1 }, message);
+      });
+      await recordExecutionLog({
+        scope: "simple/run",
+        action: "简单版单平台采集失败",
+        status: "error",
+        message,
+        details: {
+          runId: run.id,
+          platform,
+        },
+      });
+    }
+  });
+
+  const nextRun = crawlRunUpdates.current();
+  return topUpSimpleCrawlIfNeeded(nextRun, crawledItems, normalizedInput, settings, perPlatformTarget);
+}
+
+async function collectSimpleLinkItems(run: SimpleRun, crawledItems: NormalizedSourceItem[], normalizedInput: SimpleRunInput) {
+  const links = normalizedInput.links || [];
+  run = await setStage(run, "crawl", {
+    status: "running",
+    total: links.length,
+    message: "正在解析来源链接并缓存媒体",
+  });
+
+  await recordExecutionLog({
+    scope: "simple/run",
+    action: "Simple run source-link import started",
+    status: "running",
+    message: `Resolving ${links.length} source link(s) for ${normalizedInput.keyword}.`,
+    details: {
+      runId: run.id,
+      keyword: normalizedInput.keyword,
+      linkCount: links.length,
+      linkPlatform: normalizedInput.linkPlatform || "auto",
+    },
+  });
+
+  const resolved = await resolveSourceLinks({
+    links,
+    platform: isPlatform(normalizedInput.linkPlatform) ? normalizedInput.linkPlatform : undefined,
+  });
+  crawledItems.push(...resolved.items);
+
+  let nextRun = await saveRun({
+    ...run,
+    linkResults: resolved.results.map(toSimpleRunLinkResult),
+    updatedAt: new Date().toISOString(),
+  });
+
+  const platformRequested = countLinkResultsByPlatform(resolved.results);
+  const platformCrawled = countItemsByPlatform(resolved.items);
+  for (const [platform, requested] of platformRequested) {
+    nextRun = await addPlatformResult(nextRun, {
+      platform,
+      requested,
+      crawled: platformCrawled.get(platform) || 0,
+      taggedContent: 0,
+      taggedVisual: 0,
+    });
+  }
+
+  const failed = resolved.results.filter((result) => result.status === "failed").length;
+  const skipped = resolved.results.filter((result) => result.status === "duplicate" || result.status === "unsupported").length;
+  nextRun = await setStage(nextRun, "crawl", {
+    total: resolved.total,
+    completed: resolved.items.length,
+    failed,
+    skipped,
+    message: `已解析 ${resolved.total} 条链接，获得 ${resolved.items.length} 条候选内容，重复/不支持 ${skipped} 条，失败 ${failed} 条`,
+  });
+
+  await recordExecutionLog({
+    scope: "simple/run",
+    action: "Simple run source-link import completed",
+    status: resolved.items.length ? "success" : "error",
+    message: `Resolved ${resolved.items.length}/${resolved.total} source link item(s) for ${normalizedInput.keyword}.`,
+    details: {
+      runId: nextRun.id,
+      keyword: normalizedInput.keyword,
+      total: resolved.total,
+      valid: resolved.valid,
+      resolvedItems: resolved.items.length,
+      failed,
+      skipped,
+    },
+  });
+
+  return nextRun;
+}
+
+function countLinkResultsByPlatform(results: SourceLinkImportResult[]) {
+  const counts = new Map<Platform, number>();
+  results.forEach((result) => {
+    if (!result.platform) return;
+    counts.set(result.platform, (counts.get(result.platform) || 0) + 1);
+  });
+  return counts;
+}
+
+function countItemsByPlatform(items: NormalizedSourceItem[]) {
+  const counts = new Map<Platform, number>();
+  items.forEach((item) => {
+    counts.set(item.platform, (counts.get(item.platform) || 0) + 1);
+  });
+  return counts;
+}
+
+function toSimpleRunLinkResult(result: SourceLinkImportResult): SimpleRunLinkResult {
+  return {
+    url: result.url,
+    platform: result.platform,
+    status: result.status,
+    sourceId: result.sourceId,
+    itemId: result.itemId,
+    title: result.title,
+    error: result.error,
+  };
+}
+
+async function applyUnsafeFilterLinkResults(run: SimpleRun, filteredItems: NormalizedSourceItem[]) {
+  if (!run.linkResults?.length || !filteredItems.length) return run;
+  const filteredIds = new Set(filteredItems.map((item) => item.id));
+  return saveRun({
+    ...run,
+    linkResults: run.linkResults.map((result) =>
+      result.itemId && filteredIds.has(result.itemId)
+        ? {
+            ...result,
+            status: "filtered",
+            error: "Filtered by source safety gate",
+          }
+        : result,
+    ),
+    updatedAt: new Date().toISOString(),
+  });
 }
 
 function buildDefaultCrawlInput(
@@ -767,14 +983,38 @@ function limitSimpleImageTasks(tasks: SourceImageTask[]) {
 function normalizeSimpleRunInput(input: CreateSimpleRunInput): SimpleRunInput {
   const keyword = typeof input.keyword === "string" ? input.keyword.trim() : "";
   if (!keyword) throw new Error("Keyword is required");
+  const sourceMode = input.sourceMode === "links" ? "links" : "keyword";
   const platforms = Array.from(new Set((input.platforms || []).filter(isPlatform)));
-  if (!platforms.length) throw new Error("At least one platform is required");
+  const links = normalizeSourceLinkInput(input.links);
+  if (sourceMode === "keyword" && !platforms.length) throw new Error("At least one platform is required");
+  if (sourceMode === "links" && !links.length) throw new Error("At least one source link is required");
+  const targetCountFallback = sourceMode === "links" ? links.length : 10;
+  const targetCount = Math.min(Math.max(Number(input.targetCount || targetCountFallback), 1), maxSimpleRunItems);
   return {
+    sourceMode,
     keyword,
     platforms,
-    targetCount: Math.min(Math.max(Number(input.targetCount || 10), 1), maxSimpleRunItems),
+    targetCount: sourceMode === "links" ? Math.min(targetCount, links.length) : targetCount,
     materialPaths: normalizeMaterialPaths(input.materialPaths),
+    links: sourceMode === "links" ? links : undefined,
+    linkPlatform: sourceMode === "links" ? normalizeLinkPlatform(input.linkPlatform) : undefined,
   };
+}
+
+function normalizeSourceLinkInput(input: unknown) {
+  const values = Array.isArray(input) ? input : typeof input === "string" ? input.split(/\r?\n/) : [];
+  return Array.from(
+    new Set(
+      values
+        .filter((value): value is string => typeof value === "string")
+        .map((value) => value.trim())
+        .filter(Boolean),
+    ),
+  ).slice(0, 200);
+}
+
+function normalizeLinkPlatform(value: unknown): Platform | "auto" {
+  return isPlatform(value) ? value : "auto";
 }
 
 function normalizeMaterialPaths(input: unknown) {
@@ -913,6 +1153,9 @@ async function failRun(run: SimpleRun, message: string) {
 }
 
 async function finishSimpleRun(run: SimpleRun, startedAt: number) {
+  const terminatedRun = await getForceTerminatedSimpleRun(run.id);
+  if (terminatedRun) return terminatedRun;
+
   const status = run.status === "failed" ? run.status : resolveRunStatus(run);
   const finalRun = await saveRun({
     ...run,
@@ -943,6 +1186,9 @@ function resolveRunStatus(run: SimpleRun): SimpleRun["status"] {
 }
 
 async function saveRun(run: SimpleRun) {
+  const terminatedRun = await getForceTerminatedSimpleRun(run.id);
+  if (terminatedRun) return terminatedRun;
+
   await saveSimpleRunToDb(run);
   return run;
 }

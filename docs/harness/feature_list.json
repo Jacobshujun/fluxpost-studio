@@ -42,7 +42,8 @@
         "2026-06-04 Xiaohongshu App V2 detail endpoints removed from src/lib/tikhub.ts; scripts/harness/xiaohongshu_note_type_check.mjs now enforces Web V3-only search/detail usage and Web V3 wrapper id/xsec_token preservation",
         "2026-06-04 live Xiaohongshu 小鹏G6 target-1 advanced crawl completed through Web V3 only with real sourceId=6a110db30000000007028960, contentText length 428, two source images, two downloaded images, and twelve video frames; residual provider ordering risk observed because TikHub returned a 小鹏GX titled item under the current no-post-crawl-filter rule",
         "2026-06-04 Xiaohongshu keyword search switched to TikHub App V2 /api/v1/xiaohongshu/app_v2/search_notes with App V2 note_type mapping: image/text=普通笔记, video=视频笔记, all=不限",
-        "2026-06-04 live Xiaohongshu 小鹏G6 target-1 advanced crawl after the App V2 switch called search_notes with requestedNoteTypeParam=普通笔记 and returned one image item titled 被这台小鹏G6硬控了！ with sourceId=6a213dcf000000003503291b, six source images, six downloaded images, and zero video frames"
+        "2026-06-04 live Xiaohongshu 小鹏G6 target-1 advanced crawl after the App V2 switch called search_notes with requestedNoteTypeParam=普通笔记 and returned one image item titled 被这台小鹏G6硬控了！ with sourceId=6a213dcf000000003503291b, six source images, six downloaded images, and zero video frames",
+        "2026-06-08 advanced content-pool batch source-link import added through POST /api/crawl/links, src/lib/source-link-import.ts, src/lib/tikhub.ts source-link detail helpers, and frontend link-import mode; scripts/harness/link_import_check.mjs and full Harness baseline passed without live external service calls"
       ],
       "notes": "External TikHub behavior is not part of default baseline verification."
     },
@@ -280,7 +281,8 @@
         "2026-06-03 RunningHub image provider integration added: src/lib/image-generation.ts supports OPENAI_IMAGE_ENDPOINT=runninghub with local reference upload, G-2 task submission, polling, and config status verification; npm run lint, tsc, build, local restart, and Harness baseline passed",
         "2026-06-03 browser UI smoke on http://127.0.0.1:3001 confirmed simple workspace, keyword input, simple start button, advanced module switcher after mode change, and no horizontal overflow at 1440x950 or 390x844",
         "2026-06-04 simple mode no longer overwrites saved advanced platform crawl settings with hidden controls; Xiaohongshu image/text noteType=2 is enforced through scripts/harness/xiaohongshu_note_type_check.mjs; full Harness baseline passed",
-        "2026-06-04 simple starts now enqueue durable simple_run_queue work and return immediately; simple run snapshots persist submission-time platform crawl settings; UI allows target count up to 500; scripts/harness/simple_queue_check.mjs and full Harness baseline passed"
+        "2026-06-04 simple starts now enqueue durable simple_run_queue work and return immediately; simple run snapshots persist submission-time platform crawl settings; UI allows target count up to 500; scripts/harness/simple_queue_check.mjs and full Harness baseline passed",
+        "2026-06-08 compact and simple workspaces added batch source-link one-click production through sourceMode=links on POST /api/simple/runs; src/lib/simple-runs.ts resolves exact links via src/lib/source-link-import.ts, skips keyword search/top-up, then reuses safety/tagging/content-pool/production/publish stages; scripts/harness/simple_link_run_check.mjs, lint, tsc, build, local restart, and mocked compact/simple UI checks passed without live external service calls"
       ],
       "notes": "External TikHub/OpenAI/image-generation/Feishu calls are not part of default baseline verification. A real small-count simple run and a larger two-keyword queue validation are still needed before marking done."
     }

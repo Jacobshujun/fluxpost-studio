@@ -19,12 +19,12 @@ Last updated: 2026-06-08
 
 1. Configure environment values in `.env.local` from the README Environment section.
 2. Start the local web app.
-3. Search/crawl content by platform and keyword through `/api/crawl/jobs`.
+3. Search/crawl content by platform and keyword through `/api/crawl/jobs`, batch-import supported source links into the content pool through `/api/crawl/links`, or use `/api/simple/runs` for one-click simple production from either keywords or exact source links.
 4. Assess harvested items with the crawl-stage content safety gate, then persist retained items into the runtime database-backed content pool.
 5. Optionally scan local image material folders through `/api/materials/scan`.
-6. Generate post drafts through `/api/generate`, including text and optional image generation.
+6. Generate post drafts through `/api/generate` or through the simple-run one-click workflow, including text and optional image generation.
 7. Review or edit drafts through `/api/review`.
-8. Publish approved posts through `/api/publish/feishu`, which writes a local payload and calls Feishu CLI when target Base config is available.
+8. Publish approved posts through `/api/publish/feishu` or through the simple-run publish stage, which writes a local payload and calls Feishu CLI when target Base config is available.
 
 ## Tech Stack And Startup
 
@@ -56,6 +56,7 @@ Last updated: 2026-06-08
   - `GET /api/content-pool`
   - `GET|POST|PATCH|DELETE /api/content/items`
   - `GET|POST /api/crawl/jobs`
+  - `POST /api/crawl/links`
   - `POST /api/generate`
   - `POST /api/images`
   - `GET|POST|PATCH|DELETE /api/materials/library`
@@ -65,6 +66,7 @@ Last updated: 2026-06-08
   - `POST /api/production/posts/regenerate`
   - `POST /api/publish/feishu`
   - `POST /api/review`
+  - `GET|POST|DELETE /api/simple/runs`
   - `GET|DELETE /api/activity`
 - Feishu CLI wrapper: `src/lib/feishu-cli.ts`.
 

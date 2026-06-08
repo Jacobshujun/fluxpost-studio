@@ -21,6 +21,7 @@ const types = read("src/lib/types.ts");
 const feishu = read("src/lib/feishu-cli.ts");
 const schema = read("db/migrations/001_initial_postgres.sql");
 const page = read("src/app/page.tsx");
+const route = read("src/app/api/simple/runs/route.ts");
 
 assertContains(types, /export type SimpleRunQueueItem = \{[\s\S]*runId:\s*string[\s\S]*status:\s*SimpleRunQueueStatus/, "Simple run queue item type is missing.");
 assertContains(types, /platformCrawlSettings\?:\s*PlatformCrawlSettings/, "SimpleRun must persist platform crawl settings for queued execution.");
@@ -33,7 +34,13 @@ assertContains(simpleRuns, /claimNextSimpleRunQueueItem\(workerId,\s*simpleRunQu
 assertContains(simpleRuns, /heartbeatSimpleRunQueueItem\(item\.id,\s*workerId,\s*simpleRunQueueLockMs\)/, "Simple queue worker must heartbeat running work.");
 assertContains(simpleRuns, /getSimpleRunQueueItemByRunId\(run\.id\)/, "Interrupted-run reconciliation must inspect the durable queue.");
 assertContains(simpleRuns, /failSimpleRunQueueItemByRunId\(run\.id,\s*message\)/, "Interrupted runs must close their queue item.");
-assertContains(page, /max=\{500\}/, "Simple-mode target count input must allow more than 100 items.");
+assertContains(simpleRuns, /export async function terminateSimpleRun/, "Simple runs must expose an operator force-terminate helper.");
+assertContains(simpleRuns, /Simple run force terminated/, "Force termination must be observable in execution logs.");
+assertContains(route, /export async function DELETE/, "Simple run API must expose a force-termination endpoint.");
+assertContains(route, /terminateSimpleRun\(runId/, "Simple run DELETE endpoint must close the run through the domain helper.");
+assertContains(page, /onTerminateRun=\{terminateSimpleRunFromUi\}/, "Simple UI must wire the force-terminate action.");
+assertContains(page, /强制终止/, "Simple UI must expose a force-terminate button.");
+assertContains(page, /max=\{sourceMode === "links" \? Math\.max\(1,\s*linkCount \|\| 1\) : 500\}/, "Keyword-mode target count input must still allow more than 100 items.");
 
 assertContains(database, /CREATE TABLE IF NOT EXISTS simple_run_queue/, "Runtime database schema must create simple_run_queue.");
 assertContains(schema, /CREATE TABLE IF NOT EXISTS simple_run_queue/, "PostgreSQL migration must create simple_run_queue.");

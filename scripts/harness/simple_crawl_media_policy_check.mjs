@@ -17,7 +17,8 @@ function assertNotContains(source, pattern, message) {
 
 const simpleRuns = read("src/lib/simple-runs.ts");
 
-assertContains(simpleRuns, /topUpSimpleCrawlIfNeeded\(run,\s*crawledItems,\s*normalizedInput,\s*settings,\s*perPlatformTarget\)/, "Simple run workflow must top up after initial per-platform crawl.");
+assertContains(simpleRuns, /collectSimpleKeywordItems\(run,\s*crawledItems,\s*normalizedInput,\s*settings\)/, "Simple run workflow must route keyword crawls through the keyword collection helper.");
+assertContains(simpleRuns, /topUpSimpleCrawlIfNeeded\(nextRun,\s*crawledItems,\s*normalizedInput,\s*settings,\s*perPlatformTarget\)/, "Simple keyword crawl must top up after initial per-platform crawl.");
 assertContains(simpleRuns, /function topUpSimpleCrawlIfNeeded\(/, "Simple crawl top-up helper is missing.");
 assertContains(simpleRuns, /input\.targetCount\s*-\s*dedupeItems\(crawledItems\)\.length/, "Top-up must be based on deduped missing candidates.");
 assertContains(simpleRuns, /const requested = previousRequested \+ missing/, "Top-up must request the previous platform target plus the missing count.");

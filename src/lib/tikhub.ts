@@ -22,8 +22,20 @@ const endpointByPlatform: Record<Platform, string> = {
 
 const douyinKeywordSearchEndpoint = "/api/v1/douyin/search/fetch_general_search_v1";
 const xiaohongshuWebNoteDetailEndpoint = "/api/v1/xiaohongshu/web_v3/fetch_note_detail";
+const xiaohongshuNoteInfoV4Endpoint = "/api/v1/xiaohongshu/web/get_note_info_v4";
+const xiaohongshuShareInfoEndpoint = "/api/v1/xiaohongshu/web/extract_share_info";
+const douyinShareVideoEndpoint = "/api/v1/douyin/web/fetch_one_video_by_share_url";
+const douyinSingleVideoEndpoint = "/api/v1/douyin/web/fetch_one_video_v3";
+const weiboPostDetailEndpoint = "/api/v1/weibo/web_v2/fetch_post_detail";
+const wechatChannelsShareVideoEndpoint = "/api/v1/wechat_channels/fetch_video_by_share_url";
 const maxContentImages = 18;
 const maxDouyinContentImages = 36;
+
+export type TikHubSourceLinkInput = {
+  url: string;
+  platform?: Platform;
+  cookie?: string;
+};
 
 export async function crawlTikHub(input: CrawlInput): Promise<NormalizedSourceItem[]> {
   if (!appConfig.tikhubApiKey) {
@@ -53,8 +65,207 @@ export async function crawlTikHub(input: CrawlInput): Promise<NormalizedSourceIt
   return cacheCrawledMedia(filteredItems);
 }
 
+export async function fetchTikHubItemBySourceLink(input: TikHubSourceLinkInput): Promise<NormalizedSourceItem[]> {
+  if (!appConfig.tikhubApiKey) {
+    throw new Error("TIKHUB_API_KEY is not configured");
+  }
+
+  const platform = input.platform || detectPlatformFromSourceUrl(input.url);
+  if (!platform) throw new Error("Unsupported source link platform");
+
+  let items: NormalizedSourceItem[] = [];
+  switch (platform) {
+    case "xiaohongshu":
+      items = await fetchXiaohongshuBySourceLink(input.url);
+      break;
+    case "douyin":
+      items = await fetchDouyinBySourceLink(input.url, input.cookie);
+      break;
+    case "weibo":
+      items = await fetchWeiboBySourceLink(input.url);
+      break;
+    case "wechat_channels":
+      items = await fetchWechatChannelsBySourceLink(input.url);
+      break;
+    default:
+      items = [];
+  }
+
+  const normalizedItems = dedupeItems(items)
+    .slice(0, 1)
+    .map((item) => ensureSourceUrlFromLink(item, input.url));
+  const { cacheCrawledMedia } = await import("./media-cache");
+  return cacheCrawledMedia(normalizedItems);
+}
+
+export function detectPlatformFromSourceUrl(value: string): Platform | undefined {
+  const url = extractFirstHttpUrl(value);
+  if (!url) return undefined;
+  try {
+    const parsed = new URL(url);
+    const host = parsed.hostname.toLowerCase();
+    if (/(^|\.)xhslink\.com$|(^|\.)xiaohongshu\.com$|(^|\.)xhscdn\.com$/.test(host)) return "xiaohongshu";
+    if (/(^|\.)douyin\.com$|(^|\.)iesdouyin\.com$|(^|\.)douyinvod\.com$/.test(host)) return "douyin";
+    if (/(^|\.)weibo\.com$|(^|\.)weibo\.cn$|(^|\.)m\.weibo\.cn$|(^|\.)weibo\.com\.cn$/.test(host)) return "weibo";
+    if (/(^|\.)weixin\.qq\.com$|(^|\.)channels\.weixin\.qq\.com$|(^|\.)finder\.video\.qq\.com$/.test(host)) {
+      return "wechat_channels";
+    }
+  } catch {
+    return undefined;
+  }
+  return undefined;
+}
+
+export function buildXiaohongshuShareInfoPath(shareUrl: string) {
+  const params = new URLSearchParams({ share_text: shareUrl });
+  return `${xiaohongshuShareInfoEndpoint}?${params.toString()}`;
+}
+
+export function buildXiaohongshuNoteInfoV4Path(noteId: string, xsecToken?: string) {
+  const params = new URLSearchParams({ note_id: noteId });
+  if (xsecToken) params.set("xsec_token", xsecToken);
+  return `${xiaohongshuNoteInfoV4Endpoint}?${params.toString()}`;
+}
+
+export function buildXiaohongshuWebNoteDetailPath(noteId: string, xsecToken: string) {
+  const params = new URLSearchParams({
+    note_id: noteId,
+    xsec_token: xsecToken,
+  });
+  return `${xiaohongshuWebNoteDetailEndpoint}?${params.toString()}`;
+}
+
+export function buildDouyinShareVideoPath(shareUrl: string) {
+  const params = new URLSearchParams({ share_url: shareUrl });
+  return `${douyinShareVideoEndpoint}?${params.toString()}`;
+}
+
+export function buildDouyinSingleVideoPath(awemeId: string) {
+  const params = new URLSearchParams({ aweme_id: awemeId });
+  return `${douyinSingleVideoEndpoint}?${params.toString()}`;
+}
+
+export function buildDouyinSourceLinkPath(sourceUrl: string) {
+  const awemeId = extractDouyinSingleVideoAwemeId(sourceUrl);
+  return awemeId ? buildDouyinSingleVideoPath(awemeId) : buildDouyinShareVideoPath(sourceUrl);
+}
+
+export function buildWeiboPostDetailPath(sourceId: string) {
+  const params = new URLSearchParams({
+    id: sourceId,
+    is_get_long_text: "true",
+  });
+  return `${weiboPostDetailEndpoint}?${params.toString()}`;
+}
+
+export function buildWechatChannelsShareVideoPath(shareUrl: string) {
+  const params = new URLSearchParams({ share_url: shareUrl });
+  return `${wechatChannelsShareVideoEndpoint}?${params.toString()}`;
+}
+
 function getCollectionTarget(targetCount: number) {
   return Math.min(Math.max(targetCount * 6, targetCount), 200);
+}
+
+async function fetchXiaohongshuBySourceLink(sourceUrl: string) {
+  const localInfo = extractXiaohongshuLinkInfo(sourceUrl);
+  let noteId = localInfo.noteId;
+  let xsecToken = localInfo.xsecToken;
+  let items: NormalizedSourceItem[] = [];
+
+  if (!noteId || !xsecToken) {
+    try {
+      const shareRaw = await tikhubRequest(buildXiaohongshuShareInfoPath(sourceUrl));
+      const shareInfo = extractXiaohongshuShareInfo(shareRaw);
+      noteId ||= shareInfo.noteId;
+      xsecToken ||= shareInfo.xsecToken;
+      items = normalizeTikHubResponse(shareRaw, "xiaohongshu");
+    } catch (error) {
+      await recordExecutionLog({
+        scope: "tikhub",
+        action: "Xiaohongshu link share info failed",
+        status: "info",
+        message: compactError(error),
+      });
+    }
+  }
+
+  if (noteId) {
+    try {
+      const raw = await tikhubRequest(buildXiaohongshuNoteInfoV4Path(noteId, xsecToken));
+      items = normalizeTikHubResponse(raw, "xiaohongshu");
+    } catch (error) {
+      await recordExecutionLog({
+        scope: "tikhub",
+        action: "Xiaohongshu link note info failed",
+        status: "info",
+        message: compactError(error),
+        details: { sourceId: noteId },
+      });
+    }
+  }
+
+  if (noteId && xsecToken) {
+    try {
+      const raw = await tikhubRequest(buildXiaohongshuWebNoteDetailPath(noteId, xsecToken));
+      const detail = normalizeTikHubResponse(raw, "xiaohongshu");
+      const matchedDetail = items[0] ? pickMatchingDetail(items[0], detail) : detail[0];
+      if (matchedDetail) {
+        items = items[0] ? [mergeXiaohongshuDetail(items[0], matchedDetail)] : [matchedDetail];
+      }
+    } catch (error) {
+      await recordExecutionLog({
+        scope: "tikhub",
+        action: "Xiaohongshu link Web detail failed",
+        status: "info",
+        message: compactError(error),
+        details: { sourceId: noteId },
+      });
+    }
+  }
+
+  return items;
+}
+
+async function fetchDouyinBySourceLink(sourceUrl: string, cookie?: string) {
+  const awemeId = extractDouyinSingleVideoAwemeId(sourceUrl);
+  const path = buildDouyinSourceLinkPath(sourceUrl);
+  if (cookie) {
+    await recordExecutionLog({
+      scope: "tikhub",
+      action: "Douyin link import cookie ignored",
+      status: "info",
+      message: "Douyin single-link import uses the TikHub share/detail endpoint and does not persist request cookies.",
+      details: { hasCookie: true },
+    });
+  }
+  try {
+    const raw = await tikhubRequest(path);
+    return normalizeTikHubResponse(raw, "douyin");
+  } catch (error) {
+    if (!awemeId) throw error;
+    await recordExecutionLog({
+      scope: "tikhub",
+      action: "Douyin single-video detail fallback",
+      status: "info",
+      message: "Douyin single-video detail failed; retrying with the share-url endpoint.",
+      details: { sourceId: awemeId },
+    });
+    const raw = await tikhubRequest(buildDouyinShareVideoPath(sourceUrl));
+    return normalizeTikHubResponse(raw, "douyin");
+  }
+}
+
+async function fetchWeiboBySourceLink(sourceUrl: string) {
+  const sourceId = extractWeiboStatusId(sourceUrl);
+  if (!sourceId) throw new Error("Unsupported Weibo link shape");
+  const raw = await tikhubRequest(buildWeiboPostDetailPath(sourceId));
+  return normalizeTikHubResponse(raw, "weibo");
+}
+
+async function fetchWechatChannelsBySourceLink(sourceUrl: string) {
+  const raw = await tikhubRequest(buildWechatChannelsShareVideoPath(sourceUrl));
+  return normalizeTikHubResponse(raw, "wechat_channels");
 }
 
 async function fetchWechatChannels(input: CrawlInput) {
@@ -720,12 +931,14 @@ export function normalizeTikHubResponse(raw: unknown, platform: Platform): Norma
     ? extractXiaohongshuRecords(data)
     : platform === "weibo"
       ? extractWeiboRecords(data)
-      : extractLikelyRecords(data);
+      : platform === "douyin"
+        ? extractDouyinRecords(data)
+        : extractLikelyRecords(data);
   const observedAt = new Date().toISOString();
 
   return records.map((record, index) => {
     const normalizedRecord = unwrapContentRecord(record);
-    const sourceId = firstString(normalizedRecord, ["aweme_id", "note_id", "noteId", "weibo_id", "mid", "mblogid", "object_id", "id"]) || `${platform}-${index}`;
+    const sourceId = firstString(normalizedRecord, ["aweme_id", "awemeId", "note_id", "noteId", "weibo_id", "mid", "mblogid", "object_id", "id"]) || `${platform}-${index}`;
     const extractedMedia = extractContentMedia(normalizedRecord, platform);
     const extractedImages = normalizeContentImageUrls(extractedMedia.images);
     const fallbackImages = shouldUseGenericImageFallback(platform, extractedImages) ? collectUrls(normalizedRecord, "image") : [];
@@ -792,6 +1005,82 @@ export function normalizeTikHubResponse(raw: unknown, platform: Platform): Norma
       },
       raw: normalizedRecord,
     };
+  });
+}
+
+function extractDouyinRecords(value: unknown): JsonRecord[] {
+  const records: JsonRecord[] = [];
+  const seen = new Set<JsonRecord>();
+
+  const push = (record: JsonRecord) => {
+    if (!seen.has(record)) {
+      seen.add(record);
+      records.push(record);
+    }
+  };
+
+  const visit = (node: unknown, depth = 0) => {
+    if (depth > 8) return;
+    if (Array.isArray(node)) {
+      node.forEach((child) => visit(child, depth + 1));
+      return;
+    }
+    if (!isRecord(node)) return;
+
+    const data = getRecord(node.data);
+    const content =
+      getRecord(node.aweme_info) ||
+      getRecord(node.aweme_detail) ||
+      getRecord(node.awemeDetail) ||
+      getRecord(node.aweme) ||
+      (data
+        ? getRecord(data.aweme_info) ||
+          getRecord(data.aweme_detail) ||
+          getRecord(data.awemeDetail) ||
+          getRecord(data.aweme)
+        : undefined);
+
+    if (content) {
+      push({ ...node, ...content });
+    } else if (isDouyinAwemeRecord(node)) {
+      push(node);
+    }
+
+    Object.entries(node).forEach(([key, child]) => {
+      if (/^(aweme_info|aweme_detail|awemeDetail|aweme)$/i.test(key)) return;
+      visit(child, depth + 1);
+    });
+  };
+
+  visit(value);
+  return dedupeDouyinRecords(records.length ? records : extractLikelyRecords(value));
+}
+
+function isDouyinAwemeRecord(record: JsonRecord) {
+  const hasIdentity = ["aweme_id", "awemeId", "id"].some((key) => {
+    const value = record[key];
+    return (typeof value === "string" && value.trim()) || typeof value === "number";
+  });
+  const hasText = ["desc", "content", "text", "text_raw", "title"].some((key) => typeof record[key] === "string" && record[key].trim());
+  const hasContentSignals =
+    "aweme_type" in record ||
+    "create_time" in record ||
+    "statistics" in record ||
+    "author" in record ||
+    "video" in record ||
+    "images" in record ||
+    "image_infos" in record;
+  return hasIdentity && (hasText || hasContentSignals) && hasContentSignals;
+}
+
+function dedupeDouyinRecords(records: JsonRecord[]) {
+  const seen = new Set<string>();
+  return records.filter((record, index) => {
+    const normalizedRecord = unwrapContentRecord(record);
+    const id = firstString(normalizedRecord, ["aweme_id", "awemeId", "id"]) || `record-${index}`;
+    if (seen.has(id)) return false;
+    seen.add(id);
+    return true;
   });
 }
 
@@ -949,6 +1238,12 @@ function unwrapContentRecord(record: JsonRecord): JsonRecord {
   const candidates = [
     getRecord(record.aweme_info),
     data ? getRecord(data.aweme_info) : undefined,
+    getRecord(record.aweme_detail),
+    getRecord(record.awemeDetail),
+    data ? getRecord(data.aweme_detail) : undefined,
+    data ? getRecord(data.awemeDetail) : undefined,
+    getRecord(record.aweme),
+    data ? getRecord(data.aweme) : undefined,
     getRecord(record.note),
     data ? getRecord(data.note) : undefined,
     getRecord(record.note_card),
@@ -1209,12 +1504,12 @@ function scoreRecordArray(records: JsonRecord[]) {
   const keyText = sample.map((record) => JSON.stringify(Object.keys(record))).join(" ");
   const sampleText = JSON.stringify(sample.slice(0, 2));
   const nestedText = sample
-    .map((record) => ["aweme_info", "note", "note_list", "note_card", "noteCard", "mblog", "weibo", "object", "video", "statistics"].filter((key) => key in record).join(" "))
+    .map((record) => ["aweme_info", "aweme_detail", "awemeDetail", "aweme", "note", "note_list", "note_card", "noteCard", "mblog", "weibo", "object", "video", "statistics"].filter((key) => key in record).join(" "))
     .join(" ");
   let score = records.length;
-  if (/aweme_info|note\b|note_list|note_card|noteCard|mblog|weibo|statistics|interact_info|video|liked_count|collected_count|comments_count|shared_count|view_count/i.test(`${keyText} ${nestedText} ${sampleText}`)) score += 1000;
-  if (/data_id|card_id/i.test(keyText) && /aweme_info|note_card|noteCard|mblog/i.test(sampleText)) score += 800;
-  if (/url_list/i.test(keyText) && !/aweme_info|note|note_card|noteCard|mblog/i.test(sampleText)) score -= 700;
+  if (/aweme_info|aweme_detail|awemeDetail|aweme\b|note\b|note_list|note_card|noteCard|mblog|weibo|statistics|interact_info|video|liked_count|collected_count|comments_count|shared_count|view_count/i.test(`${keyText} ${nestedText} ${sampleText}`)) score += 1000;
+  if (/data_id|card_id/i.test(keyText) && /aweme_info|aweme_detail|awemeDetail|note_card|noteCard|mblog/i.test(sampleText)) score += 800;
+  if (/url_list/i.test(keyText) && !/aweme_info|aweme_detail|awemeDetail|note|note_card|noteCard|mblog/i.test(sampleText)) score -= 700;
   if (/fileid|trace_id|url_size_large|need_load_original_image/i.test(keyText) && !/desc|title|liked_count|note/i.test(keyText)) score -= 900;
   if (/guide_search_words|query_id|attached_text/i.test(keyText)) score -= 500;
   if (/word/i.test(keyText) && !/aweme|note|mblog|video/i.test(keyText)) score -= 300;
@@ -1329,6 +1624,88 @@ function dedupeStrings(values: string[]) {
 
 function stripHtml(value: string) {
   return value.replace(/<[^>]*>/g, "").replace(/\s+/g, " ");
+}
+
+function ensureSourceUrlFromLink(item: NormalizedSourceItem, sourceUrl: string): NormalizedSourceItem {
+  const normalizedSourceUrl = normalizeUrl(item.sourceUrl) || sourceUrl;
+  return {
+    ...item,
+    sourceUrl: normalizedSourceUrl,
+    mediaUrls: dedupeStrings([normalizedSourceUrl, ...item.mediaUrls].filter((value): value is string => Boolean(value))),
+  };
+}
+
+function extractFirstHttpUrl(value: string) {
+  const match = value.match(/https?:\/\/[^\s"'<>]+/i);
+  if (!match) return "";
+  return match[0].replace(/[),.，。；;]+$/u, "");
+}
+
+function extractXiaohongshuLinkInfo(value: string) {
+  const url = extractFirstHttpUrl(value);
+  if (!url) return {};
+  try {
+    const parsed = new URL(url);
+    const pathParts = parsed.pathname.split("/").map((part) => part.trim()).filter(Boolean);
+    const noteId =
+      parsed.searchParams.get("note_id") ||
+      parsed.searchParams.get("noteId") ||
+      pathParts.find((part) => /^[0-9a-f]{16,32}$/i.test(part));
+    const xsecToken =
+      parsed.searchParams.get("xsec_token") ||
+      parsed.searchParams.get("xsecToken");
+    return {
+      noteId: noteId || undefined,
+      xsecToken: xsecToken || undefined,
+    };
+  } catch {
+    return {};
+  }
+}
+
+function extractXiaohongshuShareInfo(raw: unknown) {
+  const record = getRecord(raw) || {};
+  return {
+    noteId: firstString(record, ["note_id", "noteId", "id"]),
+    xsecToken: firstString(record, ["xsec_token", "xsecToken"]),
+  };
+}
+
+function extractDouyinSingleVideoAwemeId(value: string) {
+  const url = extractFirstHttpUrl(value);
+  if (!url) return "";
+  try {
+    const parsed = new URL(url);
+    const pathParts = parsed.pathname.split("/").map((part) => part.trim()).filter(Boolean);
+    const paramCandidate = parsed.searchParams.get("aweme_id") || parsed.searchParams.get("awemeId") || parsed.searchParams.get("id");
+    if (paramCandidate && /^\d{8,32}$/.test(paramCandidate)) return paramCandidate;
+    const videoIndex = pathParts.findIndex((part) => part === "video");
+    const afterVideo = videoIndex >= 0 ? pathParts[videoIndex + 1] : "";
+    if (afterVideo && /^\d{8,32}$/.test(afterVideo)) return afterVideo;
+    return "";
+  } catch {
+    return "";
+  }
+}
+
+function extractWeiboStatusId(value: string) {
+  const url = extractFirstHttpUrl(value);
+  if (!url) return "";
+  try {
+    const parsed = new URL(url);
+    const paramCandidate = parsed.searchParams.get("id") || parsed.searchParams.get("mid") || parsed.searchParams.get("mblogid");
+    if (paramCandidate) return paramCandidate;
+    const pathParts = parsed.pathname.split("/").map((part) => part.trim()).filter(Boolean);
+    const statusIndex = pathParts.findIndex((part) => /^(status|detail)$/i.test(part));
+    const afterStatus = statusIndex >= 0 ? pathParts[statusIndex + 1] : "";
+    if (afterStatus) return afterStatus;
+    return pathParts
+      .slice()
+      .reverse()
+      .find((part) => /^[0-9A-Za-z]{6,32}$/.test(part) && !/^(u|p|profile|status|detail)$/i.test(part)) || "";
+  } catch {
+    return "";
+  }
 }
 
 function normalizeUrl(value?: string) {

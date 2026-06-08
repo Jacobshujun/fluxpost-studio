@@ -727,6 +727,25 @@ a {
   min-width: 0;
 }
 
+.simple-source-mode-toggle {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 8px;
+}
+
+.simple-link-panel {
+  min-width: 0;
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  background: color-mix(in srgb, var(--surface-soft) 78%, transparent);
+  padding: 12px;
+}
+
+.simple-link-textarea {
+  min-height: 132px;
+  resize: vertical;
+}
+
 .simple-policy-preview,
 .simple-run-summary,
 .simple-stage-card,
@@ -933,6 +952,58 @@ a {
   gap: 14px;
 }
 
+.simple-overall-side,
+.simple-run-summary-actions {
+  display: flex;
+  min-width: 0;
+  align-items: center;
+  justify-content: flex-end;
+  gap: 8px;
+}
+
+.simple-overall-side {
+  flex-wrap: wrap;
+}
+
+.simple-force-terminate-button {
+  display: inline-flex;
+  min-width: 0;
+  height: 34px;
+  align-items: center;
+  justify-content: center;
+  gap: 7px;
+  border: 1px solid color-mix(in srgb, var(--rose) 52%, var(--line));
+  border-radius: 8px;
+  background: color-mix(in srgb, var(--rose) 10%, var(--surface-raised));
+  padding: 0 11px;
+  color: var(--rose);
+  font-size: 11px;
+  font-weight: 900;
+  line-height: 1;
+  white-space: nowrap;
+  transition:
+    border-color 180ms ease,
+    background 180ms ease,
+    color 180ms ease,
+    transform 180ms ease;
+}
+
+.simple-force-terminate-button:hover:not(:disabled) {
+  border-color: color-mix(in srgb, var(--rose) 78%, var(--line));
+  background: color-mix(in srgb, var(--rose) 18%, var(--surface-raised));
+  color: var(--rose-bright);
+  transform: translateY(-1px);
+}
+
+.simple-force-terminate-button:disabled {
+  cursor: wait;
+  opacity: 0.62;
+}
+
+.simple-force-terminate-button-compact {
+  height: 38px;
+}
+
 .simple-overall-progress-icon {
   display: grid;
   width: 36px;
@@ -1064,6 +1135,15 @@ a {
   .simple-overall-progress-head {
     align-items: stretch;
     flex-direction: column;
+  }
+
+  .simple-overall-side {
+    align-items: stretch;
+    width: 100%;
+  }
+
+  .simple-force-terminate-button-compact {
+    width: 100%;
   }
 
   .simple-overall-metrics {
@@ -1815,6 +1895,43 @@ body {
   padding: clamp(10px, 1.1vw, 18px);
 }
 
+.studio-topbar {
+  position: relative;
+  z-index: 30;
+  display: flex;
+  flex: 0 0 auto;
+  min-width: 0;
+  flex-direction: column;
+  gap: clamp(8px, 0.85vw, 12px);
+}
+
+.studio-topbar > .design-header,
+.studio-topbar .workspace-mode-switcher,
+.studio-topbar .command-bar,
+.studio-topbar .module-switcher {
+  margin-bottom: 0 !important;
+}
+
+.advanced-command-dock {
+  display: grid;
+  min-width: 0;
+  gap: clamp(8px, 0.85vw, 12px);
+}
+
+.studio-body {
+  display: flex;
+  flex: 1 1 auto;
+  min-height: 0;
+  min-width: 0;
+  flex-direction: column;
+  isolation: isolate;
+}
+
+.studio-body > .simple-workspace,
+.studio-body > .studio-workspace {
+  flex: 1 1 auto;
+}
+
 .design-header {
   display: grid !important;
   grid-template-columns: minmax(0, 1fr) auto;
@@ -2406,6 +2523,11 @@ body {
     grid-template-columns: minmax(240px, 1.05fr) minmax(150px, 0.42fr) minmax(300px, 1.08fr);
   }
 
+  .simple-workspace-compact .simple-source-mode-toggle,
+  .simple-workspace-compact .simple-link-panel {
+    grid-column: 1 / -1;
+  }
+
   .simple-workspace-compact .primary-button {
     min-height: 52px;
   }
@@ -2420,12 +2542,33 @@ body {
     grid-template-columns: clamp(260px, 20vw, 340px) minmax(0, 1fr) clamp(320px, 24vw, 430px);
   }
 
-  .app-shell-compact .studio-frame {
+  .app-shell-compact .studio-frame,
+  .app-shell-simple .studio-frame,
+  .app-shell-advanced .studio-frame {
     overflow: hidden;
   }
 
-  .simple-workspace-compact .simple-control-panel {
+  .app-shell-compact .studio-body,
+  .app-shell-simple .studio-body,
+  .app-shell-advanced .studio-body {
+    overflow: hidden;
+  }
+
+  .app-shell-simple .simple-workspace,
+  .app-shell-advanced .studio-workspace {
+    min-height: 0;
+    overflow: hidden;
+  }
+
+  .simple-workspace-compact .simple-control-panel,
+  .app-shell-simple .simple-control-panel,
+  .app-shell-simple .simple-run-panel,
+  .app-shell-advanced .studio-pane,
+  .app-shell-advanced .studio-samples {
+    overflow-x: hidden;
     overflow-y: auto;
+    overscroll-behavior: contain;
+    scrollbar-gutter: stable;
   }
 }
 
