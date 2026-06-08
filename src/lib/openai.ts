@@ -1,0 +1,431 @@
+import { compactError, recordExecutionLog } from "./activity-log";
+import { appConfig, openaiTextUrl } from "./config";
+import { runWithConcurrencyPool } from "./concurrency";
+import { formatImageTasksForPrompt, mergeProductionPlan } from "./creation-controls";
+import { makeDemoPost } from "./mock-data";
+import { buildProductionPlan, formatProductionPlanForPrompt } from "./production-plan";
+import type { GeneratedPost, NormalizedSourceItem, ProductionPlan, SourceImageTask } from "./types";
+
+type RewriteInput = {
+  source: NormalizedSourceItem;
+  materialPaths: string[];
+  instruction?: string;
+  productionPlanOverride?: ProductionPlan;
+  imageTasks?: SourceImageTask[];
+};
+
+type ReviewEditInput = {
+  post: GeneratedPost;
+  instruction: string;
+};
+
+type ResponsesApiTextResponse = {
+  output_text?: string;
+  output?: Array<{
+    content?: Array<{
+      type?: string;
+      text?: string;
+    }>;
+  }>;
+};
+
+type ChatCompletionResponse = {
+  choices?: Array<{
+    message?: {
+      content?: string;
+    };
+  }>;
+};
+
+const minGeneratedTitleChars = 12;
+const maxGeneratedTitleChars = 18;
+
+const titleStyleInstruction = [
+  "title 硬性规则：标题必须控制在 12-18 个可见字符之间。",
+  "title 必须包含车型/颜色/场景/核心冲突中的至少两个信息点，不能只写泛情绪短句。",
+  "title 避免只使用“有点”“看完了”“到了”“纠结了”等短口语收尾；需要保留真实用户语气，同时提高信息量。",
+  "如果原标题信息不足，请从正文里提取车型、使用场景、价格/销量/颜色/试驾等具体信息补足 title。",
+].join("\n");
+
+export async function generatePost(input: RewriteInput): Promise<GeneratedPost> {
+  const productionPlan = mergeProductionPlan(input.source.productionPlan || buildProductionPlan(input.source), input.productionPlanOverride);
+  if (productionPlan.decision === "observe_only") {
+    throw new Error("该内容被制作策略标记为仅观察，不进入自动生成流程");
+  }
+
+  if (!appConfig.openaiApiKey) {
+    return makeDemoPost(input.source, input.materialPaths);
+  }
+
+  const prompt = [
+    "你是社交媒体图文内容制作专家。不要直接仿写原文，而是提取信息点、爆款表达模型和平台语感后进行原创重构。",
+    "必须遵守制作策略：行业图文只洗稿洗图，不结合车型资料；竞品图文只分析创意并用小鹏素材重构；竞品视频不采用。",
+    `制作策略:\n${formatProductionPlanForPrompt(productionPlan)}`,
+    `用户选择的图片处理任务:\n${formatImageTasksForPrompt(input.imageTasks)}`,
+    "如果用户选择了图片任务，imagePrompt 必须只围绕被选中的图片/关键帧展开，不要处理未选中的图片。",
+    "如果图片策略是原图引用，必须保留原图作为配图，不要提出洗图或重构要求。",
+    "如果图片任务的处理方式是保持原图，该图片会直接使用原图，不需要写入 imagePrompt 的生成要求。",
+    "你是社交媒体图文内容制作专家。请学习爆款内容的结构、节奏和视觉策略，但不要复刻原文。",
+    "输出严格 JSON，字段为 title, body, imagePrompt, aiNotes。",
+    titleStyleInstruction,
+    "body 用中文，适合社交媒体图文发布，保留段落换行。",
+    `平台: ${input.source.platform}`,
+    `原标题: ${input.source.title || ""}`,
+    `原内容: ${input.source.contentText || ""}`,
+    `数据: ${JSON.stringify(input.source.metrics)}`,
+    `用户素材路径: ${input.materialPaths.join(", ") || "未提供"}`,
+    `额外要求: ${input.instruction || "无"}`,
+  ].join("\n");
+
+  const json = await callOpenAIForJson(prompt);
+  const body = stringFromJson(json.body, "");
+  const rawTitle = stringFromJson(json.title, "未命名图文草稿");
+  const title = await repairGeneratedTitleIfNeeded(rawTitle, input, body);
+
+  return {
+    id: `post-${input.source.id}-${Date.now()}`,
+    sourceItemId: input.source.id,
+    platform: input.source.platform,
+    title,
+    body,
+    imagePrompt: stringFromJson(json.imagePrompt, ""),
+    imageUrls: [],
+    contentTags: input.source.contentTagging?.tags || [],
+    productionPlanOverride: productionPlan,
+    imageTasks: input.imageTasks,
+    materialPaths: input.materialPaths,
+    status: "draft",
+    aiNotes: arrayOfStrings(json.aiNotes),
+    updatedAt: new Date().toISOString(),
+  };
+}
+
+export async function editPostWithPrompt(input: ReviewEditInput): Promise<GeneratedPost> {
+  if (!appConfig.openaiApiKey) {
+    return {
+      ...input.post,
+      title: input.post.title,
+      body: `${input.post.body}\n\n修改备注：${input.instruction}`,
+      aiNotes: [...input.post.aiNotes, "当前为未配置 OpenAI API Key 时的本地编辑回显。"],
+      status: "editing",
+      updatedAt: new Date().toISOString(),
+    };
+  }
+
+  const prompt = [
+    "你是社交媒体图文审稿编辑。请根据用户指令修改草稿，保持可发布状态。",
+    "输出严格 JSON，字段为 title, body, imagePrompt, aiNotes。",
+    `当前标题: ${input.post.title}`,
+    `当前正文: ${input.post.body}`,
+    `当前图片提示词: ${input.post.imagePrompt}`,
+    `用户指令: ${input.instruction}`,
+  ].join("\n");
+
+  const json = await callOpenAIForJson(prompt);
+
+  return {
+    ...input.post,
+    title: stringFromJson(json.title, input.post.title),
+    body: stringFromJson(json.body, input.post.body),
+    imagePrompt: stringFromJson(json.imagePrompt, input.post.imagePrompt),
+    aiNotes: arrayOfStrings(json.aiNotes),
+    status: "editing",
+    updatedAt: new Date().toISOString(),
+  };
+}
+
+async function callOpenAIForJson(prompt: string): Promise<Record<string, unknown>> {
+  const text =
+    appConfig.openaiTextEndpoint === "chat"
+      ? await callChatCompletions(prompt)
+      : await callResponsesApi(prompt);
+
+  return parseJsonObject(text);
+}
+
+async function callResponsesApi(prompt: string) {
+  const startedAt = Date.now();
+  await recordExecutionLog({
+    scope: "openai/text",
+    action: "请求 Responses 文本模型",
+    status: "running",
+    message: "准备发送图文生成/编辑 Prompt",
+    details: {
+      model: appConfig.openaiTextModel,
+      promptLength: prompt.length,
+    },
+  });
+  const response = await runWithConcurrencyPool("gpt", () =>
+    fetch(openaiTextUrl("responses"), {
+      method: "POST",
+      headers: openaiHeaders(),
+      body: JSON.stringify({
+        model: appConfig.openaiTextModel,
+        input: prompt,
+        text: {
+          format: {
+            type: "json_object",
+          },
+        },
+      }),
+    }),
+  );
+
+  if (!response.ok) {
+    const body = await response.text();
+    await recordExecutionLog({
+      scope: "openai/text",
+      action: "Responses 文本模型失败",
+      status: "error",
+      message: compactError(`OpenAI request failed: ${response.status} ${body.slice(0, 260)}`),
+      durationMs: Date.now() - startedAt,
+      details: {
+        status: response.status,
+        model: appConfig.openaiTextModel,
+      },
+    });
+    throw new Error(`OpenAI request failed: ${response.status} ${body.slice(0, 260)}`);
+  }
+
+  const data = (await response.json()) as ResponsesApiTextResponse;
+  await recordExecutionLog({
+    scope: "openai/text",
+    action: "Responses 文本模型完成",
+    status: "success",
+    message: "模型已返回文本结果，准备解析 JSON",
+    durationMs: Date.now() - startedAt,
+    details: {
+      status: response.status,
+      model: appConfig.openaiTextModel,
+    },
+  });
+  return (
+    data.output_text ||
+    data.output?.flatMap((item) => item.content || []).find((content) => typeof content.text === "string")?.text ||
+    "{}"
+  );
+}
+
+async function callChatCompletions(prompt: string) {
+  const startedAt = Date.now();
+  await recordExecutionLog({
+    scope: "openai/text",
+    action: "请求 Chat 文本模型",
+    status: "running",
+    message: "准备发送图文生成/编辑 Prompt",
+    details: {
+      model: appConfig.openaiTextModel,
+      promptLength: prompt.length,
+    },
+  });
+  const response = await runWithConcurrencyPool("gpt", () =>
+    fetch(openaiTextUrl("chat/completions"), {
+      method: "POST",
+      headers: openaiHeaders(),
+      body: JSON.stringify({
+        model: appConfig.openaiTextModel,
+        messages: [
+        {
+          role: "system",
+          content: "你只输出合法 JSON，不要输出 Markdown。",
+        },
+        {
+          role: "user",
+          content: prompt,
+        },
+        ],
+        response_format: {
+          type: "json_object",
+        },
+      }),
+    }),
+  );
+
+  if (!response.ok) {
+    const body = await response.text();
+    await recordExecutionLog({
+      scope: "openai/text",
+      action: "Chat 文本模型失败",
+      status: "error",
+      message: compactError(`OpenAI chat request failed: ${response.status} ${body.slice(0, 260)}`),
+      durationMs: Date.now() - startedAt,
+      details: {
+        status: response.status,
+        model: appConfig.openaiTextModel,
+      },
+    });
+    throw new Error(`OpenAI chat request failed: ${response.status} ${body.slice(0, 260)}`);
+  }
+
+  const data = (await response.json()) as ChatCompletionResponse;
+  await recordExecutionLog({
+    scope: "openai/text",
+    action: "Chat 文本模型完成",
+    status: "success",
+    message: "模型已返回文本结果，准备解析 JSON",
+    durationMs: Date.now() - startedAt,
+    details: {
+      status: response.status,
+      model: appConfig.openaiTextModel,
+    },
+  });
+  return data.choices?.[0]?.message?.content || "{}";
+}
+
+export function openaiHeaders() {
+  return {
+    Authorization: `Bearer ${appConfig.openaiApiKey}`,
+    "Content-Type": "application/json",
+  };
+}
+
+function parseJsonObject(text: string): Record<string, unknown> {
+  const normalized = text.trim().replace(/^```json\s*/i, "").replace(/^```\s*/i, "").replace(/\s*```$/i, "");
+  const parsed = JSON.parse(normalized) as unknown;
+  if (!parsed || typeof parsed !== "object" || Array.isArray(parsed)) {
+    return {};
+  }
+  return parsed as Record<string, unknown>;
+}
+
+function stringFromJson(value: unknown, fallback: string) {
+  return typeof value === "string" && value.trim() ? value.trim() : fallback;
+}
+
+function arrayOfStrings(value: unknown) {
+  return Array.isArray(value) ? value.filter((item): item is string => typeof item === "string") : [];
+}
+
+async function repairGeneratedTitleIfNeeded(title: string, input: RewriteInput, body: string) {
+  const normalized = normalizeGeneratedTitle(title);
+  if (isGeneratedTitleLengthValid(normalized)) return normalized;
+
+  try {
+    const json = await callOpenAIForJson(
+      [
+        "你是社交媒体标题编辑，只修正 title，不改正文。",
+        titleStyleInstruction,
+        "只输出严格 JSON，字段为 title。",
+        `当前不合格标题: ${normalized}`,
+        `当前标题长度: ${countVisibleTitleChars(normalized)}`,
+        `平台: ${input.source.platform}`,
+        `原标题: ${input.source.title || ""}`,
+        `原内容: ${input.source.contentText || ""}`,
+        `已生成正文: ${body}`,
+        `用户额外要求: ${input.instruction || "无"}`,
+      ].join("\n"),
+    );
+    const repaired = normalizeGeneratedTitle(stringFromJson(json.title, ""));
+    if (isGeneratedTitleLengthValid(repaired)) {
+      return repaired;
+    }
+  } catch (error) {
+    await recordExecutionLog({
+      scope: "openai/text",
+      action: "Title repair fallback used",
+      status: "info",
+      message: compactError(error),
+      details: {
+        sourceItemId: input.source.id,
+        titleChars: countVisibleTitleChars(normalized),
+      },
+    });
+  }
+
+  const fallback = buildLocalTitleFallback(normalized, input, body);
+  await recordExecutionLog({
+    scope: "openai/text",
+    action: "Generated title normalized",
+    status: "info",
+    message: "Generated title did not meet the 12-18 character rule and was normalized locally.",
+    details: {
+      sourceItemId: input.source.id,
+      originalTitleChars: countVisibleTitleChars(normalized),
+      finalTitleChars: countVisibleTitleChars(fallback),
+    },
+  });
+  return fallback;
+}
+
+function normalizeGeneratedTitle(value: string) {
+  return value.replace(/\s+/g, "").trim();
+}
+
+function isGeneratedTitleLengthValid(value: string) {
+  const length = countVisibleTitleChars(value);
+  return length >= minGeneratedTitleChars && length <= maxGeneratedTitleChars;
+}
+
+function countVisibleTitleChars(value: string) {
+  return Array.from(value.replace(/\s+/g, "")).length;
+}
+
+function buildLocalTitleFallback(title: string, input: RewriteInput, body: string) {
+  const context = [title, input.source.title, input.source.contentText, body].filter(Boolean).join("\n");
+  const vehicle = extractVehicleName(context);
+  const scene = extractTitleScene(context);
+  const core = stripWeakTitleWords(title);
+  const candidates = [
+    core ? `${vehicle}${scene}：${core}` : "",
+    `${vehicle}${scene}这次值得细看`,
+    `${vehicle}${scene}我认真看完了`,
+    `${vehicle}真实体验这次值得聊`,
+  ].filter(Boolean);
+
+  return fitTitleLength(candidates.find(isGeneratedTitleLengthValid) || candidates[0] || title || "小鹏汽车真实体验值得细聊");
+}
+
+function extractVehicleName(text: string) {
+  const normalized = text.toLowerCase();
+  const patterns: Array<[RegExp, string]> = [
+    [/小鹏\s*p7\+?/i, "小鹏P7"],
+    [/小鹏\s*x9/i, "小鹏X9"],
+    [/小鹏\s*gx/i, "小鹏GX"],
+    [/小鹏\s*g9/i, "小鹏G9"],
+    [/小鹏\s*g6/i, "小鹏G6"],
+    [/p7\+/i, "小鹏P7+"],
+    [/\bp7\b/i, "小鹏P7"],
+    [/\bx9\b/i, "小鹏X9"],
+    [/\bgx\b/i, "小鹏GX"],
+    [/\bg9\b/i, "小鹏G9"],
+    [/\bg6\b/i, "小鹏G6"],
+    [/mona/i, "小鹏MONA"],
+  ];
+  return patterns.find(([pattern]) => pattern.test(normalized))?.[1] || "小鹏汽车";
+}
+
+function extractTitleScene(text: string) {
+  if (/试驾|试完|开了|开过|体验/.test(text)) return "试驾体验";
+  if (/颜色|车色|丹霞|昆仑|实拍|上镜/.test(text)) return "车色实拍";
+  if (/销量|订单|价格|预售|上市|费用/.test(text)) return "价格销量";
+  if (/六座|家用|空间|二胎|家庭/.test(text)) return "家用场景";
+  if (/配置|版本|Ultra|Max|鹏翼/i.test(text)) return "配置选择";
+  return "真实体验";
+}
+
+function stripWeakTitleWords(title: string) {
+  return title
+    .replace(/^这台车?/, "")
+    .replace(/^这车/, "")
+    .replace(/有点/g, "")
+    .replace(/看完了?$/, "")
+    .replace(/到了$/, "")
+    .replace(/纠结了?$/, "纠结")
+    .replace(/\s+/g, "")
+    .trim();
+}
+
+function fitTitleLength(title: string) {
+  let chars = Array.from(normalizeGeneratedTitle(title));
+  if (chars.length > maxGeneratedTitleChars) {
+    chars = chars.slice(0, maxGeneratedTitleChars);
+  }
+  while (chars.length < minGeneratedTitleChars) {
+    chars.push(...Array.from("真实体验"));
+    if (chars.length > maxGeneratedTitleChars) {
+      chars = chars.slice(0, maxGeneratedTitleChars);
+      break;
+    }
+  }
+  return chars.join("");
+}

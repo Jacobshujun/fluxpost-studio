@@ -1,0 +1,474 @@
+# Handoff
+
+Last updated: 2026-06-08
+
+## New Session Reading Order
+
+1. `AGENTS.md`
+2. `docs/harness/handoff.md`
+3. `docs/harness/progress.md`
+4. `docs/harness/feature_list.json`
+5. `docs/harness/decisions.md`
+6. `docs/harness/project_brief.md` when product scope, stack, data, APIs, or deployment are involved
+7. `docs/harness/pitfalls.md` and `docs/harness/architecture_rules.md` before code or deployment changes
+8. `docs/harness/verification.md` before completion
+
+## Current Task
+
+Current task on 2026-06-08: upload the latest local FluxPost Studio code snapshot to `https://github.com/Jacobshujun/fluxpost-studio.git`. The remote was checked with `git ls-remote` and returned no refs before upload. Full baseline verification passed with `powershell -ExecutionPolicy Bypass -File scripts/harness/check.ps1`; only known Turbopack tracing warnings and the expected Node SQLite experimental warning were emitted. Treat the repo as an initial source snapshot and keep `.env*`, runtime data, generated/cached media, `.tmp-*.json`, `test-artifacts/`, `.next/`, `node_modules/`, and `*.tsbuildinfo` out of Git.
+
+Implementation completed on 2026-06-08 for the user's request to redesign the UI with the `frontend-design` skill. The redesign is visual/frontend-only: `src/app/globals.css` adds a 2026 command-desk redesign layer covering theme variables, app background, header, theme/config controls, workspace mode tabs, module tabs, panels, inputs, buttons, cards, simple-mode prompt strategy layout, fixed compact progress bar, review/package surfaces, and mobile overflow guards. `src/app/page.tsx` only adds `app-shell-${workspaceMode}` to the root `<main>` for mode-aware styling.
+
+Verification passed: `npm run lint`, `npx --no-install tsc --noEmit`, `npm run build`, read-only `npm run local:watch-simple -- -Once`, `npm run local:restart`, Chrome headless/CDP screenshots for compact desktop/mobile and advanced desktop/mobile, CDP 390px compact-mobile check with `scrollWidth=390`, CDP advanced desktop/mobile checks with no horizontal overflow, and full `powershell -ExecutionPolicy Bypass -File scripts/harness/check.ps1`. The local production app at `http://127.0.0.1:3001/` is refreshed with the redesign. No live TikHub/OpenAI-compatible/RunningHub/Feishu production task was triggered. Browser screenshots are retained under `test-artifacts/ui-redesign/`; temporary Chrome CDP profile directories were removed before final baseline.
+
+Implementation completed on 2026-06-05 for the user's report that recently crawled Weibo images could not display. Root cause: recent Sina image responses were cached as `.jpg` local files, but their actual bytes were HEIC (`ftypheic`), so browser previews that preferred local `/media/crawl/...` paths showed broken images. Some WebP responses were also cached under `.jpg`, which made extension-based `Content-Type` inference wrong.
+
+Fix: `src/lib/image-format.ts` centralizes image byte sniffing; `src/lib/media-cache.ts` validates cached image bytes and converts HEIC cache files to JPEG in place with `ffmpeg`; `src/app/api/media/local/[...path]/route.ts` sniffs local image bytes before falling back to extension content types; `src/lib/source-tagging.ts` reuses the shared model-supported sniffing helper. Existing local Weibo cache was repaired in place: 13 HEIC files under `public/media/crawl/weibo` were converted to JPEG while keeping the original `/media/crawl/.../image-N.jpg` URLs, so runtime database records did not need mutation.
+
+Follow-up after user retest: the remaining visible bad-image behavior was stale browser cache. The old broken HEIC response had the same `/media/crawl/.../image-N.jpg` URL and cacheable headers, so an already-open browser could reuse it after the file was repaired. `src/app/page.tsx` now appends `?v=20260605-image-format-v2` to local `/media/...` and `/generated/...` preview image URLs through `toDisplayImageSrc(...)`.
+
+Implementation files: `src/lib/image-format.ts`, `src/lib/media-cache.ts`, `src/app/api/media/local/[...path]/route.ts`, `src/lib/source-tagging.ts`, `src/app/page.tsx`, `scripts/harness/media_cache_image_format_check.mjs`, `scripts/harness/source_tagging_image_check.mjs`, and `scripts/harness/check.ps1`. Verification passed: `node scripts/harness/media_cache_image_format_check.mjs`, `node scripts/harness/source_tagging_image_check.mjs`, `node scripts/harness/media_url_filter_check.mjs`, `node scripts/harness/weibo_search_mapping_check.mjs`, `npm run lint`, `npx --no-install tsc --noEmit`, read-only `npm run local:watch-simple -- -Once`, `npm run local:restart`, local HTTP media checks confirming `image/jpeg` and `image/webp`, Playwright image decode checks with non-zero dimensions, Playwright `小鹏GX` + Weibo content-pool check confirming 19 decoded images and cache-busted local media URLs, and full `powershell -ExecutionPolicy Bypass -File scripts/harness/check.ps1`. No new live TikHub/OpenAI-compatible/RunningHub/Feishu production work was triggered.
+
+Implementation completed on 2026-06-05 for Weibo crawl debugging against TikHub docs page `https://docs.tikhub.io/410358109e0`. The current Weibo crawl path uses TikHub Weibo App search `/api/v1/weibo/app/fetch_search_all` with `query`, `page`, and numeric `search_type`; `includeType=pic` maps to `search_type=63`, and `includeType=video` maps to `search_type=64`. The old `/api/v1/weibo/web_v2/fetch_advanced_search` path and old `q`/`include_type`/`timescope` parameters should not be reintroduced.
+
+Weibo App response normalization now uses a dedicated `mblog` extractor instead of generic array guessing, because the App payload can contain UI layout arrays that look record-like but are not posts. Weibo content images should come from `pics`/`pic_infos` and direct content image fields; broad raw-record URL fallback is disabled for Weibo to avoid avatars, icons, ad decorations, and layout media. Weibo CDN size variants are collapsed in `src/lib/media-url-filter.ts`, and local visual tagging now sniffs file bytes before inlining local images so HEIC bytes saved under `.jpg` are skipped rather than sent to the model as invalid JPEG.
+
+Implementation files: `src/lib/tikhub.ts`, `src/lib/media-url-filter.ts`, `src/lib/source-tagging.ts`, `src/app/page.tsx`, `scripts/harness/weibo_search_mapping_check.mjs`, `scripts/harness/source_tagging_image_check.mjs`, and `scripts/harness/check.ps1`. Verification passed: `node scripts/harness/weibo_search_mapping_check.mjs`, `node scripts/harness/source_tagging_image_check.mjs`, `node scripts/harness/media_url_filter_check.mjs`, `npm run lint`, `npx --no-install tsc --noEmit`, full `powershell -ExecutionPolicy Bypass -File scripts/harness/check.ps1`, and `npm run local:restart`. Live minimal Weibo smoke on `http://127.0.0.1:3001/api/crawl/jobs` for keyword `Xiaopeng GX`, target `1`, hot + pic completed through `/api/v1/weibo/app/fetch_search_all` with `mediaType=image`, `imageCount=2`, `downloadedImageCount=2`, visual tagging `success`, `visualTags=1`, and one unsupported HEIC visual asset skipped. The live smoke called TikHub and the configured text/vision tagging model, but did not trigger RunningHub image generation or Feishu publish.
+
+Read-only diagnosis completed on 2026-06-05 for the user's report that a recent simple-mode task appeared to use original images instead of washed/generated images. Latest run inspected: `simple-1780651475336` (`小鹏p7+ su7`, `douyin`, target `3`, created `2026-06-05T09:24:35.336Z`). It completed successfully with three published posts. All `14` selected image tasks were `mode="wash"`/`kind="source_image"`, so they were scheduled for image washing. Final output had `12` images: `8` exact source-task URL matches under `/media/crawl/...` and `4` RunningHub-generated/remote outputs. Retained logs for the run show `4` `RunningHub 图片任务完成`, `5` `Image task timed out; using source image`, and `2` hard `Image task failed` entries from RunningHub content safety audit rejection; earlier task start/submission/fallback logs were rotated out because execution logs retain only the latest `300` entries and this run produced `288` RunningHub wait logs.
+
+Recent-run aggregation found mixed behavior rather than a global "never enters washing" bug. The latest `小鹏X9` run `simple-1780647321599` had `12` selected tasks with `6` `wash` and `6` `keep`; `keep` comes from the existing `内饰空间` visual-tag rule that intentionally keeps the original image. No business-code changes were made. Verification passed on 2026-06-05: `powershell -ExecutionPolicy Bypass -File scripts/harness/check.ps1`, with only known Turbopack tracing warnings and the expected Node SQLite experimental warning. Next entry point if the user wants a fix: improve observability/correlation for per-post image-task outcomes and decide whether timeout fallback should remain silent/automatic, be retried longer, or surface as a warning before Feishu publish. Default checks must not run a real simple task because that calls TikHub, model providers, RunningHub, and Feishu.
+
+Implementation completed on 2026-06-05 for the compact simple workspace width adjustment requested by the user after the initial compact-mode delivery. The `精简版` task launch/control panel now spans the full workspace width instead of staying as a narrow left column with empty middle/right space. The compact panel uses a responsive grid: desktop lays keyword, target count, and platform controls across the top row and lets prompt strategy content expand across the full panel; mobile remains single-column. The fixed bottom overall progress bar remains visible.
+
+Implementation files: `src/app/page.tsx` and `src/app/globals.css`. Verification passed on 2026-06-05: `npm run lint`, `npx --no-install tsc --noEmit`, `npm run local:restart`, Playwright desktop/mobile checks on `http://127.0.0.1:3001/` confirming full-width compact control panel, no `.simple-run-panel`, visible `.simple-overall-progress`, and no horizontal overflow, plus `powershell -ExecutionPolicy Bypass -File scripts/harness/check.ps1`. No new live TikHub/OpenAI-compatible/RunningHub/Feishu task was triggered by verification.
+
+Implementation completed on 2026-06-05 for the compact simple workspace requested by the user. The app now has three workspace modes: `精简版`, `简单版`, and `高级版`, with `精简版` as the default. The compact mode reuses the existing simple-run backend and saved simple workspace settings, keeps only the left task launch/control panel in the main workspace, and adds a fixed bottom overall progress bar derived from `SimpleRun.stages`, platform results, generated posts, publish state, and run errors. The existing detailed simple-run status/results/history panel is still available when switching to `简单版`.
+
+Implementation files: `src/app/page.tsx` and `src/app/globals.css`. Verification passed on 2026-06-05: `npm run lint`, `npx --no-install tsc --noEmit`, `npm run build`, elevated `powershell -ExecutionPolicy Bypass -File scripts/harness/check.ps1`, read-only `npm run local:watch-simple -- -Once`, elevated `npm run local:restart`, and elevated Playwright desktop/mobile checks on `http://127.0.0.1:3001/` confirming default compact mode, no rendered `.simple-run-panel`, visible `.simple-overall-progress`, no horizontal overflow, and no console/page errors. The local production server at `http://127.0.0.1:3001/` has been refreshed. No new live TikHub/OpenAI-compatible/RunningHub/Feishu task was triggered by verification.
+
+Next entry point: manually use `精简版` from `http://127.0.0.1:3001/` and submit a small real task only when the user wants live workflow validation. The browser/UI verification was read-only and did not submit `/api/simple/runs`.
+
+Implementation completed on 2026-06-05 for crawl-stage content safety filtering requested by the user to remove negative, profane, and competitor-bashing content during harvesting.
+
+Fix: `src/lib/source-safety.ts` provides the source safety gate. It applies local hard-filter rules for obvious profanity/insult/competitor-bashing/strong-negative content, then calls the configured OpenAI-compatible text model (`appConfig.openaiTextModel`, currently `gpt-5.5` from `/api/config`) for non-hard-filter cases. Decisions are `allow`, `review`, or `filter`; kept items retain `safetyAssessment`, while filtered items are removed before AI tagging, content-pool ingest, simple-mode production, and Feishu publish. Advanced crawl applies `filterUnsafeSourceItems(...)` in `src/app/api/crawl/jobs/route.ts`; simple mode applies it in `src/lib/simple-runs.ts` after crawl/top-up and records `platformResults.filteredUnsafe`. The UI in `src/app/page.tsx` shows safety badges/cards for retained items and simple-mode safety-filter counts.
+
+Verification passed on 2026-06-05: `node scripts/harness/source_safety_filter_check.mjs`, `npx --no-install tsc --noEmit`, `npm run lint`, `powershell -ExecutionPolicy Bypass -File scripts/harness/check.ps1`, read-only `npm run local:watch-simple -- -Once`, `npm run local:restart`, and a Playwright browser smoke on `http://127.0.0.1:3001/` with no console/page errors. Baseline and browser smoke did not trigger new live TikHub/OpenAI-compatible/RunningHub/Feishu production work.
+
+Next entry point: manually validate with a small real crawl containing an obviously profane or competitor-bashing fixture/query when the user wants live confirmation. Expect execution-log action `Source safety filtered`, fewer retained items when unsafe content is found, `safetyAssessment` on retained items, and simple-mode platform rows showing `filteredUnsafe` counts.
+
+Implementation completed on 2026-06-05 for the global video highlight-frame policy requested after the `小鹏X9` image-selection diagnosis. Video/mixed source items now expose at most 5 selected highlight frames instead of carrying the older 12-frame set into storage and downstream tasks.
+
+Fix: `src/lib/video-frame-policy.ts` centralizes `maxVideoHighlightFrames=5`, frame ranking/deduplication, timestamp spacing, and stale frame URL cleanup for `mediaUrls`. The policy is applied in `src/lib/media-cache.ts`, `src/lib/media-backfill.ts`, `src/lib/content-pool.ts`, `src/lib/creation-controls.ts`, `src/lib/source-tagging.ts`, and `src/app/page.tsx`, so cache ingest, media backfill, content-pool refresh/update/create, default production image tasks, visual tagging, and frontend preview/editing share the same 5-frame cap. New regression coverage lives in `scripts/harness/video_frame_policy_check.mjs` and is wired into `scripts/harness/check.ps1`.
+
+Verification passed on 2026-06-05: `node scripts/harness/video_frame_policy_check.mjs`, `node scripts/harness/source_tagging_image_check.mjs`, `node scripts/harness/simple_crawl_media_policy_check.mjs`, `node scripts/harness/media_url_filter_check.mjs`, `npx --no-install tsc --noEmit`, `npm run lint`, `powershell -ExecutionPolicy Bypass -File scripts/harness/check.ps1`, read-only `npm run local:watch-simple -- -Once`, and `npm run local:restart`. `http://127.0.0.1:3001` was refreshed and local HTTP smoke passed. No new live TikHub/OpenAI-compatible/RunningHub/Feishu production task was triggered by verification.
+
+Next entry point: manually validate with a small video/mixed crawl when the user wants live confirmation. Check source `videoFrames.length <= 5`, content-pool preview, visual tag assets, and default production image tasks. Historical records with more than 5 frames are capped when read/refreshed/updated or when downstream paths build frame previews/tasks.
+
+Implementation completed on 2026-06-05 for the latest `小鹏x9` Douyin one-click image-selection issue. Read-only diagnosis found recent runs `simple-1780630135757` and `simple-1780630487482` already carried saved `platformCrawlSettings.douyin.contentType="2"` (image), but the accepted Douyin source items were video-like cards normalized as `mediaType="mixed"` with video cover URLs and extracted `videoFrames`. The frontend selection/request payload was not the cause.
+
+Fix: `src/lib/tikhub.ts` now treats Douyin `content_type=2` as image-only during result normalization. It keeps only records with true Douyin carousel/image fields detected by `extractDouyinCarouselImageUrls(...)`, skips video-cover-only candidates with a `Douyin image content-type mismatch skipped` activity-log entry, and strips direct video media from kept image results so image-only crawls do not produce `videoFrames`. Regression coverage was added to `scripts/harness/douyin_search_mapping_check.mjs`.
+
+Verification passed on 2026-06-05: `node scripts/harness/douyin_search_mapping_check.mjs`, `node scripts/harness/douyin_carousel_image_check.mjs`, `npx --no-install tsc --noEmit`, `npm run lint`, `powershell -ExecutionPolicy Bypass -File scripts/harness/check.ps1`, read-only `npm run local:watch-simple -- -Once`, and approved elevated `npm run local:restart` after the expected sandbox `spawn EPERM`. `http://127.0.0.1:3001` was refreshed and local HTTP smoke passed. No new live TikHub/OpenAI-compatible/RunningHub/Feishu production task was triggered by verification.
+
+Next entry point: if the user wants live validation, run a small Douyin `小鹏x9` image-only simple/advanced crawl and confirm the activity log either keeps true carousel image cards or reports skipped video-like candidates; do not use a real simple run as default baseline because it calls TikHub, model providers, RunningHub, and Feishu.
+
+Implementation completed on 2026-06-05 for the latest large simple/batch-style run failure. Simple-mode crawl now performs one top-up pass after the initial even per-platform split when deduped candidates are below the target. Simple-mode automatic production skips no-media source items with no `downloadedImages`, no source `images`, and no `videoFrames`. Feishu publish now uses low attachment concurrency, returns `attachment_failed` for incomplete attachments after record creation/reuse, persists per-post `feishu.recordId` and attachment status, and redacts CLI token output. The local production app at `http://127.0.0.1:3001` was refreshed after implementation.
+
+Verification passed after implementation on 2026-06-05: `node scripts/harness/feishu_publish_resume_check.mjs`, `node scripts/harness/simple_crawl_media_policy_check.mjs`, `node scripts/harness/concurrency_check.mjs`, `npx --no-install tsc --noEmit`, `npm run lint`, `powershell -ExecutionPolicy Bypass -File scripts/harness/check.ps1`, read-only `npm run local:watch-simple -- -Once`, and approved elevated `npm run local:restart` after the expected sandbox `spawn EPERM`. No new live TikHub/OpenAI-compatible/RunningHub/Feishu production task was triggered by verification.
+
+Next entry point: manually validate with a moderate simple-mode batch when the user is ready. Confirm crawl top-up behavior, skipped no-media item counts, generated post count, and Feishu `attachment_failed` resume behavior if attachment upload throttling recurs. Do not blindly rerun the historical failed publish payload because existing Feishu Base records may already exist; retry through posts that carry persisted `feishu.recordId`.
+
+Latest read-only diagnosis on 2026-06-05: the latest large simple/batch-style run is `simple-1780584174898` (`小鹏GX`, `xiaohongshu,douyin`, target `50`). It finished `partial`: crawl produced `44` candidates (`xiaohongshu=25/25`, `douyin=19/25`), tagging succeeded for all `44`, production generated `42` drafts, and publish failed during Feishu attachment upload. Two production failures were no-media Douyin items (`douyin-douyin-8` and `douyin-douyin-18`) that had no images, no downloaded images, and no video frames, then hit RunningHub non-JSON `504 Gateway Time-out` in the text-to-image path.
+
+Feishu diagnosis for `simple-1780584174898`: outbox `data/feishu-outbox/posts-1780584814861.json` contains `42` posts and `114` image URLs. Read-only local checks confirmed `81` local references exist and `33` remote images were materialized under `public/generated/feishu-attachments`, so missing attachment files were not the cause. Failure happened during `lark-cli base +record-upload-attachment` after record payload creation; exact CLI stderr/stdout is not preserved in the compact simple-run error. Do not blindly rerun the full publish for this run, because Base records may already exist and duplicate records are possible. Recommended next implementation entry points: `src/lib/feishu-cli.ts` for attachment concurrency/idempotent resume/full sanitized CLI error capture; `src/lib/simple-runs.ts` for no-media source policy and cross-platform top-up; new Harness checks should avoid real Feishu/RunningHub calls.
+
+Verification passed after diagnosis on 2026-06-05: `powershell -ExecutionPolicy Bypass -File scripts/harness/check.ps1`. No code changes were made and no live TikHub/OpenAI-compatible/RunningHub/Feishu task was triggered by verification.
+
+Advanced-mode crawl strategy explicit save completed on 2026-06-04. Simple mode already uses saved `workspaceSettings.platformCrawlSettings`; the missing control was an operator-facing save action that does not start a crawl. `src/app/page.tsx` now has `saveCurrentPlatformCrawlSettings()` and a `保存采集策略` button above `开始采集`. The handler snapshots the current platform controls with `getWorkspaceSettingsWithCurrentPlatformCrawlSetting()`, persists through `persistWorkspaceSettings(...)`, updates local workspace settings, and reports `采集策略已保存，简单版会自动使用当前平台设置`. It does not call `/api/crawl/jobs`, and shared strategy persistence still excludes Douyin `cookie`.
+
+Regression coverage: `scripts/harness/crawl_strategy_save_check.mjs` is wired into `scripts/harness/check.ps1`. Verification passed on 2026-06-04: the new check failed before implementation and passed after; `npm run lint`; `npx --no-install tsc --noEmit`; `powershell -ExecutionPolicy Bypass -File scripts/harness/check.ps1`; `npm run local:watch-simple -- -Once` confirmed the latest simple run was completed before restart; `npm run local:restart` refreshed `http://127.0.0.1:3001`. No new real TikHub/OpenAI-compatible/RunningHub/Feishu task was triggered by verification.
+
+Latest simple-mode target-3/only-2-produced issue fixed on 2026-06-04. Read-only diagnosis found run `simple-1780581455008` for Douyin keyword `小鹏x9`, target `3`, crawled/tagged three items but produced/published only two posts. Source item `douyin-7583713246399286537` failed production because both selected image tasks received RunningHub non-JSON `504 Gateway Time-out` HTML, and the selected-task path treated this as `All image tasks failed`.
+
+Fix: `src/lib/image-generation.ts` now has `isImageTaskSourceFallbackError(...)`, which treats timeouts, gateway/5xx/429, and temporary provider overload/rate-limit errors as recoverable per selected source-image task. Those tasks now log `Image task failed; using source image` and return the original `task.url` for that slot; non-recoverable image errors still fail. The older serial selected-task path has the same fallback behavior. Regression coverage: `scripts/harness/image_task_fallback_check.mjs` is wired into `scripts/harness/check.ps1`.
+
+Verification passed on 2026-06-04: `node scripts/harness/image_task_fallback_check.mjs` failed before implementation and passed after it; `node scripts/harness/image_prompt_guard_check.mjs`; `npm run lint`; `npx --no-install tsc --noEmit`; `powershell -ExecutionPolicy Bypass -File scripts/harness/check.ps1`; read-only `/api/simple/runs` confirmed no active running/queued simple run before restart; `npm run local:restart` refreshed `http://127.0.0.1:3001`. No new real TikHub/OpenAI-compatible/RunningHub/Feishu task was triggered by verification. Historical run `simple-1780581455008` remains a partial runtime record and was not mutated.
+
+Latest simple-mode RunningHub empty-prompt failure fixed on 2026-06-04. Live read-only diagnosis found recent Douyin simple runs for `小鹏GX` and `小鹏P7` included a no-media source item `douyin-douyin-8` with no images, no downloaded images, no video frames, and no visual assets. When the text model returned an empty `imagePrompt` for that no-task item, the no-selected-task image generation path submitted an empty `prompt` to RunningHub and received error `1007` (`field 'prompt' is required, can not be empty`).
+
+Fix: `src/lib/simple-runs.ts` now resolves a fallback simple-mode image prompt from draft/source context before image generation and stores the actual prompt on the generated post; `src/lib/image-generation.ts` normalizes provider prompts and skips locally with an execution-log entry when there are no selected image tasks and no prompt, so empty prompts are not sent to RunningHub/OpenAI image providers; `src/lib/creation-controls.ts` tolerates missing runtime image-task `prompt` fields. Regression coverage: `scripts/harness/image_prompt_guard_check.mjs` is wired into `scripts/harness/check.ps1`.
+
+Verification passed on 2026-06-04: `node scripts/harness/image_prompt_guard_check.mjs` failed before the implementation and passed after it; `npm run lint`; `npx --no-install tsc --noEmit`; `powershell -ExecutionPolicy Bypass -File scripts/harness/check.ps1`; read-only `/api/simple/runs` confirmed no active running/queued simple run before restart; `npm run local:restart` refreshed `http://127.0.0.1:3001`. No new real TikHub/OpenAI-compatible/RunningHub/Feishu task was triggered by verification. Historical partial simple-run records remain historical runtime state and were not mutated.
+
+Simple-mode high-throughput V1/V2 completed on 2026-06-04. V1: simple-mode target count is now configurable with backend fallback `500` and hard ceiling `2000`, and the simple UI accepts up to `500`; Feishu Base record creation is chunked at `50` posts per request while attachment uploads remain per created record/chunk. V2: `POST /api/simple/runs` now saves a simple run, enqueues `simple_run_queue`, returns immediately, and starts in-process workers that claim queued work from PostgreSQL with `FOR UPDATE SKIP LOCKED` or from the SQLite fallback path.
+
+Important runtime behavior: queued simple runs survive local server restart and will be picked up when `/api/simple/runs` is posted/read. Already-running stale runs are still marked interrupted instead of being blindly replayed, because Feishu record creation is not yet idempotently mapped per post and automatic replay after a publish-stage crash could duplicate Base records. Each simple run persists the platform crawl settings captured at submission time.
+
+Implementation entry points: `src/lib/simple-runs.ts` owns queue worker startup, run snapshot settings, and simple workflow execution; `src/lib/database.ts` owns `simple_run_queue` schema/helpers and the PostgreSQL `SKIP LOCKED` claim; `src/lib/feishu-cli.ts` owns `feishuRecordBatchSize = 50` and chunked Base writes; `src/app/page.tsx` exposes the simple count input up to `500`; `scripts/harness/simple_queue_check.mjs` guards this behavior.
+
+Verification passed on 2026-06-04: `node scripts/harness/simple_queue_check.mjs`, `node scripts/harness/simple_config_sync_check.mjs`, `npm run db:migrate:postgres -- --dry-run`, `npm run lint`, `npx --no-install tsc --noEmit`, `npm run build`, `powershell -ExecutionPolicy Bypass -File scripts/harness/check.ps1`, read-only `GET /api/simple/runs` confirming no active running/queued simple run before restart, and `npm run local:restart`. `http://127.0.0.1:3001` was refreshed. No real TikHub/OpenAI-compatible/RunningHub/Feishu production task was triggered by verification.
+
+Latest simple-mode publish failure fixed on 2026-06-04. The failed run was `simple-1780572602107` for Douyin keyword `小鹏GX`, target `3`; crawl/tag/production completed and three drafts were generated, but publish failed with PostgreSQL duplicate-key text for `content_projects_pkey`. This was local content-pool persistence during source status updates, not a Feishu Base unique constraint.
+
+Root cause: `writeContentProjectsToDb(...)` in `src/lib/database.ts` still used full-table replacement for `content_projects`. Concurrent simple-mode production/publish paths call `markSourceRewritten(...)` for multiple posts, and overlapping PostgreSQL delete/reinsert transactions could collide on the same content project primary key. Fix: `writeContentProjectsToDb(...)` now uses row-level upsert for both PostgreSQL and SQLite, preserving the original `created_at` and updating project metadata/JSON. New check `scripts/harness/content_projects_upsert_check.mjs` is wired into `scripts/harness/check.ps1`.
+
+Verification passed on 2026-06-04: `node scripts/harness/content_projects_upsert_check.mjs`, `npm run lint`, `npx --no-install tsc --noEmit`, `powershell -ExecutionPolicy Bypass -File scripts/harness/check.ps1`, and `npm run local:restart`. `http://127.0.0.1:3001` was refreshed. No new real TikHub/OpenAI-compatible/RunningHub/Feishu task was triggered by verification. Historical run `simple-1780572602107` remains a partial failed runtime record and was not mutated.
+
+Latest simple-mode failure fixed on 2026-06-04. The failed run was `simple-1780571959657` for Douyin keyword `小鹏GX`, target `5`; read-only `/api/simple/runs` and `/api/activity` showed TikHub `/api/v1/douyin/search/fetch_general_search_v1` returned `200` for the first request and `400` for the next pagination request, after which simple mode reported zero producible content.
+
+Root cause: `fetchDouyinKeywordSearch(...)` in `src/lib/tikhub.ts` still tried to collect up to `targetCount * 6` candidates even though current product rules allow only dedupe/slice after provider results. A later pagination error threw out of the whole crawl and discarded first-page candidates. Fix: Douyin keyword pagination now stops once the requested deduped `targetCount` is collected; if a later page fails after candidates have been collected, those candidates are kept and a `Douyin keyword pagination stopped` execution-log entry is recorded. First-page failures still fail the crawl.
+
+Regression coverage: `scripts/harness/douyin_search_mapping_check.mjs` now simulates both enough-first-page and partial-then-400 cases without calling TikHub, while still checking endpoint, sort/content-type mapping, cursor, and `search_id/backtrace` carry-through. Verification passed on 2026-06-04: `node scripts/harness/douyin_search_mapping_check.mjs`, `npm run lint`, `npx --no-install tsc --noEmit`, `powershell -ExecutionPolicy Bypass -File scripts/harness/check.ps1`, and `npm run local:restart`. `http://127.0.0.1:3001` was refreshed; no new real TikHub/OpenAI-compatible/RunningHub/Feishu task was triggered by verification.
+
+Simple/advanced one-click production config sync was rechecked and fixed on 2026-06-04. Confirmed synchronized before this task: default text prompt, visual-tag image strategy prompts, image size/quality, and per-platform crawl settings. Confirmed bug fixed in this task: simple-mode backend production previously used `materialPaths: []`, so advanced scanned assets and material-library asset paths were not available to one-click generation.
+
+Current code path: `src/app/page.tsx` sends `productionMaterialPaths` in the `POST /api/simple/runs` payload and shows the material count in the simple one-click strategy badges; `src/app/api/simple/runs/route.ts` accepts/forwards `materialPaths`; `src/lib/simple-runs.ts` normalizes and persists the paths in `SimpleRunInput`, logs only `materialCount`, and passes `normalizedInput.materialPaths` to `generatePost(...)`. `scripts/harness/simple_config_sync_check.mjs` is wired into the baseline and checks this chain without external calls.
+
+Verification passed on 2026-06-04: `node scripts/harness/simple_config_sync_check.mjs`, `npm run lint`, `npx --no-install tsc --noEmit`, `npm run build`, `powershell -ExecutionPolicy Bypass -File scripts/harness/check.ps1`, `npm run local:watch-simple -- -Once`, and `npm run local:restart`. `http://127.0.0.1:3001` was refreshed. No real TikHub/OpenAI-compatible/RunningHub/Feishu task was triggered by verification. The latest partial simple run with `generated_posts_pkey` is historical old-code runtime state and was not mutated.
+
+PostgreSQL migration bug sweep completed on 2026-06-04. Read-only checks on `http://127.0.0.1:3001` confirmed the app is running on PostgreSQL; the latest simple run still shows a historical partial publish failure from the old code path with `generated_posts_pkey`, and recent activity showed Douyin visual tagging failures because remote image URLs were passed directly to the OpenAI-compatible chat endpoint and rejected as invalid image data.
+
+`src/lib/generated-posts.ts` and `src/lib/database.ts` now use row-level generated-post mutations: save/update/status changes go through upsert, and single/batch delete use generated-post delete helpers. This closes the remaining PostgreSQL full-table replacement collision window for generated-post runtime paths. `scripts/harness/generated_posts_upsert_check.mjs` is wired into the Harness baseline.
+
+`src/lib/source-tagging.ts` now preflights remote visual assets before model tagging. Remote HTTP(S) images are fetched with shared media headers, validated as supported JPEG/PNG/GIF/WebP, size-limited, converted to inline data URLs, and unsupported assets are skipped per image with an execution-log entry instead of failing the whole batch. `scripts/harness/source_tagging_image_check.mjs` is wired into the Harness baseline and uses mocked local fetches only.
+
+Verification passed on 2026-06-04: `node scripts/harness/source_tagging_image_check.mjs`, `node scripts/harness/generated_posts_upsert_check.mjs`, `npm run lint`, `npx --no-install tsc --noEmit`, `npm run build`, `powershell -ExecutionPolicy Bypass -File scripts/harness/check.ps1`, `npm run local:restart`, `node scripts/harness/http_smoke.js http://127.0.0.1:3001`, and read-only `/api/config` confirmed `databaseBackend=postgres`. No new real TikHub/OpenAI-compatible/RunningHub/Feishu task was triggered by verification. Existing historical simple-run records were not mutated.
+
+Latest Douyin carousel fix on 2026-06-04: the live `小鹏X9` Douyin image/text crawl exposed the root cause of repeated images and missing later carousel images. TikHub general search V1 returns real carousel assets in `raw.images`, but the old extraction path read `video.cover/origin_cover` first and then broad recursive fallback URLs, so cover/jpeg/webp/heic/watermark variants of the same first few assets filled the image limit.
+
+`src/lib/douyin-media.ts` now owns lightweight Douyin carousel image extraction. It chooses one best supported URL per carousel image, preferring non-watermarked JPEG/WebP `tplv-dy-aweme-images-v2` variants and avoiding HEIC, watermarked URLs, cover variants, and static UI assets. `src/lib/tikhub.ts` uses this helper before video-cover fallback, and `src/lib/media-url-filter.ts` canonicalizes Douyin variants by asset id.
+
+Existing Douyin content-pool records can now be repaired from preserved raw data: `src/lib/content-pool.ts` uses `raw.images` to rebuild Douyin image lists during read refresh and drops old `downloadedImages` when the raw repair changes source-image order, because old local `image-1`, `image-2`, ... files were downloaded from the stale variant order.
+
+Verification passed on 2026-06-04: `node scripts/harness/douyin_carousel_image_check.mjs`, `node scripts/harness/douyin_search_mapping_check.mjs`, `node scripts/harness/media_url_filter_check.mjs`, `node scripts/harness/xiaohongshu_note_type_check.mjs`, `npm run lint`, `npx --no-install tsc --noEmit`, `powershell -ExecutionPolicy Bypass -File scripts/harness/check.ps1`, `npm run local:watch-simple -- -Once`, and `npm run local:restart`. Post-restart read-only check on `http://127.0.0.1:3001/api/content-pool` confirmed current `小鹏X9` Douyin sample `sourceId=7647456408942589300` now exposes `images=32`, `downloadedImages=0`, `cacheStatus=remote_only`, `remoteImages=32`, and no HEIC/watermark/cover variants. No new real TikHub/OpenAI-compatible/RunningHub/Feishu task was triggered by verification.
+
+Latest Douyin crawl update on 2026-06-04: per user instruction, Douyin keyword search was switched to TikHub `/api/v1/douyin/search/fetch_general_search_v1`. `src/lib/tikhub.ts` now builds general-search POST bodies through `buildDouyinKeywordSearchPayload(...)` with `keyword`, `cursor`, `sort_type`, `publish_time=0`, `filter_duration=0`, `content_type`, `search_id`, `backtrace`, and the optional per-request cookie.
+
+Current Douyin mapping is confirmed before provider calls: sort `0/general/relevance -> sort_type=0`, `1/most_liked/likes_desc -> sort_type=1`, `2/latest/time_descending/published_desc -> sort_type=2`; content type `0/all -> content_type=0`, `1/video -> content_type=1`, `2/image/picture -> content_type=2`, and `3/article/text -> content_type=3`. `src/app/page.tsx` points the Douyin docs link at the new general-search V1 docs.
+
+New Harness check `scripts/harness/douyin_search_mapping_check.mjs` is wired into `scripts/harness/check.ps1` and verifies the new endpoint, no old `fetch_video_search_v2` usage, the sort/content-type maps, `cursor` pagination, and `search_id/backtrace` carry-through without calling TikHub.
+
+Verification passed on 2026-06-04: `node scripts/harness/douyin_search_mapping_check.mjs`, `npx --no-install tsc --noEmit`, `npm run lint`, `powershell -ExecutionPolicy Bypass -File scripts/harness/check.ps1`, `npm run local:watch-simple -- -Once`, and `npm run local:restart`. `http://127.0.0.1:3001` was refreshed and local HTTP smoke passed. No real TikHub/OpenAI-compatible/RunningHub/Feishu task was triggered by verification.
+
+Latest Xiaohongshu duplicate-image fix on 2026-06-04: the latest local `小鹏P7` sample `sourceId=6a1b0255000000003700fbcd` had `images.length=10` but only five Xiaohongshu asset ids because App V2 returned each image as a blurry `!nd_prv...` URL plus a clearer `!nd_dft...` URL. `src/lib/media-url-filter.ts` now canonicalizes Xiaohongshu `xhscdn` / `rednotecdn` asset ids by stripping signed prefix differences and `!nd_prv` / `!nd_dft` transform suffixes, and `scoreImageUrl(...)` prefers `!nd_dft`.
+
+Stale local cache handling was also fixed: `filterAlignedDownloadedImages(...)` drops `downloadedImages` when old local download count exceeds the normalized source-image count, because old local indexes can point to alternating blurry/clear variants. `src/lib/media-cache-status.ts` now counts only safely aligned local images when source images exist. New Harness check `scripts/harness/media_url_filter_check.mjs` is wired into `scripts/harness/check.ps1` and covers this regression.
+
+Verification passed on 2026-06-04: `node scripts/harness/media_url_filter_check.mjs`, `npm run lint`, `npx --no-install tsc --noEmit`, `powershell -ExecutionPolicy Bypass -File scripts/harness/check.ps1`, and `npm run local:restart`. Local post-restart read-only check on `http://127.0.0.1:3001/api/content-pool` confirmed the `小鹏P7` sample now returns `imagesCount=5`, `downloadedCount=0`, `imagesAreDefault=true`, `cacheStatus=remote_only`, `localImages=0`, and `remoteImages=5`.
+
+Latest read-only duplicate-image diagnosis on 2026-06-04: Xiaohongshu App V2 image records can produce visually duplicated images before media caching. The latest local sample `sourceId=6a1d3e9c000000003501cdd5` has `images.length=8` but only four Xiaohongshu asset ids; each asset appears once as a `!nd_prv...` preview URL and once as a `!nd_dft...` default URL. `downloadedImages.length=8` because `cacheCrawledMedia(...)` downloads every source image entry in order.
+
+Root cause to fix next if requested: `extractXiaohongshuMedia(...)` currently calls the recursive generic `extractUrlList(...)` for each App V2 `imageList` item, collecting `urlPre`, `urlDefault`, and `infoList` scene URLs (`WB_PRV` / `WB_DFT`). Existing `normalizeContentImageUrls(...)` does asset-level dedupe, but `getImageAssetKey(...)` does not yet canonicalize `rednotecdn.com` signed prefixes or strip Xiaohongshu `!nd_prv` / `!nd_dft` transform suffixes. `mergeXiaohongshuDetail(...)` and `cacheCrawledMedia(...)` can further amplify visible duplication in `mediaUrls` by keeping search/detail remote URLs plus local downloads.
+
+Verification for this read-only diagnosis passed on 2026-06-04: `powershell -ExecutionPolicy Bypass -File scripts/harness/check.ps1`. The command did not trigger TikHub, OpenAI-compatible services, RunningHub, or Feishu production calls; build emitted only the known Turbopack tracing warnings.
+
+Latest Xiaohongshu crawl update on 2026-06-04: per user instruction, Xiaohongshu keyword search was switched from Web V3 search to TikHub App V2 `/api/v1/xiaohongshu/app_v2/search_notes`. `src/lib/tikhub.ts` now sends App V2 parameters `keyword`, `page`, `sort_type`, `note_type`, `time_filter=不限`, `source=explore_feed`, and `ai_mode=0`; pagination carries returned `search_id` and `search_session_id` when available.
+
+Current Xiaohongshu type mapping: internal image/text `noteType=2 -> note_type=普通笔记`, video `noteType=1 -> note_type=视频笔记`, and all/undefined `noteType -> note_type=不限`. This supersedes the earlier Web V3 `note_type=1/2/0` mapping.
+
+Verification passed on 2026-06-04: `node scripts/harness/xiaohongshu_note_type_check.mjs`, `node scripts/harness/keyword_relevance_check.mjs`, `node scripts/harness/concurrency_check.mjs`, `npm run lint`, `npx --no-install tsc --noEmit`, `npm run build`, `npm run local:restart`, and `powershell -ExecutionPolicy Bypass -File scripts/harness/check.ps1`.
+
+Live validation on `http://127.0.0.1:3001`: an advanced Xiaohongshu crawl for keyword `小鹏G6`, sort `time_descending`, image/text `noteType=2`, target `1`, called `GET /api/v1/xiaohongshu/app_v2/search_notes`, logged `requestedNoteTypeParam=普通笔记`, and returned one image item titled `被这台小鹏G6硬控了！` with real `sourceId=6a213dcf000000003503291b`, `contentText` length 160, six source images, six downloaded images, and zero video frames.
+
+Latest update on 2026-06-04: the current product rule is no post-crawl hard filtering. The user chooses platform, keyword, sort, and type before crawling, so `src/lib/tikhub.ts` now relies on TikHub request parameters and then only dedupes, slices to `targetCount`, enriches/caches media, tags, and persists.
+
+Removed/superseded crawl filters: local keyword relevance filtering, Xiaohongshu local image/video post-filtering, user-unselected all-type fallback retries, and cross-platform result dropping in `src/app/api/crawl/jobs/route.ts`. Xiaohongshu now maps UI note type to App V2 request parameter values: image/text `noteType=2 -> note_type=普通笔记`, video `noteType=1 -> note_type=视频笔记`, all `noteType=0/undefined -> note_type=不限`.
+
+Harness checks now enforce the no-filter policy and App V2 search mapping: `scripts/harness/keyword_relevance_check.mjs` fails if keyword relevance helper code returns, and `scripts/harness/xiaohongshu_note_type_check.mjs` fails if Xiaohongshu Web V3 search usage, local type filter helpers, dropped-count diagnostics, or selected-type all-note fallback return. Older strict-filter notes below are historical context only and must not guide new crawl changes.
+
+Verification for this update passed on 2026-06-04: `node scripts/harness/keyword_relevance_check.mjs`, `node scripts/harness/xiaohongshu_note_type_check.mjs`, `npm run lint`, `npx --no-install tsc --noEmit`, `npm run build`, `powershell -ExecutionPolicy Bypass -File scripts/harness/check.ps1`, and `npm run local:restart`. The local app is refreshed at `http://127.0.0.1:3001`. No live TikHub/GPT/RunningHub/Feishu task was triggered by verification.
+
+Follow-up on 2026-06-04: the user's "content is still empty" report was traced to `src/lib/content-pool.ts`, not TikHub transport. TikHub returned one normalized item for a live Xiaohongshu `小鹏G6` crawl, but `refreshProjectStats(...)` still removed Xiaohongshu records with temporary `sourceId` and no title/body. That residual ingest filter was deleted. `src/lib/tikhub.ts` now preserves wrapper fields when unwrapping nested records and includes `displayTitle` in Xiaohongshu title/text extraction. A live target-1 local crawl then completed with `returnedItems=1` and `projectTotalItems=1`.
+
+Latest update on 2026-06-04: high-throughput application-level concurrency was implemented. New module `src/lib/concurrency.ts` defines shared pools with defaults crawl `8`, media `20`, GPT `50`, image `100`, Feishu `50`, and production `20`. GPT/image/Feishu have hard caps of `50`/`100`/`50`. TikHub HTTP calls, media cache fan-out, GPT text/tagging calls, image generation, Feishu CLI calls, simple-mode platform crawl, simple-mode production, and advanced batch production now use these bounded paths.
+
+Simple-mode now crawls platforms and produces posts concurrently, while `createRunUpdateQueue(...)` serializes progress writes to `simple_runs`. Advanced batch production now uses the production pool and `createBatchJobUpdateQueue(...)` for serialized task status writes. `generateImagesFromPrompt(...)` selected-task concurrency is capped by `concurrencyConfig.image`, so simple mode can fan out up to its 9 selected images per post while the whole app stays under the global image pool.
+
+Observed issue fixed during this update: the latest real simple run before the change had failed publishing with PostgreSQL `generated_posts_pkey` duplicate-key errors. Root cause was concurrent full-table replacement by `saveGeneratedPost(...)`; `src/lib/database.ts` now provides `saveGeneratedPostToDb(...)`, and `src/lib/generated-posts.ts` uses single-row upsert for generated-post saves.
+
+Verification for this update passed on 2026-06-04: `node scripts/harness/concurrency_check.mjs`, `npm run lint`, `npx --no-install tsc --noEmit`, `npm run build`, `powershell -ExecutionPolicy Bypass -File scripts/harness/check.ps1`, and `npm run local:restart`. The local app is refreshed at `http://127.0.0.1:3001`. No live TikHub/OpenAI-compatible/RunningHub/Feishu production task was triggered by verification.
+
+Next recommended work: run a small live manual simple-mode validation by submitting two keyword jobs close together and watching progress/Feishu publish behavior. For 500+ daily tasks, the next backend step is a durable PostgreSQL queue/worker model with row-level locking, likely `FOR UPDATE SKIP LOCKED`, so in-flight provider work can survive server restarts.
+
+Latest update on 2026-06-04: per user instruction to delete the filtering mechanism after `小鹏P7` crawl failures, local keyword hard filtering and local Xiaohongshu note-type post-filtering were removed from `src/lib/tikhub.ts`. The current crawl path now relies on TikHub request parameters for search/sort/type, then locally dedupes, slices to `targetCount`, and caches media. Weibo no longer filters normalized results with local keyword matching. Xiaohongshu now maps UI note type to App V2 `note_type`, and no longer adds an all-type fallback unless the user selected all types.
+
+Verification for this update passed on 2026-06-04: `node scripts/harness/keyword_relevance_check.mjs`, `node scripts/harness/xiaohongshu_note_type_check.mjs`, `npm run lint`, `npx --no-install tsc --noEmit`, `npm run build`, `powershell -ExecutionPolicy Bypass -File scripts/harness/check.ps1`, and elevated `npm run local:restart` after the known sandbox `spawn EPERM` limitation. The local app is refreshed at `http://127.0.0.1:3001`.
+
+Historical note: earlier strict-filter debugging for Xiaohongshu keyword/type relevance is superseded by the current no-post-crawl-filter rule above.
+
+Latest update on 2026-06-04: simple/advanced platform crawl preference synchronization was fixed in `src/app/page.tsx`. Advanced platform switches now persist the current platform controls into the shared workspace settings draft, and simple-mode start merges the currently visible advanced platform controls into the `settings` payload before calling `POST /api/simple/runs`. The backend path in `src/lib/simple-runs.ts` already consumes `settings.platformCrawlSettings`, so simple mode now receives Xiaohongshu, Douyin, Weibo, and WeChat Channels crawl sort/type settings configured in advanced mode.
+
+Verification for this update passed without external production calls: a mocked Playwright browser check on `http://127.0.0.1:3001` intercepted `POST /api/simple/runs` and confirmed the payload carried Xiaohongshu `sort=time_descending` and `noteType=1`, Douyin `sort=2` and `contentType=3`, Weibo `sort=media`, `searchType=media`, `includeType=video`, `timeScope=week`, and WeChat Channels `sort=relevance`; `powershell -ExecutionPolicy Bypass -File scripts/harness/check.ps1` passed; `npm run local:restart` refreshed the local app and local HTTP smoke passed. Do not use real `POST /api/simple/runs` as default verification because it triggers TikHub, text/image models, RunningHub, and Feishu.
+
+Image-generation timeout and reference normalization policy was implemented on 2026-06-04 in `src/lib/image-generation.ts`. Selected image tasks now use a 180-second per-image deadline. If a selected image task times out, the backend records `Image task timed out; using source image` and returns the original source image URL for that slot, so slow image generation no longer fails the entire selected image batch. RunningHub upload, submit, and polling share this deadline. Reference images are normalized with `ffmpeg` before model input: local app-served images and downloadable remote images are converted to temporary JPG references with aspect ratio preserved and longest side capped at 2400px, then deleted after use. If a remote reference cannot be downloaded for normalization, the app logs that fact and falls back to the original remote URL.
+
+Verification for this update passed: `ffmpeg -version`, `npm run lint`, `npx --no-install tsc --noEmit`, `npm run build`, elevated `npm run local:restart` after a sandbox `spawn EPERM`, and `powershell -ExecutionPolicy Bypass -File scripts/harness/check.ps1`. The local app at `http://127.0.0.1:3001` has been restarted and is serving the new image-generation strategy.
+
+Latest read-only diagnosis on 2026-06-04: simple run `simple-1780536879346` for keyword `小鹏P7`, platform `xiaohongshu`, target `2`, failed in the `生成图文`/production stage because the local port-3001 server restarted at `2026-06-04T01:40:00.789Z` while RunningHub image tasks were still polling as `RUNNING`. Crawl succeeded with 2 candidates, AI tagging succeeded with 2 content tags and 14 visual tags, and production had already created 1 draft with 9 images. Feishu publish was skipped only because production was interrupted. `/api/config` confirmed the active runtime uses PostgreSQL plus RunningHub `nano-banana-pro`. The next engineering fix is a durable PostgreSQL-backed queue that persists provider task IDs and resumes polling after restart.
+
+Simple-mode workspace ratio was adjusted on 2026-06-04 per user feedback: the `自动任务执行状态` panel should be the dominant desktop panel, and `一键内容生产` should be the narrower control panel. The current desktop grid in `src/app/globals.css` is `minmax(340px, 0.72fr) minmax(560px, 1.28fr)`. Playwright verification on `http://127.0.0.1:3001` observed approximate widths of 502px for the control panel and 892px for the status panel at 1440px viewport, with no horizontal overflow. Mobile remains a single-column stack with no horizontal overflow.
+
+Simple-mode automatic task status layout was refined on 2026-06-04. In `src/app/page.tsx`, the simple run stage list now renders as four full-width vertical rows instead of a 2x2 grid. In `src/app/globals.css`, `.simple-stage-list` and the updated `.simple-stage-card` styles give each stage row a clear title/status, progress/message area, and percent column, with a mobile-safe two-column wrap. Verification passed: `npm run lint`, `npx --no-install tsc --noEmit`, `npm run build`, `npm run local:restart`, a Playwright layout check on `http://127.0.0.1:3001` confirming four stage cards in four unique vertical positions with no horizontal overflow or console errors, and `powershell -ExecutionPolicy Bypass -File scripts/harness/check.ps1`.
+
+Live PostgreSQL migration was completed on 2026-06-04. Local PostgreSQL 18 service `postgresql-x64-18` is running on `127.0.0.1:5432`; `psql` is available at `D:\Program Files\PostgreSQL\18\bin\psql.exe`, not on PATH. A dedicated FluxPost Studio database/user were provisioned, and `.env.local` now contains `DATABASE_URL`; do not print or copy the connection string or password.
+
+The SQLite-to-PostgreSQL copy was executed with `npm run db:migrate:postgres`. Migrated row counts were app_meta=2, content_projects=7, generated_posts=9, batch_jobs=3, material_folders=0, material_assets=0, execution_logs=300, crawl_jobs=19, runtime_posts=11, and simple_runs=4. PostgreSQL read-only verification after migration observed app_meta=3 because the migration script also writes `sqlite_to_postgres_migrated_at`.
+
+`http://127.0.0.1:3001` was restarted with `npm run local:restart` after adding `DATABASE_URL`. Read-only `/api/config` now reports `databaseBackend=postgres` and `postgresConfigured=true`; local HTTP smoke and content-pool smoke passed. Full Harness baseline also passed with `powershell -ExecutionPolicy Bypass -File scripts/harness/check.ps1`.
+
+RunningHub image provider integration was completed on 2026-06-03. The app now supports `OPENAI_IMAGE_ENDPOINT=runninghub` for `nano-banana-pro` image generation. `src/lib/image-generation.ts` uploads local app-served reference images to RunningHub, submits G-2 image tasks, polls `/openapi/v2/query`, and returns generated image URLs through the existing draft/image pipeline. `src/lib/config.ts`, `src/lib/types.ts`, `.env.example`, and README were updated. Local `.env.local` was updated with the RunningHub provider settings without exposing the API key.
+
+The local server at `http://127.0.0.1:3001` was restarted after the RunningHub integration. Read-only `/api/config` confirmed `imageProvider=runninghub`, `imageModel=nano-banana-pro`, `runningHubConfigured=true`, and `runningHubBaseUrl=https://www.runninghub.cn`. This restart intentionally interrupted the older in-flight simple run that was still using the prior image provider.
+
+Verification passed for this update: `npm run lint`, `npx --no-install tsc --noEmit`, `npm run build`, `npm run local:restart`, and `powershell -ExecutionPolicy Bypass -File scripts/harness/check.ps1`.
+
+Simple-mode stuck-run diagnosis was completed on 2026-06-03. Latest run `simple-1780485506635` for keyword `小鹏P7` was confirmed `failed`, not still running. The root cause was a blocking simple-mode request that reached image generation, received repeated `400 I cannot fulfill this request` responses from `nano-banana-pro`, and was then interrupted when the old port-3001 Node process restarted during the request.
+
+The mitigation is implemented in `src/lib/simple-runs.ts`, `src/app/api/simple/runs/route.ts`, and `src/app/page.tsx`: simple-run POST now creates the run and returns quickly while the local Node process continues the workflow in the background; the UI polls `/api/simple/runs` every three seconds while a run is queued/running; and `GET /api/simple/runs` marks queued/running runs as failed if they were last updated before the current server process started. This prevents interrupted old runs from staying stuck forever.
+
+Verification passed for the stuck-run mitigation: `npm run lint`, `npx --no-install tsc --noEmit`, `npm run build`, `powershell -ExecutionPolicy Bypass -File scripts/harness/check.ps1`, and `npm run local:restart`. Read-only checks after restart confirmed `npm run local:watch-simple -- -Once` reports the latest run as `failed`, `/api/config` reports `imageModel=nano-banana-pro`, `databaseBackend=sqlite`, and Feishu configured, and `/api/simple/runs` returns the latest run statuses.
+
+PostgreSQL runtime migration groundwork was completed on 2026-06-03. `src/lib/database.ts` now defaults to SQLite and switches to PostgreSQL when `DATABASE_URL` is configured. The `pg` dependency is installed; storage-facing callers were made async; `/api/config` now reports non-sensitive `databaseBackend` and `postgresConfigured`. PostgreSQL schema lives at `db/migrations/001_initial_postgres.sql`, and `npm run db:migrate:postgres` runs `scripts/db/migrate-sqlite-to-postgres.mjs` to copy SQLite rows into PostgreSQL without moving media binaries.
+
+Verification passed for the PostgreSQL groundwork: `npm run db:migrate:postgres -- --dry-run`, `node scripts/harness/postgres_schema_check.mjs`, `npm run lint`, `npx --no-install tsc --noEmit`, `npm run build`, and `powershell -ExecutionPolicy Bypass -File scripts/harness/check.ps1`. The dry-run observed current SQLite row counts: app_meta=2, content_projects=7, generated_posts=8, batch_jobs=3, material_folders=0, material_assets=0, execution_logs=300, crawl_jobs=19, runtime_posts=10, simple_runs=3.
+
+`http://127.0.0.1:3001` was refreshed on 2026-06-03 with `npm run local:restart` after the simple-mode stuck-run mitigation. The local production server is now serving the PostgreSQL-ready storage code and the background simple-run code.
+
+Live PostgreSQL migration is complete for this local workspace. Current `http://127.0.0.1:3001` runtime reports `databaseBackend: "postgres"`.
+
+Simple/advanced crawl preference sync and simple-mode layout resizing were completed on 2026-06-03. Workspace settings now include non-sensitive `platformCrawlSettings`; advanced crawl controls update them, advanced crawl persists the current platform preference before TikHub requests, and simple runs use the saved preferences. Douyin advanced controls include `Latest` sort and `Article` content type values. Douyin cookie is intentionally not stored as a default. Simple mode now gives the one-click generation panel the dominant desktop width and keeps the automatic task status/history as the narrower auxiliary column.
+
+The image-generation model was switched on 2026-06-03 to `nano-banana-pro`. The user requested keeping the configured request address and API key unchanged. Updated `src/lib/config.ts`, `.env.example`, README examples, and local `.env.local` `OPENAI_IMAGE_MODEL`; do not expose `.env.local` contents.
+
+Visual-tag image strategy prompt routing was updated on 2026-06-03. The workflow now follows the user's image reference: `内饰空间` maps to original-image reference without calling the image model, and `汽车外观`, `带文字图`, and `人车美图` each have a configurable prompt. The prompts are stored in workspace settings under `imageStrategyPrompts` with keys `carExterior`, `textImage`, and `peopleWithCar`; `imageWashPrompt` remains as the legacy/text-image compatible field. Simple mode and advanced production both expose these three prompts and `使用默认` reset actions. `src/lib/creation-controls.ts` owns the visual-tag routing and includes the shared instruction to preserve aspect ratio and scale the longest side to 2400px before image processing.
+
+Simple-mode prompt editing was updated on 2026-06-03. The simple one-click workflow now shows editable text/content and image-washing prompts in `src/app/page.tsx`, with `使用默认` reset actions and a `保存当前提示词为默认` action. Starting a simple run validates both prompts, submits the current values, and the backend persists them through the existing workspace prompt settings path. Styling for the prompt editor lives in `src/app/globals.css`.
+
+Simple-version automatic workflow steps 1-4 were implemented on 2026-06-03. `src/app/page.tsx` now defaults to a Simple workspace with a Simple/Advanced mode switch. Simple mode only asks for keyword, target count, and selected platforms, then calls `POST /api/simple/runs` to run crawl, AI tagging, content production, image processing, approval, and Feishu publish in one backend sequence. Advanced mode keeps the existing content, production, and material modules and now includes a `默认生产策略` panel whose saved prompt/image settings are reused by simple mode.
+
+The new simple run backend uses `src/lib/simple-runs.ts`, persists run history in SQLite table `simple_runs`, and stores shared default prompt settings through `src/lib/workspace-settings.ts` in `app_meta`. Feishu publishing now maps generated post `contentTags` to the `内容标签` field as a string array, suitable for a Base multi-select field.
+
+The first real simple-mode task for keyword `小鹏GX`, target `2`, platform `xiaohongshu`, was observed running for several minutes. Local status showed crawl and AI tagging completed successfully, then production spent time in sequential image generation because one source exposed 12 video keyframes and each `gpt-image-2` call took roughly 70-238 seconds with one upstream `524` retry. `src/lib/simple-runs.ts` now caps simple-mode selected image/keyframe tasks to nine per generated post, and simple mode passes `taskConcurrency: 3` into `src/lib/image-generation.ts` so image washing runs with bounded concurrency. `scripts/local/watch-simple-runs.ps1` and `npm run local:watch-simple` were added for terminal-only backend visibility without adding a Web UI panel.
+
+Video frame-first preview and tagging behavior was updated on 2026-06-03. For video or mixed source items with extracted `videoFrames`, `src/lib/source-tagging.ts` now tags frame assets only, `src/app/page.tsx` uses frames as the image preview list and hides the separate duplicate high-frame grid, and `src/lib/creation-controls.ts` creates default production image tasks from frames only. Preview images/covers are used only when the video has no extracted frames.
+
+Douyin local media preview failure was fixed on 2026-06-03. The content pool already contained Douyin items with downloaded images/videos on disk, but `/media/crawl/douyin/...` returned 404 from `next start` because runtime-created files under `public/` were not reliably served by the production static layer. `next.config.ts` now rewrites `/media/crawl/:path*` and `/generated/:path*` before filesystem handling to `GET|HEAD /api/media/local/[...path]`, which streams files from the allowed local media roots and supports byte ranges for mp4 playback.
+
+Weibo crawl response and image validation were fixed on 2026-06-03. `POST /api/crawl/jobs` now returns only the current crawl samples instead of top hot items from the whole keyword pool, and it filters cross-platform samples before tagging/ingest. The content-pool UI now stays filtered to the crawled platform after a crawl. Real smoke for keyword `小鹏GX` confirmed `includeType=pic` returns Weibo image posts with local downloaded images.
+
+The local restart script was also fixed. Earlier `http://127.0.0.1:3001` could keep serving an old bundle because the script printed the npm parent PID while the real Node listener stayed alive. `scripts/local/restart.ps1` now checks native command exit codes, uses `netstat.exe` fallback, verifies port release, and prints the real listener PID.
+
+Local media persistence/backfill has been added for crawled source images, videos, and keyframes. The next session should run one real keyword crawl from the Web UI, then select several content-pool items and run `补全本地素材` to confirm local image/video/keyframe counts improve for reachable remote URLs.
+
+AI auto-tagging remains ready for real crawl review: confirm the OpenAI-compatible relay accepts text and image tagging inputs, and manually edit/save one content tag plus one visual tag.
+
+Feishu publishing is adapted for the target Base fields `动态标题`, `动态正文`, and `动态素材`; the UI now shows publish progress/status and the backend can optionally send a Feishu IM notification after successful Base publish.
+
+On 2026-06-03 the first real simple-mode task for keyword `小鹏GX`, target `2`, platform `xiaohongshu`, finished as `partial`: crawl, tagging, and two generated posts succeeded, while Feishu publish failed because one post had image URLs but no local files suitable for Feishu attachment upload. A manual Feishu CLI task brief was sent with bot identity to the provided chat recipient. The exact recipient IDs are stored only in `.env.local` and must not be copied into Harness docs.
+
+The Feishu attachment failure was fixed on 2026-06-03. `src/lib/feishu-cli.ts` now prepares attachment files before Base record creation: local app media paths still resolve under `public/`, and reachable remote HTTP(S) image URLs are downloaded into `public/generated/feishu-attachments` before upload. A real publish retry for the failed generated post created the Base record and uploaded 12 images to the `动态素材` attachment field. Automatic Feishu notification idempotency keys were shortened after one success notification failed field validation.
+
+## Recovery Entry Point
+
+- Work from project root: `C:\Users\Administrator\.codex\social-content-studio`.
+- Latest simple-version automatic workflow files:
+  - `src/lib/database.ts`
+  - `db/migrations/001_initial_postgres.sql`
+  - `scripts/db/migrate-sqlite-to-postgres.mjs`
+  - `scripts/harness/postgres_schema_check.mjs`
+  - `src/app/page.tsx`
+  - `src/app/globals.css`
+  - `src/lib/simple-runs.ts`
+  - `src/lib/workspace-settings.ts`
+  - `src/app/api/simple/runs/route.ts`
+  - `src/app/api/workspace/settings/route.ts`
+  - `src/lib/types.ts`
+  - `src/lib/database.ts`
+  - `src/lib/feishu-cli.ts`
+  - `src/app/api/publish/feishu/route.ts`
+  - `scripts/local/watch-simple-runs.ps1`
+  - `package.json`
+- Latest batch management files:
+  - `src/app/page.tsx`
+  - `src/app/globals.css`
+  - `src/lib/content-pool.ts`
+  - `src/lib/generated-posts.ts`
+  - `src/app/api/content/items/batch/route.ts`
+  - `src/app/api/production/posts/batch/route.ts`
+- Latest AI source-tagging files:
+  - `src/lib/types.ts`
+  - `src/lib/source-tagging.ts`
+  - `src/lib/content-pool.ts`
+  - `src/app/api/crawl/jobs/route.ts`
+  - `src/app/page.tsx`
+  - `src/lib/creation-controls.ts`
+- Latest media preview fix files:
+  - `src/lib/media-request.ts`
+  - `src/lib/media-cache.ts`
+  - `src/lib/media-cache-status.ts`
+  - `src/lib/media-backfill.ts`
+  - `src/app/api/media/proxy/route.ts`
+  - `src/app/api/media/local/[...path]/route.ts`
+  - `next.config.ts`
+  - `src/app/page.tsx`
+- Latest Weibo crawl response fix files:
+  - `src/app/api/crawl/jobs/route.ts`
+  - `src/app/page.tsx`
+  - `scripts/local/restart.ps1`
+- Content-pool media backfill is exposed through `POST /api/content/items/batch` with `action: "cache_media"` and selected source item ids.
+- The content-pool UI includes batch `补全本地素材`, selected-item `补全当前素材`, mini source-card cache badges, and the selected-item `本地素材缓存` status card.
+- `mediaCache` on source items summarizes local images, remote fallback images, local video availability, keyframe count, and recent download errors.
+- Remote browser image previews now use `/api/media/proxy?url=...` for HTTP(S) image URLs. Local `/media/...` and `/generated/...` paths still render directly.
+- Local `/media/crawl/...` and `/generated/...` browser paths are served by beforeFiles rewrites to `/api/media/local/[...path]`; do not remove these rewrites unless another runtime media server replaces them.
+- The local media API serves only `crawl` and `generated` roots, validates path segments, returns image/video content types, and supports HTTP Range requests for videos.
+- Video/mixed items with `videoFrames` should treat frames as the visual source of truth: visual tagging, manual visual tag editing, image preview, and default production image tasks should use frames only.
+- Video items with local `videoFrames` should use the extracted frames as the image preview instead of old remote signed cover fallbacks.
+- `src/lib/source-tagging.ts` owns allowed tag normalization, GPT text/vision calls, first-nine visual asset collection, and failed/skipped tagging status.
+- Crawled items are tagged after TikHub/media caching and before `ingestCrawlItems`.
+- Manual content and visual tag edits are saved through `PATCH /api/content/items`; `src/lib/content-pool.ts` preserves user-edited tagging on recrawl.
+- If the OpenAI-compatible relay rejects image inputs, visual tagging records a failed status without blocking content tags or ingest.
+- Content-pool batch actions are status updates and destructive delete. Generated-post batch actions are status updates and destructive delete.
+- Generated-post bulk approval/publish synchronizes source-item status through `markSourceRewritten`.
+- Bulk actions write execution logs under `content/items` and `production/posts`.
+- Batch selection controls now render as visible `选择` / `已选` toggles in content-pool cards, production source cards, and generated-post cards.
+- The local production server on `http://127.0.0.1:3001` was restarted after the visible-selection UI update.
+- Use `npm run local:restart` after frontend or API changes that must be visible on `http://127.0.0.1:3001/`; `npm run build` alone does not refresh an already-running `next start` process.
+- Simple-mode tasks are now submitted as background local Node work. This improves browser responsiveness but is not yet a durable queue: a process restart still interrupts active work, and the reconciler marks that interrupted run failed instead of resuming it.
+- The simple-mode nine-image cap and bounded image concurrency change has passed build and Harness verification. After the first long-running simple run finished, `npm run local:restart` passed and `http://127.0.0.1:3001` now runs the refreshed code and env.
+- `npm run local:watch-simple` can be run in a separate terminal to watch the latest simple run and backend execution logs. Use `npm run local:watch-simple -- -Once` for a single snapshot.
+- `scripts/local/restart.ps1` must stop the real listener PID on port `3001`; it now falls back to `netstat.exe` when `Get-NetTCPConnection` misses the listener.
+- Local startup helper files: `scripts/local/restart.ps1` and package scripts `dev:lan`, `start:lan`, `local:restart`.
+- Latest implementation file: `src/lib/feishu-cli.ts`.
+- Local `lark-cli` app configuration was verified with `lark-cli doctor`; bot identity is ready. Do not record the app id or secret in Harness docs.
+- The target Feishu Base link was provided and parsed as:
+  - Base token: configured locally and redacted from Harness docs
+  - Table ID: `tblA0EfoAF9J4ffi`
+- Bot read access to that Base is now confirmed with `lark-cli base +table-list --as bot`.
+- Target table `tblA0EfoAF9J4ffi` is confirmed as `【懂车帝】推送表`.
+- Target fields are confirmed with `lark-cli base +field-list --as bot`:
+  - `动态标题`: text, field id `fldhiSSxuy`.
+  - `动态正文`: text, field id `fldTDGTnlc`.
+  - `动态素材`: attachment, field id `fld6L0XGw4`.
+- `.env.local` has been updated with the required Feishu app publish target keys. Do not read or expose its contents.
+- Default target fields are now:
+  - `动态标题`
+  - `动态正文`
+  - `动态素材`
+- `动态素材` is treated as a Base attachment field. Publishing first creates the record with title/body, then uploads each generated local image file into that record's `动态素材` attachment cell.
+- One generated post can upload multiple images to one `动态素材` cell.
+- `src/lib/feishu-cli.ts` clears the specific broken proxy value `127.0.0.1:9` for Feishu CLI subprocesses.
+- `src/lib/feishu-cli.ts` resolves `FEISHU_CLI_BIN=lark-cli` on Windows by invoking the npm-installed `@larksuite/cli/scripts/run.js` with `process.execPath`; this fixes web publish failures logged as `spawn lark-cli ENOENT`.
+- `src/lib/feishu-cli.ts` maps root-relative app image URLs such as `/media/...` and `/generated/...` to project `public/` before checking `path.isAbsolute`; this fixes Feishu attachment preflight failures logged as `has image URLs but no local files`.
+- Attachment preparation now runs before default Base record creation, so missing local attachments or unreachable remote image URLs should fail before creating a partial Feishu record.
+- Remote HTTP(S) image URLs from image-model providers can be downloaded into `public/generated/feishu-attachments` during Feishu publish and then uploaded as local attachment files.
+- `lark-cli base +record-batch-create --json @file` requires a relative path under the current working directory and strict UTF-8 without BOM; the wrapper passes relative JSON payload paths.
+- Earlier UI progress implementation file: `src/app/page.tsx`.
+- Latest review UI implementation files: `src/app/page.tsx` and `src/app/globals.css`.
+- The production review panel includes `ReviewPackageCard`, which shows the selected generated post as a final review package with images or image placeholder, title, body, readiness badges, large preview, approval, and Feishu publish actions.
+- `ReviewPackageCard` now shows a publish status panel when the user clicks `写入飞书`, including running, success, warning, error, and notification status text.
+- `src/lib/feishu-cli.ts` can send a success notification with `lark-cli im +messages-send --as bot` when `FEISHU_NOTIFY_CHAT_ID` or `FEISHU_NOTIFY_USER_ID` is configured. If both are configured, it sends to `FEISHU_NOTIFY_CHAT_ID`.
+- Notification failure does not fail a successful Base write; it is returned to the frontend and recorded in the execution log details.
+- `loadGeneratedPosts(preferredPostId?)` can keep the review panel focused on the newly generated, regenerated, edited, image-updated, or published post.
+
+## Product And Runtime Facts
+
+- UI has three top-level modules: content pool management, content production, and material management.
+- Content pool management owns crawl tasks, keyword content pool, source preview, and source item CRUD.
+- Content production owns queue filtering/sorting, batch selection, generation controls, generated post library, review, regeneration, and Feishu publish actions.
+- Runtime data now lives primarily in `data/fluxpost.db`; legacy JSON files are retained as migration sources and compatibility artifacts.
+- SQLite uses Node.js built-in `node:sqlite`; current local runtime requires Node.js 24+.
+- Crawled media and generated images live under `public/media/` and `public/generated/`.
+- Crawled media binaries should be persisted under `public/media/crawl`; the runtime database stores metadata, remote URLs, local app paths, and cache status.
+
+## Important Boundaries
+
+- Do not read or expose `.env.local` or any `.env*` secret values.
+- Do not read or expose the local lark-cli config secret. `lark-cli config show` redacts the secret and is safe; raw config files may contain sensitive references.
+- Do not run real Base writes unless the user is intentionally testing a publish or has selected approved content in the app.
+- Do not trigger `POST /api/simple/runs` as a default verification step; it calls TikHub, OpenAI-compatible tagging/generation, image generation, and Feishu publishing.
+- Do not run `npm run local:restart` while a real simple-mode request is still intentionally running unless the user accepts interrupting that request.
+- Feishu attachment upload still passes local files to `lark-cli`, but the wrapper can now materialize reachable remote HTTP(S) image URLs into `public/generated/feishu-attachments` before upload. Expired or protected remote URLs still fail before Base record creation.
+- Media backfill cannot recover already-expired or platform-protected remote URLs. Videos need a direct downloadable URL, and frames still require `ffmpeg`.
+- Do not modify runtime data in `data/`, generated images in `public/generated/`, cached crawl media in `public/media/`, or debug screenshots/logs unless the user asks.
+- Do not create a second persistent context system outside `docs/harness/`.
+- For Xiaohongshu/content images, use `mergeDownloadedAndRemoteImages(..., { preferDownloaded: true })`; do not merge by slicing remote images with `downloadedImages.length`.
+- Existing video-only Weibo records may have `images=[]` but populated `videoFrames`; use frames as visual preview when available.
+- Weibo `includeType=all` can return text-only items with `images=[]`; use `includeType=pic` when specifically validating Weibo image extraction.
+- Current local generated-post data may include drafts without images; in that case the final review package intentionally shows a `暂无最终配图` placeholder.
+- Feishu notification recipient values are optional env config. Do not read or expose `.env.local`; if no recipient is configured, the UI should report that notification was skipped. If both chat and user recipients are configured, the wrapper prefers the chat recipient.
+- Latest real web publish failure before the resolver fix was `spawn lark-cli ENOENT`, not a Base permission error. Retest from the Web UI after the local app restart.
+- Latest real web publish failure after the CLI resolver fix was root-relative image path resolution for `/media/...`; retest from the Web UI after the attachment path fix and local app restart.
+
+## Recent Verification
+
+- Passed on 2026-06-04 for fixed Xiaohongshu Web V3 search usage and diagnostics: `node scripts/harness/xiaohongshu_note_type_check.mjs`, `node scripts/harness/keyword_relevance_check.mjs`, `npx --no-install tsc --noEmit`, `npm run lint`, `npm run build`, `powershell -ExecutionPolicy Bypass -File scripts/harness/check.ps1`, and elevated `npm run local:restart` after sandbox `spawn EPERM`. Local HTTP smoke passed on `http://127.0.0.1:3001`. No real live TikHub/OpenAI-compatible/RunningHub/Feishu task was triggered.
+
+- Passed on 2026-06-04 for read-only diagnosis of failed simple run `simple-1780551380562`: `GET /api/simple/runs`, `GET /api/activity?limit=300`, `GET /api/workspace/settings`, code inspection of `src/lib/simple-runs.ts` and `src/lib/tikhub.ts`, and `powershell -ExecutionPolicy Bypass -File scripts/harness/check.ps1`. No new live TikHub/OpenAI-compatible/RunningHub/Feishu task was triggered.
+
+- Passed on 2026-06-04 for simple-mode Xiaohongshu image/text preference enforcement: `node scripts/harness/xiaohongshu_note_type_check.mjs`, `node scripts/harness/keyword_relevance_check.mjs`, `npm run lint`, `npx --no-install tsc --noEmit`, `npm run build`, `powershell -ExecutionPolicy Bypass -File scripts/harness/check.ps1`, `npm run local:watch-simple -- -Once`, and `npm run local:restart`. No real TikHub/OpenAI-compatible/RunningHub/Feishu task was triggered by this verification.
+
+- Passed on 2026-06-04 for keyword relevance filtering and `小鹏P7` / `小鹏P7+` boundaries: `node scripts/harness/keyword_relevance_check.mjs`, `npm run lint`, `npx --no-install tsc --noEmit`, `npm run build`, `powershell -ExecutionPolicy Bypass -File scripts/harness/check.ps1`, `npm run local:watch-simple -- -Once`, and `npm run local:restart`. No real TikHub/OpenAI-compatible/RunningHub/Feishu task was triggered by the keyword verification or baseline.
+
+- Passed on 2026-06-04 for live simple-run interruption and Xiaohongshu relevance diagnosis: `powershell -ExecutionPolicy Bypass -File scripts\local\restart.ps1 -SkipBuild`, `npm run local:watch-simple -- -Once`, read-only `GET /api/content-pool`, read-only `GET /api/workspace/settings`, and code inspection. No new crawl/model/Feishu task was started during the diagnosis.
+
+- Passed on 2026-06-04 for simple/advanced crawl preference sync: mocked Playwright request-body check on `http://127.0.0.1:3001`, `powershell -ExecutionPolicy Bypass -File scripts/harness/check.ps1`, and `npm run local:restart`. No real TikHub/OpenAI-compatible/RunningHub/Feishu simple task was triggered by the mocked browser check.
+
+- Passed on 2026-06-03 for simple-mode stuck-run mitigation: `npm run lint`, `npx --no-install tsc --noEmit`, `npm run build`, `powershell -ExecutionPolicy Bypass -File scripts/harness/check.ps1`, and `npm run local:restart`.
+- Passed on 2026-06-03 read-only checks after restart: `npm run local:watch-simple -- -Once`, `GET http://127.0.0.1:3001/api/config`, and `GET http://127.0.0.1:3001/api/simple/runs`. No new TikHub/OpenAI/Feishu call was triggered.
+
+- Passed on 2026-06-03 for simple/advanced crawl preference sync and simple layout resizing: `npm run lint`, `npx --no-install tsc --noEmit`, `npm run build`, `powershell -ExecutionPolicy Bypass -File scripts/harness/check.ps1`, elevated `npm run local:restart`, Playwright desktop UI width/no-overflow check, Playwright advanced Douyin `Latest` sort and `Article` content-type check, and read-only `GET /api/workspace/settings` confirming `platformCrawlSettings`.
+
+- Passed on 2026-06-03 image model switch to `nano-banana-pro`: `powershell -ExecutionPolicy Bypass -File scripts/harness/check.ps1`, `npm run local:restart`, `node scripts/harness/http_smoke.js http://127.0.0.1:3001`, and read-only `GET /api/config` confirmed the running local app reports `imageModel=nano-banana-pro`.
+
+- Passed on 2026-06-03 custom visual-tag image prompt recheck: `powershell -ExecutionPolicy Bypass -File scripts/harness/check.ps1`, `npm run local:watch-simple -- -Once`, `node scripts/harness/http_smoke.js http://127.0.0.1:3001`, and read-only `GET /api/workspace/settings` on `http://127.0.0.1:3001` confirmed the live local app exposes `imageStrategyPrompts.carExterior`, `imageStrategyPrompts.textImage`, and `imageStrategyPrompts.peopleWithCar`.
+- Passed on 2026-06-03 for visual-tag image strategy prompt routing: `npm run lint`, `npx --no-install tsc --noEmit`, `npm run build`, `powershell -ExecutionPolicy Bypass -File scripts/harness/check.ps1`, and `npm run local:restart`.
+- Passed on 2026-06-03 browser/API smoke on `http://127.0.0.1:3001`: simple mode shows one text prompt plus three image strategy prompts and reset buttons with no horizontal overflow; advanced production shows the three image strategy prompts and original-reference rule with no horizontal overflow; `/api/workspace/settings` returns `carExterior`, `textImage`, and `peopleWithCar` prompt keys.
+
+- Passed on 2026-06-03 for simple-mode editable prompt settings: `npm run lint`, `npx --no-install tsc --noEmit`, `npm run build`, `powershell -ExecutionPolicy Bypass -File scripts/harness/check.ps1`, and `npm run local:restart`.
+- Passed on 2026-06-03 browser UI smoke on `http://127.0.0.1:3001`: desktop `1440x950` and mobile `390x844` confirmed two simple-mode prompt textareas, two reset buttons, the prompt-save action, no console errors, and no horizontal overflow.
+
+- Passed on 2026-06-03 for simple-version automatic workflow UI and APIs: `npm run lint`, `npx --no-install tsc --noEmit`, `npm run build`, `powershell -ExecutionPolicy Bypass -File scripts/harness/check.ps1`, and `npm run local:restart`.
+- Passed on 2026-06-03 browser UI smoke on `http://127.0.0.1:3001`: simple workspace, keyword field, simple start button, advanced module switcher after mode change, and no horizontal overflow on desktop `1440x950` or mobile `390x844`.
+- Passed on 2026-06-03 for simple-run slowness mitigation and terminal backend watcher: `npm run local:watch-simple -- -Once`, `npm run lint`, `npx --no-install tsc --noEmit`, `npm run build`, and `powershell -ExecutionPolicy Bypass -File scripts/harness/check.ps1`.
+- Passed on 2026-06-03 for simple-mode nine-image cap and bounded image concurrency: `npm run lint`, `npx --no-install tsc --noEmit`, `npm run build`, `powershell -ExecutionPolicy Bypass -File scripts/harness/check.ps1`, and `npm run local:watch-simple -- -Once`. The existing `http://127.0.0.1:3001` app was not restarted because a real simple run was still running on the old sequential code path.
+- Passed on 2026-06-03 for Feishu notification env and recipient precedence: `.env.local` updated without exposing values, `src/lib/feishu-cli.ts` prefers chat notification when both chat/user env values exist, `npm run lint`, `npx --no-install tsc --noEmit`, `npm run build`, `powershell -ExecutionPolicy Bypass -File scripts/harness/check.ps1`, manual Feishu CLI task brief send, and `npm run local:restart`.
+- Passed on 2026-06-03 for Feishu remote image attachment materialization: `npm run lint`, `npx --no-install tsc --noEmit`, `npm run build`, `powershell -ExecutionPolicy Bypass -File scripts/harness/check.ps1`, real publish retry uploaded 12 remote image-model URLs as Feishu attachments, manual Feishu repair brief send, and `npm run local:restart`.
+- Passed on 2026-06-03 for video frame-first preview/tagging/task behavior: `npm run lint`, `npx --no-install tsc --noEmit`, `npm run build`, `npm run local:restart`, and `powershell -ExecutionPolicy Bypass -File scripts/harness/check.ps1`.
+- Passed on 2026-06-03 browser check on `http://127.0.0.1:3001`: Douyin sample `douyin-7639960163977784475` visible preview loaded `/frames/cover.jpg` and no visible original `image-*` source image in the current viewport.
+
+- Passed on 2026-06-03 for runtime local media serving: `npm run lint`, `npx --no-install tsc --noEmit`, `npm run build`, `npm run local:restart`, and `powershell -ExecutionPolicy Bypass -File scripts/harness/check.ps1`.
+- Passed on 2026-06-03 real Douyin crawl smoke: platform `douyin`, keyword `小鹏GX`, `targetCount=1`, returned one completed item with 12 local images, a local mp4, 12 local frames, and `mediaCache.status=local_complete`.
+- Passed on 2026-06-03 HTTP media checks on `http://127.0.0.1:3001`: Douyin local image and frame returned 200, Douyin local mp4 returned 200, and a video byte-range request returned 206.
+- Passed on 2026-06-03 browser media check on `http://127.0.0.1:3001`: Chromium loaded a Douyin source image, cover frame, and mp4 metadata from `/media/crawl/...`.
+
+- Passed on 2026-06-03 for Weibo crawl response fix: `npm run lint`, `npx --no-install tsc --noEmit`, `npm run build`, and `powershell -ExecutionPolicy Bypass -File scripts/harness/check.ps1`.
+- Passed on 2026-06-03 after refreshing `http://127.0.0.1:3001`: `powershell -ExecutionPolicy Bypass -File scripts\local\restart.ps1 -SkipBuild`; old listener PID `44656` was stopped and new listener PID `35992` started.
+- Passed on 2026-06-03 real Weibo crawl smoke: platform `weibo`, keyword `小鹏GX`, `targetCount=1`, `includeType=all` returned only Weibo items.
+- Passed on 2026-06-03 real Weibo image crawl smoke: platform `weibo`, keyword `小鹏GX`, `targetCount=3`, `includeType=pic` returned three Weibo image posts with local downloaded image counts `5`, `3`, and `3`.
+- Passed on 2026-06-03 for local media persistence/backfill: `npm run lint`, `npx --no-install tsc --noEmit`, `npm run build`, `powershell -ExecutionPolicy Bypass -File scripts/harness/check.ps1`, and `npm run local:restart`.
+- Passed on 2026-06-03 API smoke: `POST /api/content/items/batch` with `action=cache_media` and a missing id returned `updatedCount=0` and one not-found id.
+- Passed on 2026-06-03 Playwright smoke on `http://127.0.0.1:3001/`: `补全本地素材` and `本地素材缓存` render with no console errors and no horizontal overflow.
+- Passed on 2026-06-03 for remote media proxy preview fix: `npm run lint`, `npx --no-install tsc --noEmit`, `npm run build`, `npm run local:restart`, and `powershell -ExecutionPolicy Bypass -File scripts/harness/check.ps1`.
+- Passed on 2026-06-03 browser check on `http://127.0.0.1:3001`: selected Xiaohongshu item `xiaohongshu-6a0db7220000000006020fad`; visible proxied remote images loaded with dimensions and no broken visible images.
+- Passed on 2026-06-03 for AI source tagging: `npm run lint`, `npx --no-install tsc --noEmit`, `npm run build`, and `powershell -ExecutionPolicy Bypass -File scripts/harness/check.ps1`.
+- Passed on 2026-06-03 after restarting the local app: `npm run local:restart`; local HTTP smoke passed on `http://127.0.0.1:3001`.
+- Passed on 2026-06-03 browser check on `http://127.0.0.1:3001`: Playwright switched to project `小鹏GX` and confirmed `AI 标签`, `内容标签`, and `图片 / 关键帧标签` render with no console errors.
+- Passed on 2026-06-02 for the local production refresh script: `npm run local:restart`.
+- Passed on 2026-06-02 for batch resource management: `npm run lint`, `npx --no-install tsc --noEmit`, `npm run build`, and `powershell -ExecutionPolicy Bypass -File scripts/harness/check.ps1`.
+- Passed on 2026-06-02 for the running local app on `http://127.0.0.1:3001`: `node scripts/harness/http_smoke.js http://127.0.0.1:3001`.
+- Passed on 2026-06-02 for visible batch selection controls: Playwright confirmed content-pool selection changes from `选择` to `已选`, generated-post selection changes from `选择` to `已选`, and batch counters update.
+- Passed on 2026-06-02 after restarting `http://127.0.0.1:3001`: `node scripts/harness/http_smoke.js http://127.0.0.1:3001`.
+- Passed on 2026-06-02 after user granted Base access: `lark-cli base +table-list --as bot --base-token ... --limit 50`.
+- Passed on 2026-06-02 after user granted Base access: `lark-cli base +field-list --as bot --base-token ... --table-id tblA0EfoAF9J4ffi --limit 200`.
+- Passed on 2026-06-02 for Feishu record dry-run with `动态标题` and `动态正文`; no real data was written.
+- Passed on 2026-06-02 for Feishu attachment upload dry-run against `动态素材`; no file was uploaded.
+- Passed on 2026-06-02 after restarting the local app on `http://127.0.0.1:3001`: local HTTP smoke and `/api/config` Feishu configured check.
+- Passed on 2026-06-02 for Feishu dynamic field dry-run using `动态标题` and `动态正文`; no real data was written.
+- Passed on 2026-06-02 for Feishu attachment publish wrapper update: `npm run lint`, `npx --no-install tsc --noEmit`, `npm run build`, and `powershell -ExecutionPolicy Bypass -File scripts/harness/check.ps1`.
+- Passed on 2026-06-02 for Feishu CLI readiness: `lark-cli config show`, `lark-cli doctor --offline`, and `lark-cli doctor` with `LARK_CLI_NO_PROXY=1` and proxy env values cleared.
+- Passed on 2026-06-02 for the final review package UI: `npm run lint`, `npx --no-install tsc --noEmit`, `npm run build`, Playwright desktop/mobile visibility and overflow checks, `powershell -ExecutionPolicy Bypass -File scripts/harness/check.ps1`, and `node scripts/harness/http_smoke.js http://127.0.0.1:3001`.
+- Passed on 2026-06-02 for Feishu publish feedback and optional notification: `npm run lint`, `npx --no-install tsc --noEmit`, `npm run build`, `powershell -ExecutionPolicy Bypass -File scripts/harness/check.ps1`, Playwright mocked publish check, and `node scripts/harness/http_smoke.js http://127.0.0.1:3001`.
+- Passed on 2026-06-02 for the Windows `lark-cli` executable resolution fix: `npm run lint`, `npx --no-install tsc --noEmit`, `npm run build`, `powershell -ExecutionPolicy Bypass -File scripts/harness/check.ps1`, and `node scripts/harness/http_smoke.js http://127.0.0.1:3001` after restart.
+- Passed on 2026-06-02 for the Feishu attachment root-relative path fix: `npm run lint`, `npx --no-install tsc --noEmit`, local `/media/...` path-mapping check, `npm run build`, `powershell -ExecutionPolicy Bypass -File scripts/harness/check.ps1`, and `node scripts/harness/http_smoke.js http://127.0.0.1:3001` after restart.
+- Next build emitted the known Turbopack tracing warnings for `src/lib/media-cache.ts` and `next.config.ts`; build still completed successfully.

@@ -1,0 +1,949 @@
+import { execFile } from "node:child_process";
+import { createHash } from "node:crypto";
+import { existsSync } from "node:fs";
+import { mkdir, writeFile } from "node:fs/promises";
+import os from "node:os";
+import path from "node:path";
+import { promisify } from "node:util";
+import { recordExecutionLog } from "./activity-log";
+import { appConfig } from "./config";
+import { concurrencyConfig, mapWithConcurrency, runWithConcurrencyPool } from "./concurrency";
+import { buildMediaRequestHeaders, isProxyableRemoteMediaUrl } from "./media-request";
+import type { FeishuPostPublishState, GeneratedPost } from "./types";
+
+const execFileAsync = promisify(execFile);
+
+export const feishuRecordBatchSize = 50;
+
+type CliInvocation = {
+  file: string;
+  argsPrefix: string[];
+};
+
+type FeishuNotificationResult = {
+  status: "sent" | "skipped" | "failed";
+  recipientType?: "chat" | "user";
+  message: string;
+  stdout?: string;
+  stderr?: string;
+};
+
+type PreparedAttachmentFiles = Map<string, string[]>;
+
+type FeishuAttachmentUpload = {
+  postId: string;
+  recordId: string;
+  fileCount: number;
+  status: "uploaded" | "skipped";
+  stdout: string;
+  stderr: string;
+};
+
+type FeishuAttachmentFailure = {
+  postId: string;
+  recordId: string;
+  fileCount: number;
+  error: string;
+  stdout?: string;
+  stderr?: string;
+};
+
+type FeishuRecordMapping = {
+  postId: string;
+  recordId: string;
+  created: boolean;
+};
+
+type FeishuPostStateUpdate = {
+  postId: string;
+  feishu: FeishuPostPublishState;
+};
+
+const maxFeishuAttachmentImageBytes = 30 * 1024 * 1024;
+
+export async function publishPostsToFeishu(posts: GeneratedPost[]) {
+  const outboxDir = path.join(process.cwd(), "data", "feishu-outbox");
+  await mkdir(outboxDir, { recursive: true });
+  const payloadPath = path.join(outboxDir, `posts-${Date.now()}.json`);
+  await writeFile(payloadPath, JSON.stringify({ posts }, null, 2), "utf8");
+
+  if (!appConfig.feishuCliBin) {
+    return {
+      status: "needs_config" as const,
+      payloadPath,
+      message: "FEISHU_CLI_BIN is not configured. Payload has been staged locally.",
+      recordMappings: [] as FeishuRecordMapping[],
+      postStates: buildStagedFeishuPostStateUpdates(posts, payloadPath),
+      attachmentUploads: [] as FeishuAttachmentUpload[],
+      attachmentFailures: [] as FeishuAttachmentFailure[],
+    };
+  }
+
+  if (!appConfig.feishuBitableAppToken || !appConfig.feishuBitableTableId) {
+    return {
+      status: "needs_config" as const,
+      payloadPath,
+      message: "FEISHU_BITABLE_APP_TOKEN or FEISHU_BITABLE_TABLE_ID is not configured. Payload has been staged locally.",
+      recordMappings: [] as FeishuRecordMapping[],
+      postStates: buildStagedFeishuPostStateUpdates(posts, payloadPath),
+      attachmentUploads: [] as FeishuAttachmentUpload[],
+      attachmentFailures: [] as FeishuAttachmentFailure[],
+    };
+  }
+
+  const fieldMap = getBitableFieldMap();
+  const useDefaultBaseCreate = !appConfig.feishuCliArgs.trim();
+  const attachmentFiles =
+    useDefaultBaseCreate && fieldMap.imageUrls ? await prepareAttachmentFilesForPosts(posts) : new Map<string, string[]>();
+
+  const recordPayloadPaths: string[] = [];
+  const stdoutParts: string[] = [];
+  const stderrParts: string[] = [];
+  const attachmentUploads: FeishuAttachmentUpload[] = [];
+  const attachmentFailures: FeishuAttachmentFailure[] = [];
+  const recordMappings: FeishuRecordMapping[] = [];
+  const chunks = chunkPosts(posts, feishuRecordBatchSize);
+
+  for (const [chunkIndex, chunk] of chunks.entries()) {
+    const existingMappings = useDefaultBaseCreate
+      ? chunk
+          .map((post) => {
+            const recordId = getExistingFeishuRecordId(post);
+            return recordId ? { postId: post.id, recordId, created: false } : null;
+          })
+          .filter((item): item is FeishuRecordMapping => Boolean(item))
+      : [];
+    recordMappings.push(...existingMappings);
+
+    const postsToCreate = useDefaultBaseCreate ? chunk.filter((post) => !getExistingFeishuRecordId(post)) : chunk;
+    if (postsToCreate.length) {
+      const recordPayloadPath = path.join(outboxDir, `base-records-${Date.now()}-${chunkIndex + 1}.json`);
+      recordPayloadPaths.push(recordPayloadPath);
+      await writeFile(recordPayloadPath, JSON.stringify(buildBitableRecordPayload(postsToCreate, fieldMap), null, 2), "utf8");
+
+      const args = buildCliArgs(payloadPath, recordPayloadPath);
+      const result = await runFeishuCli(args, {
+        timeout: 120_000,
+        maxBuffer: 1024 * 1024 * 8,
+        env: buildCliEnv({
+          ...process.env,
+          FEISHU_PAYLOAD_PATH: payloadPath,
+          FEISHU_RECORD_PAYLOAD_PATH: recordPayloadPath,
+          FEISHU_BITABLE_APP_TOKEN: appConfig.feishuBitableAppToken,
+          FEISHU_BITABLE_TABLE_ID: appConfig.feishuBitableTableId,
+        }),
+      });
+      stdoutParts.push(result.stdout);
+      stderrParts.push(result.stderr);
+
+      const createdRecordIds = parseCreatedRecordIds(result.stdout);
+      if (createdRecordIds.length < postsToCreate.length) {
+        throw new Error("Feishu record creation did not return enough record IDs for attachment upload.");
+      }
+      recordMappings.push(
+        ...postsToCreate.map((post, index) => ({
+          postId: post.id,
+          recordId: createdRecordIds[index],
+          created: true,
+        })),
+      );
+    }
+
+    if (useDefaultBaseCreate && fieldMap.imageUrls) {
+      const uploadResult = await uploadGeneratedImagesToFeishu(chunk, recordMappings, fieldMap.imageUrls, attachmentFiles);
+      attachmentUploads.push(...uploadResult.uploads);
+      attachmentFailures.push(...uploadResult.failures);
+    }
+  }
+  const postStates = buildFeishuPostStateUpdates(posts, recordMappings, attachmentUploads, attachmentFailures, payloadPath);
+  const notification = attachmentFailures.length
+    ? {
+        status: "skipped" as const,
+        message: "Feishu notification skipped because one or more attachment uploads failed.",
+      }
+    : await sendFeishuPublishNotification(posts, attachmentUploads);
+
+  if (attachmentFailures.length) {
+    await recordExecutionLog({
+      scope: "publish/feishu",
+      action: "Feishu attachment upload incomplete",
+      status: "error",
+      message: formatAttachmentFailureMessage(attachmentFailures),
+      details: {
+        postCount: posts.length,
+        recordCount: recordMappings.length,
+        attachmentFailureCount: attachmentFailures.length,
+      },
+    });
+  }
+
+  return {
+    status: attachmentFailures.length ? ("attachment_failed" as const) : ("published" as const),
+    payloadPath,
+    recordPayloadPath: recordPayloadPaths[0],
+    recordPayloadPaths,
+    batchSize: feishuRecordBatchSize,
+    chunkCount: chunks.length,
+    message: attachmentFailures.length
+      ? `Feishu Base records were created or reused for ${recordMappings.length} posts, but ${attachmentFailures.length} attachment upload(s) failed. Retry will reuse existing record IDs and upload only unfinished attachments.`
+      : `Feishu Base write completed for ${posts.length} posts in ${chunks.length} chunk(s) of up to ${feishuRecordBatchSize}.`,
+    recordMappings,
+    postStates,
+    attachmentUploads,
+    attachmentFailures,
+    notification,
+    stdout: stdoutParts.filter(Boolean).join("\n"),
+    stderr: stderrParts.filter(Boolean).join("\n"),
+  };
+}
+
+function chunkPosts<T>(items: T[], size: number) {
+  const chunks: T[][] = [];
+  for (let index = 0; index < items.length; index += size) {
+    chunks.push(items.slice(index, index + size));
+  }
+  return chunks;
+}
+
+function buildCliArgs(payloadPath: string, recordPayloadPath: string) {
+  const cliPayloadPath = toCliRelativePath(payloadPath);
+  const cliRecordPayloadPath = toCliRelativePath(recordPayloadPath);
+  const templateArgs = appConfig.feishuCliArgs
+    ? splitArgs(appConfig.feishuCliArgs)
+    : [
+        "base",
+        "+record-batch-create",
+        "--as",
+        "bot",
+        "--base-token",
+        "{appToken}",
+        "--table-id",
+        "{tableId}",
+        "--json",
+        "@{recordPayload}",
+      ];
+
+  return templateArgs
+    .map((arg) => arg.replaceAll("{payload}", cliPayloadPath))
+    .map((arg) => arg.replaceAll("{recordPayload}", cliRecordPayloadPath))
+    .map((arg) => arg.replaceAll("{appToken}", appConfig.feishuBitableAppToken))
+    .map((arg) => arg.replaceAll("{tableId}", appConfig.feishuBitableTableId));
+}
+
+function toCliRelativePath(filePath: string) {
+  const relativePath = path.relative(process.cwd(), filePath);
+  return relativePath.startsWith("..") ? filePath : `./${relativePath.replaceAll("\\", "/")}`;
+}
+
+function buildBitableRecordPayload(posts: GeneratedPost[], fieldMap: Record<string, string>) {
+  const entries = Object.entries(fieldMap).filter(([key, fieldName]) => key !== "imageUrls" && fieldName.trim());
+
+  return {
+    fields: entries.map(([, fieldName]) => fieldName),
+    rows: posts.map((post) => entries.map(([key]) => getPostFieldValue(post, key))),
+  };
+}
+
+function getBitableFieldMap() {
+  const defaults: Record<string, string> = {
+    title: "动态标题",
+    body: "动态正文",
+    imageUrls: "动态素材",
+    contentTags: "内容标签",
+  };
+
+  if (!appConfig.feishuBitableFieldMap.trim()) return defaults;
+
+  try {
+    const parsed = JSON.parse(appConfig.feishuBitableFieldMap) as Record<string, unknown>;
+    return Object.fromEntries(
+      Object.entries({ ...defaults, ...parsed })
+        .filter(([, value]) => typeof value === "string")
+        .map(([key, value]) => [key, value as string]),
+    );
+  } catch (error) {
+    throw new Error(`FEISHU_BITABLE_FIELD_MAP must be valid JSON: ${error instanceof Error ? error.message : "unknown parse error"}`);
+  }
+}
+
+async function uploadGeneratedImagesToFeishu(
+  posts: GeneratedPost[],
+  recordMappings: FeishuRecordMapping[],
+  attachmentFieldName: string,
+  attachmentFiles: PreparedAttachmentFiles,
+) {
+  if (!posts.some((post) => post.imageUrls.length)) return { uploads: [] as FeishuAttachmentUpload[], failures: [] as FeishuAttachmentFailure[] };
+  const recordIdByPostId = new Map(recordMappings.map((item) => [item.postId, item.recordId]));
+
+  const results = await mapWithConcurrency(posts, concurrencyConfig.feishuAttachment, async (post) => {
+    const recordId = recordIdByPostId.get(post.id);
+    if (!recordId) {
+      return {
+        upload: null,
+        failure: {
+          postId: post.id,
+          recordId: "",
+          fileCount: 0,
+          error: "Feishu record ID is missing for attachment upload.",
+        },
+      };
+    }
+    const files = attachmentFiles.get(post.id) || resolveLocalImageFiles(post.imageUrls);
+    if (!files.length) {
+      if (post.imageUrls.length) {
+        return {
+          upload: null,
+          failure: {
+            postId: post.id,
+            recordId,
+            fileCount: 0,
+            error: `Post ${post.id} has image URLs but no local files that can be uploaded to Feishu attachments.`,
+          },
+        };
+      }
+      return { upload: null, failure: null };
+    }
+    if (files.length > 50) {
+      return {
+        upload: null,
+        failure: {
+          postId: post.id,
+          recordId,
+          fileCount: files.length,
+          error: `Post ${post.id} has ${files.length} images; Feishu attachment upload supports at most 50 files per cell.`,
+        },
+      };
+    }
+
+    if (post.feishu?.recordId === recordId && post.feishu.attachmentStatus === "uploaded" && post.feishu.attachmentFileCount === files.length) {
+      return {
+        upload: {
+          postId: post.id,
+          recordId,
+          fileCount: files.length,
+          status: "skipped" as const,
+          stdout: "",
+          stderr: "",
+        },
+        failure: null,
+      };
+    }
+
+    const args = [
+      "base",
+      "+record-upload-attachment",
+      "--as",
+      "bot",
+      "--base-token",
+      appConfig.feishuBitableAppToken,
+      "--table-id",
+      appConfig.feishuBitableTableId,
+      "--record-id",
+      recordId,
+      "--field-id",
+      attachmentFieldName,
+      ...files.flatMap((file) => ["--file", file]),
+    ];
+
+    try {
+      const result = await runFeishuCli(args, {
+        timeout: 300_000,
+        maxBuffer: 1024 * 1024 * 8,
+        env: buildCliEnv(process.env),
+      });
+      return {
+        upload: {
+          postId: post.id,
+          recordId,
+          fileCount: files.length,
+          status: "uploaded" as const,
+          stdout: result.stdout,
+          stderr: result.stderr,
+        },
+        failure: null,
+      };
+    } catch (error) {
+      return {
+        upload: null,
+        failure: {
+          postId: post.id,
+          recordId,
+          fileCount: files.length,
+          error: compactCliError(error),
+          stdout: getCliOutput(error, "stdout"),
+          stderr: getCliOutput(error, "stderr"),
+        },
+      };
+    }
+  });
+
+  return {
+    uploads: results.map((item) => item.upload).filter((item): item is FeishuAttachmentUpload => Boolean(item)),
+    failures: results.map((item) => item.failure).filter((item): item is FeishuAttachmentFailure => Boolean(item)),
+  };
+}
+
+function buildFeishuPostStateUpdates(
+  posts: GeneratedPost[],
+  recordMappings: FeishuRecordMapping[],
+  attachmentUploads: FeishuAttachmentUpload[],
+  attachmentFailures: FeishuAttachmentFailure[],
+  payloadPath: string,
+): FeishuPostStateUpdate[] {
+  const mappingByPostId = new Map(recordMappings.map((item) => [item.postId, item]));
+  const uploadByPostId = new Map(attachmentUploads.map((item) => [item.postId, item]));
+  const failureByPostId = new Map(attachmentFailures.map((item) => [item.postId, item]));
+  const now = new Date().toISOString();
+
+  return posts.map((post) => {
+    const mapping = mappingByPostId.get(post.id);
+    const upload = uploadByPostId.get(post.id);
+    const failure = failureByPostId.get(post.id);
+    const recordId = mapping?.recordId || post.feishu?.recordId;
+    const next: FeishuPostPublishState = {
+      ...post.feishu,
+      ...(recordId ? { recordId } : {}),
+      ...(mapping?.created ? { recordCreatedAt: now } : {}),
+      payloadPath,
+    };
+
+    if (failure) {
+      return {
+        postId: post.id,
+        feishu: {
+          ...next,
+          attachmentStatus: "failed",
+          attachmentFileCount: failure.fileCount,
+          attachmentError: failure.error,
+        },
+      };
+    }
+
+    if (upload) {
+      return {
+        postId: post.id,
+        feishu: {
+          ...next,
+          attachmentStatus: "uploaded",
+          attachmentFileCount: upload.fileCount,
+          attachmentUploadedAt: upload.status === "uploaded" ? now : post.feishu?.attachmentUploadedAt || now,
+          attachmentError: undefined,
+        },
+      };
+    }
+
+    return {
+      postId: post.id,
+      feishu: {
+        ...next,
+        attachmentStatus: post.imageUrls.length ? "pending" : "skipped",
+        attachmentFileCount: 0,
+        attachmentError: undefined,
+      },
+    };
+  });
+}
+
+function buildStagedFeishuPostStateUpdates(posts: GeneratedPost[], payloadPath: string): FeishuPostStateUpdate[] {
+  return posts.map((post) => ({
+    postId: post.id,
+    feishu: {
+      ...post.feishu,
+      payloadPath,
+      attachmentStatus: post.imageUrls.length ? "pending" : "skipped",
+      attachmentFileCount: 0,
+    },
+  }));
+}
+
+function getExistingFeishuRecordId(post: GeneratedPost) {
+  const recordId = post.feishu?.recordId?.trim();
+  return recordId && recordId.startsWith("rec") ? recordId : "";
+}
+
+function formatAttachmentFailureMessage(failures: FeishuAttachmentFailure[]) {
+  const first = failures[0];
+  if (!first) return "Feishu attachment upload failed.";
+  return `Feishu attachment upload failed for ${failures.length} post(s). First failure: ${first.postId}: ${first.error}`;
+}
+
+async function prepareAttachmentFilesForPosts(posts: GeneratedPost[]): Promise<PreparedAttachmentFiles> {
+  const attachments: PreparedAttachmentFiles = new Map();
+  const prepared = await mapWithConcurrency(posts, concurrencyConfig.media, async (post) => {
+    const { files, failures } = await prepareAttachmentFilesForPost(post);
+    if (failures.length) {
+      throw new Error(
+        `Post ${post.id} has image URLs that could not be prepared for Feishu attachments: ${failures
+          .slice(0, 5)
+          .join("; ")}`,
+      );
+    }
+    if (!files.length && post.imageUrls.length) {
+      throw new Error(`Post ${post.id} has image URLs but no local files that can be uploaded to Feishu attachments.`);
+    }
+    if (files.length > 50) {
+      throw new Error(`Post ${post.id} has ${files.length} images; Feishu attachment upload supports at most 50 files per cell.`);
+    }
+    return { postId: post.id, files };
+  });
+  for (const item of prepared) {
+    attachments.set(item.postId, item.files);
+  }
+  return attachments;
+}
+
+async function prepareAttachmentFilesForPost(post: GeneratedPost) {
+  const files: string[] = [];
+  const failures: string[] = [];
+
+  for (const [index, imageUrl] of post.imageUrls.entries()) {
+    const localFile = resolveLocalImageFile(imageUrl);
+    if (localFile) {
+      files.push(localFile);
+      continue;
+    }
+
+    if (!isProxyableRemoteMediaUrl(imageUrl)) {
+      failures.push(`image ${index + 1} is not a local file or HTTP(S) URL`);
+      continue;
+    }
+
+    try {
+      files.push(await downloadRemoteImageForFeishu(post.id, imageUrl, index));
+    } catch (error) {
+      failures.push(`image ${index + 1} download failed: ${error instanceof Error ? error.message : "unknown error"}`);
+    }
+  }
+
+  return { files, failures };
+}
+
+async function downloadRemoteImageForFeishu(postId: string, imageUrl: string, index: number) {
+  const response = await fetch(imageUrl, {
+    headers: buildMediaRequestHeaders(imageUrl),
+  });
+  if (!response.ok) {
+    throw new Error(`HTTP ${response.status}`);
+  }
+
+  const contentType = response.headers.get("content-type") || "";
+  const mimeType = contentType.split(";")[0]?.trim().toLowerCase() || "";
+  if (mimeType && !mimeType.startsWith("image/")) {
+    throw new Error(`remote file is not an image (${mimeType})`);
+  }
+
+  const buffer = Buffer.from(await response.arrayBuffer());
+  if (!buffer.length) {
+    throw new Error("remote image is empty");
+  }
+  if (buffer.length > maxFeishuAttachmentImageBytes) {
+    throw new Error(`remote image is too large (${buffer.length} bytes)`);
+  }
+
+  const folder = path.join(process.cwd(), "public", "generated", "feishu-attachments", sanitizePathSegment(postId));
+  await mkdir(folder, { recursive: true });
+  const fileName = `image-${String(index + 1).padStart(3, "0")}-${hashString(imageUrl)}.${resolveImageExtension(imageUrl, mimeType)}`;
+  const absolutePath = path.join(folder, fileName);
+  await writeFile(absolutePath, buffer);
+  return toCliRelativePath(absolutePath);
+}
+
+function resolveImageExtension(imageUrl: string, mimeType: string) {
+  if (mimeType === "image/jpeg" || mimeType === "image/jpg") return "jpg";
+  if (mimeType === "image/png") return "png";
+  if (mimeType === "image/webp") return "webp";
+  if (mimeType === "image/gif") return "gif";
+  const extension = path.extname(new URL(imageUrl).pathname).replace(".", "").toLowerCase();
+  return extension && /^[a-z0-9]{2,5}$/.test(extension) ? extension : "png";
+}
+
+function sanitizePathSegment(value: string) {
+  return value.replace(/[^a-zA-Z0-9_-]/g, "_").slice(0, 120) || "post";
+}
+
+function hashString(value: string) {
+  return createHash("sha1").update(value).digest("hex").slice(0, 12);
+}
+
+async function sendFeishuPublishNotification(
+  posts: GeneratedPost[],
+  attachmentUploads: Array<{ postId: string; recordId: string; fileCount: number }>,
+): Promise<FeishuNotificationResult> {
+  const chatId = appConfig.feishuNotifyChatId.trim();
+  const userId = appConfig.feishuNotifyUserId.trim();
+
+  if (!chatId && !userId) {
+    return {
+      status: "skipped",
+      message: "FEISHU_NOTIFY_CHAT_ID or FEISHU_NOTIFY_USER_ID is not configured.",
+    };
+  }
+
+  const recipientType = chatId ? "chat" : "user";
+  const recipientId = chatId || userId;
+  const args = [
+    "im",
+    "+messages-send",
+    "--as",
+    "bot",
+    recipientType === "chat" ? "--chat-id" : "--user-id",
+    recipientId,
+    "--text",
+    buildPublishNotificationText(posts, attachmentUploads),
+    "--idempotency-key",
+    buildNotificationIdempotencyKey(posts),
+  ];
+
+  try {
+    const result = await runFeishuCli(args, {
+      timeout: 60_000,
+      maxBuffer: 1024 * 1024 * 4,
+      env: buildCliEnv(process.env),
+    });
+    return {
+      status: "sent",
+      recipientType,
+      message: recipientType === "chat" ? "Feishu group notification sent." : "Feishu direct notification sent.",
+      stdout: result.stdout,
+      stderr: result.stderr,
+    };
+  } catch (error) {
+    return {
+      status: "failed",
+      recipientType,
+      message: compactCliError(error),
+      stdout: getCliOutput(error, "stdout"),
+      stderr: getCliOutput(error, "stderr"),
+    };
+  }
+}
+
+function buildPublishNotificationText(
+  posts: GeneratedPost[],
+  attachmentUploads: Array<{ postId: string; recordId: string; fileCount: number }>,
+) {
+  const firstPost = posts[0];
+  const imageCount = posts.reduce((total, post) => total + post.imageUrls.length, 0);
+  const uploadedImageCount = attachmentUploads.reduce((total, item) => total + item.fileCount, 0);
+  const title = firstPost?.title?.trim() || "未命名图文";
+
+  return [
+    "FluxPost Studio 写入飞书成功",
+    `标题：${title}`,
+    `记录：${posts.length} 条`,
+    `素材：${uploadedImageCount || imageCount} 张`,
+    `时间：${formatFeishuDateTime(new Date().toISOString())}`,
+    "请到目标飞书多维表格复核动态标题、动态正文和动态素材。",
+  ].join("\n");
+}
+
+function buildNotificationIdempotencyKey(posts: GeneratedPost[]) {
+  const fingerprint = posts.map((post) => post.id).join("|") || "post";
+  return `fp-${Date.now().toString(36)}-${hashString(fingerprint)}`;
+}
+
+function compactCliError(error: unknown) {
+  return error instanceof Error ? sanitizeCliText(error.message) : "Feishu notification failed with an unknown CLI error.";
+}
+
+function getCliOutput(error: unknown, key: "stdout" | "stderr") {
+  if (!error || typeof error !== "object") return undefined;
+  const value = (error as Record<string, unknown>)[key];
+  return typeof value === "string" ? sanitizeCliText(value) : undefined;
+}
+
+async function runFeishuCli(args: string[], options: { timeout: number; maxBuffer: number; env: NodeJS.ProcessEnv }) {
+  const invocation = resolveFeishuCliInvocation(appConfig.feishuCliBin);
+  return runWithConcurrencyPool("feishu", async () => {
+    try {
+      return await execFileAsync(invocation.file, [...invocation.argsPrefix, ...args], {
+        timeout: options.timeout,
+        windowsHide: true,
+        maxBuffer: options.maxBuffer,
+        env: options.env,
+      });
+    } catch (error) {
+      throw sanitizeCliError(error);
+    }
+  });
+}
+
+function sanitizeCliError(error: unknown) {
+  if (!(error instanceof Error)) return new Error("Feishu CLI failed with an unknown error.");
+  const next = new Error(sanitizeCliText(error.message));
+  const source = error as Error & { stdout?: string; stderr?: string; code?: unknown; signal?: unknown };
+  const target = next as Error & { stdout?: string; stderr?: string; code?: unknown; signal?: unknown };
+  if (typeof source.stdout === "string") target.stdout = sanitizeCliText(source.stdout);
+  if (typeof source.stderr === "string") target.stderr = sanitizeCliText(source.stderr);
+  if (source.code !== undefined) target.code = source.code;
+  if (source.signal !== undefined) target.signal = source.signal;
+  return next;
+}
+
+function sanitizeCliText(value: string) {
+  let next = value.replace(/Bearer\s+[A-Za-z0-9._~+/=-]+/g, "Bearer ***").replace(/(--base-token\s+)(\S+)/gi, "$1***");
+  if (appConfig.feishuBitableAppToken) {
+    next = next.replaceAll(appConfig.feishuBitableAppToken, "***");
+  }
+  return next;
+}
+
+export function resolveFeishuCliInvocation(configuredBin: string): CliInvocation {
+  const command = stripWrappingQuotes(configuredBin.trim());
+  if (!command) {
+    throw new Error("FEISHU_CLI_BIN is not configured.");
+  }
+
+  if (process.platform === "win32") {
+    const larkCliScript = resolveLarkCliNodeScript(command);
+    if (larkCliScript) {
+      return {
+        file: process.execPath,
+        argsPrefix: [larkCliScript],
+      };
+    }
+
+    const directExecutable = resolveWindowsExecutable(command);
+    if (directExecutable) {
+      return {
+        file: directExecutable,
+        argsPrefix: [],
+      };
+    }
+  }
+
+  if (command.toLowerCase().endsWith(".js") && existsSync(command)) {
+    return {
+      file: process.execPath,
+      argsPrefix: [command],
+    };
+  }
+
+  return {
+    file: command,
+    argsPrefix: [],
+  };
+}
+
+function resolveLarkCliNodeScript(command: string) {
+  const baseName = path.basename(command).toLowerCase().replace(/\.(cmd|ps1|exe)$/i, "");
+  if (baseName !== "lark-cli") return null;
+
+  const candidateDirs = new Set<string>();
+  if (/[\\/]/.test(command)) {
+    candidateDirs.add(path.dirname(command));
+  }
+  for (const item of getPathDirs()) candidateDirs.add(item);
+  if (process.env.APPDATA) candidateDirs.add(path.join(process.env.APPDATA, "npm"));
+  if (process.env.npm_config_prefix) candidateDirs.add(process.env.npm_config_prefix);
+
+  for (const dir of candidateDirs) {
+    const scriptPath = path.join(dir, "node_modules", "@larksuite", "cli", "scripts", "run.js");
+    if (existsSync(scriptPath)) return scriptPath;
+  }
+  return null;
+}
+
+function resolveWindowsExecutable(command: string) {
+  if (path.isAbsolute(command) || /[\\/]/.test(command)) {
+    const direct = resolveWindowsExecutableAt(command);
+    if (direct) return direct;
+    return null;
+  }
+
+  for (const dir of getPathDirs()) {
+    const direct = resolveWindowsExecutableAt(path.join(dir, command));
+    if (direct) return direct;
+  }
+  return null;
+}
+
+function resolveWindowsExecutableAt(candidate: string) {
+  const extension = path.extname(candidate).toLowerCase();
+  if (extension && extension !== ".cmd" && extension !== ".bat" && existsSync(candidate)) return candidate;
+
+  const pathext = (process.env.PATHEXT || ".EXE;.COM").split(";").filter(Boolean);
+  for (const ext of pathext) {
+    const file = `${candidate}${ext.toLowerCase()}`;
+    if (existsSync(file) && !file.toLowerCase().endsWith(".cmd") && !file.toLowerCase().endsWith(".bat")) return file;
+  }
+  return null;
+}
+
+function getPathDirs() {
+  return (process.env.PATH || process.env.Path || "")
+    .split(path.delimiter)
+    .map((item) => stripWrappingQuotes(item.trim()))
+    .filter(Boolean);
+}
+
+function stripWrappingQuotes(value: string) {
+  if ((value.startsWith('"') && value.endsWith('"')) || (value.startsWith("'") && value.endsWith("'"))) {
+    return value.slice(1, -1);
+  }
+  return value;
+}
+
+function parseCreatedRecordIds(stdout: string) {
+  if (!stdout.trim()) return [];
+  const parsed = JSON.parse(stdout) as unknown;
+  return findStringArray(parsed, "record_id_list") || findRecordIds(parsed);
+}
+
+function findStringArray(value: unknown, key: string): string[] | null {
+  if (!value || typeof value !== "object") return null;
+  const record = value as Record<string, unknown>;
+  if (Array.isArray(record[key]) && record[key].every((item) => typeof item === "string")) return record[key] as string[];
+  for (const child of Object.values(record)) {
+    const result = findStringArray(child, key);
+    if (result) return result;
+  }
+  return null;
+}
+
+function findRecordIds(value: unknown): string[] {
+  if (!value || typeof value !== "object") return [];
+  if (Array.isArray(value)) {
+    return value.flatMap((item) => findRecordIds(item));
+  }
+  const record = value as Record<string, unknown>;
+  const id = record.record_id || record.recordId || record.id;
+  const current = typeof id === "string" && id.startsWith("rec") ? [id] : [];
+  return [...current, ...Object.values(record).flatMap((item) => findRecordIds(item))];
+}
+
+function resolveLocalImageFiles(imageUrls: string[]) {
+  return imageUrls
+    .map((url) => resolveLocalImageFile(url))
+    .filter((file): file is string => Boolean(file));
+}
+
+function resolveLocalImageFile(url: string) {
+  if (!url || /^https?:\/\//i.test(url)) return null;
+
+  const cleanUrl = url.split(/[?#]/, 1)[0];
+  const normalizedUrl = cleanUrl.startsWith("/") ? cleanUrl.slice(1) : cleanUrl;
+  const absolutePath = cleanUrl.startsWith("/")
+    ? path.join(process.cwd(), "public", normalizedUrl)
+    : path.isAbsolute(cleanUrl)
+      ? cleanUrl
+      : path.join(process.cwd(), "public", normalizedUrl);
+  if (!existsSync(absolutePath)) return null;
+
+  const relativePath = path.relative(process.cwd(), absolutePath);
+  return relativePath.startsWith("..") ? absolutePath : `./${relativePath.replaceAll("\\", "/")}`;
+}
+
+function getPostFieldValue(post: GeneratedPost, key: string) {
+  switch (key) {
+    case "title":
+      return post.title;
+    case "body":
+      return post.body;
+    case "platform":
+      return formatPlatform(post.platform);
+    case "status":
+      return formatReviewStatus(post.status);
+    case "imageUrls":
+      return post.imageUrls.join("\n");
+    case "contentTags":
+      return post.contentTags || [];
+    case "imagePrompt":
+      return post.imagePrompt;
+    case "aiNotes":
+      return post.aiNotes.join("\n");
+    case "materialPaths":
+      return post.materialPaths.join("\n");
+    case "sourceItemId":
+      return post.sourceItemId;
+    case "postId":
+      return post.id;
+    case "version":
+      return post.version || 1;
+    case "createdAt":
+      return formatFeishuDateTime(post.createdAt);
+    case "updatedAt":
+      return formatFeishuDateTime(post.updatedAt);
+    default:
+      return null;
+  }
+}
+
+function formatPlatform(value: GeneratedPost["platform"]) {
+  const labels: Record<GeneratedPost["platform"], string> = {
+    wechat_channels: "视频号",
+    xiaohongshu: "小红书",
+    douyin: "抖音",
+    weibo: "微博",
+  };
+  return labels[value] || value;
+}
+
+function formatReviewStatus(value: GeneratedPost["status"]) {
+  const labels: Record<GeneratedPost["status"], string> = {
+    draft: "草稿",
+    editing: "编辑中",
+    approved: "已审查",
+    published: "已发布",
+  };
+  return labels[value] || value;
+}
+
+function formatFeishuDateTime(value?: string) {
+  if (!value) return null;
+  const date = new Date(value);
+  if (Number.isNaN(date.getTime())) return value;
+  const parts = new Intl.DateTimeFormat("zh-CN", {
+    timeZone: "Asia/Shanghai",
+    year: "numeric",
+    month: "2-digit",
+    day: "2-digit",
+    hour: "2-digit",
+    minute: "2-digit",
+    second: "2-digit",
+    hour12: false,
+  }).formatToParts(date);
+  const lookup = Object.fromEntries(parts.map((part) => [part.type, part.value]));
+  return `${lookup.year}-${lookup.month}-${lookup.day} ${lookup.hour}:${lookup.minute}:${lookup.second}`;
+}
+
+function buildCliEnv(env: NodeJS.ProcessEnv) {
+  const nextEnv = { ...env };
+  const proxy = nextEnv.HTTPS_PROXY || nextEnv.https_proxy || nextEnv.HTTP_PROXY || nextEnv.http_proxy || "";
+  if (/^http:\/\/127\.0\.0\.1:9\/?$/i.test(proxy)) {
+    nextEnv.LARK_CLI_NO_PROXY = "1";
+    nextEnv.HTTPS_PROXY = "";
+    nextEnv.HTTP_PROXY = "";
+    nextEnv.https_proxy = "";
+    nextEnv.http_proxy = "";
+  }
+  return nextEnv;
+}
+
+function splitArgs(value: string) {
+  const args: string[] = [];
+  let current = "";
+  let quote: '"' | "'" | null = null;
+
+  for (const char of value) {
+    if ((char === '"' || char === "'") && quote === null) {
+      quote = char;
+      continue;
+    }
+    if (char === quote) {
+      quote = null;
+      continue;
+    }
+    if (char === " " && quote === null) {
+      if (current) {
+        args.push(current);
+        current = "";
+      }
+      continue;
+    }
+    current += char;
+  }
+
+  if (current) args.push(current);
+  return args.map((arg) => arg.replaceAll("{tmp}", os.tmpdir()));
+}

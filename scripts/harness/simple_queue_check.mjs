@@ -1,0 +1,50 @@
+import { readFileSync } from "node:fs";
+import path from "node:path";
+
+const projectRoot = process.cwd();
+
+function read(relativePath) {
+  return readFileSync(path.join(projectRoot, relativePath), "utf8");
+}
+
+function assertContains(source, pattern, message) {
+  if (!pattern.test(source)) throw new Error(message);
+}
+
+function assertNotContains(source, pattern, message) {
+  if (pattern.test(source)) throw new Error(message);
+}
+
+const simpleRuns = read("src/lib/simple-runs.ts");
+const database = read("src/lib/database.ts");
+const types = read("src/lib/types.ts");
+const feishu = read("src/lib/feishu-cli.ts");
+const schema = read("db/migrations/001_initial_postgres.sql");
+const page = read("src/app/page.tsx");
+
+assertContains(types, /export type SimpleRunQueueItem = \{[\s\S]*runId:\s*string[\s\S]*status:\s*SimpleRunQueueStatus/, "Simple run queue item type is missing.");
+assertContains(types, /platformCrawlSettings\?:\s*PlatformCrawlSettings/, "SimpleRun must persist platform crawl settings for queued execution.");
+
+assertContains(simpleRuns, /SIMPLE_RUN_MAX_ITEMS",\s*500,\s*10,\s*2000/, "Simple-mode target limit must be configurable and default above 100.");
+assertNotContains(simpleRuns, /const\s+maxSimpleRunItems\s*=\s*100\b/, "Simple-mode target limit must no longer be hard-capped at 100.");
+assertContains(simpleRuns, /await\s+enqueueSimpleRunQueueItem\(context\.run\)/, "startSimpleRun must enqueue the run instead of executing it inline.");
+assertContains(simpleRuns, /ensureSimpleRunQueueWorker\(\)/, "Simple run queue worker must be started after enqueue/list.");
+assertContains(simpleRuns, /claimNextSimpleRunQueueItem\(workerId,\s*simpleRunQueueLockMs\)/, "Simple queue worker must claim work from the durable queue.");
+assertContains(simpleRuns, /heartbeatSimpleRunQueueItem\(item\.id,\s*workerId,\s*simpleRunQueueLockMs\)/, "Simple queue worker must heartbeat running work.");
+assertContains(simpleRuns, /getSimpleRunQueueItemByRunId\(run\.id\)/, "Interrupted-run reconciliation must inspect the durable queue.");
+assertContains(simpleRuns, /failSimpleRunQueueItemByRunId\(run\.id,\s*message\)/, "Interrupted runs must close their queue item.");
+assertContains(page, /max=\{500\}/, "Simple-mode target count input must allow more than 100 items.");
+
+assertContains(database, /CREATE TABLE IF NOT EXISTS simple_run_queue/, "Runtime database schema must create simple_run_queue.");
+assertContains(schema, /CREATE TABLE IF NOT EXISTS simple_run_queue/, "PostgreSQL migration must create simple_run_queue.");
+assertContains(database, /FOR UPDATE SKIP LOCKED/, "PostgreSQL queue claim must use FOR UPDATE SKIP LOCKED.");
+assertContains(database, /export async function enqueueSimpleRunQueueItem/, "Queue enqueue helper is missing.");
+assertContains(database, /export async function claimNextSimpleRunQueueItem/, "Queue claim helper is missing.");
+assertContains(database, /export async function heartbeatSimpleRunQueueItem/, "Queue heartbeat helper is missing.");
+
+assertContains(feishu, /export const feishuRecordBatchSize = 50/, "Feishu record batch size must be 50.");
+assertContains(feishu, /chunkPosts\(posts,\s*feishuRecordBatchSize\)/, "Feishu publish must split posts into 50-record chunks.");
+assertContains(feishu, /recordPayloadPaths/, "Feishu publish should expose all chunk payload paths.");
+assertNotContains(feishu, /posts\.length\s*>\s*200/, "Feishu publish must not rely on the old 200-record request cap.");
+
+console.log("Simple queue and Feishu chunking check passed.");
