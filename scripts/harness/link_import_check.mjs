@@ -58,7 +58,8 @@ assertContains(tikhubSource, /web\/extract_share_info/, "Xiaohongshu short/share
 assertContains(linkImportSource, /mapWithConcurrency<ParsedSourceLink,\s*FetchedSourceLink>\(candidates,\s*concurrencyConfig\.crawl/, "Link import fetch fan-out must be bounded by crawl concurrency.");
 assertContains(linkImportSource, /filterUnsafeSourceItems\(dedupedItems/, "Link import must apply source safety before tagging and ingest.");
 assertContains(linkImportSource, /tagSourceItems\(safetyResult\.items\)/, "Link import must reuse source tagging.");
-assertContains(linkImportSource, /ingestCrawlItems\(input\.query,\s*taggedItems\)/, "Link import must persist through the content-pool ingest boundary.");
+assertContains(linkImportSource, /owner\?:\s*WorkspaceAccessActor/, "Link import must accept workspace owner context.");
+assertContains(linkImportSource, /ingestCrawlItems\(input\.query,\s*taggedItems,\s*input\.owner\)/, "Link import must persist through the owner-scoped content-pool ingest boundary.");
 assertContains(linkRouteSource, /importSourceLinks/, "Link import API route must delegate to source-link-import domain logic.");
 assertContains(linkRouteSource, /\/api\/crawl\/links|crawl\/links/, "Link import route must be isolated from keyword crawl route semantics.");
 assertContains(pageSource, /crawlInputMode/, "Frontend must expose a crawl input mode state.");
@@ -89,12 +90,12 @@ const tikhub = loadTsModule("src/lib/tikhub.ts", {
   },
   "./concurrency": {
     concurrencyConfig: {
-      crawl: 8,
-      media: 20,
+      crawl: 12,
+      media: 30,
       gpt: 50,
       image: 100,
       feishu: 50,
-      production: 20,
+      production: 30,
     },
     mapWithConcurrency: async (items, _concurrency, mapper) => Promise.all(items.map(mapper)),
     runWithConcurrencyPool: async (_name, task) => task(),

@@ -1,6 +1,7 @@
 import { NextResponse } from "next/server";
 import { compactError, recordExecutionLog } from "@/lib/activity-log";
 import { importSourceLinks } from "@/lib/source-link-import";
+import { isWorkspaceSignInError, requireWorkspaceAccount } from "@/lib/workspace-accounts";
 import type { Platform } from "@/lib/types";
 
 export const runtime = "nodejs";
@@ -8,6 +9,7 @@ export const runtime = "nodejs";
 export async function POST(request: Request) {
   const startedAt = Date.now();
   try {
+    const account = await requireWorkspaceAccount(request);
     const body = (await request.json()) as {
       query?: string;
       links?: string[] | string;
@@ -15,7 +17,7 @@ export async function POST(request: Request) {
       cookie?: string;
     };
     const input = parseLinkImportInput(body);
-    const result = await importSourceLinks(input);
+    const result = await importSourceLinks({ ...input, owner: account });
     return NextResponse.json(result);
   } catch (error) {
     await recordExecutionLog({
@@ -25,7 +27,10 @@ export async function POST(request: Request) {
       message: compactError(error),
       durationMs: Date.now() - startedAt,
     });
-    return NextResponse.json({ error: error instanceof Error ? error.message : "Invalid link import request" }, { status: 400 });
+    return NextResponse.json(
+      { error: error instanceof Error ? error.message : "Invalid link import request" },
+      { status: isWorkspaceSignInError(error) ? 401 : 400 },
+    );
   }
 }
 

@@ -30,6 +30,12 @@ assertContains(simpleRuns, /function hasSimpleProductionVisualSource\(source: No
 assertContains(simpleRuns, /source\.downloadedImages\?\.length/, "Media eligibility must consider downloaded images.");
 assertContains(simpleRuns, /source\.images\.length/, "Media eligibility must consider source images.");
 assertContains(simpleRuns, /source\.videoFrames\?\.length/, "Media eligibility must consider video frames.");
+assertContains(simpleRuns, /function isSimpleProductionVideoLikeSource\(source: NormalizedSourceItem\)/, "Simple production must distinguish video-like sources from image-only sources.");
+assertContains(simpleRuns, /source\.mediaType === "video"/, "Video mediaType must be treated as video-like for simple production.");
+assertContains(simpleRuns, /source\.mediaType === "mixed"/, "Mixed mediaType must be treated as video-like for simple production.");
+assertContains(simpleRuns, /source\.mediaCache\?\.videoPresent/, "Media-cache video presence must be treated as video-like for simple production.");
+assertContains(simpleRuns, /if \(isSimpleProductionVideoLikeSource\(source\)\)\s*return Boolean\(source\.videoFrames\?\.length\)/, "Video-like simple production sources must require extracted video frames instead of falling back to cover/source images.");
+assertContains(simpleRuns, /Skipped video source without extracted video frames\./, "Video-like no-frame skips must be logged with a specific operator-facing reason.");
 assertContains(simpleRuns, /noMediaItems/, "Simple production must track no-media skipped items.");
 assertContains(simpleRuns, /Simple production source skipped/, "No-media skips must be logged.");
 assertContains(simpleRuns, /total:\s*productionItems\.length \+ noMediaItems\.length/, "Produce stage total must include skipped no-media candidates.");
@@ -39,5 +45,11 @@ assertNotContains(
   /\.sort\(\(a, b\) => b\.score - a\.score\)\s*\.slice\(0,\s*normalizedInput\.targetCount\)\s*\.map\(\(\{ item \}\) => item\)/,
   "Simple production must not let no-media items consume the target before media eligibility filtering.",
 );
+
+const creationControls = read("src/lib/creation-controls.ts");
+assertContains(creationControls, /function shouldUseVideoFramesAsImageTasks\(source: NormalizedSourceItem\)/, "Default production task builder must keep a video-frame policy helper.");
+assertContains(creationControls, /function isVideoLikeSource\(source: NormalizedSourceItem\)/, "Default production task builder must distinguish video-like sources from image-only sources.");
+assertContains(creationControls, /if \(shouldUseVideoFramesAsImageTasks\(source\)\)\s*\{\s*return frameTasks\.slice\(0,\s*maxVideoHighlightFrames\);\s*\}/, "Video-like default production tasks must not fall back to source/cover images when no frames were extracted.");
+assertContains(creationControls, /function shouldUseVideoFramesAsImageTasks\(source: NormalizedSourceItem\)\s*\{\s*return isVideoLikeSource\(source\);/, "Default production task video-frame policy must apply to every video-like source, even when no frames were extracted.");
 
 console.log("Simple crawl top-up and media policy check passed.");

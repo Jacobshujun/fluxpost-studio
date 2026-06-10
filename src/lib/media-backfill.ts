@@ -2,9 +2,10 @@ import { readContentProjectsFromDb, writeContentProjectsToDb } from "./database"
 import { cacheCrawledMedia } from "./media-cache";
 import { buildMediaCacheStatus } from "./media-cache-status";
 import { replaceVideoFrameUrlsInMediaUrls, selectBestVideoHighlightFrames } from "./video-frame-policy";
+import { canAccessWorkspaceOwner, type WorkspaceAccessActor } from "./workspace-ownership";
 import type { NormalizedSourceItem } from "./types";
 
-export async function backfillSourceItemMedia(sourceItemIds: string[]) {
+export async function backfillSourceItemMedia(sourceItemIds: string[], account?: WorkspaceAccessActor) {
   const ids = makeUniqueIds(sourceItemIds);
   const selectedIds = new Set(ids);
   const foundIds = new Set<string>();
@@ -14,7 +15,7 @@ export async function backfillSourceItemMedia(sourceItemIds: string[]) {
 
   projects.forEach((project) => {
     project.items.forEach((item) => {
-      if (selectedIds.has(item.id)) {
+      if (selectedIds.has(item.id) && canMutateWorkspaceContent(account, item)) {
         foundIds.add(item.id);
         itemsToCache.push(item);
       }
@@ -101,4 +102,9 @@ function mergeStringArrays(...groups: Array<string[] | undefined>) {
 
 function makeUniqueIds(values: string[]) {
   return Array.from(new Set(values.map((value) => value.trim()).filter(Boolean)));
+}
+
+function canMutateWorkspaceContent(account: WorkspaceAccessActor | undefined, item: NormalizedSourceItem) {
+  if (!account) return true;
+  return canAccessWorkspaceOwner(account, item.ownerUserId);
 }

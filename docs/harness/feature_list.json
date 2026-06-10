@@ -104,7 +104,8 @@
         "2026-06-02 publish status panel and optional Feishu IM notification support added in src/app/page.tsx, src/app/globals.css, src/lib/config.ts, src/lib/feishu-cli.ts, and src/app/api/publish/feishu/route.ts",
         "2026-06-02 Playwright mocked publish check confirmed the publish button sends POST /api/publish/feishu and shows running, success, and skipped-notification states",
         "2026-06-02 Harness baseline passed after publish feedback and optional notification update",
-        "2026-06-03 remote image attachment materialization added in src/lib/feishu-cli.ts; real publish retry for a previously failed generated post uploaded 12 remote image-model URLs to the Feishu 动态素材 attachment field after local download"
+        "2026-06-03 remote image attachment materialization added in src/lib/feishu-cli.ts; real publish retry for a previously failed generated post uploaded 12 remote image-model URLs to the Feishu 动态素材 attachment field after local download",
+        "2026-06-08 asynchronous Feishu publish queue added: POST /api/publish/feishu enqueues durable jobs, GET /api/publish/feishu?jobId=... supports polling, src/lib/feishu-publish-queue.ts persists returned postStates and updates generated posts/source usage, and scripts/harness/feishu_publish_queue_check.mjs plus full Harness baseline passed without calling Feishu"
       ],
       "notes": "Ready for a real publish test with one approved generated post that has final local images; no real Base record creation has been executed in this verification. Feishu IM notification requires FEISHU_NOTIFY_CHAT_ID or FEISHU_NOTIFY_USER_ID plus bot message permission."
     },
@@ -230,6 +231,33 @@
       "notes": "Bulk delete is destructive and requires browser confirmation. Manual browser walkthrough is still recommended before heavy operational use."
     },
     {
+      "id": "shared-workspace-accounts",
+      "title": "V1 whitelist account system with owner isolation",
+      "status": "ready_for_review",
+      "definition_of_done": [
+        "The workspace supports small-team whitelist login from environment configuration",
+        "Whitelist users receive stable account ids for local owner attribution",
+        "Whitelist mode supports administrator users from WORKSPACE_ADMIN_USERS",
+        "Browser sessions use HttpOnly cookies and daily sign-in uses per-user hashed passwords",
+        "Members can access only their own owner-scoped runtime records while admins can access all records",
+        "Write paths attribute new simple runs, content, material entries, generated posts, logs, and Feishu publish jobs to the current account",
+        "Default verification covers account schema and wiring without creating real credentials"
+      ],
+      "evidence": [
+        "Source files present: src/lib/workspace-accounts.ts, src/app/api/accounts/route.ts, src/app/api/accounts/session/route.ts",
+        "Runtime schema updated in src/lib/database.ts and db/migrations/001_initial_postgres.sql with workspace_accounts and workspace_sessions",
+        "UI files updated: src/app/page.tsx and src/app/globals.css",
+        "Harness check added: scripts/harness/workspace_accounts_check.mjs and wired into scripts/harness/check.ps1",
+        "2026-06-08 passed: node scripts/harness/workspace_accounts_check.mjs; node scripts/harness/postgres_schema_check.mjs; npm run lint; npx --no-install tsc --noEmit; npm run build",
+        "2026-06-08 passed: powershell -ExecutionPolicy Bypass -File scripts/harness/check.ps1; npm run local:restart; Playwright desktop/mobile account access panel no-overflow checks",
+        "2026-06-08 follow-up hardened mutating workspace API routes: content, crawl/import, generate/images, materials, production, review, activity clear, simple runs, workspace settings, and manual Feishu publish require a workspace account; HTTP smoke confirms unauthenticated POST /api/production/posts returns 401 without writes",
+        "2026-06-08 whitelist simplification added: WORKSPACE_AUTH_MODE defaults to whitelist, WORKSPACE_ALLOWED_USERS and WORKSPACE_ACCESS_PASSWORD drive access, whitelist sessions use virtual account ids shaped as whitelist:{username}, the frontend no longer exposes admin bootstrap or account creation controls, and node scripts/harness/workspace_accounts_check.mjs, npx --no-install tsc --noEmit, npm run lint, npm run build, full Harness baseline, npm run local:restart, and read-only /api/accounts/session verification passed",
+        "2026-06-08 owner-isolation follow-up added WORKSPACE_ADMIN_USERS, first-admin setup through WORKSPACE_ACCESS_PASSWORD, admin account management, per-user whitelist passwords, private read APIs, and owner filtering for content pools, generated posts, materials, execution logs, crawl jobs, runtime posts, simple runs, batch jobs, and Feishu publish jobs",
+        "2026-06-08 passed: node scripts/harness/workspace_accounts_check.mjs; node scripts/harness/link_import_check.mjs; node scripts/harness/generated_posts_upsert_check.mjs; npx --no-install tsc --noEmit; npm run lint; npm run build; full powershell -ExecutionPolicy Bypass -File scripts/harness/check.ps1; npm run local:watch-simple -- -Once; npm run local:restart; read-only /api/accounts/session verification on http://127.0.0.1:3001"
+      ],
+      "notes": "Default whitelist accounts identify operators and partition app-layer runtime records by owner for normal members. Admins can see all records. Direct media URL authorization under /media and /generated remains a V1.1 hardening item. No real whitelist credentials or account-table credentials are created during automated verification."
+    },
+    {
       "id": "high-throughput-concurrency",
       "title": "High-throughput provider concurrency",
       "status": "ready_for_review",
@@ -252,7 +280,8 @@
         "2026-06-04 passed: npm run db:migrate:postgres -- --dry-run",
         "2026-06-04 passed: npm run lint; npx --no-install tsc --noEmit; npm run build",
         "2026-06-04 passed: powershell -ExecutionPolicy Bypass -File scripts/harness/check.ps1",
-        "2026-06-04 passed: npm run local:restart and local HTTP smoke on http://127.0.0.1:3001"
+        "2026-06-04 passed: npm run local:restart and local HTTP smoke on http://127.0.0.1:3001",
+        "2026-06-08 collection/generation defaults raised while Feishu writes remain queued: crawl=12, media=30, production=30, SIMPLE_RUN_WORKER_CONCURRENCY=4, Feishu queue worker default=1 with per-owner serialization; concurrency and Feishu queue Harness checks plus full baseline passed"
       ],
       "notes": "Provider work still uses application-process concurrency pools. Simple-mode queued runs now use a durable database queue, but subtask-level provider replay and Feishu per-post idempotency remain future work. Real large-count simple runs still need manual validation before marking done."
     },
@@ -279,10 +308,12 @@
         "2026-06-03 passed after slowness mitigation and watcher: npm run local:watch-simple -- -Once; npm run lint; npx --no-install tsc --noEmit; npm run build; powershell -ExecutionPolicy Bypass -File scripts/harness/check.ps1",
         "2026-06-03 visual-tag image strategy prompt routing added: workspace settings persist carExterior/textImage/peopleWithCar prompts, simple and advanced UI expose all three, and browser/API smoke on http://127.0.0.1:3001 passed",
         "2026-06-03 RunningHub image provider integration added: src/lib/image-generation.ts supports OPENAI_IMAGE_ENDPOINT=runninghub with local reference upload, G-2 task submission, polling, and config status verification; npm run lint, tsc, build, local restart, and Harness baseline passed",
+        "2026-06-08 RunningHub image dispatch removed and replaced with GPT-Image-2 standard OpenAI Images API request shape: /images/generations JSON for text-to-image, multipart /images/edits for selected reference-image tasks, OPENAI_IMAGE_API_KEY support, and static image request-shape Harness checks passed",
         "2026-06-03 browser UI smoke on http://127.0.0.1:3001 confirmed simple workspace, keyword input, simple start button, advanced module switcher after mode change, and no horizontal overflow at 1440x950 or 390x844",
         "2026-06-04 simple mode no longer overwrites saved advanced platform crawl settings with hidden controls; Xiaohongshu image/text noteType=2 is enforced through scripts/harness/xiaohongshu_note_type_check.mjs; full Harness baseline passed",
         "2026-06-04 simple starts now enqueue durable simple_run_queue work and return immediately; simple run snapshots persist submission-time platform crawl settings; UI allows target count up to 500; scripts/harness/simple_queue_check.mjs and full Harness baseline passed",
-        "2026-06-08 compact and simple workspaces added batch source-link one-click production through sourceMode=links on POST /api/simple/runs; src/lib/simple-runs.ts resolves exact links via src/lib/source-link-import.ts, skips keyword search/top-up, then reuses safety/tagging/content-pool/production/publish stages; scripts/harness/simple_link_run_check.mjs, lint, tsc, build, local restart, and mocked compact/simple UI checks passed without live external service calls"
+        "2026-06-08 compact and simple workspaces added batch source-link one-click production through sourceMode=links on POST /api/simple/runs; src/lib/simple-runs.ts resolves exact links via src/lib/source-link-import.ts, skips keyword search/top-up, then reuses safety/tagging/content-pool/production/publish stages; scripts/harness/simple_link_run_check.mjs, lint, tsc, build, local restart, and mocked compact/simple UI checks passed without live external service calls",
+        "2026-06-08 simple-run publish stage now approves/saves generated posts, enqueues Feishu publishing with publish.status=queued and jobId, and frees the simple-run worker while src/lib/feishu-publish-queue.ts asynchronously updates publish completion; Feishu queue check and full Harness baseline passed"
       ],
       "notes": "External TikHub/OpenAI/image-generation/Feishu calls are not part of default baseline verification. A real small-count simple run and a larger two-keyword queue validation are still needed before marking done."
     }

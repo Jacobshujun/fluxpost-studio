@@ -1,11 +1,12 @@
 import { NextResponse } from "next/server";
 import { compactError, recordExecutionLog } from "@/lib/activity-log";
 import { concurrencyConfig } from "@/lib/concurrency";
-import { markSourceRewritten } from "@/lib/content-pool";
+import { getSourceItemsByIds, markSourceRewritten } from "@/lib/content-pool";
 import { saveGeneratedPost } from "@/lib/generated-posts";
 import { generateImagesFromPrompt } from "@/lib/image-generation";
 import { generatePost } from "@/lib/openai";
 import { savePost } from "@/lib/store";
+import { isWorkspaceSignInError, requireWorkspaceAccount } from "@/lib/workspace-accounts";
 import type { ImageGenerationQuality, NormalizedSourceItem, ProductionPlan, SourceImageTask } from "@/lib/types";
 
 export const runtime = "nodejs";
@@ -13,6 +14,7 @@ export const runtime = "nodejs";
 export async function POST(request: Request) {
   const startedAt = Date.now();
   try {
+    const account = await requireWorkspaceAccount(request);
     const body = (await request.json()) as {
       source?: NormalizedSourceItem;
       materialPaths?: string[];
@@ -33,14 +35,17 @@ export async function POST(request: Request) {
       });
       return NextResponse.json({ error: "Source item is required" }, { status: 400 });
     }
+    const source = (await getSourceItemsByIds([body.source.id], account))[0];
+    if (!source) return NextResponse.json({ error: "Source item not found" }, { status: 404 });
+
     await recordExecutionLog({
       scope: "generate",
       action: "开始逐条仿写",
       status: "running",
       message: "已接收选中的爆款样本，准备调用文本模型生成图文草稿",
       details: {
-        sourceItemId: body.source.id,
-        platform: body.source.platform,
+        sourceItemId: source.id,
+        platform: source.platform,
           materialCount: Array.isArray(body.materialPaths) ? body.materialPaths.length : 0,
           instructionLength: body.instruction?.length || 0,
           imageTaskCount: Array.isArray(body.imageTasks) ? body.imageTasks.filter((task) => task.selected).length : 0,
@@ -51,7 +56,7 @@ export async function POST(request: Request) {
     });
 
     const post = await generatePost({
-      source: body.source,
+      source,
       materialPaths: Array.isArray(body.materialPaths) ? body.materialPaths : [],
       instruction: body.instruction,
       productionPlanOverride: body.productionPlanOverride,
@@ -103,9 +108,9 @@ export async function POST(request: Request) {
       }
     }
 
-    await savePost(post);
-    await saveGeneratedPost(post);
-    await markSourceRewritten(post.sourceItemId, post);
+    const savedPost = await saveGeneratedPost(post, account);
+    await savePost(savedPost, account);
+    await markSourceRewritten(savedPost.sourceItemId, savedPost, account);
     await recordExecutionLog({
       scope: "generate",
       action: "图文草稿生成完成",
@@ -113,14 +118,14 @@ export async function POST(request: Request) {
       message: post.imageUrls.length ? "完整图文草稿已写入本地 store，并标记原样本为已仿写" : "文字草稿已写入本地 store，并标记原样本为已仿写",
       durationMs: Date.now() - startedAt,
       details: {
-        postId: post.id,
-        sourceItemId: post.sourceItemId,
-        titleLength: post.title.length,
-        bodyLength: post.body.length,
-        imageCount: post.imageUrls.length,
+        postId: savedPost.id,
+        sourceItemId: savedPost.sourceItemId,
+        titleLength: savedPost.title.length,
+        bodyLength: savedPost.body.length,
+        imageCount: savedPost.imageUrls.length,
       },
     });
-    return NextResponse.json({ post });
+    return NextResponse.json({ post: savedPost });
   } catch (error) {
     const message = error instanceof Error ? error.message : "Failed to generate post";
     await recordExecutionLog({
@@ -130,6 +135,6 @@ export async function POST(request: Request) {
       message: compactError(error),
       durationMs: Date.now() - startedAt,
     });
-    return NextResponse.json({ error: message }, { status: 500 });
+    return NextResponse.json({ error: message }, { status: isWorkspaceSignInError(error) ? 401 : 500 });
   }
 }

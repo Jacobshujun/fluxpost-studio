@@ -23,11 +23,13 @@ const feishu = read("src/lib/feishu-cli.ts");
 const simpleRuns = read("src/lib/simple-runs.ts");
 const batchProduction = read("src/lib/batch-production.ts");
 
+assertContains(concurrency, /crawl:\s*readConcurrencyEnv\("WORKER_CRAWL_CONCURRENCY",\s*12,\s*50\)/, "Crawl pool must default to 12 and cap at 50.");
+assertContains(concurrency, /media:\s*readConcurrencyEnv\("WORKER_MEDIA_CONCURRENCY",\s*30,\s*100\)/, "Media pool must default to 30 and cap at 100.");
 assertContains(concurrency, /gpt:\s*readConcurrencyEnv\("WORKER_GPT_CONCURRENCY",\s*50,\s*50\)/, "GPT pool must default to 50 and cap at 50.");
 assertContains(
   concurrency,
   /image:\s*readConcurrencyEnv\("WORKER_IMAGE_CONCURRENCY",\s*100,\s*100\)/,
-  "Image pool must default to 100 and cap at RunningHub's 100-concurrency limit.",
+  "Image pool must default to 100 and cap at the global image-provider limit.",
 );
 assertContains(
   concurrency,
@@ -39,6 +41,7 @@ assertContains(
   /feishuAttachment:\s*readConcurrencyEnv\("WORKER_FEISHU_ATTACHMENT_CONCURRENCY",\s*3,\s*10\)/,
   "Feishu attachment pool must default to 3 and cap at 10.",
 );
+assertContains(concurrency, /production:\s*readConcurrencyEnv\("WORKER_PRODUCTION_CONCURRENCY",\s*30,\s*50\)/, "Production pool must default to 30 and cap at 50.");
 assertContains(concurrency, /runWithConcurrencyPool/, "Global concurrency runner must be exported.");
 assertContains(concurrency, /mapWithConcurrency/, "Shared bounded mapper must be exported.");
 

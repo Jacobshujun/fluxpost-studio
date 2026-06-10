@@ -1,34 +1,62 @@
+import { AsyncLocalStorage } from "node:async_hooks";
 import { readExecutionLogsFromDb, writeExecutionLogsToDb } from "./database";
 import type { ExecutionLogEntry } from "./types";
+import {
+  canAccessWorkspaceOwner,
+  filterWorkspaceOwnedRecords,
+  isWorkspaceAdmin,
+  scopeWorkspaceOwner,
+  type WorkspaceAccessActor,
+  type WorkspaceOwnedRecord,
+} from "./workspace-ownership";
 
 type StoredExecutionLog = {
   entries: ExecutionLogEntry[];
 };
 
 const maxEntries = 300;
+const executionLogOwnerStorage = new AsyncLocalStorage<WorkspaceOwnedRecord>();
 
-export async function listExecutionLogs(limit = 120) {
+export async function listExecutionLogs(limit = 120, account?: WorkspaceAccessActor) {
   const log = await readExecutionLog();
-  return log.entries.slice(0, limit);
+  return filterWorkspaceOwnedRecords(log.entries, account).slice(0, limit);
 }
 
-export async function clearExecutionLogs() {
-  await writeExecutionLog({ entries: [] });
+export async function clearExecutionLogs(account?: WorkspaceAccessActor) {
+  if (!account || isWorkspaceAdmin(account)) {
+    await writeExecutionLog({ entries: [] });
+    return;
+  }
+  const log = await readExecutionLog();
+  await writeExecutionLog({
+    entries: log.entries.filter((entry) => !canAccessWorkspaceOwner(account, entry.ownerUserId)),
+  });
 }
 
 export async function recordExecutionLog(input: Omit<ExecutionLogEntry, "id" | "createdAt">) {
   try {
     const log = await readExecutionLog();
+    const owner = executionLogOwnerStorage.getStore();
     const entry: ExecutionLogEntry = {
       id: `exec-${Date.now()}-${Math.random().toString(16).slice(2, 8)}`,
       createdAt: new Date().toISOString(),
       ...input,
+      ownerUserId: input.ownerUserId || owner?.ownerUserId,
+      ownerDisplayName: input.ownerDisplayName || owner?.ownerDisplayName,
       details: normalizeDetails(input.details),
     };
     await writeExecutionLog({ entries: [entry, ...log.entries].slice(0, maxEntries) });
   } catch (error) {
     console.warn("Failed to record execution log", error);
   }
+}
+
+export function runWithExecutionLogOwner<T>(account: WorkspaceAccessActor, operation: () => Promise<T>) {
+  return executionLogOwnerStorage.run(scopeWorkspaceOwner(account), operation);
+}
+
+export function enterExecutionLogOwner(account: WorkspaceAccessActor) {
+  executionLogOwnerStorage.enterWith(scopeWorkspaceOwner(account));
 }
 
 export function compactError(error: unknown) {

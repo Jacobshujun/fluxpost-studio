@@ -2,6 +2,7 @@ import { NextResponse } from "next/server";
 import { compactError, recordExecutionLog } from "@/lib/activity-log";
 import { markSourceRewritten } from "@/lib/content-pool";
 import { batchDeleteGeneratedPosts, batchUpdateGeneratedPostStatus } from "@/lib/generated-posts";
+import { isWorkspaceSignInError, requireWorkspaceAccount } from "@/lib/workspace-accounts";
 import type { GeneratedPost } from "@/lib/types";
 
 export const runtime = "nodejs";
@@ -11,6 +12,7 @@ const generatedPostStatusValues: GeneratedPost["status"][] = ["draft", "editing"
 export async function POST(request: Request) {
   const startedAt = Date.now();
   try {
+    const account = await requireWorkspaceAccount(request);
     const body = (await request.json()) as {
       action?: "set_status" | "delete";
       ids?: string[];
@@ -23,9 +25,9 @@ export async function POST(request: Request) {
       if (!body.status || !generatedPostStatusValues.includes(body.status)) {
         return NextResponse.json({ error: "Valid post status is required" }, { status: 400 });
       }
-      const result = await batchUpdateGeneratedPostStatus(ids, body.status);
+      const result = await batchUpdateGeneratedPostStatus(ids, body.status, account);
       if (body.status === "approved" || body.status === "published") {
-        await Promise.all(result.posts.map((post) => markSourceRewritten(post.sourceItemId, post)));
+        await Promise.all(result.posts.map((post) => markSourceRewritten(post.sourceItemId, post, account)));
       }
       await recordExecutionLog({
         scope: "production/posts",
@@ -44,7 +46,7 @@ export async function POST(request: Request) {
     }
 
     if (body.action === "delete") {
-      const result = await batchDeleteGeneratedPosts(ids);
+      const result = await batchDeleteGeneratedPosts(ids, account);
       await recordExecutionLog({
         scope: "production/posts",
         action: "批量删除生成稿",
@@ -69,7 +71,10 @@ export async function POST(request: Request) {
       message: compactError(error),
       durationMs: Date.now() - startedAt,
     });
-    return NextResponse.json({ error: error instanceof Error ? error.message : "Failed to batch update generated posts" }, { status: 400 });
+    return NextResponse.json(
+      { error: error instanceof Error ? error.message : "Failed to batch update generated posts" },
+      { status: isWorkspaceSignInError(error) ? 401 : 400 },
+    );
   }
 }
 

@@ -6,24 +6,37 @@ import { updateSourceContentTags, updateSourceVisualTags } from "./source-taggin
 import { enrichSourceTimestamps } from "./source-timestamps";
 import { extractDouyinCarouselImageUrls } from "./douyin-media";
 import { replaceVideoFrameUrlsInMediaUrls, selectBestVideoHighlightFrames } from "./video-frame-policy";
+import {
+  accessActorFromOwner,
+  applyWorkspaceOwner,
+  canAccessWorkspaceOwner,
+  filterWorkspaceOwnedRecords,
+  scopeWorkspaceOwner,
+  type WorkspaceAccessActor,
+} from "./workspace-ownership";
 import type { ContentPoolSnapshot, ContentProject, GeneratedPost, NormalizedSourceItem, Platform, SourceUsageStatus, ViralAnalysis } from "./types";
 
 type StoredContentPool = {
   projects: ContentProject[];
 };
 
-export async function getContentPoolSnapshot(query?: string): Promise<ContentPoolSnapshot> {
+const sourceRewriteMaxAttempts = 3;
+const sourceRewriteRetryDelayMs = 35;
+
+export async function getContentPoolSnapshot(query?: string, account?: WorkspaceAccessActor): Promise<ContentPoolSnapshot> {
   const pool = await readPool();
-  const projects = pool.projects.map(refreshProjectStats).sort((a, b) => b.updatedAt.localeCompare(a.updatedAt));
-  const matchedProject = query ? projects.find((project) => project.normalizedQuery === normalizeQuery(query)) : undefined;
+  const projects = filterWorkspaceOwnedRecords(pool.projects.map(refreshProjectStats), account).sort((a, b) => b.updatedAt.localeCompare(a.updatedAt));
+  const matchedProject = query
+    ? projects.find((project) => project.normalizedQuery === normalizeProjectKey(query, project.ownerUserId) || normalizeQuery(project.query) === normalizeQuery(query))
+    : undefined;
   const activeProject = matchedProject || projects[0];
   return { projects, activeProject };
 }
 
-export async function getSourceItemsByIds(sourceItemIds: string[]) {
+export async function getSourceItemsByIds(sourceItemIds: string[], account?: WorkspaceAccessActor) {
   if (!sourceItemIds.length) return [];
   const pool = await readPool();
-  const projects = pool.projects.map(refreshProjectStats);
+  const projects = filterWorkspaceOwnedRecords(pool.projects.map(refreshProjectStats), account);
   const itemsById = new Map<string, NormalizedSourceItem>();
   projects.forEach((project) => {
     project.items.forEach((item) => {
@@ -33,19 +46,21 @@ export async function getSourceItemsByIds(sourceItemIds: string[]) {
   return sourceItemIds.map((id) => itemsById.get(id)).filter((item): item is NormalizedSourceItem => Boolean(item));
 }
 
-export async function ingestCrawlItems(query: string, items: NormalizedSourceItem[]) {
+export async function ingestCrawlItems(query: string, items: NormalizedSourceItem[], account?: WorkspaceAccessActor) {
   const pool = await readPool();
   const now = new Date().toISOString();
-  const normalizedQuery = normalizeQuery(query);
-  const project = ensureProject(pool, query, normalizedQuery, now);
+  const owner = account ? scopeWorkspaceOwner(account) : undefined;
+  const normalizedQuery = normalizeProjectKey(query, owner?.ownerUserId);
+  const project = ensureProject(pool, query, normalizedQuery, now, owner);
 
   project.query = query;
   project.updatedAt = now;
   project.lastCrawledAt = now;
+  if (owner) Object.assign(project, owner);
 
   const existing = new Map(project.items.map((item) => [item.id, item]));
   for (const item of items) {
-    const enrichedItem = enrichSourceTimestamps(item, now);
+    const enrichedItem = applyWorkspaceOwner(enrichSourceTimestamps(item, now), account, item);
     const previous = existing.get(enrichedItem.id);
     if (previous) {
       const downloadedImages = enrichedItem.downloadedImages?.length ? enrichedItem.downloadedImages : previous.downloadedImages;
@@ -123,15 +138,17 @@ export async function createSourceItem(query: string, item: Omit<NormalizedSourc
   id?: string;
   sourceId?: string;
   poolStatus?: SourceUsageStatus;
-}) {
+}, account?: WorkspaceAccessActor) {
   const pool = await readPool();
   const now = new Date().toISOString();
-  const normalizedQuery = normalizeQuery(query);
-  const project = ensureProject(pool, query, normalizedQuery, now);
+  const owner = account ? scopeWorkspaceOwner(account) : undefined;
+  const normalizedQuery = normalizeProjectKey(query, owner?.ownerUserId);
+  const project = ensureProject(pool, query, normalizedQuery, now, owner);
   const sourceId = item.sourceId || `manual-${Date.now()}`;
   const videoFrames = normalizeVideoFrames(item.videoFrames);
   const sourceItem: NormalizedSourceItem = {
     ...item,
+    ...owner,
     id: item.id || `${item.platform}-${sourceId}`,
     sourceId,
     images: normalizeContentImageUrls(item.images || []),
@@ -166,12 +183,12 @@ export async function createSourceItem(query: string, item: Omit<NormalizedSourc
   };
 
   project.items = [nextItem, ...project.items.filter((existing) => existing.id !== enrichedItem.id)];
-  Object.assign(project, refreshProjectStats({ ...project, updatedAt: now }));
+  Object.assign(project, refreshProjectStats({ ...project, ...owner, updatedAt: now }));
   await writePool(pool);
   return { project, item: nextItem };
 }
 
-export async function updateSourceItem(sourceItemId: string, patch: Partial<NormalizedSourceItem>) {
+export async function updateSourceItem(sourceItemId: string, patch: Partial<NormalizedSourceItem>, account?: WorkspaceAccessActor) {
   const pool = await readPool();
   const now = new Date().toISOString();
   let updatedItem: NormalizedSourceItem | undefined;
@@ -180,12 +197,15 @@ export async function updateSourceItem(sourceItemId: string, patch: Partial<Norm
     let changed = false;
     const items = project.items.map((item) => {
       if (item.id !== sourceItemId) return item;
+      if (!canMutateWorkspaceContent(account, item)) return item;
       changed = true;
       const videoFrames = normalizeVideoFrames(patch.videoFrames === undefined ? item.videoFrames : patch.videoFrames);
       const nextItem: NormalizedSourceItem = {
         ...item,
         ...patch,
         id: item.id,
+        ownerUserId: item.ownerUserId,
+        ownerDisplayName: item.ownerDisplayName,
         platform: patch.platform || item.platform,
         sourceId: patch.sourceId || item.sourceId,
         images: patch.images ? normalizeContentImageUrls(patch.images) : item.images,
@@ -227,13 +247,17 @@ export async function updateSourceItem(sourceItemId: string, patch: Partial<Norm
   return updatedItem;
 }
 
-export async function deleteSourceItem(sourceItemId: string) {
+export async function deleteSourceItem(sourceItemId: string, account?: WorkspaceAccessActor) {
   const pool = await readPool();
   const now = new Date().toISOString();
   let deleted = false;
 
   pool.projects = pool.projects.map((project) => {
-    const nextItems = project.items.filter((item) => item.id !== sourceItemId);
+    const nextItems = project.items.filter((item) => {
+      if (item.id !== sourceItemId) return true;
+      if (!canMutateWorkspaceContent(account, item)) return true;
+      return false;
+    });
     if (nextItems.length === project.items.length) return project;
     deleted = true;
     return refreshProjectStats({ ...project, items: nextItems, updatedAt: now });
@@ -243,7 +267,7 @@ export async function deleteSourceItem(sourceItemId: string) {
   await writePool(pool);
 }
 
-export async function batchUpdateSourceItemStatus(sourceItemIds: string[], poolStatus: SourceUsageStatus) {
+export async function batchUpdateSourceItemStatus(sourceItemIds: string[], poolStatus: SourceUsageStatus, account?: WorkspaceAccessActor) {
   const ids = makeUniqueIds(sourceItemIds);
   const selectedIds = new Set(ids);
   const foundIds = new Set<string>();
@@ -254,7 +278,7 @@ export async function batchUpdateSourceItemStatus(sourceItemIds: string[], poolS
   pool.projects = pool.projects.map((project) => {
     let changed = false;
     const items = project.items.map((item) => {
-      if (!selectedIds.has(item.id)) return item;
+      if (!selectedIds.has(item.id) || !canMutateWorkspaceContent(account, item)) return item;
       changed = true;
       foundIds.add(item.id);
       const nextItem: NormalizedSourceItem = {
@@ -278,7 +302,7 @@ export async function batchUpdateSourceItemStatus(sourceItemIds: string[], poolS
   };
 }
 
-export async function batchDeleteSourceItems(sourceItemIds: string[]) {
+export async function batchDeleteSourceItems(sourceItemIds: string[], account?: WorkspaceAccessActor) {
   const ids = makeUniqueIds(sourceItemIds);
   const selectedIds = new Set(ids);
   const foundIds = new Set<string>();
@@ -287,7 +311,7 @@ export async function batchDeleteSourceItems(sourceItemIds: string[]) {
 
   pool.projects = pool.projects.map((project) => {
     const nextItems = project.items.filter((item) => {
-      const shouldDelete = selectedIds.has(item.id);
+      const shouldDelete = selectedIds.has(item.id) && canMutateWorkspaceContent(account, item);
       if (shouldDelete) foundIds.add(item.id);
       return !shouldDelete;
     });
@@ -302,8 +326,21 @@ export async function batchDeleteSourceItems(sourceItemIds: string[]) {
   };
 }
 
-export async function markSourceRewritten(sourceItemId: string, post: GeneratedPost) {
+export async function markSourceRewritten(sourceItemId: string, post: GeneratedPost, account?: WorkspaceAccessActor) {
+  for (let attempt = 1; attempt <= sourceRewriteMaxAttempts; attempt += 1) {
+    try {
+      await markSourceRewrittenOnce(sourceItemId, post, account);
+      return;
+    } catch (error) {
+      if (attempt >= sourceRewriteMaxAttempts || !isSourceRewriteRetryableError(error)) throw error;
+      await delaySourceRewriteRetry(attempt);
+    }
+  }
+}
+
+async function markSourceRewrittenOnce(sourceItemId: string, post: GeneratedPost, account?: WorkspaceAccessActor) {
   const pool = await readPool();
+  const access = account || accessActorFromOwner(post.ownerUserId, post.ownerDisplayName);
   let changed = false;
   const nextStatus: SourceUsageStatus =
     post.status === "published" ? "published" : post.status === "approved" ? "approved" : "rewritten";
@@ -312,7 +349,7 @@ export async function markSourceRewritten(sourceItemId: string, post: GeneratedP
   pool.projects = pool.projects.map((project) => {
     let projectChanged = false;
     const items = project.items.map((item) => {
-      if (item.id !== sourceItemId) return item;
+      if (item.id !== sourceItemId || !canMutateWorkspaceContent(access, item)) return item;
       const currentStatus = item.poolStatus || "new";
       const shouldCountUsage = rankStatus(currentStatus) < rankStatus("rewritten") && rankStatus(nextStatus) >= rankStatus("rewritten");
       changed = true;
@@ -328,6 +365,16 @@ export async function markSourceRewritten(sourceItemId: string, post: GeneratedP
   });
 
   if (changed) await writePool(pool);
+}
+
+function isSourceRewriteRetryableError(error: unknown) {
+  const code = typeof (error as { code?: unknown })?.code === "string" ? (error as { code: string }).code : "";
+  const message = error instanceof Error ? error.message : String(error || "");
+  return code === "40P01" || code === "40001" || /\bdeadlock\b/i.test(message) || message.includes("\u6b7b\u9501");
+}
+
+function delaySourceRewriteRetry(attempt: number) {
+  return new Promise<void>((resolve) => setTimeout(resolve, sourceRewriteRetryDelayMs * attempt));
 }
 
 export function calculateHotScore(item: NormalizedSourceItem) {
@@ -429,12 +476,13 @@ function refreshProjectStats(project: ContentProject): ContentProject {
   };
 }
 
-function ensureProject(pool: StoredContentPool, query: string, normalizedQuery: string, now: string) {
+function ensureProject(pool: StoredContentPool, query: string, normalizedQuery: string, now: string, owner?: { ownerUserId: string; ownerDisplayName: string }) {
   let project = pool.projects.find((item) => item.normalizedQuery === normalizedQuery);
 
   if (!project) {
     project = {
       id: `project-${normalizedQuery || Date.now()}`,
+      ...owner,
       query,
       normalizedQuery,
       createdAt: now,
@@ -461,8 +509,19 @@ function isValidSourceItem(item: NormalizedSourceItem) {
   return true;
 }
 
+function canMutateWorkspaceContent(account: WorkspaceAccessActor | undefined, item: NormalizedSourceItem) {
+  if (!account) return true;
+  return canAccessWorkspaceOwner(account, item.ownerUserId);
+}
+
 function normalizeQuery(value: string) {
   return value.trim().toLowerCase().replace(/\s+/g, "-").replace(/[^a-z0-9\u3400-\u9fff_-]+/gi, "").slice(0, 80);
+}
+
+function normalizeProjectKey(query: string, ownerUserId?: string) {
+  const base = normalizeQuery(query);
+  const owner = ownerUserId ? normalizeQuery(ownerUserId) : "";
+  return owner ? `${base || "project"}--owner-${owner}`.slice(0, 120) : base;
 }
 
 function mergeStringArrays(...groups: Array<string[] | undefined>) {

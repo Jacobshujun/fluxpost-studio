@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useMemo, useRef, useState, useSyncExternalStore, type ReactNode, type TouchEvent } from "react";
+import { useEffect, useMemo, useRef, useState, useSyncExternalStore, type FormEvent, type ReactNode, type TouchEvent } from "react";
 import {
   BarChart3,
   Bot,
@@ -17,7 +17,10 @@ import {
   Image as ImageIcon,
   Layers3,
   Lightbulb,
+  KeyRound,
   Loader2,
+  LogIn,
+  LogOut,
   Maximize2,
   Moon,
   Play,
@@ -34,6 +37,8 @@ import {
   Terminal,
   Trash2,
   UploadCloud,
+  User,
+  Users,
   Video,
   Wand2,
   X,
@@ -57,6 +62,7 @@ import type {
   ContentProject,
   CrawlJob,
   ExecutionLogEntry,
+  FeishuPublishJob,
   FeishuPostPublishState,
   GeneratedPost,
   ImageGenerationQuality,
@@ -79,6 +85,7 @@ import type {
   SourceUsageStatus,
   TextProductionStrategy,
   VisualTag,
+  WorkspaceAccount,
   WorkspacePromptSettings,
 } from "@/lib/types";
 
@@ -116,6 +123,20 @@ type SimpleWorkspaceVariant = "standard" | "compact";
 type SimpleSourceMode = "keyword" | "links";
 type TaskProgressStatus = "running" | "success" | "error";
 
+type AccountSessionResponse = {
+  authMode?: "accounts" | "whitelist";
+  hasAccounts?: boolean;
+  hasAdminAccount?: boolean;
+  accountCount?: number;
+  activeAccountCount?: number;
+  whitelistConfigured?: boolean;
+  adminConfigured?: boolean;
+  setupPasswordConfigured?: boolean;
+  account?: WorkspaceAccount | null;
+  accounts?: WorkspaceAccount[];
+  error?: string;
+};
+
 type TaskProgressSnapshot = {
   title: string;
   label: string;
@@ -133,6 +154,8 @@ type PublishStatusSnapshot = {
   detail: string;
   progress: number;
   notification?: string;
+  jobId?: string;
+  queueStatus?: FeishuPublishJob["status"];
 };
 
 type LinkImportResultStatus = "imported" | "filtered" | "duplicate" | "unsupported" | "failed";
@@ -171,7 +194,10 @@ type LinkImportResponse = {
 };
 
 type FeishuPublishResponse = {
-  status?: "published" | "attachment_failed" | "needs_config" | "skipped" | "failed" | string;
+  status?: "queued" | "running" | "published" | "attachment_failed" | "needs_config" | "skipped" | "failed" | string;
+  jobId?: string;
+  queueStatus?: FeishuPublishJob["status"];
+  job?: FeishuPublishJob;
   payloadPath?: string;
   message?: string;
   error?: string;
@@ -246,7 +272,7 @@ const platforms: Array<{ value: Platform; label: string; accent: string }> = [
 
 const platformDocs: Record<Platform, string> = {
   wechat_channels: "https://docs.tikhub.io/419832668e0",
-  xiaohongshu: "https://docs.tikhub.io/438852171e0",
+  xiaohongshu: "https://docs.tikhub.io/420136398e0",
   douyin: "https://docs.tikhub.io/370212773e0",
   weibo: "https://docs.tikhub.io/410358109e0",
 };
@@ -257,6 +283,9 @@ const sortOptions: Record<Platform, Array<{ label: string; value: string }>> = {
     { label: "综合", value: "general" },
     { label: "最新", value: "time_descending" },
     { label: "最热", value: "popularity_descending" },
+    { label: "最多评论", value: "comment_descending" },
+    { label: "最多收藏", value: "collect_descending" },
+    { label: "英文优先", value: "english_preferred" },
   ],
   douyin: [
     /*
@@ -420,6 +449,16 @@ function setStoredTheme(nextTheme: ThemeMode) {
 
 export default function Home() {
   const [config, setConfig] = useState<ConfigStatus | null>(null);
+  const [accountLoading, setAccountLoading] = useState(true);
+  const [currentAccount, setCurrentAccount] = useState<WorkspaceAccount | null>(null);
+  const [workspaceAccounts, setWorkspaceAccounts] = useState<WorkspaceAccount[]>([]);
+  const [accountSessionState, setAccountSessionState] = useState<AccountSessionResponse>({});
+  const [accountUsername, setAccountUsername] = useState("");
+  const [accountPassword, setAccountPassword] = useState("");
+  const [accountSetupPassword, setAccountSetupPassword] = useState("");
+  const [accountBusy, setAccountBusy] = useState(false);
+  const [accountMessage, setAccountMessage] = useState("");
+  const [accountPanelOpen, setAccountPanelOpen] = useState(false);
   const theme = useSyncExternalStore(subscribeTheme, getStoredTheme, () => "professional" as ThemeMode);
   const [workspaceMode, setWorkspaceMode] = useState<WorkspaceMode>("compact");
   const [workspaceSettings, setWorkspaceSettings] = useState<WorkspacePromptSettings>(defaultWorkspaceSettings);
@@ -631,6 +670,11 @@ export default function Home() {
   );
 
   useEffect(() => {
+    void loadAccountSession();
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
+
+  useEffect(() => {
     fetch("/api/config")
       .then((res) => res.json())
       .then(setConfig)
@@ -642,6 +686,7 @@ export default function Home() {
   }, [theme]);
 
   useEffect(() => {
+    if (!currentAccount) return;
     loadContentPool();
     loadWorkspaceSettings();
     loadSimpleRuns();
@@ -652,18 +697,20 @@ export default function Home() {
     const timer = window.setInterval(loadExecutionLogs, 2500);
     return () => window.clearInterval(timer);
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, []);
+  }, [currentAccount?.id]);
 
   useEffect(() => {
+    if (!currentAccount) return;
     if (!simpleRuns.some(isSimpleRunLive)) return;
     const timer = window.setInterval(() => {
       void loadSimpleRuns(activeSimpleRunId);
       void loadExecutionLogs();
     }, 3000);
     return () => window.clearInterval(timer);
-  }, [simpleRuns, activeSimpleRunId]);
+  }, [currentAccount, simpleRuns, activeSimpleRunId]);
 
   useEffect(() => {
+    if (!currentAccount) return;
     if (!activeSimpleRun || isSimpleRunLive(activeSimpleRun)) return;
     if (!activeSimpleRun.platformResults.length && !activeSimpleRun.posts.length) return;
     void loadContentPool(activeSimpleRun.input.keyword);
@@ -673,6 +720,18 @@ export default function Home() {
   }, [activeSimpleRun?.id, activeSimpleRun?.status]);
 
   useEffect(() => {
+    if (!currentAccount) return;
+    if (!publishStatus?.jobId || !isFeishuPublishQueueLive(publishStatus.queueStatus)) return;
+    const poll = () => {
+      void pollFeishuPublishJob(publishStatus.jobId || "");
+    };
+    poll();
+    const timer = window.setInterval(poll, 3000);
+    return () => window.clearInterval(timer);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [publishStatus?.jobId, publishStatus?.queueStatus]);
+
+  useEffect(() => {
     if (!preview) return;
     const handleKeyDown = (event: KeyboardEvent) => {
       if (event.key === "Escape") setPreview(null);
@@ -680,6 +739,116 @@ export default function Home() {
     window.addEventListener("keydown", handleKeyDown);
     return () => window.removeEventListener("keydown", handleKeyDown);
   }, [preview]);
+
+  async function loadAccountSession() {
+    setAccountLoading(true);
+    try {
+      const res = await fetch("/api/accounts/session");
+      const data = (await res.json()) as AccountSessionResponse;
+      if (!res.ok) throw new Error(data.error || "Workspace account session failed");
+      setAccountSessionState(data);
+      setCurrentAccount(data.account || null);
+      if (data.account) {
+        await loadWorkspaceAccounts();
+      } else {
+        setWorkspaceAccounts([]);
+        if (data.authMode === "whitelist" && !data.whitelistConfigured) {
+          setAccountMessage("Whitelist access is not configured. Set WORKSPACE_ALLOWED_USERS first.");
+        } else if (data.authMode === "whitelist" && !data.hasAdminAccount) {
+          setAccountMessage(
+            data.adminConfigured && data.setupPasswordConfigured
+              ? "Initialize the first administrator account from the whitelist."
+              : "Set WORKSPACE_ADMIN_USERS and WORKSPACE_ACCESS_PASSWORD before initializing the first administrator.",
+          );
+        }
+      }
+    } catch (error) {
+      setCurrentAccount(null);
+      setAccountMessage(error instanceof Error ? error.message : "Workspace account session failed");
+    } finally {
+      setAccountLoading(false);
+    }
+  }
+
+  async function loadWorkspaceAccounts() {
+    try {
+      const res = await fetch("/api/accounts");
+      const data = (await res.json()) as AccountSessionResponse;
+      if (res.ok) setWorkspaceAccounts(data.accounts || []);
+    } catch {
+      // Account list is auxiliary; the active session still controls access.
+    }
+  }
+
+  async function submitAccountAccess() {
+    if (accountBusy) return;
+    setAccountBusy(true);
+    setAccountMessage("");
+    try {
+      const bootstrapRequired = !accountSessionState.hasAdminAccount;
+      const res = await fetch(bootstrapRequired ? "/api/accounts" : "/api/accounts/session", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify(
+          bootstrapRequired
+            ? {
+                username: accountUsername,
+                password: accountPassword,
+                setupPassword: accountSetupPassword,
+                role: "admin",
+              }
+            : {
+                username: accountUsername,
+                password: accountPassword,
+              },
+        ),
+      });
+      const data = (await res.json()) as AccountSessionResponse;
+      if (!res.ok || !data.account) throw new Error(data.error || "Workspace account sign-in failed");
+      setAccountSessionState(data);
+      setCurrentAccount(data.account);
+      setAccountUsername("");
+      setAccountPassword("");
+      setAccountSetupPassword("");
+      setAccountMessage(bootstrapRequired ? "Administrator initialized." : "Signed in.");
+      await loadWorkspaceAccounts();
+    } catch (error) {
+      setAccountMessage(error instanceof Error ? error.message : "Workspace account sign-in failed");
+    } finally {
+      setAccountBusy(false);
+    }
+  }
+
+  async function logoutWorkspaceAccount() {
+    setAccountBusy(true);
+    try {
+      await fetch("/api/accounts/session", { method: "DELETE" });
+    } finally {
+      setCurrentAccount(null);
+      setWorkspaceAccounts([]);
+      setAccountPanelOpen(false);
+      setAccountPassword("");
+      setAccountSetupPassword("");
+      setAccountMessage("Signed out.");
+      clearWorkspaceRuntimeState();
+      setAccountBusy(false);
+    }
+  }
+
+  function clearWorkspaceRuntimeState() {
+    setSimpleRuns([]);
+    setActiveSimpleRunId("");
+    setSources([]);
+    setProjects([]);
+    setActiveProject(null);
+    setBatchJobs([]);
+    setActiveBatchJob(null);
+    setGeneratedPosts([]);
+    setSelectedGeneratedPostId("");
+    setSelectedGeneratedPostIds([]);
+    setExecutionLogs([]);
+    setPublishStatus(null);
+  }
 
   async function loadContentPool(nextQuery = query) {
     try {
@@ -739,6 +908,42 @@ export default function Home() {
       );
     } catch {
       // 历史简单任务不是主流程渲染前置条件。
+    }
+  }
+
+  async function pollFeishuPublishJob(jobId: string) {
+    if (!jobId) return;
+    try {
+      const res = await fetch(`/api/publish/feishu?jobId=${encodeURIComponent(jobId)}`);
+      const data = (await res.json()) as FeishuPublishResponse;
+      if (!res.ok) throw new Error(data.error || "Feishu publish job polling failed");
+      const postsForStatus = data.job?.posts?.length ? data.job.posts : post ? [post] : [];
+      setPublishStatus((current) =>
+        current?.jobId === jobId ? buildPublishStatus(postsForStatus, data, current.postId) : current,
+      );
+
+      if (data.job && !isFeishuPublishQueueLive(data.job.status)) {
+        const currentPost = post && data.job.postIds.includes(post.id) ? data.job.posts.find((item) => item.id === post.id) : undefined;
+        if (currentPost) setPost(currentPost);
+        setMessage(buildPublishMessage(data));
+        await loadContentPool(query);
+        await loadGeneratedPosts(currentPost?.id || data.job.postIds[0] || selectedGeneratedPostId);
+        await loadExecutionLogs();
+      }
+    } catch (error) {
+      const detail = error instanceof Error ? error.message : "Feishu publish job polling failed";
+      setPublishStatus((current) =>
+        current?.jobId === jobId
+          ? {
+              ...current,
+              status: "error",
+              title: "飞书写入状态读取失败",
+              detail,
+              progress: 100,
+              queueStatus: "failed",
+            }
+          : current,
+      );
     }
   }
 
@@ -2023,13 +2228,13 @@ export default function Home() {
       const nextPost = {
         ...posts[0],
         feishu: nextFeishuState || posts[0].feishu,
-        status: data.status === "published" ? "published" as const : "approved" as const,
+        status: data.status === "published" ? ("published" as const) : ("approved" as const),
       };
       setPost(nextPost);
       setSelectedGeneratedPostId(nextPost.id);
       await loadContentPool(query);
       await loadGeneratedPosts(nextPost.id);
-      setPublishStatus(buildPublishStatus(posts, data));
+      setPublishStatus(buildPublishStatus(posts, data, nextPost.id));
       setMessage(buildPublishMessage(data));
     } catch (error) {
       const detail = error instanceof Error ? error.message : "写入飞书失败";
@@ -2201,6 +2406,60 @@ export default function Home() {
     });
   }
 
+  if (!currentAccount) {
+    return (
+      <main className="app-shell app-shell-auth overflow-x-hidden">
+        <div className="studio-frame mx-auto flex w-full max-w-[1680px] flex-col text-sm text-white">
+          <header className="design-header mb-4 flex flex-col gap-4 px-4 py-4 lg:flex-row lg:items-center lg:justify-between">
+            <div className="flex min-w-0 items-center gap-3">
+              <div className="brand-mark grid h-12 w-12 shrink-0 place-items-center rounded-[8px]">
+                <Sparkles className="h-5 w-5" />
+              </div>
+              <div className="min-w-0">
+                <p className="header-eyebrow">Social content operations</p>
+                <h1 className="truncate text-xl font-black text-white sm:text-2xl">FluxPost Studio</h1>
+                <p className="text-xs text-white/55">Shared workspace account access</p>
+              </div>
+            </div>
+            <div className="flex flex-wrap gap-2 lg:justify-end">
+              <div className="theme-switcher" role="group" aria-label="Theme switcher">
+                {themeOptions.map((option) => (
+                  <button
+                    key={option.value}
+                    className={`theme-option ${theme === option.value ? "theme-option-active" : ""}`}
+                    type="button"
+                    aria-pressed={theme === option.value}
+                    onClick={() => setStoredTheme(option.value)}
+                  >
+                    {option.icon}
+                    <span>{option.label}</span>
+                  </button>
+                ))}
+              </div>
+              <ConfigChip label="TikHub" ok={Boolean(config?.tikhubConfigured)} />
+              <ConfigChip label={config?.textModel || "GPT"} ok={Boolean(config?.openaiConfigured)} />
+              <ConfigChip label="Feishu CLI" ok={Boolean(config?.feishuConfigured)} />
+            </div>
+          </header>
+
+          <AccountAccessPanelV2
+            loading={accountLoading}
+            busy={accountBusy}
+            bootstrapRequired={!accountSessionState.hasAdminAccount}
+            username={accountUsername}
+            password={accountPassword}
+            setupPassword={accountSetupPassword}
+            message={accountMessage}
+            onUsernameChange={setAccountUsername}
+            onPasswordChange={setAccountPassword}
+            onSetupPasswordChange={setAccountSetupPassword}
+            onSubmit={submitAccountAccess}
+          />
+        </div>
+      </main>
+    );
+  }
+
   return (
     <main className={`app-shell app-shell-${workspaceMode} overflow-x-hidden`}>
       <datalist id="image-size-presets">
@@ -2236,6 +2495,17 @@ export default function Home() {
                 </button>
               ))}
             </div>
+            <AccountMenuV2
+              account={currentAccount}
+              accounts={workspaceAccounts}
+              open={accountPanelOpen}
+              busy={accountBusy}
+              message={accountMessage}
+              onToggleOpen={() => setAccountPanelOpen((value) => !value)}
+              onRefresh={loadWorkspaceAccounts}
+              onAccountsChanged={loadWorkspaceAccounts}
+              onLogout={logoutWorkspaceAccount}
+            />
             <ConfigChip label="TikHub" ok={Boolean(config?.tikhubConfigured)} />
             <ConfigChip label={config?.textModel || "GPT"} ok={Boolean(config?.openaiConfigured)} />
             <ConfigChip label="Feishu CLI" ok={Boolean(config?.feishuConfigured)} />
@@ -2508,6 +2778,7 @@ export default function Home() {
                     <option value={0}>全部</option>
                     <option value={1}>视频</option>
                     <option value={2}>图文</option>
+                    <option value={3}>直播</option>
                   </select>
                 </div>
               ) : null}
@@ -3307,6 +3578,410 @@ function ModuleSwitcher({ activeModule, onChange }: { activeModule: ActiveModule
   );
 }
 
+function AccountAccessPanelV2({
+  loading,
+  busy,
+  bootstrapRequired,
+  username,
+  password,
+  setupPassword,
+  message,
+  onUsernameChange,
+  onPasswordChange,
+  onSetupPasswordChange,
+  onSubmit,
+}: {
+  loading: boolean;
+  busy: boolean;
+  bootstrapRequired: boolean;
+  username: string;
+  password: string;
+  setupPassword: string;
+  message: string;
+  onUsernameChange: (value: string) => void;
+  onPasswordChange: (value: string) => void;
+  onSetupPasswordChange: (value: string) => void;
+  onSubmit: () => void;
+}) {
+  return (
+    <section className="account-access-shell">
+      <form
+        className="glass account-access-panel rounded-[8px] p-5"
+        onSubmit={(event) => {
+          event.preventDefault();
+          onSubmit();
+        }}
+      >
+        <div className="flex items-center justify-between gap-3">
+          <PanelTitle icon={<KeyRound className="h-4 w-4" />} title={bootstrapRequired ? "初始化管理员" : "账号登录"} />
+          <span className="status-badge text-[11px] text-[var(--mint)]">{bootstrapRequired ? "Admin" : "Session"}</span>
+        </div>
+
+        <div className="mt-5 grid gap-3">
+          <label className="space-y-1">
+            <span className="field-label">账号</span>
+            <input
+              className="field"
+              value={username}
+              autoComplete="username"
+              disabled={loading || busy}
+              onChange={(event) => onUsernameChange(event.target.value)}
+              placeholder="name@example.com"
+            />
+          </label>
+          <label className="space-y-1">
+            <span className="field-label">{bootstrapRequired ? "账号密码" : "密码"}</span>
+            <input
+              className="field"
+              type="password"
+              value={password}
+              autoComplete={bootstrapRequired ? "new-password" : "current-password"}
+              disabled={loading || busy}
+              onChange={(event) => onPasswordChange(event.target.value)}
+              placeholder={bootstrapRequired ? "设置管理员登录密码" : "输入个人账号密码"}
+            />
+          </label>
+          {bootstrapRequired ? (
+            <label className="space-y-1">
+              <span className="field-label">初始化密钥</span>
+              <input
+                className="field"
+                type="password"
+                value={setupPassword}
+                autoComplete="one-time-code"
+                disabled={loading || busy}
+                onChange={(event) => onSetupPasswordChange(event.target.value)}
+                placeholder="WORKSPACE_ACCESS_PASSWORD"
+              />
+            </label>
+          ) : null}
+        </div>
+
+        <button className="primary-button mt-5 flex w-full items-center justify-center gap-2" type="submit" disabled={loading || busy}>
+          {loading || busy ? <Loader2 className="h-4 w-4 animate-spin" /> : <LogIn className="h-4 w-4" />}
+          {loading ? "读取账号状态" : bootstrapRequired ? "创建管理员并进入" : "进入工作台"}
+        </button>
+        {message ? <p className="mt-3 text-xs leading-5 text-white/58">{message}</p> : null}
+      </form>
+    </section>
+  );
+}
+
+function AccountAccessPanel({
+  loading,
+  busy,
+  username,
+  password,
+  message,
+  onUsernameChange,
+  onPasswordChange,
+  onSubmit,
+}: {
+  loading: boolean;
+  busy: boolean;
+  username: string;
+  password: string;
+  message: string;
+  onUsernameChange: (value: string) => void;
+  onPasswordChange: (value: string) => void;
+  onSubmit: () => void;
+}) {
+  return (
+    <section className="account-access-shell">
+      <form
+        className="glass account-access-panel rounded-[8px] p-5"
+        onSubmit={(event) => {
+          event.preventDefault();
+          onSubmit();
+        }}
+      >
+        <div className="flex items-center justify-between gap-3">
+          <PanelTitle icon={<KeyRound className="h-4 w-4" />} title="白名单登录" />
+          <span className="status-badge text-[11px] text-[var(--mint)]">Session</span>
+        </div>
+
+        <div className="mt-5 grid gap-3">
+          <label className="space-y-1">
+            <span className="field-label">账号</span>
+            <input
+              className="field"
+              value={username}
+              autoComplete="username"
+              disabled={loading || busy}
+              onChange={(event) => onUsernameChange(event.target.value)}
+              placeholder="name@example.com"
+            />
+          </label>
+          <label className="space-y-1">
+            <span className="field-label">共享访问密码</span>
+            <input
+              className="field"
+              type="password"
+              value={password}
+              autoComplete="current-password"
+              disabled={loading || busy}
+              onChange={(event) => onPasswordChange(event.target.value)}
+              placeholder="工作台访问密码"
+            />
+          </label>
+        </div>
+
+        <button className="primary-button mt-5 flex w-full items-center justify-center gap-2" type="submit" disabled={loading || busy}>
+          {loading || busy ? <Loader2 className="h-4 w-4 animate-spin" /> : <LogIn className="h-4 w-4" />}
+          {loading ? "读取访问状态" : "进入工作台"}
+        </button>
+        {message ? <p className="mt-3 text-xs leading-5 text-white/58">{message}</p> : null}
+      </form>
+    </section>
+  );
+}
+
+function AccountMenuV2({
+  account,
+  accounts,
+  open,
+  busy,
+  message,
+  onToggleOpen,
+  onRefresh,
+  onAccountsChanged,
+  onLogout,
+}: {
+  account: WorkspaceAccount;
+  accounts: WorkspaceAccount[];
+  open: boolean;
+  busy: boolean;
+  message: string;
+  onToggleOpen: () => void;
+  onRefresh: () => void;
+  onAccountsChanged: () => Promise<void> | void;
+  onLogout: () => void;
+}) {
+  const [manageUsername, setManageUsername] = useState("");
+  const [manageDisplayName, setManageDisplayName] = useState("");
+  const [managePassword, setManagePassword] = useState("");
+  const [manageRole, setManageRole] = useState<"operator" | "admin">("operator");
+  const [manageMessage, setManageMessage] = useState("");
+  const [manageBusy, setManageBusy] = useState(false);
+  const isAdmin = account.role === "admin";
+
+  async function submitManagedAccount(event: FormEvent) {
+    event.preventDefault();
+    if (!isAdmin || manageBusy) return;
+    const username = manageUsername.trim().toLowerCase();
+    const existing = accounts.find((item) => item.username === username);
+    if (!username) {
+      setManageMessage("请输入白名单用户名。");
+      return;
+    }
+    if (!managePassword && !existing?.passwordSet) {
+      setManageMessage("新账号需要设置密码。");
+      return;
+    }
+
+    setManageBusy(true);
+    setManageMessage("");
+    try {
+      const res = await fetch("/api/accounts", {
+        method: existing?.passwordSet ? "PATCH" : "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          id: existing?.passwordSet ? existing.id : undefined,
+          username,
+          displayName: manageDisplayName,
+          password: managePassword || undefined,
+          role: manageRole,
+          status: "active",
+        }),
+      });
+      const data = (await res.json()) as AccountSessionResponse;
+      if (!res.ok) throw new Error(data.error || "账号保存失败");
+      setManagePassword("");
+      setManageMessage(existing?.passwordSet ? "账号已更新。" : "账号已创建。");
+      await onAccountsChanged();
+    } catch (error) {
+      setManageMessage(error instanceof Error ? error.message : "账号保存失败");
+    } finally {
+      setManageBusy(false);
+    }
+  }
+
+  async function toggleManagedAccount(item: WorkspaceAccount) {
+    if (!isAdmin || manageBusy || item.id === account.id || !item.passwordSet) return;
+    setManageBusy(true);
+    setManageMessage("");
+    try {
+      const res = await fetch("/api/accounts", {
+        method: "PATCH",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          id: item.id,
+          status: item.status === "active" ? "disabled" : "active",
+        }),
+      });
+      const data = (await res.json()) as AccountSessionResponse;
+      if (!res.ok) throw new Error(data.error || "账号状态更新失败");
+      await onAccountsChanged();
+    } catch (error) {
+      setManageMessage(error instanceof Error ? error.message : "账号状态更新失败");
+    } finally {
+      setManageBusy(false);
+    }
+  }
+
+  return (
+    <div className="account-menu">
+      <button className="account-chip" type="button" onClick={onToggleOpen} aria-expanded={open}>
+        <User className="h-3.5 w-3.5" />
+        <span className="min-w-0 truncate">{account.displayName || account.username}</span>
+        <span className="account-role">{account.role}</span>
+      </button>
+      {open ? (
+        <div className="account-popover glass rounded-[8px] p-4">
+          <div className="flex items-center justify-between gap-3">
+            <div className="min-w-0">
+              <p className="text-sm font-black text-white">{account.displayName || account.username}</p>
+              <p className="truncate text-[11px] text-white/52">{account.username}</p>
+            </div>
+            <button className="icon-button" type="button" onClick={onRefresh} title="刷新账号">
+              <RefreshCw className="h-4 w-4" />
+            </button>
+          </div>
+
+          <div className="mt-4 space-y-2">
+            <div className="flex items-center gap-2 text-[11px] font-bold uppercase text-white/45">
+              <Users className="h-3.5 w-3.5" />
+              Accounts
+            </div>
+            <div className="account-list thin-scrollbar">
+              {accounts.map((item) => (
+                <div className="account-list-row account-list-row-managed" key={item.id}>
+                  <span className="min-w-0 truncate">{item.displayName || item.username}</span>
+                  <span>{item.username === account.username ? "current" : `${item.role}/${item.status}`}</span>
+                  {isAdmin && item.username !== account.username ? (
+                    <button
+                      className="soft-button account-row-action"
+                      type="button"
+                      onClick={() => toggleManagedAccount(item)}
+                      disabled={manageBusy || !item.passwordSet}
+                    >
+                      {item.status === "active" ? "停用" : "启用"}
+                    </button>
+                  ) : null}
+                </div>
+              ))}
+            </div>
+          </div>
+
+          {isAdmin ? (
+            <form className="account-admin-form mt-4 grid gap-2" onSubmit={submitManagedAccount}>
+              <input
+                className="field field-compact"
+                value={manageUsername}
+                onChange={(event) => setManageUsername(event.target.value)}
+                placeholder="白名单用户名"
+                disabled={manageBusy}
+              />
+              <input
+                className="field field-compact"
+                value={manageDisplayName}
+                onChange={(event) => setManageDisplayName(event.target.value)}
+                placeholder="显示名"
+                disabled={manageBusy}
+              />
+              <input
+                className="field field-compact"
+                type="password"
+                value={managePassword}
+                onChange={(event) => setManagePassword(event.target.value)}
+                placeholder="新密码 / 留空仅更新角色"
+                disabled={manageBusy}
+              />
+              <select className="field field-compact" value={manageRole} onChange={(event) => setManageRole(event.target.value as "operator" | "admin")} disabled={manageBusy}>
+                <option value="operator">成员</option>
+                <option value="admin">管理员</option>
+              </select>
+              <button className="soft-button h-9 text-xs font-semibold" type="submit" disabled={manageBusy}>
+                {manageBusy ? "处理中..." : "保存账号"}
+              </button>
+            </form>
+          ) : null}
+
+          {manageMessage || message ? <p className="mt-3 text-[11px] leading-5 text-white/52">{manageMessage || message}</p> : null}
+          <button className="soft-button mt-3 flex h-9 w-full items-center justify-center gap-2 text-xs font-semibold" type="button" onClick={onLogout} disabled={busy || manageBusy}>
+            <LogOut className="h-3.5 w-3.5" />
+            退出账号
+          </button>
+        </div>
+      ) : null}
+    </div>
+  );
+}
+
+function AccountMenu({
+  account,
+  accounts,
+  open,
+  busy,
+  message,
+  onToggleOpen,
+  onRefresh,
+  onLogout,
+}: {
+  account: WorkspaceAccount;
+  accounts: WorkspaceAccount[];
+  open: boolean;
+  busy: boolean;
+  message: string;
+  onToggleOpen: () => void;
+  onRefresh: () => void;
+  onLogout: () => void;
+}) {
+  return (
+    <div className="account-menu">
+      <button className="account-chip" type="button" onClick={onToggleOpen} aria-expanded={open}>
+        <User className="h-3.5 w-3.5" />
+        <span className="min-w-0 truncate">{account.displayName || account.username}</span>
+        <span className="account-role">{account.role}</span>
+      </button>
+      {open ? (
+        <div className="account-popover glass rounded-[8px] p-4">
+          <div className="flex items-center justify-between gap-3">
+            <div className="min-w-0">
+              <p className="text-sm font-black text-white">{account.displayName || account.username}</p>
+              <p className="truncate text-[11px] text-white/52">{account.username}</p>
+            </div>
+            <button className="icon-button" type="button" onClick={onRefresh} title="刷新白名单用户">
+              <RefreshCw className="h-4 w-4" />
+            </button>
+          </div>
+
+          <div className="mt-4 space-y-2">
+            <div className="flex items-center gap-2 text-[11px] font-bold uppercase tracking-[0.12em] text-white/45">
+              <Users className="h-3.5 w-3.5" />
+              Accounts
+            </div>
+            <div className="account-list thin-scrollbar">
+              {accounts.map((item) => (
+                <div className="account-list-row" key={item.id}>
+                  <span className="min-w-0 truncate">{item.displayName || item.username}</span>
+                  <span>{item.username === account.username ? "current" : item.role}</span>
+                </div>
+              ))}
+            </div>
+          </div>
+
+          {message ? <p className="mt-3 text-[11px] leading-5 text-white/52">{message}</p> : null}
+          <button className="soft-button mt-3 flex h-9 w-full items-center justify-center gap-2 text-xs font-semibold" type="button" onClick={onLogout} disabled={busy}>
+            <LogOut className="h-3.5 w-3.5" />
+            退出账号
+          </button>
+        </div>
+      ) : null}
+    </div>
+  );
+}
+
 function WorkspaceModeSwitcher({ mode, onChange }: { mode: WorkspaceMode; onChange: (mode: WorkspaceMode) => void }) {
   const options: Array<{ value: WorkspaceMode; label: string; description: string; icon: ReactNode }> = [
     { value: "compact", label: "精简版", description: "只发起任务，底部看总进度", icon: <Radio className="h-4 w-4" /> },
@@ -3604,12 +4279,14 @@ function SimpleWorkspace({
 
       {isCompact ? (
         <SimpleOverallProgressBar
-          run={runForSummary}
+          runs={runs}
+          activeRun={runForSummary}
           busy={busy}
           terminatingRunId={terminatingRunId}
           sourceDetail={sourceDetail}
           targetCount={targetCount}
           onTerminateRun={onTerminateRun}
+          onSelectRun={onSelectRun}
         />
       ) : (
         <section className="glass-strong ops-panel simple-run-panel thin-scrollbar rounded-[8px] p-4">
@@ -3785,26 +4462,35 @@ function SimpleWorkspace({
 }
 
 function SimpleOverallProgressBar({
-  run,
+  runs,
+  activeRun,
   busy,
   terminatingRunId,
   sourceDetail,
   targetCount,
   onTerminateRun,
+  onSelectRun,
 }: {
-  run: SimpleRun | null;
+  runs: SimpleRun[];
+  activeRun: SimpleRun | null;
   busy: boolean;
   terminatingRunId: string;
   sourceDetail: string;
   targetCount: number;
   onTerminateRun: (runId: string) => void;
+  onSelectRun: (runId: string) => void;
 }) {
-  const summary = buildSimpleOverallProgressSummary(run, busy, sourceDetail, targetCount);
+  const progressRuns = buildSimpleOverallProgressRuns(runs, activeRun);
+  const singleRun = progressRuns[0] || activeRun;
+  const isMultiRun = progressRuns.length > 1;
+  const summary = isMultiRun
+    ? buildSimpleOverallProgressSummaryForRuns(progressRuns)
+    : buildSimpleOverallProgressSummary(singleRun, busy, sourceDetail, targetCount);
   const toneClass = `simple-overall-progress-${summary.tone}`;
-  const showTerminate = canForceTerminateSimpleRun(run);
+  const showTerminate = !isMultiRun && canForceTerminateSimpleRun(singleRun);
 
   return (
-    <section className={`simple-overall-progress glass-strong ${toneClass}`} aria-label="简单版整体进度">
+    <section className={`simple-overall-progress glass-strong ${toneClass} ${isMultiRun ? "simple-overall-progress-multi" : ""}`} aria-label="简单版整体进度">
       <div className="simple-overall-progress-head">
         <div className="flex min-w-0 items-center gap-3">
           <span className="simple-overall-progress-icon">
@@ -3825,14 +4511,14 @@ function SimpleOverallProgressBar({
         </div>
 
         <div className="simple-overall-side">
-          {showTerminate && run ? (
+          {showTerminate && singleRun ? (
             <button
               className="simple-force-terminate-button simple-force-terminate-button-compact"
               type="button"
-              onClick={() => onTerminateRun(run.id)}
-              disabled={terminatingRunId === run.id}
+              onClick={() => onTerminateRun(singleRun.id)}
+              disabled={terminatingRunId === singleRun.id}
             >
-              {terminatingRunId === run.id ? <Loader2 className="h-3.5 w-3.5 animate-spin" /> : <X className="h-3.5 w-3.5" />}
+              {terminatingRunId === singleRun.id ? <Loader2 className="h-3.5 w-3.5 animate-spin" /> : <X className="h-3.5 w-3.5" />}
               强制终止
             </button>
           ) : null}
@@ -3852,6 +4538,52 @@ function SimpleOverallProgressBar({
           </div>
         </div>
       </div>
+
+      {isMultiRun ? (
+        <div className="simple-overall-run-list thin-scrollbar" aria-label="简单版多任务进度">
+          {progressRuns.map((progressRun) => {
+            const runSummary = buildSimpleOverallProgressSummary(progressRun, false, sourceDetail, progressRun.input.targetCount);
+            const isActive = progressRun.id === activeRun?.id;
+            const rowCanTerminate = canForceTerminateSimpleRun(progressRun);
+            return (
+              <article key={progressRun.id} className={`simple-overall-run-row ${isActive ? "simple-overall-run-row-active" : ""}`}>
+                <button
+                  className="simple-overall-run-select"
+                  type="button"
+                  aria-pressed={isActive}
+                  onClick={() => onSelectRun(progressRun.id)}
+                >
+                  <span className="simple-overall-run-heading">
+                    <span className="simple-overall-run-title">{progressRun.input.keyword || progressRun.id}</span>
+                    <span className={`status-badge shrink-0 text-[10px] ${getSimpleRunStatusClass(progressRun.status)}`}>
+                      {formatSimpleRunStatus(progressRun.status)}
+                    </span>
+                  </span>
+                  <span className="simple-overall-run-meta">
+                    {formatSimpleRunSource(progressRun)} · {runSummary.label}
+                  </span>
+                  <span className="simple-overall-run-track" aria-hidden="true">
+                    <span style={{ width: `${runSummary.value}%` }} />
+                  </span>
+                </button>
+                <span className="simple-overall-run-percent">{runSummary.value}%</span>
+                {rowCanTerminate ? (
+                  <button
+                    className="simple-overall-run-stop"
+                    type="button"
+                    title="强制终止"
+                    aria-label={`强制终止 ${progressRun.input.keyword || progressRun.id}`}
+                    onClick={() => onTerminateRun(progressRun.id)}
+                    disabled={terminatingRunId === progressRun.id}
+                  >
+                    {terminatingRunId === progressRun.id ? <Loader2 className="h-3.5 w-3.5 animate-spin" /> : <X className="h-3.5 w-3.5" />}
+                  </button>
+                ) : null}
+              </article>
+            );
+          })}
+        </div>
+      ) : null}
 
       <div
         className="simple-overall-track"
@@ -5607,6 +6339,54 @@ function clampProgressValue(value: number) {
 
 type SimpleOverallProgressTone = "idle" | "running" | "success" | "warning" | "error";
 
+function buildSimpleOverallProgressRuns(runs: SimpleRun[], activeRun: SimpleRun | null) {
+  const liveRuns = runs.filter(isSimpleRunLive);
+  const candidates = liveRuns.length ? liveRuns : activeRun ? [activeRun] : runs.slice(0, 1);
+  const seen = new Set<string>();
+  return candidates
+    .filter((run) => {
+      if (seen.has(run.id)) return false;
+      seen.add(run.id);
+      return true;
+    })
+    .slice(0, 8);
+}
+
+function buildSimpleOverallProgressSummaryForRuns(runs: SimpleRun[]) {
+  const summaries = runs.map((run) => buildSimpleOverallProgressSummary(run, false, "", run.input.targetCount));
+  const runningCount = runs.filter((run) => run.status === "running").length;
+  const queuedCount = runs.filter((run) => run.status === "queued").length;
+  const completedCount = runs.filter((run) => run.status === "completed").length;
+  const failedCount = runs.filter((run) => run.status === "failed").length;
+  const firstLiveRun = runs.find(isSimpleRunLive) || runs[0];
+  const firstLiveSummary = summaries[runs.findIndex((run) => run.id === firstLiveRun.id)] || summaries[0];
+  const value = summaries.length
+    ? clampProgressValue(summaries.reduce((sum, summary) => sum + summary.value, 0) / summaries.length)
+    : 0;
+  const tone: SimpleOverallProgressTone = summaries.some((summary) => summary.tone === "error")
+    ? "error"
+    : runningCount || queuedCount
+      ? "running"
+      : summaries.some((summary) => summary.tone === "warning")
+        ? "warning"
+        : completedCount === runs.length
+          ? "success"
+          : "idle";
+
+  return {
+    title: `${runs.length} 个任务进度`,
+    label: [`执行中 ${runningCount}`, `排队 ${queuedCount}`, failedCount ? `失败 ${failedCount}` : "", completedCount ? `完成 ${completedCount}` : ""]
+      .filter(Boolean)
+      .join(" · "),
+    detail: firstLiveRun ? `${firstLiveRun.input.keyword || firstLiveRun.id} · ${firstLiveSummary.label}` : "等待任务发起",
+    value,
+    tone,
+    crawled: summaries.reduce((sum, summary) => sum + summary.crawled, 0),
+    produced: summaries.reduce((sum, summary) => sum + summary.produced, 0),
+    published: summaries.reduce((sum, summary) => sum + summary.published, 0),
+  };
+}
+
 function buildSimpleOverallProgressSummary(run: SimpleRun | null, busy: boolean, sourceDetail: string, targetCount: number) {
   if (!run) {
     return {
@@ -6672,7 +7452,17 @@ function buildSimpleRunMessage(run: SimpleRun) {
 }
 
 function isSimpleRunLive(run: SimpleRun) {
-  return run.status === "queued" || run.status === "running" || run.stages.some((stage) => stage.status === "running");
+  return (
+    run.status === "queued" ||
+    run.status === "running" ||
+    run.publish?.status === "queued" ||
+    run.publish?.status === "running" ||
+    run.stages.some((stage) => stage.status === "running")
+  );
+}
+
+function isFeishuPublishQueueLive(status?: FeishuPublishJob["status"]) {
+  return status === "queued" || status === "running";
 }
 
 function isSimpleRunForceTerminated(run: SimpleRun) {
@@ -6750,6 +7540,8 @@ function getSimpleStageStatusClass(value: SimpleRun["stages"][number]["status"])
 }
 
 function formatSimplePublishStatus(value?: NonNullable<SimpleRun["publish"]>["status"]) {
+  if (value === "queued") return "排队中";
+  if (value === "running") return "写入中";
   if (value === "attachment_failed") return "附件未完成";
   if (value === "published") return "已写入";
   if (value === "needs_config") return "待配置";
@@ -6760,39 +7552,75 @@ function formatSimplePublishStatus(value?: NonNullable<SimpleRun["publish"]>["st
 
 function getSimplePublishStatusClass(value?: NonNullable<SimpleRun["publish"]>["status"]) {
   if (value === "published") return "text-[var(--mint)]";
+  if (value === "queued" || value === "running") return "text-[var(--cyan)]";
   if (value === "attachment_failed" || value === "needs_config" || value === "skipped") return "text-[var(--amber)]";
   if (value === "failed") return "text-[var(--rose)]";
   return "text-white/45";
 }
 
-function buildPublishStatus(posts: GeneratedPost[], data: FeishuPublishResponse): PublishStatusSnapshot {
+function buildPublishStatus(posts: GeneratedPost[], data: FeishuPublishResponse, fallbackPostId?: string): PublishStatusSnapshot {
   const notification = formatPublishNotification(data.notification);
   const uploadedCount = (data.attachmentUploads || []).reduce((total, item) => total + (item.fileCount || 0), 0);
   const sourceImageCount = posts.reduce((total, item) => total + item.imageUrls.length, 0);
   const imageCount = uploadedCount || sourceImageCount;
+  const postId = fallbackPostId || posts[0]?.id || data.job?.postIds[0] || "";
+  const jobId = data.jobId || data.job?.id;
+  const queueStatus = data.queueStatus || data.job?.status;
+
+  if (data.status === "queued" || queueStatus === "queued") {
+    return {
+      postId,
+      status: "warning",
+      title: "已进入 Feishu 写入队列",
+      detail: data.message || `Feishu job ${jobId || ""} 正在等待同用户写入队列。`,
+      progress: 55,
+      notification,
+      jobId,
+      queueStatus: queueStatus || "queued",
+    };
+  }
+
+  if (data.status === "running" || queueStatus === "running") {
+    return {
+      postId,
+      status: "running",
+      title: "Feishu CLI 正在写入",
+      detail: data.message || `Feishu job ${jobId || ""} 已开始写入多维表格。`,
+      progress: 70,
+      notification,
+      jobId,
+      queueStatus: queueStatus || "running",
+    };
+  }
 
   if (data.status !== "published") {
     return {
-      postId: posts[0]?.id || "",
-      status: "warning",
+      postId,
+      status: data.status === "failed" ? "error" : "warning",
       title: "飞书未完成真实写入",
       detail: data.message || `发布流程返回 ${data.status || "unknown"}，请先检查 Feishu CLI 和 Base 配置。`,
-      progress: 72,
+      progress: 100,
       notification,
+      jobId,
+      queueStatus,
     };
   }
 
   return {
-    postId: posts[0]?.id || "",
+    postId,
     status: data.notification?.status === "failed" ? "warning" : "success",
     title: data.notification?.status === "failed" ? "飞书写入完成，通知失败" : "飞书写入完成",
     detail: `已写入 ${posts.length} 条记录，${imageCount} 张素材已处理。`,
     progress: 100,
     notification,
+    jobId,
+    queueStatus,
   };
 }
 
 function buildPublishMessage(data: FeishuPublishResponse) {
+  if (data.status === "queued" || data.queueStatus === "queued") return data.message || "飞书写入任务已进入队列。";
+  if (data.status === "running" || data.queueStatus === "running") return data.message || "Feishu CLI 正在写入。";
   if (data.status !== "published") return data.message || `飞书流程返回 ${data.status || "unknown"}`;
   const notification = formatPublishNotification(data.notification);
   return notification ? `飞书写入完成，${notification}` : `飞书写入完成：${data.payloadPath || ""}`;

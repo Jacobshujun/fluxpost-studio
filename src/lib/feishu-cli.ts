@@ -250,6 +250,7 @@ function getBitableFieldMap() {
     body: "动态正文",
     imageUrls: "动态素材",
     contentTags: "内容标签",
+    contentCreationSource: "内容创作来源",
   };
 
   if (!appConfig.feishuBitableFieldMap.trim()) return defaults;
@@ -848,6 +849,8 @@ function getPostFieldValue(post: GeneratedPost, key: string) {
       return post.imageUrls.join("\n");
     case "contentTags":
       return post.contentTags || [];
+    case "contentCreationSource":
+      return formatContentCreationSource(post);
     case "imagePrompt":
       return post.imagePrompt;
     case "aiNotes":
@@ -867,6 +870,14 @@ function getPostFieldValue(post: GeneratedPost, key: string) {
     default:
       return null;
   }
+}
+
+function formatContentCreationSource(post: GeneratedPost) {
+  const displayName = post.ownerDisplayName?.trim();
+  if (displayName) return displayName;
+  const ownerId = post.ownerUserId?.trim();
+  if (!ownerId) return null;
+  return ownerId.startsWith("whitelist:") ? ownerId.slice("whitelist:".length) || ownerId : ownerId;
 }
 
 function formatPlatform(value: GeneratedPost["platform"]) {

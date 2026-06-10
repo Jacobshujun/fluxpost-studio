@@ -26,7 +26,7 @@ export function buildDefaultImageTasks(
   const resolvedPrompts = resolveImageStrategyPrompts(prompts);
   const visualTagsByUrl = getVisualTagsByUrl(source);
   const frameTasks = getSourceVideoFrameTasks(source, resolvedPrompts.textImage, visualTagsByUrl, resolvedPrompts);
-  if (shouldUseVideoFramesAsImageTasks(source) && frameTasks.length) {
+  if (shouldUseVideoFramesAsImageTasks(source)) {
     return frameTasks.slice(0, maxVideoHighlightFrames);
   }
 
@@ -207,9 +207,16 @@ function getVisualTagsByUrl(source: NormalizedSourceItem) {
 }
 
 function shouldUseVideoFramesAsImageTasks(source: NormalizedSourceItem) {
+  return isVideoLikeSource(source);
+}
+
+function isVideoLikeSource(source: NormalizedSourceItem) {
   return Boolean(
-    source.videoFrames?.length &&
-      (source.mediaType === "video" || source.mediaType === "mixed" || source.videoUrl || source.downloadedVideoUrl),
+    source.mediaType === "video" ||
+      source.mediaType === "mixed" ||
+      source.videoUrl ||
+      source.downloadedVideoUrl ||
+      source.mediaCache?.videoPresent,
   );
 }
 

@@ -6,17 +6,27 @@ import { tagSourceItems } from "@/lib/source-tagging";
 import { crawlTikHub } from "@/lib/tikhub";
 import { makeDemoSourceItems } from "@/lib/mock-data";
 import { saveJob, listJobs } from "@/lib/store";
+import { isWorkspaceSignInError, requireWorkspaceAccount } from "@/lib/workspace-accounts";
 import type { CrawlInput, Platform } from "@/lib/types";
 
 export const runtime = "nodejs";
 
-export async function GET() {
-  return NextResponse.json({ jobs: await listJobs() });
+export async function GET(request: Request) {
+  try {
+    const account = await requireWorkspaceAccount(request);
+    return NextResponse.json({ jobs: await listJobs(account) });
+  } catch (error) {
+    return NextResponse.json(
+      { error: error instanceof Error ? error.message : "Failed to list crawl jobs" },
+      { status: isWorkspaceSignInError(error) ? 401 : 500 },
+    );
+  }
 }
 
 export async function POST(request: Request) {
   const startedAt = Date.now();
   try {
+    const account = await requireWorkspaceAccount(request);
     const body = (await request.json()) as Partial<CrawlInput>;
     const input = parseCrawlInput(body);
     await recordExecutionLog({
@@ -35,12 +45,14 @@ export async function POST(request: Request) {
     const now = new Date().toISOString();
     const job = await saveJob({
       id: `job-${Date.now()}`,
+      ownerUserId: account.id,
+      ownerDisplayName: account.displayName,
       status: "running",
       input,
       createdAt: now,
       updatedAt: now,
       items: [],
-    });
+    }, account);
 
     try {
       let items = await crawlTikHub(input);
@@ -82,14 +94,14 @@ export async function POST(request: Request) {
           taggedVisual: taggedVisualCount,
         },
       });
-      const project = await ingestCrawlItems(input.query, items);
+      const project = await ingestCrawlItems(input.query, items, account);
       items = items.slice(0, input.targetCount);
       const updated = await saveJob({
         ...job,
         status: "completed",
         items,
         updatedAt: new Date().toISOString(),
-      });
+      }, account);
       await recordExecutionLog({
         scope: "crawl/jobs",
         action: "采集任务完成",
@@ -115,8 +127,8 @@ export async function POST(request: Request) {
         error: isMissingTikHubKey ? undefined : message,
         items: isMissingTikHubKey ? makeDemoSourceItems(input.platform, input.targetCount) : [],
         updatedAt: new Date().toISOString(),
-      });
-      const project = isMissingTikHubKey ? await ingestCrawlItems(input.query, updated.items) : undefined;
+      }, account);
+      const project = isMissingTikHubKey ? await ingestCrawlItems(input.query, updated.items, account) : undefined;
       await recordExecutionLog({
         scope: "crawl/jobs",
         action: isMissingTikHubKey ? "采集降级为演示数据" : "采集任务失败",
@@ -140,7 +152,7 @@ export async function POST(request: Request) {
       message: compactError(error),
       durationMs: Date.now() - startedAt,
     });
-    return NextResponse.json({ error: message }, { status: 400 });
+    return NextResponse.json({ error: message }, { status: isWorkspaceSignInError(error) ? 401 : 400 });
   }
 }
 

@@ -2,6 +2,7 @@ import { NextResponse } from "next/server";
 import { compactError, recordExecutionLog } from "@/lib/activity-log";
 import { concurrencyConfig } from "@/lib/concurrency";
 import { generateImagesFromPrompt } from "@/lib/image-generation";
+import { isWorkspaceSignInError, requireWorkspaceAccount } from "@/lib/workspace-accounts";
 import type { ImageGenerationQuality, SourceImageTask } from "@/lib/types";
 
 export const runtime = "nodejs";
@@ -9,6 +10,7 @@ export const runtime = "nodejs";
 export async function POST(request: Request) {
   const startedAt = Date.now();
   try {
+    await requireWorkspaceAccount(request);
     const body = (await request.json()) as {
       prompt?: string;
       count?: number;
@@ -68,6 +70,6 @@ export async function POST(request: Request) {
       message: compactError(error),
       durationMs: Date.now() - startedAt,
     });
-    return NextResponse.json({ error: message }, { status: 500 });
+    return NextResponse.json({ error: message }, { status: isWorkspaceSignInError(error) ? 401 : 500 });
   }
 }

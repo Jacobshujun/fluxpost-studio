@@ -2,6 +2,7 @@ import { NextResponse } from "next/server";
 import { compactError, recordExecutionLog } from "@/lib/activity-log";
 import { batchDeleteSourceItems, batchUpdateSourceItemStatus } from "@/lib/content-pool";
 import { backfillSourceItemMedia } from "@/lib/media-backfill";
+import { isWorkspaceSignInError, requireWorkspaceAccount } from "@/lib/workspace-accounts";
 import type { SourceUsageStatus } from "@/lib/types";
 
 export const runtime = "nodejs";
@@ -11,6 +12,7 @@ const sourceStatusValues: SourceUsageStatus[] = ["new", "analyzed", "rewritten",
 export async function POST(request: Request) {
   const startedAt = Date.now();
   try {
+    const account = await requireWorkspaceAccount(request);
     const body = (await request.json()) as {
       action?: "set_status" | "delete" | "cache_media";
       ids?: string[];
@@ -23,7 +25,7 @@ export async function POST(request: Request) {
       if (!body.status || !sourceStatusValues.includes(body.status)) {
         return NextResponse.json({ error: "Valid source status is required" }, { status: 400 });
       }
-      const result = await batchUpdateSourceItemStatus(ids, body.status);
+      const result = await batchUpdateSourceItemStatus(ids, body.status, account);
       await recordExecutionLog({
         scope: "content/items",
         action: "批量更新内容池状态",
@@ -41,7 +43,7 @@ export async function POST(request: Request) {
     }
 
     if (body.action === "cache_media") {
-      const result = await backfillSourceItemMedia(ids);
+      const result = await backfillSourceItemMedia(ids, account);
       await recordExecutionLog({
         scope: "content/items",
         action: "批量补全本地素材",
@@ -63,7 +65,7 @@ export async function POST(request: Request) {
     }
 
     if (body.action === "delete") {
-      const result = await batchDeleteSourceItems(ids);
+      const result = await batchDeleteSourceItems(ids, account);
       await recordExecutionLog({
         scope: "content/items",
         action: "批量删除内容池样本",
@@ -88,7 +90,10 @@ export async function POST(request: Request) {
       message: compactError(error),
       durationMs: Date.now() - startedAt,
     });
-    return NextResponse.json({ error: error instanceof Error ? error.message : "Failed to batch update content items" }, { status: 400 });
+    return NextResponse.json(
+      { error: error instanceof Error ? error.message : "Failed to batch update content items" },
+      { status: isWorkspaceSignInError(error) ? 401 : 400 },
+    );
   }
 }
 

@@ -1,17 +1,27 @@
 import { NextResponse } from "next/server";
 import { compactError, recordExecutionLog } from "@/lib/activity-log";
 import { createAndRunBatchProduction, listBatchProductionJobs } from "@/lib/batch-production";
+import { isWorkspaceSignInError, requireWorkspaceAccount } from "@/lib/workspace-accounts";
 
 export const runtime = "nodejs";
 
-export async function GET() {
-  const jobs = await listBatchProductionJobs();
-  return NextResponse.json({ jobs });
+export async function GET(request: Request) {
+  try {
+    const account = await requireWorkspaceAccount(request);
+    const jobs = await listBatchProductionJobs(account);
+    return NextResponse.json({ jobs });
+  } catch (error) {
+    return NextResponse.json(
+      { error: error instanceof Error ? error.message : "Failed to list batch production jobs" },
+      { status: isWorkspaceSignInError(error) ? 401 : 500 },
+    );
+  }
 }
 
 export async function POST(request: Request) {
   const startedAt = Date.now();
   try {
+    const account = await requireWorkspaceAccount(request);
     const body = (await request.json()) as {
       title?: string;
       sourceItemIds?: string[];
@@ -35,12 +45,12 @@ export async function POST(request: Request) {
       sourceItemIds: Array.isArray(body.sourceItemIds) ? body.sourceItemIds : [],
       materialPaths: Array.isArray(body.materialPaths) ? body.materialPaths : [],
       instruction: body.instruction,
-    });
+    }, account);
 
     return NextResponse.json({ job });
   } catch (error) {
     const message = error instanceof Error ? error.message : "批量制作失败";
-    const status = /请选择|未在内容池/.test(message) ? 400 : 500;
+    const status = isWorkspaceSignInError(error) ? 401 : /请选择|未在内容池/.test(message) ? 400 : 500;
     await recordExecutionLog({
       scope: "production/batches",
       action: "批量制作请求失败",

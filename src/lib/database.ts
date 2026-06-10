@@ -6,10 +6,13 @@ import type {
   ContentProject,
   CrawlJob,
   ExecutionLogEntry,
+  FeishuPublishJob,
   GeneratedPost,
   MaterialLibrarySnapshot,
   SimpleRun,
   SimpleRunQueueItem,
+  WorkspaceAccountRecord,
+  WorkspaceSession,
 } from "./types";
 
 type SqliteStatement = {
@@ -51,7 +54,53 @@ type SimpleRunQueueRow = {
   error?: string | null;
 };
 
+type FeishuPublishQueueRow = {
+  id: string;
+  owner_user_id: string;
+  source: FeishuPublishJob["source"];
+  source_run_id?: string | null;
+  status: FeishuPublishJob["status"];
+  priority: number;
+  attempts: number;
+  max_attempts: number;
+  run_after: string;
+  locked_by?: string | null;
+  locked_until?: string | null;
+  created_at: string;
+  updated_at: string;
+  started_at?: string | null;
+  completed_at?: string | null;
+  error?: string | null;
+  data_json: unknown;
+};
+
+type WorkspaceAccountRow = {
+  id: string;
+  username: string;
+  display_name: string;
+  password_hash: string;
+  role: WorkspaceAccountRecord["role"];
+  status: WorkspaceAccountRecord["status"];
+  created_at: string;
+  updated_at: string;
+  last_login_at?: string | null;
+  data_json: unknown;
+};
+
+type WorkspaceSessionRow = {
+  id: string;
+  account_id: string;
+  token_hash: string;
+  created_at: string;
+  expires_at: string;
+  last_seen_at?: string | null;
+  revoked_at?: string | null;
+  data_json: unknown;
+};
+
 type StoreTable =
+  | "workspace_accounts"
+  | "workspace_sessions"
   | "content_projects"
   | "generated_posts"
   | "batch_jobs"
@@ -61,7 +110,8 @@ type StoreTable =
   | "crawl_jobs"
   | "runtime_posts"
   | "simple_runs"
-  | "simple_run_queue";
+  | "simple_run_queue"
+  | "feishu_publish_queue";
 
 export type DatabaseBackend = "sqlite" | "postgres";
 
@@ -543,6 +593,519 @@ export async function failSimpleRunQueueItemByRunId(runId: string, error: string
   `).run(now, now, error, runId);
 }
 
+export async function saveFeishuPublishJobToDb(job: FeishuPublishJob) {
+  await ensureDatabaseReady();
+  if (getDatabaseBackend() === "postgres") {
+    await getPostgresPool().query(
+      `
+        INSERT INTO feishu_publish_queue (
+          id, owner_user_id, source, source_run_id, status, priority,
+          attempts, max_attempts, run_after, locked_by, locked_until,
+          created_at, updated_at, started_at, completed_at, error, data_json
+        )
+        VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, $16, $17::jsonb)
+        ON CONFLICT(id) DO UPDATE SET
+          owner_user_id = excluded.owner_user_id,
+          source = excluded.source,
+          source_run_id = excluded.source_run_id,
+          status = excluded.status,
+          priority = excluded.priority,
+          attempts = excluded.attempts,
+          max_attempts = excluded.max_attempts,
+          run_after = excluded.run_after,
+          locked_by = excluded.locked_by,
+          locked_until = excluded.locked_until,
+          created_at = feishu_publish_queue.created_at,
+          updated_at = excluded.updated_at,
+          started_at = excluded.started_at,
+          completed_at = excluded.completed_at,
+          error = excluded.error,
+          data_json = excluded.data_json
+      `,
+      [
+        job.id,
+        job.ownerUserId,
+        job.source,
+        job.sourceRunId || null,
+        job.status,
+        job.priority,
+        job.attempts,
+        job.maxAttempts,
+        job.runAfter,
+        job.lockedBy || null,
+        job.lockedUntil || null,
+        job.createdAt,
+        job.updatedAt,
+        job.startedAt || null,
+        job.completedAt || null,
+        job.error || null,
+        toJson(job),
+      ],
+    );
+    return job;
+  }
+
+  getSqliteDatabase().prepare(`
+    INSERT INTO feishu_publish_queue (
+      id, owner_user_id, source, source_run_id, status, priority,
+      attempts, max_attempts, run_after, locked_by, locked_until,
+      created_at, updated_at, started_at, completed_at, error, data_json
+    )
+    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+    ON CONFLICT(id) DO UPDATE SET
+      owner_user_id = excluded.owner_user_id,
+      source = excluded.source,
+      source_run_id = excluded.source_run_id,
+      status = excluded.status,
+      priority = excluded.priority,
+      attempts = excluded.attempts,
+      max_attempts = excluded.max_attempts,
+      run_after = excluded.run_after,
+      locked_by = excluded.locked_by,
+      locked_until = excluded.locked_until,
+      created_at = feishu_publish_queue.created_at,
+      updated_at = excluded.updated_at,
+      started_at = excluded.started_at,
+      completed_at = excluded.completed_at,
+      error = excluded.error,
+      data_json = excluded.data_json
+  `).run(
+    job.id,
+    job.ownerUserId,
+    job.source,
+    job.sourceRunId || null,
+    job.status,
+    job.priority,
+    job.attempts,
+    job.maxAttempts,
+    job.runAfter,
+    job.lockedBy || null,
+    job.lockedUntil || null,
+    job.createdAt,
+    job.updatedAt,
+    job.startedAt || null,
+    job.completedAt || null,
+    job.error || null,
+    toJson(job),
+  );
+  return job;
+}
+
+export async function readFeishuPublishJobsFromDb(limit = 50) {
+  await ensureDatabaseReady();
+  if (getDatabaseBackend() === "postgres") {
+    const result = await getPostgresPool().query<FeishuPublishQueueRow>(
+      `
+        SELECT *
+        FROM feishu_publish_queue
+        ORDER BY created_at DESC
+        LIMIT $1
+      `,
+      [limit],
+    );
+    return result.rows.map(fromFeishuPublishQueueRow);
+  }
+
+  const rows = getSqliteDatabase().prepare(`
+    SELECT *
+    FROM feishu_publish_queue
+    ORDER BY created_at DESC
+    LIMIT ?
+  `).all(limit) as FeishuPublishQueueRow[];
+  return rows.map(fromFeishuPublishQueueRow);
+}
+
+export async function getFeishuPublishJobFromDb(jobId: string) {
+  await ensureDatabaseReady();
+  if (getDatabaseBackend() === "postgres") {
+    const result = await getPostgresPool().query<FeishuPublishQueueRow>("SELECT * FROM feishu_publish_queue WHERE id = $1", [jobId]);
+    return result.rows[0] ? fromFeishuPublishQueueRow(result.rows[0]) : undefined;
+  }
+
+  const row = getSqliteDatabase().prepare("SELECT * FROM feishu_publish_queue WHERE id = ?").get(jobId) as FeishuPublishQueueRow | undefined;
+  return row ? fromFeishuPublishQueueRow(row) : undefined;
+}
+
+export async function claimNextFeishuPublishQueueItem(workerId: string, lockMs = 10 * 60_000) {
+  await ensureDatabaseReady();
+  const now = new Date();
+  const nowIso = now.toISOString();
+  const lockedUntil = new Date(now.getTime() + lockMs).toISOString();
+
+  if (getDatabaseBackend() === "postgres") {
+    const result = await getPostgresPool().query<FeishuPublishQueueRow>(
+      `
+        WITH next_item AS (
+          SELECT id
+          FROM feishu_publish_queue
+          WHERE status = 'queued'
+            AND run_after <= $1
+            AND attempts < max_attempts
+            AND NOT EXISTS (
+              SELECT 1
+              FROM feishu_publish_queue running
+              WHERE running.owner_user_id = feishu_publish_queue.owner_user_id
+                AND running.status = 'running'
+                AND (running.locked_until IS NULL OR running.locked_until > $1)
+            )
+          ORDER BY priority DESC, created_at ASC
+          LIMIT 1
+          FOR UPDATE SKIP LOCKED
+        )
+        UPDATE feishu_publish_queue queue
+        SET
+          status = 'running',
+          attempts = queue.attempts + 1,
+          locked_by = $2,
+          locked_until = $3,
+          started_at = COALESCE(queue.started_at, $1),
+          updated_at = $1
+        FROM next_item
+        WHERE queue.id = next_item.id
+        RETURNING queue.*
+      `,
+      [nowIso, workerId, lockedUntil],
+    );
+    return result.rows[0] ? fromFeishuPublishQueueRow(result.rows[0]) : undefined;
+  }
+
+  const db = getSqliteDatabase();
+  let claimed: FeishuPublishJob | undefined;
+  runSqliteTransaction(db, () => {
+    const row = db.prepare(`
+      SELECT *
+      FROM feishu_publish_queue
+      WHERE status = 'queued'
+        AND run_after <= ?
+        AND attempts < max_attempts
+        AND NOT EXISTS (
+          SELECT 1
+          FROM feishu_publish_queue running
+          WHERE running.owner_user_id = feishu_publish_queue.owner_user_id
+            AND running.status = 'running'
+            AND (running.locked_until IS NULL OR running.locked_until > ?)
+        )
+      ORDER BY priority DESC, created_at ASC
+      LIMIT 1
+    `).get(nowIso, nowIso) as FeishuPublishQueueRow | undefined;
+    if (!row) return;
+    db.prepare(`
+      UPDATE feishu_publish_queue
+      SET status = 'running',
+          attempts = attempts + 1,
+          locked_by = ?,
+          locked_until = ?,
+          started_at = COALESCE(started_at, ?),
+          updated_at = ?
+      WHERE id = ?
+    `).run(workerId, lockedUntil, nowIso, nowIso, row.id);
+    const nextRow = db.prepare("SELECT * FROM feishu_publish_queue WHERE id = ?").get(row.id) as FeishuPublishQueueRow;
+    claimed = fromFeishuPublishQueueRow(nextRow);
+  });
+  return claimed;
+}
+
+export async function heartbeatFeishuPublishQueueItem(queueId: string, workerId: string, lockMs = 10 * 60_000) {
+  await ensureDatabaseReady();
+  const now = new Date();
+  const lockedUntil = new Date(now.getTime() + lockMs).toISOString();
+  const nowIso = now.toISOString();
+
+  if (getDatabaseBackend() === "postgres") {
+    await getPostgresPool().query(
+      `
+        UPDATE feishu_publish_queue
+        SET locked_until = $1, updated_at = $2
+        WHERE id = $3 AND locked_by = $4 AND status = 'running'
+      `,
+      [lockedUntil, nowIso, queueId, workerId],
+    );
+    return;
+  }
+
+  getSqliteDatabase().prepare(`
+    UPDATE feishu_publish_queue
+    SET locked_until = ?, updated_at = ?
+    WHERE id = ? AND locked_by = ? AND status = 'running'
+  `).run(lockedUntil, nowIso, queueId, workerId);
+}
+
+export async function countWorkspaceAccountsInDb() {
+  await ensureDatabaseReady();
+  if (getDatabaseBackend() === "postgres") {
+    const result = await getPostgresPool().query<CountRow>("SELECT COUNT(*)::int AS count FROM workspace_accounts");
+    return Number(result.rows[0]?.count || 0);
+  }
+
+  const row = getSqliteDatabase().prepare("SELECT COUNT(*) AS count FROM workspace_accounts").get() as CountRow | undefined;
+  return Number(row?.count || 0);
+}
+
+export async function readWorkspaceAccountsFromDb(): Promise<WorkspaceAccountRecord[]> {
+  await ensureDatabaseReady();
+  if (getDatabaseBackend() === "postgres") {
+    const result = await getPostgresPool().query<WorkspaceAccountRow>("SELECT * FROM workspace_accounts ORDER BY created_at ASC");
+    return result.rows.map(fromWorkspaceAccountRow);
+  }
+
+  const rows = getSqliteDatabase().prepare("SELECT * FROM workspace_accounts ORDER BY created_at ASC").all() as WorkspaceAccountRow[];
+  return rows.map(fromWorkspaceAccountRow);
+}
+
+export async function getWorkspaceAccountByIdFromDb(accountId: string) {
+  await ensureDatabaseReady();
+  if (getDatabaseBackend() === "postgres") {
+    const result = await getPostgresPool().query<WorkspaceAccountRow>("SELECT * FROM workspace_accounts WHERE id = $1", [accountId]);
+    return result.rows[0] ? fromWorkspaceAccountRow(result.rows[0]) : undefined;
+  }
+
+  const row = getSqliteDatabase().prepare("SELECT * FROM workspace_accounts WHERE id = ?").get(accountId) as WorkspaceAccountRow | undefined;
+  return row ? fromWorkspaceAccountRow(row) : undefined;
+}
+
+export async function getWorkspaceAccountByUsernameFromDb(username: string) {
+  await ensureDatabaseReady();
+  if (getDatabaseBackend() === "postgres") {
+    const result = await getPostgresPool().query<WorkspaceAccountRow>("SELECT * FROM workspace_accounts WHERE username = $1", [username]);
+    return result.rows[0] ? fromWorkspaceAccountRow(result.rows[0]) : undefined;
+  }
+
+  const row = getSqliteDatabase().prepare("SELECT * FROM workspace_accounts WHERE username = ?").get(username) as WorkspaceAccountRow | undefined;
+  return row ? fromWorkspaceAccountRow(row) : undefined;
+}
+
+export async function saveWorkspaceAccountToDb(account: WorkspaceAccountRecord) {
+  await ensureDatabaseReady();
+  if (getDatabaseBackend() === "postgres") {
+    await getPostgresPool().query(
+      `
+        INSERT INTO workspace_accounts (
+          id, username, display_name, password_hash, role, status,
+          created_at, updated_at, last_login_at, data_json
+        )
+        VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10::jsonb)
+        ON CONFLICT(id) DO UPDATE SET
+          username = excluded.username,
+          display_name = excluded.display_name,
+          password_hash = excluded.password_hash,
+          role = excluded.role,
+          status = excluded.status,
+          created_at = workspace_accounts.created_at,
+          updated_at = excluded.updated_at,
+          last_login_at = excluded.last_login_at,
+          data_json = excluded.data_json
+      `,
+      [
+        account.id,
+        account.username,
+        account.displayName,
+        account.passwordHash,
+        account.role,
+        account.status,
+        account.createdAt,
+        account.updatedAt,
+        account.lastLoginAt || null,
+        toJson(account),
+      ],
+    );
+    return account;
+  }
+
+  getSqliteDatabase().prepare(`
+    INSERT INTO workspace_accounts (
+      id, username, display_name, password_hash, role, status,
+      created_at, updated_at, last_login_at, data_json
+    )
+    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+    ON CONFLICT(id) DO UPDATE SET
+      username = excluded.username,
+      display_name = excluded.display_name,
+      password_hash = excluded.password_hash,
+      role = excluded.role,
+      status = excluded.status,
+      created_at = workspace_accounts.created_at,
+      updated_at = excluded.updated_at,
+      last_login_at = excluded.last_login_at,
+      data_json = excluded.data_json
+  `).run(
+    account.id,
+    account.username,
+    account.displayName,
+    account.passwordHash,
+    account.role,
+    account.status,
+    account.createdAt,
+    account.updatedAt,
+    account.lastLoginAt || null,
+    toJson(account),
+  );
+  return account;
+}
+
+export async function saveWorkspaceSessionToDb(session: WorkspaceSession) {
+  await ensureDatabaseReady();
+  if (getDatabaseBackend() === "postgres") {
+    await getPostgresPool().query(
+      `
+        INSERT INTO workspace_sessions (
+          id, account_id, token_hash, created_at, expires_at,
+          last_seen_at, revoked_at, data_json
+        )
+        VALUES ($1, $2, $3, $4, $5, $6, $7, $8::jsonb)
+        ON CONFLICT(id) DO UPDATE SET
+          account_id = excluded.account_id,
+          token_hash = excluded.token_hash,
+          expires_at = excluded.expires_at,
+          last_seen_at = excluded.last_seen_at,
+          revoked_at = excluded.revoked_at,
+          data_json = excluded.data_json
+      `,
+      [
+        session.id,
+        session.accountId,
+        session.tokenHash,
+        session.createdAt,
+        session.expiresAt,
+        session.lastSeenAt || null,
+        session.revokedAt || null,
+        toJson(session),
+      ],
+    );
+    return session;
+  }
+
+  getSqliteDatabase().prepare(`
+    INSERT INTO workspace_sessions (
+      id, account_id, token_hash, created_at, expires_at,
+      last_seen_at, revoked_at, data_json
+    )
+    VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+    ON CONFLICT(id) DO UPDATE SET
+      account_id = excluded.account_id,
+      token_hash = excluded.token_hash,
+      expires_at = excluded.expires_at,
+      last_seen_at = excluded.last_seen_at,
+      revoked_at = excluded.revoked_at,
+      data_json = excluded.data_json
+  `).run(
+    session.id,
+    session.accountId,
+    session.tokenHash,
+    session.createdAt,
+    session.expiresAt,
+    session.lastSeenAt || null,
+    session.revokedAt || null,
+    toJson(session),
+  );
+  return session;
+}
+
+export async function getWorkspaceSessionByTokenHashFromDb(tokenHash: string) {
+  await ensureDatabaseReady();
+  if (getDatabaseBackend() === "postgres") {
+    const result = await getPostgresPool().query<WorkspaceSessionRow>("SELECT * FROM workspace_sessions WHERE token_hash = $1", [tokenHash]);
+    return result.rows[0] ? fromWorkspaceSessionRow(result.rows[0]) : undefined;
+  }
+
+  const row = getSqliteDatabase().prepare("SELECT * FROM workspace_sessions WHERE token_hash = ?").get(tokenHash) as WorkspaceSessionRow | undefined;
+  return row ? fromWorkspaceSessionRow(row) : undefined;
+}
+
+export async function touchWorkspaceSessionInDb(sessionId: string) {
+  await ensureDatabaseReady();
+  const now = new Date().toISOString();
+  if (getDatabaseBackend() === "postgres") {
+    await getPostgresPool().query(
+      `
+        UPDATE workspace_sessions
+        SET last_seen_at = $1,
+            data_json = jsonb_set(data_json, '{lastSeenAt}', to_jsonb($2::text), true)
+        WHERE id = $3 AND revoked_at IS NULL
+      `,
+      [now, now, sessionId],
+    );
+    return;
+  }
+
+  const session = getSqliteDatabase().prepare("SELECT * FROM workspace_sessions WHERE id = ?").get(sessionId) as WorkspaceSessionRow | undefined;
+  if (!session || session.revoked_at) return;
+  const data = {
+    ...fromWorkspaceSessionRow(session),
+    lastSeenAt: now,
+  };
+  getSqliteDatabase().prepare(`
+    UPDATE workspace_sessions
+    SET last_seen_at = ?, data_json = ?
+    WHERE id = ? AND revoked_at IS NULL
+  `).run(now, toJson(data), sessionId);
+}
+
+export async function revokeWorkspaceSessionByTokenHashInDb(tokenHash: string) {
+  await ensureDatabaseReady();
+  const now = new Date().toISOString();
+  if (getDatabaseBackend() === "postgres") {
+    await getPostgresPool().query(
+      `
+        UPDATE workspace_sessions
+        SET revoked_at = $1,
+            data_json = jsonb_set(data_json, '{revokedAt}', to_jsonb($2::text), true)
+        WHERE token_hash = $3 AND revoked_at IS NULL
+      `,
+      [now, now, tokenHash],
+    );
+    return;
+  }
+
+  const session = getSqliteDatabase().prepare("SELECT * FROM workspace_sessions WHERE token_hash = ?").get(tokenHash) as WorkspaceSessionRow | undefined;
+  if (!session || session.revoked_at) return;
+  const data = {
+    ...fromWorkspaceSessionRow(session),
+    revokedAt: now,
+  };
+  getSqliteDatabase().prepare(`
+    UPDATE workspace_sessions
+    SET revoked_at = ?, data_json = ?
+    WHERE token_hash = ? AND revoked_at IS NULL
+  `).run(now, toJson(data), tokenHash);
+}
+
+export async function revokeWorkspaceSessionsByAccountIdInDb(accountId: string) {
+  await ensureDatabaseReady();
+  const now = new Date().toISOString();
+  if (getDatabaseBackend() === "postgres") {
+    await getPostgresPool().query(
+      `
+        UPDATE workspace_sessions
+        SET revoked_at = $1,
+            data_json = jsonb_set(data_json, '{revokedAt}', to_jsonb($2::text), true)
+        WHERE account_id = $3 AND revoked_at IS NULL
+      `,
+      [now, now, accountId],
+    );
+    return;
+  }
+
+  const rows = getSqliteDatabase()
+    .prepare("SELECT * FROM workspace_sessions WHERE account_id = ? AND revoked_at IS NULL")
+    .all(accountId) as WorkspaceSessionRow[];
+  if (!rows.length) return;
+  const update = getSqliteDatabase().prepare(`
+    UPDATE workspace_sessions
+    SET revoked_at = ?, data_json = ?
+    WHERE id = ? AND revoked_at IS NULL
+  `);
+  rows.forEach((session) => {
+    update.run(
+      now,
+      toJson({
+        ...fromWorkspaceSessionRow(session),
+        revokedAt: now,
+      }),
+      session.id,
+    );
+  });
+}
+
 export async function readAppMetaValue(key: string) {
   await ensureDatabaseReady();
   if (getDatabaseBackend() === "postgres") {
@@ -867,6 +1430,33 @@ function createSqliteSchema(db: SqliteDatabase) {
       updated_at TEXT NOT NULL
     );
 
+    CREATE TABLE IF NOT EXISTS workspace_accounts (
+      id TEXT PRIMARY KEY,
+      username TEXT NOT NULL UNIQUE,
+      display_name TEXT NOT NULL,
+      password_hash TEXT NOT NULL,
+      role TEXT NOT NULL,
+      status TEXT NOT NULL,
+      created_at TEXT NOT NULL,
+      updated_at TEXT NOT NULL,
+      last_login_at TEXT,
+      data_json TEXT NOT NULL
+    );
+    CREATE INDEX IF NOT EXISTS idx_workspace_accounts_status ON workspace_accounts(status, created_at ASC);
+
+    CREATE TABLE IF NOT EXISTS workspace_sessions (
+      id TEXT PRIMARY KEY,
+      account_id TEXT NOT NULL,
+      token_hash TEXT NOT NULL UNIQUE,
+      created_at TEXT NOT NULL,
+      expires_at TEXT NOT NULL,
+      last_seen_at TEXT,
+      revoked_at TEXT,
+      data_json TEXT NOT NULL
+    );
+    CREATE INDEX IF NOT EXISTS idx_workspace_sessions_account_id ON workspace_sessions(account_id);
+    CREATE INDEX IF NOT EXISTS idx_workspace_sessions_expires_at ON workspace_sessions(expires_at);
+
     CREATE TABLE IF NOT EXISTS content_projects (
       id TEXT PRIMARY KEY,
       normalized_query TEXT NOT NULL UNIQUE,
@@ -981,6 +1571,29 @@ function createSqliteSchema(db: SqliteDatabase) {
     );
     CREATE INDEX IF NOT EXISTS idx_simple_run_queue_ready ON simple_run_queue(status, run_after, priority DESC, created_at ASC);
     CREATE INDEX IF NOT EXISTS idx_simple_run_queue_run_id ON simple_run_queue(run_id);
+
+    CREATE TABLE IF NOT EXISTS feishu_publish_queue (
+      id TEXT PRIMARY KEY,
+      owner_user_id TEXT NOT NULL,
+      source TEXT NOT NULL,
+      source_run_id TEXT,
+      status TEXT NOT NULL,
+      priority INTEGER NOT NULL DEFAULT 0,
+      attempts INTEGER NOT NULL DEFAULT 0,
+      max_attempts INTEGER NOT NULL DEFAULT 1,
+      run_after TEXT NOT NULL,
+      locked_by TEXT,
+      locked_until TEXT,
+      created_at TEXT NOT NULL,
+      updated_at TEXT NOT NULL,
+      started_at TEXT,
+      completed_at TEXT,
+      error TEXT,
+      data_json TEXT NOT NULL
+    );
+    CREATE INDEX IF NOT EXISTS idx_feishu_publish_queue_ready ON feishu_publish_queue(status, run_after, priority DESC, created_at ASC);
+    CREATE INDEX IF NOT EXISTS idx_feishu_publish_queue_owner_status ON feishu_publish_queue(owner_user_id, status, created_at ASC);
+    CREATE INDEX IF NOT EXISTS idx_feishu_publish_queue_source_run_id ON feishu_publish_queue(source_run_id);
   `);
 }
 
@@ -990,6 +1603,33 @@ const postgresSchemaSql = `
     value TEXT NOT NULL,
     updated_at TIMESTAMPTZ NOT NULL
   );
+
+  CREATE TABLE IF NOT EXISTS workspace_accounts (
+    id TEXT PRIMARY KEY,
+    username TEXT NOT NULL UNIQUE,
+    display_name TEXT NOT NULL,
+    password_hash TEXT NOT NULL,
+    role TEXT NOT NULL,
+    status TEXT NOT NULL,
+    created_at TIMESTAMPTZ NOT NULL,
+    updated_at TIMESTAMPTZ NOT NULL,
+    last_login_at TIMESTAMPTZ,
+    data_json JSONB NOT NULL
+  );
+  CREATE INDEX IF NOT EXISTS idx_workspace_accounts_status ON workspace_accounts(status, created_at ASC);
+
+  CREATE TABLE IF NOT EXISTS workspace_sessions (
+    id TEXT PRIMARY KEY,
+    account_id TEXT NOT NULL,
+    token_hash TEXT NOT NULL UNIQUE,
+    created_at TIMESTAMPTZ NOT NULL,
+    expires_at TIMESTAMPTZ NOT NULL,
+    last_seen_at TIMESTAMPTZ,
+    revoked_at TIMESTAMPTZ,
+    data_json JSONB NOT NULL
+  );
+  CREATE INDEX IF NOT EXISTS idx_workspace_sessions_account_id ON workspace_sessions(account_id);
+  CREATE INDEX IF NOT EXISTS idx_workspace_sessions_expires_at ON workspace_sessions(expires_at);
 
   CREATE TABLE IF NOT EXISTS content_projects (
     id TEXT PRIMARY KEY,
@@ -1105,6 +1745,29 @@ const postgresSchemaSql = `
   );
   CREATE INDEX IF NOT EXISTS idx_simple_run_queue_ready ON simple_run_queue(status, run_after, priority DESC, created_at ASC);
   CREATE INDEX IF NOT EXISTS idx_simple_run_queue_run_id ON simple_run_queue(run_id);
+
+  CREATE TABLE IF NOT EXISTS feishu_publish_queue (
+    id TEXT PRIMARY KEY,
+    owner_user_id TEXT NOT NULL,
+    source TEXT NOT NULL,
+    source_run_id TEXT,
+    status TEXT NOT NULL,
+    priority INTEGER NOT NULL DEFAULT 0,
+    attempts INTEGER NOT NULL DEFAULT 0,
+    max_attempts INTEGER NOT NULL DEFAULT 1,
+    run_after TIMESTAMPTZ NOT NULL,
+    locked_by TEXT,
+    locked_until TIMESTAMPTZ,
+    created_at TIMESTAMPTZ NOT NULL,
+    updated_at TIMESTAMPTZ NOT NULL,
+    started_at TIMESTAMPTZ,
+    completed_at TIMESTAMPTZ,
+    error TEXT,
+    data_json JSONB NOT NULL
+  );
+  CREATE INDEX IF NOT EXISTS idx_feishu_publish_queue_ready ON feishu_publish_queue(status, run_after, priority DESC, created_at ASC);
+  CREATE INDEX IF NOT EXISTS idx_feishu_publish_queue_owner_status ON feishu_publish_queue(owner_user_id, status, created_at ASC);
+  CREATE INDEX IF NOT EXISTS idx_feishu_publish_queue_source_run_id ON feishu_publish_queue(source_run_id);
 `;
 
 async function migrateLegacyJsonToPostgres() {
@@ -1403,6 +2066,59 @@ function fromSimpleRunQueueRow(row: SimpleRunQueueRow): SimpleRunQueueItem {
   };
 }
 
+function fromFeishuPublishQueueRow(row: FeishuPublishQueueRow): FeishuPublishJob {
+  const data = fromJson<FeishuPublishJob>(row.data_json);
+  return {
+    ...data,
+    id: row.id,
+    ownerUserId: row.owner_user_id,
+    source: row.source,
+    sourceRunId: row.source_run_id || undefined,
+    status: row.status,
+    priority: Number(row.priority || 0),
+    attempts: Number(row.attempts || 0),
+    maxAttempts: Number(row.max_attempts || 1),
+    runAfter: normalizeDateValue(row.run_after),
+    lockedBy: row.locked_by || undefined,
+    lockedUntil: row.locked_until ? normalizeDateValue(row.locked_until) : undefined,
+    createdAt: normalizeDateValue(row.created_at),
+    updatedAt: normalizeDateValue(row.updated_at),
+    startedAt: row.started_at ? normalizeDateValue(row.started_at) : undefined,
+    completedAt: row.completed_at ? normalizeDateValue(row.completed_at) : undefined,
+    error: row.error || data.error,
+  };
+}
+
+function fromWorkspaceAccountRow(row: WorkspaceAccountRow): WorkspaceAccountRecord {
+  const data = fromJson<Partial<WorkspaceAccountRecord>>(row.data_json);
+  return {
+    ...data,
+    id: row.id,
+    username: row.username,
+    displayName: row.display_name,
+    passwordHash: row.password_hash,
+    role: row.role === "admin" ? "admin" : "operator",
+    status: row.status === "disabled" ? "disabled" : "active",
+    createdAt: normalizeDateValue(row.created_at),
+    updatedAt: normalizeDateValue(row.updated_at),
+    lastLoginAt: row.last_login_at ? normalizeDateValue(row.last_login_at) : undefined,
+  };
+}
+
+function fromWorkspaceSessionRow(row: WorkspaceSessionRow): WorkspaceSession {
+  const data = fromJson<Partial<WorkspaceSession>>(row.data_json);
+  return {
+    ...data,
+    id: row.id,
+    accountId: row.account_id,
+    tokenHash: row.token_hash,
+    createdAt: normalizeDateValue(row.created_at),
+    expiresAt: normalizeDateValue(row.expires_at),
+    lastSeenAt: row.last_seen_at ? normalizeDateValue(row.last_seen_at) : undefined,
+    revokedAt: row.revoked_at ? normalizeDateValue(row.revoked_at) : undefined,
+  };
+}
+
 function normalizeDateValue(value: unknown) {
   if (value instanceof Date) return value.toISOString();
   return typeof value === "string" ? value : new Date(String(value)).toISOString();
@@ -1410,6 +2126,8 @@ function normalizeDateValue(value: unknown) {
 
 function assertStoreTable(table: StoreTable) {
   const allowedTables: StoreTable[] = [
+    "workspace_accounts",
+    "workspace_sessions",
     "content_projects",
     "generated_posts",
     "batch_jobs",
@@ -1420,6 +2138,7 @@ function assertStoreTable(table: StoreTable) {
     "runtime_posts",
     "simple_runs",
     "simple_run_queue",
+    "feishu_publish_queue",
   ];
   if (!allowedTables.includes(table)) throw new Error(`Unsupported store table: ${table}`);
 }

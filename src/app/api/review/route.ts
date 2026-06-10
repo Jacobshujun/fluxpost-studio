@@ -1,9 +1,10 @@
 import { NextResponse } from "next/server";
 import { compactError, recordExecutionLog } from "@/lib/activity-log";
 import { markSourceRewritten } from "@/lib/content-pool";
-import { saveGeneratedPost } from "@/lib/generated-posts";
+import { getGeneratedPost, saveGeneratedPost } from "@/lib/generated-posts";
 import { editPostWithPrompt } from "@/lib/openai";
 import { savePost } from "@/lib/store";
+import { isWorkspaceSignInError, requireWorkspaceAccount } from "@/lib/workspace-accounts";
 import type { GeneratedPost } from "@/lib/types";
 
 export const runtime = "nodejs";
@@ -11,6 +12,7 @@ export const runtime = "nodejs";
 export async function POST(request: Request) {
   const startedAt = Date.now();
   try {
+    const account = await requireWorkspaceAccount(request);
     const body = (await request.json()) as {
       post?: GeneratedPost;
       instruction?: string;
@@ -40,7 +42,9 @@ export async function POST(request: Request) {
       },
     });
 
-    let post = body.post;
+    const currentPost = await getGeneratedPost(body.post.id, account);
+    if (!currentPost) return NextResponse.json({ error: "Post not found" }, { status: 404 });
+    let post = currentPost;
     if (body.manualPatch) {
       post = {
         ...post,
@@ -53,9 +57,9 @@ export async function POST(request: Request) {
       post = await editPostWithPrompt({ post, instruction: body.instruction.trim() });
     }
 
-    await savePost(post);
-    await saveGeneratedPost(post);
-    await markSourceRewritten(post.sourceItemId, post);
+    const savedPost = await saveGeneratedPost(post, account);
+    await savePost(savedPost, account);
+    await markSourceRewritten(savedPost.sourceItemId, savedPost, account);
     await recordExecutionLog({
       scope: "review",
       action: "审查更新完成",
@@ -63,13 +67,13 @@ export async function POST(request: Request) {
       message: `草稿状态已更新为 ${post.status}`,
       durationMs: Date.now() - startedAt,
       details: {
-        postId: post.id,
-        status: post.status,
-        titleLength: post.title.length,
-        bodyLength: post.body.length,
+        postId: savedPost.id,
+        status: savedPost.status,
+        titleLength: savedPost.title.length,
+        bodyLength: savedPost.body.length,
       },
     });
-    return NextResponse.json({ post });
+    return NextResponse.json({ post: savedPost });
   } catch (error) {
     const message = error instanceof Error ? error.message : "Failed to update review";
     await recordExecutionLog({
@@ -79,6 +83,6 @@ export async function POST(request: Request) {
       message: compactError(error),
       durationMs: Date.now() - startedAt,
     });
-    return NextResponse.json({ error: message }, { status: 500 });
+    return NextResponse.json({ error: message }, { status: isWorkspaceSignInError(error) ? 401 : 500 });
   }
 }

@@ -414,12 +414,20 @@ async function recordXiaohongshuSearchDiagnostics(
 }
 
 function mapXiaohongshuSort(sort?: string) {
-  return sort === "time_descending" || sort === "popularity_descending" || sort === "general" ? sort : "general";
+  return sort === "time_descending" ||
+    sort === "popularity_descending" ||
+    sort === "comment_descending" ||
+    sort === "collect_descending" ||
+    sort === "english_preferred" ||
+    sort === "general"
+    ? sort
+    : "general";
 }
 
 export function mapXiaohongshuNoteType(noteType?: number) {
   if (noteType === 1) return "视频笔记";
   if (noteType === 2) return "普通笔记";
+  if (noteType === 3) return "直播笔记";
   return "不限";
 }
 

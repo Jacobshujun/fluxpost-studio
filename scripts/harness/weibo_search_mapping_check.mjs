@@ -124,12 +124,12 @@ const sandbox = {
     if (name === "./concurrency") {
       return {
         concurrencyConfig: {
-          crawl: 8,
-          media: 20,
+          crawl: 12,
+          media: 30,
           gpt: 50,
           image: 100,
           feishu: 50,
-          production: 20,
+          production: 30,
         },
         mapWithConcurrency: async (items, _concurrency, mapper) => Promise.all(items.map(mapper)),
         runWithConcurrencyPool: async (_name, task) => task(),

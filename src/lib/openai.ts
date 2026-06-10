@@ -37,15 +37,37 @@ type ChatCompletionResponse = {
   }>;
 };
 
-const minGeneratedTitleChars = 12;
-const maxGeneratedTitleChars = 18;
+const minGeneratedTitleChars = 10;
+const maxGeneratedTitleChars = 26;
 
-const titleStyleInstruction = [
-  "title 硬性规则：标题必须控制在 12-18 个可见字符之间。",
-  "title 必须包含车型/颜色/场景/核心冲突中的至少两个信息点，不能只写泛情绪短句。",
-  "title 避免只使用“有点”“看完了”“到了”“纠结了”等短口语收尾；需要保留真实用户语气，同时提高信息量。",
-  "如果原标题信息不足，请从正文里提取车型、使用场景、价格/销量/颜色/试驾等具体信息补足 title。",
-].join("\n");
+type TitleLengthProfile = {
+  label: string;
+  min: number;
+  max: number;
+  guidance: string;
+};
+
+const titleLengthProfiles: TitleLengthProfile[] = [
+  { label: "短标题", min: 10, max: 14, guidance: "短促有钩子，适合一眼扫到重点。" },
+  { label: "中标题", min: 15, max: 20, guidance: "信息密度更高，兼顾口语感和具体卖点。" },
+  { label: "长标题", min: 21, max: 26, guidance: "像真实用户笔记标题，允许带一点转折或悬念。" },
+];
+
+function pickTitleLengthProfile() {
+  return titleLengthProfiles[Math.floor(Math.random() * titleLengthProfiles.length)] || titleLengthProfiles[1];
+}
+
+function formatTitleStyleInstruction(profile: TitleLengthProfile) {
+  return [
+    `title 长度规则：本次采用${profile.label}，必须控制在 ${profile.min}-${profile.max} 个可见字符之间。`,
+    `title 全局允许范围是 ${minGeneratedTitleChars}-${maxGeneratedTitleChars} 个可见字符，但本次优先遵守上面的随机档位。`,
+    "title 不要固定 12 字，也不要每次贴区间下限；在本次区间内按信息量自然变化。",
+    `title 风格提示：${profile.guidance}`,
+    "title 必须包含车型/颜色/场景/核心冲突中的至少两个信息点，不能只写泛情绪短句。",
+    "title 避免只使用“有点”“看完了”“到了”“纠结了”等短口语收尾；需要保留真实用户语气，同时提高信息量。",
+    "如果原标题信息不足，请从正文里提取车型、使用场景、价格/销量/颜色/试驾等具体信息补足 title。",
+  ].join("\n");
+}
 
 export async function generatePost(input: RewriteInput): Promise<GeneratedPost> {
   const productionPlan = mergeProductionPlan(input.source.productionPlan || buildProductionPlan(input.source), input.productionPlanOverride);
@@ -57,6 +79,8 @@ export async function generatePost(input: RewriteInput): Promise<GeneratedPost> 
     return makeDemoPost(input.source, input.materialPaths);
   }
 
+  const titleProfile = pickTitleLengthProfile();
+  const titleStyleInstruction = formatTitleStyleInstruction(titleProfile);
   const prompt = [
     "你是社交媒体图文内容制作专家。不要直接仿写原文，而是提取信息点、爆款表达模型和平台语感后进行原创重构。",
     "必须遵守制作策略：行业图文只洗稿洗图，不结合车型资料；竞品图文只分析创意并用小鹏素材重构；竞品视频不采用。",
@@ -80,7 +104,7 @@ export async function generatePost(input: RewriteInput): Promise<GeneratedPost> 
   const json = await callOpenAIForJson(prompt);
   const body = stringFromJson(json.body, "");
   const rawTitle = stringFromJson(json.title, "未命名图文草稿");
-  const title = await repairGeneratedTitleIfNeeded(rawTitle, input, body);
+  const title = await repairGeneratedTitleIfNeeded(rawTitle, input, body, titleProfile);
 
   return {
     id: `post-${input.source.id}-${Date.now()}`,
@@ -296,18 +320,19 @@ function arrayOfStrings(value: unknown) {
   return Array.isArray(value) ? value.filter((item): item is string => typeof item === "string") : [];
 }
 
-async function repairGeneratedTitleIfNeeded(title: string, input: RewriteInput, body: string) {
+async function repairGeneratedTitleIfNeeded(title: string, input: RewriteInput, body: string, profile: TitleLengthProfile) {
   const normalized = normalizeGeneratedTitle(title);
-  if (isGeneratedTitleLengthValid(normalized)) return normalized;
+  if (isGeneratedTitleLengthValid(normalized, profile)) return normalized;
 
   try {
     const json = await callOpenAIForJson(
       [
         "你是社交媒体标题编辑，只修正 title，不改正文。",
-        titleStyleInstruction,
+        formatTitleStyleInstruction(profile),
         "只输出严格 JSON，字段为 title。",
         `当前不合格标题: ${normalized}`,
         `当前标题长度: ${countVisibleTitleChars(normalized)}`,
+        `本次标题档位: ${profile.label} ${profile.min}-${profile.max} 个可见字符`,
         `平台: ${input.source.platform}`,
         `原标题: ${input.source.title || ""}`,
         `原内容: ${input.source.contentText || ""}`,
@@ -316,7 +341,7 @@ async function repairGeneratedTitleIfNeeded(title: string, input: RewriteInput, 
       ].join("\n"),
     );
     const repaired = normalizeGeneratedTitle(stringFromJson(json.title, ""));
-    if (isGeneratedTitleLengthValid(repaired)) {
+    if (isGeneratedTitleLengthValid(repaired, profile)) {
       return repaired;
     }
   } catch (error) {
@@ -328,20 +353,24 @@ async function repairGeneratedTitleIfNeeded(title: string, input: RewriteInput, 
       details: {
         sourceItemId: input.source.id,
         titleChars: countVisibleTitleChars(normalized),
+        titleLengthProfile: profile.label,
+        targetTitleRange: `${profile.min}-${profile.max}`,
       },
     });
   }
 
-  const fallback = buildLocalTitleFallback(normalized, input, body);
+  const fallback = buildLocalTitleFallback(normalized, input, body, profile);
   await recordExecutionLog({
     scope: "openai/text",
     action: "Generated title normalized",
     status: "info",
-    message: "Generated title did not meet the 12-18 character rule and was normalized locally.",
+    message: "Generated title did not meet the randomized title-length profile and was normalized locally.",
     details: {
       sourceItemId: input.source.id,
       originalTitleChars: countVisibleTitleChars(normalized),
       finalTitleChars: countVisibleTitleChars(fallback),
+      titleLengthProfile: profile.label,
+      targetTitleRange: `${profile.min}-${profile.max}`,
     },
   });
   return fallback;
@@ -351,16 +380,18 @@ function normalizeGeneratedTitle(value: string) {
   return value.replace(/\s+/g, "").trim();
 }
 
-function isGeneratedTitleLengthValid(value: string) {
+function isGeneratedTitleLengthValid(value: string, profile?: TitleLengthProfile) {
   const length = countVisibleTitleChars(value);
-  return length >= minGeneratedTitleChars && length <= maxGeneratedTitleChars;
+  const min = profile?.min ?? minGeneratedTitleChars;
+  const max = profile?.max ?? maxGeneratedTitleChars;
+  return length >= min && length <= max;
 }
 
 function countVisibleTitleChars(value: string) {
   return Array.from(value.replace(/\s+/g, "")).length;
 }
 
-function buildLocalTitleFallback(title: string, input: RewriteInput, body: string) {
+function buildLocalTitleFallback(title: string, input: RewriteInput, body: string, profile: TitleLengthProfile) {
   const context = [title, input.source.title, input.source.contentText, body].filter(Boolean).join("\n");
   const vehicle = extractVehicleName(context);
   const scene = extractTitleScene(context);
@@ -370,9 +401,11 @@ function buildLocalTitleFallback(title: string, input: RewriteInput, body: strin
     `${vehicle}${scene}这次值得细看`,
     `${vehicle}${scene}我认真看完了`,
     `${vehicle}真实体验这次值得聊`,
+    `${vehicle}${scene}这些细节比参数更值得聊`,
+    `${vehicle}${scene}看完我更在意这些细节`,
   ].filter(Boolean);
 
-  return fitTitleLength(candidates.find(isGeneratedTitleLengthValid) || candidates[0] || title || "小鹏汽车真实体验值得细聊");
+  return fitTitleLength(candidates.find((candidate) => isGeneratedTitleLengthValid(candidate, profile)) || candidates[0] || title || "小鹏汽车真实体验值得细聊", profile);
 }
 
 function extractVehicleName(text: string) {
@@ -415,15 +448,15 @@ function stripWeakTitleWords(title: string) {
     .trim();
 }
 
-function fitTitleLength(title: string) {
+function fitTitleLength(title: string, profile: TitleLengthProfile) {
   let chars = Array.from(normalizeGeneratedTitle(title));
-  if (chars.length > maxGeneratedTitleChars) {
-    chars = chars.slice(0, maxGeneratedTitleChars);
+  if (chars.length > profile.max) {
+    chars = chars.slice(0, profile.max);
   }
-  while (chars.length < minGeneratedTitleChars) {
+  while (chars.length < profile.min) {
     chars.push(...Array.from("真实体验"));
-    if (chars.length > maxGeneratedTitleChars) {
-      chars = chars.slice(0, maxGeneratedTitleChars);
+    if (chars.length > profile.max) {
+      chars = chars.slice(0, profile.max);
       break;
     }
   }

@@ -1,11 +1,11 @@
 export const concurrencyConfig = {
-  crawl: readConcurrencyEnv("WORKER_CRAWL_CONCURRENCY", 8, 50),
-  media: readConcurrencyEnv("WORKER_MEDIA_CONCURRENCY", 20, 100),
+  crawl: readConcurrencyEnv("WORKER_CRAWL_CONCURRENCY", 12, 50),
+  media: readConcurrencyEnv("WORKER_MEDIA_CONCURRENCY", 30, 100),
   gpt: readConcurrencyEnv("WORKER_GPT_CONCURRENCY", 50, 50),
   image: readConcurrencyEnv("WORKER_IMAGE_CONCURRENCY", 100, 100),
   feishu: readConcurrencyEnv("WORKER_FEISHU_CONCURRENCY", 50, 50),
   feishuAttachment: readConcurrencyEnv("WORKER_FEISHU_ATTACHMENT_CONCURRENCY", 3, 10),
-  production: readConcurrencyEnv("WORKER_PRODUCTION_CONCURRENCY", 20, 50),
+  production: readConcurrencyEnv("WORKER_PRODUCTION_CONCURRENCY", 30, 50),
 } as const;
 
 export type ConcurrencyPoolName = keyof typeof concurrencyConfig;

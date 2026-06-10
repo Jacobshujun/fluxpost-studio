@@ -31,13 +31,13 @@ assertContains(
 );
 assertContains(
   imageGeneration,
-  /callRunningHubImageApi\(providerPrompt,\s*count,\s*imageOptions\)/,
-  "RunningHub no-task generation should receive the normalized non-empty provider prompt.",
+  /callImagesApi\(providerPrompt,\s*count,\s*imageOptions\)/,
+  "Images API no-task generation should receive the normalized non-empty provider prompt.",
 );
 assertNotContains(
   imageGeneration,
-  /callRunningHubImageApi\(prompt,\s*count,\s*imageOptions\)/,
-  "RunningHub no-task generation must not receive the raw caller prompt.",
+  /callImagesApi\(prompt,\s*count,\s*imageOptions\)/,
+  "Images API no-task generation must not receive the raw caller prompt.",
 );
 
 assertContains(

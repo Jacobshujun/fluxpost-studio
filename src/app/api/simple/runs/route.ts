@@ -1,17 +1,25 @@
 import { NextResponse } from "next/server";
 import { compactError, recordExecutionLog } from "@/lib/activity-log";
 import { listSimpleRuns, startSimpleRun, terminateSimpleRun } from "@/lib/simple-runs";
+import { requireWorkspaceAccount } from "@/lib/workspace-accounts";
 import type { Platform, WorkspacePromptSettings } from "@/lib/types";
 
 export const runtime = "nodejs";
 
-export async function GET() {
-  return NextResponse.json({ runs: await listSimpleRuns() });
+export async function GET(request: Request) {
+  try {
+    const account = await requireWorkspaceAccount(request);
+    return NextResponse.json({ runs: await listSimpleRuns(20, account) });
+  } catch (error) {
+    const message = error instanceof Error ? error.message : "Simple runs list failed";
+    return NextResponse.json({ error: message }, { status: /sign-in/i.test(message) ? 401 : 500 });
+  }
 }
 
 export async function POST(request: Request) {
   const startedAt = Date.now();
   try {
+    const account = await requireWorkspaceAccount(request);
     const body = (await request.json()) as {
       sourceMode?: "keyword" | "links";
       keyword?: string;
@@ -31,6 +39,8 @@ export async function POST(request: Request) {
       linkPlatform: body.linkPlatform,
       materialPaths: Array.isArray(body.materialPaths) ? body.materialPaths : [],
       settings: body.settings,
+      ownerUserId: account.id,
+      ownerDisplayName: account.displayName,
     });
     return NextResponse.json({ run });
   } catch (error) {
@@ -42,13 +52,15 @@ export async function POST(request: Request) {
       message: compactError(error),
       durationMs: Date.now() - startedAt,
     });
-    return NextResponse.json({ error: message }, { status: /required|platform/i.test(message) ? 400 : 500 });
+    const status = /sign-in/i.test(message) ? 401 : /required|platform/i.test(message) ? 400 : 500;
+    return NextResponse.json({ error: message }, { status });
   }
 }
 
 export async function DELETE(request: Request) {
   const startedAt = Date.now();
   try {
+    const account = await requireWorkspaceAccount(request);
     let body: { runId?: string; reason?: string } = {};
     try {
       body = (await request.json()) as { runId?: string; reason?: string };
@@ -62,7 +74,7 @@ export async function DELETE(request: Request) {
       return NextResponse.json({ error: "Simple run id is required" }, { status: 400 });
     }
 
-    const run = await terminateSimpleRun(runId, body.reason);
+    const run = await terminateSimpleRun(runId, body.reason, account);
     return NextResponse.json({ run });
   } catch (error) {
     const message = error instanceof Error ? error.message : "Simple run termination failed";
@@ -73,7 +85,7 @@ export async function DELETE(request: Request) {
       message: compactError(error),
       durationMs: Date.now() - startedAt,
     });
-    const status = /required/i.test(message) ? 400 : /not found/i.test(message) ? 404 : 500;
+    const status = /sign-in/i.test(message) ? 401 : /required/i.test(message) ? 400 : /not found/i.test(message) ? 404 : 500;
     return NextResponse.json({ error: message }, { status });
   }
 }

@@ -1,6 +1,6 @@
 # Project Brief
 
-Last updated: 2026-06-08
+Last updated: 2026-06-09
 
 ## Project Name, Goal, Path
 
@@ -12,8 +12,12 @@ Last updated: 2026-06-08
 
 ## User Roles
 
-- 待确认: the repository does not define formal user roles.
-- Confirmed product surface implies operators who harvest social content, create/review posts, and publish approved payloads to Feishu.
+- Default workspace access is small-team whitelist mode for up to a few local operators. Configure it with `WORKSPACE_AUTH_MODE=whitelist`, `WORKSPACE_ALLOWED_USERS`, `WORKSPACE_ADMIN_USERS`, and `WORKSPACE_ACCESS_PASSWORD`.
+- `WORKSPACE_ALLOWED_USERS` is the allow-list for account usernames. `WORKSPACE_ADMIN_USERS` is a subset of allowed usernames that may bootstrap or always receive the admin role in whitelist mode; existing admins can also assign admin role from the account menu.
+- `WORKSPACE_ACCESS_PASSWORD` is only the first-admin setup key in whitelist mode. Daily sign-in uses the per-user password hash stored in `workspace_accounts`.
+- Normal members can access only records stamped with their `ownerUserId`; admins can access all workspace records. Unowned legacy records are effectively admin-only because member filters require an owner match.
+- Mutating workspace API routes require a signed-in workspace account before local writes, queue creation, or external provider calls. Read-only local diagnostics remain available without a browser session where explicitly supported.
+
 
 ## Main Flow
 
@@ -52,6 +56,8 @@ Last updated: 2026-06-08
 - Main page: `src/app/page.tsx`.
 - Root layout: `src/app/layout.tsx`.
 - API routes:
+  - `GET|POST /api/accounts`
+  - `GET|POST|DELETE /api/accounts/session`
   - `GET /api/config`
   - `GET /api/content-pool`
   - `GET|POST|PATCH|DELETE /api/content/items`
@@ -64,7 +70,7 @@ Last updated: 2026-06-08
   - `GET|POST /api/production/batches`
   - `GET|POST|PATCH|DELETE /api/production/posts`
   - `POST /api/production/posts/regenerate`
-  - `POST /api/publish/feishu`
+  - `GET|POST /api/publish/feishu`
   - `POST /api/review`
   - `GET|POST|DELETE /api/simple/runs`
   - `GET|DELETE /api/activity`
@@ -77,8 +83,9 @@ Last updated: 2026-06-08
 - Fallback runtime database when `DATABASE_URL` is not configured: `data/fluxpost.db` SQLite.
 - PostgreSQL schema: `db/migrations/001_initial_postgres.sql`.
 - Legacy JSON files under `data/` can be used as one-time migration sources: `content-pool.json`, `batch-production.json`, `generated-posts.json`, `material-library.json`, and `execution-log.json`.
-- Runtime database stores content projects, generated posts, batch jobs, material folders/assets, execution logs, crawl jobs, runtime posts, simple runs, and workspace settings metadata.
-- Runtime database also stores `simple_run_queue`, the durable queue table for simple-mode run execution.
+- Runtime database stores workspace accounts/sessions, content projects, generated posts, batch jobs, material folders/assets, execution logs, crawl jobs, runtime posts, simple runs, and workspace settings metadata.
+- Runtime database also stores `simple_run_queue`, the durable queue table for simple-mode run execution, and `feishu_publish_queue`, the durable queue table for asynchronous Feishu CLI writes.
+- Workspace sessions use an HttpOnly `fluxpost_session` browser cookie. In default whitelist mode, the first-admin setup key is environment-driven and not stored in the runtime database; daily account passwords are stored only as Node `scrypt` hashes.
 - SQLite-to-PostgreSQL migration script: `scripts/db/migrate-sqlite-to-postgres.mjs`. It copies metadata and JSON payload rows; it does not move media binaries.
 - Feishu outbox payload directory from code/README: `data/feishu-outbox/`.
 - Generated AI images: `public/generated/`.
@@ -90,14 +97,18 @@ Last updated: 2026-06-08
 ## External Integrations
 
 - TikHub API base URL/key are configured by `TIKHUB_BASE_URL` and `TIKHUB_API_KEY`.
+- Workspace whitelist access is configured by `WORKSPACE_AUTH_MODE=whitelist`, `WORKSPACE_ALLOWED_USERS`, `WORKSPACE_ADMIN_USERS`, and `WORKSPACE_ACCESS_PASSWORD`; do not record the real allowed user list, admin list, setup key, or account passwords in Harness docs.
 - PostgreSQL runtime storage is configured by `DATABASE_URL` and optional `DATABASE_POOL_MAX`.
 - Local PostgreSQL facts confirmed on 2026-06-04: Windows service `postgresql-x64-18` is running, the client binaries live under `D:\Program Files\PostgreSQL\18\bin`, and a dedicated FluxPost Studio database/user were provisioned for the app.
-- OpenAI-compatible text and image endpoints are configured by `OPENAI_*` variables.
-- RunningHub image generation is configured by `OPENAI_IMAGE_ENDPOINT=runninghub` plus `RUNNINGHUB_*` variables. The RunningHub API key is sensitive and must stay in local env only.
+- OpenAI-compatible text endpoints are configured by `OPENAI_*` variables.
+- GPT-Image-2 image generation uses the OpenAI Images API shape. `OPENAI_IMAGE_BASE_URL` configures the primary image API base URL, `OPENAI_IMAGE_API_KEY` configures the primary image API key with `OPENAI_API_KEY` fallback, optional `OPENAI_IMAGE_BACKUP_BASE_URL` and `OPENAI_IMAGE_BACKUP_API_KEY` configure a backup image route, `OPENAI_IMAGE_ENDPOINT=images` selects Images API dispatch, and `OPENAI_IMAGE_MODEL` defaults to `gpt-image-2`. Text-to-image requests use `/images/generations`; reference-image editing/image-to-image requests use multipart `/images/edits`.
 - Feishu CLI publishing is configured by `FEISHU_CLI_BIN`, optional `FEISHU_CLI_BITABLE_ARGS`, `FEISHU_BITABLE_APP_TOKEN`, `FEISHU_BITABLE_TABLE_ID`, and optional `FEISHU_BITABLE_FIELD_MAP`.
+- Generated-post Feishu CLI publishing defaults to Base fields `动态标题`, `动态正文`, `动态素材`, `内容标签`, and `内容创作来源`; the content creation source value comes from the workspace owner display name on the generated post, with owner id as a historical fallback.
+- Feishu source-link import sync is configured by `FEISHU_SOURCE_IMPORT_ENABLED`, `FEISHU_SOURCE_IMPORT_BASE_TOKEN`, `FEISHU_SOURCE_IMPORT_TABLE_ID`, and optional `FEISHU_SOURCE_IMPORT_FIELD_MAP`. The default source-import target is the user-requested Base `JbpPbSIMqaD75wsZ9fAcBy9mnEe` table `tbllsn3LBZ6mWTyL`; it writes `源链接`, `标题`, `正文`, single-select `平台`, and attachment fields `图片`/`视频` only for TikHub-resolved items kept by the source safety filter.
 - Optional Feishu IM success notification is configured by exactly one of `FEISHU_NOTIFY_CHAT_ID` or `FEISHU_NOTIFY_USER_ID`; it uses bot identity through `lark-cli im +messages-send`.
 - The confirmed default Feishu command shape is `lark-cli base +record-batch-create --as bot --base-token {appToken} --table-id {tableId} --json @{recordPayload}`.
-- Simple-mode throughput knobs include `SIMPLE_RUN_MAX_ITEMS` (fallback `500`, hard ceiling `2000`) and `SIMPLE_RUN_WORKER_CONCURRENCY` (fallback `2`, hard ceiling `10`).
+- Simple-mode throughput knobs include `SIMPLE_RUN_MAX_ITEMS` (fallback `500`, hard ceiling `2000`) and `SIMPLE_RUN_WORKER_CONCURRENCY` (fallback `4`, hard ceiling `10`).
+- Feishu publish queue throughput is controlled by `FEISHU_PUBLISH_WORKER_CONCURRENCY` (fallback `1`, hard ceiling `5`), with a per-owner running-job guard so Feishu CLI writes are serialized per user/owner.
 - Feishu attachment-upload throughput is controlled separately by `WORKER_FEISHU_ATTACHMENT_CONCURRENCY` (fallback `3`, hard ceiling `10`) so large attachment batches do not use the same high concurrency as record creation.
 
 ## Deployment Facts
@@ -110,9 +121,9 @@ Last updated: 2026-06-08
 
 ## Not Covered Or Pending Confirmation
 
-- Formal user roles and permissions: 待确认.
+- Formal user roles beyond V1 `admin`/`operator`: 待确认.
 - Server deployment runbook: 待确认.
-- Feishu target Base token and table ID: 待确认.
+- Generated-post Feishu target Base token and table ID for deployment: 待确认. Source-link import sync has a user-requested default target in `src/lib/config.ts`.
 - Safe isolated test credentials for TikHub/OpenAI/Feishu: 待确认.
 - PostgreSQL server installation, database/user provisioning, and live migration execution: confirmed locally on 2026-06-04.
 - High-volume asynchronous queue schema/worker model beyond the current JSONB-backed runtime tables: 待确认.

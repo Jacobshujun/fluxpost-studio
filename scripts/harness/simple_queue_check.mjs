@@ -41,6 +41,11 @@ assertContains(route, /terminateSimpleRun\(runId/, "Simple run DELETE endpoint m
 assertContains(page, /onTerminateRun=\{terminateSimpleRunFromUi\}/, "Simple UI must wire the force-terminate action.");
 assertContains(page, /强制终止/, "Simple UI must expose a force-terminate button.");
 assertContains(page, /max=\{sourceMode === "links" \? Math\.max\(1,\s*linkCount \|\| 1\) : 500\}/, "Keyword-mode target count input must still allow more than 100 items.");
+assertContains(page, /<SimpleOverallProgressBar[\s\S]*runs=\{runs\}[\s\S]*activeRun=\{runForSummary\}/, "Compact progress must receive the simple-run list, not only one active run.");
+assertContains(page, /buildSimpleOverallProgressRuns\(runs,\s*activeRun\)/, "Compact progress must derive multiple visible runs from current simple runs.");
+assertContains(page, /simple-overall-run-list/, "Compact progress must render a multi-run progress list.");
+assertContains(page, /progressRuns\.map\(\(progressRun\)/, "Compact progress must map over multiple runs.");
+assertNotContains(page, /<SimpleOverallProgressBar\s+run=\{runForSummary\}/, "Compact progress must not be wired to a single run prop.");
 
 assertContains(database, /CREATE TABLE IF NOT EXISTS simple_run_queue/, "Runtime database schema must create simple_run_queue.");
 assertContains(schema, /CREATE TABLE IF NOT EXISTS simple_run_queue/, "PostgreSQL migration must create simple_run_queue.");

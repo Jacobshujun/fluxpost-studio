@@ -16,6 +16,47 @@ export type SimpleRunStatus = "queued" | "running" | "completed" | "partial" | "
 
 export type SimpleRunQueueStatus = "queued" | "running" | "completed" | "failed";
 
+export type FeishuPublishQueueStatus =
+  | "queued"
+  | "running"
+  | "completed"
+  | "partial"
+  | "needs_config"
+  | "failed"
+  | "cancelled";
+
+export type FeishuPublishJobSource = "manual" | "simple";
+
+export type WorkspaceAccountRole = "admin" | "operator";
+
+export type WorkspaceAccountStatus = "active" | "disabled";
+
+export type WorkspaceAccount = {
+  id: string;
+  username: string;
+  displayName: string;
+  role: WorkspaceAccountRole;
+  status: WorkspaceAccountStatus;
+  createdAt: string;
+  updatedAt: string;
+  lastLoginAt?: string;
+  passwordSet?: boolean;
+};
+
+export type WorkspaceAccountRecord = WorkspaceAccount & {
+  passwordHash: string;
+};
+
+export type WorkspaceSession = {
+  id: string;
+  accountId: string;
+  tokenHash: string;
+  createdAt: string;
+  expiresAt: string;
+  lastSeenAt?: string;
+  revokedAt?: string;
+};
+
 export type SimpleRunStageId = "crawl" | "tag" | "produce" | "publish";
 
 export type SimpleRunStageStatus = "queued" | "running" | "success" | "warning" | "error" | "skipped";
@@ -103,6 +144,8 @@ export type SourceVisualTagging = {
 export type ExecutionLogEntry = {
   id: string;
   createdAt: string;
+  ownerUserId?: string;
+  ownerDisplayName?: string;
   scope: string;
   action: string;
   status: ExecutionLogStatus;
@@ -241,6 +284,8 @@ export type CrawlInput = {
 export type CrawlJob = {
   id: string;
   status: CrawlStatus;
+  ownerUserId?: string;
+  ownerDisplayName?: string;
   input: CrawlInput;
   createdAt: string;
   updatedAt: string;
@@ -277,6 +322,8 @@ export type SourceMediaCacheStatus = {
 
 export type NormalizedSourceItem = {
   id: string;
+  ownerUserId?: string;
+  ownerDisplayName?: string;
   platform: Platform;
   sourceId: string;
   mediaType?: "video" | "image" | "text" | "mixed" | "unknown";
@@ -319,6 +366,8 @@ export type NormalizedSourceItem = {
 
 export type ContentProject = {
   id: string;
+  ownerUserId?: string;
+  ownerDisplayName?: string;
   query: string;
   normalizedQuery: string;
   createdAt: string;
@@ -341,6 +390,8 @@ export type ContentPoolSnapshot = {
 
 export type GeneratedPost = {
   id: string;
+  ownerUserId?: string;
+  ownerDisplayName?: string;
   sourceItemId: string;
   createdAt?: string;
   parentPostId?: string;
@@ -379,6 +430,8 @@ export type ProductionTask = {
 
 export type BatchProductionJob = {
   id: string;
+  ownerUserId?: string;
+  ownerDisplayName?: string;
   title: string;
   status: BatchProductionStatus;
   instruction: string;
@@ -402,6 +455,8 @@ export type SimpleRunInput = {
   materialPaths: string[];
   links?: string[];
   linkPlatform?: Platform | "auto";
+  ownerUserId?: string;
+  ownerDisplayName?: string;
 };
 
 export type SimpleRunLinkResult = {
@@ -448,8 +503,9 @@ export type SimpleRunPostResult = {
 };
 
 export type SimpleRunPublishResult = {
-  status: "published" | "attachment_failed" | "needs_config" | "skipped" | "failed";
+  status: "queued" | "running" | "published" | "attachment_failed" | "needs_config" | "skipped" | "failed";
   postCount: number;
+  jobId?: string;
   payloadPath?: string;
   message?: string;
   notificationStatus?: string;
@@ -458,6 +514,8 @@ export type SimpleRunPublishResult = {
 
 export type SimpleRun = {
   id: string;
+  ownerUserId?: string;
+  ownerDisplayName?: string;
   status: SimpleRunStatus;
   input: SimpleRunInput;
   createdAt: string;
@@ -494,6 +552,37 @@ export type SimpleRunQueueItem = {
   error?: string;
 };
 
+export type FeishuPublishJobResult = {
+  status: "published" | "attachment_failed" | "needs_config" | "skipped" | "failed";
+  payloadPath?: string;
+  message?: string;
+  notificationStatus?: string;
+  attachmentFailureCount?: number;
+  recordCount?: number;
+};
+
+export type FeishuPublishJob = {
+  id: string;
+  ownerUserId: string;
+  source: FeishuPublishJobSource;
+  sourceRunId?: string;
+  status: FeishuPublishQueueStatus;
+  priority: number;
+  attempts: number;
+  maxAttempts: number;
+  runAfter: string;
+  lockedBy?: string;
+  lockedUntil?: string;
+  createdAt: string;
+  updatedAt: string;
+  startedAt?: string;
+  completedAt?: string;
+  postIds: string[];
+  posts: GeneratedPost[];
+  result?: FeishuPublishJobResult;
+  error?: string;
+};
+
 export type MaterialAsset = {
   id: string;
   path: string;
@@ -505,6 +594,8 @@ export type MaterialAssetKind = "image" | "document" | "other";
 
 export type MaterialFolder = {
   id: string;
+  ownerUserId?: string;
+  ownerDisplayName?: string;
   name: string;
   parentId?: string;
   createdAt: string;
@@ -513,6 +604,8 @@ export type MaterialFolder = {
 
 export type MaterialLibraryAsset = {
   id: string;
+  ownerUserId?: string;
+  ownerDisplayName?: string;
   folderId: string;
   path: string;
   name: string;
@@ -531,17 +624,19 @@ export type MaterialLibrarySnapshot = {
 export type ConfigStatus = {
   tikhubConfigured: boolean;
   openaiConfigured: boolean;
-  runningHubConfigured: boolean;
+  openaiImageConfigured: boolean;
+  openaiImageBackupConfigured: boolean;
   feishuConfigured: boolean;
   databaseBackend: "sqlite" | "postgres";
   postgresConfigured: boolean;
   textModel: string;
   imageModel: string;
   imageProvider: string;
+  openaiImageRequestTimeoutMs: number;
   openaiBaseUrl: string;
   openaiTextBaseUrl: string;
   openaiImageBaseUrl: string;
-  runningHubBaseUrl: string;
+  openaiImageBackupBaseUrl?: string;
   tikhubBaseUrl: string;
   feishuCliBin?: string;
   feishuNotifyConfigured: boolean;

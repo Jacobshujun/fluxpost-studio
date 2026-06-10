@@ -1,9 +1,11 @@
 import { compactError, recordExecutionLog } from "./activity-log";
 import { concurrencyConfig, mapWithConcurrency } from "./concurrency";
 import { ingestCrawlItems } from "./content-pool";
+import { syncSourceItemsToFeishu, type SourceImportFeishuSyncResult } from "./source-import-feishu";
 import { filterUnsafeSourceItems } from "./source-safety";
 import { tagSourceItems } from "./source-tagging";
 import { detectPlatformFromSourceUrl, fetchTikHubItemBySourceLink } from "./tikhub";
+import type { WorkspaceAccessActor } from "./workspace-ownership";
 import type { ContentProject, NormalizedSourceItem, Platform } from "./types";
 
 export type SourceLinkImportStatus = "imported" | "filtered" | "duplicate" | "unsupported" | "failed";
@@ -30,6 +32,9 @@ export type SourceLinkImportSummary = {
   taggedVisual: number;
   localImages: number;
   videoFrames: number;
+  feishuSourceCreated: number;
+  feishuSourceSkippedDuplicate: number;
+  feishuSourceFailed: number;
 };
 
 export type SourceLinkImportResponse = {
@@ -38,6 +43,7 @@ export type SourceLinkImportResponse = {
   project?: ContentProject;
   results: SourceLinkImportResult[];
   summary: SourceLinkImportSummary;
+  sourceFeishuSync?: SourceImportFeishuSyncResult;
 };
 
 export type SourceLinkImportInput = {
@@ -45,6 +51,7 @@ export type SourceLinkImportInput = {
   links: string[];
   platform?: Platform;
   cookie?: string;
+  owner?: WorkspaceAccessActor;
 };
 
 export type SourceLinkResolveInput = {
@@ -108,6 +115,7 @@ export async function importSourceLinks(input: SourceLinkImportInput): Promise<S
     }
   }
 
+  const sourceFeishuSync = await syncSourceItemsToFeishu(safetyResult.items, { scope: "crawl/links" });
   const taggedItems = await tagSourceItems(safetyResult.items);
   const importedIds = new Set(taggedItems.map((item) => item.id));
   for (const result of results) {
@@ -117,8 +125,8 @@ export async function importSourceLinks(input: SourceLinkImportInput): Promise<S
     }
   }
 
-  const project = taggedItems.length ? await ingestCrawlItems(input.query, taggedItems) : undefined;
-  const summary = summarizeLinkImport(parsedLinks.length, results, taggedItems);
+  const project = taggedItems.length ? await ingestCrawlItems(input.query, taggedItems, input.owner) : undefined;
+  const summary = summarizeLinkImport(parsedLinks.length, results, taggedItems, sourceFeishuSync);
   await recordExecutionLog({
     scope: "crawl/links",
     action: "Source link import completed",
@@ -133,6 +141,9 @@ export async function importSourceLinks(input: SourceLinkImportInput): Promise<S
       failed: summary.failed,
       unsupported: summary.unsupported,
       duplicates: summary.duplicates,
+      feishuSourceCreated: summary.feishuSourceCreated,
+      feishuSourceSkippedDuplicate: summary.feishuSourceSkippedDuplicate,
+      feishuSourceFailed: summary.feishuSourceFailed,
     },
   });
 
@@ -142,6 +153,7 @@ export async function importSourceLinks(input: SourceLinkImportInput): Promise<S
     project,
     results,
     summary,
+    sourceFeishuSync,
   };
 }
 
@@ -281,6 +293,7 @@ function summarizeLinkImport(
   total: number,
   results: SourceLinkImportResult[],
   importedItems: NormalizedSourceItem[],
+  sourceFeishuSync?: SourceImportFeishuSyncResult,
 ): SourceLinkImportSummary {
   return {
     total,
@@ -294,6 +307,9 @@ function summarizeLinkImport(
     taggedVisual: importedItems.reduce((sum, item) => sum + (item.visualTagging?.assets.length || 0), 0),
     localImages: importedItems.reduce((sum, item) => sum + (item.downloadedImages?.length || 0), 0),
     videoFrames: importedItems.reduce((sum, item) => sum + (item.videoFrames?.length || 0), 0),
+    feishuSourceCreated: sourceFeishuSync?.created || 0,
+    feishuSourceSkippedDuplicate: sourceFeishuSync?.skippedDuplicate || 0,
+    feishuSourceFailed: sourceFeishuSync?.failed || 0,
   };
 }
 

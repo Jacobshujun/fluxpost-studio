@@ -1,89 +1,100 @@
 import { NextResponse } from "next/server";
 import { compactError, recordExecutionLog } from "@/lib/activity-log";
-import { getSourceItemsByIds, markSourceRewritten } from "@/lib/content-pool";
-import { publishPostsToFeishu } from "@/lib/feishu-cli";
-import { saveGeneratedPost } from "@/lib/generated-posts";
-import { savePost } from "@/lib/store";
+import {
+  buildFeishuPublishJobResponse,
+  enqueueFeishuPublishJob,
+  getFeishuPublishJob,
+  listFeishuPublishJobs,
+} from "@/lib/feishu-publish-queue";
+import { getGeneratedPost } from "@/lib/generated-posts";
+import { requireWorkspaceAccount } from "@/lib/workspace-accounts";
 import type { GeneratedPost } from "@/lib/types";
 
 export const runtime = "nodejs";
 
+export async function GET(request: Request) {
+  try {
+    const url = new URL(request.url);
+    const account = await requireWorkspaceAccount(request);
+    const jobId = url.searchParams.get("jobId")?.trim();
+    if (jobId) {
+      const job = await getFeishuPublishJob(jobId, account);
+      if (!job) return NextResponse.json({ error: "Feishu publish job not found" }, { status: 404 });
+      return NextResponse.json(buildFeishuPublishJobResponse(job));
+    }
+
+    const jobs = await listFeishuPublishJobs(50, account);
+    return NextResponse.json({ jobs });
+  } catch (error) {
+    const message = compactError(error);
+    return NextResponse.json({ error: message }, { status: /sign-in/i.test(message) ? 401 : 500 });
+  }
+}
+
 export async function POST(request: Request) {
   const startedAt = Date.now();
   try {
+    const account = await requireWorkspaceAccount(request);
     const body = (await request.json()) as { posts?: GeneratedPost[] };
-    const posts = Array.isArray(body.posts) ? body.posts : [];
-    if (!posts.length) {
+    const requestedPosts = Array.isArray(body.posts) ? body.posts : [];
+    if (!requestedPosts.length) {
       await recordExecutionLog({
         scope: "publish/feishu",
-        action: "飞书写入请求校验失败",
+        action: "Feishu publish enqueue validation failed",
         status: "error",
-        message: "没有可写入的已审查草稿",
+        message: "At least one approved post is required.",
         durationMs: Date.now() - startedAt,
       });
       return NextResponse.json({ error: "At least one approved post is required" }, { status: 400 });
     }
+    const posts = (
+      await Promise.all(
+        requestedPosts.map(async (post) => {
+          if (!post?.id) return undefined;
+          return getGeneratedPost(post.id, account);
+        }),
+      )
+    ).filter((post): post is GeneratedPost => Boolean(post));
+    if (!posts.length || posts.length !== requestedPosts.length) {
+      return NextResponse.json({ error: "One or more posts were not found" }, { status: 404 });
+    }
 
-    await recordExecutionLog({
-      scope: "publish/feishu",
-      action: "开始写入飞书",
-      status: "running",
-      message: "准备调用 Feishu CLI 或生成 outbox payload",
-      details: {
-        postCount: posts.length,
-        firstPostId: posts[0]?.id || null,
-      },
+    const job = await enqueueFeishuPublishJob(posts, {
+      source: "manual",
+      ownerUserId: account.id,
+      ownerDisplayName: account.displayName,
     });
-    const publishPosts = await enrichPostsWithContentTags(posts);
-    const result = await publishPostsToFeishu(publishPosts);
-    const nextStatus: GeneratedPost["status"] = result.status === "published" ? "published" : "approved";
-    const feishuStateByPostId = new Map((result.postStates || []).map((item) => [item.postId, item.feishu]));
-    await Promise.all(publishPosts.map(async (post) => {
-      const nextPost = {
-        ...post,
-        feishu: feishuStateByPostId.get(post.id) || post.feishu,
-        status: nextStatus,
-        updatedAt: new Date().toISOString(),
-      };
-      await savePost(nextPost);
-      await saveGeneratedPost(nextPost);
-      await markSourceRewritten(nextPost.sourceItemId, nextPost);
-    }));
 
     await recordExecutionLog({
       scope: "publish/feishu",
-      action: "飞书写入完成",
-      status: result.status === "published" ? "success" : "info",
-      message: result.message || `飞书流程返回 ${result.status}`,
+      action: "Feishu publish enqueue completed",
+      status: "info",
+      message: `Feishu publish job ${job.id} queued for ${job.postIds.length} post(s).`,
       durationMs: Date.now() - startedAt,
       details: {
-        status: result.status,
-        payloadPath: result.payloadPath || null,
-        notificationStatus: result.notification?.status || null,
-        notificationMessage: result.notification?.message || null,
+        jobId: job.id,
+        postCount: job.postIds.length,
+        ownerUserId: job.ownerUserId,
       },
     });
-    return NextResponse.json(result);
+
+    return NextResponse.json(
+      {
+        ...buildFeishuPublishJobResponse(job),
+        message: `Feishu publish job ${job.id} has been queued. Feishu CLI writes will run in the per-user queue.`,
+        postStates: [],
+      },
+      { status: 202 },
+    );
   } catch (error) {
-    const message = error instanceof Error ? error.message : "Failed to publish to Feishu";
+    const message = error instanceof Error ? error.message : "Failed to enqueue Feishu publish job";
     await recordExecutionLog({
       scope: "publish/feishu",
-      action: "飞书写入失败",
+      action: "Feishu publish enqueue failed",
       status: "error",
       message: compactError(error),
       durationMs: Date.now() - startedAt,
     });
-    return NextResponse.json({ error: message }, { status: 500 });
+    return NextResponse.json({ error: message }, { status: /sign-in/i.test(message) ? 401 : 500 });
   }
-}
-
-async function enrichPostsWithContentTags(posts: GeneratedPost[]) {
-  const missingTagSourceIds = posts.filter((post) => !post.contentTags?.length).map((post) => post.sourceItemId);
-  if (!missingTagSourceIds.length) return posts;
-  const sources = await getSourceItemsByIds(missingTagSourceIds);
-  const sourceById = new Map(sources.map((source) => [source.id, source]));
-  return posts.map((post) => ({
-    ...post,
-    contentTags: post.contentTags?.length ? post.contentTags : sourceById.get(post.sourceItemId)?.contentTagging?.tags || [],
-  }));
 }

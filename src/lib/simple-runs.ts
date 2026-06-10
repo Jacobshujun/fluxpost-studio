@@ -1,4 +1,4 @@
-import { compactError, recordExecutionLog } from "./activity-log";
+import { compactError, recordExecutionLog, runWithExecutionLogOwner } from "./activity-log";
 import { buildDefaultImageTasks } from "./creation-controls";
 import { concurrencyConfig, mapWithConcurrency, runWithConcurrencyPool } from "./concurrency";
 import { calculateHotScore, ingestCrawlItems, markSourceRewritten } from "./content-pool";
@@ -14,17 +14,24 @@ import {
   readSimpleRunsFromDb,
   saveSimpleRunToDb,
 } from "./database";
-import { publishPostsToFeishu } from "./feishu-cli";
+import { enqueueFeishuPublishJob, ensureFeishuPublishQueueWorker } from "./feishu-publish-queue";
 import { saveGeneratedPost } from "./generated-posts";
 import { generateImagesFromPrompt } from "./image-generation";
 import { generatePost } from "./openai";
 import { buildProductionPlan } from "./production-plan";
 import { savePost } from "./store";
+import { syncSourceItemsToFeishu } from "./source-import-feishu";
 import { resolveSourceLinks, type SourceLinkImportResult } from "./source-link-import";
 import { filterUnsafeSourceItems } from "./source-safety";
 import { tagSourceItems } from "./source-tagging";
 import { crawlTikHub } from "./tikhub";
 import { defaultWorkspacePromptSettings, getWorkspacePromptSettings, saveWorkspacePromptSettings } from "./workspace-settings";
+import {
+  accessActorFromOwner,
+  applyWorkspaceOwner,
+  filterWorkspaceOwnedRecords,
+  type WorkspaceAccessActor,
+} from "./workspace-ownership";
 import type {
   CrawlInput,
   GeneratedPost,
@@ -47,12 +54,14 @@ type CreateSimpleRunInput = Omit<SimpleRunInput, "materialPaths" | "platforms" |
   materialPaths?: string[];
   links?: string[] | string;
   linkPlatform?: SimpleRunInput["linkPlatform"];
+  ownerUserId?: string;
+  ownerDisplayName?: string;
   settings?: Partial<WorkspacePromptSettings>;
 };
 
 const maxSimpleRunItems = readBoundedIntegerEnv("SIMPLE_RUN_MAX_ITEMS", 500, 10, 2000);
 const maxSimpleImageTasksPerPost = 9;
-const simpleRunQueueWorkerConcurrency = readBoundedIntegerEnv("SIMPLE_RUN_WORKER_CONCURRENCY", 2, 1, 10);
+const simpleRunQueueWorkerConcurrency = readBoundedIntegerEnv("SIMPLE_RUN_WORKER_CONCURRENCY", 4, 1, 10);
 const simpleRunQueueLockMs = 5 * 60_000;
 const simpleRunQueueHeartbeatMs = 30_000;
 const simpleRunForceTerminateMessage = "用户已强制终止该任务。";
@@ -64,19 +73,25 @@ const stageTitles: Record<SimpleRunStageId, string> = {
   publish: "写入飞书",
 };
 
-export async function listSimpleRuns(limit = 20) {
+export async function listSimpleRuns(limit = 20, account?: WorkspaceAccessActor) {
   await reconcileInterruptedSimpleRuns(limit);
   ensureSimpleRunQueueWorker();
-  return readSimpleRunsFromDb(limit);
+  ensureFeishuPublishQueueWorker();
+  return filterWorkspaceOwnedRecords((await readSimpleRunsFromDb(limit)).map(ensureSimpleRunOwner), account);
 }
 
-export async function getSimpleRun(runId: string) {
-  return getSimpleRunFromDb(runId);
+export async function getSimpleRun(runId: string, account?: WorkspaceAccessActor) {
+  const storedRun = await getSimpleRunFromDb(runId);
+  const run = storedRun ? ensureSimpleRunOwner(storedRun) : undefined;
+  if (!run || (account && !filterWorkspaceOwnedRecords([run], account).length)) return undefined;
+  return run;
 }
 
 export async function createAndRunSimpleRun(input: CreateSimpleRunInput) {
   const context = await prepareSimpleRun(input);
-  return runSimpleRunWorkflow(context.run, context.normalizedInput, context.settings, context.startedAt);
+  return runWithSimpleRunOwner(context.normalizedInput, () =>
+    runSimpleRunWorkflow(context.run, context.normalizedInput, context.settings, context.startedAt),
+  );
 }
 
 export async function startSimpleRun(input: CreateSimpleRunInput) {
@@ -86,12 +101,12 @@ export async function startSimpleRun(input: CreateSimpleRunInput) {
   return context.run;
 }
 
-export async function terminateSimpleRun(runId: string, reason = simpleRunForceTerminateMessage) {
+export async function terminateSimpleRun(runId: string, reason = simpleRunForceTerminateMessage, account?: WorkspaceAccessActor) {
   const trimmedRunId = runId.trim();
   if (!trimmedRunId) throw new Error("Simple run id is required");
 
   const run = await getSimpleRunFromDb(trimmedRunId);
-  if (!run) throw new Error(`Simple run ${trimmedRunId} was not found.`);
+  if (!run || (account && !filterWorkspaceOwnedRecords([run], account).length)) throw new Error(`Simple run ${trimmedRunId} was not found.`);
 
   const message = reason.trim() || simpleRunForceTerminateMessage;
   await failSimpleRunQueueItemByRunId(run.id, message);
@@ -117,6 +132,8 @@ export async function terminateSimpleRun(runId: string, reason = simpleRunForceT
       runId: run.id,
       previousStatus: run.status,
     },
+    ownerUserId: run.ownerUserId || run.input.ownerUserId,
+    ownerDisplayName: run.ownerDisplayName || run.input.ownerDisplayName,
   });
 
   ensureSimpleRunQueueWorker();
@@ -146,7 +163,10 @@ async function prepareSimpleRun(input: CreateSimpleRunInput) {
       linkCount: normalizedInput.links?.length || 0,
       linkPlatform: normalizedInput.linkPlatform || "",
       materialCount: normalizedInput.materialPaths.length,
+      ownerUserId: normalizedInput.ownerUserId || "local",
     },
+    ownerUserId: normalizedInput.ownerUserId,
+    ownerDisplayName: normalizedInput.ownerDisplayName,
   });
 
   return {
@@ -198,7 +218,7 @@ async function drainSimpleRunQueue(workerId: string) {
       if (!run) {
         throw new Error(`Simple run ${item.runId} no longer exists.`);
       }
-      await runSimpleRunWorkflow(run, run.input, settingsFromRun(run), startedAt);
+      await runWithSimpleRunOwner(run.input, () => runSimpleRunWorkflow(run, run.input, settingsFromRun(run), startedAt));
       await completeSimpleRunQueueItem(item.id, workerId);
     } catch (error) {
       const message = compactError(error);
@@ -227,6 +247,24 @@ function isSimpleRunLinkMode(input: SimpleRunInput) {
   return input.sourceMode === "links";
 }
 
+function simpleRunAccessActor(input: SimpleRunInput) {
+  return accessActorFromOwner(input.ownerUserId, input.ownerDisplayName);
+}
+
+function ensureSimpleRunOwner(run: SimpleRun): SimpleRun {
+  if (run.ownerUserId || !run.input.ownerUserId) return run;
+  return {
+    ...run,
+    ownerUserId: run.input.ownerUserId,
+    ownerDisplayName: run.input.ownerDisplayName,
+  };
+}
+
+function runWithSimpleRunOwner<T>(input: SimpleRunInput, operation: () => Promise<T>) {
+  const access = simpleRunAccessActor(input);
+  return access ? runWithExecutionLogOwner(access, operation) : operation();
+}
+
 async function runSimpleRunWorkflow(
   run: SimpleRun,
   normalizedInput: SimpleRunInput,
@@ -248,6 +286,8 @@ async function runSimpleRunWorkflow(
   run = await applyUnsafeFilterPlatformCounts(run, safetyResult.filtered);
   if (isSimpleRunLinkMode(normalizedInput)) {
     run = await applyUnsafeFilterLinkResults(run, safetyResult.filtered);
+    await syncSourceItemsToFeishu(safetyResult.items, { scope: "simple/run", sourceRunId: run.id });
+    await assertSimpleRunNotForceTerminated(run.id);
   }
   const safeCrawledItems = dedupeItems(safetyResult.items).slice(0, normalizedInput.targetCount);
 
@@ -277,7 +317,8 @@ async function runSimpleRunWorkflow(
   try {
     taggedItems = await tagSourceItems(tagCandidates);
     await assertSimpleRunNotForceTerminated(run.id);
-    await ingestCrawlItems(normalizedInput.keyword, taggedItems);
+    const access = simpleRunAccessActor(normalizedInput);
+    await ingestCrawlItems(normalizedInput.keyword, taggedItems, access);
     const taggedContent = taggedItems.filter((item) => item.contentTagging?.status === "success").length;
     const taggedVisual = taggedItems.reduce((sum, item) => sum + (item.visualTagging?.assets.length || 0), 0);
     run = {
@@ -329,18 +370,14 @@ async function runSimpleRunWorkflow(
   const completedPosts: GeneratedPost[] = [];
   const produceRunUpdates = createRunUpdateQueue(run);
   for (const source of noMediaItems) {
-    const message = "Skipped source without images, downloaded images, or video frames.";
+    const message = describeSimpleProductionMediaSkip(source);
     await produceRunUpdates.update((latestRun) => incrementStage(latestRun, "produce", { skipped: 1 }, message));
     await recordExecutionLog({
       scope: "simple/run",
       action: "Simple production source skipped",
       status: "info",
       message,
-      details: {
-        runId: run.id,
-        sourceItemId: source.id,
-        platform: source.platform,
-      },
+      details: buildSimpleProductionMediaSkipDetails(run.id, source),
     });
   }
   await mapWithConcurrency(productionItems, concurrencyConfig.production, async (source) =>
@@ -379,7 +416,8 @@ async function runSimpleRunWorkflow(
         quality: settings.imageQuality,
         taskConcurrency: concurrencyConfig.image,
       });
-      const post: GeneratedPost = {
+      const access = simpleRunAccessActor(normalizedInput);
+      const post: GeneratedPost = applyWorkspaceOwner({
         ...draft,
         imagePrompt,
         imageUrls: imageResult.imageUrls,
@@ -393,15 +431,18 @@ async function runSimpleRunWorkflow(
         ],
         status: "draft",
         updatedAt: new Date().toISOString(),
-      };
-      await savePost(post);
-      await saveGeneratedPost(post);
-      await markSourceRewritten(post.sourceItemId, post);
-      completedPosts.push(post);
+      }, access, source);
+      await savePost(post, access);
+      await saveGeneratedPost(post, access);
       await produceRunUpdates.update(async (latestRun) => {
         const withPost = await addPostResult(latestRun, post);
         return incrementStage(withPost, "produce", { completed: 1 });
       });
+      completedPosts.push(post);
+      const sourceStatusWarning = await syncSimpleSourceStatus(post, access, run.id, "draft");
+      if (sourceStatusWarning) {
+        await produceRunUpdates.update((latestRun) => updatePostResultWarning(latestRun, post.id, sourceStatusWarning));
+      }
     } catch (error) {
       const message = compactError(error);
       await produceRunUpdates.update(async (latestRun) => {
@@ -455,53 +496,39 @@ async function runSimpleRunWorkflow(
     await assertSimpleRunNotForceTerminated(run.id);
     await Promise.all(
       approvedPosts.map(async (post) => {
-        await savePost(post);
-        await saveGeneratedPost(post);
-        await markSourceRewritten(post.sourceItemId, post);
+        const access = simpleRunAccessActor(normalizedInput);
+        await savePost(post, access);
+        await saveGeneratedPost(post, access);
+        await syncSimpleSourceStatus(post, access, run.id, "approved");
       }),
     );
 
-    const publishResult = await publishPostsToFeishu(approvedPosts);
+    const publishJob = await enqueueFeishuPublishJob(approvedPosts, {
+      source: "simple",
+      sourceRunId: run.id,
+      ownerUserId: run.input.ownerUserId || "local",
+      ownerDisplayName: run.input.ownerDisplayName,
+    });
     await assertSimpleRunNotForceTerminated(run.id);
-    const nextStatus = publishResult.status === "published" ? ("published" as const) : ("approved" as const);
-    const feishuStateByPostId = new Map((publishResult.postStates || []).map((item) => [item.postId, item.feishu]));
-    const finalPosts = approvedPosts.map((post) => ({
-      ...post,
-      feishu: feishuStateByPostId.get(post.id) || post.feishu,
-      status: nextStatus,
-      updatedAt: new Date().toISOString(),
-    }));
-    await Promise.all(
-      finalPosts.map(async (post) => {
-        await savePost(post);
-        await saveGeneratedPost(post);
-        await markSourceRewritten(post.sourceItemId, post);
-      }),
-    );
-
     run = {
       ...run,
       posts: run.posts.map((post) => ({
         ...post,
-        status: nextStatus,
+        status: "approved",
       })),
       publish: {
-        status: publishResult.status,
+        status: "queued",
         postCount: approvedPosts.length,
-        payloadPath: publishResult.payloadPath,
-        message: publishResult.message,
-        notificationStatus: publishResult.notification?.status,
+        jobId: publishJob.id,
+        message: `Feishu publish job ${publishJob.id} queued. Collection and generation workers are free while Feishu CLI writes run in order.`,
       },
     };
     run = await setStage(run, "publish", {
-      status: publishResult.status === "published" ? "success" : "warning",
-      completed: publishResult.recordMappings?.length || approvedPosts.length,
-      failed: publishResult.attachmentFailures?.length || 0,
-      message: publishResult.message || `飞书流程返回 ${publishResult.status}`,
+      status: "warning",
+      completed: 0,
+      failed: 0,
+      message: `Feishu publish queued as ${publishJob.id}.`,
     });
-    if (publishResult.status === "attachment_failed") {
-      run = await addRunError(run, publishResult.message || "Feishu attachment upload failed after record creation.");
-    }
   } catch (error) {
     const message = compactError(error);
     run = {
@@ -934,7 +961,41 @@ function selectSimpleProductionItems(
 }
 
 function hasSimpleProductionVisualSource(source: NormalizedSourceItem) {
-  return Boolean((source.downloadedImages?.length || 0) > 0 || source.images.length > 0 || (source.videoFrames?.length || 0) > 0);
+  if (isSimpleProductionVideoLikeSource(source)) return Boolean(source.videoFrames?.length);
+  return Boolean((source.downloadedImages?.length || 0) > 0 || source.images.length > 0);
+}
+
+function isSimpleProductionVideoLikeSource(source: NormalizedSourceItem) {
+  return Boolean(
+    source.mediaType === "video" ||
+      source.mediaType === "mixed" ||
+      source.videoUrl ||
+      source.downloadedVideoUrl ||
+      source.mediaCache?.videoPresent,
+  );
+}
+
+function describeSimpleProductionMediaSkip(source: NormalizedSourceItem) {
+  if (isSimpleProductionVideoLikeSource(source)) return "Skipped video source without extracted video frames.";
+  return "Skipped source without images, downloaded images, or video frames.";
+}
+
+function buildSimpleProductionMediaSkipDetails(runId: string, source: NormalizedSourceItem) {
+  const downloadErrors = Array.from(new Set([...(source.downloadErrors || []), ...(source.mediaCache?.errors || [])]));
+  return {
+    runId,
+    sourceItemId: source.id,
+    platform: source.platform,
+    mediaType: source.mediaType || "unknown",
+    videoLike: isSimpleProductionVideoLikeSource(source),
+    videoPresent: Boolean(source.videoUrl || source.downloadedVideoUrl || source.mediaCache?.videoPresent),
+    localVideo: Boolean(source.downloadedVideoUrl || source.mediaCache?.localVideo),
+    frameCount: source.videoFrames?.length || source.mediaCache?.frameCount || 0,
+    sourceImageCount: source.images.length,
+    localImageCount: source.downloadedImages?.length || 0,
+    downloadErrorCount: downloadErrors.length,
+    downloadErrors: downloadErrors.slice(0, 5).join(" | ") || null,
+  };
 }
 
 function buildSimpleImageTasks(source: NormalizedSourceItem, settings: WorkspacePromptSettings): SourceImageTask[] {
@@ -998,6 +1059,8 @@ function normalizeSimpleRunInput(input: CreateSimpleRunInput): SimpleRunInput {
     materialPaths: normalizeMaterialPaths(input.materialPaths),
     links: sourceMode === "links" ? links : undefined,
     linkPlatform: sourceMode === "links" ? normalizeLinkPlatform(input.linkPlatform) : undefined,
+    ownerUserId: normalizeOptionalOwnerValue(input.ownerUserId),
+    ownerDisplayName: normalizeOptionalOwnerValue(input.ownerDisplayName),
   };
 }
 
@@ -1029,10 +1092,17 @@ function normalizeMaterialPaths(input: unknown) {
   );
 }
 
+function normalizeOptionalOwnerValue(input: unknown) {
+  const value = typeof input === "string" ? input.trim() : "";
+  return value ? value.slice(0, 96) : undefined;
+}
+
 function makeInitialRun(input: SimpleRunInput, settings: WorkspacePromptSettings): SimpleRun {
   const now = new Date().toISOString();
   return {
     id: `simple-${Date.now()}`,
+    ownerUserId: input.ownerUserId,
+    ownerDisplayName: input.ownerDisplayName,
     status: "queued",
     input,
     createdAt: now,
@@ -1134,6 +1204,37 @@ async function addPostResult(run: SimpleRun, post: GeneratedPost) {
   });
 }
 
+async function updatePostResultWarning(run: SimpleRun, postId: string, message: string) {
+  return saveRun({
+    ...run,
+    posts: run.posts.map((post) => (post.postId === postId ? { ...post, error: message } : post)),
+    updatedAt: new Date().toISOString(),
+  });
+}
+
+async function syncSimpleSourceStatus(post: GeneratedPost, access: WorkspaceAccessActor | undefined, runId: string, stage: "draft" | "approved") {
+  try {
+    await markSourceRewritten(post.sourceItemId, post, access);
+    return undefined;
+  } catch (error) {
+    const message = compactError(error);
+    await recordExecutionLog({
+      scope: "simple/run",
+      action: "Simple source status sync warning",
+      status: "info",
+      message,
+      details: {
+        runId,
+        postId: post.id,
+        sourceItemId: post.sourceItemId,
+        postStatus: post.status,
+        stage,
+      },
+    });
+    return message;
+  }
+}
+
 async function addRunError(run: SimpleRun, message: string) {
   return saveRun({
     ...run,
@@ -1181,6 +1282,7 @@ async function finishSimpleRun(run: SimpleRun, startedAt: number) {
 
 function resolveRunStatus(run: SimpleRun): SimpleRun["status"] {
   if (!run.posts.length) return "failed";
+  if ((run.publish?.status === "queued" || run.publish?.status === "running") && !run.errors.length) return "completed";
   if (run.publish?.status === "published" && !run.errors.length) return "completed";
   return "partial";
 }

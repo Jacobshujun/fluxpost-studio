@@ -6,20 +6,22 @@ async function main() {
     assertType(data, "object", "config response");
     assertType(data.tikhubConfigured, "boolean", "config.tikhubConfigured");
     assertType(data.openaiConfigured, "boolean", "config.openaiConfigured");
+    assertType(data.openaiImageConfigured, "boolean", "config.openaiImageConfigured");
     assertType(data.feishuConfigured, "boolean", "config.feishuConfigured");
   });
-  await expectJson("/api/content-pool", (data) => {
-    assert(Array.isArray(data.projects), "content-pool.projects must be an array");
+  await expectJson("/api/accounts/session", (data) => {
+    assertType(data, "object", "accounts session response");
+    assertType(data.hasAccounts, "boolean", "accounts.hasAccounts");
   });
-  await expectJson("/api/activity?limit=1", (data) => {
-    assert(Array.isArray(data.entries), "activity.entries must be an array");
-  });
-  await expectJson("/api/production/batches", (data) => {
-    assert(Array.isArray(data.jobs), "production batches jobs must be an array");
-  });
-  await expectJson("/api/crawl/jobs", (data) => {
-    assert(Array.isArray(data.jobs), "crawl jobs must be an array");
-  });
+  await expectStatus("/api/content-pool", undefined, 401);
+  await expectStatus("/api/activity?limit=1", undefined, 401);
+  await expectStatus("/api/production/batches", undefined, 401);
+  await expectStatus("/api/crawl/jobs", undefined, 401);
+  await expectStatus("/api/production/posts", {
+    method: "POST",
+    headers: { "content-type": "application/json" },
+    body: "{}",
+  }, 401);
   console.log(`HTTP smoke passed for ${baseUrl}`);
 }
 
@@ -47,6 +49,15 @@ async function expectJson(path, validate) {
   const data = await response.json();
   validate(data);
   console.log(`Smoke ok: ${path}`);
+}
+
+async function expectStatus(path, init, expectedStatus) {
+  const response = await fetch(`${baseUrl}${path}`, init);
+  if (response.status !== expectedStatus) {
+    const body = await response.text();
+    throw new Error(`${path} expected HTTP ${expectedStatus}, got HTTP ${response.status}: ${body.slice(0, 240)}`);
+  }
+  console.log(`Smoke ok: ${path} returned HTTP ${expectedStatus}`);
 }
 
 function normalizeBaseUrl(value) {

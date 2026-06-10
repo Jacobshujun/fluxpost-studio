@@ -18,6 +18,20 @@ const tables = [
     conflict: "key",
   },
   {
+    name: "workspace_accounts",
+    columns: ["id", "username", "display_name", "password_hash", "role", "status", "created_at", "updated_at", "last_login_at", "data_json"],
+    conflict: "id",
+    jsonColumns: new Set(["data_json"]),
+    optional: true,
+  },
+  {
+    name: "workspace_sessions",
+    columns: ["id", "account_id", "token_hash", "created_at", "expires_at", "last_seen_at", "revoked_at", "data_json"],
+    conflict: "id",
+    jsonColumns: new Set(["data_json"]),
+    optional: true,
+  },
+  {
     name: "content_projects",
     columns: ["id", "normalized_query", "query", "created_at", "updated_at", "last_crawled_at", "data_json"],
     conflict: "id",

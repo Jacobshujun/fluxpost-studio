@@ -6,6 +6,7 @@ import { saveGeneratedPost } from "./generated-posts";
 import { generatePost } from "./openai";
 import { buildProductionPlan } from "./production-plan";
 import { savePost } from "./store";
+import { applyWorkspaceOwner, filterWorkspaceOwnedRecords, scopeWorkspaceOwner, type WorkspaceAccessActor } from "./workspace-ownership";
 import type { BatchProductionJob, BatchProductionStatus, NormalizedSourceItem, ProductionTask } from "./types";
 
 type StoredBatchProduction = {
@@ -21,22 +22,24 @@ type CreateBatchProductionInput = {
 
 const maxBatchItems = 30;
 
-export async function listBatchProductionJobs() {
+export async function listBatchProductionJobs(account?: WorkspaceAccessActor) {
   const store = await readBatchProduction();
-  return store.jobs.sort((a, b) => b.createdAt.localeCompare(a.createdAt));
+  return filterWorkspaceOwnedRecords(store.jobs, account).sort((a, b) => b.createdAt.localeCompare(a.createdAt));
 }
 
-export async function createAndRunBatchProduction(input: CreateBatchProductionInput) {
+export async function createAndRunBatchProduction(input: CreateBatchProductionInput, account?: WorkspaceAccessActor) {
   const startedAt = Date.now();
   const sourceItemIds = Array.from(new Set(input.sourceItemIds.filter(Boolean))).slice(0, maxBatchItems);
   if (!sourceItemIds.length) throw new Error("请选择至少一条内容进入批量制作");
 
-  const sources = await getSourceItemsByIds(sourceItemIds);
+  const sources = await getSourceItemsByIds(sourceItemIds, account);
   if (!sources.length) throw new Error("未在内容池中找到选中的内容");
 
   const now = new Date().toISOString();
+  const owner = account ? scopeWorkspaceOwner(account) : undefined;
   const job = refreshJobStats({
     id: `batch-${Date.now()}`,
+    ...owner,
     title: input.title?.trim() || `批量制作 ${sources.length} 条内容`,
     status: "queued",
     instruction: input.instruction?.trim() || "",
@@ -110,23 +113,24 @@ export async function createAndRunBatchProduction(input: CreateBatchProductionIn
         materialPaths: job.materialPaths,
         instruction: buildBatchInstruction(source, job.instruction),
       });
-      await savePost(post);
-      await saveGeneratedPost(post);
-      await markSourceRewritten(post.sourceItemId, post);
+      const ownedPost = applyWorkspaceOwner(post, account, source);
+      await savePost(ownedPost, account);
+      await saveGeneratedPost(ownedPost, account);
+      await markSourceRewritten(ownedPost.sourceItemId, ownedPost, account);
       await jobUpdates.update((latestJob) => updateTask(latestJob.id, task.id, {
         status: "completed",
-        postId: post.id,
-        post,
+        postId: ownedPost.id,
+        post: ownedPost,
         completedAt: new Date().toISOString(),
       }));
       await recordExecutionLog({
         scope: "batch-production",
         action: "单条批量草稿完成",
         status: "success",
-        message: post.title,
+        message: ownedPost.title,
         details: {
           jobId: runningJob.id,
-          postId: post.id,
+          postId: ownedPost.id,
           sourceItemId: source.id,
         },
       });

@@ -16,6 +16,7 @@ const concurrency = read("src/lib/concurrency.ts");
 const activityLog = read("src/lib/activity-log.ts");
 const feishu = read("src/lib/feishu-cli.ts");
 const route = read("src/app/api/publish/feishu/route.ts");
+const queue = read("src/lib/feishu-publish-queue.ts");
 const simpleRuns = read("src/lib/simple-runs.ts");
 const page = read("src/app/page.tsx");
 
@@ -37,9 +38,10 @@ assertContains(feishu, /catch \(error\) \{[\s\S]*failure:\s*\{[\s\S]*error:\s*co
 assertContains(feishu, /function sanitizeCliText\(value: string\)[\s\S]*--base-token/, "CLI output sanitization must redact base tokens.");
 assertContains(feishu, /Feishu attachment upload incomplete/, "Incomplete attachment uploads must be logged explicitly.");
 
-assertContains(route, /feishuStateByPostId/, "Manual publish route must persist returned Feishu post states.");
-assertContains(simpleRuns, /feishuStateByPostId/, "Simple-run publish must persist returned Feishu post states.");
-assertContains(simpleRuns, /publishResult\.status === "attachment_failed"/, "Simple-run publish must mark attachment_failed as a run error.");
+assertContains(route, /enqueueFeishuPublishJob/, "Manual publish route must enqueue Feishu publish jobs.");
+assertContains(simpleRuns, /enqueueFeishuPublishJob\(approvedPosts/, "Simple-run publish must enqueue Feishu publish jobs.");
+assertContains(queue, /feishuStateByPostId/, "Feishu queue worker must persist returned Feishu post states.");
+assertContains(queue, /publishStatus === "attachment_failed"/, "Feishu queue worker must reflect attachment_failed in simple-run publish state.");
 assertContains(page, /postStates\?:\s*Array<\{ postId: string; feishu: FeishuPostPublishState \}>/, "Frontend publish response type must include postStates.");
 assertContains(page, /value === "attachment_failed" \|\| value === "needs_config"/, "Simple publish status badge must treat attachment_failed as a warning.");
 

@@ -3,11 +3,10 @@ import { mkdir, readFile, rm, writeFile } from "node:fs/promises";
 import { randomUUID } from "node:crypto";
 import path from "node:path";
 import { compactError, recordExecutionLog } from "./activity-log";
-import { appConfig, openaiImageUrl, runningHubUrl } from "./config";
+import { appConfig, openaiImageApiKey, openaiImageUrl, type OpenaiImageApiRoute } from "./config";
 import { concurrencyConfig, mapWithConcurrency, runWithConcurrencyPool } from "./concurrency";
 import { buildSingleImageTaskPrompt } from "./creation-controls";
 import { buildMediaRequestHeaders } from "./media-request";
-import { openaiHeaders } from "./openai";
 import type { ImageGenerationOptions, SourceImageTask } from "./types";
 
 type ResponsesImageResponse = {
@@ -24,50 +23,33 @@ type ImagesApiResponse = {
   }>;
 };
 
-type RunningHubTaskResponse = {
-  taskId?: string;
-  status?: "QUEUED" | "RUNNING" | "SUCCESS" | "FAILED" | string;
-  errorCode?: string;
-  errorMessage?: string;
-  results?: Array<{
-    url?: string | null;
-    outputType?: string | null;
-    text?: string | null;
-  }> | null;
-  failedReason?: unknown;
-  message?: string;
-};
-
-type RunningHubUploadResponse = {
-  code?: number;
-  message?: string;
-  data?: {
-    type?: string;
-    download_url?: string;
-    fileName?: string;
-    size?: string;
-  } | null;
+type PreparedReferenceImage = {
+  filePath: string;
+  fileName: string;
+  mimeType: string;
+  bytes: number;
 };
 
 const maxImageAttempts = 3;
-const imageRequestTimeoutMs = 180_000;
+const imageRequestTimeoutMs = appConfig.openaiImageRequestTimeoutMs;
 const remoteReferenceTimeoutMs = 30_000;
-const runningHubRequestTimeoutMs = 120_000;
 const referenceImageMaxSidePx = 2400;
 const referenceImageNormalizeTimeoutMs = 60_000;
 const retryableImageStatuses = new Set([408, 409, 425, 429, 500, 502, 503, 504]);
 const defaultImageOptions: ImageGenerationOptions = {
-  size: "1200x1600",
+  size: "1024x1536",
   quality: "medium",
 };
+let activeStandardImagesApiRoute: OpenaiImageApiRoute = "primary";
 
 type PreparedReferenceImages = {
   values: string[];
   fallbackValues: string[];
+  files: PreparedReferenceImage[];
   localCount: number;
   remoteCount: number;
   encodedCount: number;
-  mode: "url" | "base64" | "mixed" | "data_url" | "none";
+  mode: "url" | "base64" | "mixed" | "data_url" | "file" | "none";
 };
 
 type SelectedImageTaskResult = {
@@ -85,10 +67,7 @@ export async function generateImagesFromPrompt(
     return {
       status: "needs_config" as const,
       imageUrls: [] as string[],
-      message:
-        appConfig.openaiImageEndpoint === "runninghub"
-          ? "RUNNINGHUB_API_KEY is not configured."
-          : "OPENAI_API_KEY is not configured.",
+      message: "OPENAI_IMAGE_API_KEY or OPENAI_API_KEY is not configured.",
     };
   }
 
@@ -149,9 +128,7 @@ export async function generateImagesFromPrompt(
       const taskPrompt = buildSingleImageTaskPrompt(providerPrompt, task);
       try {
         const taskUrls =
-          appConfig.openaiImageEndpoint === "runninghub"
-            ? await callRunningHubImageApi(taskPrompt, 1, imageOptions, [task.url])
-            : appConfig.openaiImageEndpoint === "images"
+          appConfig.openaiImageEndpoint === "images"
             ? await callImagesApi(taskPrompt, 1, imageOptions, [task.url])
             : await callResponsesImageTool(taskPrompt, 1, imageOptions);
         imageUrls.push(...taskUrls);
@@ -220,9 +197,7 @@ export async function generateImagesFromPrompt(
   }
 
   const imageUrls =
-    appConfig.openaiImageEndpoint === "runninghub"
-      ? await callRunningHubImageApi(providerPrompt, count, imageOptions)
-      : appConfig.openaiImageEndpoint === "images"
+    appConfig.openaiImageEndpoint === "images"
       ? await callImagesApi(providerPrompt, count, imageOptions)
       : await callResponsesImageTool(providerPrompt, count, imageOptions);
 
@@ -272,9 +247,7 @@ async function runSelectedImageTask(
   const taskPrompt = buildSingleImageTaskPrompt(prompt, task);
   try {
     const taskUrls =
-      appConfig.openaiImageEndpoint === "runninghub"
-        ? await callRunningHubImageApi(taskPrompt, 1, imageOptions, [task.url])
-        : appConfig.openaiImageEndpoint === "images"
+      appConfig.openaiImageEndpoint === "images"
         ? await callImagesApi(taskPrompt, 1, imageOptions, [task.url])
         : await callResponsesImageTool(taskPrompt, 1, imageOptions);
     return {
@@ -283,20 +256,21 @@ async function runSelectedImageTask(
   } catch (error) {
     const message = compactError(error);
     if (isImageTaskSourceFallbackError(error)) {
+      const fallbackTimeoutMs = resolveImageTaskFallbackTimeoutMs();
       const isTimeout = isImageTaskTimeoutError(error);
       await recordExecutionLog({
         scope: "openai/image",
         action: isTimeout ? "Image task timed out; using source image" : "Image task failed; using source image",
         status: "info",
         message: isTimeout
-          ? `${task.label} exceeded 180 seconds, so the original source image is used for this slot.`
+          ? `${task.label} exceeded ${Math.round(fallbackTimeoutMs / 1000)} seconds, so the original source image is used for this slot.`
           : `${task.label} image provider failed temporarily, so the original source image is used for this slot: ${message}`,
         details: {
           label: task.label,
           mode: task.mode,
           kind: task.kind,
           fallbackUrl: task.url,
-          ...(isTimeout ? { timeoutMs: imageRequestTimeoutMs } : { error: message }),
+          ...(isTimeout ? { timeoutMs: fallbackTimeoutMs } : { error: message }),
         },
       });
       return {
@@ -343,7 +317,7 @@ async function callResponsesImageToolInPool(prompt: string, count: number, optio
   });
   const response = await fetchWithTimeout(openaiImageUrl("responses"), {
     method: "POST",
-    headers: openaiHeaders(),
+    headers: openaiImageHeaders(),
     body: JSON.stringify({
       model: appConfig.openaiTextModel,
       input: prompt,
@@ -440,279 +414,113 @@ async function callImagesApiInPool(prompt: string, count: number, options: Image
   return imageUrls;
 }
 
-async function callRunningHubImageApi(
-  prompt: string,
-  count: number,
-  options: ImageGenerationOptions,
-  referenceImages: string[] = [],
-) {
-  return runWithConcurrencyPool("image", () => callRunningHubImageApiInPool(prompt, count, options, referenceImages));
-}
-
-async function callRunningHubImageApiInPool(
-  prompt: string,
-  count: number,
-  options: ImageGenerationOptions,
-  referenceImages: string[] = [],
-) {
-  const startedAt = Date.now();
-  const deadline = startedAt + imageRequestTimeoutMs;
-  const inputImageUrls = await prepareRunningHubImageUrls(referenceImages, deadline);
-  const endpointPath = inputImageUrls.length ? appConfig.runningHubImageToImagePath : appConfig.runningHubTextToImagePath;
-  const aspectRatio = resolveRunningHubAspectRatio(options.size);
-  const resolution = resolveRunningHubResolution(options.quality);
-
-  await recordExecutionLog({
-    scope: "runninghub/image",
-    action: "提交 RunningHub 图片任务",
-    status: "running",
-    message: inputImageUrls.length ? "准备通过 RunningHub G-2 图生图生成图片" : "准备通过 RunningHub G-2 文生图生成图片",
-    details: {
-      provider: "runninghub",
-      endpointPath,
-      count,
-      promptLength: prompt.length,
-      referenceImageCount: inputImageUrls.length,
-      aspectRatio,
-      resolution,
-    },
-  });
-
-  const submitted = await postRunningHubJson<RunningHubTaskResponse>(
-    endpointPath,
-    {
-      prompt,
-      ...(inputImageUrls.length ? { imageUrls: inputImageUrls.slice(0, 10) } : {}),
-      aspectRatio,
-      resolution,
-    },
-    getRemainingTimeoutMs(deadline),
-  );
-
-  const taskId = submitted.taskId;
-  if (!taskId) {
-    throw new Error(`RunningHub image task did not return taskId: ${JSON.stringify(submitted).slice(0, 260)}`);
-  }
-
-  const completed = await waitForRunningHubTask(taskId, startedAt, deadline);
-  const imageUrls = (completed.results || [])
-    .map((item) => item.url)
-    .filter((url): url is string => Boolean(url))
-    .slice(0, count);
-
-  await recordExecutionLog({
-    scope: "runninghub/image",
-    action: "RunningHub 图片任务完成",
-    status: imageUrls.length ? "success" : "info",
-    message: `RunningHub 返回 ${imageUrls.length} 张图片`,
-    durationMs: Date.now() - startedAt,
-    details: {
-      taskId,
-      imageCount: imageUrls.length,
-      status: completed.status || null,
-      aspectRatio,
-      resolution,
-    },
-  });
-
-  if (!imageUrls.length) {
-    throw new Error(`RunningHub task ${taskId} completed without image URLs.`);
-  }
-
-  return imageUrls;
-}
-
-async function waitForRunningHubTask(taskId: string, startedAt: number, deadline: number): Promise<RunningHubTaskResponse> {
-  let lastStatus = "";
-
-  while (Date.now() < deadline) {
-    const data = await postRunningHubJson<RunningHubTaskResponse>(appConfig.runningHubQueryPath, { taskId }, getRemainingTimeoutMs(deadline));
-    lastStatus = String(data.status || "").toUpperCase();
-
-    if (lastStatus === "SUCCESS") return data;
-    if (lastStatus === "FAILED") {
-      throw new Error(
-        `RunningHub task ${taskId} failed: ${data.errorMessage || data.message || JSON.stringify(data.failedReason || {}).slice(0, 260)}`,
-      );
-    }
-
-    await recordExecutionLog({
-      scope: "runninghub/image",
-      action: "RunningHub 图片任务等待",
-      status: "info",
-      message: `任务 ${taskId} 当前状态 ${lastStatus || "UNKNOWN"}，继续轮询`,
-      durationMs: Date.now() - startedAt,
-      details: {
-        taskId,
-        status: lastStatus || null,
-      },
-    });
-    await sleepWithinDeadline(appConfig.runningHubPollIntervalMs, deadline);
-  }
-
-  throw new Error(`RunningHub task ${taskId} timed out after ${Math.round((deadline - startedAt) / 1000)}s; last status: ${lastStatus || "UNKNOWN"}.`);
-}
-
-async function prepareRunningHubImageUrls(referenceImages: string[], deadline: number) {
-  const urls: string[] = [];
-  for (const referenceImage of referenceImages.filter(Boolean)) {
-    if (/^https?:\/\//i.test(referenceImage)) {
-      const remoteFile = await materializeRemoteReferenceImage(referenceImage).catch(async (error) => {
-        await recordExecutionLog({
-          scope: "runninghub/image",
-          action: "Remote reference image resize skipped",
-          status: "info",
-          message: `Could not resize remote reference image before RunningHub upload: ${compactError(error)}`,
-          details: {
-            referenceImage,
-          },
-        });
-        return null;
-      });
-      if (remoteFile) {
-        try {
-          urls.push(await uploadRunningHubLocalFile(remoteFile, deadline));
-        } finally {
-          await rm(remoteFile, { force: true }).catch(() => undefined);
-        }
-        continue;
-      }
-      urls.push(referenceImage);
-      continue;
-    }
-
-    const localFile = resolvePublicFilePath(referenceImage);
-    if (!localFile) {
-      throw new Error(`RunningHub image-to-image requires an HTTP(S) URL or app-served local media path, got: ${referenceImage}`);
-    }
-    const normalizedFile = await normalizeReferenceImageFile(localFile);
-    try {
-      urls.push(await uploadRunningHubLocalFile(normalizedFile, deadline));
-    } finally {
-      await rm(normalizedFile, { force: true }).catch(() => undefined);
-    }
-  }
-  return urls;
-}
-
-async function uploadRunningHubLocalFile(filePath: string, deadline: number) {
-  const startedAt = Date.now();
-  const file = await readFile(filePath);
-  const form = new FormData();
-  const blob = new Blob([new Uint8Array(file)], { type: getImageMimeType(filePath) });
-  form.append("file", blob, path.basename(filePath));
-
-  await recordExecutionLog({
-    scope: "runninghub/image",
-    action: "上传 RunningHub 参考图",
-    status: "running",
-    message: "正在上传本地参考图到 RunningHub",
-    details: {
-      fileName: path.basename(filePath),
-      bytes: file.length,
-    },
-  });
-
-  const response = await fetchWithTimeout(
-    runningHubUrl(appConfig.runningHubUploadPath),
-    {
-      method: "POST",
-      headers: runningHubHeaders(false),
-      body: form,
-    },
-    getRemainingTimeoutMs(deadline, runningHubRequestTimeoutMs),
-  );
-  const data = await readRunningHubResponse<RunningHubUploadResponse>(response, "RunningHub upload");
-  if (!response.ok || data.code !== 0 || !data.data?.download_url) {
-    throw new Error(`RunningHub upload failed: ${response.status} ${JSON.stringify(data).slice(0, 260)}`);
-  }
-
-  await recordExecutionLog({
-    scope: "runninghub/image",
-    action: "RunningHub 参考图上传完成",
-    status: "success",
-    message: "本地参考图已上传到 RunningHub",
-    durationMs: Date.now() - startedAt,
-    details: {
-      fileName: path.basename(filePath),
-      size: data.data.size || null,
-    },
-  });
-  return data.data.download_url;
-}
-
-async function postRunningHubJson<T>(pathValue: string, body: Record<string, unknown>, timeoutMs = runningHubRequestTimeoutMs): Promise<T> {
-  const response = await fetchWithTimeout(
-    runningHubUrl(pathValue),
-    {
-      method: "POST",
-      headers: runningHubHeaders(true),
-      body: JSON.stringify(body),
-    },
-    timeoutMs,
-  );
-  const data = await readRunningHubResponse<T & { code?: number; msg?: string; message?: string }>(response, "RunningHub API");
-  if (!response.ok) {
-    throw new Error(`RunningHub API failed: ${response.status} ${JSON.stringify(data).slice(0, 260)}`);
-  }
-  if (typeof data.code === "number" && data.code !== 0) {
-    throw new Error(`RunningHub API failed: ${data.code} ${data.msg || data.message || ""}`);
-  }
-  return data as T;
-}
-
-async function readRunningHubResponse<T>(response: Response, label: string): Promise<T> {
-  const contentType = response.headers.get("content-type") || "";
-  const body = await response.text();
-  return parseJsonResponse<T>(body, response, label, contentType);
-}
-
-function runningHubHeaders(json: boolean) {
-  return {
-    Authorization: `Bearer ${appConfig.runningHubApiKey}`,
-    ...(json ? { "Content-Type": "application/json" } : {}),
-  };
-}
-
-async function requestImagesApiWithRetry(
+async function requestStandardImagesApiWithRetry(
   prompt: string,
   count: number,
   startedAt: number,
   options: ImageGenerationOptions,
   referenceImages: PreparedReferenceImages,
 ): Promise<ImagesApiResponse> {
+  const endpointPath = referenceImages.files.length ? "images/edits" : "images/generations";
+  const data: NonNullable<ImagesApiResponse["data"]> = [];
+
+  try {
+    for (let index = 0; index < Math.max(1, Math.floor(count)); index += 1) {
+      const response = await requestSingleStandardImagesApiWithRetry(prompt, startedAt, options, referenceImages, endpointPath);
+      data.push(...(response.data || []).slice(0, 1));
+    }
+
+    return { data };
+  } finally {
+    await cleanupPreparedReferenceImages(referenceImages);
+  }
+}
+
+async function requestSingleStandardImagesApiWithRetry(
+  prompt: string,
+  startedAt: number,
+  options: ImageGenerationOptions,
+  referenceImages: PreparedReferenceImages,
+  endpointPath: "images/edits" | "images/generations",
+): Promise<ImagesApiResponse> {
+  const triedRoutes = new Set<OpenaiImageApiRoute>();
+  let route = resolveActiveStandardImagesApiRoute();
+
+  while (true) {
+    try {
+      const response = await requestSingleStandardImagesApiWithRetryForRoute(route, prompt, Date.now(), options, referenceImages, endpointPath);
+      activeStandardImagesApiRoute = route;
+      return response;
+    } catch (error) {
+      triedRoutes.add(route);
+      const nextRoute = resolveNextStandardImagesApiRoute(route, triedRoutes, error);
+      if (!nextRoute) {
+        restorePrimaryStandardImagesApiRouteAfterBackupFailure(route, error);
+        throw error;
+      }
+
+      await recordExecutionLog({
+        scope: "openai/image",
+        action: nextRoute === "backup" ? "Images API failover to backup" : "Images API failover to primary",
+        status: "info",
+        message:
+          nextRoute === "backup"
+            ? "Primary image API failed, so the next image request attempt will use the backup image API."
+            : "Backup image API failed, so the next image request attempt will use the primary image API.",
+        durationMs: Date.now() - startedAt,
+        details: {
+          failedRoute: route,
+          nextRoute,
+          endpointPath,
+          error: compactError(error),
+        },
+      });
+
+      activeStandardImagesApiRoute = nextRoute;
+      route = nextRoute;
+    }
+  }
+}
+
+async function requestSingleStandardImagesApiWithRetryForRoute(
+  route: OpenaiImageApiRoute,
+  prompt: string,
+  startedAt: number,
+  options: ImageGenerationOptions,
+  referenceImages: PreparedReferenceImages,
+  endpointPath: "images/edits" | "images/generations",
+): Promise<ImagesApiResponse> {
   let lastError = "";
   let sendQuality = Boolean(options.quality);
-  let activeReferenceImages = referenceImages.values;
-  let referenceMode = referenceImages.mode;
+  let sendInputFidelity = endpointPath === "images/edits";
   const deadline = startedAt + imageRequestTimeoutMs;
 
   for (let attempt = 1; attempt <= maxImageAttempts; attempt += 1) {
     let response: Response;
     try {
-      response = await fetchWithTimeout(openaiImageUrl("images/generations"), {
-        method: "POST",
-        headers: openaiHeaders(),
-        body: JSON.stringify(buildImagesApiBody(prompt, count, options, activeReferenceImages, sendQuality)),
-      }, getRemainingTimeoutMs(deadline));
+      response = await fetchWithTimeout(
+        openaiImageUrl(endpointPath, route),
+        await buildStandardImagesApiRequest(route, prompt, options, referenceImages.files, sendQuality, sendInputFidelity),
+        getRemainingTimeoutMs(deadline),
+      );
     } catch (error) {
       lastError = compactError(error);
       const shouldRetryTimeout = attempt < maxImageAttempts && hasRetryWindow(deadline);
       await recordExecutionLog({
         scope: "openai/image",
-        action: shouldRetryTimeout ? "Images 图片模型请求超时重试" : "Images 图片模型请求超时",
+        action: shouldRetryTimeout ? "Images API request timeout retry" : "Images API request timed out",
         status: shouldRetryTimeout ? "info" : "error",
-        message: shouldRetryTimeout
-          ? `${lastError}；准备第 ${attempt + 1}/${maxImageAttempts} 次重试`
-          : lastError,
+        message: shouldRetryTimeout ? `${lastError}; retrying ${attempt + 1}/${maxImageAttempts}.` : lastError,
         durationMs: Date.now() - startedAt,
         details: {
           status: 0,
           model: appConfig.openaiImageModel,
+          route,
+          endpointPath,
           attempt,
           size: options.size,
           quality: sendQuality ? options.quality : "omitted",
-          referenceMode,
+          referenceMode: referenceImages.mode,
         },
       });
       if (!shouldRetryTimeout) throw new Error(lastError);
@@ -725,48 +533,46 @@ async function requestImagesApiWithRetry(
 
     lastError = `OpenAI image request failed: ${response.status} ${body.slice(0, 260)}`;
     const qualityRejected = sendQuality && isUnsupportedQualityError(response.status, body);
-    const uploadRejected = activeReferenceImages.length > 0 && isImageUploadError(response.status, body);
+    const inputFidelityRejected = sendInputFidelity && isUnsupportedInputFidelityError(response.status, body);
+    const uploadRejected = referenceImages.files.length > 0 && isImageUploadError(response.status, body);
     const shouldRetry = attempt < maxImageAttempts && hasRetryWindow(deadline) && isRetryableImageError(response.status, body);
     await recordExecutionLog({
       scope: "openai/image",
-      action: uploadRejected
-        ? "Images 参考图上传失败"
+      action: inputFidelityRejected
+        ? "Images edit fidelity parameter fallback"
+        : uploadRejected
+        ? "Images reference upload failed"
         : qualityRejected
-        ? "Images 图片质量参数回退"
+        ? "Images quality parameter fallback"
         : shouldRetry
-        ? "Images 图片模型等待重试"
-        : "Images 图片模型失败",
-      status: uploadRejected || qualityRejected || shouldRetry ? "info" : "error",
-      message: uploadRejected
-        ? compactError(
-            referenceImages.fallbackValues.length && referenceMode !== "data_url"
-              ? `${lastError}；准备改用 data URL 参考图重试`
-              : lastError,
-          )
+        ? "Images API retry queued"
+        : "Images API failed",
+      status: inputFidelityRejected || uploadRejected || qualityRejected || shouldRetry ? "info" : "error",
+      message: inputFidelityRejected
+        ? compactError(`${lastError}; retrying without input_fidelity.`)
         : qualityRejected
-        ? compactError(`${lastError}；当前通道可能不支持 quality 参数，准备不带 quality 重试`)
+        ? compactError(`${lastError}; retrying without quality.`)
         : shouldRetry
-        ? compactError(`${lastError}；上游临时繁忙，准备第 ${attempt + 1}/${maxImageAttempts} 次重试`)
+        ? compactError(`${lastError}; retrying ${attempt + 1}/${maxImageAttempts}.`)
         : compactError(lastError),
       durationMs: Date.now() - startedAt,
       details: {
         status: response.status,
         model: appConfig.openaiImageModel,
+        route,
+        endpointPath,
         attempt,
         size: options.size,
         quality: sendQuality ? options.quality : "omitted",
-        referenceMode,
+        referenceMode: referenceImages.mode,
       },
     });
 
-    if (uploadRejected) {
-      if (referenceImages.fallbackValues.length && referenceMode !== "data_url") {
-        activeReferenceImages = referenceImages.fallbackValues;
-        referenceMode = "data_url";
-        continue;
-      }
-      throw new Error(lastError);
+    if (inputFidelityRejected) {
+      sendInputFidelity = false;
+      continue;
     }
+    if (uploadRejected) throw new Error(lastError);
     if (qualityRejected) {
       sendQuality = false;
       continue;
@@ -776,6 +582,66 @@ async function requestImagesApiWithRetry(
   }
 
   throw new Error(lastError || "OpenAI image request failed");
+}
+
+async function buildStandardImagesApiRequest(
+  route: OpenaiImageApiRoute,
+  prompt: string,
+  options: ImageGenerationOptions,
+  referenceImages: PreparedReferenceImage[],
+  sendQuality: boolean,
+  sendInputFidelity: boolean,
+): Promise<RequestInit> {
+  if (!referenceImages.length) {
+    return {
+      method: "POST",
+      headers: openaiImageHeaders(true, route),
+      body: JSON.stringify(buildStandardImagesGenerationBody(prompt, options, sendQuality)),
+    };
+  }
+
+  const form = new FormData();
+  form.append("model", appConfig.openaiImageModel);
+  form.append("prompt", prompt);
+  form.append("n", "1");
+  form.append("size", options.size);
+  form.append("output_format", "png");
+  form.append("response_format", "b64_json");
+  if (sendQuality) form.append("quality", options.quality);
+  if (sendInputFidelity) form.append("input_fidelity", "high");
+
+  for (const referenceImage of referenceImages.slice(0, 1)) {
+    const file = await readFile(referenceImage.filePath);
+    form.append("image", new Blob([new Uint8Array(file)], { type: referenceImage.mimeType }), referenceImage.fileName);
+  }
+
+  return {
+    method: "POST",
+    headers: openaiImageHeaders(false, route),
+    body: form,
+  };
+}
+
+function buildStandardImagesGenerationBody(prompt: string, options: ImageGenerationOptions, sendQuality: boolean) {
+  return {
+    model: appConfig.openaiImageModel,
+    prompt,
+    n: 1,
+    size: options.size,
+    ...(sendQuality ? { quality: options.quality } : {}),
+    output_format: "png",
+    response_format: "b64_json",
+  };
+}
+
+async function requestImagesApiWithRetry(
+  prompt: string,
+  count: number,
+  startedAt: number,
+  options: ImageGenerationOptions,
+  referenceImages: PreparedReferenceImages,
+): Promise<ImagesApiResponse> {
+  return requestStandardImagesApiWithRetry(prompt, count, startedAt, options, referenceImages);
 }
 
 async function readJsonResponse<T>(response: Response, label: string): Promise<T> {
@@ -806,57 +672,74 @@ function isUnsupportedQualityError(status: number, body: string) {
   return status === 400 && /quality|unknown parameter|unsupported|invalid.*parameter|unrecognized/i.test(body);
 }
 
+function isUnsupportedInputFidelityError(status: number, body: string) {
+  return status === 400 && /input_fidelity|fidelity|unknown parameter|unsupported|invalid.*parameter|unrecognized/i.test(body);
+}
+
 function isImageUploadError(status: number, body: string) {
   return status === 400 && /image upload failed|check the image|invalid image|failed to download|download image/i.test(body);
 }
 
-function buildImagesApiBody(
-  prompt: string,
-  count: number,
-  options: ImageGenerationOptions,
-  referenceImages: string[],
-  sendQuality: boolean,
-) {
+function resolveActiveStandardImagesApiRoute(): OpenaiImageApiRoute {
+  if (activeStandardImagesApiRoute === "backup" && isStandardImagesApiRouteConfigured("backup")) return "backup";
+  if (isStandardImagesApiRouteConfigured("primary")) return "primary";
+  if (isStandardImagesApiRouteConfigured("backup")) return "backup";
+  return "primary";
+}
+
+function resolveNextStandardImagesApiRoute(
+  currentRoute: OpenaiImageApiRoute,
+  triedRoutes: Set<OpenaiImageApiRoute>,
+  error: unknown,
+): OpenaiImageApiRoute | null {
+  if (!isStandardImagesApiFailoverError(error)) return null;
+  const candidate: OpenaiImageApiRoute = currentRoute === "primary" ? "backup" : "primary";
+  if (triedRoutes.has(candidate)) return null;
+  return isStandardImagesApiRouteConfigured(candidate) ? candidate : null;
+}
+
+function restorePrimaryStandardImagesApiRouteAfterBackupFailure(route: OpenaiImageApiRoute, error: unknown) {
+  if (route === "backup" && isStandardImagesApiFailoverError(error)) {
+    activeStandardImagesApiRoute = "primary";
+  }
+}
+
+function isStandardImagesApiRouteConfigured(route: OpenaiImageApiRoute) {
+  if (route === "backup") return Boolean(appConfig.openaiImageBackupBaseUrl && appConfig.openaiImageBackupApiKey);
+  return Boolean(openaiImageApiKey(route));
+}
+
+function isStandardImagesApiFailoverError(error: unknown) {
+  const message = compactError(error);
+  if (/cannot fulfill this request|content policy|safety|moderation|image upload failed|check the image|invalid image|failed to download|download image/i.test(message)) {
+    return false;
+  }
+  return (
+    /OpenAI image request failed:\s*(?:401|403|404|408|409|425|429|50[0234])\b/i.test(message) ||
+    /Images API returned (?:non-JSON|invalid JSON)/i.test(message) ||
+    /request timed out|timed out after|time-?out|timeout|abort|fetch failed|ECONNRESET|ENOTFOUND|ETIMEDOUT|ECONNREFUSED/i.test(message) ||
+    /upstream_error|excessive system load|overloaded|temporarily unavailable|rate limit|Gateway Time-?out|Bad Gateway|Service Unavailable/i.test(message)
+  );
+}
+
+function openaiImageHeaders(json = true, route: OpenaiImageApiRoute = "primary") {
   return {
-    model: appConfig.openaiImageModel,
-    prompt,
-    ...(referenceImages.length ? { image: referenceImages } : {}),
-    n: count,
-    size: options.size,
-    ...(sendQuality ? { quality: options.quality } : {}),
-    response_format: "b64_json",
+    Authorization: `Bearer ${openaiImageApiKey(route)}`,
+    ...(json ? { "Content-Type": "application/json" } : {}),
   };
 }
 
 function isImageProviderConfigured() {
-  if (appConfig.openaiImageEndpoint === "runninghub") return Boolean(appConfig.runningHubApiKey);
-  return Boolean(appConfig.openaiApiKey);
-}
-
-function resolveRunningHubAspectRatio(size: string) {
-  const [width, height] = size.split("x").map((item) => Number(item));
-  if (!Number.isFinite(width) || !Number.isFinite(height) || !width || !height) return "3:4";
-
-  const ratio = width / height;
-  const allowed = ["1:1", "2:3", "3:2", "4:5", "5:4", "4:3", "3:4", "16:9", "9:16", "21:9", "9:21", "2:1", "1:2", "3:1", "1:3"];
-  return allowed.reduce((best, item) => {
-    const [candidateWidth, candidateHeight] = item.split(":").map((part) => Number(part));
-    const candidateDistance = Math.abs(candidateWidth / candidateHeight - ratio);
-    const bestParts = best.split(":").map((part) => Number(part));
-    const bestDistance = Math.abs(bestParts[0] / bestParts[1] - ratio);
-    return candidateDistance < bestDistance ? item : best;
-  }, "3:4");
-}
-
-function resolveRunningHubResolution(quality: ImageGenerationOptions["quality"]) {
-  if (quality === "high") return "4k";
-  if (quality === "low") return "1k";
-  return "2k";
+  if (appConfig.openaiImageEndpoint === "images") {
+    return isStandardImagesApiRouteConfigured("primary") || isStandardImagesApiRouteConfigured("backup");
+  }
+  return Boolean(appConfig.openaiImageApiKey);
 }
 
 async function prepareReferenceImages(referenceImages: string[]): Promise<PreparedReferenceImages> {
   const values: string[] = [];
   const fallbackValues: string[] = [];
+  const files: PreparedReferenceImage[] = [];
   let localCount = 0;
   let remoteCount = 0;
   let encodedCount = 0;
@@ -865,16 +748,18 @@ async function prepareReferenceImages(referenceImages: string[]): Promise<Prepar
     const localFile = resolvePublicFilePath(referenceImage);
     if (localFile) {
       const normalizedFile = await normalizeReferenceImageFile(localFile);
-      try {
-        const file = await readFile(normalizedFile);
-        const base64 = file.toString("base64");
-        values.push(base64);
-        fallbackValues.push(`data:${getImageMimeType(normalizedFile)};base64,${base64}`);
-        localCount += 1;
-        encodedCount += 1;
-      } finally {
-        await rm(normalizedFile, { force: true }).catch(() => undefined);
-      }
+      const file = await readFile(normalizedFile);
+      const base64 = file.toString("base64");
+      values.push(base64);
+      fallbackValues.push(`data:${getImageMimeType(normalizedFile)};base64,${base64}`);
+      files.push({
+        filePath: normalizedFile,
+        fileName: path.basename(normalizedFile),
+        mimeType: getImageMimeType(normalizedFile),
+        bytes: file.length,
+      });
+      localCount += 1;
+      encodedCount += 1;
       continue;
     }
 
@@ -892,16 +777,18 @@ async function prepareReferenceImages(referenceImages: string[]): Promise<Prepar
         return null;
       });
       if (remoteFile) {
-        try {
-          const file = await readFile(remoteFile);
-          const base64 = file.toString("base64");
-          values.push(base64);
-          fallbackValues.push(`data:${getImageMimeType(remoteFile)};base64,${base64}`);
-          remoteCount += 1;
-          encodedCount += 1;
-        } finally {
-          await rm(remoteFile, { force: true }).catch(() => undefined);
-        }
+        const file = await readFile(remoteFile);
+        const base64 = file.toString("base64");
+        values.push(base64);
+        fallbackValues.push(`data:${getImageMimeType(remoteFile)};base64,${base64}`);
+        files.push({
+          filePath: remoteFile,
+          fileName: path.basename(remoteFile),
+          mimeType: getImageMimeType(remoteFile),
+          bytes: file.length,
+        });
+        remoteCount += 1;
+        encodedCount += 1;
         continue;
       }
     }
@@ -913,11 +800,16 @@ async function prepareReferenceImages(referenceImages: string[]): Promise<Prepar
   return {
     values,
     fallbackValues,
+    files,
     localCount,
     remoteCount,
     encodedCount,
-    mode: resolveReferenceMode(encodedCount, values.length - encodedCount),
+    mode: files.length ? "file" : resolveReferenceMode(encodedCount, values.length - encodedCount),
   };
+}
+
+async function cleanupPreparedReferenceImages(referenceImages: PreparedReferenceImages) {
+  await Promise.all(referenceImages.files.map((file) => rm(file.filePath, { force: true }).catch(() => undefined)));
 }
 
 function resolvePublicFilePath(value: string) {
@@ -1078,7 +970,20 @@ function normalizeProviderPrompt(prompt: string) {
 
 function normalizeImageSize(value?: string) {
   const normalized = (value || defaultImageOptions.size).trim().toLowerCase().replace(/\s+/g, "").replace(/×/g, "x");
-  return /^\d{2,5}x\d{2,5}$/.test(normalized) ? normalized : defaultImageOptions.size;
+  if (normalized === "auto") return "auto";
+  if (!/^\d{2,5}x\d{2,5}$/.test(normalized)) return defaultImageOptions.size;
+
+  const [width, height] = normalized.split("x").map((item) => Number(item));
+  if (!Number.isFinite(width) || !Number.isFinite(height) || !width || !height) return defaultImageOptions.size;
+
+  const allowed = ["1024x1024", "1536x1024", "1024x1536", "1536x864", "3840x2160"];
+  if (allowed.includes(normalized)) return normalized;
+
+  const ratio = width / height;
+  if (Math.abs(ratio - 1) < 0.12) return "1024x1024";
+  if (ratio > 1.6) return width >= 3000 ? "3840x2160" : "1536x864";
+  if (ratio > 1) return "1536x1024";
+  return "1024x1536";
 }
 
 function normalizeImageQuality(value?: string): ImageGenerationOptions["quality"] {
@@ -1107,10 +1012,14 @@ function isImageTaskSourceFallbackError(error: unknown) {
   return /\b(?:408|409|425|429|50[0234])\b|Gateway Time-?out|Bad Gateway|Service Unavailable|upstream_error|excessive system load|overloaded|temporarily unavailable|rate limit/i.test(message);
 }
 
-function getRemainingTimeoutMs(deadline: number, capMs = imageRequestTimeoutMs) {
+function resolveImageTaskFallbackTimeoutMs() {
+  return imageRequestTimeoutMs;
+}
+
+function getRemainingTimeoutMs(deadline: number, capMs = imageRequestTimeoutMs, timeoutMsForMessage = imageRequestTimeoutMs) {
   const remaining = deadline - Date.now();
   if (remaining <= 0) {
-    throw new Error(`Image task timed out after ${Math.round(imageRequestTimeoutMs / 1000)}s.`);
+    throw new Error(`Image task timed out after ${Math.round(timeoutMsForMessage / 1000)}s.`);
   }
   return Math.max(1, Math.min(capMs, remaining));
 }

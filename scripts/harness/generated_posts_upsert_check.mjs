@@ -30,7 +30,7 @@ assertContains(
 );
 assertContains(
   generatedPosts,
-  /export async function updateGeneratedPost[\s\S]*await saveGeneratedPost\(nextPost\)/,
+  /export async function updateGeneratedPost[\s\S]*await saveGeneratedPost\(nextPost,\s*account\)/,
   "updateGeneratedPost should persist through single-row upsert, not full-table replacement.",
 );
 assertContains(

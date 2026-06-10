@@ -1,6 +1,12 @@
 import { stat } from "node:fs/promises";
 import path from "node:path";
 import { readMaterialLibraryFromDb, writeMaterialLibraryToDb } from "./database";
+import {
+  canAccessWorkspaceOwner,
+  filterWorkspaceOwnedRecords,
+  scopeWorkspaceOwner,
+  type WorkspaceAccessActor,
+} from "./workspace-ownership";
 import type { MaterialAssetKind, MaterialFolder, MaterialLibraryAsset, MaterialLibrarySnapshot } from "./types";
 
 type StoredMaterialLibrary = MaterialLibrarySnapshot;
@@ -16,18 +22,19 @@ const rootFolderId = "root";
 const imageExtensions = new Set([".png", ".jpg", ".jpeg", ".webp", ".gif"]);
 const documentExtensions = new Set([".pdf", ".doc", ".docx", ".txt", ".md"]);
 
-export async function listMaterialLibrary(): Promise<MaterialLibrarySnapshot> {
+export async function listMaterialLibrary(account?: WorkspaceAccessActor): Promise<MaterialLibrarySnapshot> {
   const store = await readLibrary();
-  return normalizeLibrary(store);
+  return scopeLibrary(normalizeLibrary(store), account);
 }
 
-export async function createMaterialFolder(name: string, parentId = rootFolderId) {
+export async function createMaterialFolder(name: string, parentId = rootFolderId, account?: WorkspaceAccessActor) {
   const store = normalizeLibrary(await readLibrary());
-  assertFolderExists(store, parentId);
+  assertFolderExists(scopeLibrary(store, account), parentId);
   const now = new Date().toISOString();
   const folder: MaterialFolder = {
     id: `folder-${Date.now()}`,
-    name: normalizeName(name, "新建文件夹"),
+    ...(account ? scopeWorkspaceOwner(account) : {}),
+    name: normalizeName(name, "New folder"),
     parentId,
     createdAt: now,
     updatedAt: now,
@@ -36,15 +43,21 @@ export async function createMaterialFolder(name: string, parentId = rootFolderId
   return folder;
 }
 
-export async function updateMaterialFolder(folderId: string, patch: Partial<Pick<MaterialFolder, "name" | "parentId">>) {
+export async function updateMaterialFolder(
+  folderId: string,
+  patch: Partial<Pick<MaterialFolder, "name" | "parentId">>,
+  account?: WorkspaceAccessActor,
+) {
   if (folderId === rootFolderId) throw new Error("Root folder cannot be edited");
   const store = normalizeLibrary(await readLibrary());
   const folder = store.folders.find((item) => item.id === folderId);
-  if (!folder) throw new Error("Material folder not found");
-  if (patch.parentId) assertFolderExists(store, patch.parentId);
+  if (!folder || !canMutateMaterialRecord(account, folder)) throw new Error("Material folder not found");
+  if (patch.parentId) assertFolderExists(scopeLibrary(store, account), patch.parentId);
   const nextFolder: MaterialFolder = {
     ...folder,
     ...patch,
+    ownerUserId: folder.ownerUserId,
+    ownerDisplayName: folder.ownerDisplayName,
     name: patch.name ? normalizeName(patch.name, folder.name) : folder.name,
     updatedAt: new Date().toISOString(),
   };
@@ -55,20 +68,21 @@ export async function updateMaterialFolder(folderId: string, patch: Partial<Pick
   return nextFolder;
 }
 
-export async function deleteMaterialFolder(folderId: string) {
+export async function deleteMaterialFolder(folderId: string, account?: WorkspaceAccessActor) {
   if (folderId === rootFolderId) throw new Error("Root folder cannot be deleted");
   const store = normalizeLibrary(await readLibrary());
-  assertFolderExists(store, folderId);
-  const folderIds = collectDescendantFolderIds(store.folders, folderId);
+  const scoped = scopeLibrary(store, account);
+  assertFolderExists(scoped, folderId);
+  const folderIds = collectDescendantFolderIds(scoped.folders, folderId);
   await writeLibrary({
     folders: store.folders.filter((folder) => !folderIds.has(folder.id)),
     assets: store.assets.filter((asset) => !folderIds.has(asset.folderId)),
   });
 }
 
-export async function createMaterialAsset(input: CreateAssetInput) {
+export async function createMaterialAsset(input: CreateAssetInput, account?: WorkspaceAccessActor) {
   const store = normalizeLibrary(await readLibrary());
-  assertFolderExists(store, input.folderId);
+  assertFolderExists(scopeLibrary(store, account), input.folderId);
   const filePath = path.resolve(input.path);
   const fileStat = await stat(filePath);
   if (!fileStat.isFile()) throw new Error("Material path must be a file");
@@ -76,6 +90,7 @@ export async function createMaterialAsset(input: CreateAssetInput) {
   const extension = path.extname(filePath).toLowerCase();
   const asset: MaterialLibraryAsset = {
     id: `asset-${Date.now()}`,
+    ...(account ? scopeWorkspaceOwner(account) : {}),
     folderId: input.folderId,
     path: filePath,
     name: normalizeName(input.name || path.basename(filePath), path.basename(filePath)),
@@ -92,14 +107,20 @@ export async function createMaterialAsset(input: CreateAssetInput) {
   return asset;
 }
 
-export async function updateMaterialAsset(assetId: string, patch: Partial<Pick<MaterialLibraryAsset, "folderId" | "name" | "tags">>) {
+export async function updateMaterialAsset(
+  assetId: string,
+  patch: Partial<Pick<MaterialLibraryAsset, "folderId" | "name" | "tags">>,
+  account?: WorkspaceAccessActor,
+) {
   const store = normalizeLibrary(await readLibrary());
   const asset = store.assets.find((item) => item.id === assetId);
-  if (!asset) throw new Error("Material asset not found");
-  if (patch.folderId) assertFolderExists(store, patch.folderId);
+  if (!asset || !canMutateMaterialRecord(account, asset)) throw new Error("Material asset not found");
+  if (patch.folderId) assertFolderExists(scopeLibrary(store, account), patch.folderId);
   const nextAsset: MaterialLibraryAsset = {
     ...asset,
     ...patch,
+    ownerUserId: asset.ownerUserId,
+    ownerDisplayName: asset.ownerDisplayName,
     name: patch.name ? normalizeName(patch.name, asset.name) : asset.name,
     tags: patch.tags ? normalizeTags(patch.tags) : asset.tags,
     updatedAt: new Date().toISOString(),
@@ -111,38 +132,18 @@ export async function updateMaterialAsset(assetId: string, patch: Partial<Pick<M
   return nextAsset;
 }
 
-export async function deleteMaterialAsset(assetId: string) {
+export async function deleteMaterialAsset(assetId: string, account?: WorkspaceAccessActor) {
   const store = normalizeLibrary(await readLibrary());
-  const assets = store.assets.filter((asset) => asset.id !== assetId);
+  const assets = store.assets.filter((asset) => asset.id !== assetId || !canMutateMaterialRecord(account, asset));
   if (assets.length === store.assets.length) throw new Error("Material asset not found");
   await writeLibrary({ ...store, assets });
 }
 
 function normalizeLibrary(store: StoredMaterialLibrary): StoredMaterialLibrary {
-  const now = new Date().toISOString();
-  const folders = store.folders?.length
-    ? store.folders
-    : [
-        {
-          id: rootFolderId,
-          name: "素材库",
-          createdAt: now,
-          updatedAt: now,
-        },
-      ];
+  const folders = store.folders?.length ? store.folders : [makeRootFolder()];
   const hasRoot = folders.some((folder) => folder.id === rootFolderId);
   return {
-    folders: hasRoot
-      ? folders
-      : [
-          {
-            id: rootFolderId,
-            name: "素材库",
-            createdAt: now,
-            updatedAt: now,
-          },
-          ...folders,
-        ],
+    folders: hasRoot ? folders : [makeRootFolder(), ...folders],
     assets: Array.isArray(store.assets) ? store.assets : [],
   };
 }
@@ -159,10 +160,33 @@ async function writeLibrary(store: StoredMaterialLibrary) {
   await writeMaterialLibraryToDb(normalizeLibrary(store));
 }
 
+function scopeLibrary(store: StoredMaterialLibrary, account?: WorkspaceAccessActor): StoredMaterialLibrary {
+  if (!account) return store;
+  return {
+    folders: [store.folders.find((folder) => folder.id === rootFolderId) || makeRootFolder(), ...filterWorkspaceOwnedRecords(store.folders.filter((folder) => folder.id !== rootFolderId), account)],
+    assets: filterWorkspaceOwnedRecords(store.assets, account),
+  };
+}
+
+function makeRootFolder(): MaterialFolder {
+  const now = new Date().toISOString();
+  return {
+    id: rootFolderId,
+    name: "Material Library",
+    createdAt: now,
+    updatedAt: now,
+  };
+}
+
 function assertFolderExists(store: MaterialLibrarySnapshot, folderId: string) {
   if (!store.folders.some((folder) => folder.id === folderId)) {
     throw new Error("Material folder not found");
   }
+}
+
+function canMutateMaterialRecord(account: WorkspaceAccessActor | undefined, record: MaterialFolder | MaterialLibraryAsset) {
+  if (!account) return true;
+  return canAccessWorkspaceOwner(account, record.ownerUserId);
 }
 
 function collectDescendantFolderIds(folders: MaterialFolder[], folderId: string) {

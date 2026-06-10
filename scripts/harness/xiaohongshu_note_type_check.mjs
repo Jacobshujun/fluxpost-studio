@@ -6,6 +6,7 @@ import ts from "typescript";
 const projectRoot = process.cwd();
 const sourcePath = path.join(projectRoot, "src/lib/tikhub.ts");
 const source = readFileSync(sourcePath, "utf8");
+const pageSource = readFileSync(path.join(projectRoot, "src/app/page.tsx"), "utf8");
 
 if (/filterXiaohongshuItemsByRequestedNoteType|isXiaohongshuRequestedNoteType|shouldApplyXiaohongshuLocalTypeFilter|droppedByNoteTypeCount/.test(source)) {
   throw new Error("src/lib/tikhub.ts must not contain local Xiaohongshu post-crawl note-type filtering helpers or dropped-count diagnostics.");
@@ -17,6 +18,20 @@ if (/get_image_note_detail|get_video_note_detail/.test(source)) {
 
 if (/web_v3\/fetch_search_notes/.test(source)) {
   throw new Error("Xiaohongshu search must use App V2 search_notes, not Web V3 fetch_search_notes.");
+}
+
+if (!/xiaohongshu:\s*"https:\/\/docs\.tikhub\.io\/420136398e0"/.test(pageSource) || /438852171e0/.test(pageSource)) {
+  throw new Error("Frontend Xiaohongshu docs link must point to the updated TikHub App V2 search_notes document.");
+}
+
+for (const sortValue of ["comment_descending", "collect_descending", "english_preferred"]) {
+  if (!pageSource.includes(`value: "${sortValue}"`)) {
+    throw new Error(`Frontend Xiaohongshu sort options should expose ${sortValue}.`);
+  }
+}
+
+if (!pageSource.includes("<option value={3}>直播</option>")) {
+  throw new Error("Frontend Xiaohongshu note type options should expose TikHub App V2 live notes.");
 }
 
 const transpiled = ts.transpileModule(source, {
@@ -61,12 +76,12 @@ const sandbox = {
     if (name === "./concurrency") {
       return {
         concurrencyConfig: {
-          crawl: 8,
-          media: 20,
+          crawl: 12,
+          media: 30,
           gpt: 50,
           image: 100,
           feishu: 50,
-          production: 20,
+          production: 30,
         },
         mapWithConcurrency: async (items, _concurrency, mapper) => Promise.all(items.map(mapper)),
         runWithConcurrencyPool: async (_name, task) => task(),
@@ -120,6 +135,9 @@ if (mapXiaohongshuNoteType(2) !== "普通笔记") {
 if (mapXiaohongshuNoteType(1) !== "视频笔记") {
   throw new Error("Internal Xiaohongshu noteType=1 should map to TikHub App V2 video note_type=视频笔记.");
 }
+if (mapXiaohongshuNoteType(3) !== "直播笔记") {
+  throw new Error("Internal Xiaohongshu noteType=3 should map to TikHub App V2 live note_type=直播笔记.");
+}
 
 const imageTextSearchPath = buildXiaohongshuSearchPath(
   { query: "Xiaopeng P7", sort: "popularity_descending", noteType: 2 },
@@ -151,6 +169,16 @@ if (imageTextUrl.searchParams.get("ai_mode") !== "0") {
   throw new Error("Xiaohongshu App V2 search path should include ai_mode=0.");
 }
 
+for (const sortValue of ["comment_descending", "collect_descending", "english_preferred"]) {
+  const sortUrl = new URL(
+    buildXiaohongshuSearchPath({ query: "Xiaopeng P7", sort: sortValue, noteType: 0 }, 1),
+    "https://example.test",
+  );
+  if (sortUrl.searchParams.get("sort_type") !== sortValue) {
+    throw new Error(`Xiaohongshu App V2 search path should preserve sort_type=${sortValue}.`);
+  }
+}
+
 const imageTextAttempts = getXiaohongshuSearchNoteTypeParams(2);
 if (imageTextAttempts.join(",") !== "普通笔记") {
   throw new Error(`Image/text search should only request selected App V2 note_type=普通笔记, got ${imageTextAttempts.join(",")}`);
@@ -158,6 +186,10 @@ if (imageTextAttempts.join(",") !== "普通笔记") {
 const videoAttempts = getXiaohongshuSearchNoteTypeParams(1);
 if (videoAttempts.join(",") !== "视频笔记") {
   throw new Error(`Video search should only request selected App V2 note_type=视频笔记, got ${videoAttempts.join(",")}`);
+}
+const liveAttempts = getXiaohongshuSearchNoteTypeParams(3);
+if (liveAttempts.join(",") !== "直播笔记") {
+  throw new Error(`Live search should only request selected App V2 note_type=直播笔记, got ${liveAttempts.join(",")}`);
 }
 const allAttempts = getXiaohongshuSearchNoteTypeParams(0);
 if (allAttempts.join(",") !== "不限") {
