@@ -6,14 +6,14 @@ import { concurrencyConfig, mapWithConcurrency, runWithConcurrencyPool } from ".
 import { extractDouyinCarouselImageUrls } from "./douyin-media";
 import { isLikelyNonContentImageUrl, normalizeContentImageUrls } from "./media-url-filter";
 import { extractPublishedTime } from "./source-timestamps";
-import type { CrawlInput, NormalizedSourceItem, Platform } from "./types";
+import type { CrawlInput, CrawlPlatform, NormalizedSourceItem, Platform } from "./types";
 
 type JsonRecord = Record<string, unknown>;
 
 const xiaohongshuSearchEndpoint = "/api/v1/xiaohongshu/app_v2/search_notes";
 const maxXiaohongshuSearchPages = 20;
 
-const endpointByPlatform: Record<Platform, string> = {
+const endpointByPlatform: Record<CrawlPlatform, string> = {
   wechat_channels: "/api/v1/wechat_channels/fetch_search_ordinary",
   xiaohongshu: xiaohongshuSearchEndpoint,
   douyin: "/api/v1/douyin/web/fetch_challenge_posts",
@@ -33,7 +33,7 @@ const maxDouyinContentImages = 36;
 
 export type TikHubSourceLinkInput = {
   url: string;
-  platform?: Platform;
+  platform?: CrawlPlatform;
   cookie?: string;
 };
 
@@ -98,7 +98,7 @@ export async function fetchTikHubItemBySourceLink(input: TikHubSourceLinkInput):
   return cacheCrawledMedia(normalizedItems);
 }
 
-export function detectPlatformFromSourceUrl(value: string): Platform | undefined {
+export function detectPlatformFromSourceUrl(value: string): CrawlPlatform | undefined {
   const url = extractFirstHttpUrl(value);
   if (!url) return undefined;
   try {
@@ -974,7 +974,7 @@ export function normalizeTikHubResponse(raw: unknown, platform: Platform): Norma
       mediaType: detectMediaType(normalizedRecord, images, videos),
       sourceUrl,
       authorName: firstString(normalizedRecord, ["nickname", "user_nick", "user_name", "author", "screen_name", "name"]),
-      title: firstString(normalizedRecord, ["title", "display_title", "displayTitle", "desc", "content", "text_raw"]),
+      title: extractSourceTitle(normalizedRecord, platform),
       contentText: extractContentText(normalizedRecord, platform),
       images,
       videoUrl: videos[0],
@@ -1090,6 +1090,13 @@ function dedupeDouyinRecords(records: JsonRecord[]) {
     seen.add(id);
     return true;
   });
+}
+
+function extractSourceTitle(record: JsonRecord, platform: Platform) {
+  if (platform === "douyin") {
+    return firstString(record, ["title", "display_title", "displayTitle"]);
+  }
+  return firstString(record, ["title", "display_title", "displayTitle", "desc", "content", "text_raw"]);
 }
 
 function extractContentText(record: JsonRecord, platform: Platform) {
@@ -1411,9 +1418,14 @@ function extractWeiboImageUrls(value: unknown): string[] {
 
     const variantKeys = [
       "largest",
+      "woriginal",
+      "oslarge",
       "large",
       "mw2000",
       "mw1024",
+      "cmw960",
+      "wap360",
+      "wap180",
       "original",
       "bmiddle",
       "middleplus",
@@ -1429,7 +1441,7 @@ function extractWeiboImageUrls(value: unknown): string[] {
 
     Object.entries(node).forEach(([key, child]) => {
       if (/avatar|profile|author|user/i.test(key)) return;
-      if (/pic|image|img|cover|large|middle|thumb|mw\d+|original|url/i.test(key)) visit(child, depth + 1);
+      if (/pic|image|img|cover|large|middle|thumb|mw\d+|cmw\d+|wap\d+|oslarge|original|woriginal|url/i.test(key)) visit(child, depth + 1);
     });
   };
 

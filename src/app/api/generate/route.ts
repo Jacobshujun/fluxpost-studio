@@ -4,6 +4,7 @@ import { concurrencyConfig } from "@/lib/concurrency";
 import { getSourceItemsByIds, markSourceRewritten } from "@/lib/content-pool";
 import { saveGeneratedPost } from "@/lib/generated-posts";
 import { generateImagesFromPrompt } from "@/lib/image-generation";
+import { normalizeImageGenerationSize } from "@/lib/image-size-options";
 import { generatePost } from "@/lib/openai";
 import { savePost } from "@/lib/store";
 import { isWorkspaceSignInError, requireWorkspaceAccount } from "@/lib/workspace-accounts";
@@ -37,6 +38,7 @@ export async function POST(request: Request) {
     }
     const source = (await getSourceItemsByIds([body.source.id], account))[0];
     if (!source) return NextResponse.json({ error: "Source item not found" }, { status: 404 });
+    const imageSize = normalizeImageGenerationSize(body.imageSize);
 
     await recordExecutionLog({
       scope: "generate",
@@ -50,7 +52,7 @@ export async function POST(request: Request) {
           instructionLength: body.instruction?.length || 0,
           imageTaskCount: Array.isArray(body.imageTasks) ? body.imageTasks.filter((task) => task.selected).length : 0,
           generateImages: body.generateImages !== false,
-          imageSize: body.imageSize || "1200x1600",
+          imageSize,
           imageQuality: body.imageQuality || "medium",
       },
     });
@@ -74,12 +76,12 @@ export async function POST(request: Request) {
             postId: post.id,
             sourceItemId: post.sourceItemId,
             imageTaskCount: Array.isArray(body.imageTasks) ? body.imageTasks.filter((task) => task.selected).length : 0,
-            imageSize: body.imageSize || "1200x1600",
+            imageSize,
             imageQuality: body.imageQuality || "medium",
           },
         });
         const imageResult = await generateImagesFromPrompt(post.imagePrompt, 1, post.imageTasks, {
-          size: body.imageSize,
+          size: imageSize,
           quality: body.imageQuality,
           taskConcurrency: concurrencyConfig.image,
         });

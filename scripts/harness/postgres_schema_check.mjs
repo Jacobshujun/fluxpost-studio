@@ -19,7 +19,9 @@ const requiredTables = [
   "runtime_posts",
   "simple_runs",
   "simple_run_queue",
+  "image_generation_queue",
   "feishu_publish_queue",
+  "lark_task_launches",
 ];
 
 if (!existsSync(schemaPath)) {
@@ -54,9 +56,14 @@ for (const table of requiredTables.filter((table) => table !== "app_meta")) {
   "idx_simple_runs_created_at",
   "idx_simple_run_queue_ready",
   "idx_simple_run_queue_run_id",
+  "idx_image_generation_queue_ready",
+  "idx_image_generation_queue_provider_status",
   "idx_feishu_publish_queue_ready",
   "idx_feishu_publish_queue_owner_status",
   "idx_feishu_publish_queue_source_run_id",
+  "idx_lark_task_launches_message_id",
+  "idx_lark_task_launches_run_id",
+  "idx_lark_task_launches_created_at",
   "idx_workspace_accounts_status",
   "idx_workspace_sessions_account_id",
   "idx_workspace_sessions_expires_at",

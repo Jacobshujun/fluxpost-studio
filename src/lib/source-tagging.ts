@@ -63,6 +63,27 @@ const remoteImageFetchTimeoutMs = 20_000;
 export const sourceContentTagOptions = contentTagOptions;
 export const sourceVisualTagOptions = visualTagOptions;
 
+const visualTagAliases: Record<string, VisualTag> = {
+  APP: "APP",
+  app: "APP",
+  App: "APP",
+  应用界面: "APP",
+  手机APP: "APP",
+  手机App: "APP",
+  手机应用界面: "APP",
+  车机界面: "APP",
+  中控界面: "APP",
+  仪表界面: "APP",
+};
+
+const contentTagAliases: Record<string, ContentTag> = {
+  提车: "提车记录",
+  提车作业: "提车记录",
+  车主提车: "提车记录",
+  新车交付: "提车记录",
+  交付记录: "提车记录",
+};
+
 export async function tagSourceItems(items: NormalizedSourceItem[]) {
   if (!items.length) return items;
   if (!appConfig.openaiApiKey) {
@@ -308,6 +329,7 @@ export function normalizeContentTags(value: unknown): ContentTag[] {
     new Set(
       candidates
         .map((item) => (typeof item === "string" ? item.trim() : ""))
+        .map((item) => contentTagAliases[item] || item)
         .filter((item): item is ContentTag => allowed.has(item)),
     ),
   ).slice(0, maxContentTags);
@@ -316,6 +338,8 @@ export function normalizeContentTags(value: unknown): ContentTag[] {
 export function normalizeVisualTag(value: unknown): VisualTag | undefined {
   if (typeof value !== "string") return undefined;
   const normalized = value.trim();
+  const alias = visualTagAliases[normalized] || visualTagAliases[normalized.toUpperCase()];
+  if (alias) return alias;
   return (visualTagOptions as readonly string[]).includes(normalized) ? (normalized as VisualTag) : undefined;
 }
 
@@ -397,6 +421,7 @@ function buildContentTaggingPrompt(item: NormalizedSourceItem) {
     "你是汽车社媒内容运营专家。请给采集到的内容打标签，必须只输出合法 JSON。",
     "内容标签只能从以下列表选择，可以多选，但最多 4 个。模糊时少选，不要为了凑数硬选。",
     contentTagOptions.join("、"),
+    "提车记录：车主提车、交付现场、提车作业、提车当天体验或晒新车钥匙/交付花束等内容。该标签用于归档，不进入后续内容生产。",
     "输出 JSON 结构：",
     '{"contentTags":["新车曝光"],"confidence":0.85,"reasons":["理由"]}',
     `平台: ${item.platform}`,
@@ -414,6 +439,13 @@ function buildVisualTaggingPrompt(item: NormalizedSourceItem, visualAssets: Arra
     "你是汽车社媒视觉素材标注助手。请查看随消息提供的图片，给每一张图打 1 个视觉标签，只输出合法 JSON。",
     "标签只能从以下列表选择：",
     visualTagOptions.join("、"),
+    "标签判定优先级：APP > 人车美图 > 车型美图 > 汽车外观 > 带文字图 > 内饰空间。",
+    "APP：手机 App 截图、车机/中控/仪表界面、导航、能耗、充电、辅助驾驶、OTA 等屏幕 UI，界面控件和文字密集。",
+    "人车美图：车外观和人物同时明显，人物参与构图、摆拍或场景氛围。",
+    "车型美图：纯车外观美图，没有人物，整车或车型主体占画面核心。",
+    "汽车外观：车身外观、外观局部、车灯、轮毂、充电口、路边随拍等，不满足车型美图或人车美图时使用。",
+    "带文字图：海报、信息图、文字内容图，但不是 App 或车机界面。",
+    "内饰空间：座舱、座椅、中控台等车内空间，不以屏幕 UI 为主体。",
     "输出 JSON 结构：",
     '{"visualTags":[{"id":"image-1","tag":"汽车外观","confidence":0.8,"reason":"车身外观占主体"}]}',
     "必须按 id 返回，不能新增 id。看不清时选择最保守的标签，并在 reason 中说明。",

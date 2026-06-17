@@ -9,7 +9,7 @@ import { recordExecutionLog } from "./activity-log";
 import { appConfig } from "./config";
 import { concurrencyConfig, mapWithConcurrency, runWithConcurrencyPool } from "./concurrency";
 import { buildMediaRequestHeaders, isProxyableRemoteMediaUrl } from "./media-request";
-import type { FeishuPostPublishState, GeneratedPost } from "./types";
+import type { FeishuPostPublishState, FeishuPublishJobSource, GeneratedPost } from "./types";
 
 const execFileAsync = promisify(execFile);
 
@@ -59,9 +59,27 @@ type FeishuPostStateUpdate = {
   feishu: FeishuPostPublishState;
 };
 
+type FeishuPublishNotificationContext = {
+  jobId?: string;
+  source?: FeishuPublishJobSource;
+  sourceRunId?: string;
+  ownerUserId?: string;
+  ownerDisplayName?: string;
+};
+
+type FeishuPublishNotificationSummary = FeishuPublishNotificationContext & {
+  status: "published" | "attachment_failed";
+  recordMappings: FeishuRecordMapping[];
+  attachmentFailureCount: number;
+};
+
+type PublishPostsToFeishuOptions = {
+  notificationContext?: FeishuPublishNotificationContext;
+};
+
 const maxFeishuAttachmentImageBytes = 30 * 1024 * 1024;
 
-export async function publishPostsToFeishu(posts: GeneratedPost[]) {
+export async function publishPostsToFeishu(posts: GeneratedPost[], options: PublishPostsToFeishuOptions = {}) {
   const outboxDir = path.join(process.cwd(), "data", "feishu-outbox");
   await mkdir(outboxDir, { recursive: true });
   const payloadPath = path.join(outboxDir, `posts-${Date.now()}.json`);
@@ -156,12 +174,12 @@ export async function publishPostsToFeishu(posts: GeneratedPost[]) {
     }
   }
   const postStates = buildFeishuPostStateUpdates(posts, recordMappings, attachmentUploads, attachmentFailures, payloadPath);
-  const notification = attachmentFailures.length
-    ? {
-        status: "skipped" as const,
-        message: "Feishu notification skipped because one or more attachment uploads failed.",
-      }
-    : await sendFeishuPublishNotification(posts, attachmentUploads);
+  const notification = await sendFeishuPublishNotification(posts, attachmentUploads, {
+    ...options.notificationContext,
+    status: attachmentFailures.length ? "attachment_failed" : "published",
+    recordMappings,
+    attachmentFailureCount: attachmentFailures.length,
+  });
 
   if (attachmentFailures.length) {
     await recordExecutionLog({
@@ -569,6 +587,7 @@ function hashString(value: string) {
 async function sendFeishuPublishNotification(
   posts: GeneratedPost[],
   attachmentUploads: Array<{ postId: string; recordId: string; fileCount: number }>,
+  context: FeishuPublishNotificationSummary,
 ): Promise<FeishuNotificationResult> {
   const chatId = appConfig.feishuNotifyChatId.trim();
   const userId = appConfig.feishuNotifyUserId.trim();
@@ -590,9 +609,9 @@ async function sendFeishuPublishNotification(
     recipientType === "chat" ? "--chat-id" : "--user-id",
     recipientId,
     "--text",
-    buildPublishNotificationText(posts, attachmentUploads),
+    buildPublishNotificationText(posts, attachmentUploads, context),
     "--idempotency-key",
-    buildNotificationIdempotencyKey(posts),
+    buildNotificationIdempotencyKey(posts, context),
   ];
 
   try {
@@ -622,24 +641,76 @@ async function sendFeishuPublishNotification(
 function buildPublishNotificationText(
   posts: GeneratedPost[],
   attachmentUploads: Array<{ postId: string; recordId: string; fileCount: number }>,
+  context: FeishuPublishNotificationSummary,
 ) {
-  const firstPost = posts[0];
   const imageCount = posts.reduce((total, post) => total + post.imageUrls.length, 0);
   const uploadedImageCount = attachmentUploads.reduce((total, item) => total + item.fileCount, 0);
-  const title = firstPost?.title?.trim() || "未命名图文";
+  const createdCount = context.recordMappings.filter((item) => item.created).length;
+  const reusedCount = Math.max(0, context.recordMappings.length - createdCount);
+  const recordCount = context.recordMappings.length || posts.length;
+  const header = context.status === "attachment_failed" ? "FluxPost Studio 写入飞书部分完成" : "FluxPost Studio 写入飞书成功";
+  const lines = [
+    header,
+    `任务：${formatNotificationTask(posts, context)}`,
+  ];
 
-  return [
-    "FluxPost Studio 写入飞书成功",
-    `标题：${title}`,
-    `记录：${posts.length} 条`,
-    `素材：${uploadedImageCount || imageCount} 张`,
-    `时间：${formatFeishuDateTime(new Date().toISOString())}`,
-    "请到目标飞书多维表格复核动态标题、动态正文和动态素材。",
-  ].join("\n");
+  const sourceLine = formatNotificationSource(context);
+  if (sourceLine) lines.push(`来源：${sourceLine}`);
+  if (context.ownerDisplayName?.trim()) lines.push(`发起人：${compactNotificationText(context.ownerDisplayName, 40)}`);
+  if (context.jobId) lines.push(`任务ID：${context.jobId}`);
+
+  lines.push(`记录：${formatNotificationRecordLine(recordCount, createdCount, reusedCount)}`);
+  lines.push(
+    context.status === "attachment_failed"
+      ? `素材：已上传 ${uploadedImageCount} 张，失败 ${context.attachmentFailureCount} 组`
+      : `素材：${uploadedImageCount || imageCount} 张`,
+  );
+  lines.push(...formatNotificationContentLines(posts));
+  lines.push(`时间：${formatFeishuDateTime(new Date().toISOString())}`);
+  lines.push(
+    context.status === "attachment_failed"
+      ? "请优先检查飞书多维表格中的动态素材，必要时重试附件上传。"
+      : "请到目标飞书多维表格复核动态标题、动态正文和动态素材。",
+  );
+
+  return lines.join("\n");
 }
 
-function buildNotificationIdempotencyKey(posts: GeneratedPost[]) {
-  const fingerprint = posts.map((post) => post.id).join("|") || "post";
+function formatNotificationTask(posts: GeneratedPost[], context: FeishuPublishNotificationSummary) {
+  if (posts.length === 1) return "单条发布";
+  if (context.source === "simple") return `简单任务批量发布 ${posts.length} 条图文`;
+  if (context.source === "manual") return `手动批量发布 ${posts.length} 条图文`;
+  return `批量发布 ${posts.length} 条图文`;
+}
+
+function formatNotificationSource(context: FeishuPublishNotificationSummary) {
+  if (context.source === "simple") return context.sourceRunId ? `简单任务 ${context.sourceRunId}` : "简单任务";
+  if (context.source === "manual") return "手动发布";
+  return undefined;
+}
+
+function formatNotificationRecordLine(recordCount: number, createdCount: number, reusedCount: number) {
+  if (!createdCount && !reusedCount) return `成功写入 ${recordCount} 条`;
+  if (!reusedCount) return `成功写入 ${recordCount} 条（新建 ${createdCount}）`;
+  if (!createdCount) return `成功写入 ${recordCount} 条（复用 ${reusedCount}）`;
+  return `成功写入 ${recordCount} 条（新建 ${createdCount}，复用 ${reusedCount}）`;
+}
+
+function formatNotificationContentLines(posts: GeneratedPost[]) {
+  const titles = posts.map((post) => compactNotificationText(post.title, 64)).filter(Boolean);
+  if (!titles.length) return [] as string[];
+  if (posts.length === 1) return [`内容：${titles[0]}`];
+  return ["内容示例：", ...titles.slice(0, 3).map((title, index) => `${index + 1}. ${title}`)];
+}
+
+function compactNotificationText(value: string | undefined, maxLength: number) {
+  const normalized = value?.replace(/\s+/g, " ").trim() || "";
+  if (Array.from(normalized).length <= maxLength) return normalized;
+  return `${Array.from(normalized).slice(0, maxLength - 1).join("")}…`;
+}
+
+function buildNotificationIdempotencyKey(posts: GeneratedPost[], context?: FeishuPublishNotificationContext) {
+  const fingerprint = [context?.jobId, ...posts.map((post) => post.id)].filter(Boolean).join("|") || "post";
   return `fp-${Date.now().toString(36)}-${hashString(fingerprint)}`;
 }
 
@@ -886,6 +957,9 @@ function formatPlatform(value: GeneratedPost["platform"]) {
     xiaohongshu: "小红书",
     douyin: "抖音",
     weibo: "微博",
+    feishu: "飞书",
+    xiaopeng_bbs: "小鹏社区",
+    dongchedi: "\u61c2\u8f66\u5e1d",
   };
   return labels[value] || value;
 }

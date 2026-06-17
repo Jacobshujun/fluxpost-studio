@@ -2,7 +2,7 @@ import { NextResponse } from "next/server";
 import { compactError, recordExecutionLog } from "@/lib/activity-log";
 import { listSimpleRuns, startSimpleRun, terminateSimpleRun } from "@/lib/simple-runs";
 import { requireWorkspaceAccount } from "@/lib/workspace-accounts";
-import type { Platform, WorkspacePromptSettings } from "@/lib/types";
+import type { CrawlPlatform, SourceLinkPlatform, WorkspacePromptSettings } from "@/lib/types";
 
 export const runtime = "nodejs";
 
@@ -21,22 +21,24 @@ export async function POST(request: Request) {
   try {
     const account = await requireWorkspaceAccount(request);
     const body = (await request.json()) as {
-      sourceMode?: "keyword" | "links";
+      sourceMode?: "keyword" | "links" | "feishu";
       keyword?: string;
       targetCount?: number;
-      platforms?: Platform[];
+      platforms?: CrawlPlatform[];
       links?: string[] | string;
-      linkPlatform?: Platform | "auto";
+      linkPlatform?: SourceLinkPlatform | "auto";
+      feishuTaskNumbers?: string[] | string;
       materialPaths?: string[];
       settings?: Partial<WorkspacePromptSettings>;
     };
     const run = await startSimpleRun({
-      sourceMode: body.sourceMode === "links" ? "links" : "keyword",
+      sourceMode: body.sourceMode === "feishu" ? "feishu" : body.sourceMode === "links" ? "links" : "keyword",
       keyword: body.keyword || "",
       targetCount: body.targetCount === undefined ? undefined : Number(body.targetCount),
       platforms: Array.isArray(body.platforms) ? body.platforms : [],
       links: body.links,
       linkPlatform: body.linkPlatform,
+      feishuTaskNumbers: body.feishuTaskNumbers,
       materialPaths: Array.isArray(body.materialPaths) ? body.materialPaths : [],
       settings: body.settings,
       ownerUserId: account.id,

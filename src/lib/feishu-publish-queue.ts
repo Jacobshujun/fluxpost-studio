@@ -13,7 +13,7 @@ import {
 import { publishPostsToFeishu } from "./feishu-cli";
 import { getGeneratedPost, saveGeneratedPost } from "./generated-posts";
 import { savePost } from "./store";
-import { accessActorFromOwner, applyWorkspaceOwner, filterWorkspaceOwnedRecords, type WorkspaceAccessActor } from "./workspace-ownership";
+import { accessActorFromOwner, filterWorkspaceOwnedRecords, type WorkspaceAccessActor } from "./workspace-ownership";
 import type {
   FeishuPublishJob,
   FeishuPublishJobResult,
@@ -36,6 +36,8 @@ const defaultOwnerUserId = "local";
 const feishuPublishQueueWorkerConcurrency = readBoundedIntegerEnv("FEISHU_PUBLISH_WORKER_CONCURRENCY", 1, 1, 5);
 const feishuPublishQueueLockMs = 10 * 60_000;
 const feishuPublishQueueHeartbeatMs = 30_000;
+const feishuPublishPersistMaxAttempts = 3;
+const feishuPublishPersistRetryDelayMs = 300;
 
 type FeishuPublishQueueGlobalState = typeof globalThis & {
   __fluxpostFeishuPublishQueue?: {
@@ -52,8 +54,7 @@ const feishuPublishQueueState = ((globalThis as FeishuPublishQueueGlobalState)._
 
 export async function enqueueFeishuPublishJob(posts: GeneratedPost[], options: EnqueueFeishuPublishJobOptions = {}) {
   const ownerUserId = (options.ownerUserId || defaultOwnerUserId).trim() || defaultOwnerUserId;
-  const ownerAccess = accessActorFromOwner(ownerUserId, options.ownerDisplayName);
-  const publishPosts = normalizePosts(await enrichPostsWithContentTags(posts.map((post) => applyWorkspaceOwner(post, ownerAccess, post))));
+  const publishPosts = normalizePosts(await enrichPostsWithContentTags(posts));
   if (!publishPosts.length) throw new Error("At least one post is required to enqueue Feishu publishing.");
 
   const approvedPosts = publishPosts.map((post) => ({
@@ -213,7 +214,15 @@ async function executeFeishuPublishJob(job: FeishuPublishJob) {
   });
 
   const latestPosts = await loadLatestPostsForJob(job);
-  const publishResult = await publishPostsToFeishu(latestPosts);
+  const publishResult = await publishPostsToFeishu(latestPosts, {
+    notificationContext: {
+      jobId: job.id,
+      source: job.source,
+      sourceRunId: job.sourceRunId,
+      ownerUserId: job.ownerUserId,
+      ownerDisplayName: latestPosts.find((post) => post.ownerDisplayName?.trim())?.ownerDisplayName,
+    },
+  });
   const finalPosts = await persistPublishedPosts(latestPosts, publishResult);
   const jobResult = buildJobResult(publishResult);
   const terminalStatus = queueStatusFromPublishResult(jobResult.status);
@@ -257,18 +266,52 @@ async function persistPublishedPosts(
     updatedAt: now,
   }));
 
-  await Promise.all(finalPosts.map(persistOnePost));
+  await persistPostsSerially(finalPosts);
   return finalPosts;
 }
 
 async function persistPostsForFeishuQueue(posts: GeneratedPost[]) {
-  await Promise.all(posts.map(persistOnePost));
+  await persistPostsSerially(posts);
+}
+
+async function persistPostsSerially(posts: GeneratedPost[]) {
+  for (const post of posts) {
+    await withFeishuPublishTransientDatabaseRetry(() => persistOnePost(post));
+  }
 }
 
 async function persistOnePost(post: GeneratedPost) {
   await savePost(post);
   await saveGeneratedPost(post);
   await markSourceRewritten(post.sourceItemId, post);
+}
+
+async function withFeishuPublishTransientDatabaseRetry(operation: () => Promise<void>) {
+  for (let attempt = 1; attempt <= feishuPublishPersistMaxAttempts; attempt += 1) {
+    try {
+      await operation();
+      return;
+    } catch (error) {
+      if (attempt >= feishuPublishPersistMaxAttempts || !isFeishuPublishTransientDatabaseError(error)) throw error;
+      await delayFeishuPublishPersistRetry(attempt);
+    }
+  }
+}
+
+function isFeishuPublishTransientDatabaseError(error: unknown) {
+  const code = typeof (error as { code?: unknown })?.code === "string" ? (error as { code: string }).code : "";
+  const message = error instanceof Error ? error.message : String(error || "");
+  return (
+    code === "40P01" ||
+    code === "40001" ||
+    /\bdeadlock\b/i.test(message) ||
+    message.includes("\u6b7b\u9501") ||
+    /timeout exceeded when trying to connect/i.test(message)
+  );
+}
+
+function delayFeishuPublishPersistRetry(attempt: number) {
+  return new Promise<void>((resolve) => setTimeout(resolve, feishuPublishPersistRetryDelayMs * attempt));
 }
 
 async function loadLatestPostsForJob(job: FeishuPublishJob) {

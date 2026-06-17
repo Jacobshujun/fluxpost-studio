@@ -97,6 +97,37 @@ if (normalizedDetail.length !== 1 || normalizedDetail[0] !== xhsDetailDefault) {
   throw new Error("Xiaohongshu xhscdn detail normalization should keep the clearer detail image variant.");
 }
 
+const weiboLarge =
+  "https://wx1.sinaimg.cn/large/c5eeee85ly1ie66ysirnhj22bc1jknpd.jpg";
+const weiboWap360 =
+  "https://wx1.sinaimg.cn/wap360/c5eeee85ly1ie66ysirnhj22bc1jknpd.jpg";
+const weiboWap180 =
+  "https://wx1.sinaimg.cn/wap180/c5eeee85ly1ie66ysirnhj22bc1jknpd.jpg";
+const weiboCmw960 =
+  "https://wx1.sinaimg.cn/cmw960/c5eeee85ly1ie66ysirnhj22bc1jknpd.jpg";
+const normalizedWeiboMobileVariants = normalizeContentImageUrls([
+  weiboWap360,
+  weiboLarge,
+  weiboWap180,
+  weiboCmw960,
+]);
+if (normalizedWeiboMobileVariants.length !== 1 || normalizedWeiboMobileVariants[0] !== weiboLarge) {
+  throw new Error("Weibo mobile-size variants should collapse to the large image asset.");
+}
+
+const weiboOslarge =
+  "https://wx2.sinaimg.cn/oslarge/abc123def4567890.jpg";
+const weiboWoriginal =
+  "https://wx3.sinaimg.cn/woriginal/abc123def4567890.jpg";
+const normalizedWeiboOriginalVariants = normalizeContentImageUrls([
+  weiboLarge.replace("c5eeee85ly1ie66ysirnhj22bc1jknpd", "abc123def4567890"),
+  weiboOslarge,
+  weiboWoriginal,
+]);
+if (normalizedWeiboOriginalVariants.length !== 1 || normalizedWeiboOriginalVariants[0] !== weiboWoriginal) {
+  throw new Error("Weibo original-size variants should collapse to one asset and prefer woriginal.");
+}
+
 const staleDownloads = Array.from({ length: 10 }, (_, index) => `/media/crawl/xiaohongshu/p7/image-${index + 1}.webp`);
 const mergedStaleDownloads = mergeDownloadedAndRemoteImages(
   staleDownloads,

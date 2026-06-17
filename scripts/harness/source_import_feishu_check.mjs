@@ -23,6 +23,7 @@ const sourceLinkImport = read("src/lib/source-link-import.ts");
 const simpleRuns = read("src/lib/simple-runs.ts");
 const config = read("src/lib/config.ts");
 const checkPs1 = read("scripts/harness/check.ps1");
+const resolveSourceTitleBlock = sync.match(/function resolveSourceTitle\(item: NormalizedSourceItem\) \{[\s\S]*?\n\}/)?.[0] || "";
 
 assertContains(config, /feishuSourceImportEnabled:\s*booleanOrDefault\(process\.env\.FEISHU_SOURCE_IMPORT_ENABLED,\s*true\)/, "Source import Feishu sync should be enabled by default.");
 assertContains(config, /feishuSourceImportBaseToken:\s*process\.env\.FEISHU_SOURCE_IMPORT_BASE_TOKEN\s*\|\|\s*"JbpPbSIMqaD75wsZ9fAcBy9mnEe"/, "Source import Base token default should match the requested Base.");
@@ -60,6 +61,9 @@ assertContains(sync, /status:\s*"skipped_duplicate"/, "Existing source-link reco
 
 assertContains(sync, /"\+record-batch-create"/, "Text and select fields should be written with record-batch-create.");
 assertContains(sync, /fields:\s*\[fieldMap\.sourceUrl,\s*fieldMap\.title,\s*fieldMap\.body,\s*fieldMap\.platform\]/, "Record create payload should write source link, title, body, and platform only.");
+assertContains(resolveSourceTitleBlock, /compactText\(item\.title,\s*240\)\s*\|\|\s*""/, "Source import title should use only a real source title and allow blank titles.");
+assertNotContains(resolveSourceTitleBlock, /item\.contentText/, "Source import title must not fall back to body text.");
+assertNotContains(sourceLinkImport, /title:\s*item\.title\s*\|\|\s*item\.contentText/, "Link import result titles must not use body previews as title fallbacks.");
 assertNotContains(sync, /(?<!select_)fields:\s*\[[^\]]*fieldMap\.image[^\]]*\]/, "Attachment fields must not be included in the normal record create payload.");
 assertNotContains(sync, /(?<!select_)fields:\s*\[[^\]]*fieldMap\.video[^\]]*\]/, "Video attachments must not be included in the normal record create payload.");
 assertContains(sync, /parseCreatedSourceRecordIds\(result\.stdout\)\[0\]/, "Source record creation must parse created record IDs through the source-create parser.");

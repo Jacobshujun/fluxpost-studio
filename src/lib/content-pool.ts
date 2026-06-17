@@ -230,7 +230,7 @@ export async function updateSourceItem(sourceItemId: string, patch: Partial<Norm
         ...nextItem,
         hotScore: patch.hotScore ?? calculateHotScore(nextItem),
         analysis: patch.analysis || item.analysis || analyzeSourceItem(nextItem),
-        productionPlan: patch.productionPlan || item.productionPlan || buildProductionPlan(nextItem),
+        productionPlan: patch.productionPlan || (patch.contentTagging === undefined ? item.productionPlan : undefined) || buildProductionPlan(nextItem),
       };
       const recalculated = {
         ...recalculatedBase,

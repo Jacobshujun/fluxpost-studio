@@ -103,6 +103,8 @@ function getImageAssetKey(url: string) {
     if (xiaohongshuAssetKey) return xiaohongshuAssetKey;
     const douyinAssetKey = getDouyinImageAssetKey(parsed.hostname, parsed.pathname);
     if (douyinAssetKey) return douyinAssetKey;
+    const weiboAssetKey = getWeiboImageAssetKey(parsed.hostname, parsed.pathname);
+    if (weiboAssetKey) return weiboAssetKey;
     return parsed.pathname
       .toLowerCase()
       .replace(/^\/crop\.[^/]+\//, "/")
@@ -112,7 +114,7 @@ function getImageAssetKey(url: string) {
       .replace(/^\/notes_pre_post\//, "/");
   } catch {
     const fallbackPath = decoded.split("?")[0];
-    return getXiaohongshuImageAssetKey("", fallbackPath) || getDouyinImageAssetKey("", fallbackPath) || fallbackPath;
+    return getXiaohongshuImageAssetKey("", fallbackPath) || getDouyinImageAssetKey("", fallbackPath) || getWeiboImageAssetKey("", fallbackPath) || fallbackPath;
   }
 }
 
@@ -155,6 +157,25 @@ function getDouyinImageAssetKey(hostname: string, pathname: string) {
   return `douyin:${assetId}`;
 }
 
+function getWeiboImageAssetKey(hostname: string, pathname: string) {
+  const normalizedHost = hostname.toLowerCase();
+  if (normalizedHost && !/sinaimg\.cn$/.test(normalizedHost)) return undefined;
+
+  const segments = pathname.toLowerCase().split("/").filter(Boolean);
+  if (segments.length < 2) return undefined;
+
+  const sizeSegment = segments[0];
+  const filename = segments[segments.length - 1];
+  if (!filename || !isWeiboImageSizeSegment(sizeSegment)) return undefined;
+  if (!/\.(?:jpe?g|png|webp|gif)$/.test(filename)) return undefined;
+
+  return `weibo:${filename.replace(/\.(?:jpe?g|png|webp|gif)$/, "")}`;
+}
+
+function isWeiboImageSizeSegment(segment: string) {
+  return /^(?:crop\.[^/]+|woriginal|oslarge|large|mw\d+|hmw\d+|cmw\d+|chmw\d+|orj\d+|orh\d+|or\d+|hlarge|bmiddle|middleplus|wap\d+|thumbnail|thumb\d+|small|square)$/.test(segment);
+}
+
 function scoreImageUrl(url: string) {
   const decoded = safeDecode(url).toLowerCase();
   const widthMatch = decoded.match(/\/w\/(\d+)/);
@@ -169,12 +190,8 @@ function scoreImageUrl(url: string) {
   const douyinHeicPenalty = /\.heic(?:[?#]|$)|:q80\.heic(?:[?#]|$)/.test(decoded) ? -180 : 0;
   const douyinWatermarkPenalty = /water-v|watermark/.test(decoded) ? -100 : 0;
   const douyinCoverPenalty = /sc=(?:cover|origin_cover)|~noop|tplv-dy-360p/.test(decoded) ? -140 : 0;
-  const weiboQualityScore = /sinaimg\.cn\/(large|mw2000|mw1024|orj\d+|orh\d+|hlarge|hmw\d+)\//.test(decoded)
-    ? 160
-    : /sinaimg\.cn\/(bmiddle|middleplus|or\d+|chmw\d+)\//.test(decoded)
-      ? 80
-      : 0;
-  const weiboPreviewPenalty = /sinaimg\.cn\/(thumbnail|thumb\d+|small|square)\//.test(decoded) ? -80 : 0;
+  const weiboQualityScore = scoreWeiboImageUrl(decoded);
+  const weiboPreviewPenalty = /sinaimg\.cn\/(?:wap\d+|thumbnail|thumb\d+|small|square)\//.test(decoded) ? -80 : 0;
   const previewPenalty = /preview|srh_prv|redimage\/frame|w\/576/.test(decoded) ? -80 : 0;
   return (
     widthScore +
@@ -191,6 +208,20 @@ function scoreImageUrl(url: string) {
     previewPenalty +
     weiboPreviewPenalty
   );
+}
+
+function scoreWeiboImageUrl(decodedUrl: string) {
+  const sizeMatch = decodedUrl.match(/sinaimg\.cn\/([^/]+)\//);
+  const size = sizeMatch?.[1];
+  if (!size) return 0;
+  if (size === "woriginal") return 240;
+  if (size === "oslarge") return 230;
+  if (size === "large") return 220;
+  if (size === "mw2000") return 190;
+  if (/^(?:mw1024|orj\d+|orh\d+|hlarge|hmw\d+)$/.test(size)) return 160;
+  if (/^(?:bmiddle|middleplus|or\d+|cmw\d+|chmw\d+)$/.test(size)) return 80;
+  if (/^wap\d+$/.test(size)) return 20;
+  return 0;
 }
 
 function getCachedImageIndex(url: string) {

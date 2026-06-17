@@ -1,5 +1,5 @@
 import { AsyncLocalStorage } from "node:async_hooks";
-import { readExecutionLogsFromDb, writeExecutionLogsToDb } from "./database";
+import { appendExecutionLogToDb, readExecutionLogsFromDb, writeExecutionLogsToDb } from "./database";
 import type { ExecutionLogEntry } from "./types";
 import {
   canAccessWorkspaceOwner,
@@ -35,7 +35,6 @@ export async function clearExecutionLogs(account?: WorkspaceAccessActor) {
 
 export async function recordExecutionLog(input: Omit<ExecutionLogEntry, "id" | "createdAt">) {
   try {
-    const log = await readExecutionLog();
     const owner = executionLogOwnerStorage.getStore();
     const entry: ExecutionLogEntry = {
       id: `exec-${Date.now()}-${Math.random().toString(16).slice(2, 8)}`,
@@ -45,7 +44,7 @@ export async function recordExecutionLog(input: Omit<ExecutionLogEntry, "id" | "
       ownerDisplayName: input.ownerDisplayName || owner?.ownerDisplayName,
       details: normalizeDetails(input.details),
     };
-    await writeExecutionLog({ entries: [entry, ...log.entries].slice(0, maxEntries) });
+    await appendExecutionLogToDb(entry, maxEntries);
   } catch (error) {
     console.warn("Failed to record execution log", error);
   }

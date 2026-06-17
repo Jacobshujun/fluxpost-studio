@@ -3,9 +3,11 @@ import { mkdir, readFile, rm, writeFile } from "node:fs/promises";
 import { randomUUID } from "node:crypto";
 import path from "node:path";
 import { compactError, recordExecutionLog } from "./activity-log";
+import { isComfyUiKleinConfigured, runComfyUiKleinImageTask } from "./comfyui-klein";
 import { appConfig, openaiImageApiKey, openaiImageUrl, type OpenaiImageApiRoute } from "./config";
 import { concurrencyConfig, mapWithConcurrency, runWithConcurrencyPool } from "./concurrency";
 import { buildSingleImageTaskPrompt } from "./creation-controls";
+import { defaultImageGenerationSize, normalizeImageGenerationSize } from "./image-size-options";
 import { buildMediaRequestHeaders } from "./media-request";
 import type { ImageGenerationOptions, SourceImageTask } from "./types";
 
@@ -37,7 +39,7 @@ const referenceImageMaxSidePx = 2400;
 const referenceImageNormalizeTimeoutMs = 60_000;
 const retryableImageStatuses = new Set([408, 409, 425, 429, 500, 502, 503, 504]);
 const defaultImageOptions: ImageGenerationOptions = {
-  size: "1024x1536",
+  size: defaultImageGenerationSize,
   quality: "medium",
 };
 let activeStandardImagesApiRoute: OpenaiImageApiRoute = "primary";
@@ -63,7 +65,10 @@ export async function generateImagesFromPrompt(
   imageTasks?: SourceImageTask[],
   options?: Partial<ImageGenerationOptions>,
 ) {
-  if (!isImageProviderConfigured()) {
+  const imageOptions = normalizeImageOptions(options);
+  const providerPrompt = normalizeProviderPrompt(prompt);
+  const selectedTasks = (imageTasks || []).filter((task) => task.selected);
+  if (!selectedTasks.length && !isImageProviderConfigured()) {
     return {
       status: "needs_config" as const,
       imageUrls: [] as string[],
@@ -71,9 +76,6 @@ export async function generateImagesFromPrompt(
     };
   }
 
-  const imageOptions = normalizeImageOptions(options);
-  const providerPrompt = normalizeProviderPrompt(prompt);
-  const selectedTasks = (imageTasks || []).filter((task) => task.selected);
   if (selectedTasks.length) {
     const selectedTaskConcurrency = imageOptions.taskConcurrency || 1;
     if (selectedTaskConcurrency > 0) {
@@ -102,7 +104,7 @@ export async function generateImagesFromPrompt(
         scope: "openai/image",
         action: "逐张图片任务开始",
         status: "running",
-        message: `正在处理 ${task.label}（${index + 1}/${selectedTasks.length}）`,
+        message: `正在处理 ${task.label}，${index + 1}/${selectedTasks.length}`,
         details: {
           mode: task.mode,
           kind: task.kind,
@@ -114,9 +116,9 @@ export async function generateImagesFromPrompt(
         imageUrls.push(task.url);
         await recordExecutionLog({
           scope: "openai/image",
-          action: "保持原图",
+          action: "Keep source image",
           status: "info",
-          message: `${task.label} 已直接使用原图，未调用图片模型`,
+          message: `${task.label} used the original source image without calling the image model.`,
           details: {
             label: task.label,
             kind: task.kind,
@@ -155,7 +157,7 @@ export async function generateImagesFromPrompt(
         failedTasks.push(`${task.label}: ${message}`);
         await recordExecutionLog({
           scope: "openai/image",
-          action: "单张图片任务失败",
+          action: "Single image task failed",
           status: "error",
           message,
           details: {
@@ -168,7 +170,7 @@ export async function generateImagesFromPrompt(
     }
 
     if (!imageUrls.length && failedTasks.length) {
-      throw new Error(`所有图片任务都失败：${failedTasks.join("；")}`);
+      throw new Error(`All image tasks failed: ${failedTasks.join("; ")}`);
     }
 
     return {
@@ -246,15 +248,32 @@ async function runSelectedImageTask(
 
   const taskPrompt = buildSingleImageTaskPrompt(prompt, task);
   try {
-    const taskUrls =
-      appConfig.openaiImageEndpoint === "images"
-        ? await callImagesApi(taskPrompt, 1, imageOptions, [task.url])
-        : await callResponsesImageTool(taskPrompt, 1, imageOptions);
+    const taskUrls = await runImageProviderTask(taskPrompt, task, imageOptions);
     return {
       imageUrls: taskUrls,
     };
   } catch (error) {
     const message = compactError(error);
+    if (shouldFallbackComfyUiKleinTask(task)) {
+      await recordExecutionLog({
+        scope: "comfyui/klein",
+        action: "ComfyUI Klein failed; using source image",
+        status: "info",
+        message: `${task.label} local Klein workflow failed, so the original source image is used for this slot: ${message}`,
+        details: {
+          label: task.label,
+          mode: task.mode,
+          kind: task.kind,
+          strategyKey: task.strategyKey || null,
+          fallbackUrl: task.url,
+          error: message,
+        },
+      });
+      return {
+        imageUrls: [task.url],
+      };
+    }
+
     if (isImageTaskSourceFallbackError(error)) {
       const fallbackTimeoutMs = resolveImageTaskFallbackTimeoutMs();
       const isTimeout = isImageTaskTimeoutError(error);
@@ -296,6 +315,24 @@ async function runSelectedImageTask(
   }
 }
 
+async function runImageProviderTask(taskPrompt: string, task: SourceImageTask, imageOptions: ImageGenerationOptions) {
+  if (task.provider === "comfyui_klein" && isComfyUiKleinConfigured()) {
+    return runComfyUiKleinImageTask({ prompt: taskPrompt, task });
+  }
+
+  if (!isImageProviderConfigured()) {
+    throw new Error("OPENAI_IMAGE_API_KEY or OPENAI_API_KEY is not configured.");
+  }
+
+  return appConfig.openaiImageEndpoint === "images"
+    ? callImagesApi(taskPrompt, 1, imageOptions, [task.url])
+    : callResponsesImageTool(taskPrompt, 1, imageOptions);
+}
+
+function shouldFallbackComfyUiKleinTask(task: SourceImageTask) {
+  return task.provider === "comfyui_klein" && isComfyUiKleinConfigured() && appConfig.comfyUiKleinFailurePolicy === "fallback_source";
+}
+
 async function callResponsesImageTool(prompt: string, count: number, options: ImageGenerationOptions) {
   return runWithConcurrencyPool("image", () => callResponsesImageToolInPool(prompt, count, options));
 }
@@ -304,9 +341,9 @@ async function callResponsesImageToolInPool(prompt: string, count: number, optio
   const startedAt = Date.now();
   await recordExecutionLog({
     scope: "openai/image",
-    action: "请求 Responses 图片工具",
+    action: "Request Responses image tool",
     status: "running",
-    message: "准备通过 image_generation 工具生成图片",
+    message: "Preparing to generate images through the image_generation tool",
     details: {
       model: appConfig.openaiImageModel,
       count,
@@ -335,7 +372,7 @@ async function callResponsesImageToolInPool(prompt: string, count: number, optio
     const body = await response.text();
     await recordExecutionLog({
       scope: "openai/image",
-      action: "Responses 图片工具失败",
+      action: "Responses image tool failed",
       status: "error",
       message: compactError(`OpenAI image request failed: ${response.status} ${body.slice(0, 260)}`),
       durationMs: Date.now() - startedAt,
@@ -356,9 +393,9 @@ async function callResponsesImageToolInPool(prompt: string, count: number, optio
   const imageUrls = await saveBase64Images(base64Images);
   await recordExecutionLog({
     scope: "openai/image",
-    action: "Responses 图片工具完成",
+    action: "Responses image tool completed",
     status: "success",
-    message: `图片工具返回 ${imageUrls.length} 张本地图片`,
+    message: `Image tool returned ${imageUrls.length} local images.`,
     durationMs: Date.now() - startedAt,
     details: {
       imageCount: imageUrls.length,
@@ -377,9 +414,9 @@ async function callImagesApiInPool(prompt: string, count: number, options: Image
   const preparedReferences = await prepareReferenceImages(referenceImages);
   await recordExecutionLog({
     scope: "openai/image",
-    action: "请求 Images 图片模型",
+    action: "Request Images API",
     status: "running",
-    message: "准备通过 images/generations 生成图片",
+    message: "Preparing to generate images through images/generations",
     details: {
       model: appConfig.openaiImageModel,
       count,
@@ -400,9 +437,9 @@ async function callImagesApiInPool(prompt: string, count: number, options: Image
   const imageUrls = [...(await saveBase64Images(base64Images)), ...remoteUrls].slice(0, count);
   await recordExecutionLog({
     scope: "openai/image",
-    action: "Images 图片模型完成",
+    action: "Images API completed",
     status: "success",
-    message: `图片模型返回 ${imageUrls.length} 张图片`,
+    message: `Images API returned ${imageUrls.length} images.`,
     durationMs: Date.now() - startedAt,
     details: {
       imageCount: imageUrls.length,
@@ -958,7 +995,7 @@ function resolveReferenceMode(encodedCount: number, urlCount: number): PreparedR
 
 function normalizeImageOptions(options?: Partial<ImageGenerationOptions>): ImageGenerationOptions {
   return {
-    size: normalizeImageSize(options?.size),
+    size: normalizeImageGenerationSize(options?.size),
     quality: normalizeImageQuality(options?.quality),
     taskConcurrency: normalizeTaskConcurrency(options?.taskConcurrency),
   };
@@ -966,24 +1003,6 @@ function normalizeImageOptions(options?: Partial<ImageGenerationOptions>): Image
 
 function normalizeProviderPrompt(prompt: string) {
   return typeof prompt === "string" ? prompt.trim() : "";
-}
-
-function normalizeImageSize(value?: string) {
-  const normalized = (value || defaultImageOptions.size).trim().toLowerCase().replace(/\s+/g, "").replace(/×/g, "x");
-  if (normalized === "auto") return "auto";
-  if (!/^\d{2,5}x\d{2,5}$/.test(normalized)) return defaultImageOptions.size;
-
-  const [width, height] = normalized.split("x").map((item) => Number(item));
-  if (!Number.isFinite(width) || !Number.isFinite(height) || !width || !height) return defaultImageOptions.size;
-
-  const allowed = ["1024x1024", "1536x1024", "1024x1536", "1536x864", "3840x2160"];
-  if (allowed.includes(normalized)) return normalized;
-
-  const ratio = width / height;
-  if (Math.abs(ratio - 1) < 0.12) return "1024x1024";
-  if (ratio > 1.6) return width >= 3000 ? "3840x2160" : "1536x864";
-  if (ratio > 1) return "1536x1024";
-  return "1024x1536";
 }
 
 function normalizeImageQuality(value?: string): ImageGenerationOptions["quality"] {

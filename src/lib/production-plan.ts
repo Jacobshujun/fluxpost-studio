@@ -44,6 +44,29 @@ export function buildProductionPlan(item: NormalizedSourceItem): ProductionPlan 
   const hasVideo = hasVideoSignal(item);
   const hasImage = hasImageSignal(item);
 
+  if (hasPickupRecordTag(item)) {
+    return {
+      contentDirection: direction,
+      decision: "observe_only",
+      reason: "提车记录属于车主提车归档内容，不进入后续内容生产流程。",
+      textStrategy: "not_adopt",
+      imageStrategy: "not_adopt",
+      materialRequirements: {
+        vehicleDocs: false,
+        vehicleImages: false,
+        sourceImages: hasImage,
+        videoKeyframes: hasVideo,
+        videoPublicPoints: false,
+      },
+      promptGuidance: {
+        textBrief: "不生成正文。保留车主提车事实和现场信息，供内容池归档与人工观察。",
+        imageBrief: "不生成图片。提车现场素材仅归档，不进入发布素材生产。",
+      },
+      workflow: ["内容池归档", "不生成草稿", "不写入飞书发布"],
+      riskFlags: ["pickup_record_observe_only"],
+    };
+  }
+
   if (hasVideo && direction === "competitor") {
     return {
       contentDirection: direction,
@@ -179,6 +202,10 @@ export function buildProductionPlan(item: NormalizedSourceItem): ProductionPlan 
     workflow: ["方向待确认", "暂缓批量生成"],
     riskFlags: ["direction_needs_review"],
   };
+}
+
+function hasPickupRecordTag(item: NormalizedSourceItem) {
+  return Boolean(item.contentTagging?.tags.includes("提车记录"));
 }
 
 export function formatProductionPlanForPrompt(plan: ProductionPlan) {

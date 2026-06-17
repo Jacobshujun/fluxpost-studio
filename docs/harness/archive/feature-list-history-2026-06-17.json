@@ -1,0 +1,348 @@
+{
+  "project": "fluxpost-studio",
+  "status_values": ["not_started", "in_progress", "ready_for_review", "done", "blocked"],
+  "features": [
+    {
+      "id": "harness-engineering",
+      "title": "Harness Engineering project structure",
+      "status": "done",
+      "definition_of_done": [
+        "AGENTS.md exists and defines startup, work, completion, boundary, and quality protocols",
+        "docs/harness contains project brief, feature state, progress, handoff, decisions, verification, pitfalls, and architecture rules",
+        "scripts/harness/check.ps1 runs real baseline verification without external production service calls",
+        "README explains Harness recovery and baseline verification"
+      ],
+      "evidence": [
+        "2026-06-01 baseline passed: powershell -ExecutionPolicy Bypass -File scripts/harness/check.ps1",
+        "Baseline covered Harness init/handoff validation, project JSON parse, npm run lint, npx --no-install tsc --noEmit, npm run build, and local HTTP smoke on 127.0.0.1:3310"
+      ],
+      "notes": "Initialized as the canonical long-term AI collaboration context."
+    },
+    {
+      "id": "keyword-crawl-content-pool",
+      "title": "Keyword crawl and content pool",
+      "status": "ready_for_review",
+      "definition_of_done": [
+        "Users can submit platform, keyword, count, and optional filters",
+        "TikHub results are normalized and written to data/content-pool.json",
+        "Crawled items expose metrics, media URLs, crawled time, and published time when available"
+      ],
+      "evidence": [
+        "Source files present: src/app/api/crawl/jobs/route.ts, src/lib/tikhub.ts, src/lib/content-pool.ts",
+        "2026-06-02 passed: npm run lint; npx --no-install tsc --noEmit; npm run build; powershell -ExecutionPolicy Bypass -File scripts/harness/check.ps1",
+        "2026-06-02 local audit confirmed Xiaohongshu image display merge now covers every source image position with a cached local image or original remote image",
+        "2026-06-03 added /api/media/proxy for remote image preview and verified the Xiaohongshu sample xiaohongshu-6a0db7220000000006020fad loads proxied remote images without broken visible images",
+        "2026-06-03 passed: npm run lint; npx --no-install tsc --noEmit; npm run build; powershell -ExecutionPolicy Bypass -File scripts/harness/check.ps1",
+        "2026-06-04 no-post-filter policy implemented in src/lib/tikhub.ts: crawlTikHub dedupes, slices to targetCount, and caches media after provider collection without local keyword relevance filtering",
+        "2026-06-04 Xiaohongshu Web V3 request mapping preserved: internal image/text noteType=2 maps to note_type=1, video noteType=1 maps to note_type=2, and all maps to note_type=0",
+        "2026-06-04 selected Xiaohongshu image/text or video crawls no longer add note_type=0 fallback retries, and src/app/api/crawl/jobs/route.ts no longer drops cross-platform normalized results",
+        "2026-06-04 static checks updated: scripts/harness/keyword_relevance_check.mjs verifies keyword filter helpers are absent, and scripts/harness/xiaohongshu_note_type_check.mjs verifies local type filter helpers/dropped-count diagnostics are absent",
+        "2026-06-04 passed after removing remaining post-crawl filters: npm run lint; npx --no-install tsc --noEmit; npm run build; powershell -ExecutionPolicy Bypass -File scripts/harness/check.ps1; npm run local:restart",
+        "2026-06-04 content-pool residual filter removed from src/lib/content-pool.ts after live Xiaohongshu 小鹏G6 target-1 crawl showed returnedItems=1 but projectTotalItems=0 before the fix; post-fix live crawl showed projectTotalItems=1",
+        "2026-06-04 Xiaohongshu App V2 detail endpoints removed from src/lib/tikhub.ts; scripts/harness/xiaohongshu_note_type_check.mjs now enforces Web V3-only search/detail usage and Web V3 wrapper id/xsec_token preservation",
+        "2026-06-04 live Xiaohongshu 小鹏G6 target-1 advanced crawl completed through Web V3 only with real sourceId=6a110db30000000007028960, contentText length 428, two source images, two downloaded images, and twelve video frames; residual provider ordering risk observed because TikHub returned a 小鹏GX titled item under the current no-post-crawl-filter rule",
+        "2026-06-04 Xiaohongshu keyword search switched to TikHub App V2 /api/v1/xiaohongshu/app_v2/search_notes with App V2 note_type mapping: image/text=普通笔记, video=视频笔记, all=不限",
+        "2026-06-04 live Xiaohongshu 小鹏G6 target-1 advanced crawl after the App V2 switch called search_notes with requestedNoteTypeParam=普通笔记 and returned one image item titled 被这台小鹏G6硬控了！ with sourceId=6a213dcf000000003503291b, six source images, six downloaded images, and zero video frames",
+        "2026-06-08 advanced content-pool batch source-link import added through POST /api/crawl/links, src/lib/source-link-import.ts, src/lib/tikhub.ts source-link detail helpers, and frontend link-import mode; scripts/harness/link_import_check.mjs and full Harness baseline passed without live external service calls",
+        "2026-06-16 Dongchedi source-link/ID import added through src/lib/dongchedi.ts and src/lib/source-link-import.ts, with advanced/simple link-mode UI/API wiring, Feishu source-import canonical URL/label mapping, generated-post/review labels, and scripts/harness/dongchedi_import_check.mjs in the baseline; verification passed without live Dongchedi/TikHub/OpenAI/image-provider/Feishu production calls"
+      ],
+      "notes": "External TikHub behavior is not part of default baseline verification."
+    },
+    {
+      "id": "media-cache-video-frames",
+      "title": "Crawled media cache and video frame extraction",
+      "status": "ready_for_review",
+      "definition_of_done": [
+        "Crawled images and videos can be cached under public/media/crawl",
+        "Downloaded videos can produce cover, interval, or scene-change frames",
+        "Failures are visible to the caller and do not delete unrelated media"
+      ],
+      "evidence": [
+        "Source file present: src/lib/media-cache.ts",
+        "Source files present: src/lib/media-cache-status.ts and src/lib/media-backfill.ts",
+        "2026-06-02 media cache image limit increased to 18 content images per crawled item; baseline verification passed",
+        "2026-06-03 content-pool batch API added cache_media for retrying local media downloads and keyframe extraction for existing items",
+        "2026-06-03 content-pool UI added local media cache status and batch/current-item backfill actions",
+        "2026-06-03 passed: npm run lint; npx --no-install tsc --noEmit; npm run build; powershell -ExecutionPolicy Bypass -File scripts/harness/check.ps1; npm run local:restart",
+        "2026-06-03 browser/API smoke confirmed the local UI shows 补全本地素材 and 本地素材缓存, and POST /api/content/items/batch action cache_media returns a safe not-found result for a missing id",
+        "2026-06-03 runtime media route added for /media/crawl and /generated browser paths; real Douyin crawl for 小鹏GX returned local images, a local mp4, and local frames; HTTP and Chromium checks confirmed the local image, frame, mp4, and video range request load successfully"
+      ],
+      "notes": "Requires system ffmpeg on PATH for video frames. Backfill can retry existing remote URLs, but expired or protected URLs still require recrawling or a better extraction path."
+    },
+    {
+      "id": "batch-content-production",
+      "title": "Batch content production",
+      "status": "ready_for_review",
+      "definition_of_done": [
+        "Users can select source items and material paths",
+        "Each source item gets an independent production task",
+        "Generated drafts include title, body, image prompt, image task choices, and review status"
+      ],
+      "evidence": [
+        "Source files present: src/app/api/production/batches/route.ts, src/lib/batch-production.ts, src/lib/openai.ts"
+      ],
+      "notes": "OpenAI-compatible external calls are not part of default baseline verification."
+    },
+    {
+      "id": "review-feishu-publish",
+      "title": "Review and Feishu publishing",
+      "status": "ready_for_review",
+      "definition_of_done": [
+        "Users can manually patch or prompt-edit a generated post",
+        "Approved posts can be staged as Feishu payloads",
+        "Configured Feishu CLI can publish using the project wrapper"
+      ],
+      "evidence": [
+        "Source files present: src/app/api/review/route.ts, src/app/api/publish/feishu/route.ts, src/lib/feishu-cli.ts",
+        "2026-06-02 target Base read access passed with lark-cli base +table-list --as bot",
+        "2026-06-02 target fields confirmed: 动态标题 text, 动态正文 text, 动态素材 attachment",
+        "2026-06-02 record creation dry-run passed for 动态标题 and 动态正文",
+        "2026-06-02 attachment upload dry-run passed for 动态素材",
+        "2026-06-02 local app restarted on port 3001 and /api/config reported Feishu configured",
+        "2026-06-02 final review package UI added in src/app/page.tsx and src/app/globals.css",
+        "2026-06-02 Playwright desktop/mobile checks confirmed final review package, approve action, publish action, and no horizontal overflow",
+        "2026-06-02 Harness baseline passed after the final review package UI update",
+        "2026-06-02 publish status panel and optional Feishu IM notification support added in src/app/page.tsx, src/app/globals.css, src/lib/config.ts, src/lib/feishu-cli.ts, and src/app/api/publish/feishu/route.ts",
+        "2026-06-02 Playwright mocked publish check confirmed the publish button sends POST /api/publish/feishu and shows running, success, and skipped-notification states",
+        "2026-06-02 Harness baseline passed after publish feedback and optional notification update",
+        "2026-06-03 remote image attachment materialization added in src/lib/feishu-cli.ts; real publish retry for a previously failed generated post uploaded 12 remote image-model URLs to the Feishu 动态素材 attachment field after local download",
+        "2026-06-08 asynchronous Feishu publish queue added: POST /api/publish/feishu enqueues durable jobs, GET /api/publish/feishu?jobId=... supports polling, src/lib/feishu-publish-queue.ts persists returned postStates and updates generated posts/source usage, and scripts/harness/feishu_publish_queue_check.mjs plus full Harness baseline passed without calling Feishu",
+        "2026-06-12 independent review desk added at /review in src/app/review/page.tsx with generated-post search/filtering, multi-select, large editing workspace, single/batch approve, selected delete, and single/batch queued Feishu publish through existing owner-scoped APIs; src/app/page.tsx links to the new page and src/app/globals.css adds the layout",
+        "2026-06-12 verification passed for /review: npx --no-install tsc --noEmit; npm run lint with existing 3 warnings only; npm run build; powershell -ExecutionPolicy Bypass -File scripts/harness/check.ps1; npm run local:restart"
+      ],
+      "notes": "Ready for a real publish test with one approved generated post that has final local images; no real Base record creation has been executed in this verification. Feishu IM notification requires FEISHU_NOTIFY_CHAT_ID or FEISHU_NOTIFY_USER_ID plus bot message permission."
+    },
+    {
+      "id": "feishu-distribution-check",
+      "title": "Feishu distribution audit write-back",
+      "status": "ready_for_review",
+      "definition_of_done": [
+        "Users can bulk input Feishu record numbers from a signed-in browser session",
+        "The app can judge whether each record is distributable to other Xiaohongshu accounts",
+        "Approved and blocked decisions are written back to the Feishu single-select field 是否分发",
+        "Default verification covers the tool without triggering live Feishu writes"
+      ],
+      "evidence": [
+        "Source files present: src/lib/distribution-check.ts, src/app/api/distribution-check/route.ts, and src/app/distribution-check/page.tsx",
+        "2026-06-16 config added in src/lib/config.ts for FEISHU_DISTRIBUTION_CHECK_BASE_TOKEN, FEISHU_DISTRIBUTION_CHECK_TABLE_ID, FEISHU_DISTRIBUTION_CHECK_VIEW_ID, and FEISHU_DISTRIBUTION_CHECK_FIELD_MAP, with defaults matching the user-provided Base/table/view",
+        "2026-06-16 src/lib/distribution-check.ts preflights fields, searches exact 编号, supports direct rec... ids, applies conservative local/model assessment, and writes 是否分发 through grouped lark-cli base +record-batch-update without touching attachments",
+        "2026-06-16 src/app/api/distribution-check/route.ts requires requireWorkspaceAccount(request) before Feishu work, and src/app/page.tsx links to /distribution-check",
+        "2026-06-16 distribution audit prompt customization added: src/lib/distribution-check-prompt.ts defines the default, workspace settings persist distributionCheckPrompt, /distribution-check lets operators edit/save/restore it, and the API passes the current prompt to runDistributionCheck while backend hard output guards remain in src/lib/distribution-check.ts",
+        "2026-06-16 verification passed: node scripts/harness/distribution_check.mjs; npx --no-install tsc --noEmit; npm run lint; npm run build; powershell -ExecutionPolicy Bypass -File scripts/harness/check.ps1; npm run local:restart"
+      ],
+      "notes": "Ready for a small intentional live validation with real 编号 values. No live Feishu write was triggered by automated verification."
+    },
+    {
+      "id": "execution-observability",
+      "title": "Execution activity log",
+      "status": "ready_for_review",
+      "definition_of_done": [
+        "Backend operations record activity entries",
+        "Frontend can read recent activity",
+        "Users can clear the activity log from the API"
+      ],
+      "evidence": [
+        "Source files present: src/app/api/activity/route.ts, src/lib/activity-log.ts"
+      ],
+      "notes": "Stored in SQLite table execution_logs; legacy data/execution-log.json is retained as a migration artifact."
+    },
+    {
+      "id": "sqlite-runtime-persistence",
+      "title": "SQLite runtime persistence",
+      "status": "ready_for_review",
+      "definition_of_done": [
+        "Runtime stores use SQLite instead of JSON files as the primary write path",
+        "Existing JSON runtime data can migrate into SQLite without deleting legacy files",
+        "Baseline verification validates SQLite schema and store availability"
+      ],
+      "evidence": [
+        "Source file present: src/lib/database.ts",
+        "Store modules now use SQLite helpers: src/lib/content-pool.ts, src/lib/generated-posts.ts, src/lib/batch-production.ts, src/lib/material-library.ts, src/lib/activity-log.ts, src/lib/store.ts",
+        "Harness SQLite check present: scripts/harness/db_check.mjs",
+        "2026-06-02 passed: npm run lint; npx --no-install tsc --noEmit; npm run build; powershell -ExecutionPolicy Bypass -File scripts/harness/check.ps1",
+        "Baseline SQLite check observed data/fluxpost.db with content_projects=6 and execution_logs=300"
+      ],
+      "notes": "Uses Node.js built-in node:sqlite, which requires Node 24+ and emits an expected experimental warning."
+    },
+    {
+      "id": "postgres-runtime-storage",
+      "title": "PostgreSQL runtime storage and migration",
+      "status": "done",
+      "definition_of_done": [
+        "Runtime storage can use PostgreSQL when DATABASE_URL is configured",
+        "The app continues to use SQLite by default when DATABASE_URL is not configured",
+        "A PostgreSQL schema migration exists for the current runtime tables",
+        "A SQLite-to-PostgreSQL migration script can copy current runtime rows without moving media binaries",
+        "Baseline verification checks the PostgreSQL schema without requiring a live PostgreSQL server"
+      ],
+      "evidence": [
+        "Source file updated: src/lib/database.ts selects sqlite or postgres storage by DATABASE_URL",
+        "Source files updated to await async storage calls: src/lib/content-pool.ts, src/lib/generated-posts.ts, src/lib/batch-production.ts, src/lib/material-library.ts, src/lib/activity-log.ts, src/lib/store.ts, src/lib/simple-runs.ts, src/lib/workspace-settings.ts, src/lib/media-backfill.ts, and affected API routes",
+        "Schema file present: db/migrations/001_initial_postgres.sql",
+        "Migration script present: scripts/db/migrate-sqlite-to-postgres.mjs",
+        "Harness schema check present: scripts/harness/postgres_schema_check.mjs and wired into scripts/harness/check.ps1",
+        "2026-06-03 passed: npm run db:migrate:postgres -- --dry-run",
+        "2026-06-03 passed: node scripts/harness/postgres_schema_check.mjs",
+        "2026-06-03 passed: npm run lint; npx --no-install tsc --noEmit; npm run build",
+        "2026-06-03 passed: powershell -ExecutionPolicy Bypass -File scripts/harness/check.ps1",
+        "2026-06-04 live migration executed: local PostgreSQL 18 service was provisioned with a dedicated FluxPost Studio database/user and DATABASE_URL was written to .env.local without exposing the secret",
+        "2026-06-04 passed: npm run db:migrate:postgres migrated content_projects=7, generated_posts=9, batch_jobs=3, execution_logs=300, crawl_jobs=19, runtime_posts=11, simple_runs=4",
+        "2026-06-04 passed: read-only /api/config on http://127.0.0.1:3001 reported databaseBackend=postgres and postgresConfigured=true after npm run local:restart",
+        "2026-06-04 passed: powershell -ExecutionPolicy Bypass -File scripts/harness/check.ps1"
+      ],
+      "notes": "Live local migration is complete. Current JSONB-table design preserves existing behavior; high-volume queue tables and SKIP LOCKED workers remain a follow-up."
+    },
+    {
+      "id": "modular-resource-workspaces",
+      "title": "Modular content, production, and material workspaces",
+      "status": "ready_for_review",
+      "definition_of_done": [
+        "The web UI exposes separate top-level modules for content pool management, production, and material library management",
+        "Content pool items can be created manually, edited, and deleted through local API routes",
+        "Generated posts are persisted, selectable, editable, deletable, and can be regenerated as versions",
+        "Material folders and assets can be created, edited, deleted, and used as production material paths"
+      ],
+      "evidence": [
+        "Source files present: src/app/page.tsx, src/app/globals.css",
+        "Resource APIs present: src/app/api/content/items/route.ts, src/app/api/production/posts/route.ts, src/app/api/production/posts/regenerate/route.ts, src/app/api/materials/library/route.ts",
+        "Persistence libraries present: src/lib/generated-posts.ts, src/lib/material-library.ts",
+        "2026-06-02 passed: npm run lint; npx --no-install tsc --noEmit; npm run build",
+        "2026-06-02 passed browser check on http://127.0.0.1:3001/: production module rendered production queue/review/draft library and did not render crawl task, keyword pool, or content pool management on desktop/mobile"
+      ],
+      "notes": "External OpenAI/TikHub/Feishu calls are not part of the default baseline. Browser manual UI review is still recommended."
+    },
+    {
+      "id": "ai-source-tagging",
+      "title": "AI auto-tagging for crawled content and visual assets",
+      "status": "ready_for_review",
+      "definition_of_done": [
+        "Crawled source items are automatically tagged with up to four allowed content tags before being persisted",
+        "The first nine source images or video highlight frames can receive one allowed visual tag each",
+        "Content and visual tags can be manually edited from the content-pool management UI",
+        "Manual tag edits are persisted through the existing SQLite-backed content item update path"
+      ],
+      "evidence": [
+        "Source files updated: src/lib/types.ts, src/lib/source-tagging.ts, src/lib/content-pool.ts, src/app/api/crawl/jobs/route.ts, src/app/page.tsx",
+        "2026-06-03 passed: npm run lint",
+        "2026-06-03 passed: npx --no-install tsc --noEmit",
+        "2026-06-03 passed: npm run build",
+        "2026-06-03 passed: powershell -ExecutionPolicy Bypass -File scripts/harness/check.ps1",
+        "2026-06-03 passed: npm run local:restart and local HTTP smoke on http://127.0.0.1:3001",
+        "2026-06-03 Playwright check on http://127.0.0.1:3001 confirmed AI tag overview and manual tag editors render for a non-empty content project with no console errors",
+        "2026-06-03 video frame-first update: src/lib/source-tagging.ts now uses only videoFrames for video/mixed visual tagging when frames exist; src/app/page.tsx uses frames as the image preview list; npm run lint, tsc, build, local restart, and Harness baseline passed"
+      ],
+      "notes": "External GPT vision/text behavior is not part of the default baseline. Visual tagging sends available local media as inline image data where possible; if the relay rejects image inputs, visual tagging records a failed status without blocking content text tags."
+    },
+    {
+      "id": "batch-resource-management",
+      "title": "Batch management for content pool and generated posts",
+      "status": "ready_for_review",
+      "definition_of_done": [
+        "Users can multi-select content pool items and run bulk status or delete actions",
+        "Users can multi-select generated posts and run bulk status or delete actions",
+        "Batch APIs persist changes through the existing SQLite-backed domain stores",
+        "Batch actions record execution-log entries and refresh affected UI state"
+      ],
+      "evidence": [
+        "Source APIs present: src/app/api/content/items/batch/route.ts and src/app/api/production/posts/batch/route.ts",
+        "Domain functions present: batchUpdateSourceItemStatus, batchDeleteSourceItems, batchUpdateGeneratedPostStatus, and batchDeleteGeneratedPosts",
+        "2026-06-02 passed: npm run lint; npx --no-install tsc --noEmit; npm run build",
+        "2026-06-02 passed: powershell -ExecutionPolicy Bypass -File scripts/harness/check.ps1",
+        "2026-06-02 passed: node scripts/harness/http_smoke.js http://127.0.0.1:3001",
+        "2026-06-02 Playwright check confirmed visible selection controls: content-pool selection changes from 选择 to 已选, generated-post selection changes from 选择 to 已选, and batch counters update"
+      ],
+      "notes": "Bulk delete is destructive and requires browser confirmation. Manual browser walkthrough is still recommended before heavy operational use."
+    },
+    {
+      "id": "shared-workspace-accounts",
+      "title": "V1 whitelist account system with owner isolation",
+      "status": "ready_for_review",
+      "definition_of_done": [
+        "The workspace supports small-team whitelist login from environment configuration",
+        "Whitelist users receive stable account ids for local owner attribution",
+        "Whitelist mode supports administrator users from WORKSPACE_ADMIN_USERS",
+        "Browser sessions use HttpOnly cookies and daily sign-in uses per-user hashed passwords",
+        "Members can access only their own owner-scoped runtime records while admins can access all records",
+        "Write paths attribute new simple runs, content, material entries, generated posts, logs, and Feishu publish jobs to the current account",
+        "Default verification covers account schema and wiring without creating real credentials"
+      ],
+      "evidence": [
+        "Source files present: src/lib/workspace-accounts.ts, src/app/api/accounts/route.ts, src/app/api/accounts/session/route.ts",
+        "Runtime schema updated in src/lib/database.ts and db/migrations/001_initial_postgres.sql with workspace_accounts and workspace_sessions",
+        "UI files updated: src/app/page.tsx and src/app/globals.css",
+        "Harness check added: scripts/harness/workspace_accounts_check.mjs and wired into scripts/harness/check.ps1",
+        "2026-06-08 passed: node scripts/harness/workspace_accounts_check.mjs; node scripts/harness/postgres_schema_check.mjs; npm run lint; npx --no-install tsc --noEmit; npm run build",
+        "2026-06-08 passed: powershell -ExecutionPolicy Bypass -File scripts/harness/check.ps1; npm run local:restart; Playwright desktop/mobile account access panel no-overflow checks",
+        "2026-06-08 follow-up hardened mutating workspace API routes: content, crawl/import, generate/images, materials, production, review, activity clear, simple runs, workspace settings, and manual Feishu publish require a workspace account; HTTP smoke confirms unauthenticated POST /api/production/posts returns 401 without writes",
+        "2026-06-08 whitelist simplification added: WORKSPACE_AUTH_MODE defaults to whitelist, WORKSPACE_ALLOWED_USERS and WORKSPACE_ACCESS_PASSWORD drive access, whitelist sessions use virtual account ids shaped as whitelist:{username}, the frontend no longer exposes admin bootstrap or account creation controls, and node scripts/harness/workspace_accounts_check.mjs, npx --no-install tsc --noEmit, npm run lint, npm run build, full Harness baseline, npm run local:restart, and read-only /api/accounts/session verification passed",
+        "2026-06-08 owner-isolation follow-up added WORKSPACE_ADMIN_USERS, first-admin setup through WORKSPACE_ACCESS_PASSWORD, admin account management, per-user whitelist passwords, private read APIs, and owner filtering for content pools, generated posts, materials, execution logs, crawl jobs, runtime posts, simple runs, batch jobs, and Feishu publish jobs",
+        "2026-06-08 passed: node scripts/harness/workspace_accounts_check.mjs; node scripts/harness/link_import_check.mjs; node scripts/harness/generated_posts_upsert_check.mjs; npx --no-install tsc --noEmit; npm run lint; npm run build; full powershell -ExecutionPolicy Bypass -File scripts/harness/check.ps1; npm run local:watch-simple -- -Once; npm run local:restart; read-only /api/accounts/session verification on http://127.0.0.1:3001"
+      ],
+      "notes": "Default whitelist accounts identify operators and partition app-layer runtime records by owner for normal members. Admins can see all records. Direct media URL authorization under /media and /generated remains a V1.1 hardening item. No real whitelist credentials or account-table credentials are created during automated verification."
+    },
+    {
+      "id": "high-throughput-concurrency",
+      "title": "High-throughput provider concurrency",
+      "status": "ready_for_review",
+      "definition_of_done": [
+        "TikHub, media cache, GPT, image generation, Feishu, and production work use shared application-level concurrency pools",
+        "Default pool limits match current product targets: GPT 50, image 100, Feishu 50, with hard caps in code",
+        "Simple-mode platform crawling and post production run concurrently while progress writes remain serialized",
+        "Advanced batch production runs concurrently while task-status writes remain serialized",
+        "Generated post saves use single-row upsert so concurrent status updates do not duplicate primary keys",
+        "Baseline verification includes a static concurrency integration check without calling external services"
+      ],
+      "evidence": [
+        "Source file added: src/lib/concurrency.ts",
+        "Source files updated: src/lib/simple-runs.ts, src/lib/batch-production.ts, src/lib/image-generation.ts, src/lib/openai.ts, src/lib/source-tagging.ts, src/lib/tikhub.ts, src/lib/media-cache.ts, src/lib/feishu-cli.ts, src/lib/database.ts, src/lib/generated-posts.ts",
+        "Harness check added: scripts/harness/concurrency_check.mjs and wired into scripts/harness/check.ps1",
+        "2026-06-04 V1/V2 added durable simple_run_queue, PostgreSQL SKIP LOCKED queue claiming, simple-run worker heartbeat, simple target-count uplift, and Feishu 50-record chunking",
+        "2026-06-04 check added: scripts/harness/simple_queue_check.mjs and wired into scripts/harness/check.ps1",
+        "2026-06-04 passed: node scripts/harness/concurrency_check.mjs",
+        "2026-06-04 passed: node scripts/harness/simple_queue_check.mjs",
+        "2026-06-04 passed: npm run db:migrate:postgres -- --dry-run",
+        "2026-06-04 passed: npm run lint; npx --no-install tsc --noEmit; npm run build",
+        "2026-06-04 passed: powershell -ExecutionPolicy Bypass -File scripts/harness/check.ps1",
+        "2026-06-04 passed: npm run local:restart and local HTTP smoke on http://127.0.0.1:3001",
+        "2026-06-08 collection/generation defaults raised while Feishu writes remain queued: crawl=12, media=30, production=30, SIMPLE_RUN_WORKER_CONCURRENCY=4, Feishu queue worker default=1 with per-owner serialization; concurrency and Feishu queue Harness checks plus full baseline passed"
+      ],
+      "notes": "Provider work still uses application-process concurrency pools. Simple-mode queued runs now use a durable database queue, but subtask-level provider replay and Feishu per-post idempotency remain future work. Real large-count simple runs still need manual validation before marking done."
+    },
+    {
+      "id": "simple-auto-workflow",
+      "title": "Simple mode automatic content workflow",
+      "status": "ready_for_review",
+      "definition_of_done": [
+        "Users can switch between simple and advanced workspace modes",
+        "Simple mode accepts keyword, target count, and selected platforms only",
+        "Simple mode runs crawl, AI tagging, content production, image processing, approval, and Feishu publish as one backend sequence",
+        "Simple mode avoids unbounded image/keyframe processing per source item",
+        "Advanced mode can edit and save the default text and image prompts used by simple mode",
+        "Generated posts publish content tags to the Feishu Base 内容标签 multi-select field"
+      ],
+      "evidence": [
+        "Source files present: src/lib/simple-runs.ts, src/lib/workspace-settings.ts, src/app/api/simple/runs/route.ts, src/app/api/workspace/settings/route.ts",
+        "UI files updated: src/app/page.tsx and src/app/globals.css",
+        "SQLite schema includes simple_runs and app_meta persistence for run history and workspace prompt settings",
+        "Feishu field map includes contentTags -> 内容标签, and getPostFieldValue returns contentTags as an array",
+        "scripts/local/watch-simple-runs.ps1 and npm run local:watch-simple provide a terminal backend monitor for simple runs",
+        "2026-06-03 simple-run slowness mitigation: src/lib/simple-runs.ts caps simple-mode selected image/keyframe tasks to nine per generated post; 2026-06-04 update now passes the global image concurrency cap from src/lib/concurrency.ts into src/lib/image-generation.ts",
+        "2026-06-03 passed: npm run lint; npx --no-install tsc --noEmit; npm run build; powershell -ExecutionPolicy Bypass -File scripts/harness/check.ps1; npm run local:restart",
+        "2026-06-03 passed after slowness mitigation and watcher: npm run local:watch-simple -- -Once; npm run lint; npx --no-install tsc --noEmit; npm run build; powershell -ExecutionPolicy Bypass -File scripts/harness/check.ps1",
+        "2026-06-03 visual-tag image strategy prompt routing added: workspace settings persist carExterior/textImage/peopleWithCar prompts, simple and advanced UI expose all three, and browser/API smoke on http://127.0.0.1:3001 passed",
+        "2026-06-03 RunningHub image provider integration added: src/lib/image-generation.ts supports OPENAI_IMAGE_ENDPOINT=runninghub with local reference upload, G-2 task submission, polling, and config status verification; npm run lint, tsc, build, local restart, and Harness baseline passed",
+        "2026-06-08 RunningHub image dispatch removed and replaced with GPT-Image-2 standard OpenAI Images API request shape: /images/generations JSON for text-to-image, multipart /images/edits for selected reference-image tasks, OPENAI_IMAGE_API_KEY support, and static image request-shape Harness checks passed",
+        "2026-06-03 browser UI smoke on http://127.0.0.1:3001 confirmed simple workspace, keyword input, simple start button, advanced module switcher after mode change, and no horizontal overflow at 1440x950 or 390x844",
+        "2026-06-04 simple mode no longer overwrites saved advanced platform crawl settings with hidden controls; Xiaohongshu image/text noteType=2 is enforced through scripts/harness/xiaohongshu_note_type_check.mjs; full Harness baseline passed",
+        "2026-06-04 simple starts now enqueue durable simple_run_queue work and return immediately; simple run snapshots persist submission-time platform crawl settings; UI allows target count up to 500; scripts/harness/simple_queue_check.mjs and full Harness baseline passed",
+        "2026-06-08 compact and simple workspaces added batch source-link one-click production through sourceMode=links on POST /api/simple/runs; src/lib/simple-runs.ts resolves exact links via src/lib/source-link-import.ts, skips keyword search/top-up, then reuses safety/tagging/content-pool/production/publish stages; scripts/harness/simple_link_run_check.mjs, lint, tsc, build, local restart, and mocked compact/simple UI checks passed without live external service calls",
+        "2026-06-16 simple link mode accepts Dongchedi source links and selected-platform numeric article ids through SourceLinkPlatform=\"dongchedi\"; scripts/harness/dongchedi_import_check.mjs, simple_link_run_check.mjs, lark_task_launcher_check.mjs, and full Harness baseline passed without live external service calls",
+        "2026-06-08 simple-run publish stage now approves/saves generated posts, enqueues Feishu publishing with publish.status=queued and jobId, and frees the simple-run worker while src/lib/feishu-publish-queue.ts asynchronously updates publish completion; Feishu queue check and full Harness baseline passed",
+        "2026-06-10 simple mode gained Feishu task-number source mode: src/lib/feishu-content-import.ts imports records by 任务编号, downloads 动态素材 attachments, maps 车型 to content-pool keyword/project, and frontend/API/simple-run wiring persists feishuTaskNumbers plus feishuResults; node scripts/harness/feishu_content_import_check.mjs, simple link/queue/workspace focused checks, TypeScript noEmit, lint, build, and full Harness baseline passed without live external production calls",
+        "2026-06-12 V1 Feishu/Lark IM task launch added: npm run lark:tasks polls allow-listed chats, POST /api/lark/tasks requires LARK_TASK_API_TOKEN, src/lib/lark-task-launcher.ts enforces LARK_TASK_CHAT_IDS and LARK_TASK_USER_MAP before enqueueing through startSimpleRun, lark_task_launches stores message_id idempotency, and node scripts/lark-task-runner.mjs --self-test plus scripts/harness/lark_task_launcher_check.mjs, TypeScript noEmit, lint, build, and full Harness baseline passed without live external production calls",
+        "2026-06-12 real-time Feishu/Lark event launch added: npm run lark:events consumes im.message.receive_v1 through lark-cli event consume, waits for the ready marker, filters LARK_TASK_CHAT_IDS, submits to the existing /api/lark/tasks path, and node scripts/lark-task-events.mjs --self-test plus scripts/harness/lark_task_launcher_check.mjs, TypeScript noEmit, lint, build, and full Harness baseline passed; bounded event dry-run reached ready and timed out without starting a task"
+      ],
+      "notes": "External TikHub/OpenAI/image-generation/Feishu calls are not part of default baseline verification. A real small-count simple run and a larger two-keyword queue validation are still needed before marking done."
+    }
+  ]
+}

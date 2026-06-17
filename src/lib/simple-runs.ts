@@ -15,9 +15,11 @@ import {
   saveSimpleRunToDb,
 } from "./database";
 import { enqueueFeishuPublishJob, ensureFeishuPublishQueueWorker } from "./feishu-publish-queue";
+import { importFeishuContentByTaskNumbers, normalizeFeishuTaskNumberInput } from "./feishu-content-import";
 import { saveGeneratedPost } from "./generated-posts";
 import { generateImagesFromPrompt } from "./image-generation";
 import { generatePost } from "./openai";
+import { isComfyUiKleinConfigured } from "./comfyui-klein";
 import { buildProductionPlan } from "./production-plan";
 import { savePost } from "./store";
 import { syncSourceItemsToFeishu } from "./source-import-feishu";
@@ -34,6 +36,7 @@ import {
 } from "./workspace-ownership";
 import type {
   CrawlInput,
+  CrawlPlatform,
   GeneratedPost,
   NormalizedSourceItem,
   Platform,
@@ -44,16 +47,21 @@ import type {
   SimpleRunStageId,
   SimpleRunStageStatus,
   SourceImageTask,
+  SourceLinkPlatform,
   WorkspacePromptSettings,
 } from "./types";
 
-type CreateSimpleRunInput = Omit<SimpleRunInput, "materialPaths" | "platforms" | "targetCount" | "links" | "linkPlatform" | "sourceMode"> & {
+type CreateSimpleRunInput = Omit<
+  SimpleRunInput,
+  "materialPaths" | "platforms" | "targetCount" | "links" | "linkPlatform" | "feishuTaskNumbers" | "sourceMode"
+> & {
   sourceMode?: SimpleRunInput["sourceMode"];
   targetCount?: number;
-  platforms?: Platform[];
+  platforms?: CrawlPlatform[];
   materialPaths?: string[];
   links?: string[] | string;
   linkPlatform?: SimpleRunInput["linkPlatform"];
+  feishuTaskNumbers?: string[] | string;
   ownerUserId?: string;
   ownerDisplayName?: string;
   settings?: Partial<WorkspacePromptSettings>;
@@ -65,6 +73,8 @@ const simpleRunQueueWorkerConcurrency = readBoundedIntegerEnv("SIMPLE_RUN_WORKER
 const simpleRunQueueLockMs = 5 * 60_000;
 const simpleRunQueueHeartbeatMs = 30_000;
 const simpleRunForceTerminateMessage = "用户已强制终止该任务。";
+const simpleRunPublishPersistMaxAttempts = 3;
+const simpleRunPublishPersistRetryDelayMs = 60;
 
 const stageTitles: Record<SimpleRunStageId, string> = {
   crawl: "采集内容",
@@ -247,6 +257,10 @@ function isSimpleRunLinkMode(input: SimpleRunInput) {
   return input.sourceMode === "links";
 }
 
+function isSimpleRunFeishuMode(input: SimpleRunInput) {
+  return input.sourceMode === "feishu";
+}
+
 function simpleRunAccessActor(input: SimpleRunInput) {
   return accessActorFromOwner(input.ownerUserId, input.ownerDisplayName);
 }
@@ -273,7 +287,9 @@ async function runSimpleRunWorkflow(
 ) {
   await assertSimpleRunNotForceTerminated(run.id);
   const crawledItems: NormalizedSourceItem[] = [];
-  run = isSimpleRunLinkMode(normalizedInput)
+  run = isSimpleRunFeishuMode(normalizedInput)
+    ? await collectSimpleFeishuItems(run, crawledItems, normalizedInput)
+    : isSimpleRunLinkMode(normalizedInput)
     ? await collectSimpleLinkItems(run, crawledItems, normalizedInput)
     : await collectSimpleKeywordItems(run, crawledItems, normalizedInput, settings);
   await assertSimpleRunNotForceTerminated(run.id);
@@ -289,15 +305,18 @@ async function runSimpleRunWorkflow(
     await syncSourceItemsToFeishu(safetyResult.items, { scope: "simple/run", sourceRunId: run.id });
     await assertSimpleRunNotForceTerminated(run.id);
   }
+  if (isSimpleRunFeishuMode(normalizedInput)) {
+    run = await applyUnsafeFilterFeishuResults(run, safetyResult.filtered);
+  }
   const safeCrawledItems = dedupeItems(safetyResult.items).slice(0, normalizedInput.targetCount);
 
   run = await setStage(run, "crawl", {
     status: resolveStageTerminalStatus(run, "crawl"),
-    message: `${isSimpleRunLinkMode(normalizedInput) ? "已导入" : "已采集"} ${crawledItems.length} 条候选内容`,
+    message: `${isSimpleRunLinkMode(normalizedInput) || isSimpleRunFeishuMode(normalizedInput) ? "已导入" : "已采集"} ${crawledItems.length} 条候选内容`,
   });
 
   run = await setStage(run, "crawl", {
-    message: `${isSimpleRunLinkMode(normalizedInput) ? "已导入" : "已采集"} ${crawledItems.length} 条候选内容，内容安全过滤 ${safetyResult.filtered.length} 条，保留 ${safeCrawledItems.length} 条`,
+    message: `${isSimpleRunLinkMode(normalizedInput) || isSimpleRunFeishuMode(normalizedInput) ? "已导入" : "已采集"} ${crawledItems.length} 条候选内容，内容安全过滤 ${safetyResult.filtered.length} 条，保留 ${safeCrawledItems.length} 条`,
   });
 
   if (!safeCrawledItems.length) {
@@ -318,7 +337,7 @@ async function runSimpleRunWorkflow(
     taggedItems = await tagSourceItems(tagCandidates);
     await assertSimpleRunNotForceTerminated(run.id);
     const access = simpleRunAccessActor(normalizedInput);
-    await ingestCrawlItems(normalizedInput.keyword, taggedItems, access);
+    await ingestSimpleTaggedItems(normalizedInput, taggedItems, access);
     const taggedContent = taggedItems.filter((item) => item.contentTagging?.status === "success").length;
     const taggedVisual = taggedItems.reduce((sum, item) => sum + (item.visualTagging?.assets.length || 0), 0);
     run = {
@@ -401,8 +420,10 @@ async function runSimpleRunWorkflow(
             textBrief: settings.textInstruction,
             imageBrief: [
               `汽车外观: ${settings.imageStrategyPrompts.carExterior}`,
+              `车型美图: ${settings.imageStrategyPrompts.carExterior}`,
               `带文字图: ${settings.imageStrategyPrompts.textImage}`,
               `人车美图: ${settings.imageStrategyPrompts.peopleWithCar}`,
+              "APP: 原图引用，不调用图片模型",
               "内饰空间: 原图引用，不调用图片模型",
             ].join("\n"),
           },
@@ -494,14 +515,8 @@ async function runSimpleRunWorkflow(
       updatedAt: new Date().toISOString(),
     }));
     await assertSimpleRunNotForceTerminated(run.id);
-    await Promise.all(
-      approvedPosts.map(async (post) => {
-        const access = simpleRunAccessActor(normalizedInput);
-        await savePost(post, access);
-        await saveGeneratedPost(post, access);
-        await syncSimpleSourceStatus(post, access, run.id, "approved");
-      }),
-    );
+    const access = simpleRunAccessActor(normalizedInput);
+    const sourceStatusWarnings = await persistApprovedPostsForSimplePublish(approvedPosts, access, run.id);
 
     const publishJob = await enqueueFeishuPublishJob(approvedPosts, {
       source: "simple",
@@ -515,6 +530,7 @@ async function runSimpleRunWorkflow(
       posts: run.posts.map((post) => ({
         ...post,
         status: "approved",
+        error: sourceStatusWarnings.get(post.postId) || post.error,
       })),
       publish: {
         status: "queued",
@@ -732,7 +748,7 @@ async function collectSimpleLinkItems(run: SimpleRun, crawledItems: NormalizedSo
 
   const resolved = await resolveSourceLinks({
     links,
-    platform: isPlatform(normalizedInput.linkPlatform) ? normalizedInput.linkPlatform : undefined,
+    platform: isSourceLinkPlatform(normalizedInput.linkPlatform) ? normalizedInput.linkPlatform : undefined,
   });
   crawledItems.push(...resolved.items);
 
@@ -777,6 +793,67 @@ async function collectSimpleLinkItems(run: SimpleRun, crawledItems: NormalizedSo
       resolvedItems: resolved.items.length,
       failed,
       skipped,
+    },
+  });
+
+  return nextRun;
+}
+
+async function collectSimpleFeishuItems(run: SimpleRun, crawledItems: NormalizedSourceItem[], normalizedInput: SimpleRunInput) {
+  const taskNumbers = normalizedInput.feishuTaskNumbers || [];
+  run = await setStage(run, "crawl", {
+    status: "running",
+    total: taskNumbers.length,
+    message: "正在按任务编号从飞书表导入内容",
+  });
+
+  await recordExecutionLog({
+    scope: "simple/run",
+    action: "Simple run Feishu task import started",
+    status: "running",
+    message: `Importing ${taskNumbers.length} Feishu task record(s).`,
+    details: {
+      runId: run.id,
+      taskCount: taskNumbers.length,
+    },
+  });
+
+  const imported = await importFeishuContentByTaskNumbers(taskNumbers);
+  crawledItems.push(...imported.items);
+
+  let nextRun = await saveRun({
+    ...run,
+    feishuResults: imported.results,
+    updatedAt: new Date().toISOString(),
+  });
+
+  nextRun = await addPlatformResult(nextRun, {
+    platform: "feishu",
+    requested: imported.total,
+    crawled: imported.items.length,
+    taggedContent: 0,
+    taggedVisual: 0,
+    error: imported.imported ? undefined : "No Feishu task records were imported.",
+  });
+
+  nextRun = await setStage(nextRun, "crawl", {
+    total: imported.total,
+    completed: imported.imported,
+    failed: imported.results.filter((result) => result.status === "failed").length,
+    skipped: imported.results.filter((result) => result.status === "not_found").length,
+    message: `飞书导入 ${imported.imported}/${imported.total} 条任务记录`,
+  });
+
+  await recordExecutionLog({
+    scope: "simple/run",
+    action: "Simple run Feishu task import completed",
+    status: imported.imported ? "success" : "error",
+    message: `Imported ${imported.imported}/${imported.total} Feishu task record(s).`,
+    details: {
+      runId: nextRun.id,
+      total: imported.total,
+      imported: imported.imported,
+      failed: imported.failed,
     },
   });
 
@@ -830,8 +907,26 @@ async function applyUnsafeFilterLinkResults(run: SimpleRun, filteredItems: Norma
   });
 }
 
+async function applyUnsafeFilterFeishuResults(run: SimpleRun, filteredItems: NormalizedSourceItem[]) {
+  if (!run.feishuResults?.length || !filteredItems.length) return run;
+  const filteredIds = new Set(filteredItems.map((item) => item.id));
+  return saveRun({
+    ...run,
+    feishuResults: run.feishuResults.map((result) =>
+      result.itemId && filteredIds.has(result.itemId)
+        ? {
+            ...result,
+            status: "failed",
+            error: "Filtered by source safety gate",
+          }
+        : result,
+    ),
+    updatedAt: new Date().toISOString(),
+  });
+}
+
 function buildDefaultCrawlInput(
-  platform: Platform,
+  platform: CrawlPlatform,
   keyword: string,
   targetCount: number,
   settings: WorkspacePromptSettings,
@@ -926,6 +1021,36 @@ function countUniquePlatformItems(items: NormalizedSourceItem[], platform: Platf
   return dedupeItems(items.filter((item) => item.platform === platform)).length;
 }
 
+async function ingestSimpleTaggedItems(
+  input: SimpleRunInput,
+  taggedItems: NormalizedSourceItem[],
+  access: WorkspaceAccessActor | undefined,
+) {
+  if (!isSimpleRunFeishuMode(input)) {
+    await ingestCrawlItems(input.keyword, taggedItems, access);
+    return;
+  }
+
+  const grouped = groupFeishuItemsByVehicle(taggedItems, input.keyword);
+  for (const [vehicle, items] of grouped) {
+    await ingestCrawlItems(vehicle, items, access);
+  }
+}
+
+function groupFeishuItemsByVehicle(items: NormalizedSourceItem[], fallbackKeyword: string) {
+  const grouped = new Map<string, NormalizedSourceItem[]>();
+  for (const item of items) {
+    const vehicle = getFeishuItemVehicle(item) || fallbackKeyword || "飞书导入";
+    grouped.set(vehicle, [...(grouped.get(vehicle) || []), item]);
+  }
+  return grouped;
+}
+
+function getFeishuItemVehicle(item: NormalizedSourceItem) {
+  const raw = item.raw as { feishu?: { vehicle?: string } };
+  return raw.feishu?.vehicle?.trim() || "";
+}
+
 async function applyUnsafeFilterPlatformCounts(run: SimpleRun, filteredItems: NormalizedSourceItem[]) {
   const filteredByPlatform = new Map<Platform, number>();
   filteredItems.forEach((item) => {
@@ -961,8 +1086,13 @@ function selectSimpleProductionItems(
 }
 
 function hasSimpleProductionVisualSource(source: NormalizedSourceItem) {
+  if (hasSimpleProductionPickupRecordTag(source)) return false;
   if (isSimpleProductionVideoLikeSource(source)) return Boolean(source.videoFrames?.length);
   return Boolean((source.downloadedImages?.length || 0) > 0 || source.images.length > 0);
+}
+
+function hasSimpleProductionPickupRecordTag(source: NormalizedSourceItem) {
+  return Boolean(source.contentTagging?.tags.includes("提车记录"));
 }
 
 function isSimpleProductionVideoLikeSource(source: NormalizedSourceItem) {
@@ -976,6 +1106,7 @@ function isSimpleProductionVideoLikeSource(source: NormalizedSourceItem) {
 }
 
 function describeSimpleProductionMediaSkip(source: NormalizedSourceItem) {
+  if (hasSimpleProductionPickupRecordTag(source)) return "Skipped pickup record source excluded from production.";
   if (isSimpleProductionVideoLikeSource(source)) return "Skipped video source without extracted video frames.";
   return "Skipped source without images, downloaded images, or video frames.";
 }
@@ -987,6 +1118,8 @@ function buildSimpleProductionMediaSkipDetails(runId: string, source: Normalized
     sourceItemId: source.id,
     platform: source.platform,
     mediaType: source.mediaType || "unknown",
+    pickupRecord: hasSimpleProductionPickupRecordTag(source),
+    contentTags: source.contentTagging?.tags?.join(",") || null,
     videoLike: isSimpleProductionVideoLikeSource(source),
     videoPresent: Boolean(source.videoUrl || source.downloadedVideoUrl || source.mediaCache?.videoPresent),
     localVideo: Boolean(source.downloadedVideoUrl || source.mediaCache?.localVideo),
@@ -999,7 +1132,7 @@ function buildSimpleProductionMediaSkipDetails(runId: string, source: Normalized
 }
 
 function buildSimpleImageTasks(source: NormalizedSourceItem, settings: WorkspacePromptSettings): SourceImageTask[] {
-  const tasks = buildDefaultImageTasks(source, settings.imageStrategyPrompts);
+  const tasks = buildDefaultImageTasks(source, settings.imageStrategyPrompts, { useComfyUiKlein: isComfyUiKleinConfigured() });
   return limitSimpleImageTasks(tasks);
 }
 
@@ -1043,22 +1176,30 @@ function limitSimpleImageTasks(tasks: SourceImageTask[]) {
 
 function normalizeSimpleRunInput(input: CreateSimpleRunInput): SimpleRunInput {
   const keyword = typeof input.keyword === "string" ? input.keyword.trim() : "";
-  if (!keyword) throw new Error("Keyword is required");
-  const sourceMode = input.sourceMode === "links" ? "links" : "keyword";
+  const sourceMode = input.sourceMode === "feishu" ? "feishu" : input.sourceMode === "links" ? "links" : "keyword";
   const platforms = Array.from(new Set((input.platforms || []).filter(isPlatform)));
   const links = normalizeSourceLinkInput(input.links);
+  const feishuTaskNumbers = normalizeFeishuTaskNumberInput(input.feishuTaskNumbers);
+  if (sourceMode !== "feishu" && !keyword) throw new Error("Keyword is required");
   if (sourceMode === "keyword" && !platforms.length) throw new Error("At least one platform is required");
   if (sourceMode === "links" && !links.length) throw new Error("At least one source link is required");
-  const targetCountFallback = sourceMode === "links" ? links.length : 10;
+  if (sourceMode === "feishu" && !feishuTaskNumbers.length) throw new Error("At least one Feishu task number is required");
+  const targetCountFallback = sourceMode === "feishu" ? feishuTaskNumbers.length : sourceMode === "links" ? links.length : 10;
   const targetCount = Math.min(Math.max(Number(input.targetCount || targetCountFallback), 1), maxSimpleRunItems);
   return {
     sourceMode,
-    keyword,
+    keyword: keyword || "飞书导入",
     platforms,
-    targetCount: sourceMode === "links" ? Math.min(targetCount, links.length) : targetCount,
+    targetCount:
+      sourceMode === "feishu"
+        ? Math.min(targetCount, feishuTaskNumbers.length)
+        : sourceMode === "links"
+          ? Math.min(targetCount, links.length)
+          : targetCount,
     materialPaths: normalizeMaterialPaths(input.materialPaths),
     links: sourceMode === "links" ? links : undefined,
     linkPlatform: sourceMode === "links" ? normalizeLinkPlatform(input.linkPlatform) : undefined,
+    feishuTaskNumbers: sourceMode === "feishu" ? feishuTaskNumbers : undefined,
     ownerUserId: normalizeOptionalOwnerValue(input.ownerUserId),
     ownerDisplayName: normalizeOptionalOwnerValue(input.ownerDisplayName),
   };
@@ -1076,8 +1217,12 @@ function normalizeSourceLinkInput(input: unknown) {
   ).slice(0, 200);
 }
 
-function normalizeLinkPlatform(value: unknown): Platform | "auto" {
-  return isPlatform(value) ? value : "auto";
+function normalizeLinkPlatform(value: unknown): SourceLinkPlatform | "auto" {
+  return isSourceLinkPlatform(value) ? value : "auto";
+}
+
+function isSourceLinkPlatform(value: unknown): value is SourceLinkPlatform {
+  return isPlatform(value) || value === "xiaopeng_bbs" || value === "dongchedi";
 }
 
 function normalizeMaterialPaths(input: unknown) {
@@ -1212,6 +1357,49 @@ async function updatePostResultWarning(run: SimpleRun, postId: string, message: 
   });
 }
 
+async function persistApprovedPostsForSimplePublish(
+  posts: GeneratedPost[],
+  access: WorkspaceAccessActor | undefined,
+  runId: string,
+) {
+  const sourceStatusWarnings = new Map<string, string>();
+  for (const post of posts) {
+    await persistApprovedPostForSimplePublish(post, access);
+    const warning = await syncSimpleSourceStatus(post, access, runId, "approved");
+    if (warning) sourceStatusWarnings.set(post.id, warning);
+  }
+  return sourceStatusWarnings;
+}
+
+async function persistApprovedPostForSimplePublish(post: GeneratedPost, access: WorkspaceAccessActor | undefined) {
+  await withSimpleRunTransientDatabaseRetry(async () => {
+    await savePost(post, access);
+    await saveGeneratedPost(post, access);
+  });
+}
+
+async function withSimpleRunTransientDatabaseRetry(operation: () => Promise<void>) {
+  for (let attempt = 1; attempt <= simpleRunPublishPersistMaxAttempts; attempt += 1) {
+    try {
+      await operation();
+      return;
+    } catch (error) {
+      if (attempt >= simpleRunPublishPersistMaxAttempts || !isSimpleRunTransientDatabaseError(error)) throw error;
+      await delaySimpleRunPublishPersistRetry(attempt);
+    }
+  }
+}
+
+function isSimpleRunTransientDatabaseError(error: unknown) {
+  const code = typeof (error as { code?: unknown })?.code === "string" ? (error as { code: string }).code : "";
+  const message = error instanceof Error ? error.message : String(error || "");
+  return code === "40P01" || code === "40001" || /\bdeadlock\b/i.test(message) || message.includes("死锁");
+}
+
+function delaySimpleRunPublishPersistRetry(attempt: number) {
+  return new Promise<void>((resolve) => setTimeout(resolve, simpleRunPublishPersistRetryDelayMs * attempt));
+}
+
 async function syncSimpleSourceStatus(post: GeneratedPost, access: WorkspaceAccessActor | undefined, runId: string, stage: "draft" | "approved") {
   try {
     await markSourceRewritten(post.sourceItemId, post, access);
@@ -1324,7 +1512,7 @@ function dedupeItems(items: NormalizedSourceItem[]) {
   });
 }
 
-function isPlatform(value: unknown): value is Platform {
+function isPlatform(value: unknown): value is CrawlPlatform {
   return value === "wechat_channels" || value === "xiaohongshu" || value === "douyin" || value === "weibo";
 }
 

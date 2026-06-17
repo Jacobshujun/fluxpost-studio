@@ -83,7 +83,8 @@ assertContains(files.store, /filterWorkspaceOwnedRecords\(await listCrawlJobsFro
 assertContains(files.simpleRoute, /listSimpleRuns\(20,\s*account\)/, "Simple run GET must filter by account.");
 assertContains(files.simpleRoute, /ownerUserId:\s*account\.id/, "Simple run POST must persist owner user id.");
 assertContains(files.simpleRuns, /runWithSimpleRunOwner/, "Simple-run worker logs/work must run under the run owner.");
-assertContains(files.simpleRuns, /ingestCrawlItems\(normalizedInput\.keyword,\s*taggedItems,\s*access\)/, "Simple-run ingest must stamp owner.");
+assertContains(files.simpleRuns, /ingestSimpleTaggedItems\(normalizedInput,\s*taggedItems,\s*access\)/, "Simple-run workflow must route tagged ingest through the owner-aware helper.");
+assertContains(files.simpleRuns, /if \(!isSimpleRunFeishuMode\(input\)\) \{[\s\S]*ingestCrawlItems\(input\.keyword,\s*taggedItems,\s*access\)/, "Simple-run keyword/link ingest must stamp owner.");
 assertContains(files.simpleRuns, /ownerUserId:\s*run\.input\.ownerUserId \|\| "local"/, "Simple-run Feishu publish must use the run owner.");
 assertContains(files.simpleRuns, /ownerDisplayName:\s*run\.input\.ownerDisplayName/, "Simple-run Feishu publish must keep the run owner display name.");
 
@@ -91,7 +92,9 @@ assertContains(files.publishRoute, /getGeneratedPost\(post\.id,\s*account\)/, "M
 assertContains(files.publishRoute, /ownerUserId:\s*account\.id/, "Manual Feishu publish must use current account as owner.");
 assertContains(files.publishRoute, /ownerDisplayName:\s*account\.displayName/, "Manual Feishu publish must keep current account display name.");
 assertContains(files.publishQueue, /ownerDisplayName\?:\s*string/, "Feishu publish queue enqueue options must carry owner display name.");
-assertContains(files.publishQueue, /accessActorFromOwner\(ownerUserId,\s*options\.ownerDisplayName\)/, "Feishu publish queue must preserve owner display name when stamping posts.");
+assertContains(files.publishQueue, /const ownerUserId = \(options\.ownerUserId \|\| defaultOwnerUserId\)\.trim\(\) \|\| defaultOwnerUserId/, "Feishu publish queue must use the current publisher as queue owner.");
+assertContains(files.publishQueue, /const publishPosts = normalizePosts\(await enrichPostsWithContentTags\(posts\)\)/, "Feishu publish queue must preserve each generated post owner when enqueueing.");
+assertNotContains(files.publishQueue, /applyWorkspaceOwner\(post,\s*ownerAccess,\s*post\)/, "Feishu publish queue must not rewrite post ownership to the queue owner.");
 assertContains(files.publishQueue, /listFeishuPublishJobs\(limit = 50,\s*account/, "Feishu publish job listing must filter by owner.");
 assertContains(files.publishQueue, /filterWorkspaceOwnedRecords\(await readFeishuPublishJobsFromDb\(limit\),\s*account\)/, "Feishu queue reads must apply owner filtering.");
 assertNotContains(files.publishRoute, /ownerUserId:\s*"local"/, "Manual Feishu publish route must not hard-code ownerUserId local.");

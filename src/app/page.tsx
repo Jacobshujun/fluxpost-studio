@@ -1,6 +1,7 @@
 "use client";
 
 import { useEffect, useMemo, useRef, useState, useSyncExternalStore, type FormEvent, type ReactNode, type TouchEvent } from "react";
+import Link from "next/link";
 import {
   BarChart3,
   Bot,
@@ -12,6 +13,7 @@ import {
   ClipboardCheck,
   CloudDownload,
   Database,
+  ExternalLink,
   FileText,
   FolderOpen,
   Image as ImageIcon,
@@ -51,6 +53,8 @@ import {
   defaultPeopleWithCarWashPrompt,
   imageReferenceSizeInstruction,
 } from "@/lib/creation-controls";
+import { defaultDistributionCheckPrompt } from "@/lib/distribution-check-prompt";
+import { defaultImageGenerationSize, imageGenerationSizeOptions, isImageGenerationSize } from "@/lib/image-size-options";
 import { mergeDownloadedAndRemoteImages } from "@/lib/media-url-filter";
 import { selectBestVideoHighlightFrames } from "@/lib/video-frame-policy";
 import { contentTagOptions, visualTagOptions } from "@/lib/types";
@@ -60,6 +64,7 @@ import type {
   ContentDirection,
   ConfigStatus,
   ContentProject,
+  CrawlPlatform,
   CrawlJob,
   ExecutionLogEntry,
   FeishuPublishJob,
@@ -80,6 +85,7 @@ import type {
   ProductionTask,
   SimpleRun,
   SourceImageTask,
+  SourceLinkPlatform,
   SourceMediaCacheStatus,
   SourceVisualTaggingAsset,
   SourceUsageStatus,
@@ -105,7 +111,7 @@ type PreviewState =
 type PoolStatusFilter = SourceUsageStatus | "all";
 type PoolPlatformFilter = Platform | "all";
 type CrawlInputMode = "keyword" | "links";
-type LinkImportPlatform = Platform | "auto";
+type LinkImportPlatform = SourceLinkPlatform | "auto";
 type PoolSortMode =
   | "hot_desc"
   | "published_desc"
@@ -120,7 +126,7 @@ type ThemeMode = "professional" | "editorial" | "creator";
 type ActiveModule = "content" | "production" | "materials";
 type WorkspaceMode = "compact" | "simple" | "advanced";
 type SimpleWorkspaceVariant = "standard" | "compact";
-type SimpleSourceMode = "keyword" | "links";
+type SimpleSourceMode = "keyword" | "links" | "feishu";
 type TaskProgressStatus = "running" | "success" | "error";
 
 type AccountSessionResponse = {
@@ -268,16 +274,27 @@ const platforms: Array<{ value: Platform; label: string; accent: string }> = [
   { value: "xiaohongshu", label: "小红书", accent: "bg-rose-300" },
   { value: "douyin", label: "抖音", accent: "bg-white" },
   { value: "weibo", label: "微博", accent: "bg-amber-300" },
+  { value: "feishu", label: "飞书", accent: "bg-emerald-300" },
 ];
 
-const platformDocs: Record<Platform, string> = {
+const crawlPlatforms = platforms.filter(
+  (item): item is { value: CrawlPlatform; label: string; accent: string } => item.value !== "feishu",
+);
+
+const linkImportPlatforms: Array<{ value: SourceLinkPlatform; label: string; accent: string }> = [
+  ...crawlPlatforms,
+  { value: "xiaopeng_bbs", label: "小鹏社区", accent: "bg-sky-300" },
+  { value: "dongchedi", label: "\u61c2\u8f66\u5e1d", accent: "bg-lime-300" },
+];
+
+const platformDocs: Record<CrawlPlatform, string> = {
   wechat_channels: "https://docs.tikhub.io/419832668e0",
   xiaohongshu: "https://docs.tikhub.io/420136398e0",
   douyin: "https://docs.tikhub.io/370212773e0",
   weibo: "https://docs.tikhub.io/410358109e0",
 };
 
-const sortOptions: Record<Platform, Array<{ label: string; value: string }>> = {
+const sortOptions: Record<CrawlPlatform, Array<{ label: string; value: string }>> = {
   wechat_channels: [{ label: "相关", value: "relevance" }],
   xiaohongshu: [
     { label: "综合", value: "general" },
@@ -329,7 +346,7 @@ const douyinContentTypeOptions = [
   { label: "\u6587\u7ae0", value: "3" },
 ];
 
-const defaultPlatformCrawlSettings: Record<Platform, PlatformCrawlSetting> = {
+const defaultPlatformCrawlSettings: Record<CrawlPlatform, PlatformCrawlSetting> = {
   wechat_channels: { sort: "relevance" },
   xiaohongshu: { sort: "popularity_descending", noteType: 0 },
   douyin: { sort: "0", contentType: "0" },
@@ -347,6 +364,8 @@ const poolStatusOptions: Array<{ label: string; value: PoolStatusFilter }> = [
 const poolPlatformOptions: Array<{ label: string; value: PoolPlatformFilter }> = [
   { label: "全部平台", value: "all" },
   ...platforms.map((item) => ({ label: item.label, value: item.value })),
+  { label: "小鹏社区", value: "xiaopeng_bbs" },
+  { label: "\u61c2\u8f66\u5e1d", value: "dongchedi" },
 ];
 
 const poolSortOptions: Array<{ label: string; value: PoolSortMode }> = [
@@ -369,8 +388,6 @@ const productionQueueOptions: Array<{ label: string; value: ProductionQueueFilte
   { label: "已发布", value: "published" },
 ];
 
-const imageSizePresets = ["1200x1600", "1024x1024", "1024x1536", "1536x1024", "1600x1200"];
-
 const localMediaPreviewVersion = "20260605-image-format-v2";
 
 const imageQualityOptions: Array<{ label: string; value: ImageGenerationQuality }> = [
@@ -385,7 +402,8 @@ const defaultWorkspaceSettings: WorkspacePromptSettings = {
   textInstruction: defaultTextInstruction,
   imageWashPrompt: defaultImageWashPrompt,
   imageStrategyPrompts: defaultImageStrategyPrompts,
-  imageSize: "1200x1600",
+  distributionCheckPrompt: defaultDistributionCheckPrompt,
+  imageSize: defaultImageGenerationSize,
   imageQuality: "medium",
   platformCrawlSettings: defaultPlatformCrawlSettings,
   updatedAt: new Date(0).toISOString(),
@@ -401,8 +419,8 @@ const imageStrategyPromptOptions: Array<{
   {
     key: "carExterior",
     tag: "汽车外观",
-    title: "汽车外观",
-    strategy: "洗图：更换背景，背景无文字，车牌打马赛克",
+    title: "汽车外观 / 车型美图",
+    strategy: "洗图：外观图更换背景；车型美图指无人物的纯车外观主体图",
     defaultPrompt: defaultCarExteriorWashPrompt,
   },
   {
@@ -465,14 +483,15 @@ export default function Home() {
   const [simpleSourceMode, setSimpleSourceMode] = useState<SimpleSourceMode>("keyword");
   const [simpleKeyword, setSimpleKeyword] = useState("");
   const [simpleTargetCount, setSimpleTargetCount] = useState(20);
-  const [simplePlatforms, setSimplePlatforms] = useState<Platform[]>(platforms.map((item) => item.value));
+  const [simplePlatforms, setSimplePlatforms] = useState<CrawlPlatform[]>(crawlPlatforms.map((item) => item.value));
   const [simpleLinkPlatform, setSimpleLinkPlatform] = useState<LinkImportPlatform>("auto");
   const [simpleLinkText, setSimpleLinkText] = useState("");
+  const [simpleFeishuTaskText, setSimpleFeishuTaskText] = useState("");
   const [simpleRuns, setSimpleRuns] = useState<SimpleRun[]>([]);
   const [activeSimpleRunId, setActiveSimpleRunId] = useState("");
   const [activeModule, setActiveModule] = useState<ActiveModule>("content");
   const [crawlInputMode, setCrawlInputMode] = useState<CrawlInputMode>("keyword");
-  const [platform, setPlatform] = useState<Platform>("xiaohongshu");
+  const [platform, setPlatform] = useState<CrawlPlatform>("xiaohongshu");
   const [linkImportPlatform, setLinkImportPlatform] = useState<LinkImportPlatform>("auto");
   const [linkImportText, setLinkImportText] = useState("");
   const [linkImportResults, setLinkImportResults] = useState<LinkImportResult[]>([]);
@@ -529,7 +548,7 @@ export default function Home() {
   const [strategyDraftSourceId, setStrategyDraftSourceId] = useState("");
   const [imageTasks, setImageTasks] = useState<SourceImageTask[]>([]);
   const [imageTaskSourceId, setImageTaskSourceId] = useState("");
-  const [imageSize, setImageSize] = useState("1200x1600");
+  const [imageSize, setImageSize] = useState<string>(defaultImageGenerationSize);
   const [imageQuality, setImageQuality] = useState<ImageGenerationQuality>("medium");
   const [reviewPrompt, setReviewPrompt] = useState("");
   const [message, setMessage] = useState("");
@@ -611,7 +630,9 @@ export default function Home() {
     () => simpleRuns.find((run) => run.id === activeSimpleRunId) || simpleRuns[0] || null,
     [activeSimpleRunId, simpleRuns],
   );
+  const useComfyUiKleinTasks = Boolean(config?.comfyUiKleinConfigured);
   const simpleLinkCount = useMemo(() => splitLines(simpleLinkText).length, [simpleLinkText]);
+  const simpleFeishuTaskCount = useMemo(() => splitFeishuTaskNumbers(simpleFeishuTaskText).length, [simpleFeishuTaskText]);
 
   const projectStats = useMemo(() => buildProjectStats(activeProject), [activeProject]);
   const selectedSourceImages = useMemo(() => (selectedSource ? getDisplayImages(selectedSource) : []), [selectedSource]);
@@ -633,8 +654,11 @@ export default function Home() {
   );
   const activeStrategyDraft = strategyDraftSourceId === selectedSource?.id ? strategyDraft : defaultStrategyDraft;
   const defaultImageTasks = useMemo(
-    () => (selectedSource ? buildDefaultImageTasks(selectedSource, workspaceSettings.imageStrategyPrompts) : []),
-    [selectedSource, workspaceSettings.imageStrategyPrompts],
+    () =>
+      selectedSource
+        ? buildDefaultImageTasks(selectedSource, workspaceSettings.imageStrategyPrompts, { useComfyUiKlein: useComfyUiKleinTasks })
+        : [],
+    [selectedSource, useComfyUiKleinTasks, workspaceSettings.imageStrategyPrompts],
   );
   const activeImageTasks = imageTaskSourceId === selectedSource?.id ? imageTasks : defaultImageTasks;
   const selectedSourceCanGenerate = activeStrategyDraft?.decision !== "observe_only";
@@ -713,7 +737,7 @@ export default function Home() {
     if (!currentAccount) return;
     if (!activeSimpleRun || isSimpleRunLive(activeSimpleRun)) return;
     if (!activeSimpleRun.platformResults.length && !activeSimpleRun.posts.length) return;
-    void loadContentPool(activeSimpleRun.input.keyword);
+    void loadContentPool(getSimpleRunPrimaryProjectQuery(activeSimpleRun));
     void loadGeneratedPosts(activeSimpleRun.posts[0]?.postId);
     void loadExecutionLogs();
     // eslint-disable-next-line react-hooks/exhaustive-deps
@@ -954,7 +978,7 @@ export default function Home() {
     if (patch.imageQuality) setImageQuality(patch.imageQuality);
   }
 
-  function getPlatformCrawlSettingFromSettings(targetPlatform: Platform, settingsSource = workspaceSettings): PlatformCrawlSetting {
+  function getPlatformCrawlSettingFromSettings(targetPlatform: CrawlPlatform, settingsSource = workspaceSettings): PlatformCrawlSetting {
     return {
       ...defaultPlatformCrawlSettings[targetPlatform],
       ...(settingsSource.platformCrawlSettings?.[targetPlatform] || {}),
@@ -963,7 +987,7 @@ export default function Home() {
 
   function buildWorkspaceSettingsWithPlatformCrawlSetting(
     settingsSource: WorkspacePromptSettings,
-    targetPlatform: Platform,
+    targetPlatform: CrawlPlatform,
     setting: PlatformCrawlSetting,
   ): WorkspacePromptSettings {
     const currentSetting = settingsSource.platformCrawlSettings?.[targetPlatform] || {};
@@ -982,7 +1006,7 @@ export default function Home() {
     };
   }
 
-  function applyPlatformCrawlControls(nextPlatform: Platform, settingsSource = workspaceSettings) {
+  function applyPlatformCrawlControls(nextPlatform: CrawlPlatform, settingsSource = workspaceSettings) {
     const nextSetting = getPlatformCrawlSettingFromSettings(nextPlatform, settingsSource);
     setSort(nextSetting.sort || sortOptions[nextPlatform][0]?.value || "");
     setNoteType(Number(nextSetting.noteType ?? 0));
@@ -991,11 +1015,11 @@ export default function Home() {
     setContentType(nextPlatform === "douyin" ? nextSetting.contentType || "0" : "0");
   }
 
-  function updatePlatformCrawlSettingsDraft(targetPlatform: Platform, setting: PlatformCrawlSetting) {
+  function updatePlatformCrawlSettingsDraft(targetPlatform: CrawlPlatform, setting: PlatformCrawlSetting) {
     setWorkspaceSettings((current) => buildWorkspaceSettingsWithPlatformCrawlSetting(current, targetPlatform, setting));
   }
 
-  function getCurrentPlatformCrawlSetting(targetPlatform: Platform): PlatformCrawlSetting {
+  function getCurrentPlatformCrawlSetting(targetPlatform: CrawlPlatform): PlatformCrawlSetting {
     return {
       sort,
       noteType: targetPlatform === "xiaohongshu" ? noteType : undefined,
@@ -1142,7 +1166,7 @@ export default function Home() {
     }
   }
 
-  function toggleSimplePlatform(value: Platform) {
+  function toggleSimplePlatform(value: CrawlPlatform) {
     setSimplePlatforms((current) => (current.includes(value) ? current.filter((item) => item !== value) : [...current, value]));
   }
 
@@ -1151,6 +1175,10 @@ export default function Home() {
     if (value === "links") {
       const linkCount = splitLines(simpleLinkText).length;
       if (linkCount) setSimpleTargetCount(Math.min(linkCount, 500));
+    }
+    if (value === "feishu") {
+      const taskCount = splitFeishuTaskNumbers(simpleFeishuTaskText).length;
+      if (taskCount) setSimpleTargetCount(Math.min(taskCount, 500));
     }
   }
 
@@ -1162,11 +1190,20 @@ export default function Home() {
     }
   }
 
+  function updateSimpleFeishuTaskText(value: string) {
+    setSimpleFeishuTaskText(value);
+    if (simpleSourceMode === "feishu") {
+      const taskCount = splitFeishuTaskNumbers(value).length;
+      if (taskCount) setSimpleTargetCount(Math.min(taskCount, 500));
+    }
+  }
+
   async function startSimpleRun() {
     const keyword = simpleKeyword.trim();
     const sourceMode = simpleSourceMode;
     const links = splitLines(simpleLinkText);
-    if (!keyword) {
+    const feishuTaskNumbers = splitFeishuTaskNumbers(simpleFeishuTaskText);
+    if (sourceMode !== "feishu" && !keyword) {
       setMessage(sourceMode === "links" ? "请先输入归属关键词 / 内容池项目" : "请先输入关键词");
       return;
     }
@@ -1176,6 +1213,10 @@ export default function Home() {
     }
     if (sourceMode === "links" && !links.length) {
       setMessage("请先粘贴需要导入的一行一个链接");
+      return;
+    }
+    if (sourceMode === "feishu" && !feishuTaskNumbers.length) {
+      setMessage("请先输入飞书任务编号");
       return;
     }
     const textInstruction = workspaceSettings.textInstruction.trim();
@@ -1190,7 +1231,7 @@ export default function Home() {
     }
     const normalizedImageSize = normalizeImageSizeInput(workspaceSettings.imageSize);
     if (!normalizedImageSize) {
-      setMessage("默认图片尺寸格式应为 1200x1600 这样的 宽x高 数字格式");
+      setMessage("请选择一个可用的 GPT 图片尺寸");
       return;
     }
 
@@ -1216,11 +1257,17 @@ export default function Home() {
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
           sourceMode,
-          keyword,
-          targetCount: sourceMode === "links" ? Math.min(simpleTargetCount, links.length) : simpleTargetCount,
+          keyword: sourceMode === "feishu" ? "飞书导入" : keyword,
+          targetCount:
+            sourceMode === "feishu"
+              ? Math.min(simpleTargetCount, feishuTaskNumbers.length)
+              : sourceMode === "links"
+                ? Math.min(simpleTargetCount, links.length)
+                : simpleTargetCount,
           platforms: sourceMode === "keyword" ? simplePlatforms : [],
           links: sourceMode === "links" ? links : undefined,
           linkPlatform: sourceMode === "links" ? simpleLinkPlatform : undefined,
+          feishuTaskNumbers: sourceMode === "feishu" ? feishuTaskNumbers : undefined,
           materialPaths: productionMaterialPaths,
           settings: settingsForRun,
         }),
@@ -1229,8 +1276,9 @@ export default function Home() {
       if (!res.ok || !data.run) throw new Error(data.error || "简单版自动任务失败");
       setSimpleRuns((current) => [data.run!, ...current.filter((run) => run.id !== data.run!.id)]);
       setActiveSimpleRunId(data.run.id);
-      setQuery(keyword);
-      await loadContentPool(keyword);
+      const nextProjectQuery = getSimpleRunPrimaryProjectQuery(data.run);
+      setQuery(nextProjectQuery);
+      await loadContentPool(nextProjectQuery);
       await loadGeneratedPosts(data.run.posts[0]?.postId);
       await loadExecutionLogs();
       setMessage(isSimpleRunLive(data.run) ? "简单版任务已提交，后端正在自动执行，请看任务进度。" : buildSimpleRunMessage(data.run));
@@ -1942,7 +1990,7 @@ export default function Home() {
     if (!post) return;
     const normalizedImageSize = normalizeImageSizeInput(imageSize);
     if (!normalizedImageSize) {
-      setMessage("图片尺寸格式应为 1200x1600 这样的 宽x高 数字格式");
+      setMessage("请选择一个可用的 GPT 图片尺寸");
       return;
     }
     setBusy("regenerate");
@@ -1987,7 +2035,7 @@ export default function Home() {
     }
     const normalizedImageSize = normalizeImageSizeInput(imageSize);
     if (!normalizedImageSize) {
-      setMessage("图片尺寸格式应为 1200x1600 这样的 宽x高 数字格式");
+      setMessage("请选择一个可用的 GPT 图片尺寸");
       return;
     }
     setBusy("generate");
@@ -2166,7 +2214,7 @@ export default function Home() {
     if (!post) return;
     const normalizedImageSize = normalizeImageSizeInput(imageSize);
     if (!normalizedImageSize) {
-      setMessage("图片尺寸格式应为 1200x1600 这样的 宽x高 数字格式");
+      setMessage("请选择一个可用的 GPT 图片尺寸");
       return;
     }
     const generationImageTasks = selectedSource?.id === post.sourceItemId ? activeImageTasks : post.imageTasks || activeImageTasks;
@@ -2252,7 +2300,7 @@ export default function Home() {
     }
   }
 
-  function choosePlatform(nextPlatform: Platform) {
+  function choosePlatform(nextPlatform: CrawlPlatform) {
     const settingsWithCurrentPlatform = getWorkspaceSettingsWithCurrentPlatformCrawlSetting();
     setWorkspaceSettings(settingsWithCurrentPlatform);
     setPlatform(nextPlatform);
@@ -2352,7 +2400,7 @@ export default function Home() {
   function resetImageTasks() {
     if (!selectedSource) return;
     setImageTaskSourceId(selectedSource.id);
-    setImageTasks(buildDefaultImageTasks(selectedSource, workspaceSettings.imageStrategyPrompts));
+    setImageTasks(buildDefaultImageTasks(selectedSource, workspaceSettings.imageStrategyPrompts, { useComfyUiKlein: useComfyUiKleinTasks }));
   }
 
   function openSourcePreview(item: NormalizedSourceItem) {
@@ -2462,11 +2510,6 @@ export default function Home() {
 
   return (
     <main className={`app-shell app-shell-${workspaceMode} overflow-x-hidden`}>
-      <datalist id="image-size-presets">
-        {imageSizePresets.map((value) => (
-          <option key={value} value={value} />
-        ))}
-      </datalist>
       <div className="studio-frame mx-auto flex w-full max-w-[1680px] flex-col text-sm text-white">
         <div className="studio-topbar">
         <header className="design-header mb-4 flex flex-col gap-4 px-4 py-4 lg:flex-row lg:items-center lg:justify-between">
@@ -2506,9 +2549,19 @@ export default function Home() {
               onAccountsChanged={loadWorkspaceAccounts}
               onLogout={logoutWorkspaceAccount}
             />
+            <Link className="soft-button inline-flex h-10 items-center justify-center gap-2 px-3 text-xs font-black" href="/review">
+              <ExternalLink className="h-4 w-4" />
+              内容审查台
+            </Link>
+            <Link className="soft-button inline-flex h-10 items-center justify-center gap-2 px-3 text-xs font-black" href="/distribution-check">
+              <ShieldCheck className="h-4 w-4" />
+              是否分发
+            </Link>
             <ConfigChip label="TikHub" ok={Boolean(config?.tikhubConfigured)} />
             <ConfigChip label={config?.textModel || "GPT"} ok={Boolean(config?.openaiConfigured)} />
             <ConfigChip label="Feishu CLI" ok={Boolean(config?.feishuConfigured)} />
+            <ConfigChip label="飞书导入" ok={Boolean(config?.feishuContentImportConfigured)} />
+            <ConfigChip label="分发审核" ok={Boolean(config?.feishuDistributionCheckConfigured)} />
             <ConfigChip label="飞书通知" ok={Boolean(config?.feishuNotifyConfigured)} />
           </div>
         </header>
@@ -2542,6 +2595,8 @@ export default function Home() {
             linkText={simpleLinkText}
             linkPlatform={simpleLinkPlatform}
             linkCount={simpleLinkCount}
+            feishuTaskText={simpleFeishuTaskText}
+            feishuTaskCount={simpleFeishuTaskCount}
             materialPathCount={productionMaterialPaths.length}
             settings={workspaceSettings}
             runs={simpleRuns}
@@ -2555,6 +2610,7 @@ export default function Home() {
             onTogglePlatform={toggleSimplePlatform}
             onLinkTextChange={updateSimpleLinkText}
             onLinkPlatformChange={setSimpleLinkPlatform}
+            onFeishuTaskTextChange={updateSimpleFeishuTaskText}
             onSettingsChange={updateWorkspaceSettingsDraft}
             onSaveSettings={() => saveWorkspaceSettingsPatch(workspaceSettings)}
             onStart={startSimpleRun}
@@ -2705,7 +2761,7 @@ export default function Home() {
             {crawlInputMode === "keyword" ? (
               <>
             <div className="mt-4 grid grid-cols-2 gap-2">
-              {platforms.map((item) => (
+              {crawlPlatforms.map((item) => (
                 <button
                   key={item.value}
                   className={`platform-card soft-button flex h-12 items-center gap-2 px-3 ${
@@ -2890,7 +2946,7 @@ export default function Home() {
                   <FieldLabel label="平台" />
                   <select className="field" value={linkImportPlatform} onChange={(event) => setLinkImportPlatform(event.target.value as LinkImportPlatform)}>
                     <option value="auto">自动识别</option>
-                    {platforms.map((item) => (
+                    {linkImportPlatforms.map((item) => (
                       <option key={item.value} value={item.value}>
                         {item.label}
                       </option>
@@ -2903,7 +2959,7 @@ export default function Home() {
                     className="field min-h-36 resize-y"
                     value={linkImportText}
                     onChange={(event) => setLinkImportText(event.target.value)}
-                    placeholder="https://..."
+                    placeholder="https://... 或小鹏社区帖子 ID（如 3776077）"
                   />
                 </div>
                 {linkImportPlatform === "douyin" ? (
@@ -4019,6 +4075,8 @@ function SimpleWorkspace({
   linkText,
   linkPlatform,
   linkCount,
+  feishuTaskText,
+  feishuTaskCount,
   materialPathCount,
   settings,
   runs,
@@ -4032,6 +4090,7 @@ function SimpleWorkspace({
   onTogglePlatform,
   onLinkTextChange,
   onLinkPlatformChange,
+  onFeishuTaskTextChange,
   onSettingsChange,
   onSaveSettings,
   onStart,
@@ -4042,10 +4101,12 @@ function SimpleWorkspace({
   sourceMode: SimpleSourceMode;
   keyword: string;
   targetCount: number;
-  selectedPlatforms: Platform[];
+  selectedPlatforms: CrawlPlatform[];
   linkText: string;
   linkPlatform: LinkImportPlatform;
   linkCount: number;
+  feishuTaskText: string;
+  feishuTaskCount: number;
   materialPathCount: number;
   settings: WorkspacePromptSettings;
   runs: SimpleRun[];
@@ -4056,9 +4117,10 @@ function SimpleWorkspace({
   onSourceModeChange: (value: SimpleSourceMode) => void;
   onKeywordChange: (value: string) => void;
   onTargetCountChange: (value: number) => void;
-  onTogglePlatform: (platform: Platform) => void;
+  onTogglePlatform: (platform: CrawlPlatform) => void;
   onLinkTextChange: (value: string) => void;
   onLinkPlatformChange: (value: LinkImportPlatform) => void;
+  onFeishuTaskTextChange: (value: string) => void;
   onSettingsChange: (patch: Partial<WorkspacePromptSettings>) => void;
   onSaveSettings: () => void;
   onStart: () => void;
@@ -4072,10 +4134,15 @@ function SimpleWorkspace({
   const selectedPlatformLabels = selectedPlatforms
     .map((value) => platforms.find((platform) => platform.value === value)?.label || value)
     .join("、");
-  const sourceDetail = sourceMode === "links" ? `链接 ${linkCount} 条` : `平台 ${selectedPlatformLabels || "未选择"}`;
+  const sourceDetail =
+    sourceMode === "feishu"
+      ? `飞书 ${feishuTaskCount} 条`
+      : sourceMode === "links"
+        ? `链接 ${linkCount} 条`
+        : `平台 ${selectedPlatformLabels || "未选择"}`;
   const canStart =
-    Boolean(keyword.trim()) &&
-    (sourceMode === "links" ? linkCount > 0 : selectedPlatforms.length > 0) &&
+    (sourceMode === "feishu" ? feishuTaskCount > 0 : Boolean(keyword.trim())) &&
+    (sourceMode === "feishu" ? true : sourceMode === "links" ? linkCount > 0 : selectedPlatforms.length > 0) &&
     Boolean(settings.textInstruction.trim()) &&
     !getMissingImageStrategyPrompt(settings);
 
@@ -4109,8 +4176,19 @@ function SimpleWorkspace({
               <UploadCloud className="h-3.5 w-3.5" />
               批量导入链接
             </button>
+            <button
+              className={`soft-button flex h-10 items-center justify-center gap-2 text-xs font-semibold ${sourceMode === "feishu" ? "platform-card-active" : ""}`}
+              type="button"
+              aria-pressed={sourceMode === "feishu"}
+              onClick={() => onSourceModeChange("feishu")}
+              disabled={busy || settingsBusy}
+            >
+              <FileText className="h-3.5 w-3.5" />
+              飞书编号
+            </button>
           </div>
 
+          {sourceMode === "feishu" ? null : (
           <div>
             <FieldLabel label={sourceMode === "links" ? "归属关键词 / 内容池项目" : "关键词"} />
             <div className="relative mt-2">
@@ -4123,13 +4201,14 @@ function SimpleWorkspace({
               />
             </div>
           </div>
+          )}
 
           <div>
-            <FieldLabel label={sourceMode === "links" ? "生产上限" : "抓取数量"} />
+            <FieldLabel label={sourceMode === "keyword" ? "抓取数量" : "生产上限"} />
             <input
               className="field mt-2"
               min={1}
-              max={sourceMode === "links" ? Math.max(1, linkCount || 1) : 500}
+              max={sourceMode === "feishu" ? Math.max(1, feishuTaskCount || 1) : sourceMode === "links" ? Math.max(1, linkCount || 1) : 500}
               type="number"
               value={targetCount}
               onChange={(event) => onTargetCountChange(Number(event.target.value))}
@@ -4137,62 +4216,76 @@ function SimpleWorkspace({
           </div>
 
           {sourceMode === "links" ? (
-          <div className="simple-link-panel">
-            <div className="mb-2 flex flex-wrap items-center justify-between gap-3">
-              <FieldLabel label="批量链接" />
-              <span className="status-badge text-[10px] text-white/45">{linkCount} 条</span>
-            </div>
-            <div className="grid gap-3 sm:grid-cols-[minmax(0,1fr)_180px]">
-              <textarea
-                className="field simple-link-textarea"
-                value={linkText}
-                onChange={(event) => onLinkTextChange(event.target.value)}
-                placeholder="每行一个小红书、抖音、微博或视频号链接"
-                disabled={busy || settingsBusy}
-              />
-              <div>
-                <FieldLabel label="平台识别" />
-                <select
-                  className="field mt-2"
-                  value={linkPlatform}
-                  onChange={(event) => onLinkPlatformChange(event.target.value as LinkImportPlatform)}
-                  disabled={busy || settingsBusy}
-                >
-                  <option value="auto">自动识别</option>
-                  {platforms.map((item) => (
-                    <option key={item.value} value={item.value}>
-                      {item.label}
-                    </option>
-                  ))}
-                </select>
+            <div className="simple-link-panel">
+              <div className="mb-2 flex flex-wrap items-center justify-between gap-3">
+                <FieldLabel label="批量链接" />
+                <span className="status-badge text-[10px] text-white/45">{linkCount} 条</span>
               </div>
-            </div>
-          </div>
-          ) : (
-          <div>
-            <div className="mb-2 flex items-center justify-between gap-3">
-              <FieldLabel label="采集平台" />
-              <span className="status-badge text-[10px] text-white/45">{selectedPlatforms.length} 个</span>
-            </div>
-            <div className="grid grid-cols-2 gap-2">
-              {platforms.map((item) => {
-                const active = selectedPlatforms.includes(item.value);
-                return (
-                  <button
-                    key={item.value}
-                    className={`platform-card soft-button flex h-12 items-center gap-2 px-3 ${active ? "platform-card-active" : ""}`}
-                    type="button"
-                    aria-pressed={active}
-                    onClick={() => onTogglePlatform(item.value)}
+              <div className="grid gap-3 sm:grid-cols-[minmax(0,1fr)_180px]">
+                <textarea
+                  className="field simple-link-textarea"
+                  value={linkText}
+                  onChange={(event) => onLinkTextChange(event.target.value)}
+                  placeholder="每行一个小红书、抖音、微博或视频号链接"
+                  disabled={busy || settingsBusy}
+                />
+                <div>
+                  <FieldLabel label="平台识别" />
+                  <select
+                    className="field mt-2"
+                    value={linkPlatform}
+                    onChange={(event) => onLinkPlatformChange(event.target.value as LinkImportPlatform)}
                     disabled={busy || settingsBusy}
                   >
-                    <span className={`h-2.5 w-2.5 rounded-full ${item.accent}`} />
-                    <span className="truncate text-xs font-semibold">{item.label}</span>
-                  </button>
-                );
-              })}
+                    <option value="auto">自动识别</option>
+                    {linkImportPlatforms.map((item) => (
+                      <option key={item.value} value={item.value}>
+                        {item.label}
+                      </option>
+                    ))}
+                  </select>
+                </div>
+              </div>
             </div>
-          </div>
+          ) : sourceMode === "feishu" ? (
+            <div className="simple-link-panel">
+              <div className="mb-2 flex flex-wrap items-center justify-between gap-3">
+                <FieldLabel label="飞书任务编号" />
+                <span className="status-badge text-[10px] text-white/45">{feishuTaskCount} 条</span>
+              </div>
+              <textarea
+                className="field simple-link-textarea"
+                value={feishuTaskText}
+                onChange={(event) => onFeishuTaskTextChange(event.target.value)}
+                placeholder="每行一个任务编号，也可以用逗号、空格或分号分隔"
+                disabled={busy || settingsBusy}
+              />
+            </div>
+          ) : (
+            <div>
+              <div className="mb-2 flex items-center justify-between gap-3">
+                <FieldLabel label="采集平台" />
+                <span className="status-badge text-[10px] text-white/45">{selectedPlatforms.length} 个</span>
+              </div>
+              <div className="grid grid-cols-2 gap-2">
+                {crawlPlatforms.map((item) => {
+                  const active = selectedPlatforms.includes(item.value);
+                  return (
+                    <button
+                      key={item.value}
+                      className={`platform-card soft-button flex h-12 items-center gap-2 px-3 ${active ? "platform-card-active" : ""}`}
+                      type="button"
+                      aria-pressed={active}
+                      onClick={() => onTogglePlatform(item.value)}
+                      disabled={busy || settingsBusy}
+                    >
+                      <span className={`h-2.5 w-2.5 rounded-full ${item.accent}`} />
+                      <span className="truncate text-xs font-semibold">{item.label}</span>
+                    </button>
+                  );
+                })}
+              </div>
+            </div>
           )}
 
           <div className="simple-policy-preview">
@@ -4256,8 +4349,22 @@ function SimpleWorkspace({
             onClick={onStart}
             disabled={busy || settingsBusy || !canStart}
           >
-            {busy ? <Loader2 className="h-4 w-4 animate-spin" /> : sourceMode === "links" ? <UploadCloud className="h-4 w-4" /> : <Send className="h-4 w-4" />}
-            {busy ? "正在自动执行" : sourceMode === "links" ? "导入链接并一键生产内容" : "开始全自动生产并写入飞书"}
+            {busy ? (
+              <Loader2 className="h-4 w-4 animate-spin" />
+            ) : sourceMode === "feishu" ? (
+              <FileText className="h-4 w-4" />
+            ) : sourceMode === "links" ? (
+              <UploadCloud className="h-4 w-4" />
+            ) : (
+              <Send className="h-4 w-4" />
+            )}
+            {busy
+              ? "正在自动执行"
+              : sourceMode === "feishu"
+                ? "导入飞书并一键生产内容"
+                : sourceMode === "links"
+                  ? "导入链接并一键生产内容"
+                  : "开始全自动生产并写入飞书"}
           </button>
         </div>
 
@@ -4371,7 +4478,7 @@ function SimpleWorkspace({
 
             <aside className="space-y-4">
               <article className="content-cluster">
-                <PanelTitle icon={<BarChart3 className="h-4 w-4" />} title={isSimpleLinkRun(runForSummary) ? "来源结果" : "平台结果"} />
+                <PanelTitle icon={<BarChart3 className="h-4 w-4" />} title={isSimpleLinkRun(runForSummary) || isSimpleFeishuRun(runForSummary) ? "来源结果" : "平台结果"} />
                 <div className="mt-3 space-y-2">
                   {runForSummary.platformResults.length ? (
                     runForSummary.platformResults.map((result) => (
@@ -4405,6 +4512,30 @@ function SimpleWorkspace({
                       </div>
                       <span className={`status-badge shrink-0 text-[10px] ${getSimpleLinkStatusClass(result.status)}`}>
                         {formatSimpleLinkStatus(result.status)}
+                      </span>
+                    </div>
+                  ))}
+                </div>
+              </article>
+              ) : null}
+
+              {runForSummary.feishuResults?.length ? (
+              <article className="content-cluster">
+                <PanelTitle icon={<FileText className="h-4 w-4" />} title="飞书导入结果" />
+                <div className="mt-3 space-y-2">
+                  {runForSummary.feishuResults.slice(0, 12).map((result, index) => (
+                    <div key={`${result.taskNumber}-${index}`} className="simple-platform-row">
+                      <div className="min-w-0">
+                        <p className="truncate text-xs font-black text-white">{result.title || result.taskNumber}</p>
+                        <p className="mt-1 truncate text-[11px] text-white/42">
+                          任务 {result.taskNumber}
+                          {result.vehicle ? ` · ${result.vehicle}` : ""}
+                          {typeof result.materialCount === "number" ? ` · 素材 ${result.materialCount}` : ""}
+                          {result.error ? ` · ${result.error}` : ""}
+                        </p>
+                      </div>
+                      <span className={`status-badge shrink-0 text-[10px] ${getSimpleFeishuStatusClass(result.status)}`}>
+                        {formatSimpleFeishuStatus(result.status)}
                       </span>
                     </div>
                   ))}
@@ -4657,6 +4788,7 @@ function ImageStrategyPromptEditor({
     <div className={`image-strategy-editor ${compact ? "image-strategy-editor-compact" : ""}`}>
       <div className="image-strategy-rule-card">
         <div className="flex flex-wrap items-center gap-1.5">
+          <span className="status-badge text-[10px] text-[var(--mint)]">APP / 应用界面</span>
           <span className="status-badge text-[10px] text-[var(--mint)]">内饰空间</span>
           <span className="status-badge text-[10px] text-white/52">原图引用</span>
           <span className="status-badge text-[10px] text-white/52">不调用图片模型</span>
@@ -4721,22 +4853,18 @@ function WorkspaceDefaultsPanel({
         />
       </div>
       <ImageStrategyPromptEditor settings={settings} disabled={busy} onChange={onChange} />
-      <div className="mt-3 grid gap-2 sm:grid-cols-[minmax(0,1fr)_132px_108px]">
-        <div className="rounded-[8px] border border-white/10 bg-white/[0.035] px-3 py-2">
+      <div className="production-setting-grid mt-3">
+        <div className="production-setting-summary">
           <p className="text-[11px] font-semibold text-white/58">图片策略</p>
-          <p className="mt-1 text-[11px] leading-5 text-white/42">简单版会根据 GPT 图片标签自动选择原图引用或三种洗图提示词。</p>
+          <p className="mt-1 text-[11px] leading-5 text-white/42">简单版会根据 GPT 图片标签自动选择原图引用或对应洗图提示词。</p>
         </div>
-        <input
-          className="field h-10 text-xs"
-          list="image-size-presets"
-          value={settings.imageSize}
-          onChange={(event) => onChange({ imageSize: event.target.value })}
-          onBlur={() => {
-            const normalized = normalizeImageSizeInput(settings.imageSize);
-            if (normalized) onChange({ imageSize: normalized });
-          }}
-          placeholder="1200x1600"
-        />
+        <select className="field h-10 text-xs" value={settings.imageSize} onChange={(event) => onChange({ imageSize: event.target.value })}>
+          {imageGenerationSizeOptions.map((option) => (
+            <option key={option.value} value={option.value}>
+              {option.label}
+            </option>
+          ))}
+        </select>
         <select
           className="field h-10 text-xs"
           value={settings.imageQuality}
@@ -5165,24 +5293,20 @@ function ProductionWorkspace({
             <div className="content-cluster mt-4">
               <FieldLabel label="生产要求" />
               <textarea className="field mt-2 min-h-24 resize-none" value={instruction} onChange={(event) => onInstructionChange(event.target.value)} />
-              <div className="mt-3 grid gap-2 sm:grid-cols-[minmax(0,1fr)_136px_112px]">
-                <div className="rounded-[8px] border border-white/10 bg-white/[0.035] px-3 py-2">
+              <div className="production-setting-grid mt-3">
+                <div className="production-setting-summary">
                   <p className="text-[11px] font-semibold text-white/55">生成草稿时自动处理配图</p>
                   <p className="mt-1 text-[11px] leading-5 text-white/42">将按上方已勾选图片逐张生成，输出后可直接预览完整图文。</p>
                 </div>
                 <label className="min-w-0">
                   <span className="sr-only">图片尺寸</span>
-                  <input
-                    className="field h-10 text-xs"
-                    list="image-size-presets"
-                    value={imageSize}
-                    onChange={(event) => onImageSizeChange(event.target.value)}
-                    onBlur={() => {
-                      const normalized = normalizeImageSizeInput(imageSize);
-                      if (normalized) onImageSizeChange(normalized);
-                    }}
-                    placeholder="1200x1600"
-                  />
+                  <select className="field h-10 text-xs" value={imageSize} onChange={(event) => onImageSizeChange(event.target.value)}>
+                    {imageGenerationSizeOptions.map((option) => (
+                      <option key={option.value} value={option.value}>
+                        {option.label}
+                      </option>
+                    ))}
+                  </select>
                 </label>
                 <select className="field h-10 text-xs" value={imageQuality} onChange={(event) => onImageQualityChange(event.target.value as ImageGenerationQuality)}>
                   {imageQualityOptions.map((option) => (
@@ -5268,22 +5392,18 @@ function ProductionWorkspace({
               <Check className="h-4 w-4" />
               保存
             </button>
-            <div className="grid gap-2 sm:grid-cols-[minmax(0,1fr)_136px_112px]">
+            <div className="production-setting-grid">
               <button className="soft-button flex h-10 items-center justify-center gap-2" type="button" onClick={onGenerateImage} disabled={Boolean(busy)}>
                 {busy === "image" ? <Loader2 className="h-4 w-4 animate-spin" /> : <ImageIcon className="h-4 w-4" />}
                 重新生成图
               </button>
-              <input
-                className="field h-10 text-xs"
-                list="image-size-presets"
-                value={imageSize}
-                onChange={(event) => onImageSizeChange(event.target.value)}
-                onBlur={() => {
-                  const normalized = normalizeImageSizeInput(imageSize);
-                  if (normalized) onImageSizeChange(normalized);
-                }}
-                placeholder="1200x1600"
-              />
+              <select className="field h-10 text-xs" value={imageSize} onChange={(event) => onImageSizeChange(event.target.value)}>
+                {imageGenerationSizeOptions.map((option) => (
+                  <option key={option.value} value={option.value}>
+                    {option.label}
+                  </option>
+                ))}
+              </select>
               <select className="field h-10 text-xs" value={imageQuality} onChange={(event) => onImageQualityChange(event.target.value as ImageGenerationQuality)}>
                 {imageQualityOptions.map((option) => (
                   <option key={option.value} value={option.value}>
@@ -7164,6 +7284,17 @@ function splitLines(value: string) {
     .filter(Boolean);
 }
 
+function splitFeishuTaskNumbers(value: string) {
+  return Array.from(
+    new Set(
+      value
+        .split(/[\r\n,，;；\t ]+/)
+        .map((item) => item.trim())
+        .filter(Boolean),
+    ),
+  );
+}
+
 function splitTags(value: string) {
   return value
     .split(/[,\n，]/)
@@ -7401,9 +7532,8 @@ function getMissingImageStrategyPrompt(settings: WorkspacePromptSettings) {
 }
 
 function normalizeImageSizeInput(value: string) {
-  const normalized = value.trim().toLowerCase().replace(/\s+/g, "").replace(/×/g, "x");
-  if (!/^\d{2,5}x\d{2,5}$/.test(normalized)) return "";
-  return normalized;
+  const normalized = value.trim().toLowerCase();
+  return isImageGenerationSize(normalized) ? normalized : "";
 }
 
 function formatSourceTime(value?: string, fallback?: string) {
@@ -7478,9 +7608,22 @@ function isSimpleLinkRun(run: SimpleRun) {
   return run.input.sourceMode === "links";
 }
 
+function isSimpleFeishuRun(run: SimpleRun) {
+  return run.input.sourceMode === "feishu";
+}
+
 function formatSimpleRunSource(run: SimpleRun) {
+  if (isSimpleFeishuRun(run)) return `飞书 ${run.input.feishuTaskNumbers?.length || run.feishuResults?.length || 0} 条`;
   if (!isSimpleLinkRun(run)) return `${run.input.platforms.length} 平台`;
   return `链接 ${run.input.links?.length || run.linkResults?.length || 0} 条`;
+}
+
+function getSimpleRunPrimaryProjectQuery(run: SimpleRun) {
+  if (isSimpleFeishuRun(run)) {
+    const vehicle = run.feishuResults?.find((result) => result.status === "imported" && result.vehicle?.trim())?.vehicle?.trim();
+    if (vehicle) return vehicle;
+  }
+  return run.input.keyword;
 }
 
 function formatSimpleRunStatus(value: SimpleRun["status"]) {
@@ -7508,6 +7651,21 @@ function formatSimpleLinkStatus(value: NonNullable<SimpleRun["linkResults"]>[num
 function getSimpleLinkStatusClass(value: NonNullable<SimpleRun["linkResults"]>[number]["status"]) {
   if (value === "imported") return "text-[var(--mint)]";
   if (value === "filtered" || value === "duplicate") return "text-[var(--amber)]";
+  return "text-[var(--rose-bright)]";
+}
+
+function formatSimpleFeishuStatus(value: NonNullable<SimpleRun["feishuResults"]>[number]["status"]) {
+  const labels: Record<NonNullable<SimpleRun["feishuResults"]>[number]["status"], string> = {
+    imported: "成功",
+    not_found: "未找到",
+    failed: "失败",
+  };
+  return labels[value];
+}
+
+function getSimpleFeishuStatusClass(value: NonNullable<SimpleRun["feishuResults"]>[number]["status"]) {
+  if (value === "imported") return "text-[var(--mint)]";
+  if (value === "not_found") return "text-[var(--amber)]";
   return "text-[var(--rose-bright)]";
 }
 

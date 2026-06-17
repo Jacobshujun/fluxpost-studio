@@ -241,6 +241,15 @@ function weiboCard(id, overrides = {}) {
           large: {
             url: `https://wx1.sinaimg.cn/large/${id}-image-1.jpg`,
           },
+          wap360: {
+            url: `https://wx1.sinaimg.cn/wap360/${id}-image-1.jpg`,
+          },
+          wap180: {
+            url: `https://wx1.sinaimg.cn/wap180/${id}-image-1.jpg`,
+          },
+          cmw960: {
+            url: `https://wx1.sinaimg.cn/cmw960/${id}-image-1.jpg`,
+          },
           hmw2000: {
             url: `https://wx1.sinaimg.cn/hmw2000/${id}-image-1.jpg`,
           },
@@ -315,8 +324,46 @@ if (!picItems[0].images.some((url) => /sinaimg\.cn\/large\/wb-pic-1-image-1\.jpg
 if (picItems[0].images.length !== 1) {
   throw new Error(`Weibo App image response should collapse content-image variants to one asset, got ${picItems[0].images.length}.`);
 }
-if (picItems[0].images.some((url) => /h5\.sinaimg|timeline_icon|thumbnail|orh1080|hmw2000|crop\./i.test(url))) {
+if (picItems[0].images.some((url) => /h5\.sinaimg|timeline_icon|thumbnail|orh1080|hmw2000|crop\.|wap\d+|cmw\d+/i.test(url))) {
   throw new Error("Weibo App image response should not keep decorative icons or duplicate preview variants.");
+}
+
+const originalVariantItems = normalizeTikHubResponse(
+  {
+    data: {
+      cards: [
+        {
+          card_type: 9,
+          mblog: {
+            id: "wb-original-variants",
+            mid: "wb-original-variants",
+            mblogid: "wb-original-variants",
+            text_raw: "Weibo original variant candidate",
+            pic_infos: {
+              "wb-original-variants-pic-1": {
+                large: {
+                  url: "https://wx1.sinaimg.cn/large/wb-original-variants-image-1.jpg",
+                },
+                oslarge: {
+                  url: "https://wx2.sinaimg.cn/oslarge/wb-original-variants-image-1.jpg",
+                },
+                woriginal: {
+                  url: "https://wx3.sinaimg.cn/woriginal/wb-original-variants-image-1.jpg",
+                },
+              },
+            },
+            attitudes_count: 12,
+            comments_count: 3,
+            reposts_count: 4,
+          },
+        },
+      ],
+    },
+  },
+  "weibo",
+);
+if (originalVariantItems.length !== 1 || originalVariantItems[0].images.length !== 1 || !/sinaimg\.cn\/woriginal\/wb-original-variants-image-1\.jpg/.test(originalVariantItems[0].images[0])) {
+  throw new Error("Weibo original-size variants should collapse to one asset and prefer woriginal.");
 }
 
 const textOnly = normalizeTikHubResponse(

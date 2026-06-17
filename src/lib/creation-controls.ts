@@ -19,13 +19,18 @@ export const defaultImageStrategyPrompts: ImageStrategyPrompts = {
 
 export const imageReferenceSizeInstruction = "参考图进入图片处理前统一尺寸：保持原图比例，等比例缩放，最长边为 2400px。";
 
+export type ImageTaskRoutingOptions = {
+  useComfyUiKlein?: boolean;
+};
+
 export function buildDefaultImageTasks(
   source: NormalizedSourceItem,
   prompts: Partial<ImageStrategyPrompts> | string = defaultImageStrategyPrompts,
+  options: ImageTaskRoutingOptions = {},
 ): SourceImageTask[] {
   const resolvedPrompts = resolveImageStrategyPrompts(prompts);
   const visualTagsByUrl = getVisualTagsByUrl(source);
-  const frameTasks = getSourceVideoFrameTasks(source, resolvedPrompts.textImage, visualTagsByUrl, resolvedPrompts);
+  const frameTasks = getSourceVideoFrameTasks(source, resolvedPrompts.textImage, visualTagsByUrl, resolvedPrompts, options);
   if (shouldUseVideoFramesAsImageTasks(source)) {
     return frameTasks.slice(0, maxVideoHighlightFrames);
   }
@@ -43,6 +48,7 @@ export function buildDefaultImageTasks(
       },
       visualTagsByUrl.get(url),
       resolvedPrompts,
+      options,
     ),
   );
 
@@ -68,10 +74,11 @@ export function applyVisualTagImageStrategy(
   task: SourceImageTask,
   tag: VisualTag | undefined,
   prompts: Partial<ImageStrategyPrompts> | string = defaultImageStrategyPrompts,
+  options: ImageTaskRoutingOptions = {},
 ): SourceImageTask {
   const resolvedPrompts = resolveImageStrategyPrompts(prompts);
 
-  if (tag === "内饰空间") {
+  if (tag === "APP" || tag === "内饰空间") {
     return {
       ...task,
       mode: "keep",
@@ -79,11 +86,13 @@ export function applyVisualTagImageStrategy(
     };
   }
 
-  if (tag === "汽车外观") {
+  if (tag === "汽车外观" || tag === "车型美图") {
     return {
       ...task,
       mode: "wash",
       prompt: resolvedPrompts.carExterior,
+      provider: resolveStrategyProvider(options),
+      strategyKey: "carExterior",
     };
   }
 
@@ -92,6 +101,8 @@ export function applyVisualTagImageStrategy(
       ...task,
       mode: "wash",
       prompt: resolvedPrompts.peopleWithCar,
+      provider: resolveStrategyProvider(options),
+      strategyKey: "peopleWithCar",
     };
   }
 
@@ -107,6 +118,7 @@ function getSourceVideoFrameTasks(
   prompt: string,
   visualTagsByUrl: Map<string, VisualTag>,
   prompts: ImageStrategyPrompts,
+  options: ImageTaskRoutingOptions,
 ): SourceImageTask[] {
   return selectBestVideoHighlightFrames(source.videoFrames).map((frame, index) =>
     applyVisualTagImageStrategy(
@@ -122,6 +134,7 @@ function getSourceVideoFrameTasks(
       },
       visualTagsByUrl.get(frame.url),
       prompts,
+      options,
     ),
   );
 }
@@ -222,4 +235,8 @@ function isVideoLikeSource(source: NormalizedSourceItem) {
 
 function stringOrDefault(value: unknown, fallback: string) {
   return typeof value === "string" && value.trim() ? value.trim() : fallback;
+}
+
+function resolveStrategyProvider(options: ImageTaskRoutingOptions): SourceImageTask["provider"] {
+  return options.useComfyUiKlein ? "comfyui_klein" : "openai_images";
 }

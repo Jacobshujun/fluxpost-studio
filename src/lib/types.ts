@@ -1,4 +1,8 @@
-export type Platform = "wechat_channels" | "xiaohongshu" | "douyin" | "weibo";
+export type CrawlPlatform = "wechat_channels" | "xiaohongshu" | "douyin" | "weibo";
+
+export type SourceLinkPlatform = CrawlPlatform | "xiaopeng_bbs" | "dongchedi";
+
+export type Platform = SourceLinkPlatform | "feishu";
 
 export type CrawlStatus = "queued" | "running" | "completed" | "failed" | "needs_config";
 
@@ -15,6 +19,10 @@ export type ExecutionLogStatus = "running" | "success" | "error" | "info";
 export type SimpleRunStatus = "queued" | "running" | "completed" | "partial" | "failed";
 
 export type SimpleRunQueueStatus = "queued" | "running" | "completed" | "failed";
+
+export type ImageGenerationQueueStatus = "queued" | "running" | "completed" | "failed" | "cancelled";
+
+export type ImageGenerationQueueProvider = "comfyui_klein";
 
 export type FeishuPublishQueueStatus =
   | "queued"
@@ -73,9 +81,10 @@ export const contentTagOptions = [
   "新车曝光",
   "问车咨询",
   "参数解读",
+  "提车记录",
 ] as const;
 
-export const visualTagOptions = ["内饰空间", "汽车外观", "带文字图", "人车美图"] as const;
+export const visualTagOptions = ["APP", "内饰空间", "汽车外观", "车型美图", "带文字图", "人车美图"] as const;
 
 export type ContentTag = (typeof contentTagOptions)[number];
 
@@ -187,6 +196,8 @@ export type ImageProductionStrategy =
 
 export type SourceImageTaskMode = "wash" | "reconstruct" | "keep";
 
+export type SourceImageTaskProvider = "openai_images" | "comfyui_klein";
+
 export type SourceImageTask = {
   id: string;
   url: string;
@@ -196,6 +207,8 @@ export type SourceImageTask = {
   mode: SourceImageTaskMode;
   prompt: string;
   timestamp?: number;
+  provider?: SourceImageTaskProvider;
+  strategyKey?: keyof ImageStrategyPrompts;
 };
 
 export type ImageGenerationQuality = "low" | "medium" | "high";
@@ -216,7 +229,7 @@ export type PlatformCrawlSetting = {
   contentType?: string;
 };
 
-export type PlatformCrawlSettings = Partial<Record<Platform, PlatformCrawlSetting>>;
+export type PlatformCrawlSettings = Partial<Record<CrawlPlatform, PlatformCrawlSetting>>;
 
 export type ImageGenerationOptions = {
   size: string;
@@ -240,6 +253,7 @@ export type WorkspacePromptSettings = {
   textInstruction: string;
   imageWashPrompt: string;
   imageStrategyPrompts: ImageStrategyPrompts;
+  distributionCheckPrompt: string;
   imageSize: string;
   imageQuality: ImageGenerationQuality;
   platformCrawlSettings: PlatformCrawlSettings;
@@ -268,7 +282,7 @@ export type ProductionPlan = {
 };
 
 export type CrawlInput = {
-  platform: Platform;
+  platform: CrawlPlatform;
   query: string;
   targetCount: number;
   mode?: "keyword" | "challenge";
@@ -448,13 +462,14 @@ export type BatchProductionJob = {
 };
 
 export type SimpleRunInput = {
-  sourceMode?: "keyword" | "links";
+  sourceMode?: "keyword" | "links" | "feishu";
   keyword: string;
   targetCount: number;
-  platforms: Platform[];
+  platforms: CrawlPlatform[];
   materialPaths: string[];
   links?: string[];
-  linkPlatform?: Platform | "auto";
+  linkPlatform?: SourceLinkPlatform | "auto";
+  feishuTaskNumbers?: string[];
   ownerUserId?: string;
   ownerDisplayName?: string;
 };
@@ -466,6 +481,17 @@ export type SimpleRunLinkResult = {
   sourceId?: string;
   itemId?: string;
   title?: string;
+  error?: string;
+};
+
+export type SimpleRunFeishuResult = {
+  taskNumber: string;
+  status: "imported" | "not_found" | "failed";
+  recordId?: string;
+  itemId?: string;
+  vehicle?: string;
+  title?: string;
+  materialCount?: number;
   error?: string;
 };
 
@@ -530,9 +556,29 @@ export type SimpleRun = {
   stages: SimpleRunStage[];
   platformResults: SimpleRunPlatformResult[];
   linkResults?: SimpleRunLinkResult[];
+  feishuResults?: SimpleRunFeishuResult[];
   posts: SimpleRunPostResult[];
   publish?: SimpleRunPublishResult;
   errors: string[];
+};
+
+export type LarkTaskLaunchStatus = "processing" | "launched" | "failed";
+
+export type LarkTaskLaunch = {
+  id: string;
+  messageId: string;
+  chatId: string;
+  senderId: string;
+  senderName?: string;
+  ownerUserId?: string;
+  ownerDisplayName?: string;
+  runId?: string;
+  status: LarkTaskLaunchStatus;
+  commandText: string;
+  parsedInput?: SimpleRunInput;
+  createdAt: string;
+  updatedAt: string;
+  error?: string;
 };
 
 export type SimpleRunQueueItem = {
@@ -583,6 +629,34 @@ export type FeishuPublishJob = {
   error?: string;
 };
 
+export type ImageGenerationQueueJob = {
+  id: string;
+  provider: ImageGenerationQueueProvider;
+  status: ImageGenerationQueueStatus;
+  priority: number;
+  attempts: number;
+  maxAttempts: number;
+  runAfter: string;
+  lockedBy?: string;
+  lockedUntil?: string;
+  createdAt: string;
+  updatedAt: string;
+  startedAt?: string;
+  completedAt?: string;
+  ownerUserId?: string;
+  ownerDisplayName?: string;
+  sourceRunId?: string;
+  postId?: string;
+  sourceItemId?: string;
+  taskId?: string;
+  taskLabel?: string;
+  strategyKey?: keyof ImageStrategyPrompts;
+  prompt: string;
+  referenceImage: string;
+  outputUrls: string[];
+  error?: string;
+};
+
 export type MaterialAsset = {
   id: string;
   path: string;
@@ -627,6 +701,8 @@ export type ConfigStatus = {
   openaiImageConfigured: boolean;
   openaiImageBackupConfigured: boolean;
   feishuConfigured: boolean;
+  feishuContentImportConfigured: boolean;
+  feishuDistributionCheckConfigured: boolean;
   databaseBackend: "sqlite" | "postgres";
   postgresConfigured: boolean;
   textModel: string;
@@ -637,6 +713,11 @@ export type ConfigStatus = {
   openaiTextBaseUrl: string;
   openaiImageBaseUrl: string;
   openaiImageBackupBaseUrl?: string;
+  comfyUiKleinEnabled: boolean;
+  comfyUiKleinConfigured: boolean;
+  comfyUiKleinWorkflowConfigured: boolean;
+  comfyUiKleinWorkflowJsonConfigured: boolean;
+  comfyUiBaseUrl?: string;
   tikhubBaseUrl: string;
   feishuCliBin?: string;
   feishuNotifyConfigured: boolean;

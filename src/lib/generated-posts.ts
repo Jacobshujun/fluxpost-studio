@@ -12,6 +12,7 @@ import {
   filterWorkspaceOwnedRecords,
   type WorkspaceAccessActor,
 } from "./workspace-ownership";
+import { clampGeneratedTitleMax } from "./title-guard";
 import type { GeneratedPost } from "./types";
 
 type StoredGeneratedPosts = {
@@ -35,6 +36,7 @@ export async function saveGeneratedPost(post: GeneratedPost, account?: Workspace
   if (previous && access) assertCanAccessWorkspaceRecord(access, previous, "Generated post not found");
   const nextPost: GeneratedPost = {
     ...applyWorkspaceOwner(post, account, previous || post),
+    title: clampGeneratedTitleMax(post.title),
     createdAt: post.createdAt || previous?.createdAt || new Date().toISOString(),
     version: post.version || previous?.version || 1,
     updatedAt: post.updatedAt || new Date().toISOString(),

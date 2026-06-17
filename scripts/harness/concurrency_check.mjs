@@ -33,6 +33,11 @@ assertContains(
 );
 assertContains(
   concurrency,
+  /localImage:\s*readConcurrencyEnv\("WORKER_LOCAL_IMAGE_CONCURRENCY",\s*1,\s*1\)/,
+  "Local image workflow pool must stay serialized for single-GPU ComfyUI workflows.",
+);
+assertContains(
+  concurrency,
   /feishu:\s*readConcurrencyEnv\("WORKER_FEISHU_CONCURRENCY",\s*50,\s*50\)/,
   "Feishu pool must default to 50 and cap at 50.",
 );
@@ -50,6 +55,8 @@ assertContains(sourceTagging, /runWithConcurrencyPool\("gpt"/, "Source tagging m
 assertContains(sourceTagging, /mapWithConcurrency\(items,\s*concurrencyConfig\.gpt/, "Source tagging item fan-out must be bounded by GPT concurrency.");
 
 assertContains(imageGeneration, /runWithConcurrencyPool\("image"/, "Image generation calls must use the image concurrency pool.");
+assertContains(imageGeneration, /runComfyUiKleinImageTask/, "Klein-routed image tasks must use the local ComfyUI image path.");
+assertContains(read("src/lib/comfyui-klein.ts"), /runWithConcurrencyPool\("localImage"/, "ComfyUI Klein must use the serialized local image pool.");
 assertContains(
   imageGeneration,
   /Math\.min\(Math\.max\(Math\.floor\(candidate\),\s*1\),\s*concurrencyConfig\.image\)/,

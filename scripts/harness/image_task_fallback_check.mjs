@@ -16,7 +16,12 @@ function assertNotContains(source, pattern, message) {
 }
 
 const imageGeneration = read("src/lib/image-generation.ts");
+const imageSizeOptions = read("src/lib/image-size-options.ts");
+const page = read("src/app/page.tsx");
+const workspaceSettings = read("src/lib/workspace-settings.ts");
 const config = read("src/lib/config.ts");
+const generateRoute = read("src/app/api/generate/route.ts");
+const imagesRoute = read("src/app/api/images/route.ts");
 
 assertContains(
   config,
@@ -52,6 +57,60 @@ assertContains(
   imageGeneration,
   /const imageRequestTimeoutMs = appConfig\.openaiImageRequestTimeoutMs;/,
   "Image generation should use the configured OpenAI-compatible image request timeout.",
+);
+
+assertContains(
+  imageSizeOptions,
+  /export const imageGenerationSizeOptions[\s\S]*1024x1536[\s\S]*1536x1024[\s\S]*1024x1024[\s\S]*1536x864[\s\S]*3840x2160/,
+  "GPT image generation sizes must be exposed as actual request-size options.",
+);
+
+assertContains(
+  workspaceSettings,
+  /imageSize:\s*defaultImageGenerationSize/,
+  "Workspace image-size defaults should use the shared GPT image size option.",
+);
+
+assertContains(
+  page,
+  /imageGenerationSizeOptions\.map/,
+  "The frontend should render global image size controls from the shared GPT request-size options.",
+);
+
+assertNotContains(
+  page,
+  /image-size-presets|placeholder="1200x1600"|list="image-size-presets"/,
+  "Image size controls should not use the old free-form 1200x1600 preset input.",
+);
+
+assertContains(
+  imageGeneration,
+  /size:\s*normalizeImageGenerationSize\(options\?\.size\)/,
+  "Backend image generation should normalize request size through the shared GPT image size options.",
+);
+
+assertContains(
+  generateRoute,
+  /const imageSize = normalizeImageGenerationSize\(body\.imageSize\)[\s\S]*size:\s*imageSize/,
+  "The generate API should normalize the requested GPT image size before dispatch.",
+);
+
+assertContains(
+  imagesRoute,
+  /const imageSize = normalizeImageGenerationSize\(body\.size\)[\s\S]*size:\s*imageSize/,
+  "The manual images API should normalize the requested GPT image size before dispatch.",
+);
+
+assertNotContains(
+  `${generateRoute}\n${imagesRoute}`,
+  /1200x1600/,
+  "Image API routes should not keep the old 1200x1600 fallback size.",
+);
+
+assertNotContains(
+  imageGeneration,
+  /const allowed = \["1024x1024", "1536x1024", "1024x1536", "1536x864", "3840x2160"\]/,
+  "Backend image size options should not maintain a separate hard-coded allowed list.",
 );
 
 assertContains(

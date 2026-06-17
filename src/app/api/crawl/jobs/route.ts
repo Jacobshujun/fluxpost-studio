@@ -7,7 +7,7 @@ import { crawlTikHub } from "@/lib/tikhub";
 import { makeDemoSourceItems } from "@/lib/mock-data";
 import { saveJob, listJobs } from "@/lib/store";
 import { isWorkspaceSignInError, requireWorkspaceAccount } from "@/lib/workspace-accounts";
-import type { CrawlInput, Platform } from "@/lib/types";
+import type { CrawlInput, CrawlPlatform } from "@/lib/types";
 
 export const runtime = "nodejs";
 
@@ -179,6 +179,6 @@ function parseCrawlInput(body: Partial<CrawlInput>): CrawlInput {
   };
 }
 
-function isPlatform(value: unknown): value is Platform {
+function isPlatform(value: unknown): value is CrawlPlatform {
   return value === "wechat_channels" || value === "xiaohongshu" || value === "douyin" || value === "weibo";
 }

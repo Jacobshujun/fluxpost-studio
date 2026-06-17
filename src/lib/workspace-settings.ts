@@ -1,6 +1,8 @@
 import { defaultImageStrategyPrompts, defaultImageWashPrompt, resolveImageStrategyPrompts } from "./creation-controls";
 import { readAppMetaValue, writeAppMetaValue } from "./database";
-import type { Platform, PlatformCrawlSetting, PlatformCrawlSettings, WorkspacePromptSettings } from "./types";
+import { defaultDistributionCheckPrompt } from "./distribution-check-prompt";
+import { defaultImageGenerationSize, normalizeImageGenerationSize } from "./image-size-options";
+import type { CrawlPlatform, PlatformCrawlSetting, PlatformCrawlSettings, WorkspacePromptSettings } from "./types";
 
 const settingsMetaKey = "workspace_prompt_settings_v1";
 const simpleDefaultTextInstruction = "保留“热点观点”角度，换成品牌自己的素材和观点，避免复述原文表达。";
@@ -16,7 +18,8 @@ export const defaultWorkspacePromptSettings: WorkspacePromptSettings = {
   textInstruction: simpleDefaultTextInstruction,
   imageWashPrompt: defaultImageWashPrompt,
   imageStrategyPrompts: defaultImageStrategyPrompts,
-  imageSize: "1200x1600",
+  distributionCheckPrompt: defaultDistributionCheckPrompt,
+  imageSize: defaultImageGenerationSize,
   imageQuality: "medium",
   platformCrawlSettings: defaultPlatformCrawlSettings,
   updatedAt: new Date(0).toISOString(),
@@ -54,7 +57,8 @@ function normalizeWorkspacePromptSettings(input: Partial<WorkspacePromptSettings
     textInstruction: stringOrDefault(input.textInstruction, defaultWorkspacePromptSettings.textInstruction),
     imageWashPrompt: imageStrategyPrompts.textImage,
     imageStrategyPrompts,
-    imageSize: normalizeImageSize(input.imageSize),
+    distributionCheckPrompt: stringOrDefault(input.distributionCheckPrompt, defaultWorkspacePromptSettings.distributionCheckPrompt),
+    imageSize: normalizeImageGenerationSize(input.imageSize),
     imageQuality: normalizeImageQuality(input.imageQuality),
     platformCrawlSettings: normalizePlatformCrawlSettings(input.platformCrawlSettings),
     updatedAt: input.updatedAt || new Date().toISOString(),
@@ -65,26 +69,20 @@ function stringOrDefault(value: unknown, fallback: string) {
   return typeof value === "string" && value.trim() ? value.trim() : fallback;
 }
 
-function normalizeImageSize(value: unknown) {
-  if (typeof value !== "string") return defaultWorkspacePromptSettings.imageSize;
-  const normalized = value.trim().toLowerCase().replace(/\s+/g, "").replace(/脳/g, "x");
-  return /^\d{2,5}x\d{2,5}$/.test(normalized) ? normalized : defaultWorkspacePromptSettings.imageSize;
-}
-
 function normalizeImageQuality(value: unknown): WorkspacePromptSettings["imageQuality"] {
   return value === "low" || value === "medium" || value === "high" ? value : defaultWorkspacePromptSettings.imageQuality;
 }
 
 function normalizePlatformCrawlSettings(input: unknown): PlatformCrawlSettings {
   const record = isRecord(input) ? input : {};
-  const platforms: Platform[] = ["wechat_channels", "xiaohongshu", "douyin", "weibo"];
+  const platforms: CrawlPlatform[] = ["wechat_channels", "xiaohongshu", "douyin", "weibo"];
   return platforms.reduce<PlatformCrawlSettings>((result, platform) => {
     result[platform] = normalizePlatformCrawlSetting(platform, isRecord(record[platform]) ? record[platform] : {});
     return result;
   }, {});
 }
 
-function normalizePlatformCrawlSetting(platform: Platform, input: Record<string, unknown>): PlatformCrawlSetting {
+function normalizePlatformCrawlSetting(platform: CrawlPlatform, input: Record<string, unknown>): PlatformCrawlSetting {
   const defaults = defaultPlatformCrawlSettings[platform] || {};
   return {
     mode: normalizeMode(input.mode, defaults.mode),

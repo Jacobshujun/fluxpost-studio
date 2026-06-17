@@ -40,7 +40,7 @@ assertContains(route, /export async function DELETE/, "Simple run API must expos
 assertContains(route, /terminateSimpleRun\(runId/, "Simple run DELETE endpoint must close the run through the domain helper.");
 assertContains(page, /onTerminateRun=\{terminateSimpleRunFromUi\}/, "Simple UI must wire the force-terminate action.");
 assertContains(page, /强制终止/, "Simple UI must expose a force-terminate button.");
-assertContains(page, /max=\{sourceMode === "links" \? Math\.max\(1,\s*linkCount \|\| 1\) : 500\}/, "Keyword-mode target count input must still allow more than 100 items.");
+assertContains(page, /max=\{sourceMode === "feishu" \? Math\.max\(1,\s*feishuTaskCount \|\| 1\) : sourceMode === "links" \? Math\.max\(1,\s*linkCount \|\| 1\) : 500\}/, "Keyword-mode target count input must still allow more than 100 items.");
 assertContains(page, /<SimpleOverallProgressBar[\s\S]*runs=\{runs\}[\s\S]*activeRun=\{runForSummary\}/, "Compact progress must receive the simple-run list, not only one active run.");
 assertContains(page, /buildSimpleOverallProgressRuns\(runs,\s*activeRun\)/, "Compact progress must derive multiple visible runs from current simple runs.");
 assertContains(page, /simple-overall-run-list/, "Compact progress must render a multi-run progress list.");

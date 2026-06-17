@@ -5,8 +5,10 @@ import { syncSourceItemsToFeishu, type SourceImportFeishuSyncResult } from "./so
 import { filterUnsafeSourceItems } from "./source-safety";
 import { tagSourceItems } from "./source-tagging";
 import { detectPlatformFromSourceUrl, fetchTikHubItemBySourceLink } from "./tikhub";
+import { buildDongchediArticleUrl, extractDongchediArticleId, fetchDongchediItemBySource } from "./dongchedi";
+import { buildXiaopengBbsThreadUrl, extractXiaopengBbsThreadId, fetchXiaopengBbsItemBySource } from "./xiaopeng-bbs";
 import type { WorkspaceAccessActor } from "./workspace-ownership";
-import type { ContentProject, NormalizedSourceItem, Platform } from "./types";
+import type { ContentProject, NormalizedSourceItem, Platform, SourceLinkPlatform } from "./types";
 
 export type SourceLinkImportStatus = "imported" | "filtered" | "duplicate" | "unsupported" | "failed";
 
@@ -49,14 +51,14 @@ export type SourceLinkImportResponse = {
 export type SourceLinkImportInput = {
   query: string;
   links: string[];
-  platform?: Platform;
+  platform?: SourceLinkPlatform;
   cookie?: string;
   owner?: WorkspaceAccessActor;
 };
 
 export type SourceLinkResolveInput = {
   links: string[];
-  platform?: Platform;
+  platform?: SourceLinkPlatform;
   cookie?: string;
 };
 
@@ -70,7 +72,7 @@ export type SourceLinkResolveResponse = {
 type ParsedSourceLink = {
   raw: string;
   url: string;
-  platform?: Platform;
+  platform?: SourceLinkPlatform;
   duplicateInput?: boolean;
 };
 
@@ -165,11 +167,16 @@ async function resolveParsedSourceLinks(parsedLinks: ParsedSourceLink[], cookie?
   const { initialResults, candidates } = splitParsedSourceLinks(parsedLinks);
   const fetched = await mapWithConcurrency<ParsedSourceLink, FetchedSourceLink>(candidates, concurrencyConfig.crawl, async (link) => {
     try {
-      const items = await fetchTikHubItemBySourceLink({
-        url: link.url,
-        platform: link.platform,
-        cookie,
-      });
+      const items =
+        link.platform === "xiaopeng_bbs"
+          ? await fetchXiaopengBbsItemBySource(link.url)
+          : link.platform === "dongchedi"
+            ? await fetchDongchediItemBySource(link.url)
+          : await fetchTikHubItemBySourceLink({
+              url: link.url,
+              platform: link.platform,
+              cookie,
+            });
       const item = items[0];
       if (!item) {
         return {
@@ -257,7 +264,7 @@ function splitParsedSourceLinks(parsedLinks: ParsedSourceLink[]) {
   return { initialResults, candidates };
 }
 
-export function parseSourceLinks(values: string[], platform?: Platform): ParsedSourceLink[] {
+export function parseSourceLinks(values: string[], platform?: SourceLinkPlatform): ParsedSourceLink[] {
   const seen = new Set<string>();
   return values
     .flatMap((value) => String(value || "").split(/\r?\n/))
@@ -265,14 +272,19 @@ export function parseSourceLinks(values: string[], platform?: Platform): ParsedS
     .filter(Boolean)
     .slice(0, maxSourceLinksPerBatch)
     .map((raw) => {
-      const url = extractFirstHttpUrl(raw);
-      const normalizedUrl = normalizeSourceUrl(url);
+      const sourceValue =
+        platform === "xiaopeng_bbs"
+          ? normalizeXiaopengBbsInput(raw)
+          : platform === "dongchedi"
+            ? normalizeDongchediInput(raw)
+            : extractFirstHttpUrl(raw);
+      const normalizedUrl = normalizeSourceUrl(sourceValue);
       const duplicateInput = normalizedUrl ? seen.has(normalizedUrl) : false;
       if (normalizedUrl) seen.add(normalizedUrl);
       return {
         raw,
         url: normalizedUrl,
-        platform: platform || detectPlatformFromSourceUrl(normalizedUrl),
+        platform: platform || detectSourceLinkPlatform(normalizedUrl),
         duplicateInput,
       };
     });
@@ -285,7 +297,7 @@ function resultFromItem(url: string, item: NormalizedSourceItem, status: SourceL
     status,
     sourceId: item.sourceId,
     itemId: item.id,
-    title: item.title || item.contentText?.slice(0, 80),
+    title: item.title,
   };
 }
 
@@ -328,4 +340,20 @@ function normalizeSourceUrl(value: string) {
   } catch {
     return "";
   }
+}
+
+function normalizeXiaopengBbsInput(value: string) {
+  const threadId = extractXiaopengBbsThreadId(value);
+  return threadId ? buildXiaopengBbsThreadUrl(threadId) : extractFirstHttpUrl(value);
+}
+
+function normalizeDongchediInput(value: string) {
+  const articleId = extractDongchediArticleId(value);
+  return articleId ? buildDongchediArticleUrl(articleId) : extractFirstHttpUrl(value);
+}
+
+function detectSourceLinkPlatform(value: string): SourceLinkPlatform | undefined {
+  if (extractXiaopengBbsThreadId(value)) return "xiaopeng_bbs";
+  if (extractDongchediArticleId(value)) return "dongchedi";
+  return detectPlatformFromSourceUrl(value);
 }

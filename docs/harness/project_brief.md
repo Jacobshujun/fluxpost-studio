@@ -1,6 +1,6 @@
 # Project Brief
 
-Last updated: 2026-06-09
+Last updated: 2026-06-16
 
 ## Project Name, Goal, Path
 
@@ -23,7 +23,7 @@ Last updated: 2026-06-09
 
 1. Configure environment values in `.env.local` from the README Environment section.
 2. Start the local web app.
-3. Search/crawl content by platform and keyword through `/api/crawl/jobs`, batch-import supported source links into the content pool through `/api/crawl/links`, or use `/api/simple/runs` for one-click simple production from either keywords or exact source links.
+3. Search/crawl content by platform and keyword through `/api/crawl/jobs`, batch-import supported source links into the content pool through `/api/crawl/links`, or use `/api/simple/runs` for one-click simple production from keywords, exact source links, or Feishu task numbers.
 4. Assess harvested items with the crawl-stage content safety gate, then persist retained items into the runtime database-backed content pool.
 5. Optionally scan local image material folders through `/api/materials/scan`.
 6. Generate post drafts through `/api/generate` or through the simple-run one-click workflow, including text and optional image generation.
@@ -43,6 +43,9 @@ Last updated: 2026-06-09
   - `npm run start`: Next production server.
   - `npm run start:lan`: Next production server on `0.0.0.0:3001`.
   - `npm run local:restart`: build, stop any process on port `3001`, restart `next start` on `0.0.0.0:3001`, and run local HTTP smoke.
+  - `npm run lark:tasks`: poll configured Feishu/Lark chats through `lark-cli` and submit explicit task commands to the local app.
+  - `npm run lark:events`: consume real-time Feishu/Lark `im.message.receive_v1` events through `lark-cli event consume` and submit explicit task commands to the local app.
+  - `npm run db:diagnose`: run read-only local PostgreSQL diagnostics through `FLUXPOST_DIAG_DATABASE_URL`, showing queue state, recent logs, active sessions, lock blockers, and key PostgreSQL settings without printing the connection string.
   - `npm run db:migrate:postgres`: copy current SQLite runtime rows into a PostgreSQL database configured by `DATABASE_URL`.
   - `npm run lint`: ESLint.
 - Local setup confirmed by README:
@@ -63,8 +66,10 @@ Last updated: 2026-06-09
   - `GET|POST|PATCH|DELETE /api/content/items`
   - `GET|POST /api/crawl/jobs`
   - `POST /api/crawl/links`
+  - `POST /api/distribution-check`
   - `POST /api/generate`
   - `POST /api/images`
+  - `POST /api/lark/tasks`
   - `GET|POST|PATCH|DELETE /api/materials/library`
   - `POST /api/materials/scan`
   - `GET|POST /api/production/batches`
@@ -78,16 +83,18 @@ Last updated: 2026-06-09
 
 ## Product And Data Rules
 
-- Supported platform enum in code: `wechat_channels`, `xiaohongshu`, `douyin`, `weibo`.
+- Supported keyword crawl platforms in code: `wechat_channels`, `xiaohongshu`, `douyin`, `weibo`.
+- Supported source-link/ID-only platforms also include `xiaopeng_bbs` and `dongchedi`. They are available through `/api/crawl/links`, simple link mode, and Lark task-launch parsing, but are not TikHub keyword crawl platforms.
 - Local runtime database in this workspace: PostgreSQL on `127.0.0.1:5432` through `DATABASE_URL` in `.env.local`; do not expose the connection string.
 - Fallback runtime database when `DATABASE_URL` is not configured: `data/fluxpost.db` SQLite.
 - PostgreSQL schema: `db/migrations/001_initial_postgres.sql`.
 - Legacy JSON files under `data/` can be used as one-time migration sources: `content-pool.json`, `batch-production.json`, `generated-posts.json`, `material-library.json`, and `execution-log.json`.
-- Runtime database stores workspace accounts/sessions, content projects, generated posts, batch jobs, material folders/assets, execution logs, crawl jobs, runtime posts, simple runs, and workspace settings metadata.
-- Runtime database also stores `simple_run_queue`, the durable queue table for simple-mode run execution, and `feishu_publish_queue`, the durable queue table for asynchronous Feishu CLI writes.
+- Runtime database stores workspace accounts/sessions, content projects, generated posts, batch jobs, material folders/assets, execution logs, crawl jobs, runtime posts, simple runs, and workspace settings metadata, including saved production prompts and the `/distribution-check` audit prompt.
+- Runtime database also stores `simple_run_queue`, the durable queue table for simple-mode run execution; `image_generation_queue`, the local image job observability table for ComfyUI Klein; and `feishu_publish_queue`, the durable queue table for asynchronous Feishu CLI writes.
 - Workspace sessions use an HttpOnly `fluxpost_session` browser cookie. In default whitelist mode, the first-admin setup key is environment-driven and not stored in the runtime database; daily account passwords are stored only as Node `scrypt` hashes.
 - SQLite-to-PostgreSQL migration script: `scripts/db/migrate-sqlite-to-postgres.mjs`. It copies metadata and JSON payload rows; it does not move media binaries.
 - Feishu outbox payload directory from code/README: `data/feishu-outbox/`.
+- Feishu/Lark IM task-launch idempotency rows live in `lark_task_launches` and are keyed by unique `message_id`.
 - Generated AI images: `public/generated/`.
 - Crawled media cache and video frames: `public/media/crawl/`.
 - Local material scanning accepts image extensions only: `.png`, `.jpg`, `.jpeg`, `.webp`, `.gif`.
@@ -96,16 +103,23 @@ Last updated: 2026-06-09
 
 ## External Integrations
 
+- 2026-06-12 ComfyUI routing update: `COMFYUI_KLEIN_ENABLED=false` is the default, so car-exterior/`杞﹀瀷缇庡浘`/people-with-car selected image tasks use the GPT-Image-2/OpenAI Images API path. Only `COMFYUI_KLEIN_ENABLED=true` plus either `COMFYUI_KLEIN_WORKFLOW_API_JSON`/`COMFYUI_KLEIN_WORKFLOW_JSON` or `COMFYUI_KLEIN_WORKFLOW_PATH` routes those strategies to the serialized local ComfyUI lane.
+
 - TikHub API base URL/key are configured by `TIKHUB_BASE_URL` and `TIKHUB_API_KEY`.
 - Workspace whitelist access is configured by `WORKSPACE_AUTH_MODE=whitelist`, `WORKSPACE_ALLOWED_USERS`, `WORKSPACE_ADMIN_USERS`, and `WORKSPACE_ACCESS_PASSWORD`; do not record the real allowed user list, admin list, setup key, or account passwords in Harness docs.
 - PostgreSQL runtime storage is configured by `DATABASE_URL` and optional `DATABASE_POOL_MAX`.
 - Local PostgreSQL facts confirmed on 2026-06-04: Windows service `postgresql-x64-18` is running, the client binaries live under `D:\Program Files\PostgreSQL\18\bin`, and a dedicated FluxPost Studio database/user were provisioned for the app.
+- Local read-only PostgreSQL diagnostics are configured through dedicated role `fluxpost_reader` and Windows user environment variable `FLUXPOST_DIAG_DATABASE_URL`. The secret diagnostic URL must not be copied into Harness docs. The role can read app runtime tables, safe account/session views under `diagnostics`, and PostgreSQL stats/settings for session and lock inspection.
 - OpenAI-compatible text endpoints are configured by `OPENAI_*` variables.
 - GPT-Image-2 image generation uses the OpenAI Images API shape. `OPENAI_IMAGE_BASE_URL` configures the primary image API base URL, `OPENAI_IMAGE_API_KEY` configures the primary image API key with `OPENAI_API_KEY` fallback, optional `OPENAI_IMAGE_BACKUP_BASE_URL` and `OPENAI_IMAGE_BACKUP_API_KEY` configure a backup image route, `OPENAI_IMAGE_ENDPOINT=images` selects Images API dispatch, and `OPENAI_IMAGE_MODEL` defaults to `gpt-image-2`. Text-to-image requests use `/images/generations`; reference-image editing/image-to-image requests use multipart `/images/edits`.
+- Local ComfyUI Klein image processing is configured by `COMFYUI_BASE_URL`, `COMFYUI_KLEIN_WORKFLOW_PATH`, Klein node id env values, KSampler override env values, `COMFYUI_KLEIN_TIMEOUT_MS`, `COMFYUI_KLEIN_POLL_INTERVAL_MS`, and `COMFYUI_KLEIN_FAILURE_POLICY`. It is currently used for car-exterior source-image strategy tasks, including `车型美图`, and people-with-car source-image strategy tasks; it is serialized through `WORKER_LOCAL_IMAGE_CONCURRENCY=1`.
 - Feishu CLI publishing is configured by `FEISHU_CLI_BIN`, optional `FEISHU_CLI_BITABLE_ARGS`, `FEISHU_BITABLE_APP_TOKEN`, `FEISHU_BITABLE_TABLE_ID`, and optional `FEISHU_BITABLE_FIELD_MAP`.
 - Generated-post Feishu CLI publishing defaults to Base fields `动态标题`, `动态正文`, `动态素材`, `内容标签`, and `内容创作来源`; the content creation source value comes from the workspace owner display name on the generated post, with owner id as a historical fallback.
-- Feishu source-link import sync is configured by `FEISHU_SOURCE_IMPORT_ENABLED`, `FEISHU_SOURCE_IMPORT_BASE_TOKEN`, `FEISHU_SOURCE_IMPORT_TABLE_ID`, and optional `FEISHU_SOURCE_IMPORT_FIELD_MAP`. The default source-import target is the user-requested Base `JbpPbSIMqaD75wsZ9fAcBy9mnEe` table `tbllsn3LBZ6mWTyL`; it writes `源链接`, `标题`, `正文`, single-select `平台`, and attachment fields `图片`/`视频` only for TikHub-resolved items kept by the source safety filter.
+- Feishu task-number content import is configured by optional `FEISHU_CONTENT_IMPORT_BASE_TOKEN`, `FEISHU_CONTENT_IMPORT_TABLE_ID`, and `FEISHU_CONTENT_IMPORT_FIELD_MAP`; base token and table id default to the generated-post publish Base/table when omitted. The default read fields are `任务编号`, `动态标题`, `动态正文`, `动态素材`, and `车型`. Imported `车型` values become the content-pool keyword/project for the source items.
+- Feishu distribution audit is configured by optional `FEISHU_DISTRIBUTION_CHECK_BASE_TOKEN`, `FEISHU_DISTRIBUTION_CHECK_TABLE_ID`, `FEISHU_DISTRIBUTION_CHECK_VIEW_ID`, and `FEISHU_DISTRIBUTION_CHECK_FIELD_MAP`. The default target is Base `JbpPbSIMqaD75wsZ9fAcBy9mnEe`, table `tblA0EfoAF9J4ffi`, view `vewE44G31p`; it reads `编号`, `动态标题`, `动态正文`, `动态素材`, `车型`, and writes single-select `是否分发`. Operators can customize the audit prompt from `/distribution-check`; the saved prompt is stored in workspace settings as `distributionCheckPrompt`.
+- Feishu source-link import sync is configured by `FEISHU_SOURCE_IMPORT_ENABLED`, `FEISHU_SOURCE_IMPORT_BASE_TOKEN`, `FEISHU_SOURCE_IMPORT_TABLE_ID`, and optional `FEISHU_SOURCE_IMPORT_FIELD_MAP`. The default source-import target is the user-requested Base `JbpPbSIMqaD75wsZ9fAcBy9mnEe` table `tbllsn3LBZ6mWTyL`; it writes `源链接`, `标题`, `正文`, single-select `平台`, and attachment fields `图片`/`视频` only for supported source-link imports kept by the source safety filter, including TikHub-resolved items and local Xiaopeng BBS/Dongchedi imports.
 - Optional Feishu IM success notification is configured by exactly one of `FEISHU_NOTIFY_CHAT_ID` or `FEISHU_NOTIFY_USER_ID`; it uses bot identity through `lark-cli im +messages-send`.
+- V1/V2 Feishu/Lark conversation task launch is configured by `LARK_TASK_CHAT_IDS`, `LARK_TASK_USER_MAP`, `LARK_TASK_API_TOKEN`, `LARK_TASK_DEFAULT_PLATFORMS`, `LARK_TASK_DEFAULT_COUNT`, and `LARK_TASK_CONFIRM_ABOVE`. The local polling runner reads configured chats through bot identity, while the real-time event runner consumes `im.message.receive_v1` events; both post explicit commands to local `/api/lark/tasks`. Sender open ids must map to existing workspace account ids before a simple run is enqueued.
 - The confirmed default Feishu command shape is `lark-cli base +record-batch-create --as bot --base-token {appToken} --table-id {tableId} --json @{recordPayload}`.
 - Simple-mode throughput knobs include `SIMPLE_RUN_MAX_ITEMS` (fallback `500`, hard ceiling `2000`) and `SIMPLE_RUN_WORKER_CONCURRENCY` (fallback `4`, hard ceiling `10`).
 - Feishu publish queue throughput is controlled by `FEISHU_PUBLISH_WORKER_CONCURRENCY` (fallback `1`, hard ceiling `5`), with a per-owner running-job guard so Feishu CLI writes are serialized per user/owner.

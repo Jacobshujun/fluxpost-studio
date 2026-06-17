@@ -32,6 +32,7 @@ export async function PATCH(request: Request) {
         carExteriorPromptLength: settings.imageStrategyPrompts.carExterior.length,
         textImagePromptLength: settings.imageStrategyPrompts.textImage.length,
         peopleWithCarPromptLength: settings.imageStrategyPrompts.peopleWithCar.length,
+        distributionCheckPromptLength: settings.distributionCheckPrompt.length,
         imageSize: settings.imageSize,
         imageQuality: settings.imageQuality,
       },

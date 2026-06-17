@@ -4,6 +4,16 @@ import { runWithConcurrencyPool } from "./concurrency";
 import { formatImageTasksForPrompt, mergeProductionPlan } from "./creation-controls";
 import { makeDemoPost } from "./mock-data";
 import { buildProductionPlan, formatProductionPlanForPrompt } from "./production-plan";
+import {
+  clampGeneratedTitleMax,
+  countVisibleTitleChars,
+  fitTitleLength,
+  formatTitleStyleInstruction,
+  isGeneratedTitleLengthValid,
+  normalizeGeneratedTitle,
+  pickTitleLengthProfile,
+  type TitleLengthProfile,
+} from "./title-guard";
 import type { GeneratedPost, NormalizedSourceItem, ProductionPlan, SourceImageTask } from "./types";
 
 type RewriteInput = {
@@ -37,38 +47,6 @@ type ChatCompletionResponse = {
   }>;
 };
 
-const minGeneratedTitleChars = 10;
-const maxGeneratedTitleChars = 26;
-
-type TitleLengthProfile = {
-  label: string;
-  min: number;
-  max: number;
-  guidance: string;
-};
-
-const titleLengthProfiles: TitleLengthProfile[] = [
-  { label: "短标题", min: 10, max: 14, guidance: "短促有钩子，适合一眼扫到重点。" },
-  { label: "中标题", min: 15, max: 20, guidance: "信息密度更高，兼顾口语感和具体卖点。" },
-  { label: "长标题", min: 21, max: 26, guidance: "像真实用户笔记标题，允许带一点转折或悬念。" },
-];
-
-function pickTitleLengthProfile() {
-  return titleLengthProfiles[Math.floor(Math.random() * titleLengthProfiles.length)] || titleLengthProfiles[1];
-}
-
-function formatTitleStyleInstruction(profile: TitleLengthProfile) {
-  return [
-    `title 长度规则：本次采用${profile.label}，必须控制在 ${profile.min}-${profile.max} 个可见字符之间。`,
-    `title 全局允许范围是 ${minGeneratedTitleChars}-${maxGeneratedTitleChars} 个可见字符，但本次优先遵守上面的随机档位。`,
-    "title 不要固定 12 字，也不要每次贴区间下限；在本次区间内按信息量自然变化。",
-    `title 风格提示：${profile.guidance}`,
-    "title 必须包含车型/颜色/场景/核心冲突中的至少两个信息点，不能只写泛情绪短句。",
-    "title 避免只使用“有点”“看完了”“到了”“纠结了”等短口语收尾；需要保留真实用户语气，同时提高信息量。",
-    "如果原标题信息不足，请从正文里提取车型、使用场景、价格/销量/颜色/试驾等具体信息补足 title。",
-  ].join("\n");
-}
-
 export async function generatePost(input: RewriteInput): Promise<GeneratedPost> {
   const productionPlan = mergeProductionPlan(input.source.productionPlan || buildProductionPlan(input.source), input.productionPlanOverride);
   if (productionPlan.decision === "observe_only") {
@@ -76,7 +54,11 @@ export async function generatePost(input: RewriteInput): Promise<GeneratedPost> 
   }
 
   if (!appConfig.openaiApiKey) {
-    return makeDemoPost(input.source, input.materialPaths);
+    const demoPost = makeDemoPost(input.source, input.materialPaths);
+    return {
+      ...demoPost,
+      title: clampGeneratedTitleMax(demoPost.title),
+    };
   }
 
   const titleProfile = pickTitleLengthProfile();
@@ -128,7 +110,7 @@ export async function editPostWithPrompt(input: ReviewEditInput): Promise<Genera
   if (!appConfig.openaiApiKey) {
     return {
       ...input.post,
-      title: input.post.title,
+      title: clampGeneratedTitleMax(input.post.title),
       body: `${input.post.body}\n\n修改备注：${input.instruction}`,
       aiNotes: [...input.post.aiNotes, "当前为未配置 OpenAI API Key 时的本地编辑回显。"],
       status: "editing",
@@ -136,9 +118,11 @@ export async function editPostWithPrompt(input: ReviewEditInput): Promise<Genera
     };
   }
 
+  const titleProfile = pickTitleLengthProfile();
   const prompt = [
     "你是社交媒体图文审稿编辑。请根据用户指令修改草稿，保持可发布状态。",
     "输出严格 JSON，字段为 title, body, imagePrompt, aiNotes。",
+    formatTitleStyleInstruction(titleProfile),
     `当前标题: ${input.post.title}`,
     `当前正文: ${input.post.body}`,
     `当前图片提示词: ${input.post.imagePrompt}`,
@@ -149,7 +133,7 @@ export async function editPostWithPrompt(input: ReviewEditInput): Promise<Genera
 
   return {
     ...input.post,
-    title: stringFromJson(json.title, input.post.title),
+    title: clampGeneratedTitleMax(stringFromJson(json.title, input.post.title)),
     body: stringFromJson(json.body, input.post.body),
     imagePrompt: stringFromJson(json.imagePrompt, input.post.imagePrompt),
     aiNotes: arrayOfStrings(json.aiNotes),
@@ -376,21 +360,6 @@ async function repairGeneratedTitleIfNeeded(title: string, input: RewriteInput, 
   return fallback;
 }
 
-function normalizeGeneratedTitle(value: string) {
-  return value.replace(/\s+/g, "").trim();
-}
-
-function isGeneratedTitleLengthValid(value: string, profile?: TitleLengthProfile) {
-  const length = countVisibleTitleChars(value);
-  const min = profile?.min ?? minGeneratedTitleChars;
-  const max = profile?.max ?? maxGeneratedTitleChars;
-  return length >= min && length <= max;
-}
-
-function countVisibleTitleChars(value: string) {
-  return Array.from(value.replace(/\s+/g, "")).length;
-}
-
 function buildLocalTitleFallback(title: string, input: RewriteInput, body: string, profile: TitleLengthProfile) {
   const context = [title, input.source.title, input.source.contentText, body].filter(Boolean).join("\n");
   const vehicle = extractVehicleName(context);
@@ -446,19 +415,4 @@ function stripWeakTitleWords(title: string) {
     .replace(/纠结了?$/, "纠结")
     .replace(/\s+/g, "")
     .trim();
-}
-
-function fitTitleLength(title: string, profile: TitleLengthProfile) {
-  let chars = Array.from(normalizeGeneratedTitle(title));
-  if (chars.length > profile.max) {
-    chars = chars.slice(0, profile.max);
-  }
-  while (chars.length < profile.min) {
-    chars.push(...Array.from("真实体验"));
-    if (chars.length > profile.max) {
-      chars = chars.slice(0, profile.max);
-      break;
-    }
-  }
-  return chars.join("");
 }

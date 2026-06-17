@@ -2,7 +2,7 @@ import { NextResponse } from "next/server";
 import { compactError, recordExecutionLog } from "@/lib/activity-log";
 import { importSourceLinks } from "@/lib/source-link-import";
 import { isWorkspaceSignInError, requireWorkspaceAccount } from "@/lib/workspace-accounts";
-import type { Platform } from "@/lib/types";
+import type { SourceLinkPlatform } from "@/lib/types";
 
 export const runtime = "nodejs";
 
@@ -13,7 +13,7 @@ export async function POST(request: Request) {
     const body = (await request.json()) as {
       query?: string;
       links?: string[] | string;
-      platform?: Platform | "auto";
+      platform?: SourceLinkPlatform | "auto";
       cookie?: string;
     };
     const input = parseLinkImportInput(body);
@@ -37,7 +37,7 @@ export async function POST(request: Request) {
 function parseLinkImportInput(body: {
   query?: string;
   links?: string[] | string;
-  platform?: Platform | "auto";
+  platform?: SourceLinkPlatform | "auto";
   cookie?: string;
 }) {
   const query = typeof body.query === "string" ? body.query.trim() : "";
@@ -58,6 +58,6 @@ function parseLinkImportInput(body: {
   };
 }
 
-function isPlatform(value: unknown): value is Platform {
-  return value === "wechat_channels" || value === "xiaohongshu" || value === "douyin" || value === "weibo";
+function isPlatform(value: unknown): value is SourceLinkPlatform {
+  return value === "wechat_channels" || value === "xiaohongshu" || value === "douyin" || value === "weibo" || value === "xiaopeng_bbs" || value === "dongchedi";
 }

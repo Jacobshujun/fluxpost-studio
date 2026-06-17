@@ -385,7 +385,7 @@ function isPathInside(filePath: string, parentPath: string) {
 }
 
 function resolveSourceTitle(item: NormalizedSourceItem) {
-  return compactText(item.title, 240) || compactText(item.contentText, 80) || `${formatPlatform(item.platform)} ${item.sourceId}`;
+  return compactText(item.title, 240) || "";
 }
 
 function resolveSourceBody(item: NormalizedSourceItem) {
@@ -426,6 +426,14 @@ function resolveCanonicalSourceUrl(item: NormalizedSourceItem) {
 
   if (item.platform === "weibo" && /^[A-Za-z0-9]+$/.test(sourceId) && !sourceId.startsWith("weibo-")) {
     return `https://weibo.com/detail/${sourceId}`;
+  }
+
+  if (item.platform === "xiaopeng_bbs" && /^\d{4,20}$/.test(sourceId)) {
+    return `https://bbs.xiaopeng.com/thread/${sourceId}?tidType=1`;
+  }
+
+  if (item.platform === "dongchedi" && /^\d{8,24}$/.test(sourceId)) {
+    return `https://www.dongchedi.com/ugc/article/${sourceId}`;
   }
 
   return "";
@@ -480,6 +488,9 @@ function formatPlatform(platform: Platform) {
     weibo: "微博",
     xiaohongshu: "小红书",
     wechat_channels: "视频号",
+    feishu: "飞书",
+    xiaopeng_bbs: "小鹏社区",
+    dongchedi: "\u61c2\u8f66\u5e1d",
   };
   return labels[platform];
 }

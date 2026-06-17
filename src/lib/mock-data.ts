@@ -7,6 +7,9 @@ export function makeDemoSourceItems(platform: Platform, count: number): Normaliz
     xiaohongshu: "小红书",
     douyin: "抖音",
     weibo: "微博",
+    feishu: "飞书",
+    xiaopeng_bbs: "小鹏社区",
+    dongchedi: "\u61c2\u8f66\u5e1d",
   };
 
   return Array.from({ length: Math.min(Math.max(count, 1), 8) }, (_, index) => ({

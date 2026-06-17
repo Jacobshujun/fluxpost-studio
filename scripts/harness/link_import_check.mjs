@@ -189,8 +189,27 @@ const dyDetailItems = normalizeTikHubResponse({
     },
   },
 }, "douyin");
-if (dyDetailItems[0]?.sourceId !== "7630774012096674665" || dyDetailItems[0]?.contentText !== "Douyin note fixture") {
-  throw new Error("Douyin source-link normalization should unwrap aweme_detail records.");
+if (
+  dyDetailItems[0]?.sourceId !== "7630774012096674665" ||
+  dyDetailItems[0]?.contentText !== "Douyin note fixture" ||
+  dyDetailItems[0]?.title
+) {
+  throw new Error("Douyin source-link normalization should unwrap aweme_detail records without treating desc as title.");
+}
+
+const dyTitledItems = normalizeTikHubResponse({
+  data: {
+    aweme_detail: {
+      aweme_id: "7630774012096674666",
+      title: "Real Douyin title",
+      desc: "Douyin body text",
+      aweme_type: 68,
+      statistics: {},
+    },
+  },
+}, "douyin");
+if (dyTitledItems[0]?.title !== "Real Douyin title" || dyTitledItems[0]?.contentText !== "Douyin body text") {
+  throw new Error("Douyin source-link normalization should keep explicit title fields separate from desc body text.");
 }
 
 const weiboUrl = new URL(buildWeiboPostDetailPath("5300929016633658"), "https://example.invalid");

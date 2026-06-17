@@ -4,6 +4,41 @@ import vm from "node:vm";
 import ts from "typescript";
 
 const projectRoot = process.cwd();
+const typesSource = readFileSync(path.join(projectRoot, "src/lib/types.ts"), "utf8");
+const sourceTaggingSource = readFileSync(path.join(projectRoot, "src/lib/source-tagging.ts"), "utf8");
+
+if (!/visualTagOptions = \["APP", "内饰空间", "汽车外观", "车型美图", "带文字图", "人车美图"\]/.test(typesSource)) {
+  throw new Error("Visual tag options must include APP and 车型美图 in the canonical allowed set.");
+}
+
+if (!typesSource.includes('"提车记录"')) {
+  throw new Error("Content tag options must include 提车记录.");
+}
+
+for (const expected of [
+  "提车记录：车主提车",
+  "该标签用于归档，不进入后续内容生产",
+  "提车作业",
+]) {
+  if (!sourceTaggingSource.includes(expected)) {
+    throw new Error(`Content tagging prompt must document pickup-record boundaries: ${expected}`);
+  }
+}
+
+if (!/const contentTagAliases:[\s\S]*提车作业:[\s\S]*"提车记录"/.test(sourceTaggingSource)) {
+  throw new Error("Content tag aliases must normalize pickup-record synonyms to 提车记录.");
+}
+
+for (const expected of [
+  "标签判定优先级：APP > 人车美图 > 车型美图 > 汽车外观 > 带文字图 > 内饰空间",
+  "APP：手机 App 截图",
+  "车型美图：纯车外观美图",
+  "人车美图：车外观和人物同时明显",
+]) {
+  if (!sourceTaggingSource.includes(expected)) {
+    throw new Error(`Visual tagging prompt must document the new label boundary: ${expected}`);
+  }
+}
 
 function loadTsModule(relativePath, requireMap = {}, sandboxExtras = {}) {
   const sourcePath = path.join(projectRoot, relativePath);
@@ -116,7 +151,7 @@ async function fetchMock(url, options = {}) {
     }
     const content = images.length
       ? { visualTags: [{ id: "image-2", tag: "汽车外观", confidence: 0.8, reason: "valid image" }] }
-      : { contentTags: ["经验干货"], confidence: 0.8, reasons: ["content"] };
+      : { contentTags: ["提车作业", "经验干货"], confidence: 0.8, reasons: ["content"] };
     return makeResponse({
       body: Buffer.from(JSON.stringify({ choices: [{ message: { content: JSON.stringify(content) } }] })),
       headers: { "content-type": "application/json" },
@@ -163,8 +198,8 @@ const sourceTagging = loadTsModule(
     "./media-url-filter": mediaFilter,
     "./video-frame-policy": videoFramePolicy,
     "./types": {
-      contentTagOptions: ["经验干货", "新车曝光"],
-      visualTagOptions: ["内饰空间", "汽车外观", "带文字图", "人车美图"],
+      contentTagOptions: ["经验干货", "新车曝光", "提车记录"],
+      visualTagOptions: ["APP", "内饰空间", "汽车外观", "车型美图", "带文字图", "人车美图"],
     },
   },
   {
@@ -187,6 +222,9 @@ const tagged = await sourceTagging.tagSourceItem({
 
 if (remoteFetches !== 2) {
   throw new Error(`Expected both remote image URLs to be preflighted, got ${remoteFetches}.`);
+}
+if (!tagged.contentTagging?.tags.includes("提车记录")) {
+  throw new Error("Content tagging should normalize 提车作业 to the canonical 提车记录 tag.");
 }
 if (modelImageUrls.length !== 1) {
   throw new Error(`Expected one valid model image after skipping invalid remote assets, got ${modelImageUrls.length}.`);

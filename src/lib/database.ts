@@ -8,6 +8,8 @@ import type {
   ExecutionLogEntry,
   FeishuPublishJob,
   GeneratedPost,
+  ImageGenerationQueueJob,
+  LarkTaskLaunch,
   MaterialLibrarySnapshot,
   SimpleRun,
   SimpleRunQueueItem,
@@ -74,6 +76,38 @@ type FeishuPublishQueueRow = {
   data_json: unknown;
 };
 
+type ImageGenerationQueueRow = {
+  id: string;
+  provider: ImageGenerationQueueJob["provider"];
+  status: ImageGenerationQueueJob["status"];
+  priority: number;
+  attempts: number;
+  max_attempts: number;
+  run_after: string;
+  locked_by?: string | null;
+  locked_until?: string | null;
+  created_at: string;
+  updated_at: string;
+  started_at?: string | null;
+  completed_at?: string | null;
+  error?: string | null;
+  data_json: unknown;
+};
+
+type LarkTaskLaunchRow = {
+  id: string;
+  message_id: string;
+  chat_id: string;
+  sender_id: string;
+  owner_user_id?: string | null;
+  run_id?: string | null;
+  status: LarkTaskLaunch["status"];
+  created_at: string;
+  updated_at: string;
+  error?: string | null;
+  data_json: unknown;
+};
+
 type WorkspaceAccountRow = {
   id: string;
   username: string;
@@ -111,7 +145,9 @@ type StoreTable =
   | "runtime_posts"
   | "simple_runs"
   | "simple_run_queue"
-  | "feishu_publish_queue";
+  | "image_generation_queue"
+  | "feishu_publish_queue"
+  | "lark_task_launches";
 
 export type DatabaseBackend = "sqlite" | "postgres";
 
@@ -591,6 +627,186 @@ export async function failSimpleRunQueueItemByRunId(runId: string, error: string
         error = ?
     WHERE run_id = ? AND status IN ('queued', 'running')
   `).run(now, now, error, runId);
+}
+
+export async function saveImageGenerationQueueJobToDb(job: ImageGenerationQueueJob) {
+  await ensureDatabaseReady();
+  if (getDatabaseBackend() === "postgres") {
+    await getPostgresPool().query(
+      `
+        INSERT INTO image_generation_queue (
+          id, provider, status, priority, attempts, max_attempts, run_after,
+          locked_by, locked_until, created_at, updated_at, started_at,
+          completed_at, error, data_json
+        )
+        VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15::jsonb)
+        ON CONFLICT(id) DO UPDATE SET
+          provider = excluded.provider,
+          status = excluded.status,
+          priority = excluded.priority,
+          attempts = excluded.attempts,
+          max_attempts = excluded.max_attempts,
+          run_after = excluded.run_after,
+          locked_by = excluded.locked_by,
+          locked_until = excluded.locked_until,
+          created_at = image_generation_queue.created_at,
+          updated_at = excluded.updated_at,
+          started_at = excluded.started_at,
+          completed_at = excluded.completed_at,
+          error = excluded.error,
+          data_json = excluded.data_json
+      `,
+      [
+        job.id,
+        job.provider,
+        job.status,
+        job.priority,
+        job.attempts,
+        job.maxAttempts,
+        job.runAfter,
+        job.lockedBy || null,
+        job.lockedUntil || null,
+        job.createdAt,
+        job.updatedAt,
+        job.startedAt || null,
+        job.completedAt || null,
+        job.error || null,
+        toJson(job),
+      ],
+    );
+    return job;
+  }
+
+  getSqliteDatabase().prepare(`
+    INSERT INTO image_generation_queue (
+      id, provider, status, priority, attempts, max_attempts, run_after,
+      locked_by, locked_until, created_at, updated_at, started_at,
+      completed_at, error, data_json
+    )
+    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+    ON CONFLICT(id) DO UPDATE SET
+      provider = excluded.provider,
+      status = excluded.status,
+      priority = excluded.priority,
+      attempts = excluded.attempts,
+      max_attempts = excluded.max_attempts,
+      run_after = excluded.run_after,
+      locked_by = excluded.locked_by,
+      locked_until = excluded.locked_until,
+      created_at = image_generation_queue.created_at,
+      updated_at = excluded.updated_at,
+      started_at = excluded.started_at,
+      completed_at = excluded.completed_at,
+      error = excluded.error,
+      data_json = excluded.data_json
+  `).run(
+    job.id,
+    job.provider,
+    job.status,
+    job.priority,
+    job.attempts,
+    job.maxAttempts,
+    job.runAfter,
+    job.lockedBy || null,
+    job.lockedUntil || null,
+    job.createdAt,
+    job.updatedAt,
+    job.startedAt || null,
+    job.completedAt || null,
+    job.error || null,
+    toJson(job),
+  );
+  return job;
+}
+
+export async function getImageGenerationQueueJobFromDb(jobId: string) {
+  await ensureDatabaseReady();
+  if (getDatabaseBackend() === "postgres") {
+    const result = await getPostgresPool().query<ImageGenerationQueueRow>("SELECT * FROM image_generation_queue WHERE id = $1", [jobId]);
+    return result.rows[0] ? fromImageGenerationQueueRow(result.rows[0]) : undefined;
+  }
+
+  const row = getSqliteDatabase().prepare("SELECT * FROM image_generation_queue WHERE id = ?").get(jobId) as ImageGenerationQueueRow | undefined;
+  return row ? fromImageGenerationQueueRow(row) : undefined;
+}
+
+export async function getLarkTaskLaunchByMessageId(messageId: string) {
+  await ensureDatabaseReady();
+  if (getDatabaseBackend() === "postgres") {
+    const result = await getPostgresPool().query<LarkTaskLaunchRow>("SELECT * FROM lark_task_launches WHERE message_id = $1", [messageId]);
+    return result.rows[0] ? fromLarkTaskLaunchRow(result.rows[0]) : undefined;
+  }
+
+  const row = getSqliteDatabase().prepare("SELECT * FROM lark_task_launches WHERE message_id = ?").get(messageId) as LarkTaskLaunchRow | undefined;
+  return row ? fromLarkTaskLaunchRow(row) : undefined;
+}
+
+export async function saveLarkTaskLaunchToDb(launch: LarkTaskLaunch) {
+  await ensureDatabaseReady();
+  if (getDatabaseBackend() === "postgres") {
+    await getPostgresPool().query(
+      `
+        INSERT INTO lark_task_launches (
+          id, message_id, chat_id, sender_id, owner_user_id, run_id,
+          status, created_at, updated_at, error, data_json
+        )
+        VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11::jsonb)
+        ON CONFLICT(message_id) DO UPDATE SET
+          chat_id = excluded.chat_id,
+          sender_id = excluded.sender_id,
+          owner_user_id = excluded.owner_user_id,
+          run_id = COALESCE(lark_task_launches.run_id, excluded.run_id),
+          status = excluded.status,
+          updated_at = excluded.updated_at,
+          error = excluded.error,
+          data_json = excluded.data_json
+      `,
+      [
+        launch.id,
+        launch.messageId,
+        launch.chatId,
+        launch.senderId,
+        launch.ownerUserId || null,
+        launch.runId || null,
+        launch.status,
+        launch.createdAt,
+        launch.updatedAt,
+        launch.error || null,
+        toJson(launch),
+      ],
+    );
+    return launch;
+  }
+
+  getSqliteDatabase().prepare(`
+    INSERT INTO lark_task_launches (
+      id, message_id, chat_id, sender_id, owner_user_id, run_id,
+      status, created_at, updated_at, error, data_json
+    )
+    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+    ON CONFLICT(message_id) DO UPDATE SET
+      chat_id = excluded.chat_id,
+      sender_id = excluded.sender_id,
+      owner_user_id = excluded.owner_user_id,
+      run_id = COALESCE(lark_task_launches.run_id, excluded.run_id),
+      status = excluded.status,
+      updated_at = excluded.updated_at,
+      error = excluded.error,
+      data_json = excluded.data_json
+  `).run(
+    launch.id,
+    launch.messageId,
+    launch.chatId,
+    launch.senderId,
+    launch.ownerUserId || null,
+    launch.runId || null,
+    launch.status,
+    launch.createdAt,
+    launch.updatedAt,
+    launch.error || null,
+    toJson(launch),
+  );
+  return launch;
 }
 
 export async function saveFeishuPublishJobToDb(job: FeishuPublishJob) {
@@ -1142,6 +1358,62 @@ export async function writeExecutionLogsToDb(entries: ExecutionLogEntry[]) {
   ]);
 }
 
+export async function appendExecutionLogToDb(entry: ExecutionLogEntry, limit = 300) {
+  await ensureDatabaseReady();
+  const maxRows = Math.max(1, Math.floor(limit));
+
+  if (getDatabaseBackend() === "postgres") {
+    const client = await getPostgresPool().connect();
+    try {
+      await client.query("BEGIN");
+      await client.query(
+        `
+          INSERT INTO execution_logs (id, scope, action, status, created_at, data_json)
+          VALUES ($1, $2, $3, $4, $5, $6::jsonb)
+          ON CONFLICT(id) DO NOTHING
+        `,
+        [entry.id, entry.scope, entry.action, entry.status, entry.createdAt, toJson(entry)],
+      );
+      await client.query(
+        `
+          DELETE FROM execution_logs
+          WHERE id IN (
+            SELECT id
+            FROM execution_logs
+            ORDER BY created_at DESC, id DESC
+            OFFSET $1
+          )
+        `,
+        [maxRows],
+      );
+      await client.query("COMMIT");
+    } catch (error) {
+      await client.query("ROLLBACK");
+      throw error;
+    } finally {
+      client.release();
+    }
+    return;
+  }
+
+  const db = getSqliteDatabase();
+  runSqliteTransaction(db, () => {
+    db.prepare(`
+      INSERT OR IGNORE INTO execution_logs (id, scope, action, status, created_at, data_json)
+      VALUES (?, ?, ?, ?, ?, ?)
+    `).run(entry.id, entry.scope, entry.action, entry.status, entry.createdAt, toJson(entry));
+    db.prepare(`
+      DELETE FROM execution_logs
+      WHERE id IN (
+        SELECT id
+        FROM execution_logs
+        ORDER BY created_at DESC, id DESC
+        LIMIT -1 OFFSET ?
+      )
+    `).run(maxRows);
+  });
+}
+
 export async function saveCrawlJobToDb(job: CrawlJob) {
   await ensureDatabaseReady();
   if (getDatabaseBackend() === "postgres") {
@@ -1572,6 +1844,26 @@ function createSqliteSchema(db: SqliteDatabase) {
     CREATE INDEX IF NOT EXISTS idx_simple_run_queue_ready ON simple_run_queue(status, run_after, priority DESC, created_at ASC);
     CREATE INDEX IF NOT EXISTS idx_simple_run_queue_run_id ON simple_run_queue(run_id);
 
+    CREATE TABLE IF NOT EXISTS image_generation_queue (
+      id TEXT PRIMARY KEY,
+      provider TEXT NOT NULL,
+      status TEXT NOT NULL,
+      priority INTEGER NOT NULL DEFAULT 0,
+      attempts INTEGER NOT NULL DEFAULT 0,
+      max_attempts INTEGER NOT NULL DEFAULT 1,
+      run_after TEXT NOT NULL,
+      locked_by TEXT,
+      locked_until TEXT,
+      created_at TEXT NOT NULL,
+      updated_at TEXT NOT NULL,
+      started_at TEXT,
+      completed_at TEXT,
+      error TEXT,
+      data_json TEXT NOT NULL
+    );
+    CREATE INDEX IF NOT EXISTS idx_image_generation_queue_ready ON image_generation_queue(status, run_after, priority DESC, created_at ASC);
+    CREATE INDEX IF NOT EXISTS idx_image_generation_queue_provider_status ON image_generation_queue(provider, status, created_at ASC);
+
     CREATE TABLE IF NOT EXISTS feishu_publish_queue (
       id TEXT PRIMARY KEY,
       owner_user_id TEXT NOT NULL,
@@ -1594,6 +1886,23 @@ function createSqliteSchema(db: SqliteDatabase) {
     CREATE INDEX IF NOT EXISTS idx_feishu_publish_queue_ready ON feishu_publish_queue(status, run_after, priority DESC, created_at ASC);
     CREATE INDEX IF NOT EXISTS idx_feishu_publish_queue_owner_status ON feishu_publish_queue(owner_user_id, status, created_at ASC);
     CREATE INDEX IF NOT EXISTS idx_feishu_publish_queue_source_run_id ON feishu_publish_queue(source_run_id);
+
+    CREATE TABLE IF NOT EXISTS lark_task_launches (
+      id TEXT PRIMARY KEY,
+      message_id TEXT NOT NULL UNIQUE,
+      chat_id TEXT NOT NULL,
+      sender_id TEXT NOT NULL,
+      owner_user_id TEXT,
+      run_id TEXT,
+      status TEXT NOT NULL,
+      created_at TEXT NOT NULL,
+      updated_at TEXT NOT NULL,
+      error TEXT,
+      data_json TEXT NOT NULL
+    );
+    CREATE INDEX IF NOT EXISTS idx_lark_task_launches_message_id ON lark_task_launches(message_id);
+    CREATE INDEX IF NOT EXISTS idx_lark_task_launches_run_id ON lark_task_launches(run_id);
+    CREATE INDEX IF NOT EXISTS idx_lark_task_launches_created_at ON lark_task_launches(created_at DESC);
   `);
 }
 
@@ -1746,6 +2055,26 @@ const postgresSchemaSql = `
   CREATE INDEX IF NOT EXISTS idx_simple_run_queue_ready ON simple_run_queue(status, run_after, priority DESC, created_at ASC);
   CREATE INDEX IF NOT EXISTS idx_simple_run_queue_run_id ON simple_run_queue(run_id);
 
+  CREATE TABLE IF NOT EXISTS image_generation_queue (
+    id TEXT PRIMARY KEY,
+    provider TEXT NOT NULL,
+    status TEXT NOT NULL,
+    priority INTEGER NOT NULL DEFAULT 0,
+    attempts INTEGER NOT NULL DEFAULT 0,
+    max_attempts INTEGER NOT NULL DEFAULT 1,
+    run_after TIMESTAMPTZ NOT NULL,
+    locked_by TEXT,
+    locked_until TIMESTAMPTZ,
+    created_at TIMESTAMPTZ NOT NULL,
+    updated_at TIMESTAMPTZ NOT NULL,
+    started_at TIMESTAMPTZ,
+    completed_at TIMESTAMPTZ,
+    error TEXT,
+    data_json JSONB NOT NULL
+  );
+  CREATE INDEX IF NOT EXISTS idx_image_generation_queue_ready ON image_generation_queue(status, run_after, priority DESC, created_at ASC);
+  CREATE INDEX IF NOT EXISTS idx_image_generation_queue_provider_status ON image_generation_queue(provider, status, created_at ASC);
+
   CREATE TABLE IF NOT EXISTS feishu_publish_queue (
     id TEXT PRIMARY KEY,
     owner_user_id TEXT NOT NULL,
@@ -1768,6 +2097,23 @@ const postgresSchemaSql = `
   CREATE INDEX IF NOT EXISTS idx_feishu_publish_queue_ready ON feishu_publish_queue(status, run_after, priority DESC, created_at ASC);
   CREATE INDEX IF NOT EXISTS idx_feishu_publish_queue_owner_status ON feishu_publish_queue(owner_user_id, status, created_at ASC);
   CREATE INDEX IF NOT EXISTS idx_feishu_publish_queue_source_run_id ON feishu_publish_queue(source_run_id);
+
+  CREATE TABLE IF NOT EXISTS lark_task_launches (
+    id TEXT PRIMARY KEY,
+    message_id TEXT NOT NULL UNIQUE,
+    chat_id TEXT NOT NULL,
+    sender_id TEXT NOT NULL,
+    owner_user_id TEXT,
+    run_id TEXT,
+    status TEXT NOT NULL,
+    created_at TIMESTAMPTZ NOT NULL,
+    updated_at TIMESTAMPTZ NOT NULL,
+    error TEXT,
+    data_json JSONB NOT NULL
+  );
+  CREATE INDEX IF NOT EXISTS idx_lark_task_launches_message_id ON lark_task_launches(message_id);
+  CREATE INDEX IF NOT EXISTS idx_lark_task_launches_run_id ON lark_task_launches(run_id);
+  CREATE INDEX IF NOT EXISTS idx_lark_task_launches_created_at ON lark_task_launches(created_at DESC);
 `;
 
 async function migrateLegacyJsonToPostgres() {
@@ -2089,6 +2435,45 @@ function fromFeishuPublishQueueRow(row: FeishuPublishQueueRow): FeishuPublishJob
   };
 }
 
+function fromImageGenerationQueueRow(row: ImageGenerationQueueRow): ImageGenerationQueueJob {
+  const data = fromJson<ImageGenerationQueueJob>(row.data_json);
+  return {
+    ...data,
+    id: row.id,
+    provider: row.provider,
+    status: row.status,
+    priority: Number(row.priority || 0),
+    attempts: Number(row.attempts || 0),
+    maxAttempts: Number(row.max_attempts || 1),
+    runAfter: normalizeDateValue(row.run_after),
+    lockedBy: row.locked_by || undefined,
+    lockedUntil: row.locked_until ? normalizeDateValue(row.locked_until) : undefined,
+    createdAt: normalizeDateValue(row.created_at),
+    updatedAt: normalizeDateValue(row.updated_at),
+    startedAt: row.started_at ? normalizeDateValue(row.started_at) : undefined,
+    completedAt: row.completed_at ? normalizeDateValue(row.completed_at) : undefined,
+    error: row.error || data.error,
+  };
+}
+
+function fromLarkTaskLaunchRow(row: LarkTaskLaunchRow): LarkTaskLaunch {
+  const data = fromJson<Partial<LarkTaskLaunch>>(row.data_json);
+  return {
+    ...data,
+    id: row.id,
+    messageId: row.message_id,
+    chatId: row.chat_id,
+    senderId: row.sender_id,
+    ownerUserId: row.owner_user_id || data.ownerUserId,
+    runId: row.run_id || data.runId,
+    status: row.status,
+    createdAt: normalizeDateValue(row.created_at),
+    updatedAt: normalizeDateValue(row.updated_at),
+    error: row.error || data.error,
+    commandText: data.commandText || "",
+  };
+}
+
 function fromWorkspaceAccountRow(row: WorkspaceAccountRow): WorkspaceAccountRecord {
   const data = fromJson<Partial<WorkspaceAccountRecord>>(row.data_json);
   return {
@@ -2138,7 +2523,9 @@ function assertStoreTable(table: StoreTable) {
     "runtime_posts",
     "simple_runs",
     "simple_run_queue",
+    "image_generation_queue",
     "feishu_publish_queue",
+    "lark_task_launches",
   ];
   if (!allowedTables.includes(table)) throw new Error(`Unsupported store table: ${table}`);
 }

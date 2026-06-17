@@ -33,6 +33,28 @@ if (directSourceSyncCalls.length !== 1) {
 }
 
 assertContains(
+  simpleRuns,
+  /const sourceStatusWarnings = await persistApprovedPostsForSimplePublish\(approvedPosts,\s*access,\s*run\.id\)/,
+  "Simple publish approval should use the serialized local persistence helper.",
+);
+
+assertContains(
+  simpleRuns,
+  /async function persistApprovedPostsForSimplePublish[\s\S]*for \(const post of posts\)[\s\S]*await persistApprovedPostForSimplePublish\(post,\s*access\);[\s\S]*await syncSimpleSourceStatus\(post,\s*access,\s*runId,\s*"approved"\)/,
+  "Simple publish approval persistence should process posts sequentially before Feishu enqueue.",
+);
+
+if (/Promise\.all\(\s*approvedPosts\.map/.test(simpleRuns)) {
+  throw new Error("Simple publish approval persistence must not fan out approvedPosts with Promise.all.");
+}
+
+assertContains(
+  simpleRuns,
+  /function isSimpleRunTransientDatabaseError\(error: unknown\)[\s\S]*code === "40P01"[\s\S]*code === "40001"[\s\S]*message\.includes\("死锁"\)/,
+  "Simple publish approval persistence should retry transient PostgreSQL deadlock/serialization conflicts.",
+);
+
+assertContains(
   contentPool,
   /const sourceRewriteMaxAttempts = 3;/,
   "Source rewrite status sync should retry transient PostgreSQL conflicts.",

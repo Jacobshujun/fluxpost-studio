@@ -3,6 +3,7 @@ export const concurrencyConfig = {
   media: readConcurrencyEnv("WORKER_MEDIA_CONCURRENCY", 30, 100),
   gpt: readConcurrencyEnv("WORKER_GPT_CONCURRENCY", 50, 50),
   image: readConcurrencyEnv("WORKER_IMAGE_CONCURRENCY", 100, 100),
+  localImage: readConcurrencyEnv("WORKER_LOCAL_IMAGE_CONCURRENCY", 1, 1),
   feishu: readConcurrencyEnv("WORKER_FEISHU_CONCURRENCY", 50, 50),
   feishuAttachment: readConcurrencyEnv("WORKER_FEISHU_ATTACHMENT_CONCURRENCY", 3, 10),
   production: readConcurrencyEnv("WORKER_PRODUCTION_CONCURRENCY", 30, 50),
