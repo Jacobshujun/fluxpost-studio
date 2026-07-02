@@ -3,7 +3,7 @@ import { appConfig, openaiTextUrl } from "./config";
 import { runWithConcurrencyPool } from "./concurrency";
 import { formatImageTasksForPrompt, mergeProductionPlan } from "./creation-controls";
 import { makeDemoPost } from "./mock-data";
-import { buildProductionPlan, formatProductionPlanForPrompt } from "./production-plan";
+import { buildProductionPlan, formatNonTextProductionConstraintsForPrompt } from "./production-plan";
 import {
   clampGeneratedTitleMax,
   countVisibleTitleChars,
@@ -47,6 +47,11 @@ type ChatCompletionResponse = {
   }>;
 };
 
+type JsonModelOptions = {
+  webSearch?: boolean;
+  logLabel?: string;
+};
+
 export async function generatePost(input: RewriteInput): Promise<GeneratedPost> {
   const productionPlan = mergeProductionPlan(input.source.productionPlan || buildProductionPlan(input.source), input.productionPlanOverride);
   if (productionPlan.decision === "observe_only") {
@@ -63,10 +68,13 @@ export async function generatePost(input: RewriteInput): Promise<GeneratedPost> 
 
   const titleProfile = pickTitleLengthProfile();
   const titleStyleInstruction = formatTitleStyleInstruction(titleProfile);
+  const userTextInstruction = input.instruction?.trim() || "基于用户提供的原文信息重写，保留事实主体，重排结构和表达，避免复述原文句式。";
   const prompt = [
     "你是社交媒体图文内容制作专家。不要直接仿写原文，而是提取信息点、爆款表达模型和平台语感后进行原创重构。",
-    "必须遵守制作策略：行业图文只洗稿洗图，不结合车型资料；竞品图文只分析创意并用小鹏素材重构；竞品视频不采用。",
-    `制作策略:\n${formatProductionPlanForPrompt(productionPlan)}`,
+    "文案生产策略完全以用户文案提示词为准；自动识别出的内容方向只用于制作准入、素材需求和图片策略，不得覆盖用户文案提示词。",
+    "除非用户文案提示词明确要求切换品牌、车型或视角，否则必须保留原文事实主体，不要因为竞品识别自动改成小鹏、G6 或其他车型。",
+    `用户文案提示词:\n${userTextInstruction}`,
+    `非文案制作约束:\n${formatNonTextProductionConstraintsForPrompt(productionPlan)}`,
     `用户选择的图片处理任务:\n${formatImageTasksForPrompt(input.imageTasks)}`,
     "如果用户选择了图片任务，imagePrompt 必须只围绕被选中的图片/关键帧展开，不要处理未选中的图片。",
     "如果图片策略是原图引用，必须保留原图作为配图，不要提出洗图或重构要求。",
@@ -80,7 +88,6 @@ export async function generatePost(input: RewriteInput): Promise<GeneratedPost> 
     `原内容: ${input.source.contentText || ""}`,
     `数据: ${JSON.stringify(input.source.metrics)}`,
     `用户素材路径: ${input.materialPaths.join(", ") || "未提供"}`,
-    `额外要求: ${input.instruction || "无"}`,
   ].join("\n");
 
   const json = await callOpenAIForJson(prompt);
@@ -142,25 +149,27 @@ export async function editPostWithPrompt(input: ReviewEditInput): Promise<Genera
   };
 }
 
-async function callOpenAIForJson(prompt: string): Promise<Record<string, unknown>> {
+export async function callOpenAIForJson(prompt: string, options: JsonModelOptions = {}): Promise<Record<string, unknown>> {
   const text =
     appConfig.openaiTextEndpoint === "chat"
-      ? await callChatCompletions(prompt)
-      : await callResponsesApi(prompt);
+      ? await callChatCompletions(prompt, options)
+      : await callResponsesApi(prompt, options);
 
   return parseJsonObject(text);
 }
 
-async function callResponsesApi(prompt: string) {
+async function callResponsesApi(prompt: string, options: JsonModelOptions = {}) {
   const startedAt = Date.now();
+  const webSearch = options.webSearch === true;
   await recordExecutionLog({
     scope: "openai/text",
     action: "请求 Responses 文本模型",
     status: "running",
-    message: "准备发送图文生成/编辑 Prompt",
+    message: options.logLabel || "准备发送图文生成/编辑 Prompt",
     details: {
       model: appConfig.openaiTextModel,
       promptLength: prompt.length,
+      webSearch,
     },
   });
   const response = await runWithConcurrencyPool("gpt", () =>
@@ -170,6 +179,12 @@ async function callResponsesApi(prompt: string) {
       body: JSON.stringify({
         model: appConfig.openaiTextModel,
         input: prompt,
+        ...(webSearch
+          ? {
+              tools: [{ type: "web_search" }],
+              tool_choice: { type: "web_search" },
+            }
+          : {}),
         text: {
           format: {
             type: "json_object",
@@ -190,6 +205,7 @@ async function callResponsesApi(prompt: string) {
       details: {
         status: response.status,
         model: appConfig.openaiTextModel,
+        webSearch,
       },
     });
     throw new Error(`OpenAI request failed: ${response.status} ${body.slice(0, 260)}`);
@@ -205,6 +221,7 @@ async function callResponsesApi(prompt: string) {
     details: {
       status: response.status,
       model: appConfig.openaiTextModel,
+      webSearch,
     },
   });
   return (
@@ -214,7 +231,10 @@ async function callResponsesApi(prompt: string) {
   );
 }
 
-async function callChatCompletions(prompt: string) {
+async function callChatCompletions(prompt: string, options: JsonModelOptions = {}) {
+  if (options.webSearch === true) {
+    throw new Error("Original-mode web search requires OPENAI_TEXT_ENDPOINT=responses; Chat Completions does not support the web_search tool.");
+  }
   const startedAt = Date.now();
   await recordExecutionLog({
     scope: "openai/text",

@@ -7,6 +7,10 @@ export const concurrencyConfig = {
   feishu: readConcurrencyEnv("WORKER_FEISHU_CONCURRENCY", 50, 50),
   feishuAttachment: readConcurrencyEnv("WORKER_FEISHU_ATTACHMENT_CONCURRENCY", 3, 10),
   production: readConcurrencyEnv("WORKER_PRODUCTION_CONCURRENCY", 30, 50),
+  distributionRecord: readConcurrencyEnv("WORKER_DISTRIBUTION_RECORD_CONCURRENCY", 2, 10),
+  distributionGpt: readConcurrencyEnv("WORKER_DISTRIBUTION_GPT_CONCURRENCY", 6, 15),
+  distributionFeishuRead: readConcurrencyEnv("WORKER_DISTRIBUTION_FEISHU_READ_CONCURRENCY", 2, 10),
+  distributionFeishuWrite: readConcurrencyEnv("WORKER_DISTRIBUTION_FEISHU_WRITE_CONCURRENCY", 1, 3),
 } as const;
 
 export type ConcurrencyPoolName = keyof typeof concurrencyConfig;

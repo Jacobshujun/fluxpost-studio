@@ -15,6 +15,8 @@ export async function POST(request: Request) {
       links?: string[] | string;
       platform?: SourceLinkPlatform | "auto";
       cookie?: string;
+      videoFrameOriginalReference?: boolean;
+      enableVideoTranscription?: boolean;
     };
     const input = parseLinkImportInput(body);
     const result = await importSourceLinks({ ...input, owner: account });
@@ -39,6 +41,8 @@ function parseLinkImportInput(body: {
   links?: string[] | string;
   platform?: SourceLinkPlatform | "auto";
   cookie?: string;
+  videoFrameOriginalReference?: boolean;
+  enableVideoTranscription?: boolean;
 }) {
   const query = typeof body.query === "string" ? body.query.trim() : "";
   if (!query) throw new Error("Query is required");
@@ -55,6 +59,8 @@ function parseLinkImportInput(body: {
     links,
     platform: isPlatform(body.platform) ? body.platform : undefined,
     cookie: typeof body.cookie === "string" ? body.cookie : undefined,
+    videoFrameOriginalReference: body.videoFrameOriginalReference !== false,
+    enableVideoTranscription: body.enableVideoTranscription === true,
   };
 }
 

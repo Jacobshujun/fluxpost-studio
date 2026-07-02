@@ -89,7 +89,7 @@ if (-not $ready) {
 }
 
 Write-Host "== Local HTTP smoke"
-& node scripts\harness\http_smoke.js "http://127.0.0.1:$Port"
+& node .trellis\verification\http_smoke.js "http://127.0.0.1:$Port"
 if ($LASTEXITCODE -ne 0) {
   throw "HTTP smoke failed with exit code $LASTEXITCODE"
 }

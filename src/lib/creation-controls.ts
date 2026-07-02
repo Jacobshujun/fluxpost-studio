@@ -21,6 +21,7 @@ export const imageReferenceSizeInstruction = "参考图进入图片处理前统�
 
 export type ImageTaskRoutingOptions = {
   useComfyUiKlein?: boolean;
+  directOriginalReference?: boolean;
 };
 
 export function buildDefaultImageTasks(
@@ -78,6 +79,10 @@ export function applyVisualTagImageStrategy(
 ): SourceImageTask {
   const resolvedPrompts = resolveImageStrategyPrompts(prompts);
 
+  if (options.directOriginalReference === true) {
+    return forceDirectOriginalReference(task);
+  }
+
   if (tag === "APP" || tag === "内饰空间") {
     return {
       ...task,
@@ -120,23 +125,22 @@ function getSourceVideoFrameTasks(
   prompts: ImageStrategyPrompts,
   options: ImageTaskRoutingOptions,
 ): SourceImageTask[] {
-  return selectBestVideoHighlightFrames(source.videoFrames).map((frame, index) =>
-    applyVisualTagImageStrategy(
-      {
-        id: `video-frame-${frame.id || index + 1}`,
-        url: frame.url,
-        kind: "video_frame" as const,
-        label: `关键帧 ${index + 1}`,
-        selected: true,
-        mode: "wash" as const,
-        prompt,
-        timestamp: frame.timestamp,
-      },
-      visualTagsByUrl.get(frame.url),
-      prompts,
-      options,
-    ),
-  );
+  return selectBestVideoHighlightFrames(source.videoFrames).map((frame, index) => {
+    const task: SourceImageTask = {
+      id: `video-frame-${frame.id || index + 1}`,
+      url: frame.url,
+      kind: "video_frame" as const,
+      label: `关键帧 ${index + 1}`,
+      selected: true,
+      mode: source.videoFrameOriginalReference === true ? "keep" : "wash",
+      prompt: source.videoFrameOriginalReference === true ? "" : prompt,
+      timestamp: frame.timestamp,
+    };
+
+    if (options.directOriginalReference === true) return forceDirectOriginalReference(task);
+    if (source.videoFrameOriginalReference === true) return task;
+    return applyVisualTagImageStrategy(task, visualTagsByUrl.get(frame.url), prompts, options);
+  });
 }
 
 export function mergeProductionPlan(basePlan: ProductionPlan, override?: ProductionPlan): ProductionPlan {
@@ -239,4 +243,15 @@ function stringOrDefault(value: unknown, fallback: string) {
 
 function resolveStrategyProvider(options: ImageTaskRoutingOptions): SourceImageTask["provider"] {
   return options.useComfyUiKlein ? "comfyui_klein" : "openai_images";
+}
+
+function forceDirectOriginalReference(task: SourceImageTask): SourceImageTask {
+  const directTask: SourceImageTask = {
+    ...task,
+    mode: "keep",
+    prompt: "",
+  };
+  delete directTask.provider;
+  delete directTask.strategyKey;
+  return directTask;
 }

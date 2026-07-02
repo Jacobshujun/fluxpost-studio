@@ -1,37 +1,40 @@
 import { execFile } from "node:child_process";
+import { randomUUID } from "node:crypto";
 import { promisify } from "node:util";
 import { compactError, recordExecutionLog } from "./activity-log";
 import { appConfig, openaiTextUrl } from "./config";
-import { runWithConcurrencyPool } from "./concurrency";
+import { concurrencyConfig, mapWithConcurrency, runWithConcurrencyPool, type ConcurrencyPoolName } from "./concurrency";
+import {
+  claimNextDistributionCheckJob,
+  getDistributionCheckJobFromDb,
+  heartbeatDistributionCheckJob,
+  readDistributionCheckJobsFromDb,
+  saveDistributionCheckJobToDb,
+} from "./database";
 import { defaultDistributionCheckPrompt } from "./distribution-check-prompt";
 import { resolveFeishuCliInvocation } from "./feishu-cli";
+import { filterWorkspaceOwnedRecords, type WorkspaceAccessActor } from "./workspace-ownership";
+import type {
+  DistributionCheckItemResult,
+  DistributionCheckJob,
+  DistributionCheckResponse,
+  DistributionDecision,
+  DistributionScore,
+  DistributionScoreDimension,
+  DistributionScorePrediction,
+} from "./types";
+
+export type {
+  DistributionCheckItemResult,
+  DistributionCheckJob,
+  DistributionCheckResponse,
+  DistributionDecision,
+  DistributionScore,
+  DistributionScoreDimension,
+  DistributionScorePrediction,
+} from "./types";
 
 const execFileAsync = promisify(execFile);
-
-export type DistributionDecision = "可分发" | "不可分发";
-
-export type DistributionCheckItemResult = {
-  number: string;
-  recordId?: string;
-  status: "updated" | "not_found" | "failed";
-  distribution?: DistributionDecision;
-  title?: string;
-  vehicle?: string;
-  previousValue?: string;
-  confidence?: number;
-  riskTags?: string[];
-  reasons?: string[];
-  error?: string;
-};
-
-export type DistributionCheckResponse = {
-  total: number;
-  updated: number;
-  distributable: number;
-  blocked: number;
-  failed: number;
-  results: DistributionCheckItemResult[];
-};
 
 type CliResult = {
   stdout: string;
@@ -45,6 +48,7 @@ type DistributionFieldMap = {
   materials: string;
   vehicle: string;
   distribution: string;
+  contentScore: string;
 };
 
 type DistributionRecord = {
@@ -62,6 +66,7 @@ type DistributionRecord = {
 type DistributionAssessment = {
   distribution: DistributionDecision;
   confidence: number;
+  score: DistributionScore;
   riskTags: string[];
   reasons: string[];
 };
@@ -73,6 +78,8 @@ type DistributionCheckOptions = {
 type ModelAssessmentJson = {
   distribution?: unknown;
   confidence?: unknown;
+  score?: unknown;
+  prediction?: unknown;
   riskTags?: unknown;
   reasons?: unknown;
 };
@@ -102,10 +109,36 @@ const defaultFieldMap: DistributionFieldMap = {
   materials: "动态素材",
   vehicle: "车型",
   distribution: "是否分发",
+  contentScore: "内容评分",
 };
 
-const maxNumbersPerBatch = 200;
+const maxNumbersPerBatch = 1000;
 const feishuRecordSearchKeywordMaxLength = 50;
+const distributionScoreThreshold = 70;
+const distributionCheckQueueWorkerConcurrency = readBoundedIntegerEnv("DISTRIBUTION_CHECK_WORKER_CONCURRENCY", 1, 1, 3);
+const distributionCheckQueueLockMs = 15 * 60_000;
+const distributionCheckQueueHeartbeatMs = 30_000;
+const feishuDistributionCliMaxAttempts = 4;
+const feishuDistributionCliBaseRetryDelayMs = 1200;
+
+type ReadyDistributionUpdate = DistributionCheckItemResult & { recordId: string; distribution: DistributionDecision; score: DistributionScore };
+
+type DistributionProgressEvent =
+  | { type: "processed"; item?: DistributionCheckItemResult }
+  | { type: "updated"; items: DistributionCheckItemResult[] };
+
+type DistributionCheckQueueGlobalState = typeof globalThis & {
+  __fluxpostDistributionCheckQueue?: {
+    activeWorkers: number;
+    sequence: number;
+    reconciledAt?: string;
+  };
+};
+
+const distributionCheckQueueState = ((globalThis as DistributionCheckQueueGlobalState).__fluxpostDistributionCheckQueue ||= {
+  activeWorkers: 0,
+  sequence: 0,
+});
 
 const personaPatterns = [
   /我(的|家|们|今天|昨天|终于|刚|在|去|提|买|开|试|订|换|觉得|感觉|分享)/,
@@ -124,69 +157,8 @@ export async function runDistributionCheck(input: unknown, options: Distribution
   const startedAt = Date.now();
   const numbers = normalizeNumberInput(input);
   if (!numbers.length) throw new Error("At least one Feishu record number is required.");
-  if (!appConfig.feishuCliBin || !appConfig.feishuDistributionCheckBaseToken || !appConfig.feishuDistributionCheckTableId) {
-    throw new Error("Distribution check needs FEISHU_CLI_BIN and Feishu Base table config.");
-  }
-
-  const fieldMap = getDistributionFieldMap();
-  await assertDistributionFieldsReady(fieldMap);
-  const results: DistributionCheckItemResult[] = [];
-  const readyToUpdate: Array<DistributionCheckItemResult & { recordId: string; distribution: DistributionDecision }> = [];
-
-  for (const number of numbers) {
-    try {
-      const record = isLikelyRecordId(number)
-        ? await getDistributionRecord(number, number, fieldMap)
-        : await findDistributionRecordByNumber(number, fieldMap);
-      if (!record) {
-        results.push({
-          number,
-          status: "not_found",
-          error: "No exact Feishu record matched this number.",
-        });
-        continue;
-      }
-
-      const assessment = await assessDistributionRecord(record, options);
-      readyToUpdate.push({
-        number,
-        recordId: record.recordId,
-        status: "updated",
-        distribution: assessment.distribution,
-        title: record.title,
-        vehicle: record.vehicle,
-        previousValue: record.previousValue,
-        confidence: assessment.confidence,
-        riskTags: assessment.riskTags,
-        reasons: assessment.reasons,
-      });
-    } catch (error) {
-      results.push({
-        number,
-        status: "failed",
-        error: compactCliError(error),
-      });
-    }
-  }
-
-  for (const decision of ["可分发", "不可分发"] as DistributionDecision[]) {
-    const group = readyToUpdate.filter((item) => item.distribution === decision);
-    if (!group.length) continue;
-    try {
-      await updateDistributionRecords(group.map((item) => item.recordId), decision, fieldMap);
-      results.push(...group);
-    } catch (error) {
-      results.push(
-        ...group.map((item) => ({
-          ...item,
-          status: "failed" as const,
-          error: compactCliError(error),
-        })),
-      );
-    }
-  }
-
-  const summary = buildDistributionSummary(results, numbers.length);
+  assertDistributionConfigured();
+  const summary = await runDistributionCheckWorkflow(numbers, options);
   await recordExecutionLog({
     scope: "feishu/distribution-check",
     action: "Distribution check completed",
@@ -204,8 +176,349 @@ export async function runDistributionCheck(input: unknown, options: Distribution
   return summary;
 }
 
+export async function enqueueDistributionCheckJob(
+  input: unknown,
+  options: DistributionCheckOptions & { ownerUserId: string; ownerDisplayName?: string; priority?: number },
+) {
+  const numbers = normalizeNumberInput(input);
+  if (!numbers.length) throw new Error("At least one Feishu record number is required.");
+  assertDistributionConfigured();
+
+  const now = new Date().toISOString();
+  const job: DistributionCheckJob = {
+    id: `distribution-check-${Date.now()}-${randomUUID().slice(0, 8)}`,
+    ownerUserId: options.ownerUserId,
+    ownerDisplayName: options.ownerDisplayName,
+    status: "queued",
+    priority: Number(options.priority || 0),
+    attempts: 0,
+    maxAttempts: 1,
+    runAfter: now,
+    createdAt: now,
+    updatedAt: now,
+    numbers,
+    processed: 0,
+    total: numbers.length,
+    updated: 0,
+    distributable: 0,
+    blocked: 0,
+    failed: 0,
+    results: [],
+    prompt: options.prompt || "",
+  };
+
+  await saveDistributionCheckJobToDb(job);
+  await recordExecutionLog({
+    scope: "feishu/distribution-check",
+    action: "Distribution check queued",
+    status: "info",
+    message: `Queued distribution check job ${job.id} for ${numbers.length} record(s).`,
+    details: {
+      jobId: job.id,
+      ownerUserId: job.ownerUserId,
+      total: numbers.length,
+    },
+    ownerUserId: job.ownerUserId,
+    ownerDisplayName: job.ownerDisplayName,
+  });
+  ensureDistributionCheckQueueWorker();
+  return job;
+}
+
+export async function listDistributionCheckJobs(limit = 30, account?: WorkspaceAccessActor) {
+  await reconcileInterruptedDistributionCheckJobs();
+  ensureDistributionCheckQueueWorker();
+  return filterWorkspaceOwnedRecords(await readDistributionCheckJobsFromDb(limit), account);
+}
+
+export async function getDistributionCheckJob(jobId: string, account?: WorkspaceAccessActor) {
+  await reconcileInterruptedDistributionCheckJobs();
+  ensureDistributionCheckQueueWorker();
+  const job = await getDistributionCheckJobFromDb(jobId);
+  if (!job || (account && !filterWorkspaceOwnedRecords([job], account).length)) return undefined;
+  return job;
+}
+
+export function ensureDistributionCheckQueueWorker() {
+  while (distributionCheckQueueState.activeWorkers < distributionCheckQueueWorkerConcurrency) {
+    distributionCheckQueueState.activeWorkers += 1;
+    distributionCheckQueueState.sequence += 1;
+    const workerId = `distribution-check-worker-${process.pid}-${Date.now()}-${distributionCheckQueueState.sequence}`;
+    setTimeout(() => {
+      void drainDistributionCheckQueue(workerId).finally(() => {
+        distributionCheckQueueState.activeWorkers = Math.max(0, distributionCheckQueueState.activeWorkers - 1);
+      });
+    }, 0);
+  }
+}
+
 export function normalizeDistributionNumberInput(input: unknown) {
   return normalizeNumberInput(input);
+}
+
+async function drainDistributionCheckQueue(workerId: string) {
+  await reconcileInterruptedDistributionCheckJobs();
+
+  while (true) {
+    const item = await claimNextDistributionCheckJob(workerId, distributionCheckQueueLockMs);
+    if (!item) return;
+
+    const runningJob = await saveDistributionCheckJobToDb({
+      ...item,
+      status: "running",
+      lockedBy: workerId,
+      startedAt: item.startedAt || new Date().toISOString(),
+      updatedAt: new Date().toISOString(),
+    });
+
+    const heartbeat = setInterval(() => {
+      void heartbeatDistributionCheckJob(runningJob.id, workerId, distributionCheckQueueLockMs).catch((error) =>
+        console.warn(`Distribution check heartbeat failed for ${runningJob.id}:`, error),
+      );
+    }, distributionCheckQueueHeartbeatMs);
+
+    try {
+      await executeDistributionCheckJob(runningJob, workerId);
+    } catch (error) {
+      const message = compactCliError(error);
+      await saveTerminalDistributionCheckJob(runningJob, {
+        status: "failed",
+        error: message,
+      });
+      await recordExecutionLog({
+        scope: "feishu/distribution-check",
+        action: "Distribution check queue job failed",
+        status: "error",
+        message,
+        details: {
+          jobId: runningJob.id,
+          ownerUserId: runningJob.ownerUserId,
+          total: runningJob.total,
+        },
+        ownerUserId: runningJob.ownerUserId,
+        ownerDisplayName: runningJob.ownerDisplayName,
+      });
+    } finally {
+      clearInterval(heartbeat);
+    }
+  }
+}
+
+async function executeDistributionCheckJob(job: DistributionCheckJob, workerId: string) {
+  const startedAt = Date.now();
+  let workingJob: DistributionCheckJob = {
+    ...job,
+    status: "running",
+    lockedBy: workerId,
+    startedAt: job.startedAt || new Date().toISOString(),
+    updatedAt: new Date().toISOString(),
+  };
+  await saveDistributionCheckJobToDb(workingJob);
+
+  await recordExecutionLog({
+    scope: "feishu/distribution-check",
+    action: "Distribution check queue job started",
+    status: "running",
+    message: `Auditing ${job.numbers.length} Feishu record(s) from queued job ${job.id}.`,
+    details: {
+      jobId: job.id,
+      total: job.numbers.length,
+      ownerUserId: job.ownerUserId,
+    },
+    ownerUserId: job.ownerUserId,
+    ownerDisplayName: job.ownerDisplayName,
+  });
+
+  let lastPersistAt = 0;
+  const persistProgress = async (force = false) => {
+    const now = Date.now();
+    if (!force && workingJob.processed < workingJob.total && now - lastPersistAt < 1200 && workingJob.processed % 10 !== 0) return;
+    lastPersistAt = now;
+    const summary = buildDistributionSummary(workingJob.results, workingJob.total);
+    workingJob = {
+      ...workingJob,
+      ...summary,
+      status: "running",
+      processed: Math.min(workingJob.processed, workingJob.total),
+      lockedUntil: new Date(Date.now() + distributionCheckQueueLockMs).toISOString(),
+      updatedAt: new Date().toISOString(),
+    };
+    await saveDistributionCheckJobToDb(workingJob);
+  };
+
+  const summary = await runDistributionCheckWorkflow(job.numbers, { prompt: job.prompt }, async (event) => {
+    if (event.type === "processed") {
+      workingJob = {
+        ...workingJob,
+        processed: Math.min(workingJob.processed + 1, workingJob.total),
+        results: event.item ? upsertDistributionResult(workingJob.results, event.item) : workingJob.results,
+      };
+      await persistProgress();
+      return;
+    }
+
+    workingJob = {
+      ...workingJob,
+      results: mergeDistributionResults(workingJob.results, event.items),
+    };
+    await persistProgress(true);
+  });
+
+  const terminalStatus = summary.updated === summary.total ? "completed" : summary.updated > 0 ? "partial" : "failed";
+  const completedJob = await saveTerminalDistributionCheckJob(workingJob, {
+    ...summary,
+    status: terminalStatus,
+    processed: job.numbers.length,
+  });
+
+  await recordExecutionLog({
+    scope: "feishu/distribution-check",
+    action: "Distribution check queue job completed",
+    status: terminalStatus === "failed" ? "error" : terminalStatus === "partial" ? "info" : "success",
+    message: `Distribution check job ${job.id} updated ${summary.updated}/${summary.total} Feishu record(s).`,
+    durationMs: Date.now() - startedAt,
+    details: {
+      jobId: completedJob.id,
+      queueStatus: completedJob.status,
+      total: summary.total,
+      updated: summary.updated,
+      failed: summary.failed,
+    },
+    ownerUserId: job.ownerUserId,
+    ownerDisplayName: job.ownerDisplayName,
+  });
+}
+
+async function runDistributionCheckWorkflow(
+  numbers: string[],
+  options: DistributionCheckOptions = {},
+  onProgress?: (event: DistributionProgressEvent) => Promise<void>,
+): Promise<DistributionCheckResponse> {
+  const fieldMap = getDistributionFieldMap();
+  await assertDistributionFieldsReady(fieldMap);
+
+  const processed = await mapWithConcurrency(numbers, concurrencyConfig.distributionRecord, async (number) => {
+    const result = await processDistributionNumber(number, fieldMap, options);
+    await onProgress?.({ type: "processed", item: "ready" in result ? undefined : result.item });
+    return result;
+  });
+
+  const results = processed.filter((item): item is { item: DistributionCheckItemResult } => "item" in item).map((item) => item.item);
+  const readyToUpdate = processed.filter((item): item is { ready: ReadyDistributionUpdate } => "ready" in item).map((item) => item.ready);
+  const updateGroups = groupDistributionUpdates(readyToUpdate);
+  const updatedGroups = await mapWithConcurrency(updateGroups, concurrencyConfig.distributionFeishuWrite, async (group) => {
+    if (!group.length) return [] as DistributionCheckItemResult[];
+    try {
+      await updateDistributionRecords(group.map((item) => item.recordId), group[0].distribution, group[0].score.total, fieldMap);
+      const items: DistributionCheckItemResult[] = group.map((item) => ({ ...item, status: "updated" }));
+      await onProgress?.({ type: "updated", items });
+      return items;
+    } catch (error) {
+      const items: DistributionCheckItemResult[] = group.map((item) => ({
+        ...item,
+        status: "failed",
+        error: compactCliError(error),
+      }));
+      await onProgress?.({ type: "updated", items });
+      return items;
+    }
+  });
+
+  return buildDistributionSummary([...results, ...updatedGroups.flat()], numbers.length);
+}
+
+async function processDistributionNumber(
+  number: string,
+  fieldMap: DistributionFieldMap,
+  options: DistributionCheckOptions,
+): Promise<{ item: DistributionCheckItemResult } | { ready: ReadyDistributionUpdate }> {
+  try {
+    const record = isLikelyRecordId(number)
+      ? await getDistributionRecord(number, number, fieldMap)
+      : await findDistributionRecordByNumber(number, fieldMap);
+    if (!record) {
+      return {
+        item: {
+          number,
+          status: "not_found",
+          error: "No exact Feishu record matched this number.",
+        },
+      };
+    }
+
+    const assessment = await assessDistributionRecord(record, options);
+    return {
+      ready: {
+        number,
+        recordId: record.recordId,
+        status: "updated",
+        distribution: assessment.distribution,
+        score: assessment.score,
+        title: record.title,
+        vehicle: record.vehicle,
+        previousValue: record.previousValue,
+        confidence: assessment.confidence,
+        riskTags: assessment.riskTags,
+        reasons: assessment.reasons,
+      },
+    };
+  } catch (error) {
+    return {
+      item: {
+        number,
+        status: "failed",
+        error: compactCliError(error),
+      },
+    };
+  }
+}
+
+async function reconcileInterruptedDistributionCheckJobs() {
+  const now = new Date();
+  const nowIso = now.toISOString();
+  if (distributionCheckQueueState.reconciledAt === nowIso) return;
+  distributionCheckQueueState.reconciledAt = nowIso;
+
+  const jobs = await readDistributionCheckJobsFromDb(100);
+  const interruptedJobs = jobs.filter((job) => job.status === "running" && job.lockedUntil && Date.parse(job.lockedUntil) < now.getTime());
+  for (const job of interruptedJobs) {
+    const message = `Interrupted distribution check job: worker lease expired at ${job.lockedUntil}. Start a new audit job to retry unfinished records.`;
+    await saveTerminalDistributionCheckJob(job, {
+      status: job.updated > 0 ? "partial" : "failed",
+      error: message,
+    });
+    await recordExecutionLog({
+      scope: "feishu/distribution-check",
+      action: "Interrupted distribution check job recovered",
+      status: "error",
+      message,
+      details: {
+        jobId: job.id,
+        ownerUserId: job.ownerUserId,
+      },
+      ownerUserId: job.ownerUserId,
+      ownerDisplayName: job.ownerDisplayName,
+    });
+  }
+}
+
+async function saveTerminalDistributionCheckJob(job: DistributionCheckJob, patch: Partial<DistributionCheckJob>) {
+  const now = new Date().toISOString();
+  const nextJob: DistributionCheckJob = {
+    ...job,
+    ...patch,
+    lockedBy: undefined,
+    lockedUntil: undefined,
+    completedAt: now,
+    updatedAt: now,
+  };
+  return saveDistributionCheckJobToDb(nextJob);
+}
+
+function assertDistributionConfigured() {
+  if (!appConfig.feishuCliBin || !appConfig.feishuDistributionCheckBaseToken || !appConfig.feishuDistributionCheckTableId) {
+    throw new Error("Distribution check needs FEISHU_CLI_BIN and Feishu Base table config.");
+  }
 }
 
 function getDistributionFieldMap(): DistributionFieldMap {
@@ -229,7 +542,7 @@ async function findDistributionRecordByNumber(number: string, fieldMap: Distribu
   const payload = {
     keyword: compactRecordSearchKeyword(number),
     search_fields: [fieldMap.number],
-    select_fields: [fieldMap.number, fieldMap.title, fieldMap.body, fieldMap.materials, fieldMap.vehicle, fieldMap.distribution],
+    select_fields: [fieldMap.number, fieldMap.title, fieldMap.body, fieldMap.materials, fieldMap.vehicle, fieldMap.distribution, fieldMap.contentScore],
     limit: 10,
   };
   const result = await runFeishuDistributionCli(
@@ -280,6 +593,7 @@ async function assertDistributionFieldsReady(fieldMap: DistributionFieldMap) {
     fieldMap.materials,
     fieldMap.vehicle,
     fieldMap.distribution,
+    fieldMap.contentScore,
   ].filter((field) => !names.has(field));
   if (missing.length) throw new Error(`Distribution check target Base is missing field(s): ${missing.join(", ")}`);
 
@@ -311,7 +625,7 @@ async function getDistributionRecord(requestedNumber: string, recordId: string, 
   return record ? normalizeDistributionRecord(requestedNumber, record, fieldMap) : undefined;
 }
 
-async function updateDistributionRecords(recordIds: string[], decision: DistributionDecision, fieldMap: DistributionFieldMap) {
+async function updateDistributionRecords(recordIds: string[], decision: DistributionDecision, contentScore: number, fieldMap: DistributionFieldMap) {
   for (let index = 0; index < recordIds.length; index += 200) {
     const batch = recordIds.slice(index, index + 200);
     await runFeishuDistributionCli(
@@ -329,12 +643,25 @@ async function updateDistributionRecords(recordIds: string[], decision: Distribu
           record_id_list: batch,
           patch: {
             [fieldMap.distribution]: decision,
+            [fieldMap.contentScore]: contentScore,
           },
         }),
       ],
       120_000,
+      "distributionFeishuWrite",
     );
   }
+}
+
+function groupDistributionUpdates(items: Array<DistributionCheckItemResult & { recordId: string; distribution: DistributionDecision; score: DistributionScore }>) {
+  const groups = new Map<string, Array<DistributionCheckItemResult & { recordId: string; distribution: DistributionDecision; score: DistributionScore }>>();
+  for (const item of items) {
+    const key = `${item.distribution}:${item.score.total}`;
+    const group = groups.get(key) || [];
+    group.push(item);
+    groups.set(key, group);
+  }
+  return Array.from(groups.values());
 }
 
 async function assessDistributionRecord(record: DistributionRecord, options: DistributionCheckOptions): Promise<DistributionAssessment> {
@@ -343,7 +670,7 @@ async function assessDistributionRecord(record: DistributionRecord, options: Dis
   if (!appConfig.openaiApiKey) return local;
 
   try {
-    const model = normalizeModelAssessment(await callDistributionModel(buildDistributionPrompt(record, local, options.prompt)));
+    const model = normalizeModelAssessment(await callDistributionModel(buildDistributionPrompt(record, local, options.prompt)), local.score);
     return mergeAssessments(local, model);
   } catch (error) {
     await recordExecutionLog({
@@ -391,13 +718,73 @@ function assessDistributionRecordLocally(record: DistributionRecord): Distributi
     reasons.push("内容疑似包含竞品拉踩表达。");
   }
 
+  const score = scoreDistributionRecord(record, Array.from(new Set(riskTags)));
   const blocked = Boolean(riskTags.length);
   return {
     distribution: blocked ? "不可分发" : "可分发",
-    confidence: blocked ? 0.82 : 0.62,
+    confidence: blocked ? 0.82 : score.total >= 82 ? 0.72 : 0.62,
+    score,
     riskTags: Array.from(new Set(riskTags)),
     reasons: reasons.length ? reasons.slice(0, 4) : ["未发现明显人设、隐私、素材或安全风险。"],
   };
+}
+
+function scoreDistributionRecord(record: DistributionRecord, hardRiskTags: string[]): DistributionScore {
+  const text = [record.title, record.body].filter(Boolean).join("\n").trim();
+  const hasPersonaRisk = hardRiskTags.some((tag) => tag === "人设口吻" || tag === "隐私风险");
+  const hasSafetyRisk = hardRiskTags.some((tag) => tag === "安全风险" || tag === "竞品拉踩");
+  const hasText = Boolean(text);
+  const bodyLength = record.body.trim().length;
+  const dimensions: DistributionScoreDimension[] = [
+    {
+      name: "去人设安全",
+      score: hasPersonaRisk ? 4 : 30,
+      max: 30,
+      reason: hasPersonaRisk ? "存在个人身份、车主经历或隐私绑定信号。" : "未命中强个人身份或隐私绑定信号。",
+    },
+    {
+      name: "素材可重构",
+      score: record.materialCount >= 3 ? 20 : record.materialCount > 0 ? 14 : 0,
+      max: 20,
+      reason: record.materialCount >= 3 ? "素材数量较充足，可支撑跨账号重构。" : record.materialCount > 0 ? "有素材但数量偏少。" : "未识别到可用素材。",
+    },
+    {
+      name: "内容通用性",
+      score: !hasText ? 0 : hasPersonaRisk ? 6 : bodyLength >= 80 ? 20 : 14,
+      max: 20,
+      reason: !hasText ? "标题和正文为空。" : hasPersonaRisk ? "内容主题被个人叙事削弱。" : bodyLength >= 80 ? "正文信息量可支撑改写。" : "内容较短，改写空间有限。",
+    },
+    {
+      name: "平台安全",
+      score: hasSafetyRisk ? 3 : 15,
+      max: 15,
+      reason: hasSafetyRisk ? "存在强负面、攻击或竞品拉踩风险。" : "未命中强负面或竞品攻击表达。",
+    },
+    {
+      name: "盲预测价值",
+      score: scorePredictionValue(record, hasText, hardRiskTags),
+      max: 15,
+      reason: record.vehicle ? "车型信息明确，便于发布前预测和发布后复盘。" : "车型信息缺失，预测锚点不足。",
+    },
+  ];
+  const rawTotal = dimensions.reduce((sum, item) => sum + item.score, 0);
+  const cappedTotal = hardRiskTags.length ? Math.min(rawTotal, 59) : rawTotal;
+  const total = Math.min(100, Math.max(0, Math.round(cappedTotal)));
+  return {
+    total,
+    threshold: distributionScoreThreshold,
+    prediction: scorePrediction(total),
+    dimensions,
+  };
+}
+
+function scorePredictionValue(record: DistributionRecord, hasText: boolean, hardRiskTags: string[]) {
+  if (!hasText || hardRiskTags.length) return 3;
+  let score = 7;
+  if (record.vehicle) score += 4;
+  if (record.title.trim().length >= 8) score += 2;
+  if (record.materialCount >= 2) score += 2;
+  return Math.min(score, 15);
 }
 
 async function callDistributionModel(prompt: string): Promise<ModelAssessmentJson> {
@@ -409,7 +796,7 @@ async function callDistributionModel(prompt: string): Promise<ModelAssessmentJso
 }
 
 async function callResponsesApi(prompt: string) {
-  const response = await runWithConcurrencyPool("gpt", () =>
+  const response = await runWithConcurrencyPool("distributionGpt", () =>
     fetch(openaiTextUrl("responses"), {
       method: "POST",
       headers: openaiHeaders(),
@@ -437,7 +824,7 @@ async function callResponsesApi(prompt: string) {
 }
 
 async function callChatCompletions(prompt: string) {
-  const response = await runWithConcurrencyPool("gpt", () =>
+  const response = await runWithConcurrencyPool("distributionGpt", () =>
     fetch(openaiTextUrl("chat/completions"), {
       method: "POST",
       headers: openaiHeaders(),
@@ -471,10 +858,13 @@ function buildDistributionPrompt(record: DistributionRecord, local: Distribution
   const auditPrompt = customPrompt?.trim() || defaultDistributionCheckPrompt;
   return [
     auditPrompt,
+    "请按 cheat-on-content README_CN 的“打分 -> 盲预测 -> 发布 -> T+3 天复盘 -> 进化评分公式”思路，先给发布前评分和盲预测，再做是否分发判断。",
     "只允许输出 JSON。",
     "distribution 只能是“可分发”或“不可分发”。不确定时必须输出“不可分发”。",
-    '输出 JSON 示例：{"distribution":"不可分发","confidence":0.86,"riskTags":["人设口吻"],"reasons":["包含车主第一人称体验"]}',
-    `本地初判: ${local.distribution}; ${local.riskTags.join(",") || "无风险"}; ${local.reasons.join(" / ")}`,
+    "score 必须是 0-100 整数，并会写入飞书“内容评分”字段；score 不直接决定 distribution。",
+    "prediction 只能是“高潜力”“可测试”或“低优先级”。",
+    '输出 JSON 示例：{"distribution":"不可分发","score":42,"prediction":"低优先级","confidence":0.86,"riskTags":["人设口吻"],"reasons":["包含车主第一人称体验"]}',
+    `本地初判: ${local.distribution}; 评分 ${local.score.total}/100; ${local.riskTags.join(",") || "无风险"}; ${local.reasons.join(" / ")}`,
     `编号: ${record.number}`,
     `车型: ${record.vehicle}`,
     `素材数量: ${record.materialCount}`,
@@ -483,21 +873,26 @@ function buildDistributionPrompt(record: DistributionRecord, local: Distribution
   ].join("\n");
 }
 
-function normalizeModelAssessment(json: ModelAssessmentJson): DistributionAssessment {
+function normalizeModelAssessment(json: ModelAssessmentJson, fallbackScore: DistributionScore): DistributionAssessment {
+  const modelScore = normalizeScore(json.score);
+  const score = modelScore === undefined ? fallbackScore : buildModelDistributionScore(modelScore, json.prediction);
   const distribution = json.distribution === "可分发" ? "可分发" : "不可分发";
   return {
     distribution,
     confidence: normalizeConfidence(json.confidence) ?? (distribution === "可分发" ? 0.7 : 0.75),
+    score,
     riskTags: arrayOfStrings(json.riskTags).slice(0, 6),
     reasons: arrayOfStrings(json.reasons).slice(0, 4),
   };
 }
 
 function mergeAssessments(local: DistributionAssessment, model: DistributionAssessment): DistributionAssessment {
+  const score = model.score;
   if (local.distribution === "不可分发" || model.distribution === "不可分发") {
     return {
       distribution: "不可分发",
       confidence: Math.max(local.confidence, model.confidence),
+      score,
       riskTags: Array.from(new Set([...local.riskTags, ...model.riskTags])),
       reasons: [...model.reasons, ...local.reasons].filter(Boolean).slice(0, 4),
     };
@@ -505,28 +900,63 @@ function mergeAssessments(local: DistributionAssessment, model: DistributionAsse
   return {
     distribution: "可分发",
     confidence: Math.max(local.confidence, model.confidence),
+    score,
     riskTags: [],
     reasons: (model.reasons.length ? model.reasons : local.reasons).slice(0, 4),
   };
 }
 
-async function runFeishuDistributionCli(args: string[], timeout: number): Promise<CliResult> {
+function buildModelDistributionScore(score: number | undefined, prediction: unknown): DistributionScore {
+  const total = score ?? 0;
+  return {
+    total,
+    threshold: distributionScoreThreshold,
+    prediction: normalizePrediction(prediction, total),
+    dimensions: [
+      {
+        name: "模型总评",
+        score: total,
+        max: 100,
+        reason: "模型按 cheat-on-content 发布前评分和盲预测流程给出的总分。",
+      },
+    ],
+  };
+}
+
+function scorePrediction(total: number): DistributionScorePrediction {
+  if (total >= 85) return "高潜力";
+  if (total >= distributionScoreThreshold) return "可测试";
+  return "低优先级";
+}
+
+function normalizePrediction(value: unknown, total: number): DistributionScorePrediction {
+  return value === "高潜力" || value === "可测试" || value === "低优先级" ? value : scorePrediction(total);
+}
+
+async function runFeishuDistributionCli(args: string[], timeout: number, pool: Extract<ConcurrencyPoolName, "distributionFeishuRead" | "distributionFeishuWrite"> = "distributionFeishuRead"): Promise<CliResult> {
   const invocation = resolveFeishuCliInvocation(appConfig.feishuCliBin);
-  return runWithConcurrencyPool("feishu", async () => {
-    try {
-      const result = await execFileAsync(invocation.file, [...invocation.argsPrefix, ...args], {
-        timeout,
-        windowsHide: true,
-        maxBuffer: 1024 * 1024 * 8,
-        env: buildCliEnv(process.env),
-      });
-      return {
-        stdout: typeof result.stdout === "string" ? result.stdout : String(result.stdout || ""),
-        stderr: typeof result.stderr === "string" ? result.stderr : String(result.stderr || ""),
-      };
-    } catch (error) {
-      throw sanitizeCliError(error);
+  return runWithConcurrencyPool(pool, async () => {
+    let lastError: Error | undefined;
+    for (let attempt = 1; attempt <= feishuDistributionCliMaxAttempts; attempt += 1) {
+      try {
+        const result = await execFileAsync(invocation.file, [...invocation.argsPrefix, ...args], {
+          timeout,
+          windowsHide: true,
+          maxBuffer: 1024 * 1024 * 8,
+          env: buildCliEnv(process.env),
+        });
+        return {
+          stdout: typeof result.stdout === "string" ? result.stdout : String(result.stdout || ""),
+          stderr: typeof result.stderr === "string" ? result.stderr : String(result.stderr || ""),
+        };
+      } catch (error) {
+        const sanitized = sanitizeCliError(error);
+        lastError = sanitized;
+        if (attempt >= feishuDistributionCliMaxAttempts || !isFeishuDistributionRateLimitError(sanitized)) throw sanitized;
+        await sleep(feishuDistributionRetryDelayMs(attempt));
+      }
     }
+    throw lastError || new Error("Feishu distribution check CLI failed.");
   });
 }
 
@@ -754,6 +1184,16 @@ function buildDistributionSummary(results: DistributionCheckItemResult[], total:
   };
 }
 
+function upsertDistributionResult(results: DistributionCheckItemResult[], item: DistributionCheckItemResult) {
+  const next = results.filter((current) => current.number !== item.number);
+  next.push(item);
+  return next;
+}
+
+function mergeDistributionResults(results: DistributionCheckItemResult[], items: DistributionCheckItemResult[]) {
+  return items.reduce((current, item) => upsertDistributionResult(current, item), results);
+}
+
 function parseJsonOutput(stdout: string) {
   if (!stdout.trim()) return {};
   return JSON.parse(stdout) as unknown;
@@ -781,6 +1221,12 @@ function normalizeConfidence(value: unknown) {
   const parsed = Number(value);
   if (!Number.isFinite(parsed)) return undefined;
   return Math.min(Math.max(parsed, 0), 1);
+}
+
+function normalizeScore(value: unknown) {
+  const parsed = Number(value);
+  if (!Number.isFinite(parsed)) return undefined;
+  return Math.min(Math.max(Math.round(parsed), 0), 100);
 }
 
 function arrayOfStrings(value: unknown) {
@@ -814,6 +1260,21 @@ function compactCliError(error: unknown) {
   return error instanceof Error ? sanitizeCliText(error.message) : compactError(error);
 }
 
+function isFeishuDistributionRateLimitError(error: Error) {
+  const message = error.message;
+  return /800004135|99991400|OpenAPISearchRecord limited|OpenAPIBatchUpdateRecords limited|request trigger frequency limit|rate_limit/i.test(message);
+}
+
+function feishuDistributionRetryDelayMs(attempt: number) {
+  const exponential = feishuDistributionCliBaseRetryDelayMs * 2 ** Math.max(0, attempt - 1);
+  const jitter = Math.floor(Math.random() * 350);
+  return Math.min(exponential + jitter, 10_000);
+}
+
+function sleep(ms: number) {
+  return new Promise((resolve) => setTimeout(resolve, ms));
+}
+
 function sanitizeCliText(value: string) {
   let next = value.replace(/Bearer\s+[A-Za-z0-9._~+/=-]+/g, "Bearer ***").replace(/(--base-token\s+)(\S+)/gi, "$1***");
   for (const token of [appConfig.feishuDistributionCheckBaseToken, appConfig.feishuBitableAppToken]) {
@@ -833,4 +1294,11 @@ function buildCliEnv(env: NodeJS.ProcessEnv) {
     nextEnv.http_proxy = "";
   }
   return nextEnv;
+}
+
+function readBoundedIntegerEnv(envName: string, fallback: number, min: number, max: number) {
+  const raw = process.env[envName];
+  const value = raw === undefined || raw.trim() === "" ? fallback : Number(raw);
+  if (!Number.isFinite(value)) return fallback;
+  return Math.min(Math.max(Math.floor(value), min), max);
 }

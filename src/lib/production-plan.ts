@@ -225,6 +225,21 @@ export function formatProductionPlanForPrompt(plan: ProductionPlan) {
     .join("\n");
 }
 
+export function formatNonTextProductionConstraintsForPrompt(plan: ProductionPlan) {
+  return [
+    `内容方向: ${formatContentDirection(plan.contentDirection)}`,
+    `制作决策: ${formatDecision(plan.decision)}`,
+    `图片策略: ${formatImageStrategy(plan.imageStrategy)}`,
+    `车型资料: ${plan.materialRequirements.vehicleDocs ? "需要" : "不需要"}`,
+    `车型图片: ${plan.materialRequirements.vehicleImages ? "需要" : "不需要"}`,
+    `视频关键帧: ${plan.materialRequirements.videoKeyframes ? "需要" : "不需要"}`,
+    `图片 Brief: ${plan.promptGuidance.imageBrief}`,
+    plan.riskFlags.length ? `风险标记: ${plan.riskFlags.join(", ")}` : "",
+  ]
+    .filter(Boolean)
+    .join("\n");
+}
+
 function detectContentDirection(item: NormalizedSourceItem): ContentDirection {
   const text = normalizeText([item.title, item.contentText, item.authorName, item.sourceUrl].filter(Boolean).join(" "));
   const hasXpeng = includesAny(text, xpengTerms);

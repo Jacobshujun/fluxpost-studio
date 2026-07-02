@@ -1,5 +1,5 @@
 import { execFile } from "node:child_process";
-import { mkdir, readFile, rm, writeFile } from "node:fs/promises";
+import { access, mkdir, readFile, rm, writeFile } from "node:fs/promises";
 import { randomUUID } from "node:crypto";
 import path from "node:path";
 import { compactError, recordExecutionLog } from "./activity-log";
@@ -7,6 +7,7 @@ import { isComfyUiKleinConfigured, runComfyUiKleinImageTask } from "./comfyui-kl
 import { appConfig, openaiImageApiKey, openaiImageUrl, type OpenaiImageApiRoute } from "./config";
 import { concurrencyConfig, mapWithConcurrency, runWithConcurrencyPool } from "./concurrency";
 import { buildSingleImageTaskPrompt } from "./creation-controls";
+import { sniffImageFormat } from "./image-format";
 import { defaultImageGenerationSize, normalizeImageGenerationSize } from "./image-size-options";
 import { buildMediaRequestHeaders } from "./media-request";
 import type { ImageGenerationOptions, SourceImageTask } from "./types";
@@ -35,6 +36,7 @@ type PreparedReferenceImage = {
 const maxImageAttempts = 3;
 const imageRequestTimeoutMs = appConfig.openaiImageRequestTimeoutMs;
 const remoteReferenceTimeoutMs = 30_000;
+const maxGeneratedImageUrlBytes = 30 * 1024 * 1024;
 const referenceImageMaxSidePx = 2400;
 const referenceImageNormalizeTimeoutMs = 60_000;
 const retryableImageStatuses = new Set([408, 409, 425, 429, 500, 502, 503, 504]);
@@ -113,7 +115,8 @@ export async function generateImagesFromPrompt(
         },
       });
       if (task.mode === "keep") {
-        imageUrls.push(task.url);
+        const sourceImageUrl = await resolveDirectSourceImageUrl(task.url);
+        imageUrls.push(sourceImageUrl);
         await recordExecutionLog({
           scope: "openai/image",
           action: "Keep source image",
@@ -122,6 +125,8 @@ export async function generateImagesFromPrompt(
           details: {
             label: task.label,
             kind: task.kind,
+            sourceUrl: task.url,
+            outputUrl: sourceImageUrl,
           },
         });
         continue;
@@ -131,13 +136,14 @@ export async function generateImagesFromPrompt(
       try {
         const taskUrls =
           appConfig.openaiImageEndpoint === "images"
-            ? await callImagesApi(taskPrompt, 1, imageOptions, [task.url])
+            ? await callImagesApi(taskPrompt, 1, imageOptions, getTaskReferenceImages(task))
             : await callResponsesImageTool(taskPrompt, 1, imageOptions);
         imageUrls.push(...taskUrls);
       } catch (error) {
         const message = compactError(error);
         if (isImageTaskSourceFallbackError(error)) {
-          imageUrls.push(task.url);
+          const fallbackUrl = await resolveDirectSourceImageUrl(task.url);
+          imageUrls.push(fallbackUrl);
           await recordExecutionLog({
             scope: "openai/image",
             action: isImageTaskTimeoutError(error) ? "Image task timed out; using source image" : "Image task failed; using source image",
@@ -148,6 +154,7 @@ export async function generateImagesFromPrompt(
               mode: task.mode,
               kind: task.kind,
               fallbackUrl: task.url,
+              outputUrl: fallbackUrl,
               error: message,
             },
           });
@@ -209,6 +216,38 @@ export async function generateImagesFromPrompt(
   };
 }
 
+export async function generateImagesFromPromptList(prompts: string[], options?: Partial<ImageGenerationOptions>) {
+  const imageOptions = normalizeImageOptions(options);
+  const normalizedPrompts = prompts.map((prompt) => prompt.trim()).filter(Boolean).slice(0, 5);
+  if (!normalizedPrompts.length) {
+    return {
+      status: "completed" as const,
+      imageUrls: [] as string[],
+      message: "No original-mode image prompts were requested.",
+    };
+  }
+
+  const results = await mapWithConcurrency(normalizedPrompts, imageOptions.taskConcurrency || concurrencyConfig.image, async (prompt) =>
+    generateImagesFromPrompt(prompt, 1, undefined, imageOptions),
+  );
+  const imageUrls = results.flatMap((result) => result.imageUrls).slice(0, 5);
+  const failures = results.filter((result) => result.status !== "completed").map((result) => result.message || result.status);
+
+  if (!imageUrls.length && failures.length) {
+    return {
+      status: results[0]?.status || ("needs_config" as const),
+      imageUrls,
+      message: failures.join("; "),
+    };
+  }
+
+  return {
+    status: "completed" as const,
+    imageUrls,
+    message: failures.length ? failures.join("; ") : undefined,
+  };
+}
+
 async function runSelectedImageTask(
   prompt: string,
   task: SourceImageTask,
@@ -231,6 +270,7 @@ async function runSelectedImageTask(
   });
 
   if (task.mode === "keep") {
+    const sourceImageUrl = await resolveDirectSourceImageUrl(task.url);
     await recordExecutionLog({
       scope: "openai/image",
       action: "Keep source image",
@@ -239,10 +279,12 @@ async function runSelectedImageTask(
       details: {
         label: task.label,
         kind: task.kind,
+        sourceUrl: task.url,
+        outputUrl: sourceImageUrl,
       },
     });
     return {
-      imageUrls: [task.url],
+      imageUrls: [sourceImageUrl],
     };
   }
 
@@ -255,6 +297,7 @@ async function runSelectedImageTask(
   } catch (error) {
     const message = compactError(error);
     if (shouldFallbackComfyUiKleinTask(task)) {
+      const fallbackUrl = await resolveDirectSourceImageUrl(task.url);
       await recordExecutionLog({
         scope: "comfyui/klein",
         action: "ComfyUI Klein failed; using source image",
@@ -266,17 +309,19 @@ async function runSelectedImageTask(
           kind: task.kind,
           strategyKey: task.strategyKey || null,
           fallbackUrl: task.url,
+          outputUrl: fallbackUrl,
           error: message,
         },
       });
       return {
-        imageUrls: [task.url],
+        imageUrls: [fallbackUrl],
       };
     }
 
     if (isImageTaskSourceFallbackError(error)) {
       const fallbackTimeoutMs = resolveImageTaskFallbackTimeoutMs();
       const isTimeout = isImageTaskTimeoutError(error);
+      const fallbackUrl = await resolveDirectSourceImageUrl(task.url);
       await recordExecutionLog({
         scope: "openai/image",
         action: isTimeout ? "Image task timed out; using source image" : "Image task failed; using source image",
@@ -289,11 +334,12 @@ async function runSelectedImageTask(
           mode: task.mode,
           kind: task.kind,
           fallbackUrl: task.url,
+          outputUrl: fallbackUrl,
           ...(isTimeout ? { timeoutMs: fallbackTimeoutMs } : { error: message }),
         },
       });
       return {
-        imageUrls: [task.url],
+        imageUrls: [fallbackUrl],
       };
     }
 
@@ -325,8 +371,12 @@ async function runImageProviderTask(taskPrompt: string, task: SourceImageTask, i
   }
 
   return appConfig.openaiImageEndpoint === "images"
-    ? callImagesApi(taskPrompt, 1, imageOptions, [task.url])
+    ? callImagesApi(taskPrompt, 1, imageOptions, getTaskReferenceImages(task))
     : callResponsesImageTool(taskPrompt, 1, imageOptions);
+}
+
+function getTaskReferenceImages(task: SourceImageTask) {
+  return [task.url, ...(task.referenceUrls || [])].filter(Boolean);
 }
 
 function shouldFallbackComfyUiKleinTask(task: SourceImageTask) {
@@ -339,6 +389,7 @@ async function callResponsesImageTool(prompt: string, count: number, options: Im
 
 async function callResponsesImageToolInPool(prompt: string, count: number, options: ImageGenerationOptions) {
   const startedAt = Date.now();
+  const sizeConstrainedPrompt = buildImageSizeConstrainedPrompt(prompt, options.size);
   await recordExecutionLog({
     scope: "openai/image",
     action: "Request Responses image tool",
@@ -347,7 +398,7 @@ async function callResponsesImageToolInPool(prompt: string, count: number, optio
     details: {
       model: appConfig.openaiImageModel,
       count,
-      promptLength: prompt.length,
+      promptLength: sizeConstrainedPrompt.length,
       size: options.size,
       quality: options.quality,
     },
@@ -357,11 +408,12 @@ async function callResponsesImageToolInPool(prompt: string, count: number, optio
     headers: openaiImageHeaders(),
     body: JSON.stringify({
       model: appConfig.openaiTextModel,
-      input: prompt,
+      input: sizeConstrainedPrompt,
       tools: [
         {
           type: "image_generation",
           model: appConfig.openaiImageModel,
+          size: options.size,
         },
       ],
       tool_choice: { type: "image_generation" },
@@ -411,16 +463,19 @@ async function callImagesApi(prompt: string, count: number, options: ImageGenera
 
 async function callImagesApiInPool(prompt: string, count: number, options: ImageGenerationOptions, referenceImages: string[] = []) {
   const startedAt = Date.now();
-  const preparedReferences = await prepareReferenceImages(referenceImages);
+  const preparedReferences = await prepareReferenceImages(referenceImages, options.size);
+  const endpointPath = preparedReferences.files.length ? "images/edits" : "images/generations";
+  const sizeConstrainedPrompt = buildImageSizeConstrainedPrompt(prompt, options.size);
   await recordExecutionLog({
     scope: "openai/image",
     action: "Request Images API",
     status: "running",
-    message: "Preparing to generate images through images/generations",
+    message: `Preparing to generate images through ${endpointPath}`,
     details: {
       model: appConfig.openaiImageModel,
       count,
-      promptLength: prompt.length,
+      promptLength: sizeConstrainedPrompt.length,
+      endpointPath,
       referenceImageCount: preparedReferences.values.length,
       localReferenceCount: preparedReferences.localCount,
       remoteReferenceCount: preparedReferences.remoteCount,
@@ -431,10 +486,10 @@ async function callImagesApiInPool(prompt: string, count: number, options: Image
     },
   });
 
-  const data = await requestImagesApiWithRetry(prompt, count, startedAt, options, preparedReferences);
+  const data = await requestImagesApiWithRetry(sizeConstrainedPrompt, count, startedAt, options, preparedReferences);
   const base64Images = (data.data || []).map((item) => item.b64_json).filter((item): item is string => Boolean(item));
   const remoteUrls = (data.data || []).map((item) => item.url).filter((item): item is string => Boolean(item));
-  const imageUrls = [...(await saveBase64Images(base64Images)), ...remoteUrls].slice(0, count);
+  const imageUrls = [...(await saveBase64Images(base64Images)), ...(await materializeGeneratedImageUrls(remoteUrls))].slice(0, count);
   await recordExecutionLog({
     scope: "openai/image",
     action: "Images API completed",
@@ -647,7 +702,7 @@ async function buildStandardImagesApiRequest(
   if (sendQuality) form.append("quality", options.quality);
   if (sendInputFidelity) form.append("input_fidelity", "high");
 
-  for (const referenceImage of referenceImages.slice(0, 1)) {
+  for (const referenceImage of referenceImages.slice(0, 4)) {
     const file = await readFile(referenceImage.filePath);
     form.append("image", new Blob([new Uint8Array(file)], { type: referenceImage.mimeType }), referenceImage.fileName);
   }
@@ -773,7 +828,7 @@ function isImageProviderConfigured() {
   return Boolean(appConfig.openaiImageApiKey);
 }
 
-async function prepareReferenceImages(referenceImages: string[]): Promise<PreparedReferenceImages> {
+async function prepareReferenceImages(referenceImages: string[], requestedSize: ImageGenerationOptions["size"]): Promise<PreparedReferenceImages> {
   const values: string[] = [];
   const fallbackValues: string[] = [];
   const files: PreparedReferenceImage[] = [];
@@ -782,9 +837,9 @@ async function prepareReferenceImages(referenceImages: string[]): Promise<Prepar
   let encodedCount = 0;
 
   for (const referenceImage of referenceImages.filter(Boolean)) {
-    const localFile = resolvePublicFilePath(referenceImage);
+    const localFile = await resolveLocalReferenceFilePath(referenceImage);
     if (localFile) {
-      const normalizedFile = await normalizeReferenceImageFile(localFile);
+      const normalizedFile = await normalizeReferenceImageFile(localFile, requestedSize);
       const file = await readFile(normalizedFile);
       const base64 = file.toString("base64");
       values.push(base64);
@@ -801,7 +856,7 @@ async function prepareReferenceImages(referenceImages: string[]): Promise<Prepar
     }
 
     if (/^https?:\/\//i.test(referenceImage)) {
-      const remoteFile = await materializeRemoteReferenceImage(referenceImage).catch(async (error) => {
+      const remoteFile = await materializeRemoteReferenceImage(referenceImage, requestedSize).catch(async (error) => {
         await recordExecutionLog({
           scope: "openai/image",
           action: "Remote reference image resize skipped",
@@ -858,6 +913,14 @@ function resolvePublicFilePath(value: string) {
   return null;
 }
 
+async function resolveLocalReferenceFilePath(value: string) {
+  const publicFile = resolvePublicFilePath(value);
+  if (publicFile) return publicFile;
+  if (!path.isAbsolute(value)) return null;
+  await access(value);
+  return value;
+}
+
 function getImageMimeType(filePath: string) {
   const extension = path.extname(filePath).toLowerCase();
   if (extension === ".jpg" || extension === ".jpeg") return "image/jpeg";
@@ -866,7 +929,7 @@ function getImageMimeType(filePath: string) {
   return "image/png";
 }
 
-async function materializeRemoteReferenceImage(url: string) {
+async function materializeRemoteReferenceImage(url: string, requestedSize: ImageGenerationOptions["size"]) {
   const response = await fetchWithTimeout(
     url,
     {
@@ -893,20 +956,108 @@ async function materializeRemoteReferenceImage(url: string) {
 
   const rawFile = await writeReferenceInputBuffer(buffer, mimeType);
   try {
-    return await normalizeReferenceImageFile(rawFile);
+    return await normalizeReferenceImageFile(rawFile, requestedSize);
   } finally {
     await rm(rawFile, { force: true }).catch(() => undefined);
   }
 }
 
-async function normalizeReferenceImageFile(filePath: string) {
+async function resolveDirectSourceImageUrl(sourceUrl: string) {
+  const localFile = resolvePublicFilePath(sourceUrl);
+  if (localFile) {
+    const hasWebpUrl = isWebpImageReference(sourceUrl);
+    const format = await readFile(localFile)
+      .then((buffer) => sniffImageFormat(buffer))
+      .catch((error) => {
+        if (hasWebpUrl) {
+          throw new Error(`source WebP image inspection failed: ${compactError(error)}`);
+        }
+        return undefined;
+      });
+
+    if (format?.mimeType !== "image/webp") return sourceUrl;
+    return convertSourceImageToJpeg(localFile, sourceUrl, "local");
+  }
+
+  if (!/^https?:\/\//i.test(sourceUrl) || !isWebpImageReference(sourceUrl)) return sourceUrl;
+  return materializeRemoteSourceImageAsJpeg(sourceUrl);
+}
+
+async function materializeRemoteSourceImageAsJpeg(url: string) {
+  const response = await fetchWithTimeout(
+    url,
+    {
+      headers: buildMediaRequestHeaders(url),
+    },
+    remoteReferenceTimeoutMs,
+  );
+  if (!response.ok) {
+    throw new Error(`source WebP image download failed: HTTP ${response.status}`);
+  }
+
+  const mimeType = normalizeMimeType(response.headers.get("content-type"), url);
+  if (!mimeType.startsWith("image/")) {
+    throw new Error(`source WebP URL did not return an image (${mimeType})`);
+  }
+
+  const buffer = Buffer.from(await response.arrayBuffer());
+  if (!buffer.length) {
+    throw new Error("source WebP image is empty");
+  }
+  if (buffer.length > 12 * 1024 * 1024) {
+    throw new Error(`source WebP image is too large (${buffer.length} bytes)`);
+  }
+
+  const format = sniffImageFormat(buffer);
+  if (format?.mimeType !== "image/webp" && mimeType !== "image/webp") return url;
+
+  const rawFile = await writeReferenceInputBuffer(buffer, format?.mimeType || mimeType);
+  try {
+    return await convertSourceImageToJpeg(rawFile, url, "remote");
+  } finally {
+    await rm(rawFile, { force: true }).catch(() => undefined);
+  }
+}
+
+async function convertSourceImageToJpeg(inputFile: string, sourceUrl: string, sourceKind: "local" | "remote") {
+  const startedAt = Date.now();
+  const outputDir = path.join(process.cwd(), "public", "generated", "source-images");
+  await mkdir(outputDir, { recursive: true });
+  const outputFile = path.join(outputDir, `source-${Date.now()}-${randomUUID()}.jpg`);
+  const outputUrl = `/generated/source-images/${path.basename(outputFile)}`;
+
+  try {
+    await runImageTranscodeToJpeg(inputFile, outputFile);
+  } catch (error) {
+    await rm(outputFile, { force: true }).catch(() => undefined);
+    throw new Error(`source WebP to JPG conversion failed: ${compactError(error)}`);
+  }
+
+  await recordExecutionLog({
+    scope: "openai/image",
+    action: "Source WebP converted to JPG",
+    status: "info",
+    message: "Direct source-image use was converted from WebP to JPG before being returned.",
+    durationMs: Date.now() - startedAt,
+    details: {
+      sourceKind,
+      sourceName: path.basename(sourceUrl.split(/[?#]/)[0] || sourceUrl),
+      outputFile: path.basename(outputFile),
+    },
+  });
+
+  return outputUrl;
+}
+
+async function normalizeReferenceImageFile(filePath: string, requestedSize: ImageGenerationOptions["size"]) {
   const startedAt = Date.now();
   const outputDir = path.join(process.cwd(), "public", "generated", "image-inputs");
   await mkdir(outputDir, { recursive: true });
 
   const outputFile = path.join(outputDir, `reference-${Date.now()}-${randomUUID()}.jpg`);
+  const target = parseRequestedPixelSize(requestedSize);
   try {
-    await runImageResize(filePath, outputFile);
+    await runImageResize(filePath, outputFile, target);
   } catch (error) {
     await rm(outputFile, { force: true }).catch(() => undefined);
     throw new Error(`reference image resize failed: ${compactError(error)}`);
@@ -916,12 +1067,15 @@ async function normalizeReferenceImageFile(filePath: string) {
     scope: "openai/image",
     action: "Reference image resized",
     status: "info",
-    message: `Reference image normalized before model input; longest side is capped at ${referenceImageMaxSidePx}px.`,
+    message: target
+      ? `Reference image normalized before model input to requested size ${target.width}x${target.height}.`
+      : `Reference image normalized before model input; longest side is capped at ${referenceImageMaxSidePx}px.`,
     durationMs: Date.now() - startedAt,
     details: {
       inputFile: path.basename(filePath),
       outputFile: path.basename(outputFile),
-      maxSidePx: referenceImageMaxSidePx,
+      requestedSize,
+      ...(target ? { width: target.width, height: target.height } : { maxSidePx: referenceImageMaxSidePx }),
     },
   });
 
@@ -936,8 +1090,30 @@ async function writeReferenceInputBuffer(buffer: Buffer, mimeType: string) {
   return filePath;
 }
 
-function runImageResize(inputFile: string, outputFile: string) {
+function runImageTranscodeToJpeg(inputFile: string, outputFile: string) {
   return new Promise<void>((resolve, reject) => {
+    const child = execFile(
+      "ffmpeg",
+      ["-y", "-hide_banner", "-loglevel", "error", "-i", inputFile, "-frames:v", "1", "-q:v", "2", outputFile],
+      { timeout: referenceImageNormalizeTimeoutMs },
+      (error, _stdout, stderr) => {
+        if (error) {
+          const detail = stderr?.toString().trim().split(/\r?\n/).slice(-2).join(" ") || error.message;
+          reject(new Error(detail.slice(0, 240)));
+          return;
+        }
+        resolve();
+      },
+    );
+    child.on("error", reject);
+  });
+}
+
+function runImageResize(inputFile: string, outputFile: string, target?: { width: number; height: number }) {
+  return new Promise<void>((resolve, reject) => {
+    const filter = target
+      ? `scale=${target.width}:${target.height}:force_original_aspect_ratio=decrease,pad=${target.width}:${target.height}:(ow-iw)/2:(oh-ih)/2:color=white`
+      : `scale=${referenceImageMaxSidePx}:${referenceImageMaxSidePx}:force_original_aspect_ratio=decrease`;
     const child = execFile(
       "ffmpeg",
       [
@@ -948,7 +1124,7 @@ function runImageResize(inputFile: string, outputFile: string) {
         "-i",
         inputFile,
         "-vf",
-        `scale=${referenceImageMaxSidePx}:${referenceImageMaxSidePx}:force_original_aspect_ratio=decrease`,
+        filter,
         "-frames:v",
         "1",
         "-q:v",
@@ -967,6 +1143,11 @@ function runImageResize(inputFile: string, outputFile: string) {
     );
     child.on("error", reject);
   });
+}
+
+function isWebpImageReference(value: string) {
+  const cleanValue = value.split(/[?#]/)[0] || "";
+  return /\.webp$/i.test(cleanValue) || /(?:format|fmt|imageMogr2\/format)[=/]webp/i.test(value) || /_webp(?:_|$)/i.test(value);
 }
 
 function extensionFromMimeType(mimeType: string) {
@@ -1003,6 +1184,17 @@ function normalizeImageOptions(options?: Partial<ImageGenerationOptions>): Image
 
 function normalizeProviderPrompt(prompt: string) {
   return typeof prompt === "string" ? prompt.trim() : "";
+}
+
+function buildImageSizeConstrainedPrompt(prompt: string, requestedSize: ImageGenerationOptions["size"]) {
+  const target = parseRequestedPixelSize(requestedSize);
+  if (!target) return prompt;
+  const instruction = [
+    `请严格按照用户指定尺寸输出：${target.width}x${target.height} 像素。`,
+    `最终画布比例必须匹配 ${target.width}:${target.height}，不要沿用参考图、视频帧或素材图的原始横竖比例。`,
+    "不要在画面中加入边框、白边、黑边或留白来模拟尺寸；应直接以该尺寸和比例构图生成。",
+  ].join("\n");
+  return `${prompt.trim()}\n\n${instruction}`.trim();
 }
 
 function normalizeImageQuality(value?: string): ImageGenerationOptions["quality"] {
@@ -1081,9 +1273,76 @@ async function saveBase64Images(base64Images: string[]) {
   const imageUrls: string[] = [];
   for (const [index, image] of base64Images.entries()) {
     const fileName = `image-${Date.now()}-${randomUUID()}-${index + 1}.png`;
-    await writeFile(path.join(generatedDir, fileName), Buffer.from(image, "base64"));
+    const filePath = path.join(generatedDir, fileName);
+    await writeFile(filePath, Buffer.from(image, "base64"));
+    await recordExecutionLog({
+      scope: "openai/image",
+      action: "Generated image saved",
+      status: "info",
+      message: "Generated image saved from provider output without local resizing.",
+      details: {
+        fileName,
+      },
+    });
     imageUrls.push(`/generated/${fileName}`);
   }
 
   return imageUrls;
+}
+
+async function materializeGeneratedImageUrls(remoteUrls: string[]) {
+  const imageUrls: string[] = [];
+  for (const [index, remoteUrl] of remoteUrls.entries()) {
+    imageUrls.push(await downloadGeneratedImageUrl(remoteUrl, index));
+  }
+  return imageUrls;
+}
+
+async function downloadGeneratedImageUrl(remoteUrl: string, index: number) {
+  const response = await fetchWithTimeout(remoteUrl, {
+    headers: buildMediaRequestHeaders(remoteUrl),
+  });
+  if (!response.ok) {
+    throw new Error(`generated image URL download failed: HTTP ${response.status}`);
+  }
+
+  const mimeType = normalizeMimeType(response.headers.get("content-type"), remoteUrl);
+  if (!mimeType.startsWith("image/")) {
+    throw new Error(`generated image URL did not return an image (${mimeType})`);
+  }
+
+  const buffer = Buffer.from(await response.arrayBuffer());
+  if (!buffer.length) {
+    throw new Error("generated image URL returned an empty image");
+  }
+  if (buffer.length > maxGeneratedImageUrlBytes) {
+    throw new Error(`generated image URL returned an oversized image (${buffer.length} bytes)`);
+  }
+
+  const generatedDir = path.join(process.cwd(), "public", "generated");
+  await mkdir(generatedDir, { recursive: true });
+  const fileName = `image-${Date.now()}-${randomUUID()}-${index + 1}.${extensionFromMimeType(mimeType)}`;
+  const filePath = path.join(generatedDir, fileName);
+  await writeFile(filePath, buffer);
+  await recordExecutionLog({
+    scope: "openai/image",
+    action: "Generated image URL saved",
+    status: "info",
+    message: "Generated image URL output was saved locally without local resizing.",
+    details: {
+      fileName,
+    },
+  });
+  return `/generated/${fileName}`;
+}
+
+function parseRequestedPixelSize(requestedSize: ImageGenerationOptions["size"]) {
+  if (requestedSize === "auto") return undefined;
+  const match = /^(\d{2,5})x(\d{2,5})$/.exec(requestedSize);
+  if (!match) return undefined;
+
+  const width = Number(match[1]);
+  const height = Number(match[2]);
+  if (!Number.isInteger(width) || !Number.isInteger(height) || width < 64 || height < 64 || width > 8192 || height > 8192) return undefined;
+  return { width, height };
 }

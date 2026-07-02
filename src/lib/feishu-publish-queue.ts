@@ -315,6 +315,7 @@ function delayFeishuPublishPersistRetry(attempt: number) {
 }
 
 async function loadLatestPostsForJob(job: FeishuPublishJob) {
+  const simpleRun = job.sourceRunId ? await getSimpleRunFromDb(job.sourceRunId) : undefined;
   const latestPosts = await Promise.all(
     job.posts.map(async (post) => {
       const latest = await getGeneratedPost(post.id);
@@ -323,6 +324,7 @@ async function loadLatestPostsForJob(job: FeishuPublishJob) {
   );
   return latestPosts.map((post) => ({
     ...post,
+    taskKeyword: post.taskKeyword || simpleRun?.input.keyword,
     status: "approved" as const,
     updatedAt: new Date().toISOString(),
   }));

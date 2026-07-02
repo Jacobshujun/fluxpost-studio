@@ -1,15 +1,15 @@
 # FluxPost Studio
 
-## Harness
+## Trellis
 
-New AI sessions should recover context from `AGENTS.md` and `docs/harness/`.
+New AI sessions should recover context from `AGENTS.md` and `.trellis/`.
 Run the baseline check from the project root:
 
 ```powershell
-powershell -ExecutionPolicy Bypass -File scripts/harness/check.ps1
+powershell -ExecutionPolicy Bypass -File .trellis/verification/check.ps1
 ```
 
-`docs/harness/` is the only persistent project context. Do not add parallel memory, TODO, planning, or handoff files elsewhere.
+`.trellis/` is the active persistent project context and task/spec system. The old `docs/harness.disabled/` and `scripts/harness.disabled/` directories are disabled migration archives; do not use them for normal work.
 
 社媒图文内容制作工作台，本地 MVP 覆盖：
 
@@ -18,6 +18,15 @@ powershell -ExecutionPolicy Bypass -File scripts/harness/check.ps1
 - GPT 文案仿写与审查修改
 - GPT 图片生成接口边界
 - 飞书 CLI 写入多维表格的 payload wrapper
+
+## Latest Updates (2026-07-02)
+
+- Migrated AI collaboration context from the old Harness files to `.trellis/`, with `npm run trellis:check` as the local baseline entry. The old `docs/harness.disabled/` and `scripts/harness.disabled/` paths are migration archives only.
+- Improved the review desk with theme sync, desktop internal scrolling, per-image Prompt generation, single-image regeneration, paste/upload replacement and append flows, plus approve-and-advance review behavior.
+- Expanded simple mode with original creation and viral imitation flows. ComfyUI Klein, direct original references, video transcription, and automatic Feishu publishing now default off so generated drafts land in review first.
+- Strengthened video and image handling: video quality selection, download fallback candidates, highlight-frame selection/review, opt-in Ark transcription, GPT-Image-2 sizing, and reference-image edit request checks.
+- Updated Feishu flows with the `车型` single-select field, vehicle-aware task-number imports, review-desk vehicle options, and a durable distribution-audit queue with progress polling.
+- Added deterministic local verification coverage for review workflows, simple/original/viral modes, video/image behavior, Feishu vehicle options, material preview, Trellis migration, and default-off creation switches.
 
 ## Local Setup
 
@@ -102,6 +111,7 @@ OPENAI_TEXT_MODEL=gpt-5.5
 OPENAI_IMAGE_ENDPOINT=images
 OPENAI_IMAGE_MODEL=gpt-image-2
 OPENAI_IMAGE_REQUEST_TIMEOUT_MS=180000
+VIRAL_IMAGE_IMITATION_PROMPT=参考图2的场景风格和美学，构图和角度可以变，同时使用图2的汽车漆面质感，为图1的车生成一张汽车美图，保持图1的汽车细节不要变，车牌黑底无字。
 
 COMFYUI_KLEIN_ENABLED=false
 COMFYUI_BASE_URL=http://127.0.0.1:8188
@@ -132,10 +142,6 @@ FEISHU_BITABLE_FIELD_MAP=
 FEISHU_CONTENT_IMPORT_BASE_TOKEN=
 FEISHU_CONTENT_IMPORT_TABLE_ID=
 FEISHU_CONTENT_IMPORT_FIELD_MAP=
-FEISHU_SOURCE_IMPORT_ENABLED=true
-FEISHU_SOURCE_IMPORT_BASE_TOKEN=
-FEISHU_SOURCE_IMPORT_TABLE_ID=
-FEISHU_SOURCE_IMPORT_FIELD_MAP=
 LARK_TASK_CHAT_IDS=
 LARK_TASK_USER_MAP=
 LARK_TASK_API_TOKEN=
@@ -171,6 +177,8 @@ OPENAI_IMAGE_MODEL=gpt-image-2
 飞书 CLI 未配置时，发布接口会把待写入内容保存到 `data/feishu-outbox/*.json`。
 
 `OPENAI_IMAGE_API_KEY` can be configured separately for the image provider; when it is empty the app uses `OPENAI_API_KEY`. `OPENAI_IMAGE_BASE_URL` is the primary image API base URL. Optional `OPENAI_IMAGE_BACKUP_BASE_URL` and `OPENAI_IMAGE_BACKUP_API_KEY` configure a backup Images API route: primary route failures switch image generation to the backup route, and backup route failures switch it back to primary. Text-to-image calls use `/images/generations`, and reference-image editing/image-to-image calls use `/images/edits`.
+
+`VIRAL_IMAGE_IMITATION_PROMPT` controls the prompt used when simple-mode viral replication imitates source images. It treats the ordered local vehicle material image as reference image 1 and the viral source image as reference image 2; restart the local app after changing this environment variable.
 
 Local ComfyUI Klein processing is disabled by default. Keep `COMFYUI_KLEIN_ENABLED=false` to use the OpenAI-compatible `gpt-image-2` Images API path for car-exterior and people-with-car selected source-image tasks. Set `COMFYUI_KLEIN_ENABLED=true` plus either `COMFYUI_KLEIN_WORKFLOW_API_JSON` or `COMFYUI_KLEIN_WORKFLOW_PATH` to route those tasks to the local ComfyUI workflow. Inline API JSON takes precedence over the file path; the file path is read for each task, so edits in that workflow file do not require code changes. The `COMFYUI_KLEIN_KSAMPLER_*` values optionally override seed, steps, cfg, sampler, scheduler, and denoise from environment configuration; changing those env values requires restarting the app. The local workflow is serialized through `WORKER_LOCAL_IMAGE_CONCURRENCY=1`; `COMFYUI_KLEIN_FAILURE_POLICY=fallback_source` keeps a failed Klein image from failing the whole generated post.
 
@@ -216,11 +224,9 @@ FEISHU_BITABLE_TABLE_ID=<table-id>
 
 Optional custom args still work through `FEISHU_CLI_BITABLE_ARGS`. Supported placeholders are `{payload}`, `{recordPayload}`, `{appToken}`, and `{tableId}`.
 
-`FEISHU_BITABLE_FIELD_MAP` can override target field names as a JSON object. Default fields are: `动态标题`, `动态正文`, `动态素材`, `内容标签`, `内容创作来源`. The `内容创作来源` value is the workspace user's display name, falling back to the owner id when a historical post has no display name.
+`FEISHU_BITABLE_FIELD_MAP` can override target field names as a JSON object. Default fields are: `动态标题`, `动态正文`, `动态素材`, `内容标签`, `内容创作来源`, and single-select `车型`. The `内容创作来源` value is the workspace user's display name, falling back to the owner id when a historical post has no display name. The `车型` value comes from the simple task keyword, with Feishu-imported source records using their imported vehicle value when present.
 
 Simple mode can import source content from the same Feishu Base by task number. By default `FEISHU_CONTENT_IMPORT_BASE_TOKEN` and `FEISHU_CONTENT_IMPORT_TABLE_ID` fall back to `FEISHU_BITABLE_APP_TOKEN` and `FEISHU_BITABLE_TABLE_ID`. `FEISHU_CONTENT_IMPORT_FIELD_MAP` can override the read fields; defaults are `任务编号`, `动态标题`, `动态正文`, `动态素材`, and `车型`. Imported `车型` values become the target content-pool keyword/project.
-
-Source-link imports also mirror safety-kept TikHub-resolved source items into a separate Feishu Base. By default, `FEISHU_SOURCE_IMPORT_ENABLED=true` uses the requested Base/table in code. Override `FEISHU_SOURCE_IMPORT_BASE_TOKEN`, `FEISHU_SOURCE_IMPORT_TABLE_ID`, or `FEISHU_SOURCE_IMPORT_FIELD_MAP` only when moving this mirror to another Base. Attachment overrides should include `imageFieldId` and `videoFieldId`.
 
 ### Feishu IM task launcher
 

@@ -1,20 +1,25 @@
 import { request as httpRequest } from "node:http";
 import { request as httpsRequest } from "node:https";
 import { cacheCrawledMedia } from "./media-cache";
+import { rankVideoUrlsByQuality, type VideoQualityCandidate } from "./video-quality";
 import type { NormalizedSourceItem } from "./types";
 
 type JsonRecord = Record<string, unknown>;
 
+type SourceFetchOptions = {
+  enableVideoTranscription?: boolean;
+};
+
 const xiaopengBbsBaseUrl = "https://bbs.xiaopeng.com";
 
-export async function fetchXiaopengBbsItemBySource(value: string): Promise<NormalizedSourceItem[]> {
+export async function fetchXiaopengBbsItemBySource(value: string, options: SourceFetchOptions = {}): Promise<NormalizedSourceItem[]> {
   const sourceId = extractXiaopengBbsThreadId(value);
   if (!sourceId) throw new Error("Unsupported Xiaopeng BBS source id or URL");
 
   const sourceUrl = buildXiaopengBbsThreadUrl(sourceId);
   const html = await requestText(sourceUrl);
   const item = normalizeXiaopengBbsThread(sourceId, sourceUrl, html);
-  return cacheCrawledMedia([item]);
+  return cacheCrawledMedia([item], { enableVideoTranscription: options.enableVideoTranscription === true });
 }
 
 export function buildXiaopengBbsThreadUrl(sourceId: string) {
@@ -157,13 +162,21 @@ function extractAttachmentImages(record: JsonRecord) {
 function extractAttachmentVideos(record: JsonRecord) {
   const videos = Array.isArray(record.videos) ? record.videos : [];
   const attachments = Array.isArray(record.attach) ? record.attach : [];
-  return dedupeStrings(
-    [...videos, ...attachments]
-      .filter(isRecord)
-      .flatMap((item) => [firstString(item, ["url", "src", "attachment", "videoUrl", "playUrl"]), firstString(item, ["cover"])])
-      .map((url) => normalizeUrl(url))
-      .filter((url): url is string => Boolean(url) && isLikelyVideoUrl(url)),
-  );
+  const candidates: VideoQualityCandidate[] = [];
+  [...videos, ...attachments].filter(isRecord).forEach((item, index) => {
+    const context: Partial<VideoQualityCandidate> = {
+      width: firstNumber(item, ["width", "w"]),
+      height: firstNumber(item, ["height", "h"]),
+      bitrate: firstNumber(item, ["bit_rate", "bitrate"]),
+      quality: firstString(item, ["quality", "definition", "format"]),
+      keyHint: `attachment.${index}`,
+    };
+    ["url", "src", "attachment", "videoUrl", "playUrl"].forEach((key) => {
+      const url = normalizeUrl(firstString(item, [key]));
+      if (url && isLikelyVideoUrl(url)) candidates.push({ ...context, url, keyHint: `attachment.${index}.${key}` });
+    });
+  });
+  return rankVideoUrlsByQuality(candidates).filter(isLikelyVideoUrl);
 }
 
 function extractTopicTitle(record: JsonRecord) {

@@ -6,6 +6,7 @@ import {
   getFeishuPublishJob,
   listFeishuPublishJobs,
 } from "@/lib/feishu-publish-queue";
+import { listFeishuVehicleOptions, normalizeFeishuVehicleValue } from "@/lib/feishu-field-options";
 import { getGeneratedPost } from "@/lib/generated-posts";
 import { requireWorkspaceAccount } from "@/lib/workspace-accounts";
 import type { GeneratedPost } from "@/lib/types";
@@ -59,7 +60,9 @@ export async function POST(request: Request) {
       return NextResponse.json({ error: "One or more posts were not found" }, { status: 404 });
     }
 
-    const job = await enqueueFeishuPublishJob(posts, {
+    const postsForPublish = await normalizePostsForFeishuPublish(posts);
+
+    const job = await enqueueFeishuPublishJob(postsForPublish, {
       source: "manual",
       ownerUserId: account.id,
       ownerDisplayName: account.displayName,
@@ -97,4 +100,23 @@ export async function POST(request: Request) {
     });
     return NextResponse.json({ error: message }, { status: /sign-in/i.test(message) ? 401 : 500 });
   }
+}
+
+async function normalizePostsForFeishuPublish(posts: GeneratedPost[]) {
+  const vehicleOptions = await listFeishuVehicleOptions();
+  if (!vehicleOptions.options.length) return posts;
+
+  return posts.map((post) => {
+    const rawVehicle = post.feishuVehicle || post.taskKeyword || "";
+    const normalized = normalizeFeishuVehicleValue(rawVehicle, vehicleOptions.options);
+    if (!normalized.matched) {
+      throw new Error(
+        `Feishu ${vehicleOptions.fieldName} option not found: ${normalized.value}. Please select an existing ${vehicleOptions.fieldName} before publishing.`,
+      );
+    }
+    return {
+      ...post,
+      feishuVehicle: normalized.value || undefined,
+    };
+  });
 }

@@ -1,7 +1,6 @@
 import { compactError, recordExecutionLog } from "./activity-log";
 import { concurrencyConfig, mapWithConcurrency } from "./concurrency";
 import { ingestCrawlItems } from "./content-pool";
-import { syncSourceItemsToFeishu, type SourceImportFeishuSyncResult } from "./source-import-feishu";
 import { filterUnsafeSourceItems } from "./source-safety";
 import { tagSourceItems } from "./source-tagging";
 import { detectPlatformFromSourceUrl, fetchTikHubItemBySourceLink } from "./tikhub";
@@ -34,9 +33,6 @@ export type SourceLinkImportSummary = {
   taggedVisual: number;
   localImages: number;
   videoFrames: number;
-  feishuSourceCreated: number;
-  feishuSourceSkippedDuplicate: number;
-  feishuSourceFailed: number;
 };
 
 export type SourceLinkImportResponse = {
@@ -45,7 +41,6 @@ export type SourceLinkImportResponse = {
   project?: ContentProject;
   results: SourceLinkImportResult[];
   summary: SourceLinkImportSummary;
-  sourceFeishuSync?: SourceImportFeishuSyncResult;
 };
 
 export type SourceLinkImportInput = {
@@ -53,6 +48,8 @@ export type SourceLinkImportInput = {
   links: string[];
   platform?: SourceLinkPlatform;
   cookie?: string;
+  videoFrameOriginalReference?: boolean;
+  enableVideoTranscription?: boolean;
   owner?: WorkspaceAccessActor;
 };
 
@@ -60,6 +57,8 @@ export type SourceLinkResolveInput = {
   links: string[];
   platform?: SourceLinkPlatform;
   cookie?: string;
+  videoFrameOriginalReference?: boolean;
+  enableVideoTranscription?: boolean;
 };
 
 export type SourceLinkResolveResponse = {
@@ -79,6 +78,12 @@ type ParsedSourceLink = {
 type FetchedSourceLink = {
   item?: NormalizedSourceItem;
   result: SourceLinkImportResult;
+};
+
+type SourceLinkResolveOptions = {
+  cookie?: string;
+  videoFrameOriginalReference?: boolean;
+  enableVideoTranscription?: boolean;
 };
 
 const maxSourceLinksPerBatch = 200;
@@ -102,7 +107,11 @@ export async function importSourceLinks(input: SourceLinkImportInput): Promise<S
     },
   });
 
-  const resolved = await resolveParsedSourceLinks(parsedLinks, input.cookie);
+  const resolved = await resolveParsedSourceLinks(parsedLinks, {
+    cookie: input.cookie,
+    videoFrameOriginalReference: input.videoFrameOriginalReference !== false,
+    enableVideoTranscription: input.enableVideoTranscription === true,
+  });
   const results = resolved.results;
   const dedupedItems = resolved.items;
   const safetyResult = await filterUnsafeSourceItems(dedupedItems, {
@@ -117,7 +126,6 @@ export async function importSourceLinks(input: SourceLinkImportInput): Promise<S
     }
   }
 
-  const sourceFeishuSync = await syncSourceItemsToFeishu(safetyResult.items, { scope: "crawl/links" });
   const taggedItems = await tagSourceItems(safetyResult.items);
   const importedIds = new Set(taggedItems.map((item) => item.id));
   for (const result of results) {
@@ -128,7 +136,7 @@ export async function importSourceLinks(input: SourceLinkImportInput): Promise<S
   }
 
   const project = taggedItems.length ? await ingestCrawlItems(input.query, taggedItems, input.owner) : undefined;
-  const summary = summarizeLinkImport(parsedLinks.length, results, taggedItems, sourceFeishuSync);
+  const summary = summarizeLinkImport(parsedLinks.length, results, taggedItems);
   await recordExecutionLog({
     scope: "crawl/links",
     action: "Source link import completed",
@@ -143,9 +151,6 @@ export async function importSourceLinks(input: SourceLinkImportInput): Promise<S
       failed: summary.failed,
       unsupported: summary.unsupported,
       duplicates: summary.duplicates,
-      feishuSourceCreated: summary.feishuSourceCreated,
-      feishuSourceSkippedDuplicate: summary.feishuSourceSkippedDuplicate,
-      feishuSourceFailed: summary.feishuSourceFailed,
     },
   });
 
@@ -155,29 +160,39 @@ export async function importSourceLinks(input: SourceLinkImportInput): Promise<S
     project,
     results,
     summary,
-    sourceFeishuSync,
   };
 }
 
 export async function resolveSourceLinks(input: SourceLinkResolveInput): Promise<SourceLinkResolveResponse> {
-  return resolveParsedSourceLinks(parseSourceLinks(input.links, input.platform), input.cookie);
+  return resolveParsedSourceLinks(parseSourceLinks(input.links, input.platform), {
+    cookie: input.cookie,
+    videoFrameOriginalReference: input.videoFrameOriginalReference !== false,
+    enableVideoTranscription: input.enableVideoTranscription === true,
+  });
 }
 
-async function resolveParsedSourceLinks(parsedLinks: ParsedSourceLink[], cookie?: string): Promise<SourceLinkResolveResponse> {
+async function resolveParsedSourceLinks(
+  parsedLinks: ParsedSourceLink[],
+  options: SourceLinkResolveOptions = {},
+): Promise<SourceLinkResolveResponse> {
+  const cookie = options.cookie;
+  const videoFrameOriginalReference = options.videoFrameOriginalReference !== false;
+  const enableVideoTranscription = options.enableVideoTranscription === true;
   const { initialResults, candidates } = splitParsedSourceLinks(parsedLinks);
   const fetched = await mapWithConcurrency<ParsedSourceLink, FetchedSourceLink>(candidates, concurrencyConfig.crawl, async (link) => {
     try {
       const items =
         link.platform === "xiaopeng_bbs"
-          ? await fetchXiaopengBbsItemBySource(link.url)
+          ? await fetchXiaopengBbsItemBySource(link.url, { enableVideoTranscription })
           : link.platform === "dongchedi"
-            ? await fetchDongchediItemBySource(link.url)
+            ? await fetchDongchediItemBySource(link.url, { cookie, enableVideoTranscription })
           : await fetchTikHubItemBySourceLink({
               url: link.url,
               platform: link.platform,
               cookie,
+              enableVideoTranscription,
             });
-      const item = items[0];
+      const item = applyVideoFrameOriginalReferencePreference(items[0], videoFrameOriginalReference);
       if (!item) {
         return {
           result: {
@@ -226,6 +241,26 @@ async function resolveParsedSourceLinks(parsedLinks: ParsedSourceLink[], cookie?
     items: dedupedItems,
     results,
   };
+}
+
+function applyVideoFrameOriginalReferencePreference(item: NormalizedSourceItem | undefined, enabled: boolean) {
+  if (!item) return item;
+  if (!isVideoLikeImportedSource(item)) return item;
+  return {
+    ...item,
+    videoFrameOriginalReference: enabled,
+  };
+}
+
+function isVideoLikeImportedSource(item: NormalizedSourceItem) {
+  return Boolean(
+    item.mediaType === "video" ||
+      item.mediaType === "mixed" ||
+      item.videoUrl ||
+      item.downloadedVideoUrl ||
+      item.videoFrames?.length ||
+      item.mediaCache?.videoPresent,
+  );
 }
 
 function splitParsedSourceLinks(parsedLinks: ParsedSourceLink[]) {
@@ -305,7 +340,6 @@ function summarizeLinkImport(
   total: number,
   results: SourceLinkImportResult[],
   importedItems: NormalizedSourceItem[],
-  sourceFeishuSync?: SourceImportFeishuSyncResult,
 ): SourceLinkImportSummary {
   return {
     total,
@@ -319,27 +353,28 @@ function summarizeLinkImport(
     taggedVisual: importedItems.reduce((sum, item) => sum + (item.visualTagging?.assets.length || 0), 0),
     localImages: importedItems.reduce((sum, item) => sum + (item.downloadedImages?.length || 0), 0),
     videoFrames: importedItems.reduce((sum, item) => sum + (item.videoFrames?.length || 0), 0),
-    feishuSourceCreated: sourceFeishuSync?.created || 0,
-    feishuSourceSkippedDuplicate: sourceFeishuSync?.skippedDuplicate || 0,
-    feishuSourceFailed: sourceFeishuSync?.failed || 0,
   };
 }
 
 function extractFirstHttpUrl(value: string) {
   const match = value.match(/https?:\/\/[^\s"'<>]+/i);
   if (!match) return "";
-  return match[0].replace(/[),.，。；;]+$/u, "");
+  return stripTrailingUrlPunctuation(match[0]);
 }
 
 function normalizeSourceUrl(value: string) {
   if (!value) return "";
   try {
-    const url = new URL(value);
+    const url = new URL(stripTrailingUrlPunctuation(value));
     url.hash = "";
     return url.toString();
   } catch {
     return "";
   }
+}
+
+function stripTrailingUrlPunctuation(value: string) {
+  return value.replace(/[),."'\u201C\u201D\u2018\u2019\uFF0C\u3002\uFF1B;]+$/u, "");
 }
 
 function normalizeXiaopengBbsInput(value: string) {

@@ -8,6 +8,7 @@ export function makeDemoSourceItems(platform: Platform, count: number): Normaliz
     douyin: "抖音",
     weibo: "微博",
     feishu: "飞书",
+    original: "原创",
     xiaopeng_bbs: "小鹏社区",
     dongchedi: "\u61c2\u8f66\u5e1d",
   };

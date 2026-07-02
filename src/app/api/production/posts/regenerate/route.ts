@@ -2,6 +2,7 @@ import { NextResponse } from "next/server";
 import { getSourceItemsByIds } from "@/lib/content-pool";
 import { getGeneratedPost, makeGeneratedPostVersion } from "@/lib/generated-posts";
 import { generateImagesFromPrompt } from "@/lib/image-generation";
+import { normalizeImageGenerationSize } from "@/lib/image-size-options";
 import { generatePost } from "@/lib/openai";
 import { isWorkspaceSignInError, requireWorkspaceAccount } from "@/lib/workspace-accounts";
 import type { GeneratedPost, ImageGenerationQuality, NormalizedSourceItem, ProductionPlan, SourceImageTask } from "@/lib/types";
@@ -37,8 +38,9 @@ export async function POST(request: Request) {
     });
 
     if (body.generateImages !== false) {
+      const imageSize = normalizeImageGenerationSize(body.imageSize);
       const imageResult = await generateImagesFromPrompt(nextPost.imagePrompt, 1, nextPost.imageTasks, {
-        size: body.imageSize,
+        size: imageSize,
         quality: body.imageQuality,
       });
       nextPost.imageUrls = imageResult.imageUrls;

@@ -1,4 +1,5 @@
 import { compactError, recordExecutionLog, runWithExecutionLogOwner } from "./activity-log";
+import { appConfig } from "./config";
 import { buildDefaultImageTasks } from "./creation-controls";
 import { concurrencyConfig, mapWithConcurrency, runWithConcurrencyPool } from "./concurrency";
 import { calculateHotScore, ingestCrawlItems, markSourceRewritten } from "./content-pool";
@@ -17,16 +18,22 @@ import {
 import { enqueueFeishuPublishJob, ensureFeishuPublishQueueWorker } from "./feishu-publish-queue";
 import { importFeishuContentByTaskNumbers, normalizeFeishuTaskNumberInput } from "./feishu-content-import";
 import { saveGeneratedPost } from "./generated-posts";
-import { generateImagesFromPrompt } from "./image-generation";
+import { generateImagesFromPrompt, generateImagesFromPromptList } from "./image-generation";
 import { generatePost } from "./openai";
+import { buildOriginalGeneratedPost, extractOriginalTopic } from "./original-creation";
 import { isComfyUiKleinConfigured } from "./comfyui-klein";
 import { buildProductionPlan } from "./production-plan";
 import { savePost } from "./store";
-import { syncSourceItemsToFeishu } from "./source-import-feishu";
 import { resolveSourceLinks, type SourceLinkImportResult } from "./source-link-import";
 import { filterUnsafeSourceItems } from "./source-safety";
 import { tagSourceItems } from "./source-tagging";
 import { crawlTikHub } from "./tikhub";
+import {
+  analyzeViralImages,
+  analyzeViralSource,
+  buildViralGeneratedPost,
+  pairViralImagesWithMaterials,
+} from "./viral-replication";
 import { defaultWorkspacePromptSettings, getWorkspacePromptSettings, saveWorkspacePromptSettings } from "./workspace-settings";
 import {
   accessActorFromOwner,
@@ -61,7 +68,16 @@ type CreateSimpleRunInput = Omit<
   materialPaths?: string[];
   links?: string[] | string;
   linkPlatform?: SimpleRunInput["linkPlatform"];
+  cookie?: string;
   feishuTaskNumbers?: string[] | string;
+  viralUrl?: string;
+  viralImitateImages?: boolean;
+  viralMaterialPaths?: string[];
+  originalPrompt?: string;
+  originalUseWebSearch?: boolean;
+  useComfyUiKlein?: boolean;
+  directOriginalReference?: boolean;
+  enableVideoTranscription?: boolean;
   ownerUserId?: string;
   ownerDisplayName?: string;
   settings?: Partial<WorkspacePromptSettings>;
@@ -82,6 +98,15 @@ const stageTitles: Record<SimpleRunStageId, string> = {
   produce: "生成图文",
   publish: "写入飞书",
 };
+
+function makeOriginalStageTitles(): Record<SimpleRunStageId, string> {
+  return {
+    crawl: "原创准备",
+    tag: "原创策划",
+    produce: "生成图文",
+    publish: "写入飞书",
+  };
+}
 
 export async function listSimpleRuns(limit = 20, account?: WorkspaceAccessActor) {
   await reconcileInterruptedSimpleRuns(limit);
@@ -172,6 +197,7 @@ async function prepareSimpleRun(input: CreateSimpleRunInput) {
       platforms: normalizedInput.platforms.join(","),
       linkCount: normalizedInput.links?.length || 0,
       linkPlatform: normalizedInput.linkPlatform || "",
+      hasCookie: Boolean(normalizedInput.cookie),
       materialCount: normalizedInput.materialPaths.length,
       ownerUserId: normalizedInput.ownerUserId || "local",
     },
@@ -261,6 +287,14 @@ function isSimpleRunFeishuMode(input: SimpleRunInput) {
   return input.sourceMode === "feishu";
 }
 
+function isSimpleRunViralMode(input: SimpleRunInput) {
+  return input.sourceMode === "viral";
+}
+
+function isSimpleRunOriginalMode(input: SimpleRunInput) {
+  return input.sourceMode === "original";
+}
+
 function simpleRunAccessActor(input: SimpleRunInput) {
   return accessActorFromOwner(input.ownerUserId, input.ownerDisplayName);
 }
@@ -286,6 +320,12 @@ async function runSimpleRunWorkflow(
   startedAt: number,
 ) {
   await assertSimpleRunNotForceTerminated(run.id);
+  if (isSimpleRunOriginalMode(normalizedInput)) {
+    return runSimpleOriginalWorkflow(run, normalizedInput, settings, startedAt);
+  }
+  if (isSimpleRunViralMode(normalizedInput)) {
+    return runSimpleViralWorkflow(run, normalizedInput, settings, startedAt);
+  }
   const crawledItems: NormalizedSourceItem[] = [];
   run = isSimpleRunFeishuMode(normalizedInput)
     ? await collectSimpleFeishuItems(run, crawledItems, normalizedInput)
@@ -302,7 +342,6 @@ async function runSimpleRunWorkflow(
   run = await applyUnsafeFilterPlatformCounts(run, safetyResult.filtered);
   if (isSimpleRunLinkMode(normalizedInput)) {
     run = await applyUnsafeFilterLinkResults(run, safetyResult.filtered);
-    await syncSourceItemsToFeishu(safetyResult.items, { scope: "simple/run", sourceRunId: run.id });
     await assertSimpleRunNotForceTerminated(run.id);
   }
   if (isSimpleRunFeishuMode(normalizedInput)) {
@@ -408,7 +447,7 @@ async function runSimpleRunWorkflow(
     }
 
     try {
-      const imageTasks = buildSimpleImageTasks(source, settings);
+      const imageTasks = buildSimpleImageTasks(source, settings, normalizedInput);
       const draft = await generatePost({
         source,
         materialPaths: normalizedInput.materialPaths,
@@ -442,6 +481,7 @@ async function runSimpleRunWorkflow(
         ...draft,
         imagePrompt,
         imageUrls: imageResult.imageUrls,
+        taskKeyword: resolveSimplePostTaskKeyword(normalizedInput, source),
         contentTags: source.contentTagging?.tags || [],
         imageTasks,
         aiNotes: [
@@ -498,6 +538,24 @@ async function runSimpleRunWorkflow(
       message: "没有可写入飞书的图文",
     });
     run = await failRun(run, "没有成功生成可发布的图文");
+    return finishSimpleRun(run, startedAt);
+  }
+
+  if (!normalizedInput.writeFeishu) {
+    run = {
+      ...run,
+      publish: {
+        status: "skipped",
+        postCount: completedPosts.length,
+        message: "已按开关跳过自动写入飞书，生成稿保留在内容审查台等待人工确认。",
+      },
+    };
+    run = await setStage(run, "publish", {
+      status: "skipped",
+      total: completedPosts.length,
+      skipped: completedPosts.length,
+      message: "已跳过自动写入飞书，等待内容审查台人工审查。",
+    });
     return finishSimpleRun(run, startedAt);
   }
 
@@ -566,6 +624,506 @@ async function runSimpleRunWorkflow(
   return finishSimpleRun(run, startedAt);
 }
 
+async function runSimpleViralWorkflow(
+  run: SimpleRun,
+  normalizedInput: SimpleRunInput,
+  settings: WorkspacePromptSettings,
+  startedAt: number,
+) {
+  const viralUrl = normalizedInput.viralUrl?.trim() || "";
+  const imitateImages = normalizedInput.viralImitateImages === true;
+  const viralMaterialPaths = normalizedInput.viralMaterialPaths || [];
+  const access = simpleRunAccessActor(normalizedInput);
+  let completedPost: GeneratedPost | undefined;
+
+  try {
+    run = await setStage(run, "crawl", {
+      status: "running",
+      total: 1,
+      message: "Analyzing viral source link.",
+    });
+    const source = await analyzeViralSource(viralUrl, normalizedInput.keyword);
+    await assertSimpleRunNotForceTerminated(run.id);
+    run = await saveRun({
+      ...run,
+      viralResult: {
+        url: viralUrl,
+        status: "analyzed",
+        sourceTitle: source.item.title,
+        imageCount: source.images.length,
+        matchedImageCount: 0,
+      },
+      platformResults: [
+        {
+          platform: source.item.platform,
+          requested: 1,
+          crawled: 1,
+          taggedContent: 0,
+          taggedVisual: 0,
+        },
+      ],
+      updatedAt: new Date().toISOString(),
+    });
+    run = await setStage(run, "crawl", {
+      status: "success",
+      completed: 1,
+      message: `Analyzed viral source with ${source.images.length} image slot(s).`,
+    });
+
+    let imagePairs: Awaited<ReturnType<typeof pairViralImagesWithMaterials>>["pairs"] = [];
+    let sourceImageCount = source.images.length;
+    let vehicleImageCount = 0;
+    let matchedImageCount = 0;
+    let analyzedImageCount = 0;
+    let skippedImageCount = 0;
+    let imageAnalysisErrors: string[] = [];
+
+    if (imitateImages) {
+    run = await setStage(run, "tag", {
+      status: "running",
+      total: source.images.length,
+      message: "Analyzing viral source image styles and pairing ordered local vehicle materials.",
+    });
+    const imageAnalysis = await analyzeViralImages(source.images);
+    analyzedImageCount = imageAnalysis.specs.length;
+    skippedImageCount = imageAnalysis.failures.length;
+    imageAnalysisErrors = imageAnalysis.failures.map((failure) => `image ${failure.index + 1}: ${failure.error}`);
+    const pairing = await pairViralImagesWithMaterials(source.images, viralMaterialPaths, normalizedInput.keyword, imageAnalysis.specs);
+    imagePairs = pairing.pairs;
+    sourceImageCount = pairing.sourceImageCount;
+    vehicleImageCount = pairing.vehicleImageCount;
+    matchedImageCount = imagePairs.length;
+    const pairingNotice = buildViralPairingNotice(matchedImageCount, sourceImageCount, vehicleImageCount);
+    if (!sourceImageCount) throw new Error("No viral source images were found for viral image imitation.");
+    if (!vehicleImageCount) throw new Error("No local vehicle material images were found for viral image imitation.");
+    await assertSimpleRunNotForceTerminated(run.id);
+    run = await saveRun({
+      ...run,
+      viralResult: {
+        ...(run.viralResult || { url: viralUrl, status: "analyzed" as const }),
+        imageCount: source.images.length,
+        sourceImageCount,
+        vehicleImageCount,
+        pairedImageCount: matchedImageCount,
+        analyzedImageCount,
+        skippedImageCount,
+        imageAnalysisErrors: imageAnalysisErrors.length ? imageAnalysisErrors : undefined,
+        matchedImageCount,
+        pairingNotice,
+      },
+      platformResults: run.platformResults.map((result) => ({
+        ...result,
+        taggedContent: 1,
+        taggedVisual: matchedImageCount,
+      })),
+      updatedAt: new Date().toISOString(),
+    });
+    run = await setStage(run, "tag", {
+      status: matchedImageCount ? "success" : "error",
+      completed: matchedImageCount,
+      failed: matchedImageCount ? 0 : sourceImageCount,
+      skipped: skippedImageCount,
+      message: `${pairingNotice} Analyzed ${analyzedImageCount} source style prompt(s).`,
+    });
+    if (!matchedImageCount) throw new Error("No paired vehicle material and viral source images were found for viral image generation");
+    } else {
+      run = await setStage(run, "tag", {
+        status: "skipped",
+        total: source.images.length,
+        skipped: source.images.length,
+        message: "Viral image imitation is disabled; generating copy only.",
+      });
+      run = await saveRun({
+        ...run,
+        platformResults: run.platformResults.map((result) => ({
+          ...result,
+          taggedContent: 1,
+          taggedVisual: 0,
+        })),
+        updatedAt: new Date().toISOString(),
+      });
+    }
+
+    run = await setStage(run, "produce", {
+      status: "running",
+      total: 1,
+      message: imitateImages ? "Generating viral-style post and images." : "Generating viral-style copy.",
+    });
+    const draft = await buildViralGeneratedPost({
+      source,
+      targetKeyword: normalizedInput.keyword,
+      materialPaths: normalizedInput.materialPaths,
+      imagePairs,
+      settings,
+      imitateImages,
+    });
+    const pairingNotice = imitateImages ? buildViralPairingNotice(matchedImageCount, sourceImageCount, vehicleImageCount) : "";
+    const imagePrompt = resolveSimpleImagePrompt(draft, source.item);
+    const imageResult = imitateImages
+      ? await generateImagesFromPrompt(imagePrompt, 1, draft.imageTasks, {
+          size: settings.imageSize,
+          quality: settings.imageQuality,
+          taskConcurrency: concurrencyConfig.image,
+        })
+      : { status: "skipped" as const, imageUrls: [] as string[], message: "Viral image imitation is disabled." };
+    const post = applyWorkspaceOwner(
+      {
+        ...draft,
+        imagePrompt,
+        imageUrls: imageResult.imageUrls,
+        taskKeyword: normalizedInput.keyword,
+        imageTasks: draft.imageTasks,
+        aiNotes: [
+          ...draft.aiNotes,
+          imitateImages
+            ? pairingNotice
+            : "Viral image imitation disabled; generated copy only.",
+          imitateImages ? (imageResult.status === "completed" ? `Generated ${imageResult.imageUrls.length} viral-style image(s).` : imageResult.message || "Image provider did not return images.") : "",
+        ].filter(Boolean),
+        status: "draft" as const,
+        updatedAt: new Date().toISOString(),
+      },
+      access,
+      source.item,
+    );
+    completedPost = post;
+    await savePost(post, access);
+    await saveGeneratedPost(post, access);
+    run = await addPostResult(run, post);
+    run = await saveRun({
+      ...run,
+      viralResult: {
+        ...(run.viralResult || { url: viralUrl, status: "analyzed" as const }),
+        status: "generated",
+        postId: post.id,
+        imageCount: source.images.length,
+        sourceImageCount,
+        vehicleImageCount,
+        pairedImageCount: matchedImageCount,
+        analyzedImageCount: imitateImages ? analyzedImageCount : undefined,
+        skippedImageCount: imitateImages ? skippedImageCount : undefined,
+        imageAnalysisErrors: imageAnalysisErrors.length ? imageAnalysisErrors : undefined,
+        matchedImageCount,
+        pairingNotice: imitateImages ? pairingNotice : undefined,
+      },
+      updatedAt: new Date().toISOString(),
+    });
+    run = await setStage(run, "produce", {
+      status: "success",
+      completed: 1,
+      message: imitateImages ? "Generated one viral-style post." : "Generated one viral-style copy post.",
+    });
+  } catch (error) {
+    const message = compactError(error);
+    run = await saveRun({
+      ...run,
+      viralResult: {
+        url: viralUrl,
+        status: "failed",
+        sourceTitle: run.viralResult?.sourceTitle,
+        imageCount: run.viralResult?.imageCount,
+        matchedImageCount: run.viralResult?.matchedImageCount,
+        error: message,
+      },
+      updatedAt: new Date().toISOString(),
+    });
+    run = await addRunError(run, message);
+    return finishSimpleRun(run, startedAt);
+  }
+
+  if (!completedPost) {
+    run = await failRun(run, "No viral post was generated.");
+    return finishSimpleRun(run, startedAt);
+  }
+
+  if (!normalizedInput.writeFeishu) {
+    run = {
+      ...run,
+      publish: {
+        status: "skipped",
+        postCount: 1,
+        message: "已按开关跳过自动写入飞书，生成稿保留在内容审查台等待人工确认。",
+      },
+    };
+    run = await setStage(run, "publish", {
+      status: "skipped",
+      total: 1,
+      skipped: 1,
+      message: "已跳过自动写入飞书，等待内容审查台人工审查。",
+    });
+    return finishSimpleRun(run, startedAt);
+  }
+
+  await assertSimpleRunNotForceTerminated(run.id);
+  run = await setStage(run, "publish", {
+    status: "running",
+    total: 1,
+    message: "Approving viral-style post and enqueueing Feishu publish.",
+  });
+  try {
+    const approvedPosts = [
+      {
+        ...completedPost,
+        status: "approved" as const,
+        updatedAt: new Date().toISOString(),
+      },
+    ];
+    await persistApprovedPostsForSimplePublish(approvedPosts, access, run.id);
+    const publishJob = await enqueueFeishuPublishJob(approvedPosts, {
+      source: "simple",
+      sourceRunId: run.id,
+      ownerUserId: run.input.ownerUserId || "local",
+      ownerDisplayName: run.input.ownerDisplayName,
+    });
+    run = {
+      ...run,
+      posts: run.posts.map((post) => (post.postId === completedPost?.id ? { ...post, status: "approved" } : post)),
+      publish: {
+        status: "queued",
+        postCount: 1,
+        jobId: publishJob.id,
+        message: `Feishu publish job ${publishJob.id} queued.`,
+      },
+    };
+    run = await setStage(run, "publish", {
+      status: "warning",
+      completed: 0,
+      failed: 0,
+      message: `Feishu publish queued as ${publishJob.id}.`,
+    });
+  } catch (error) {
+    const message = compactError(error);
+    run = {
+      ...run,
+      publish: {
+        status: "failed",
+        postCount: 1,
+        error: message,
+      },
+    };
+    run = await setStage(run, "publish", {
+      status: "error",
+      failed: 1,
+      message,
+    });
+    run = await addRunError(run, message);
+  }
+  return finishSimpleRun(run, startedAt);
+}
+
+async function runSimpleOriginalWorkflow(
+  run: SimpleRun,
+  normalizedInput: SimpleRunInput,
+  settings: WorkspacePromptSettings,
+  startedAt: number,
+) {
+  const originalPrompt = normalizedInput.originalPrompt?.trim() || "";
+  const access = simpleRunAccessActor(normalizedInput);
+  let completedPost: GeneratedPost | undefined;
+
+  try {
+    run = await setStage(run, "crawl", {
+      status: "running",
+      total: 1,
+      message: normalizedInput.originalUseWebSearch ? "Understanding original prompt and searching the web." : "Understanding original prompt.",
+    });
+    if (normalizedInput.originalUseWebSearch === true && appConfig.openaiTextEndpoint !== "responses") {
+      throw new Error("Original-mode web search requires OPENAI_TEXT_ENDPOINT=responses; Chat Completions does not support the web_search tool.");
+    }
+    const topic = extractOriginalTopic(originalPrompt);
+    run = await saveRun({
+      ...run,
+      originalResult: {
+        prompt: originalPrompt,
+        status: "planned",
+        webSearch: normalizedInput.originalUseWebSearch === true,
+      },
+      platformResults: [
+        {
+          platform: "original",
+          requested: 1,
+          crawled: 1,
+          taggedContent: 0,
+          taggedVisual: 0,
+        },
+      ],
+      updatedAt: new Date().toISOString(),
+    });
+    run = await setStage(run, "crawl", {
+      status: "success",
+      completed: 1,
+      message: `Original topic prepared: ${topic}.`,
+    });
+
+    run = await setStage(run, "tag", {
+      status: "running",
+      total: 1,
+      message: "Planning original image slots.",
+    });
+
+    const draft = await buildOriginalGeneratedPost({
+      runId: run.id,
+      prompt: originalPrompt,
+      vehicleKeyword: normalizedInput.keyword,
+      settings,
+      materialPaths: normalizedInput.materialPaths,
+      useWebSearch: normalizedInput.originalUseWebSearch === true,
+    });
+    await assertSimpleRunNotForceTerminated(run.id);
+    run = await setStage(run, "tag", {
+      status: "success",
+      completed: 1,
+      message: `Planned ${draft.imagePrompts.length} original image prompt(s).`,
+    });
+
+    run = await setStage(run, "produce", {
+      status: "running",
+      total: 1,
+      message: "Generating original post and images.",
+    });
+
+    const imageResult = await generateImagesFromPromptList(draft.imagePrompts, {
+      size: settings.imageSize,
+      quality: settings.imageQuality,
+      taskConcurrency: concurrencyConfig.image,
+    });
+    const post = applyWorkspaceOwner(
+      {
+        ...draft.post,
+        imageUrls: imageResult.imageUrls,
+        aiNotes: [
+          ...draft.post.aiNotes,
+          `Original mode planned ${draft.imagePrompts.length} image prompt(s).`,
+          imageResult.status === "completed"
+            ? `Generated ${imageResult.imageUrls.length} original image(s).`
+            : imageResult.message || "Image provider did not return original images.",
+        ],
+        status: "draft" as const,
+        updatedAt: new Date().toISOString(),
+      },
+      access,
+    );
+    completedPost = post;
+    await savePost(post, access);
+    await saveGeneratedPost(post, access);
+    run = await addPostResult(run, post);
+    run = await saveRun({
+      ...run,
+      originalResult: {
+        prompt: originalPrompt,
+        status: "generated",
+        webSearch: normalizedInput.originalUseWebSearch === true,
+        imagePromptCount: draft.imagePrompts.length,
+        imageCount: imageResult.imageUrls.length,
+        postId: post.id,
+      },
+      updatedAt: new Date().toISOString(),
+    });
+    run = await setStage(run, "produce", {
+      status: "success",
+      completed: 1,
+      message: "Generated one original post.",
+    });
+  } catch (error) {
+    const message = compactError(error);
+    run = await saveRun({
+      ...run,
+      originalResult: {
+        prompt: originalPrompt,
+        status: "failed",
+        webSearch: normalizedInput.originalUseWebSearch === true,
+        imagePromptCount: run.originalResult?.imagePromptCount,
+        imageCount: run.originalResult?.imageCount,
+        postId: run.originalResult?.postId,
+        error: message,
+      },
+      updatedAt: new Date().toISOString(),
+    });
+    run = await markOriginalWorkflowFailureStages(run, message);
+    return finishSimpleRun(run, startedAt);
+  }
+
+  if (!completedPost) {
+    run = await failRun(run, "No original post was generated.");
+    return finishSimpleRun(run, startedAt);
+  }
+
+  if (!normalizedInput.writeFeishu) {
+    run = {
+      ...run,
+      publish: {
+        status: "skipped",
+        postCount: 1,
+        message: "已按开关跳过自动写入飞书，生成稿保留在内容审查台等待人工确认。",
+      },
+    };
+    run = await setStage(run, "publish", {
+      status: "skipped",
+      total: 1,
+      skipped: 1,
+      message: "已跳过自动写入飞书，等待内容审查台人工审查。",
+    });
+    return finishSimpleRun(run, startedAt);
+  }
+
+  await assertSimpleRunNotForceTerminated(run.id);
+  run = await setStage(run, "publish", {
+    status: "running",
+    total: 1,
+    message: "Approving original post and enqueueing Feishu publish.",
+  });
+  try {
+    const approvedPosts = [
+      {
+        ...completedPost,
+        status: "approved" as const,
+        updatedAt: new Date().toISOString(),
+      },
+    ];
+    await persistApprovedPostsForSimplePublish(approvedPosts, access, run.id);
+    const publishJob = await enqueueFeishuPublishJob(approvedPosts, {
+      source: "simple",
+      sourceRunId: run.id,
+      ownerUserId: run.input.ownerUserId || "local",
+      ownerDisplayName: run.input.ownerDisplayName,
+    });
+    run = {
+      ...run,
+      posts: run.posts.map((post) => (post.postId === completedPost?.id ? { ...post, status: "approved" } : post)),
+      publish: {
+        status: "queued",
+        postCount: 1,
+        jobId: publishJob.id,
+        message: `Feishu publish job ${publishJob.id} queued.`,
+      },
+    };
+    run = await setStage(run, "publish", {
+      status: "warning",
+      completed: 0,
+      failed: 0,
+      message: `Feishu publish queued as ${publishJob.id}.`,
+    });
+  } catch (error) {
+    const message = compactError(error);
+    run = {
+      ...run,
+      publish: {
+        status: "failed",
+        postCount: 1,
+        error: message,
+      },
+    };
+    run = await setStage(run, "publish", {
+      status: "error",
+      failed: 1,
+      message,
+    });
+    run = await addRunError(run, message);
+  }
+
+  return finishSimpleRun(run, startedAt);
+}
+
 async function reconcileInterruptedSimpleRuns(limit: number) {
   const runs = await readSimpleRunsFromDb(Math.max(limit, 50));
   const serverStartedAtMs = Date.now() - process.uptime() * 1000;
@@ -611,6 +1169,31 @@ async function failInterruptedRun(runId: string, message: string, startedAt: num
     details: {
       runId,
     },
+  });
+}
+
+async function markOriginalWorkflowFailureStages(run: SimpleRun, message: string) {
+  const now = new Date().toISOString();
+  const stages = run.stages.map((stage) => {
+    if (stage.status === "running" || stage.status === "queued") {
+      const total = Number(stage.total || 0);
+      const remaining = Math.max(total - Number(stage.completed || 0) - Number(stage.skipped || 0), 0);
+      const status: SimpleRunStageStatus = stage.status === "running" ? "error" : stage.status === "queued" ? "skipped" : stage.status;
+      return {
+        ...stage,
+        status,
+        failed: status === "error" ? Math.max(Number(stage.failed || 0), remaining || 1) : stage.failed,
+        message: status === "error" ? message : "Skipped because original creation failed before this step.",
+        updatedAt: now,
+      };
+    }
+    return stage;
+  });
+  return saveRun({
+    ...run,
+    stages,
+    errors: run.errors.includes(message) ? run.errors : [...run.errors, message],
+    updatedAt: now,
   });
 }
 
@@ -683,7 +1266,7 @@ async function collectSimpleKeywordItems(
   const crawlRunUpdates = createRunUpdateQueue(run);
   await mapWithConcurrency(normalizedInput.platforms, concurrencyConfig.crawl, async (platform) => {
     try {
-      const items = (await crawlTikHub(buildDefaultCrawlInput(platform, normalizedInput.keyword, perPlatformTarget, settings))).slice(0, perPlatformTarget);
+      const items = (await crawlTikHub(withVideoTranscriptionOption(buildDefaultCrawlInput(platform, normalizedInput.keyword, perPlatformTarget, settings), normalizedInput))).slice(0, perPlatformTarget);
       crawledItems.push(...items);
       await crawlRunUpdates.update(async (latestRun) => {
         const withPlatform = await addPlatformResult(latestRun, {
@@ -743,12 +1326,16 @@ async function collectSimpleLinkItems(run: SimpleRun, crawledItems: NormalizedSo
       keyword: normalizedInput.keyword,
       linkCount: links.length,
       linkPlatform: normalizedInput.linkPlatform || "auto",
+      hasCookie: Boolean(normalizedInput.cookie),
     },
   });
 
   const resolved = await resolveSourceLinks({
     links,
     platform: isSourceLinkPlatform(normalizedInput.linkPlatform) ? normalizedInput.linkPlatform : undefined,
+    cookie: normalizedInput.cookie,
+    videoFrameOriginalReference: normalizedInput.videoFrameOriginalReference !== false,
+    enableVideoTranscription: normalizedInput.enableVideoTranscription === true,
   });
   crawledItems.push(...resolved.items);
 
@@ -818,7 +1405,7 @@ async function collectSimpleFeishuItems(run: SimpleRun, crawledItems: Normalized
     },
   });
 
-  const imported = await importFeishuContentByTaskNumbers(taskNumbers);
+  const imported = await importFeishuContentByTaskNumbers(taskNumbers, { enableVideoTranscription: normalizedInput.enableVideoTranscription === true });
   crawledItems.push(...imported.items);
 
   let nextRun = await saveRun({
@@ -949,6 +1536,13 @@ function buildDefaultCrawlInput(
   };
 }
 
+function withVideoTranscriptionOption(input: CrawlInput, simpleInput: Pick<SimpleRunInput, "enableVideoTranscription">): CrawlInput {
+  return {
+    ...input,
+    enableVideoTranscription: simpleInput.enableVideoTranscription === true,
+  };
+}
+
 async function topUpSimpleCrawlIfNeeded(
   run: SimpleRun,
   crawledItems: NormalizedSourceItem[],
@@ -980,7 +1574,7 @@ async function topUpSimpleCrawlIfNeeded(
     });
 
     try {
-      const items = (await crawlTikHub(buildDefaultCrawlInput(platform, input.keyword, requested, settings))).slice(0, requested);
+      const items = (await crawlTikHub(withVideoTranscriptionOption(buildDefaultCrawlInput(platform, input.keyword, requested, settings), input))).slice(0, requested);
       crawledItems.push(...items);
       nextRun = await addPlatformResult(nextRun, {
         platform,
@@ -1051,6 +1645,10 @@ function getFeishuItemVehicle(item: NormalizedSourceItem) {
   return raw.feishu?.vehicle?.trim() || "";
 }
 
+function resolveSimplePostTaskKeyword(input: SimpleRunInput, source: NormalizedSourceItem) {
+  return getFeishuItemVehicle(source) || input.keyword;
+}
+
 async function applyUnsafeFilterPlatformCounts(run: SimpleRun, filteredItems: NormalizedSourceItem[]) {
   const filteredByPlatform = new Map<Platform, number>();
   filteredItems.forEach((item) => {
@@ -1111,6 +1709,18 @@ function describeSimpleProductionMediaSkip(source: NormalizedSourceItem) {
   return "Skipped source without images, downloaded images, or video frames.";
 }
 
+function buildViralPairingNotice(pairedImageCount: number, sourceImageCount: number, vehicleImageCount: number) {
+  if (!sourceImageCount || !vehicleImageCount) {
+    return `Paired ${pairedImageCount} viral image slot(s) from ${vehicleImageCount} vehicle material image(s) and ${sourceImageCount} source image(s).`;
+  }
+
+  const base = `Only ${pairedImageCount}/${sourceImageCount} viral source image slot(s) will generate from ${vehicleImageCount} selected vehicle material image(s).`;
+  if (pairedImageCount < sourceImageCount) {
+    return `${base} Select ${sourceImageCount - pairedImageCount} more vehicle material image(s) to reference every viral source image.`;
+  }
+  return base;
+}
+
 function buildSimpleProductionMediaSkipDetails(runId: string, source: NormalizedSourceItem) {
   const downloadErrors = Array.from(new Set([...(source.downloadErrors || []), ...(source.mediaCache?.errors || [])]));
   return {
@@ -1131,8 +1741,11 @@ function buildSimpleProductionMediaSkipDetails(runId: string, source: Normalized
   };
 }
 
-function buildSimpleImageTasks(source: NormalizedSourceItem, settings: WorkspacePromptSettings): SourceImageTask[] {
-  const tasks = buildDefaultImageTasks(source, settings.imageStrategyPrompts, { useComfyUiKlein: isComfyUiKleinConfigured() });
+function buildSimpleImageTasks(source: NormalizedSourceItem, settings: WorkspacePromptSettings, input: SimpleRunInput): SourceImageTask[] {
+  const tasks = buildDefaultImageTasks(source, settings.imageStrategyPrompts, {
+    useComfyUiKlein: input.useComfyUiKlein === true && isComfyUiKleinConfigured(),
+    directOriginalReference: input.directOriginalReference === true,
+  });
   return limitSimpleImageTasks(tasks);
 }
 
@@ -1176,17 +1789,35 @@ function limitSimpleImageTasks(tasks: SourceImageTask[]) {
 
 function normalizeSimpleRunInput(input: CreateSimpleRunInput): SimpleRunInput {
   const keyword = typeof input.keyword === "string" ? input.keyword.trim() : "";
-  const sourceMode = input.sourceMode === "feishu" ? "feishu" : input.sourceMode === "links" ? "links" : "keyword";
+  const sourceMode =
+    input.sourceMode === "original"
+      ? "original"
+      : input.sourceMode === "viral"
+        ? "viral"
+        : input.sourceMode === "feishu"
+          ? "feishu"
+          : input.sourceMode === "links"
+            ? "links"
+            : "keyword";
   const platforms = Array.from(new Set((input.platforms || []).filter(isPlatform)));
   const links = normalizeSourceLinkInput(input.links);
   const feishuTaskNumbers = normalizeFeishuTaskNumberInput(input.feishuTaskNumbers);
-  if (sourceMode !== "feishu" && !keyword) throw new Error("Keyword is required");
+  const viralUrl = normalizeViralUrlInput(input.viralUrl);
+  const originalPrompt = normalizeOriginalPromptInput(input.originalPrompt);
+  const originalTopic = sourceMode === "original" ? extractOriginalTopic(originalPrompt || "") : "";
+  if (sourceMode !== "feishu" && sourceMode !== "original" && !keyword) throw new Error("Keyword is required");
+  if (sourceMode === "original" && !keyword) throw new Error("Original vehicle keyword is required");
   if (sourceMode === "keyword" && !platforms.length) throw new Error("At least one platform is required");
   if (sourceMode === "links" && !links.length) throw new Error("At least one source link is required");
   if (sourceMode === "feishu" && !feishuTaskNumbers.length) throw new Error("At least one Feishu task number is required");
-  const targetCountFallback = sourceMode === "feishu" ? feishuTaskNumbers.length : sourceMode === "links" ? links.length : 10;
+  if (sourceMode === "viral" && !viralUrl) throw new Error("Viral source URL is required");
+  if (sourceMode === "viral" && input.viralImitateImages === true && !normalizeMaterialPaths(input.viralMaterialPaths).length) {
+    throw new Error("请选择至少 1 张车型图用于图片模仿");
+  }
+  if (sourceMode === "original" && !originalPrompt) throw new Error("Original prompt is required");
+  const targetCountFallback = sourceMode === "feishu" ? feishuTaskNumbers.length : sourceMode === "links" ? links.length : sourceMode === "original" ? 1 : 10;
   const targetCount = Math.min(Math.max(Number(input.targetCount || targetCountFallback), 1), maxSimpleRunItems);
-  return {
+  const normalizedInput: SimpleRunInput = {
     sourceMode,
     keyword: keyword || "飞书导入",
     platforms,
@@ -1195,14 +1826,35 @@ function normalizeSimpleRunInput(input: CreateSimpleRunInput): SimpleRunInput {
         ? Math.min(targetCount, feishuTaskNumbers.length)
         : sourceMode === "links"
           ? Math.min(targetCount, links.length)
+          : sourceMode === "viral"
+            ? 1
           : targetCount,
     materialPaths: normalizeMaterialPaths(input.materialPaths),
     links: sourceMode === "links" ? links : undefined,
     linkPlatform: sourceMode === "links" ? normalizeLinkPlatform(input.linkPlatform) : undefined,
+    cookie: sourceMode === "links" ? normalizeRequestCookie(input.cookie) : undefined,
+    videoFrameOriginalReference: sourceMode === "links" ? input.videoFrameOriginalReference !== false : undefined,
+    useComfyUiKlein: input.useComfyUiKlein === true,
+    directOriginalReference: sourceMode === "viral" ? undefined : input.directOriginalReference === true,
+    enableVideoTranscription: input.enableVideoTranscription === true,
+    writeFeishu: input.writeFeishu === true,
     feishuTaskNumbers: sourceMode === "feishu" ? feishuTaskNumbers : undefined,
+    viralUrl: sourceMode === "viral" ? viralUrl : undefined,
+    viralImitateImages: sourceMode === "viral" ? input.viralImitateImages === true : undefined,
+    viralMaterialPaths: sourceMode === "viral" ? normalizeMaterialPaths(input.viralMaterialPaths) : undefined,
     ownerUserId: normalizeOptionalOwnerValue(input.ownerUserId),
     ownerDisplayName: normalizeOptionalOwnerValue(input.ownerDisplayName),
   };
+  return sourceMode === "original"
+    ? {
+        ...normalizedInput,
+        keyword: keyword || originalTopic || "原创",
+        targetCount: 1,
+        directOriginalReference: undefined,
+        originalPrompt,
+        originalUseWebSearch: input.originalUseWebSearch === true,
+      }
+    : normalizedInput;
 }
 
 function normalizeSourceLinkInput(input: unknown) {
@@ -1217,8 +1869,21 @@ function normalizeSourceLinkInput(input: unknown) {
   ).slice(0, 200);
 }
 
+function normalizeRequestCookie(input: unknown) {
+  return typeof input === "string" ? input.trim() || undefined : undefined;
+}
+
 function normalizeLinkPlatform(value: unknown): SourceLinkPlatform | "auto" {
   return isSourceLinkPlatform(value) ? value : "auto";
+}
+
+function normalizeViralUrlInput(input: unknown) {
+  return typeof input === "string" ? input.trim() : "";
+}
+
+function normalizeOriginalPromptInput(input: unknown) {
+  const value = typeof input === "string" ? input.trim() : "";
+  return value ? value.slice(0, 6000) : undefined;
 }
 
 function isSourceLinkPlatform(value: unknown): value is SourceLinkPlatform {
@@ -1258,17 +1923,17 @@ function makeInitialRun(input: SimpleRunInput, settings: WorkspacePromptSettings
     imageSize: settings.imageSize,
     imageQuality: settings.imageQuality,
     platformCrawlSettings: settings.platformCrawlSettings,
-    stages: (Object.keys(stageTitles) as SimpleRunStageId[]).map((id) => makeStage(id, now)),
+    stages: (Object.keys(stageTitles) as SimpleRunStageId[]).map((id) => makeStage(id, now, input.sourceMode === "original" ? makeOriginalStageTitles() : stageTitles)),
     platformResults: [],
     posts: [],
     errors: [],
   };
 }
 
-function makeStage(id: SimpleRunStageId, now: string): SimpleRunStage {
+function makeStage(id: SimpleRunStageId, now: string, titles: Record<SimpleRunStageId, string> = stageTitles): SimpleRunStage {
   return {
     id,
-    title: stageTitles[id],
+    title: titles[id],
     status: "queued",
     total: 0,
     completed: 0,
@@ -1472,6 +2137,7 @@ function resolveRunStatus(run: SimpleRun): SimpleRun["status"] {
   if (!run.posts.length) return "failed";
   if ((run.publish?.status === "queued" || run.publish?.status === "running") && !run.errors.length) return "completed";
   if (run.publish?.status === "published" && !run.errors.length) return "completed";
+  if (run.publish?.status === "skipped" && !run.errors.length) return "completed";
   return "partial";
 }
 

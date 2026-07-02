@@ -1,27 +1,40 @@
 "use client";
 
 import Link from "next/link";
-import { useCallback, useEffect, useMemo, useState } from "react";
+import { useCallback, useEffect, useMemo, useState, useSyncExternalStore } from "react";
+import type { ChangeEvent, ClipboardEvent, DragEvent, ReactNode } from "react";
 import {
+  ArrowDown,
+  ArrowUp,
+  CalendarClock,
   Check,
   ClipboardCheck,
   Clock3,
   ExternalLink,
+  Filter,
   Image as ImageIcon,
+  ImagePlus,
   Loader2,
   Maximize2,
+  Moon,
   RefreshCw,
   Search,
   Send,
   ShieldCheck,
   Sparkles,
+  Sun,
+  Tag,
   Trash2,
+  Upload,
+  UserRound,
   Wand2,
   X,
 } from "lucide-react";
+import { getStoredTheme, setStoredTheme, subscribeTheme, type ThemeMode } from "@/lib/theme";
 import type { FeishuPostPublishState, FeishuPublishJob, GeneratedPost, Platform } from "@/lib/types";
 
 type ReviewFilter = GeneratedPost["status"] | "all" | "ready";
+type ReviewTimeFilter = "all" | "today" | "7d" | "30d";
 type BusyState = "load" | "save" | "review" | "batch" | "publish" | null;
 
 type FeishuPublishResponse = {
@@ -38,6 +51,27 @@ type FeishuPublishResponse = {
     recipientType?: "chat" | "user";
     message?: string;
   };
+};
+
+type FeishuVehicleOptionsResponse = {
+  options?: string[];
+  fieldName?: string;
+  message?: string;
+  error?: string;
+};
+
+type ImageGenerationResponse = {
+  status?: string;
+  imageUrls?: string[];
+  message?: string;
+  error?: string;
+};
+
+type ReviewImageUploadResponse = {
+  imageUrl?: string;
+  bytes?: number;
+  mimeType?: string;
+  error?: string;
 };
 
 type PublishSnapshot = {
@@ -67,6 +101,19 @@ const reviewFilters: Array<{ value: ReviewFilter; label: string }> = [
   { value: "all", label: "全部" },
 ];
 
+const reviewTimeFilters: Array<{ value: ReviewTimeFilter; label: string }> = [
+  { value: "all", label: "全部时间" },
+  { value: "today", label: "今天" },
+  { value: "7d", label: "近 7 天" },
+  { value: "30d", label: "近 30 天" },
+];
+
+const themeOptions: Array<{ value: ThemeMode; label: string; icon: ReactNode }> = [
+  { value: "professional", label: "专业浅色", icon: <Sun className="h-3.5 w-3.5" /> },
+  { value: "editorial", label: "编辑室", icon: <Sparkles className="h-3.5 w-3.5" /> },
+  { value: "creator", label: "创作深色", icon: <Moon className="h-3.5 w-3.5" /> },
+];
+
 const platformLabels: Record<Platform, string> = {
   xiaohongshu: "小红书",
   douyin: "抖音",
@@ -75,6 +122,7 @@ const platformLabels: Record<Platform, string> = {
   xiaopeng_bbs: "小鹏社区",
   dongchedi: "\u61c2\u8f66\u5e1d",
   feishu: "飞书",
+  original: "原创",
 };
 
 export default function ReviewPage() {
@@ -83,16 +131,31 @@ export default function ReviewPage() {
   const [selectedPostIds, setSelectedPostIds] = useState<string[]>([]);
   const [draft, setDraft] = useState<GeneratedPost | null>(null);
   const [filter, setFilter] = useState<ReviewFilter>("ready");
-  const [query, setQuery] = useState("");
+  const [timeFilter, setTimeFilter] = useState<ReviewTimeFilter>("all");
+  const [keywordFilter, setKeywordFilter] = useState("");
+  const [authorFilter, setAuthorFilter] = useState("");
+  const [platformFilter, setPlatformFilter] = useState<Platform | "all">("all");
   const [reviewPrompt, setReviewPrompt] = useState("");
+  const [imagePromptByIndex, setImagePromptByIndex] = useState<Record<string, string>>({});
+  const [imageBusyKey, setImageBusyKey] = useState("");
+  const [imageUploadPanelOpen, setImageUploadPanelOpen] = useState(false);
   const [busy, setBusy] = useState<BusyState>("load");
   const [message, setMessage] = useState("");
   const [publish, setPublish] = useState<PublishSnapshot | null>(null);
   const [preview, setPreview] = useState<PreviewState>(null);
+  const [feishuVehicleOptions, setFeishuVehicleOptions] = useState<string[]>([]);
+  const [feishuVehicleFieldName, setFeishuVehicleFieldName] = useState("车型");
+  const [feishuVehicleOptionsMessage, setFeishuVehicleOptionsMessage] = useState("");
+  const theme = useSyncExternalStore(subscribeTheme, getStoredTheme, () => "professional" as ThemeMode);
 
   const selectedPosts = useMemo(() => posts.filter((post) => selectedPostIds.includes(post.id)), [posts, selectedPostIds]);
-  const filteredPosts = useMemo(() => filterPosts(posts, filter, query), [posts, filter, query]);
+  const filteredPosts = useMemo(
+    () => filterPosts(posts, { statusFilter: filter, timeFilter, keywordFilter, authorFilter, platformFilter }),
+    [posts, filter, timeFilter, keywordFilter, authorFilter, platformFilter],
+  );
   const summary = useMemo(() => buildSummary(posts), [posts]);
+  const authorOptions = useMemo(() => buildAuthorOptions(posts), [posts]);
+  const platformOptions = useMemo(() => buildPlatformOptions(posts), [posts]);
 
   const loadPosts = useCallback(async (preferredPostId?: string) => {
     setBusy((current) => current || "load");
@@ -148,6 +211,27 @@ export default function ReviewPage() {
   }, [loadPosts]);
 
   useEffect(() => {
+    document.documentElement.dataset.theme = theme;
+  }, [theme]);
+
+  useEffect(() => {
+    async function loadFeishuVehicleOptions() {
+      try {
+        const res = await fetch("/api/publish/feishu/vehicle-options");
+        const data = (await res.json()) as FeishuVehicleOptionsResponse;
+        if (!res.ok) throw new Error(data.error || "Failed to load Feishu vehicle options");
+        setFeishuVehicleOptions(data.options || []);
+        setFeishuVehicleFieldName(data.fieldName || "车型");
+        setFeishuVehicleOptionsMessage(data.message || "");
+      } catch (error) {
+        setFeishuVehicleOptions([]);
+        setFeishuVehicleOptionsMessage(error instanceof Error ? error.message : "Failed to load Feishu vehicle options");
+      }
+    }
+    void loadFeishuVehicleOptions();
+  }, []);
+
+  useEffect(() => {
     if (!publish?.jobId || !isFeishuPublishQueueLive(publish.queueStatus)) return;
     const timer = window.setInterval(() => {
       void pollPublishJob(publish.jobId || "");
@@ -169,6 +253,8 @@ export default function ReviewPage() {
   function selectPost(post: GeneratedPost) {
     setSelectedPostId(post.id);
     setDraft(post);
+    setImageBusyKey("");
+    setImageUploadPanelOpen(false);
     setMessage("");
   }
 
@@ -180,17 +266,19 @@ export default function ReviewPage() {
     setSelectedPostIds(filteredPosts.slice(0, 200).map((post) => post.id));
   }
 
-  async function saveDraft(patch?: Partial<GeneratedPost>, instruction?: string) {
+  async function saveDraft(patch?: Partial<GeneratedPost>, instruction?: string, options?: { nextPostId?: string }) {
     if (!draft) return;
     setBusy(instruction ? "review" : "save");
     setMessage("");
     try {
-      const manualPatch = patch || {
+      const manualPatch = {
         title: draft.title,
         body: draft.body,
         imagePrompt: draft.imagePrompt,
         imageUrls: draft.imageUrls,
         imageTasks: draft.imageTasks,
+        feishuVehicle: draft.feishuVehicle,
+        ...patch,
       };
       const res = await fetch("/api/review", {
         method: "POST",
@@ -199,15 +287,191 @@ export default function ReviewPage() {
       });
       const data = (await res.json()) as { post?: GeneratedPost; error?: string };
       if (!res.ok || !data.post) throw new Error(data.error || "保存审查修改失败");
+      const nextSelectedId = options?.nextPostId || data.post.id;
       setDraft(data.post);
-      setSelectedPostId(data.post.id);
-      await loadPosts(data.post.id);
+      setSelectedPostId(nextSelectedId);
+      await loadPosts(nextSelectedId);
       setMessage(data.post.status === "approved" ? "已通过审查" : "已保存修改");
     } catch (error) {
       setMessage(error instanceof Error ? error.message : "保存审查修改失败");
     } finally {
       setBusy(null);
     }
+  }
+
+  async function approveDraft() {
+    if (!draft) return;
+    const nextPostId = findNextUnreviewedPostId(posts, draft.id);
+    await saveDraft({ status: "approved" }, undefined, { nextPostId });
+  }
+
+  function moveDraftImage(index: number, delta: -1 | 1) {
+    if (!draft) return;
+    const nextIndex = index + delta;
+    if (nextIndex < 0 || nextIndex >= draft.imageUrls.length) return;
+    const imageUrls = [...draft.imageUrls];
+    [imageUrls[index], imageUrls[nextIndex]] = [imageUrls[nextIndex], imageUrls[index]];
+    setDraft({ ...draft, imageUrls });
+    setImagePromptByIndex((current) => moveImagePromptValues(current, draft, index, nextIndex));
+  }
+
+  function removeDraftImage(index: number) {
+    if (!draft || !draft.imageUrls[index]) return;
+    const imageUrls = draft.imageUrls.filter((_, currentIndex) => currentIndex !== index);
+    const nextDraft = { ...draft, imageUrls };
+    setDraft(nextDraft);
+    setImagePromptByIndex((current) => removeImagePromptValue(current, draft, index));
+    setPreview((current) => {
+      if (!current || current.post.id !== draft.id) return current;
+      if (!imageUrls.length) return null;
+      return { post: nextDraft, index: Math.min(current.index, imageUrls.length - 1) };
+    });
+  }
+
+  function replaceDraftImage(index: number, imageUrl: string, nextMessage: string) {
+    if (!draft || !draft.imageUrls[index]) return;
+    const postId = draft.id;
+    setDraft((currentDraft) => {
+      if (!currentDraft || currentDraft.id !== postId || !currentDraft.imageUrls[index]) return currentDraft;
+      const imageUrls = [...currentDraft.imageUrls];
+      imageUrls[index] = imageUrl;
+      const nextDraft = { ...currentDraft, imageUrls };
+      setPreview((current) => {
+        if (!current || current.post.id !== postId) return current;
+        return { post: nextDraft, index: Math.min(current.index, imageUrls.length - 1) };
+      });
+      return nextDraft;
+    });
+    setMessage(nextMessage);
+  }
+
+  function appendDraftImage(imageUrl: string, nextMessage: string) {
+    if (!draft) return;
+    const postId = draft.id;
+    setDraft((currentDraft) => {
+      if (!currentDraft || currentDraft.id !== postId) return currentDraft;
+      const imageUrls = [...currentDraft.imageUrls, imageUrl];
+      const nextDraft = { ...currentDraft, imageUrls };
+      setPreview((current) => (current && current.post.id === postId ? { post: nextDraft, index: current.index } : current));
+      return nextDraft;
+    });
+    setMessage(nextMessage);
+  }
+
+  async function regenerateDraftImage(index: number) {
+    if (!draft || !draft.imageUrls[index]) return;
+    const prompt = resolveDraftImagePrompt(draft, imagePromptByIndex, index).trim();
+    if (!prompt) {
+      setMessage(`第 ${index + 1} 张图片缺少 Prompt`);
+      return;
+    }
+    setImageBusyKey(`regenerate:${index}`);
+    setMessage("");
+    try {
+      const res = await fetch("/api/images", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ prompt, count: 1 }),
+      });
+      const data = (await res.json()) as ImageGenerationResponse;
+      const imageUrl = data.imageUrls?.[0];
+      if (!res.ok || !imageUrl) throw new Error(data.error || data.message || "图片模型没有返回新图");
+      replaceDraftImage(index, imageUrl, `第 ${index + 1} 张图片已重新生成，保存后生效`);
+    } catch (error) {
+      setMessage(error instanceof Error ? error.message : "图片重新生成失败");
+    } finally {
+      setImageBusyKey("");
+    }
+  }
+
+  async function uploadDraftImageAddition(file: File) {
+    if (!draft) return;
+    const uploadImageIndex = getPersistedPostImageCount(posts, draft.id, draft.imageUrls.length);
+    const displayImageIndex = draft.imageUrls.length;
+    setImageBusyKey("upload:add");
+    setMessage("");
+    try {
+      const form = new FormData();
+      form.append("file", file);
+      form.append("postId", draft.id);
+      form.append("imageIndex", String(uploadImageIndex));
+      form.append("mode", "append");
+      const res = await fetch("/api/review/images", {
+        method: "POST",
+        body: form,
+      });
+      const data = (await res.json()) as ReviewImageUploadResponse;
+      if (!res.ok || !data.imageUrl) throw new Error(data.error || "图片上传失败");
+      appendDraftImage(data.imageUrl, `第 ${displayImageIndex + 1} 张图片已新增，保存后生效`);
+      setImageUploadPanelOpen(false);
+    } catch (error) {
+      setMessage(error instanceof Error ? error.message : "图片新增失败");
+    } finally {
+      setImageBusyKey("");
+    }
+  }
+
+  async function uploadDraftImageReplacement(file: File, index: number) {
+    if (!draft || !draft.imageUrls[index]) return;
+    setImageBusyKey(`upload:${index}`);
+    setMessage("");
+    try {
+      const form = new FormData();
+      form.append("file", file);
+      form.append("postId", draft.id);
+      form.append("imageIndex", String(index));
+      const res = await fetch("/api/review/images", {
+        method: "POST",
+        body: form,
+      });
+      const data = (await res.json()) as ReviewImageUploadResponse;
+      if (!res.ok || !data.imageUrl) throw new Error(data.error || "图片上传失败");
+      replaceDraftImage(index, data.imageUrl, `第 ${index + 1} 张图片已替换，保存后生效`);
+    } catch (error) {
+      setMessage(error instanceof Error ? error.message : "图片替换失败");
+    } finally {
+      setImageBusyKey("");
+    }
+  }
+
+  function handleDraftImageFileChange(event: ChangeEvent<HTMLInputElement>, index: number) {
+    const file = event.currentTarget.files?.[0];
+    event.currentTarget.value = "";
+    if (!file) return;
+    void uploadDraftImageReplacement(file, index);
+  }
+
+  function handleDraftImageAddFileChange(event: ChangeEvent<HTMLInputElement>) {
+    const file = event.currentTarget.files?.[0];
+    event.currentTarget.value = "";
+    if (!file) return;
+    void uploadDraftImageAddition(file);
+  }
+
+  function handleDraftImagePaste(event: ClipboardEvent<HTMLElement>, index: number) {
+    const file = getClipboardImageFile(event.clipboardData);
+    if (!file) return;
+    event.preventDefault();
+    event.stopPropagation();
+    void uploadDraftImageReplacement(file, index);
+  }
+
+  function handleDraftImageAddPaste(event: ClipboardEvent<HTMLElement>) {
+    const file = getClipboardImageFile(event.clipboardData);
+    if (!file) return;
+    event.preventDefault();
+    event.stopPropagation();
+    if (busy || imageBusyKey) return;
+    void uploadDraftImageAddition(file);
+  }
+
+  function handleDraftImageAddDrop(event: DragEvent<HTMLElement>) {
+    event.preventDefault();
+    event.stopPropagation();
+    if (busy || imageBusyKey) return;
+    const file = getDataTransferImageFile(event.dataTransfer);
+    if (!file) return;
+    void uploadDraftImageAddition(file);
   }
 
   async function batchSetStatus(status: GeneratedPost["status"]) {
@@ -254,7 +518,7 @@ export default function ReviewPage() {
   }
 
   async function publishSelected() {
-    const postsToPublish = selectedPosts.length ? selectedPosts : draft ? [draft] : [];
+    let postsToPublish = selectedPosts.length ? selectedPosts : draft ? [draft] : [];
     if (!postsToPublish.length) return;
     setBusy("publish");
     setMessage("");
@@ -267,6 +531,10 @@ export default function ReviewPage() {
       notification: "完成后会按当前配置发送飞书通知。",
     });
     try {
+      if (draft && postsToPublish.some((post) => post.id === draft.id)) {
+        const savedDraft = await saveDraftForPublish(draft);
+        postsToPublish = postsToPublish.map((post) => (post.id === savedDraft.id ? savedDraft : post));
+      }
       const payloadPosts = postsToPublish.map((post) => (post.status === "approved" ? post : { ...post, status: "approved" as const }));
       const res = await fetch("/api/publish/feishu", {
         method: "POST",
@@ -293,6 +561,30 @@ export default function ReviewPage() {
     }
   }
 
+  async function saveDraftForPublish(value: GeneratedPost) {
+    const res = await fetch("/api/review", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({
+        post: value,
+        manualPatch: {
+          title: value.title,
+          body: value.body,
+          imagePrompt: value.imagePrompt,
+          imageUrls: value.imageUrls,
+          imageTasks: value.imageTasks,
+          feishuVehicle: value.feishuVehicle,
+          status: "approved",
+        },
+      }),
+    });
+    const data = (await res.json()) as { post?: GeneratedPost; error?: string };
+    if (!res.ok || !data.post) throw new Error(data.error || "Failed to save Feishu vehicle before publish");
+    setDraft(data.post);
+    setSelectedPostId(data.post.id);
+    return data.post;
+  }
+
   return (
     <main className="app-shell review-shell overflow-x-hidden">
       <div className="review-frame mx-auto flex w-full max-w-[1880px] flex-col gap-3 text-sm">
@@ -308,6 +600,20 @@ export default function ReviewPage() {
             </div>
           </div>
           <div className="review-header-actions">
+            <div className="theme-switcher review-theme-switcher" role="group" aria-label="主题切换">
+              {themeOptions.map((option) => (
+                <button
+                  key={option.value}
+                  className={`theme-option ${theme === option.value ? "theme-option-active" : ""}`}
+                  type="button"
+                  aria-pressed={theme === option.value}
+                  onClick={() => setStoredTheme(option.value)}
+                >
+                  {option.icon}
+                  <span>{option.label}</span>
+                </button>
+              ))}
+            </div>
             <Link className="soft-button inline-flex h-10 items-center justify-center gap-2 px-3 text-xs font-black" href="/">
               <ExternalLink className="h-4 w-4" />
               返回工作台
@@ -329,9 +635,47 @@ export default function ReviewPage() {
 
         <section className="review-workspace">
           <aside className="review-sidebar glass ops-panel">
-            <div className="review-search">
-              <Search className="h-4 w-4" />
-              <input className="field search-field h-10" value={query} onChange={(event) => setQuery(event.target.value)} placeholder="搜索标题或正文" />
+            <div className="review-filter-stack">
+              <div className="review-search">
+                <Search className="h-4 w-4" />
+                <input className="field search-field h-10" value={keywordFilter} onChange={(event) => setKeywordFilter(event.target.value)} placeholder="关键字：标题、正文、车型" />
+              </div>
+              <div className="review-filter-grid">
+                <label className="review-filter-field">
+                  <span><CalendarClock className="h-3.5 w-3.5" />时间</span>
+                  <select className="field h-10" value={timeFilter} onChange={(event) => setTimeFilter(event.target.value as ReviewTimeFilter)}>
+                    {reviewTimeFilters.map((item) => (
+                      <option key={item.value} value={item.value}>{item.label}</option>
+                    ))}
+                  </select>
+                </label>
+                <label className="review-filter-field">
+                  <span><UserRound className="h-3.5 w-3.5" />内容作者</span>
+                  <select className="field h-10" value={authorFilter} onChange={(event) => setAuthorFilter(event.target.value)}>
+                    <option value="">全部作者</option>
+                    {authorOptions.map((author) => (
+                      <option key={author} value={author}>{author}</option>
+                    ))}
+                  </select>
+                </label>
+                <label className="review-filter-field">
+                  <span><Filter className="h-3.5 w-3.5" />采集平台</span>
+                  <select className="field h-10" value={platformFilter} onChange={(event) => setPlatformFilter(event.target.value as Platform | "all")}>
+                    <option value="all">全部平台</option>
+                    {platformOptions.map((item) => (
+                      <option key={item} value={item}>{platformLabels[item] || item}</option>
+                    ))}
+                  </select>
+                </label>
+                <label className="review-filter-field">
+                  <span><Tag className="h-3.5 w-3.5" />状态</span>
+                  <select className="field h-10" value={filter} onChange={(event) => setFilter(event.target.value as ReviewFilter)}>
+                    {reviewFilters.map((item) => (
+                      <option key={item.value} value={item.value}>{item.label}</option>
+                    ))}
+                  </select>
+                </label>
+              </div>
             </div>
             <div className="mt-3 flex flex-wrap gap-1.5">
               {reviewFilters.map((item) => (
@@ -403,23 +747,76 @@ export default function ReviewPage() {
                 <div className="review-editor-grid">
                   <div className="review-gallery">
                     {draft.imageUrls.length ? (
-                      draft.imageUrls.map((url, index) => (
-                        <button
+                      <>
+                        {draft.imageUrls.map((url, index) => (
+                        <div
                           key={`${url}-${index}`}
                           className={`review-gallery-tile ${index === 0 ? "review-gallery-tile-primary" : ""}`}
-                          type="button"
-                          onClick={() => setPreview({ post: draft, index })}
+                          tabIndex={0}
+                          onPaste={(event) => handleDraftImagePaste(event, index)}
                         >
-                          {/* eslint-disable-next-line @next/next/no-img-element */}
-                          <img alt={`最终配图 ${index + 1}`} src={toDisplayImageSrc(url)} referrerPolicy="no-referrer" />
-                          <span>{index + 1}</span>
-                        </button>
-                      ))
+                          <button className="review-gallery-preview" type="button" onClick={() => setPreview({ post: draft, index })}>
+                            {/* eslint-disable-next-line @next/next/no-img-element */}
+                            <img alt={`最终配图 ${index + 1}`} src={toDisplayImageSrc(url)} referrerPolicy="no-referrer" />
+                            <span className="review-gallery-index">{index + 1}</span>
+                          </button>
+                          <div className="review-gallery-tools" aria-label={`配图 ${index + 1} 操作`}>
+                            <button className="review-gallery-tool" type="button" onClick={() => moveDraftImage(index, -1)} disabled={index === 0 || Boolean(busy)} aria-label="上移配图">
+                              <ArrowUp className="h-3.5 w-3.5" />
+                            </button>
+                            <button className="review-gallery-tool" type="button" onClick={() => moveDraftImage(index, 1)} disabled={index === draft.imageUrls.length - 1 || Boolean(busy)} aria-label="下移配图">
+                              <ArrowDown className="h-3.5 w-3.5" />
+                            </button>
+                            <button className="review-gallery-tool review-gallery-tool-danger" type="button" onClick={() => removeDraftImage(index)} disabled={Boolean(busy)} aria-label="删除配图">
+                              <Trash2 className="h-3.5 w-3.5" />
+                            </button>
+                          </div>
+                          <div className="review-image-editor">
+                            <textarea
+                              className="field review-image-prompt"
+                              value={resolveDraftImagePrompt(draft, imagePromptByIndex, index)}
+                              onChange={(event) =>
+                                setImagePromptByIndex((current) => ({
+                                  ...current,
+                                  [imagePromptKey(draft.id, index)]: event.target.value,
+                                }))
+                              }
+                              onPaste={(event) => handleDraftImagePaste(event, index)}
+                              placeholder={`第 ${index + 1} 张图片 Prompt`}
+                            />
+                            <div className="review-image-actions">
+                              <button
+                                className="review-gallery-tool"
+                                type="button"
+                                onClick={() => regenerateDraftImage(index)}
+                                disabled={Boolean(busy) || Boolean(imageBusyKey)}
+                                aria-label={`重新生成第 ${index + 1} 张配图`}
+                                title="重新生成"
+                              >
+                                {imageBusyKey === `regenerate:${index}` ? <Loader2 className="h-3.5 w-3.5 animate-spin" /> : <Wand2 className="h-3.5 w-3.5" />}
+                              </button>
+                              <label
+                                className={`review-gallery-tool ${Boolean(busy) || Boolean(imageBusyKey) ? "review-gallery-tool-disabled" : ""}`}
+                                aria-label={`上传替换第 ${index + 1} 张配图`}
+                                title="上传替换"
+                              >
+                                {imageBusyKey === `upload:${index}` ? <Loader2 className="h-3.5 w-3.5 animate-spin" /> : <Upload className="h-3.5 w-3.5" />}
+                                <input
+                                  className="review-file-input"
+                                  type="file"
+                                  accept="image/png,image/jpeg,image/webp,image/gif,image/avif"
+                                  disabled={Boolean(busy) || Boolean(imageBusyKey)}
+                                  onChange={(event) => handleDraftImageFileChange(event, index)}
+                                />
+                              </label>
+                            </div>
+                          </div>
+                        </div>
+                        ))}
+                        <ReviewImageAddTile busy={Boolean(busy) || Boolean(imageBusyKey)} isUploading={imageBusyKey === "upload:add"} onOpen={() => setImageUploadPanelOpen(true)} />
+                      </>
                     ) : (
-                      <div className="review-gallery-empty">
-                        <ImageIcon className="h-7 w-7" />
-                        <span>暂无最终配图</span>
-                      </div>
+                      <ReviewImageAddTile empty busy={Boolean(busy) || Boolean(imageBusyKey)} isUploading={imageBusyKey === "upload:add"} onOpen={() => setImageUploadPanelOpen(true)} />
                     )}
                   </div>
 
@@ -433,8 +830,20 @@ export default function ReviewPage() {
                       <textarea className="field review-body-editor mt-2" value={draft.body} onChange={(event) => setDraft({ ...draft, body: event.target.value })} />
                     </label>
                     <label>
-                      <FieldLabel label="图片 Prompt" />
-                      <textarea className="field mt-2 min-h-28 resize-y leading-6" value={draft.imagePrompt} onChange={(event) => setDraft({ ...draft, imagePrompt: event.target.value })} />
+                      <FieldLabel label={`写入飞书${feishuVehicleFieldName}`} />
+                      <select
+                        className="field mt-2 h-10"
+                        value={draft.feishuVehicle ?? draft.taskKeyword ?? ""}
+                        onChange={(event) => setDraft({ ...draft, feishuVehicle: event.target.value })}
+                      >
+                        <option value="">未选择</option>
+                        {feishuVehicleOptions.map((option) => (
+                          <option key={option} value={option}>
+                            {option}
+                          </option>
+                        ))}
+                      </select>
+                      {feishuVehicleOptionsMessage ? <p className="mt-1 text-[11px] text-[var(--text-muted)]">{feishuVehicleOptionsMessage}</p> : null}
                     </label>
                   </div>
                 </div>
@@ -448,7 +857,7 @@ export default function ReviewPage() {
                     {busy === "save" ? <Loader2 className="h-4 w-4 animate-spin" /> : <Check className="h-4 w-4" />}
                     保存修改
                   </button>
-                  <button className="soft-button inline-flex h-11 items-center justify-center gap-2 px-4 text-xs font-black" type="button" onClick={() => saveDraft({ status: "approved" })} disabled={Boolean(busy)}>
+                  <button className="soft-button inline-flex h-11 items-center justify-center gap-2 px-4 text-xs font-black" type="button" onClick={approveDraft} disabled={Boolean(busy)}>
                     <ShieldCheck className="h-4 w-4 text-[var(--mint)]" />
                     审查通过
                   </button>
@@ -516,6 +925,9 @@ export default function ReviewPage() {
                 {(selectedPosts.length ? selectedPosts : draft ? [draft] : []).slice(0, 10).map((post) => (
                   <div key={post.id} className="review-selected-row">
                     <span className="truncate">{post.title || "未命名生成稿"}</span>
+                    <span className="status-badge max-w-[8rem] truncate text-[11px] text-[var(--text-muted)]">
+                      {post.feishuVehicle || post.taskKeyword || "未选择"}
+                    </span>
                     <StatusBadge status={post.status} />
                   </div>
                 ))}
@@ -525,7 +937,27 @@ export default function ReviewPage() {
         </section>
       </div>
 
-      {preview ? <PreviewDialog preview={preview} onClose={() => setPreview(null)} onNavigate={(delta) => setPreview((current) => navigatePreview(current, delta))} /> : null}
+      <ReviewImageUploadPanel
+        open={imageUploadPanelOpen}
+        busy={Boolean(busy) || Boolean(imageBusyKey)}
+        isUploading={imageBusyKey === "upload:add"}
+        onClose={() => setImageUploadPanelOpen(false)}
+        onChange={handleDraftImageAddFileChange}
+        onPaste={handleDraftImageAddPaste}
+        onDrop={handleDraftImageAddDrop}
+      />
+
+      {preview ? (
+        <PreviewDialog
+          preview={preview}
+          imageBusyKey={imageBusyKey}
+          busy={Boolean(busy)}
+          onClose={() => setPreview(null)}
+          onNavigate={(delta) => setPreview((current) => navigatePreview(current, delta))}
+          onRemove={(index) => removeDraftImage(index)}
+          onRegenerate={(index) => void regenerateDraftImage(index)}
+        />
+      ) : null}
     </main>
   );
 }
@@ -541,6 +973,101 @@ function Metric({ label, value }: { label: string; value: string | number }) {
 
 function FieldLabel({ label }: { label: string }) {
   return <span className="text-xs font-black text-[var(--text-muted)]">{label}</span>;
+}
+
+function ReviewImageAddTile({
+  empty,
+  busy,
+  isUploading,
+  onOpen,
+}: {
+  empty?: boolean;
+  busy: boolean;
+  isUploading: boolean;
+  onOpen: () => void;
+}) {
+  return (
+    <button
+      className={`review-gallery-add ${empty ? "review-gallery-empty" : ""} ${busy ? "review-gallery-tool-disabled" : ""}`}
+      type="button"
+      aria-label="新增配图"
+      title="新增配图"
+      disabled={busy}
+      onClick={onOpen}
+    >
+      {isUploading ? <Loader2 className={empty ? "h-7 w-7 animate-spin" : "h-5 w-5 animate-spin"} /> : <ImagePlus className={empty ? "h-7 w-7" : "h-5 w-5"} />}
+      <span>新增图片</span>
+      <small>本地、粘贴或拖拽</small>
+    </button>
+  );
+}
+
+function ReviewImageUploadPanel({
+  open,
+  busy,
+  isUploading,
+  onClose,
+  onChange,
+  onPaste,
+  onDrop,
+}: {
+  open: boolean;
+  busy: boolean;
+  isUploading: boolean;
+  onClose: () => void;
+  onChange: (event: ChangeEvent<HTMLInputElement>) => void;
+  onPaste: (event: ClipboardEvent<HTMLElement>) => void;
+  onDrop: (event: DragEvent<HTMLElement>) => void;
+}) {
+  if (!open) return null;
+
+  const handleDragOver = (event: DragEvent<HTMLElement>) => {
+    event.preventDefault();
+    event.dataTransfer.dropEffect = busy ? "none" : "copy";
+  };
+
+  return (
+    <div className="review-upload-backdrop" role="dialog" aria-modal="true" aria-labelledby="review-image-upload-title">
+      <div className="review-upload-panel">
+        <div className="review-upload-header">
+          <div className="min-w-0">
+            <p className="header-eyebrow">Image import</p>
+            <h3 id="review-image-upload-title">新增图片</h3>
+          </div>
+          <button className="review-upload-close" type="button" onClick={onClose} disabled={isUploading} aria-label="关闭上传面板">
+            <X className="h-4 w-4" />
+          </button>
+        </div>
+
+        <div className="review-upload-options">
+          <label className={`review-upload-option ${busy ? "review-gallery-tool-disabled" : ""}`}>
+            <Upload className="h-5 w-5" />
+            <span>本地导入</span>
+            <small>选择 PNG、JPG、WebP、GIF 或 AVIF</small>
+            <input className="review-file-input" type="file" accept="image/png,image/jpeg,image/webp,image/gif,image/avif" disabled={busy} onChange={(event) => onChange(event)} />
+          </label>
+
+          <div className="review-upload-option" tabIndex={0} onPaste={onPaste} onDragOver={handleDragOver} onDrop={onDrop}>
+            <ClipboardCheck className="h-5 w-5" />
+            <span>粘贴板导入</span>
+            <small>点击这里后，Ctrl+V 粘贴图片</small>
+          </div>
+
+          <div className="review-upload-dropzone" tabIndex={0} onPaste={onPaste} onDragOver={handleDragOver} onDrop={onDrop}>
+            {isUploading ? <Loader2 className="h-6 w-6 animate-spin" /> : <ImagePlus className="h-6 w-6" />}
+            <span>拖拽导入</span>
+            <small>把本地图片拖到这里即可添加</small>
+          </div>
+        </div>
+
+        <div className="review-upload-footer">
+          <button className="soft-button h-10 px-4 text-xs font-black" type="button" onClick={onClose} disabled={isUploading}>
+            取消
+          </button>
+        </div>
+      </div>
+    </div>
+  );
 }
 
 function PostThumb({ post }: { post: GeneratedPost }) {
@@ -599,18 +1126,35 @@ function PublishStatusCard({ publish }: { publish: PublishSnapshot }) {
   );
 }
 
-function PreviewDialog({ preview, onClose, onNavigate }: { preview: PreviewState; onClose: () => void; onNavigate: (delta: number) => void }) {
+function PreviewDialog({
+  preview,
+  imageBusyKey,
+  busy,
+  onClose,
+  onNavigate,
+  onRemove,
+  onRegenerate,
+}: {
+  preview: PreviewState;
+  imageBusyKey: string;
+  busy: boolean;
+  onClose: () => void;
+  onNavigate: (delta: number) => void;
+  onRemove: (index: number) => void;
+  onRegenerate: (index: number) => void;
+}) {
   if (!preview) return null;
   const images = preview.post.imageUrls;
   const index = Math.min(Math.max(preview.index, 0), Math.max(images.length - 1, 0));
   const image = images[index];
+  const disableImageAction = busy || Boolean(imageBusyKey);
   return (
     <div className="review-preview-backdrop" role="dialog" aria-modal="true">
       <div className="review-preview-panel">
         <div className="flex items-center justify-between gap-3">
           <div className="min-w-0">
             <p className="truncate text-sm font-black">{preview.post.title || "最终配图"}</p>
-            <p className="mt-1 text-xs text-white/55">
+            <p className="mt-1 text-xs text-[var(--text-muted)]">
               {index + 1} / {images.length}
             </p>
           </div>
@@ -624,31 +1168,87 @@ function PreviewDialog({ preview, onClose, onNavigate }: { preview: PreviewState
             <img alt="" src={toDisplayImageSrc(image)} referrerPolicy="no-referrer" />
           ) : null}
         </div>
-        {images.length > 1 ? (
-          <div className="mt-3 grid grid-cols-2 gap-2">
-            <button className="soft-button h-10 text-xs" type="button" onClick={() => onNavigate(-1)}>
-              上一张
-            </button>
-            <button className="soft-button h-10 text-xs" type="button" onClick={() => onNavigate(1)}>
-              下一张
-            </button>
-          </div>
-        ) : null}
+        <div className="review-preview-actions">
+          {images.length > 1 ? (
+            <>
+              <button className="soft-button h-10 text-xs" type="button" onClick={() => onNavigate(-1)}>
+                上一张
+              </button>
+              <button className="soft-button h-10 text-xs" type="button" onClick={() => onNavigate(1)}>
+                下一张
+              </button>
+            </>
+          ) : null}
+          <button className="soft-button h-10 text-xs" type="button" onClick={() => onRegenerate(index)} disabled={disableImageAction || !image}>
+            {imageBusyKey === `regenerate:${index}` ? <Loader2 className="h-3.5 w-3.5 animate-spin" /> : <Wand2 className="h-3.5 w-3.5" />}
+            Prompt 生成
+          </button>
+          <button className="soft-button h-10 text-xs text-[var(--rose)]" type="button" onClick={() => onRemove(index)} disabled={disableImageAction || !image}>
+            <Trash2 className="h-3.5 w-3.5" />
+            删除图片
+          </button>
+        </div>
       </div>
     </div>
   );
 }
 
-function filterPosts(posts: GeneratedPost[], filter: ReviewFilter, query: string) {
-  const trimmed = query.trim().toLowerCase();
+function filterPosts(
+  posts: GeneratedPost[],
+  filters: {
+    statusFilter: ReviewFilter;
+    timeFilter: ReviewTimeFilter;
+    keywordFilter: string;
+    authorFilter: string;
+    platformFilter: Platform | "all";
+  },
+) {
+  const trimmed = filters.keywordFilter.trim().toLowerCase();
+  const author = filters.authorFilter.trim();
   return posts.filter((post) => {
     const matchesFilter =
-      filter === "all" ||
-      (filter === "ready" ? post.status === "approved" || post.status === "editing" || post.status === "draft" : post.status === filter);
+      filters.statusFilter === "all" ||
+      (filters.statusFilter === "ready" ? post.status === "approved" || post.status === "editing" || post.status === "draft" : post.status === filters.statusFilter);
     if (!matchesFilter) return false;
+    if (!matchesTimeFilter(post, filters.timeFilter)) return false;
+    if (filters.platformFilter !== "all" && post.platform !== filters.platformFilter) return false;
+    if (author && getPostAuthor(post) !== author) return false;
     if (!trimmed) return true;
-    return `${post.title}\n${post.body}\n${post.imagePrompt}`.toLowerCase().includes(trimmed);
+    return `${post.title}\n${post.body}\n${post.imagePrompt}\n${post.taskKeyword || ""}\n${post.feishuVehicle || ""}`.toLowerCase().includes(trimmed);
   });
+}
+
+function matchesTimeFilter(post: GeneratedPost, filter: ReviewTimeFilter) {
+  if (filter === "all") return true;
+  const value = Date.parse(post.updatedAt || post.createdAt || "");
+  if (!Number.isFinite(value)) return false;
+  const now = Date.now();
+  if (filter === "today") return new Date(value).toDateString() === new Date(now).toDateString();
+  const days = filter === "7d" ? 7 : 30;
+  return now - value <= days * 24 * 60 * 60 * 1000;
+}
+
+function getPostAuthor(post: GeneratedPost) {
+  return post.ownerDisplayName?.trim() || post.ownerUserId?.trim() || "未标记作者";
+}
+
+function buildAuthorOptions(posts: GeneratedPost[]) {
+  return Array.from(new Set(posts.map(getPostAuthor))).sort((a, b) => a.localeCompare(b, "zh-CN"));
+}
+
+function buildPlatformOptions(posts: GeneratedPost[]) {
+  return Array.from(new Set(posts.map((post) => post.platform))).sort((a, b) => (platformLabels[a] || a).localeCompare(platformLabels[b] || b, "zh-CN"));
+}
+
+function findNextUnreviewedPostId(posts: GeneratedPost[], currentPostId: string) {
+  const candidates = posts.filter((post) => post.id !== currentPostId && post.status !== "approved" && post.status !== "published");
+  if (!candidates.length) return undefined;
+  const currentIndex = posts.findIndex((post) => post.id === currentPostId);
+  return candidates.find((post) => posts.findIndex((item) => item.id === post.id) > currentIndex)?.id || candidates[0]?.id;
+}
+
+function getPersistedPostImageCount(posts: GeneratedPost[], postId: string, fallbackCount: number) {
+  return posts.find((post) => post.id === postId)?.imageUrls.length ?? fallbackCount;
 }
 
 function buildSummary(posts: GeneratedPost[]) {
@@ -770,6 +1370,72 @@ function navigatePreview(current: PreviewState, delta: number): PreviewState {
     ...current,
     index: (current.index + delta + total) % total,
   };
+}
+
+function resolveDraftImagePrompt(post: GeneratedPost, imagePromptByIndex: Record<string, string>, index: number) {
+  const manualPrompt = imagePromptByIndex[imagePromptKey(post.id, index)];
+  if (manualPrompt !== undefined) return manualPrompt;
+
+  const imagePromptParts = splitImagePrompt(post.imagePrompt);
+  if (imagePromptParts.length > 1 && imagePromptParts[index]) return imagePromptParts[index];
+
+  const selectedTasks = (post.imageTasks || []).filter((task) => task.selected);
+  const taskPrompt = selectedTasks[index]?.prompt || post.imageTasks?.[index]?.prompt;
+  if (taskPrompt?.trim()) return taskPrompt;
+
+  return post.imagePrompt;
+}
+
+function imagePromptKey(postId: string, index: number) {
+  return `${postId}:${index}`;
+}
+
+function moveImagePromptValues(current: Record<string, string>, post: GeneratedPost, index: number, nextIndex: number) {
+  const next = { ...current };
+  const sourceKey = imagePromptKey(post.id, index);
+  const targetKey = imagePromptKey(post.id, nextIndex);
+  const sourceValue = resolveDraftImagePrompt(post, current, index);
+  const targetValue = resolveDraftImagePrompt(post, current, nextIndex);
+  next[targetKey] = sourceValue;
+  next[sourceKey] = targetValue;
+
+  return next;
+}
+
+function removeImagePromptValue(current: Record<string, string>, post: GeneratedPost, removedIndex: number) {
+  const next = { ...current };
+  for (let index = 0; index < post.imageUrls.length; index += 1) {
+    delete next[imagePromptKey(post.id, index)];
+  }
+
+  for (let index = 0; index < post.imageUrls.length; index += 1) {
+    if (index === removedIndex) continue;
+    const newIndex = index > removedIndex ? index - 1 : index;
+    next[imagePromptKey(post.id, newIndex)] = resolveDraftImagePrompt(post, current, index);
+  }
+
+  return next;
+}
+
+function splitImagePrompt(value: string) {
+  return value
+    .split(/\n{2,}/)
+    .map((part) => part.trim())
+    .filter(Boolean);
+}
+
+function getClipboardImageFile(data: DataTransfer) {
+  for (const item of Array.from(data.items || [])) {
+    if (item.kind !== "file" || !item.type.startsWith("image/")) continue;
+    const file = item.getAsFile();
+    if (file) return file;
+  }
+
+  return Array.from(data.files || []).find((file) => file.type.startsWith("image/"));
+}
+
+function getDataTransferImageFile(data: DataTransfer) {
+  return Array.from(data.files || []).find((file) => file.type.startsWith("image/")) || getClipboardImageFile(data);
 }
 
 function toDisplayImageSrc(url?: string) {

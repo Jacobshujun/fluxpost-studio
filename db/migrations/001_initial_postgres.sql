@@ -189,6 +189,26 @@ CREATE INDEX IF NOT EXISTS idx_feishu_publish_queue_ready ON feishu_publish_queu
 CREATE INDEX IF NOT EXISTS idx_feishu_publish_queue_owner_status ON feishu_publish_queue(owner_user_id, status, created_at ASC);
 CREATE INDEX IF NOT EXISTS idx_feishu_publish_queue_source_run_id ON feishu_publish_queue(source_run_id);
 
+CREATE TABLE IF NOT EXISTS distribution_check_jobs (
+  id TEXT PRIMARY KEY,
+  owner_user_id TEXT NOT NULL,
+  status TEXT NOT NULL,
+  priority INTEGER NOT NULL DEFAULT 0,
+  attempts INTEGER NOT NULL DEFAULT 0,
+  max_attempts INTEGER NOT NULL DEFAULT 1,
+  run_after TIMESTAMPTZ NOT NULL,
+  locked_by TEXT,
+  locked_until TIMESTAMPTZ,
+  created_at TIMESTAMPTZ NOT NULL,
+  updated_at TIMESTAMPTZ NOT NULL,
+  started_at TIMESTAMPTZ,
+  completed_at TIMESTAMPTZ,
+  error TEXT,
+  data_json JSONB NOT NULL
+);
+CREATE INDEX IF NOT EXISTS idx_distribution_check_jobs_ready ON distribution_check_jobs(status, run_after, priority DESC, created_at ASC);
+CREATE INDEX IF NOT EXISTS idx_distribution_check_jobs_owner_status ON distribution_check_jobs(owner_user_id, status, created_at ASC);
+
 CREATE TABLE IF NOT EXISTS lark_task_launches (
   id TEXT PRIMARY KEY,
   message_id TEXT NOT NULL UNIQUE,

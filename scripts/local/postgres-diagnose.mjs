@@ -75,6 +75,7 @@ async function runDiagnostics(client, context) {
       UNION ALL SELECT 'simple_runs', count(*)::int FROM public.simple_runs
       UNION ALL SELECT 'simple_run_queue', count(*)::int FROM public.simple_run_queue
       UNION ALL SELECT 'feishu_publish_queue', count(*)::int FROM public.feishu_publish_queue
+      UNION ALL SELECT 'distribution_check_jobs', count(*)::int FROM public.distribution_check_jobs
       UNION ALL SELECT 'content_projects', count(*)::int FROM public.content_projects
       UNION ALL SELECT 'generated_posts', count(*)::int FROM public.generated_posts
       UNION ALL SELECT 'crawl_jobs', count(*)::int FROM public.crawl_jobs
@@ -173,6 +174,49 @@ async function runDiagnostics(client, context) {
     "locked_by",
     "locked_until",
     "updated_at",
+    "error",
+  ]);
+
+  const distributionQueue = await all(
+    client,
+    `
+      SELECT
+        id,
+        owner_user_id,
+        status,
+        attempts,
+        locked_by,
+        locked_until,
+        updated_at,
+        coalesce((data_json->>'processed')::int, 0) AS processed,
+        coalesce((data_json->>'total')::int, 0) AS total,
+        coalesce((data_json->>'updated')::int, 0) AS updated,
+        coalesce((data_json->>'failed')::int, 0) AS failed,
+        left(coalesce(error, ''), 180) AS error
+      FROM public.distribution_check_jobs
+      WHERE status IN ('queued', 'running')
+         OR updated_at > now() - interval '12 hours'
+      ORDER BY
+        CASE status WHEN 'running' THEN 0 WHEN 'queued' THEN 1 ELSE 2 END,
+        updated_at DESC
+      LIMIT $1
+    `,
+    [context.limit],
+  );
+
+  section("Distribution Check Queue");
+  table(distributionQueue, [
+    "id",
+    "owner_user_id",
+    "status",
+    "attempts",
+    "locked_by",
+    "locked_until",
+    "updated_at",
+    "processed",
+    "total",
+    "updated",
+    "failed",
     "error",
   ]);
 

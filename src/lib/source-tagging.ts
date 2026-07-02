@@ -1,11 +1,8 @@
-import { readFile } from "node:fs/promises";
-import path from "node:path";
 import { compactError, recordExecutionLog } from "./activity-log";
 import { appConfig, openaiTextUrl } from "./config";
 import { concurrencyConfig, mapWithConcurrency, runWithConcurrencyPool } from "./concurrency";
-import { normalizeModelSupportedImageMime, sniffModelSupportedImageMime } from "./image-format";
-import { buildMediaRequestHeaders } from "./media-request";
 import { mergeDownloadedAndRemoteImages } from "./media-url-filter";
+import { toModelImageUrl } from "./model-image-input";
 import { selectBestVideoHighlightFrames } from "./video-frame-policy";
 import {
   contentTagOptions,
@@ -57,8 +54,7 @@ type PreparedModelImages = {
 
 const maxContentTags = 4;
 const maxVisualAssets = 9;
-const maxInlineImageBytes = 7 * 1024 * 1024;
-const remoteImageFetchTimeoutMs = 20_000;
+const beautyCarContentTag: ContentTag = "美女车图";
 
 export const sourceContentTagOptions = contentTagOptions;
 export const sourceVisualTagOptions = visualTagOptions;
@@ -149,7 +145,7 @@ export async function tagSourceItem(item: NormalizedSourceItem): Promise<Normali
 async function generateContentTagging(item: NormalizedSourceItem): Promise<SourceContentTagging> {
   try {
     const json = await callTaggingModel(buildContentTaggingPrompt(item), []);
-    return normalizeContentTagging(json, new Date().toISOString());
+    return normalizeContentTagging(json, item, new Date().toISOString());
   } catch (error) {
     const message = compactError(error);
     await recordExecutionLog({
@@ -343,9 +339,9 @@ export function normalizeVisualTag(value: unknown): VisualTag | undefined {
   return (visualTagOptions as readonly string[]).includes(normalized) ? (normalized as VisualTag) : undefined;
 }
 
-function normalizeContentTagging(json: TaggingJson, taggedAt: string): SourceContentTagging {
+function normalizeContentTagging(json: TaggingJson, item: NormalizedSourceItem, taggedAt: string): SourceContentTagging {
   return {
-    tags: normalizeContentTags(json.contentTags ?? json.tags),
+    tags: normalizeAiContentTags(json.contentTags ?? json.tags, item),
     confidence: normalizeConfidence(json.confidence),
     reasons: arrayOfStrings(json.reasons).slice(0, 4),
     model: appConfig.openaiTextModel,
@@ -354,6 +350,24 @@ function normalizeContentTagging(json: TaggingJson, taggedAt: string): SourceCon
     updatedBy: "ai",
     updatedAt: taggedAt,
   };
+}
+
+function normalizeAiContentTags(value: unknown, item: NormalizedSourceItem): ContentTag[] {
+  return normalizeContentTags(value).filter((tag) => tag !== beautyCarContentTag || hasBeautyCarTextEvidence(item));
+}
+
+function hasBeautyCarTextEvidence(item: NormalizedSourceItem) {
+  const text = [item.title, item.contentText].filter(Boolean).join("\n");
+  if (!text.trim()) return false;
+  const noPeoplePattern = /(纯车|纯外观|没有人物|没有人出镜|无人出镜|无人物|无真人|不含人物|无美女|没有美女|没有小姐姐|没有女生)/;
+  if (noPeoplePattern.test(text)) return false;
+
+  const strongPeopleCarPattern = /(车模|美女车图|美女车照|美女车拍|小姐姐.{0,12}(车|拍|图|写真|出镜)|女车主.{0,12}(出镜|拍照|写真|合影|同框)|女生.{0,12}(和车|与车|拍照|写真|出镜|同框)|女性.{0,12}(出镜|拍照|写真|同框)|女模.{0,12}(车|拍|写真)|人车写真|人车大片|人车合影|人车同框)/;
+  if (strongPeopleCarPattern.test(text)) return true;
+
+  const femalePattern = /(美女|小姐姐|女生|女车主|女神|妹子|姑娘|女孩|女性|辣妹|女模)/;
+  const visualContextPattern = /(拍照|写真|出镜|同框|合影|摆拍|街拍|大片|美图|车图|图集|壁纸|赏图|上镜|模特)/;
+  return femalePattern.test(text) && visualContextPattern.test(text);
 }
 
 function normalizeVisualTagging(
@@ -422,6 +436,7 @@ function buildContentTaggingPrompt(item: NormalizedSourceItem) {
     "内容标签只能从以下列表选择，可以多选，但最多 4 个。模糊时少选，不要为了凑数硬选。",
     contentTagOptions.join("、"),
     "提车记录：车主提车、交付现场、提车作业、提车当天体验或晒新车钥匙/交付花束等内容。该标签用于归档，不进入后续内容生产。",
+    "美女车图：仅当标题或正文明确出现美女、小姐姐、女生、女车主、车模、女性出镜等语义时选择；纯车外观、车型美图、汽车美图、车图合集、没有人物或无法确认人物时不要选择。",
     "输出 JSON 结构：",
     '{"contentTags":["新车曝光"],"confidence":0.85,"reasons":["理由"]}',
     `平台: ${item.platform}`,
@@ -439,12 +454,12 @@ function buildVisualTaggingPrompt(item: NormalizedSourceItem, visualAssets: Arra
     "你是汽车社媒视觉素材标注助手。请查看随消息提供的图片，给每一张图打 1 个视觉标签，只输出合法 JSON。",
     "标签只能从以下列表选择：",
     visualTagOptions.join("、"),
-    "标签判定优先级：APP > 人车美图 > 车型美图 > 汽车外观 > 带文字图 > 内饰空间。",
+    "标签判定优先级：APP > 带文字图 > 人车美图 > 车型美图 > 汽车外观 > 内饰空间。",
     "APP：手机 App 截图、车机/中控/仪表界面、导航、能耗、充电、辅助驾驶、OTA 等屏幕 UI，界面控件和文字密集。",
+    "带文字图：海报、信息图、文字内容图，但不是 App 或车机界面。只要图片存在显著标题、卖点、参数、说明文字、脚注或品牌海报文案，即使整车或车型主体占画面核心，也优先选择带文字图。",
     "人车美图：车外观和人物同时明显，人物参与构图、摆拍或场景氛围。",
-    "车型美图：纯车外观美图，没有人物，整车或车型主体占画面核心。",
-    "汽车外观：车身外观、外观局部、车灯、轮毂、充电口、路边随拍等，不满足车型美图或人车美图时使用。",
-    "带文字图：海报、信息图、文字内容图，但不是 App 或车机界面。",
+    "车型美图：纯车外观美图，没有人物，整车或车型主体占画面核心，且没有显著标题或说明文字。",
+    "汽车外观：车身外观、外观局部、车灯、轮毂、充电口、路边随拍等，不满足带文字图、车型美图或人车美图时使用。",
     "内饰空间：座舱、座椅、中控台等车内空间，不以屏幕 UI 为主体。",
     "输出 JSON 结构：",
     '{"visualTags":[{"id":"image-1","tag":"汽车外观","confidence":0.8,"reason":"车身外观占主体"}]}',
@@ -599,68 +614,4 @@ async function prepareModelImages(assets: Array<Omit<SourceVisualTaggingAsset, "
     }
   }
   return { inputs, assets: modelAssets, skipped };
-}
-
-async function toModelImageUrl(url: string) {
-  if (/^data:image\//i.test(url)) return normalizeDataImageUrl(url);
-  if (/^https?:\/\//i.test(url)) return remoteImageToDataUrl(url);
-  if (!isAppLocalMediaUrl(url)) return undefined;
-
-  const relative = url.replace(/^\/+/, "");
-  const filePath = path.join(process.cwd(), "public", relative);
-  const buffer = await readFile(filePath);
-  if (buffer.length > maxInlineImageBytes) {
-    throw new Error(`Visual asset is too large for inline tagging: ${url}`);
-  }
-  const mimeType = sniffModelSupportedImageMime(buffer);
-  if (!mimeType) {
-    throw new Error(`local image is not a supported model image: ${url}`);
-  }
-  return `data:${mimeType};base64,${buffer.toString("base64")}`;
-}
-
-function normalizeDataImageUrl(url: string) {
-  const match = url.match(/^data:([^;,]+);base64,/i);
-  const mimeType = normalizeModelSupportedImageMime(match?.[1] || "");
-  return mimeType ? url.replace(/^data:[^;,]+/i, `data:${mimeType}`) : undefined;
-}
-
-async function remoteImageToDataUrl(url: string) {
-  const controller = new AbortController();
-  const timeout = setTimeout(() => controller.abort(), remoteImageFetchTimeoutMs);
-  let response: Response;
-  try {
-    response = await fetch(url, {
-      headers: buildMediaRequestHeaders(url),
-      signal: controller.signal,
-    });
-  } finally {
-    clearTimeout(timeout);
-  }
-
-  if (!response.ok) {
-    throw new Error(`remote image HTTP ${response.status}`);
-  }
-
-  const contentLength = Number(response.headers.get("content-length") || 0);
-  if (contentLength > maxInlineImageBytes) {
-    throw new Error(`remote image is too large (${Math.round(contentLength / 1024 / 1024)} MB)`);
-  }
-
-  const buffer = Buffer.from(await response.arrayBuffer());
-  if (!buffer.length) {
-    throw new Error("remote image is empty");
-  }
-  if (buffer.length > maxInlineImageBytes) {
-    throw new Error(`remote image is too large (${Math.round(buffer.length / 1024 / 1024)} MB)`);
-  }
-
-  const contentType = response.headers.get("content-type") || "";
-  const mimeType = normalizeModelSupportedImageMime(contentType) || sniffModelSupportedImageMime(buffer);
-  if (!mimeType) {
-    const normalizedContentType = contentType.split(";")[0]?.trim() || "unknown content type";
-    throw new Error(`remote image is not a supported model image (${normalizedContentType})`);
-  }
-
-  return `data:${mimeType};base64,${buffer.toString("base64")}`;
 }

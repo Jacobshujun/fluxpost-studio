@@ -5,6 +5,7 @@ import type {
   BatchProductionJob,
   ContentProject,
   CrawlJob,
+  DistributionCheckJob,
   ExecutionLogEntry,
   FeishuPublishJob,
   GeneratedPost,
@@ -62,6 +63,24 @@ type FeishuPublishQueueRow = {
   source: FeishuPublishJob["source"];
   source_run_id?: string | null;
   status: FeishuPublishJob["status"];
+  priority: number;
+  attempts: number;
+  max_attempts: number;
+  run_after: string;
+  locked_by?: string | null;
+  locked_until?: string | null;
+  created_at: string;
+  updated_at: string;
+  started_at?: string | null;
+  completed_at?: string | null;
+  error?: string | null;
+  data_json: unknown;
+};
+
+type DistributionCheckJobRow = {
+  id: string;
+  owner_user_id: string;
+  status: DistributionCheckJob["status"];
   priority: number;
   attempts: number;
   max_attempts: number;
@@ -147,6 +166,7 @@ type StoreTable =
   | "simple_run_queue"
   | "image_generation_queue"
   | "feishu_publish_queue"
+  | "distribution_check_jobs"
   | "lark_task_launches";
 
 export type DatabaseBackend = "sqlite" | "postgres";
@@ -1046,6 +1066,221 @@ export async function heartbeatFeishuPublishQueueItem(queueId: string, workerId:
   `).run(lockedUntil, nowIso, queueId, workerId);
 }
 
+export async function saveDistributionCheckJobToDb(job: DistributionCheckJob) {
+  await ensureDatabaseReady();
+  if (getDatabaseBackend() === "postgres") {
+    await getPostgresPool().query(
+      `
+        INSERT INTO distribution_check_jobs (
+          id, owner_user_id, status, priority, attempts, max_attempts,
+          run_after, locked_by, locked_until, created_at, updated_at,
+          started_at, completed_at, error, data_json
+        )
+        VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15::jsonb)
+        ON CONFLICT(id) DO UPDATE SET
+          owner_user_id = excluded.owner_user_id,
+          status = excluded.status,
+          priority = excluded.priority,
+          attempts = excluded.attempts,
+          max_attempts = excluded.max_attempts,
+          run_after = excluded.run_after,
+          locked_by = excluded.locked_by,
+          locked_until = excluded.locked_until,
+          created_at = distribution_check_jobs.created_at,
+          updated_at = excluded.updated_at,
+          started_at = excluded.started_at,
+          completed_at = excluded.completed_at,
+          error = excluded.error,
+          data_json = excluded.data_json
+      `,
+      [
+        job.id,
+        job.ownerUserId,
+        job.status,
+        job.priority,
+        job.attempts,
+        job.maxAttempts,
+        job.runAfter,
+        job.lockedBy || null,
+        job.lockedUntil || null,
+        job.createdAt,
+        job.updatedAt,
+        job.startedAt || null,
+        job.completedAt || null,
+        job.error || null,
+        toJson(job),
+      ],
+    );
+    return job;
+  }
+
+  getSqliteDatabase().prepare(`
+    INSERT INTO distribution_check_jobs (
+      id, owner_user_id, status, priority, attempts, max_attempts,
+      run_after, locked_by, locked_until, created_at, updated_at,
+      started_at, completed_at, error, data_json
+    )
+    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+    ON CONFLICT(id) DO UPDATE SET
+      owner_user_id = excluded.owner_user_id,
+      status = excluded.status,
+      priority = excluded.priority,
+      attempts = excluded.attempts,
+      max_attempts = excluded.max_attempts,
+      run_after = excluded.run_after,
+      locked_by = excluded.locked_by,
+      locked_until = excluded.locked_until,
+      created_at = distribution_check_jobs.created_at,
+      updated_at = excluded.updated_at,
+      started_at = excluded.started_at,
+      completed_at = excluded.completed_at,
+      error = excluded.error,
+      data_json = excluded.data_json
+  `).run(
+    job.id,
+    job.ownerUserId,
+    job.status,
+    job.priority,
+    job.attempts,
+    job.maxAttempts,
+    job.runAfter,
+    job.lockedBy || null,
+    job.lockedUntil || null,
+    job.createdAt,
+    job.updatedAt,
+    job.startedAt || null,
+    job.completedAt || null,
+    job.error || null,
+    toJson(job),
+  );
+  return job;
+}
+
+export async function readDistributionCheckJobsFromDb(limit = 30) {
+  await ensureDatabaseReady();
+  if (getDatabaseBackend() === "postgres") {
+    const result = await getPostgresPool().query<DistributionCheckJobRow>(
+      `
+        SELECT *
+        FROM distribution_check_jobs
+        ORDER BY created_at DESC
+        LIMIT $1
+      `,
+      [limit],
+    );
+    return result.rows.map(fromDistributionCheckJobRow);
+  }
+
+  const rows = getSqliteDatabase().prepare(`
+    SELECT *
+    FROM distribution_check_jobs
+    ORDER BY created_at DESC
+    LIMIT ?
+  `).all(limit) as DistributionCheckJobRow[];
+  return rows.map(fromDistributionCheckJobRow);
+}
+
+export async function getDistributionCheckJobFromDb(jobId: string) {
+  await ensureDatabaseReady();
+  if (getDatabaseBackend() === "postgres") {
+    const result = await getPostgresPool().query<DistributionCheckJobRow>("SELECT * FROM distribution_check_jobs WHERE id = $1", [jobId]);
+    return result.rows[0] ? fromDistributionCheckJobRow(result.rows[0]) : undefined;
+  }
+
+  const row = getSqliteDatabase().prepare("SELECT * FROM distribution_check_jobs WHERE id = ?").get(jobId) as DistributionCheckJobRow | undefined;
+  return row ? fromDistributionCheckJobRow(row) : undefined;
+}
+
+export async function claimNextDistributionCheckJob(workerId: string, lockMs = 10 * 60_000) {
+  await ensureDatabaseReady();
+  const now = new Date();
+  const nowIso = now.toISOString();
+  const lockedUntil = new Date(now.getTime() + lockMs).toISOString();
+
+  if (getDatabaseBackend() === "postgres") {
+    const result = await getPostgresPool().query<DistributionCheckJobRow>(
+      `
+        WITH next_item AS (
+          SELECT id
+          FROM distribution_check_jobs
+          WHERE status = 'queued'
+            AND run_after <= $1
+            AND attempts < max_attempts
+          ORDER BY priority DESC, created_at ASC
+          LIMIT 1
+          FOR UPDATE SKIP LOCKED
+        )
+        UPDATE distribution_check_jobs queue
+        SET
+          status = 'running',
+          attempts = queue.attempts + 1,
+          locked_by = $2,
+          locked_until = $3,
+          started_at = COALESCE(queue.started_at, $1),
+          updated_at = $1
+        FROM next_item
+        WHERE queue.id = next_item.id
+        RETURNING queue.*
+      `,
+      [nowIso, workerId, lockedUntil],
+    );
+    return result.rows[0] ? fromDistributionCheckJobRow(result.rows[0]) : undefined;
+  }
+
+  const db = getSqliteDatabase();
+  let claimed: DistributionCheckJob | undefined;
+  runSqliteTransaction(db, () => {
+    const row = db.prepare(`
+      SELECT *
+      FROM distribution_check_jobs
+      WHERE status = 'queued'
+        AND run_after <= ?
+        AND attempts < max_attempts
+      ORDER BY priority DESC, created_at ASC
+      LIMIT 1
+    `).get(nowIso) as DistributionCheckJobRow | undefined;
+    if (!row) return;
+    db.prepare(`
+      UPDATE distribution_check_jobs
+      SET status = 'running',
+          attempts = attempts + 1,
+          locked_by = ?,
+          locked_until = ?,
+          started_at = COALESCE(started_at, ?),
+          updated_at = ?
+      WHERE id = ?
+    `).run(workerId, lockedUntil, nowIso, nowIso, row.id);
+    const nextRow = db.prepare("SELECT * FROM distribution_check_jobs WHERE id = ?").get(row.id) as DistributionCheckJobRow;
+    claimed = fromDistributionCheckJobRow(nextRow);
+  });
+  return claimed;
+}
+
+export async function heartbeatDistributionCheckJob(queueId: string, workerId: string, lockMs = 10 * 60_000) {
+  await ensureDatabaseReady();
+  const now = new Date();
+  const lockedUntil = new Date(now.getTime() + lockMs).toISOString();
+  const nowIso = now.toISOString();
+
+  if (getDatabaseBackend() === "postgres") {
+    await getPostgresPool().query(
+      `
+        UPDATE distribution_check_jobs
+        SET locked_until = $1, updated_at = $2
+        WHERE id = $3 AND locked_by = $4 AND status = 'running'
+      `,
+      [lockedUntil, nowIso, queueId, workerId],
+    );
+    return;
+  }
+
+  getSqliteDatabase().prepare(`
+    UPDATE distribution_check_jobs
+    SET locked_until = ?, updated_at = ?
+    WHERE id = ? AND locked_by = ? AND status = 'running'
+  `).run(lockedUntil, nowIso, queueId, workerId);
+}
+
 export async function countWorkspaceAccountsInDb() {
   await ensureDatabaseReady();
   if (getDatabaseBackend() === "postgres") {
@@ -1887,6 +2122,26 @@ function createSqliteSchema(db: SqliteDatabase) {
     CREATE INDEX IF NOT EXISTS idx_feishu_publish_queue_owner_status ON feishu_publish_queue(owner_user_id, status, created_at ASC);
     CREATE INDEX IF NOT EXISTS idx_feishu_publish_queue_source_run_id ON feishu_publish_queue(source_run_id);
 
+    CREATE TABLE IF NOT EXISTS distribution_check_jobs (
+      id TEXT PRIMARY KEY,
+      owner_user_id TEXT NOT NULL,
+      status TEXT NOT NULL,
+      priority INTEGER NOT NULL DEFAULT 0,
+      attempts INTEGER NOT NULL DEFAULT 0,
+      max_attempts INTEGER NOT NULL DEFAULT 1,
+      run_after TEXT NOT NULL,
+      locked_by TEXT,
+      locked_until TEXT,
+      created_at TEXT NOT NULL,
+      updated_at TEXT NOT NULL,
+      started_at TEXT,
+      completed_at TEXT,
+      error TEXT,
+      data_json TEXT NOT NULL
+    );
+    CREATE INDEX IF NOT EXISTS idx_distribution_check_jobs_ready ON distribution_check_jobs(status, run_after, priority DESC, created_at ASC);
+    CREATE INDEX IF NOT EXISTS idx_distribution_check_jobs_owner_status ON distribution_check_jobs(owner_user_id, status, created_at ASC);
+
     CREATE TABLE IF NOT EXISTS lark_task_launches (
       id TEXT PRIMARY KEY,
       message_id TEXT NOT NULL UNIQUE,
@@ -2097,6 +2352,26 @@ const postgresSchemaSql = `
   CREATE INDEX IF NOT EXISTS idx_feishu_publish_queue_ready ON feishu_publish_queue(status, run_after, priority DESC, created_at ASC);
   CREATE INDEX IF NOT EXISTS idx_feishu_publish_queue_owner_status ON feishu_publish_queue(owner_user_id, status, created_at ASC);
   CREATE INDEX IF NOT EXISTS idx_feishu_publish_queue_source_run_id ON feishu_publish_queue(source_run_id);
+
+  CREATE TABLE IF NOT EXISTS distribution_check_jobs (
+    id TEXT PRIMARY KEY,
+    owner_user_id TEXT NOT NULL,
+    status TEXT NOT NULL,
+    priority INTEGER NOT NULL DEFAULT 0,
+    attempts INTEGER NOT NULL DEFAULT 0,
+    max_attempts INTEGER NOT NULL DEFAULT 1,
+    run_after TIMESTAMPTZ NOT NULL,
+    locked_by TEXT,
+    locked_until TIMESTAMPTZ,
+    created_at TIMESTAMPTZ NOT NULL,
+    updated_at TIMESTAMPTZ NOT NULL,
+    started_at TIMESTAMPTZ,
+    completed_at TIMESTAMPTZ,
+    error TEXT,
+    data_json JSONB NOT NULL
+  );
+  CREATE INDEX IF NOT EXISTS idx_distribution_check_jobs_ready ON distribution_check_jobs(status, run_after, priority DESC, created_at ASC);
+  CREATE INDEX IF NOT EXISTS idx_distribution_check_jobs_owner_status ON distribution_check_jobs(owner_user_id, status, created_at ASC);
 
   CREATE TABLE IF NOT EXISTS lark_task_launches (
     id TEXT PRIMARY KEY,
@@ -2435,6 +2710,27 @@ function fromFeishuPublishQueueRow(row: FeishuPublishQueueRow): FeishuPublishJob
   };
 }
 
+function fromDistributionCheckJobRow(row: DistributionCheckJobRow): DistributionCheckJob {
+  const data = fromJson<DistributionCheckJob>(row.data_json);
+  return {
+    ...data,
+    id: row.id,
+    ownerUserId: row.owner_user_id,
+    status: row.status,
+    priority: Number(row.priority || 0),
+    attempts: Number(row.attempts || 0),
+    maxAttempts: Number(row.max_attempts || 1),
+    runAfter: normalizeDateValue(row.run_after),
+    lockedBy: row.locked_by || undefined,
+    lockedUntil: row.locked_until ? normalizeDateValue(row.locked_until) : undefined,
+    createdAt: normalizeDateValue(row.created_at),
+    updatedAt: normalizeDateValue(row.updated_at),
+    startedAt: row.started_at ? normalizeDateValue(row.started_at) : undefined,
+    completedAt: row.completed_at ? normalizeDateValue(row.completed_at) : undefined,
+    error: row.error || data.error,
+  };
+}
+
 function fromImageGenerationQueueRow(row: ImageGenerationQueueRow): ImageGenerationQueueJob {
   const data = fromJson<ImageGenerationQueueJob>(row.data_json);
   return {
@@ -2525,6 +2821,7 @@ function assertStoreTable(table: StoreTable) {
     "simple_run_queue",
     "image_generation_queue",
     "feishu_publish_queue",
+    "distribution_check_jobs",
     "lark_task_launches",
   ];
   if (!allowedTables.includes(table)) throw new Error(`Unsupported store table: ${table}`);

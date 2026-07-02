@@ -53,7 +53,11 @@ const defaultFieldMap: FeishuContentImportFieldMap = {
 const maxTaskNumbersPerImport = 200;
 const feishuRecordSearchKeywordMaxLength = 50;
 
-export async function importFeishuContentByTaskNumbers(taskNumbers: string[]) {
+export type FeishuContentImportOptions = {
+  enableVideoTranscription?: boolean;
+};
+
+export async function importFeishuContentByTaskNumbers(taskNumbers: string[], options: FeishuContentImportOptions = {}) {
   const startedAt = Date.now();
   const normalizedTaskNumbers = normalizeTaskNumbers(taskNumbers);
   if (!normalizedTaskNumbers.length) throw new Error("At least one Feishu task number is required");
@@ -99,7 +103,7 @@ export async function importFeishuContentByTaskNumbers(taskNumbers: string[]) {
     }
   }
 
-  const cachedItems = importedItems.length ? await cacheCrawledMedia(importedItems) : [];
+  const cachedItems = importedItems.length ? await cacheCrawledMedia(importedItems, { enableVideoTranscription: options.enableVideoTranscription === true }) : [];
   const itemsById = new Map(cachedItems.map((item) => [item.id, item]));
   const finalResults = results.map((result) => {
     if (!result.itemId) return result;

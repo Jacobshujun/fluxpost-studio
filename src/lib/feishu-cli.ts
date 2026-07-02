@@ -269,6 +269,7 @@ function getBitableFieldMap() {
     imageUrls: "动态素材",
     contentTags: "内容标签",
     contentCreationSource: "内容创作来源",
+    vehicle: "车型",
   };
 
   if (!appConfig.feishuBitableFieldMap.trim()) return defaults;
@@ -922,6 +923,8 @@ function getPostFieldValue(post: GeneratedPost, key: string) {
       return post.contentTags || [];
     case "contentCreationSource":
       return formatContentCreationSource(post);
+    case "vehicle":
+      return formatVehicleFieldValue(post);
     case "imagePrompt":
       return post.imagePrompt;
     case "aiNotes":
@@ -951,6 +954,10 @@ function formatContentCreationSource(post: GeneratedPost) {
   return ownerId.startsWith("whitelist:") ? ownerId.slice("whitelist:".length) || ownerId : ownerId;
 }
 
+function formatVehicleFieldValue(post: GeneratedPost) {
+  return post.feishuVehicle?.trim() || post.taskKeyword?.trim() || null;
+}
+
 function formatPlatform(value: GeneratedPost["platform"]) {
   const labels: Record<GeneratedPost["platform"], string> = {
     wechat_channels: "视频号",
@@ -958,6 +965,7 @@ function formatPlatform(value: GeneratedPost["platform"]) {
     douyin: "抖音",
     weibo: "微博",
     feishu: "飞书",
+    original: "原创",
     xiaopeng_bbs: "小鹏社区",
     dongchedi: "\u61c2\u8f66\u5e1d",
   };

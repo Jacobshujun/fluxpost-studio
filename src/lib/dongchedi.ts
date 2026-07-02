@@ -1,20 +1,26 @@
 import { request as httpRequest } from "node:http";
 import { request as httpsRequest } from "node:https";
 import { cacheCrawledMedia } from "./media-cache";
+import { rankVideoUrlsByQuality, type VideoQualityCandidate } from "./video-quality";
 import type { NormalizedSourceItem } from "./types";
 
 type JsonRecord = Record<string, unknown>;
 
+type SourceFetchOptions = {
+  enableVideoTranscription?: boolean;
+  cookie?: string;
+};
+
 const dongchediBaseUrl = "https://www.dongchedi.com";
 
-export async function fetchDongchediItemBySource(value: string): Promise<NormalizedSourceItem[]> {
+export async function fetchDongchediItemBySource(value: string, options: SourceFetchOptions = {}): Promise<NormalizedSourceItem[]> {
   const sourceId = extractDongchediArticleId(value);
   if (!sourceId) throw new Error("Unsupported Dongchedi article id or URL");
 
   const sourceUrl = buildDongchediArticleUrl(sourceId);
-  const html = await requestText(sourceUrl);
+  const html = await requestText(sourceUrl, { cookie: options.cookie });
   const item = normalizeDongchediArticle(sourceId, sourceUrl, html);
-  return cacheCrawledMedia([item]);
+  return cacheCrawledMedia([item], { enableVideoTranscription: options.enableVideoTranscription === true });
 }
 
 export function buildDongchediArticleUrl(sourceId: string) {
@@ -57,7 +63,7 @@ export function normalizeDongchediArticle(sourceId: string, sourceUrl: string, h
   const article = findBestArticleRecord(jsonRoots, sourceId);
   if (!article) {
     if (isDongchediAntiBotChallenge(html)) {
-      throw new Error("Dongchedi anti-bot challenge page returned; article data was not available.");
+      throw new Error("Dongchedi anti-bot challenge page returned; article data was not available. Provide a valid Dongchedi Cookie in link import or one-click link mode, then retry.");
     }
     throw new Error("Dongchedi article data not found");
   }
@@ -253,25 +259,33 @@ function extractArticleImages(record: JsonRecord) {
 }
 
 function extractArticleVideos(record: JsonRecord) {
-  const urls = new Set<string>();
-  const visit = (node: unknown, keyHint = "", depth = 0) => {
+  const candidates: VideoQualityCandidate[] = [];
+  const visit = (node: unknown, keyHint = "", context: Partial<VideoQualityCandidate> = {}, depth = 0) => {
     if (depth > 6) return;
     if (typeof node === "string") {
       const normalized = normalizeUrl(node);
-      if (normalized && isLikelyVideoUrl(normalized)) urls.add(normalized);
+      if (normalized && isLikelyVideoUrl(normalized)) candidates.push({ ...context, url: normalized, keyHint });
       return;
     }
     if (Array.isArray(node)) {
-      node.forEach((child) => visit(child, keyHint, depth + 1));
+      node.forEach((child, index) => visit(child, `${keyHint}.${index}`, context, depth + 1));
       return;
     }
     if (!isRecord(node)) return;
+    const nextContext: Partial<VideoQualityCandidate> = {
+      ...context,
+      width: firstNumber(node, ["width", "w"]) || context.width,
+      height: firstNumber(node, ["height", "h"]) || context.height,
+      bitrate: firstNumber(node, ["bit_rate", "bitrate", "avg_bitrate", "video_bitrate"]) || context.bitrate,
+      quality: firstString(node, ["quality", "quality_type", "definition", "format"]) || context.quality,
+      keyHint,
+    };
     Object.entries(node).forEach(([key, child]) => {
-      if (/video|play|mp4|stream|url|src/i.test(key)) visit(child, keyHint ? `${keyHint}.${key}` : key, depth + 1);
+      if (/video|play|mp4|stream|url|src|main/i.test(key)) visit(child, keyHint ? `${keyHint}.${key}` : key, nextContext, depth + 1);
     });
   };
   visit(record);
-  return Array.from(urls).slice(0, 8);
+  return rankVideoUrlsByQuality(candidates).filter(isLikelyVideoUrl).slice(0, 8);
 }
 
 function resolveAuthorName(record: JsonRecord) {
@@ -290,7 +304,7 @@ function resolvePublishedAt(record: JsonRecord) {
   return Number.isNaN(parsed) ? undefined : new Date(parsed).toISOString();
 }
 
-function requestText(url: string, redirectCount = 0): Promise<string> {
+function requestText(url: string, options: { cookie?: string } = {}, redirectCount = 0): Promise<string> {
   return new Promise((resolve, reject) => {
     if (redirectCount > 4) {
       reject(new Error("too many redirects"));
@@ -298,21 +312,23 @@ function requestText(url: string, redirectCount = 0): Promise<string> {
     }
     const parsedUrl = new URL(url);
     const request = parsedUrl.protocol === "http:" ? httpRequest : httpsRequest;
+    const headers: Record<string, string> = {
+      "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 Chrome/124 Safari/537.36",
+      Accept: "text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8",
+      Referer: "https://www.dongchedi.com/",
+    };
+    if (options.cookie) headers.Cookie = options.cookie;
     const req = request(
       parsedUrl,
       {
-        headers: {
-          "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 Chrome/124 Safari/537.36",
-          Accept: "text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8",
-          Referer: "https://www.dongchedi.com/",
-        },
+        headers,
       },
       (res) => {
         const status = res.statusCode || 0;
         if (status >= 300 && status < 400 && res.headers.location) {
           const redirectUrl = new URL(res.headers.location, parsedUrl).toString();
           res.resume();
-          requestText(redirectUrl, redirectCount + 1).then(resolve).catch(reject);
+          requestText(redirectUrl, options, redirectCount + 1).then(resolve).catch(reject);
           return;
         }
         if (status < 200 || status >= 300) {

@@ -54,8 +54,9 @@ import {
   imageReferenceSizeInstruction,
 } from "@/lib/creation-controls";
 import { defaultDistributionCheckPrompt } from "@/lib/distribution-check-prompt";
-import { defaultImageGenerationSize, imageGenerationSizeOptions, isImageGenerationSize } from "@/lib/image-size-options";
+import { defaultImageGenerationSize, imageGenerationSizeOptions, isImageGenerationSize, normalizeImageGenerationSize } from "@/lib/image-size-options";
 import { mergeDownloadedAndRemoteImages } from "@/lib/media-url-filter";
+import { getStoredTheme, setStoredTheme, subscribeTheme, type ThemeMode } from "@/lib/theme";
 import { selectBestVideoHighlightFrames } from "@/lib/video-frame-policy";
 import { contentTagOptions, visualTagOptions } from "@/lib/types";
 import type {
@@ -122,11 +123,10 @@ type PoolSortMode =
   | "likes_desc"
   | "collects_desc";
 type ProductionQueueFilter = "all" | "ready" | "no_draft" | "has_draft" | "approved" | "published";
-type ThemeMode = "professional" | "editorial" | "creator";
 type ActiveModule = "content" | "production" | "materials";
 type WorkspaceMode = "compact" | "simple" | "advanced";
 type SimpleWorkspaceVariant = "standard" | "compact";
-type SimpleSourceMode = "keyword" | "links" | "feishu";
+type SimpleSourceMode = "keyword" | "links" | "feishu" | "viral" | "original";
 type TaskProgressStatus = "running" | "success" | "error";
 
 type AccountSessionResponse = {
@@ -218,6 +218,13 @@ type FeishuPublishResponse = {
   };
 };
 
+type FeishuVehicleOptionsResponse = {
+  options?: string[];
+  fieldName?: string;
+  message?: string;
+  error?: string;
+};
+
 type SourceEditForm = {
   title: string;
   contentText: string;
@@ -249,6 +256,22 @@ type MaterialAssetDraft = {
   tags: string;
 };
 
+type ViralMaterialCandidate = {
+  id: string;
+  path: string;
+  name: string;
+  sourceLabel: string;
+  folderId?: string;
+};
+
+type ViralMaterialFolderCandidate = {
+  id: string;
+  name: string;
+  imageCount: number;
+  selectedCount: number;
+  paths: string[];
+};
+
 type EditableVisualAsset = {
   id: string;
   index: number;
@@ -275,11 +298,14 @@ const platforms: Array<{ value: Platform; label: string; accent: string }> = [
   { value: "douyin", label: "抖音", accent: "bg-white" },
   { value: "weibo", label: "微博", accent: "bg-amber-300" },
   { value: "feishu", label: "飞书", accent: "bg-emerald-300" },
+  { value: "original", label: "原创", accent: "bg-violet-300" },
 ];
 
 const crawlPlatforms = platforms.filter(
-  (item): item is { value: CrawlPlatform; label: string; accent: string } => item.value !== "feishu",
+  (item): item is { value: CrawlPlatform; label: string; accent: string } =>
+    item.value === "wechat_channels" || item.value === "xiaohongshu" || item.value === "douyin" || item.value === "weibo",
 );
+const maxSimpleImageTasksPerPost = 9;
 
 const linkImportPlatforms: Array<{ value: SourceLinkPlatform; label: string; accent: string }> = [
   ...crawlPlatforms,
@@ -439,32 +465,6 @@ const imageStrategyPromptOptions: Array<{
   },
 ];
 
-const themeStorageKey = "fluxpost-theme";
-const themeChangeEvent = "fluxpost-theme-change";
-
-function getStoredTheme(): ThemeMode {
-  if (typeof window === "undefined") return "professional";
-  const savedTheme = window.localStorage.getItem(themeStorageKey);
-  if (savedTheme === "light") return "professional";
-  if (savedTheme === "dark") return "creator";
-  return savedTheme === "professional" || savedTheme === "editorial" || savedTheme === "creator" ? savedTheme : "professional";
-}
-
-function subscribeTheme(listener: () => void) {
-  window.addEventListener(themeChangeEvent, listener);
-  window.addEventListener("storage", listener);
-  return () => {
-    window.removeEventListener(themeChangeEvent, listener);
-    window.removeEventListener("storage", listener);
-  };
-}
-
-function setStoredTheme(nextTheme: ThemeMode) {
-  window.localStorage.setItem(themeStorageKey, nextTheme);
-  document.documentElement.dataset.theme = nextTheme;
-  window.dispatchEvent(new Event(themeChangeEvent));
-}
-
 export default function Home() {
   const [config, setConfig] = useState<ConfigStatus | null>(null);
   const [accountLoading, setAccountLoading] = useState(true);
@@ -486,7 +486,18 @@ export default function Home() {
   const [simplePlatforms, setSimplePlatforms] = useState<CrawlPlatform[]>(crawlPlatforms.map((item) => item.value));
   const [simpleLinkPlatform, setSimpleLinkPlatform] = useState<LinkImportPlatform>("auto");
   const [simpleLinkText, setSimpleLinkText] = useState("");
+  const [simpleVideoFrameOriginalReference, setSimpleVideoFrameOriginalReference] = useState(true);
+  const [simpleUseComfyUiKlein, setSimpleUseComfyUiKlein] = useState(false);
+  const [simpleDirectOriginalReference, setSimpleDirectOriginalReference] = useState(false);
+  const [simpleEnableVideoTranscription, setSimpleEnableVideoTranscription] = useState(false);
+  const [simpleWriteFeishu, setSimpleWriteFeishu] = useState(false);
+  const [simpleViralImitateImages, setSimpleViralImitateImages] = useState(false);
+  const [simpleViralMaterialPaths, setSimpleViralMaterialPaths] = useState<string[]>([]);
+  const [simpleViralMaterialFolderId, setSimpleViralMaterialFolderId] = useState("");
   const [simpleFeishuTaskText, setSimpleFeishuTaskText] = useState("");
+  const [simpleViralUrl, setSimpleViralUrl] = useState("");
+  const [simpleOriginalPrompt, setSimpleOriginalPrompt] = useState("");
+  const [simpleOriginalUseWebSearch, setSimpleOriginalUseWebSearch] = useState(false);
   const [simpleRuns, setSimpleRuns] = useState<SimpleRun[]>([]);
   const [activeSimpleRunId, setActiveSimpleRunId] = useState("");
   const [activeModule, setActiveModule] = useState<ActiveModule>("content");
@@ -494,6 +505,8 @@ export default function Home() {
   const [platform, setPlatform] = useState<CrawlPlatform>("xiaohongshu");
   const [linkImportPlatform, setLinkImportPlatform] = useState<LinkImportPlatform>("auto");
   const [linkImportText, setLinkImportText] = useState("");
+  const [linkImportVideoFrameOriginalReference, setLinkImportVideoFrameOriginalReference] = useState(true);
+  const [linkImportEnableVideoTranscription, setLinkImportEnableVideoTranscription] = useState(false);
   const [linkImportResults, setLinkImportResults] = useState<LinkImportResult[]>([]);
   const [linkImportSummary, setLinkImportSummary] = useState<LinkImportSummary | null>(null);
   const [query, setQuery] = useState("");
@@ -503,6 +516,7 @@ export default function Home() {
   const [includeType, setIncludeType] = useState("all");
   const [timeScope, setTimeScope] = useState("");
   const [contentType, setContentType] = useState("0");
+  const [crawlEnableVideoTranscription, setCrawlEnableVideoTranscription] = useState(false);
   const [cookie, setCookie] = useState("");
   const [materialPath, setMaterialPath] = useState("");
   const [materials, setMaterials] = useState<MaterialAsset[]>([]);
@@ -530,6 +544,9 @@ export default function Home() {
   const [job, setJob] = useState<CrawlJob | null>(null);
   const [post, setPost] = useState<GeneratedPost | null>(null);
   const [generatedPosts, setGeneratedPosts] = useState<GeneratedPost[]>([]);
+  const [feishuVehicleOptions, setFeishuVehicleOptions] = useState<string[]>([]);
+  const [feishuVehicleFieldName, setFeishuVehicleFieldName] = useState("车型");
+  const [feishuVehicleOptionsMessage, setFeishuVehicleOptionsMessage] = useState("");
   const [selectedGeneratedPostId, setSelectedGeneratedPostId] = useState("");
   const [selectedGeneratedPostIds, setSelectedGeneratedPostIds] = useState<string[]>([]);
   const [sourceEditState, setSourceEditState] = useState<{ sourceId: string; form: SourceEditForm }>({
@@ -550,6 +567,8 @@ export default function Home() {
   const [imageTaskSourceId, setImageTaskSourceId] = useState("");
   const [imageSize, setImageSize] = useState<string>(defaultImageGenerationSize);
   const [imageQuality, setImageQuality] = useState<ImageGenerationQuality>("medium");
+  const [imageUseComfyUiKleinOverride, setImageUseComfyUiKleinOverride] = useState<boolean | null>(null);
+  const [imageDirectOriginalReference, setImageDirectOriginalReference] = useState(false);
   const [reviewPrompt, setReviewPrompt] = useState("");
   const [message, setMessage] = useState("");
   const [preview, setPreview] = useState<PreviewState>(null);
@@ -630,7 +649,9 @@ export default function Home() {
     () => simpleRuns.find((run) => run.id === activeSimpleRunId) || simpleRuns[0] || null,
     [activeSimpleRunId, simpleRuns],
   );
-  const useComfyUiKleinTasks = Boolean(config?.comfyUiKleinConfigured);
+  const comfyUiKleinAvailable = Boolean(config?.comfyUiKleinConfigured);
+  const imageUseComfyUiKlein = imageUseComfyUiKleinOverride ?? comfyUiKleinAvailable;
+  const useComfyUiKleinTasks = comfyUiKleinAvailable && imageUseComfyUiKlein;
   const simpleLinkCount = useMemo(() => splitLines(simpleLinkText).length, [simpleLinkText]);
   const simpleFeishuTaskCount = useMemo(() => splitFeishuTaskNumbers(simpleFeishuTaskText).length, [simpleFeishuTaskText]);
 
@@ -656,9 +677,12 @@ export default function Home() {
   const defaultImageTasks = useMemo(
     () =>
       selectedSource
-        ? buildDefaultImageTasks(selectedSource, workspaceSettings.imageStrategyPrompts, { useComfyUiKlein: useComfyUiKleinTasks })
+        ? buildDefaultImageTasks(selectedSource, workspaceSettings.imageStrategyPrompts, {
+            useComfyUiKlein: useComfyUiKleinTasks,
+            directOriginalReference: imageDirectOriginalReference,
+          })
         : [],
-    [selectedSource, useComfyUiKleinTasks, workspaceSettings.imageStrategyPrompts],
+    [imageDirectOriginalReference, selectedSource, useComfyUiKleinTasks, workspaceSettings.imageStrategyPrompts],
   );
   const activeImageTasks = imageTaskSourceId === selectedSource?.id ? imageTasks : defaultImageTasks;
   const selectedSourceCanGenerate = activeStrategyDraft?.decision !== "observe_only";
@@ -692,6 +716,24 @@ export default function Home() {
     () => Array.from(new Set([...materials.map((asset) => asset.path), ...materialLibraryAssetPaths].filter(Boolean))),
     [materialLibraryAssetPaths, materials],
   );
+  const viralMaterialCandidates = useMemo(() => buildViralMaterialCandidates(materials, materialLibrary.assets, materialLibrary.folders), [materials, materialLibrary.assets, materialLibrary.folders]);
+  const viralMaterialFolders = useMemo(
+    () => buildViralMaterialFolders(materialLibrary.folders, materialLibrary.assets, simpleViralMaterialPaths),
+    [materialLibrary.assets, materialLibrary.folders, simpleViralMaterialPaths],
+  );
+  const activeSimpleViralMaterialFolderId = useMemo(() => {
+    if (viralMaterialFolders.some((folder) => folder.id === simpleViralMaterialFolderId)) return simpleViralMaterialFolderId;
+    return findMatchingViralMaterialFolderId(viralMaterialFolders, simpleKeyword) || viralMaterialFolders[0]?.id || "";
+  }, [simpleKeyword, simpleViralMaterialFolderId, viralMaterialFolders]);
+  const displayedViralMaterialCandidates = useMemo(
+    () => (activeSimpleViralMaterialFolderId ? viralMaterialCandidates.filter((asset) => asset.folderId === activeSimpleViralMaterialFolderId) : viralMaterialCandidates),
+    [activeSimpleViralMaterialFolderId, viralMaterialCandidates],
+  );
+  const viralMaterialCandidatePathSet = useMemo(() => new Set(displayedViralMaterialCandidates.map((asset) => asset.path)), [displayedViralMaterialCandidates]);
+  const selectedSimpleViralMaterialPaths = useMemo(
+    () => simpleViralMaterialPaths.filter((path) => viralMaterialCandidatePathSet.has(path)),
+    [simpleViralMaterialPaths, viralMaterialCandidatePathSet],
+  );
 
   useEffect(() => {
     void loadAccountSession();
@@ -717,6 +759,7 @@ export default function Home() {
     loadBatchProductionJobs();
     loadGeneratedPosts();
     loadMaterialLibrary();
+    loadFeishuVehicleOptions();
     loadExecutionLogs();
     const timer = window.setInterval(loadExecutionLogs, 2500);
     return () => window.clearInterval(timer);
@@ -913,6 +956,20 @@ export default function Home() {
       applyPlatformCrawlControls(platform, data.settings);
     } catch {
       // 默认策略读取失败时保留客户端默认值，不阻断主工作台渲染。
+    }
+  }
+
+  async function loadFeishuVehicleOptions() {
+    try {
+      const res = await fetch("/api/publish/feishu/vehicle-options");
+      const data = (await res.json()) as FeishuVehicleOptionsResponse;
+      if (!res.ok) throw new Error(data.error || "Feishu vehicle options failed");
+      setFeishuVehicleOptions(data.options || []);
+      setFeishuVehicleFieldName(data.fieldName || "车型");
+      setFeishuVehicleOptionsMessage(data.message || "");
+    } catch (error) {
+      setFeishuVehicleOptions([]);
+      setFeishuVehicleOptionsMessage(error instanceof Error ? error.message : "Feishu vehicle options failed");
     }
   }
 
@@ -1180,6 +1237,15 @@ export default function Home() {
       const taskCount = splitFeishuTaskNumbers(simpleFeishuTaskText).length;
       if (taskCount) setSimpleTargetCount(Math.min(taskCount, 500));
     }
+    if (value === "viral" || value === "original") {
+      setSimpleTargetCount(1);
+    }
+  }
+
+  function updateSimpleKeyword(value: string) {
+    setSimpleKeyword(value);
+    const matchingFolderId = findMatchingViralMaterialFolderId(viralMaterialFolders, value);
+    setSimpleViralMaterialFolderId(matchingFolderId);
   }
 
   function updateSimpleLinkText(value: string) {
@@ -1198,13 +1264,59 @@ export default function Home() {
     }
   }
 
+  function onToggleViralMaterialPath(path: string) {
+    setSimpleViralMaterialPaths((current) => {
+      if (current.includes(path)) return current.filter((item) => item !== path);
+      if (current.length >= maxSimpleImageTasksPerPost) return current;
+      return [...current, path];
+    });
+  }
+
+  function onToggleViralMaterialFolder(folderId: string) {
+    const folder = viralMaterialFolders.find((item) => item.id === folderId);
+    if (!folder) return;
+    setSimpleViralMaterialFolderId(folderId);
+    setSimpleViralMaterialPaths((current) => {
+      const folderPathSet = new Set(folder.paths);
+      const selectedFolderCount = folder.paths.filter((path) => current.includes(path)).length;
+      if (selectedFolderCount > 0 && current.length >= maxSimpleImageTasksPerPost) {
+        return current.filter((path) => !folderPathSet.has(path));
+      }
+      if (folder.paths.length && folder.paths.every((path) => current.includes(path))) {
+        return current.filter((path) => !folderPathSet.has(path));
+      }
+      const next = [...current];
+      for (const path of folder.paths) {
+        if (next.includes(path)) continue;
+        if (next.length >= maxSimpleImageTasksPerPost) break;
+        next.push(path);
+      }
+      return next;
+    });
+  }
+
+  function previewViralMaterialPath(path: string) {
+    const imageUrls = displayedViralMaterialCandidates.map((asset) => asset.path);
+    const index = Math.max(0, imageUrls.indexOf(path));
+    const candidate = displayedViralMaterialCandidates.find((asset) => asset.path === path);
+    openImageGallery(imageUrls, index, candidate?.name || "车型图预览", candidate?.sourceLabel || path);
+  }
+
   async function startSimpleRun() {
     const keyword = simpleKeyword.trim();
     const sourceMode = simpleSourceMode;
     const links = splitLines(simpleLinkText);
     const feishuTaskNumbers = splitFeishuTaskNumbers(simpleFeishuTaskText);
+    const viralUrl = simpleViralUrl.trim();
+    const originalPrompt = simpleOriginalPrompt.trim();
     if (sourceMode !== "feishu" && !keyword) {
-      setMessage(sourceMode === "links" ? "请先输入归属关键词 / 内容池项目" : "请先输入关键词");
+      setMessage(
+        sourceMode === "links"
+          ? "请先输入归属关键词 / 内容池项目"
+          : sourceMode === "original"
+            ? "请先输入写入飞书车型的关键词"
+            : "请先输入关键词",
+      );
       return;
     }
     if (sourceMode === "keyword" && !simplePlatforms.length) {
@@ -1219,6 +1331,22 @@ export default function Home() {
       setMessage("请先输入飞书任务编号");
       return;
     }
+    if (sourceMode === "viral" && !viralUrl) {
+      setMessage("请先输入爆款图文链接");
+      return;
+    }
+    if (sourceMode === "viral" && simpleViralImitateImages && !selectedSimpleViralMaterialPaths.length) {
+      setMessage("请选择至少 1 张车型图用于图片模仿");
+      return;
+    }
+    if (sourceMode === "original" && !originalPrompt) {
+      setMessage("请先输入原创选题、提问或要求");
+      return;
+    }
+    if (sourceMode === "original" && simpleOriginalUseWebSearch && config?.openaiTextEndpoint !== "responses") {
+      setMessage("当前文本接口不支持原创联网搜索；请关闭联网搜索，或配置 OPENAI_TEXT_ENDPOINT=responses 后重试。");
+      return;
+    }
     const textInstruction = workspaceSettings.textInstruction.trim();
     if (!textInstruction) {
       setMessage("请填写文字内容提示词，或恢复默认提示词");
@@ -1231,7 +1359,7 @@ export default function Home() {
     }
     const normalizedImageSize = normalizeImageSizeInput(workspaceSettings.imageSize);
     if (!normalizedImageSize) {
-      setMessage("请选择一个可用的 GPT 图片尺寸");
+      setMessage("请输入 auto 或 64-8192 范围内的 GPT 图片尺寸，例如 1200x1600");
       return;
     }
 
@@ -1261,13 +1389,26 @@ export default function Home() {
           targetCount:
             sourceMode === "feishu"
               ? Math.min(simpleTargetCount, feishuTaskNumbers.length)
+              : sourceMode === "viral" || sourceMode === "original"
+                ? Math.min(simpleTargetCount, 1)
               : sourceMode === "links"
                 ? Math.min(simpleTargetCount, links.length)
                 : simpleTargetCount,
           platforms: sourceMode === "keyword" ? simplePlatforms : [],
           links: sourceMode === "links" ? links : undefined,
           linkPlatform: sourceMode === "links" ? simpleLinkPlatform : undefined,
+          cookie: sourceMode === "links" && simpleLinkPlatform === "dongchedi" ? cookie : undefined,
+          videoFrameOriginalReference: sourceMode === "links" ? simpleVideoFrameOriginalReference : undefined,
+          useComfyUiKlein: simpleUseComfyUiKlein,
+          directOriginalReference: sourceMode === "viral" || sourceMode === "original" ? undefined : simpleDirectOriginalReference,
+          enableVideoTranscription: simpleEnableVideoTranscription,
+          writeFeishu: simpleWriteFeishu,
           feishuTaskNumbers: sourceMode === "feishu" ? feishuTaskNumbers : undefined,
+          viralUrl: sourceMode === "viral" ? viralUrl : undefined,
+          viralImitateImages: sourceMode === "viral" ? simpleViralImitateImages : undefined,
+          viralMaterialPaths: sourceMode === "viral" && simpleViralImitateImages ? selectedSimpleViralMaterialPaths : undefined,
+          originalPrompt: sourceMode === "original" ? originalPrompt : undefined,
+          originalUseWebSearch: sourceMode === "original" ? simpleOriginalUseWebSearch : undefined,
           materialPaths: productionMaterialPaths,
           settings: settingsForRun,
         }),
@@ -1351,6 +1492,7 @@ export default function Home() {
           timeScope: crawledPlatform === "weibo" ? timeScope : undefined,
           contentType: crawledPlatform === "douyin" ? contentType : undefined,
           cookie: crawledPlatform === "douyin" ? cookie : undefined,
+          enableVideoTranscription: crawlEnableVideoTranscription,
         }),
       });
       const data = (await res.json()) as CrawlJob & { error?: string; project?: ContentProject };
@@ -1434,7 +1576,9 @@ export default function Home() {
           query: importQuery,
           links,
           platform: linkImportPlatform === "auto" ? undefined : linkImportPlatform,
-          cookie: linkImportPlatform === "douyin" ? cookie : undefined,
+          cookie: linkImportPlatform === "douyin" || linkImportPlatform === "dongchedi" ? cookie : undefined,
+          videoFrameOriginalReference: linkImportVideoFrameOriginalReference,
+          enableVideoTranscription: linkImportEnableVideoTranscription,
         }),
       });
       const data = (await res.json()) as LinkImportResponse;
@@ -1675,7 +1819,7 @@ export default function Home() {
     }
   }
 
-  async function cacheSelectedContentItemMedia(sourceItemIds = selectedContentItemIds) {
+  async function cacheSelectedContentItemMedia(sourceItemIds = selectedContentItemIds, options: { forceVideoRefresh?: boolean } = {}) {
     if (!sourceItemIds.length) {
       setMessage("请先勾选要补全本地素材的内容");
       return;
@@ -1686,7 +1830,7 @@ export default function Home() {
       const res = await fetch("/api/content/items/batch", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ action: "cache_media", ids: sourceItemIds }),
+        body: JSON.stringify({ action: "cache_media", ids: sourceItemIds, forceVideoRefresh: options.forceVideoRefresh === true }),
       });
       const data = (await res.json()) as {
         updatedCount?: number;
@@ -1990,7 +2134,7 @@ export default function Home() {
     if (!post) return;
     const normalizedImageSize = normalizeImageSizeInput(imageSize);
     if (!normalizedImageSize) {
-      setMessage("请选择一个可用的 GPT 图片尺寸");
+      setMessage("请输入 auto 或 64-8192 范围内的 GPT 图片尺寸，例如 1200x1600");
       return;
     }
     setBusy("regenerate");
@@ -2035,7 +2179,7 @@ export default function Home() {
     }
     const normalizedImageSize = normalizeImageSizeInput(imageSize);
     if (!normalizedImageSize) {
-      setMessage("请选择一个可用的 GPT 图片尺寸");
+      setMessage("请输入 auto 或 64-8192 范围内的 GPT 图片尺寸，例如 1200x1600");
       return;
     }
     setBusy("generate");
@@ -2214,7 +2358,7 @@ export default function Home() {
     if (!post) return;
     const normalizedImageSize = normalizeImageSizeInput(imageSize);
     if (!normalizedImageSize) {
-      setMessage("请选择一个可用的 GPT 图片尺寸");
+      setMessage("请输入 auto 或 64-8192 范围内的 GPT 图片尺寸，例如 1200x1600");
       return;
     }
     const generationImageTasks = selectedSource?.id === post.sourceItemId ? activeImageTasks : post.imageTasks || activeImageTasks;
@@ -2264,7 +2408,25 @@ export default function Home() {
       notification: "写入成功后会按配置发送飞书通知。",
     });
     try {
-      const posts = post.status === "approved" ? [post] : [{ ...post, status: "approved" as const }];
+      const saveRes = await fetch("/api/review", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          post,
+          manualPatch: {
+            title: post.title,
+            body: post.body,
+            imagePrompt: post.imagePrompt,
+            imageUrls: post.imageUrls,
+            imageTasks: post.imageTasks,
+            feishuVehicle: post.feishuVehicle,
+            status: "approved",
+          },
+        }),
+      });
+      const saveData = (await saveRes.json()) as { post?: GeneratedPost; error?: string };
+      if (!saveRes.ok || !saveData.post) throw new Error(saveData.error || "淇濆瓨澶辫触");
+      const posts = [saveData.post];
       const res = await fetch("/api/publish/feishu", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
@@ -2400,7 +2562,20 @@ export default function Home() {
   function resetImageTasks() {
     if (!selectedSource) return;
     setImageTaskSourceId(selectedSource.id);
-    setImageTasks(buildDefaultImageTasks(selectedSource, workspaceSettings.imageStrategyPrompts, { useComfyUiKlein: useComfyUiKleinTasks }));
+    setImageTasks(buildDefaultImageTasks(selectedSource, workspaceSettings.imageStrategyPrompts, {
+      useComfyUiKlein: useComfyUiKleinTasks,
+      directOriginalReference: imageDirectOriginalReference,
+    }));
+  }
+
+  function changeImageUseComfyUiKlein(value: boolean) {
+    setImageUseComfyUiKleinOverride(value);
+    setImageTaskSourceId("");
+  }
+
+  function changeImageDirectOriginalReference(value: boolean) {
+    setImageDirectOriginalReference(value);
+    setImageTaskSourceId("");
   }
 
   function openSourcePreview(item: NormalizedSourceItem) {
@@ -2594,9 +2769,24 @@ export default function Home() {
             selectedPlatforms={simplePlatforms}
             linkText={simpleLinkText}
             linkPlatform={simpleLinkPlatform}
+            cookie={cookie}
+            videoFrameOriginalReference={simpleVideoFrameOriginalReference}
+            useComfyUiKlein={simpleUseComfyUiKlein}
+            directOriginalReference={simpleDirectOriginalReference}
+            enableVideoTranscription={simpleEnableVideoTranscription}
+            writeFeishu={simpleWriteFeishu}
+            viralImitateImages={simpleViralImitateImages}
+            viralMaterialFolders={viralMaterialFolders}
+            activeViralMaterialFolderId={activeSimpleViralMaterialFolderId}
+            viralMaterialCandidates={displayedViralMaterialCandidates}
+            selectedViralMaterialPaths={selectedSimpleViralMaterialPaths}
             linkCount={simpleLinkCount}
             feishuTaskText={simpleFeishuTaskText}
             feishuTaskCount={simpleFeishuTaskCount}
+            viralUrl={simpleViralUrl}
+            originalPrompt={simpleOriginalPrompt}
+            originalUseWebSearch={simpleOriginalUseWebSearch}
+            config={config}
             materialPathCount={productionMaterialPaths.length}
             settings={workspaceSettings}
             runs={simpleRuns}
@@ -2605,12 +2795,26 @@ export default function Home() {
             terminatingRunId={terminatingSimpleRunId}
             settingsBusy={busy === "settings"}
             onSourceModeChange={changeSimpleSourceMode}
-            onKeywordChange={setSimpleKeyword}
+            onKeywordChange={updateSimpleKeyword}
             onTargetCountChange={setSimpleTargetCount}
             onTogglePlatform={toggleSimplePlatform}
             onLinkTextChange={updateSimpleLinkText}
             onLinkPlatformChange={setSimpleLinkPlatform}
+            onCookieChange={setCookie}
+            onVideoFrameOriginalReferenceChange={setSimpleVideoFrameOriginalReference}
+            onUseComfyUiKleinChange={setSimpleUseComfyUiKlein}
+            onDirectOriginalReferenceChange={setSimpleDirectOriginalReference}
+            onEnableVideoTranscriptionChange={setSimpleEnableVideoTranscription}
+            onWriteFeishuChange={setSimpleWriteFeishu}
+            onViralImitateImagesChange={setSimpleViralImitateImages}
+            onToggleViralMaterialFolder={onToggleViralMaterialFolder}
+            onToggleViralMaterialPath={onToggleViralMaterialPath}
+            onPreviewViralMaterial={previewViralMaterialPath}
+            onClearViralMaterialPaths={() => setSimpleViralMaterialPaths([])}
             onFeishuTaskTextChange={updateSimpleFeishuTaskText}
+            onViralUrlChange={setSimpleViralUrl}
+            onOriginalPromptChange={setSimpleOriginalPrompt}
+            onOriginalUseWebSearchChange={setSimpleOriginalUseWebSearch}
             onSettingsChange={updateWorkspaceSettingsDraft}
             onSaveSettings={() => saveWorkspaceSettingsPatch(workspaceSettings)}
             onStart={startSimpleRun}
@@ -2685,10 +2889,15 @@ export default function Home() {
             instruction={instruction}
             imageSize={imageSize}
             imageQuality={imageQuality}
+            imageUseComfyUiKlein={imageUseComfyUiKlein}
+            imageDirectOriginalReference={imageDirectOriginalReference}
             workspaceSettings={workspaceSettings}
             generateProgress={generateProgress}
             batchProgress={batchProgress}
             publishStatus={publishStatus}
+            feishuVehicleOptions={feishuVehicleOptions}
+            feishuVehicleFieldName={feishuVehicleFieldName}
+            feishuVehicleOptionsMessage={feishuVehicleOptionsMessage}
             reviewPrompt={reviewPrompt}
             busy={busy}
             onSelectSource={setSelectedSourceId}
@@ -2711,6 +2920,8 @@ export default function Home() {
             onInstructionChange={setInstruction}
             onImageSizeChange={setImageSize}
             onImageQualityChange={setImageQuality}
+            onImageUseComfyUiKleinChange={changeImageUseComfyUiKlein}
+            onImageDirectOriginalReferenceChange={changeImageDirectOriginalReference}
             onWorkspaceSettingsChange={updateWorkspaceSettingsDraft}
             onSaveWorkspaceSettings={() => saveWorkspaceSettingsPatch(workspaceSettings)}
             onGenerateDraft={generateDraft}
@@ -2909,6 +3120,17 @@ export default function Home() {
                 </div>
               ) : null}
 
+              <label className="flex items-start gap-2 rounded-[8px] border border-white/10 bg-white/[0.035] p-3 text-xs leading-5 text-white/62">
+                <input
+                  className="mt-1 h-4 w-4 accent-[var(--mint)]"
+                  type="checkbox"
+                  checked={crawlEnableVideoTranscription}
+                  onChange={(event) => setCrawlEnableVideoTranscription(event.target.checked)}
+                  disabled={Boolean(busy)}
+                />
+                <span className="min-w-0">启用视频音频转文字</span>
+              </label>
+
               <a className="inline-flex items-center gap-2 text-xs text-[var(--cyan)]" href={platformDocs[platform]} target="_blank" rel="noreferrer">
                 <FileText className="h-3.5 w-3.5" />
                 TikHub 文档
@@ -2962,7 +3184,27 @@ export default function Home() {
                     placeholder="https://... 或小鹏社区帖子 ID（如 3776077）"
                   />
                 </div>
-                {linkImportPlatform === "douyin" ? (
+                <label className="flex items-start gap-2 rounded-[8px] border border-white/10 bg-white/[0.035] p-3 text-xs leading-5 text-white/62">
+                  <input
+                    className="mt-1 h-4 w-4 accent-[var(--mint)]"
+                    type="checkbox"
+                    checked={linkImportVideoFrameOriginalReference}
+                    onChange={(event) => setLinkImportVideoFrameOriginalReference(event.target.checked)}
+                    disabled={Boolean(busy)}
+                  />
+                  <span className="min-w-0">视频高光帧原图引用</span>
+                </label>
+                <label className="flex items-start gap-2 rounded-[8px] border border-white/10 bg-white/[0.035] p-3 text-xs leading-5 text-white/62">
+                  <input
+                    className="mt-1 h-4 w-4 accent-[var(--mint)]"
+                    type="checkbox"
+                    checked={linkImportEnableVideoTranscription}
+                    onChange={(event) => setLinkImportEnableVideoTranscription(event.target.checked)}
+                    disabled={Boolean(busy)}
+                  />
+                  <span className="min-w-0">启用视频音频转文字</span>
+                </label>
+                {(linkImportPlatform === "douyin" || linkImportPlatform === "dongchedi") ? (
                   <div>
                     <FieldLabel label="Cookie" />
                     <textarea className="field min-h-16 resize-none" value={cookie} onChange={(event) => setCookie(event.target.value)} />
@@ -3238,6 +3480,7 @@ export default function Home() {
                         item={selectedSource}
                         busy={busy === "contentBatch"}
                         onCache={() => cacheSelectedContentItemMedia([selectedSource.id])}
+                        onForceVideoRefresh={() => cacheSelectedContentItemMedia([selectedSource.id], { forceVideoRefresh: true })}
                       />
                       <button
                         className="group w-full rounded-[8px] border border-transparent p-3 text-left transition hover:border-white/10 hover:bg-white/[0.035]"
@@ -4074,9 +4317,24 @@ function SimpleWorkspace({
   selectedPlatforms,
   linkText,
   linkPlatform,
+  cookie,
+  videoFrameOriginalReference,
+  useComfyUiKlein,
+  directOriginalReference,
+  enableVideoTranscription,
+  writeFeishu,
+  viralImitateImages,
+  viralMaterialFolders,
+  activeViralMaterialFolderId,
+  viralMaterialCandidates,
+  selectedViralMaterialPaths,
   linkCount,
   feishuTaskText,
   feishuTaskCount,
+  viralUrl,
+  originalPrompt,
+  originalUseWebSearch,
+  config,
   materialPathCount,
   settings,
   runs,
@@ -4090,7 +4348,21 @@ function SimpleWorkspace({
   onTogglePlatform,
   onLinkTextChange,
   onLinkPlatformChange,
+  onCookieChange,
+  onVideoFrameOriginalReferenceChange,
+  onUseComfyUiKleinChange,
+  onDirectOriginalReferenceChange,
+  onEnableVideoTranscriptionChange,
+  onWriteFeishuChange,
+  onViralImitateImagesChange,
+  onToggleViralMaterialFolder,
+  onToggleViralMaterialPath,
+  onPreviewViralMaterial,
+  onClearViralMaterialPaths,
   onFeishuTaskTextChange,
+  onViralUrlChange,
+  onOriginalPromptChange,
+  onOriginalUseWebSearchChange,
   onSettingsChange,
   onSaveSettings,
   onStart,
@@ -4104,9 +4376,24 @@ function SimpleWorkspace({
   selectedPlatforms: CrawlPlatform[];
   linkText: string;
   linkPlatform: LinkImportPlatform;
+  cookie: string;
+  videoFrameOriginalReference: boolean;
+  useComfyUiKlein: boolean;
+  directOriginalReference: boolean;
+  enableVideoTranscription: boolean;
+  writeFeishu: boolean;
+  viralImitateImages: boolean;
+  viralMaterialFolders: ViralMaterialFolderCandidate[];
+  activeViralMaterialFolderId: string;
+  viralMaterialCandidates: ViralMaterialCandidate[];
+  selectedViralMaterialPaths: string[];
   linkCount: number;
   feishuTaskText: string;
   feishuTaskCount: number;
+  viralUrl: string;
+  originalPrompt: string;
+  originalUseWebSearch: boolean;
+  config: ConfigStatus | null;
   materialPathCount: number;
   settings: WorkspacePromptSettings;
   runs: SimpleRun[];
@@ -4120,7 +4407,21 @@ function SimpleWorkspace({
   onTogglePlatform: (platform: CrawlPlatform) => void;
   onLinkTextChange: (value: string) => void;
   onLinkPlatformChange: (value: LinkImportPlatform) => void;
+  onCookieChange: (value: string) => void;
+  onVideoFrameOriginalReferenceChange: (value: boolean) => void;
+  onUseComfyUiKleinChange: (value: boolean) => void;
+  onDirectOriginalReferenceChange: (value: boolean) => void;
+  onEnableVideoTranscriptionChange: (value: boolean) => void;
+  onWriteFeishuChange: (value: boolean) => void;
+  onViralImitateImagesChange: (value: boolean) => void;
+  onToggleViralMaterialFolder: (folderId: string) => void;
+  onToggleViralMaterialPath: (path: string) => void;
+  onPreviewViralMaterial: (path: string) => void;
+  onClearViralMaterialPaths: () => void;
   onFeishuTaskTextChange: (value: string) => void;
+  onViralUrlChange: (value: string) => void;
+  onOriginalPromptChange: (value: string) => void;
+  onOriginalUseWebSearchChange: (value: boolean) => void;
   onSettingsChange: (patch: Partial<WorkspacePromptSettings>) => void;
   onSaveSettings: () => void;
   onStart: () => void;
@@ -4131,18 +4432,25 @@ function SimpleWorkspace({
   const runForSummary = activeRun || runs[0] || null;
   const producedCount = runForSummary?.posts.length || 0;
   const publishedCount = runForSummary?.posts.filter((post) => post.status === "published").length || 0;
+  const originalWebSearchAvailable = config?.openaiTextEndpoint === "responses";
+  const selectedViralMaterialCount = selectedViralMaterialPaths.length;
+  const viralImageSelectionMissing = sourceMode === "viral" && viralImitateImages && selectedViralMaterialCount === 0;
   const selectedPlatformLabels = selectedPlatforms
     .map((value) => platforms.find((platform) => platform.value === value)?.label || value)
     .join("、");
   const sourceDetail =
     sourceMode === "feishu"
       ? `飞书 ${feishuTaskCount} 条`
+      : sourceMode === "original"
+        ? `原创 1 条 · ${keyword || "未填写车型"}`
       : sourceMode === "links"
         ? `链接 ${linkCount} 条`
         : `平台 ${selectedPlatformLabels || "未选择"}`;
   const canStart =
-    (sourceMode === "feishu" ? feishuTaskCount > 0 : Boolean(keyword.trim())) &&
-    (sourceMode === "feishu" ? true : sourceMode === "links" ? linkCount > 0 : selectedPlatforms.length > 0) &&
+    (sourceMode === "feishu" ? feishuTaskCount > 0 : sourceMode === "original" ? Boolean(originalPrompt.trim()) && Boolean(keyword.trim()) : Boolean(keyword.trim())) &&
+    (sourceMode === "feishu" ? true : sourceMode === "original" ? true : sourceMode === "viral" ? Boolean(viralUrl.trim()) : sourceMode === "links" ? linkCount > 0 : selectedPlatforms.length > 0) &&
+    !viralImageSelectionMissing &&
+    !(sourceMode === "original" && originalUseWebSearch && !originalWebSearchAvailable) &&
     Boolean(settings.textInstruction.trim()) &&
     !getMissingImageStrategyPrompt(settings);
 
@@ -4186,18 +4494,38 @@ function SimpleWorkspace({
               <FileText className="h-3.5 w-3.5" />
               飞书编号
             </button>
+            <button
+              className={`soft-button flex h-10 items-center justify-center gap-2 text-xs font-semibold ${sourceMode === "viral" ? "platform-card-active" : ""}`}
+              type="button"
+              aria-pressed={sourceMode === "viral"}
+              onClick={() => onSourceModeChange("viral")}
+              disabled={busy || settingsBusy}
+            >
+              <Sparkles className="h-3.5 w-3.5" />
+              爆款仿写
+            </button>
+            <button
+              className={`soft-button flex h-10 items-center justify-center gap-2 text-xs font-semibold ${sourceMode === "original" ? "platform-card-active" : ""}`}
+              type="button"
+              aria-pressed={sourceMode === "original"}
+              onClick={() => onSourceModeChange("original")}
+              disabled={busy || settingsBusy}
+            >
+              <Wand2 className="h-3.5 w-3.5" />
+              原创
+            </button>
           </div>
 
           {sourceMode === "feishu" ? null : (
           <div>
-            <FieldLabel label={sourceMode === "links" ? "归属关键词 / 内容池项目" : "关键词"} />
+            <FieldLabel label={sourceMode === "links" ? "归属关键词 / 内容池项目" : sourceMode === "original" ? "写入飞书车型 / 关键词" : "关键词"} />
             <div className="relative mt-2">
               <Search className="pointer-events-none absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-white/35" />
               <input
                 className="field search-field"
                 value={keyword}
                 onChange={(event) => onKeywordChange(event.target.value)}
-                placeholder={sourceMode === "links" ? "例如：小鹏GX 链接导入" : "例如：小鹏GX"}
+                placeholder={sourceMode === "links" ? "例如：小鹏GX 链接导入" : sourceMode === "original" ? "例如：小鹏GX，需要与飞书车型选项一致" : "例如：小鹏GX"}
               />
             </div>
           </div>
@@ -4208,14 +4536,173 @@ function SimpleWorkspace({
             <input
               className="field mt-2"
               min={1}
-              max={sourceMode === "feishu" ? Math.max(1, feishuTaskCount || 1) : sourceMode === "links" ? Math.max(1, linkCount || 1) : 500}
+              max={sourceMode === "feishu" ? Math.max(1, feishuTaskCount || 1) : sourceMode === "viral" || sourceMode === "original" ? 1 : sourceMode === "links" ? Math.max(1, linkCount || 1) : 500}
               type="number"
-              value={targetCount}
+              value={sourceMode === "original" ? 1 : targetCount}
               onChange={(event) => onTargetCountChange(Number(event.target.value))}
+              disabled={sourceMode === "original" || busy || settingsBusy}
             />
           </div>
 
-          {sourceMode === "links" ? (
+          {sourceMode === "original" ? (
+            <div className="simple-link-panel">
+              <div className="mb-2 flex flex-wrap items-center justify-between gap-3">
+                <FieldLabel label="原创 Prompt" />
+                <span className="status-badge text-[10px] text-white/45">1 条</span>
+              </div>
+              <textarea
+                className="field simple-link-textarea"
+                value={originalPrompt}
+                onChange={(event) => onOriginalPromptChange(event.target.value)}
+                placeholder="输入选题、提问或要求，例如：围绕小鹏G6智驾体验，写一篇适合小红书发布的种草图文"
+                disabled={busy || settingsBusy}
+              />
+              <label className="mt-3 flex items-start gap-2 rounded-[8px] border border-white/10 bg-white/[0.035] p-3 text-xs leading-5 text-white/62">
+                <input
+                  className="mt-1 h-4 w-4 accent-[var(--mint)]"
+                  type="checkbox"
+                  checked={originalUseWebSearch}
+                  onChange={(event) => onOriginalUseWebSearchChange(event.target.checked)}
+                  disabled={busy || settingsBusy || !originalWebSearchAvailable}
+                />
+                <span className="min-w-0">启用联网搜索</span>
+              </label>
+              {!originalWebSearchAvailable ? (
+                <p className="mt-2 text-[11px] leading-5 text-white/42">需配置 OPENAI_TEXT_ENDPOINT=responses 后启用原创联网搜索。</p>
+              ) : null}
+            </div>
+          ) : sourceMode === "viral" ? (
+            <div className="simple-link-panel">
+              <div className="mb-2 flex flex-wrap items-center justify-between gap-3">
+                <FieldLabel label="爆款图文链接" />
+                <span className="status-badge text-[10px] text-white/45">1 条</span>
+              </div>
+              <input
+                className="field"
+                value={viralUrl}
+                onChange={(event) => onViralUrlChange(event.target.value)}
+                placeholder="粘贴 1 条小红书、抖音、微博、视频号或汽车社区爆款链接"
+                disabled={busy || settingsBusy}
+              />
+              <label className="mt-3 flex items-start gap-2 rounded-[8px] border border-white/10 bg-white/[0.035] p-3 text-xs leading-5 text-white/62">
+                <input
+                  className="mt-1 h-4 w-4 accent-[var(--mint)]"
+                  type="checkbox"
+                  checked={viralImitateImages}
+                  onChange={(event) => onViralImitateImagesChange(event.target.checked)}
+                  disabled={busy || settingsBusy}
+                />
+                <span className="min-w-0">模仿爆款图片</span>
+              </label>
+              {viralImitateImages ? (
+                <p className="mt-2 text-[11px] leading-5 text-white/45">
+                  按素材顺序使用车型图作为图1，爆款源图作为图2，上传/导入几张就生成几张，最多 9 张。
+                </p>
+              ) : null}
+              {viralImitateImages ? (
+                <div className="mt-3 rounded-[8px] border border-white/10 bg-black/10 p-3">
+                  <div className="flex flex-wrap items-center justify-between gap-2">
+                    <div>
+                      <p className="text-[11px] font-black text-white/72">车型图选择</p>
+                      <p className="mt-1 text-[10px] leading-4 text-white/45">
+                        按选中顺序配对：车型图为图1，爆款源图为图2，最多 {maxSimpleImageTasksPerPost} 张。
+                      </p>
+                    </div>
+                    <div className="flex items-center gap-2">
+                      <span className="status-badge text-[10px] text-white/45">
+                        {selectedViralMaterialCount}/{maxSimpleImageTasksPerPost}
+                      </span>
+                      <button className="soft-button h-8 px-2 text-[10px]" type="button" onClick={onClearViralMaterialPaths} disabled={busy || settingsBusy || !selectedViralMaterialCount}>
+                        清空
+                      </button>
+                    </div>
+                  </div>
+                  {viralImageSelectionMissing ? <p className="mt-2 text-[11px] leading-5 text-[var(--amber)]">请选择至少 1 张车型图用于图片模仿</p> : null}
+                  {viralMaterialFolders.length ? (
+                    <div className="mt-3">
+                      <p className="mb-2 text-[10px] font-black uppercase tracking-[0.16em] text-white/40">车型库文件夹</p>
+                      <div className="grid gap-2 sm:grid-cols-2">
+                        {viralMaterialFolders.map((folder) => {
+                          const selected = folder.selectedCount > 0 && folder.selectedCount === folder.imageCount;
+                          const active = folder.id === activeViralMaterialFolderId;
+                          const disabled = busy || settingsBusy;
+                          return (
+                            <button
+                              key={folder.id}
+                              className={`rounded-[8px] border p-2 text-left transition ${
+                                selected || active ? "border-[var(--mint)] bg-[var(--mint)]/10" : "border-white/10 bg-white/[0.035] hover:border-white/20"
+                              } ${disabled ? "opacity-55" : ""}`}
+                              type="button"
+                              onClick={() => onToggleViralMaterialFolder(folder.id)}
+                              disabled={disabled}
+                            >
+                              <div className="flex min-w-0 items-center gap-2">
+                                <span className={`grid h-7 w-7 shrink-0 place-items-center rounded-[7px] ${selected || active ? "bg-[var(--mint)] text-black" : "bg-white/10 text-white/45"}`}>
+                                  <FolderOpen className="h-3.5 w-3.5" />
+                                </span>
+                                <div className="min-w-0">
+                                  <p className="truncate text-xs font-black text-white">{folder.name}</p>
+                                  <p className="mt-1 text-[10px] text-white/42">
+                                    {folder.selectedCount}/{folder.imageCount} images
+                                  </p>
+                                </div>
+                              </div>
+                            </button>
+                          );
+                        })}
+                      </div>
+                    </div>
+                  ) : null}
+                  <div className="thin-scrollbar mt-3 max-h-56 space-y-2 overflow-y-auto">
+                    {viralMaterialCandidates.length ? (
+                      viralMaterialCandidates.map((asset) => {
+                        const selectedIndex = selectedViralMaterialPaths.indexOf(asset.path);
+                        const selected = selectedIndex >= 0;
+                        const disabled = busy || settingsBusy || (!selected && selectedViralMaterialCount >= maxSimpleImageTasksPerPost);
+                        return (
+                          <button
+                            key={asset.id}
+                            className={`w-full rounded-[8px] border p-2 text-left transition ${
+                              selected ? "border-[var(--mint)] bg-[var(--mint)]/10" : "border-white/10 bg-white/[0.035] hover:border-white/20"
+                            } ${disabled ? "opacity-55" : ""}`}
+                            type="button"
+                            onClick={() => onToggleViralMaterialPath(asset.path)}
+                            disabled={disabled}
+                          >
+                            <div className="flex min-w-0 items-center gap-2">
+                              <span className={`grid h-7 w-7 shrink-0 place-items-center rounded-[7px] text-[11px] font-black ${selected ? "bg-[var(--mint)] text-black" : "bg-white/10 text-white/45"}`}>
+                                {selected ? selectedIndex + 1 : <ImageIcon className="h-3.5 w-3.5" />}
+                              </span>
+                              <div className="min-w-0">
+                                <p className="truncate text-xs font-black text-white">{asset.name}</p>
+                                <p className="mt-1 truncate text-[10px] text-white/42">
+                                  {asset.sourceLabel} · {formatCompactPath(asset.path)}
+                                </p>
+                              </div>
+                              <span
+                                className="soft-button ml-auto grid h-8 w-8 shrink-0 place-items-center"
+                                onClick={(event) => {
+                                  event.stopPropagation();
+                                  onPreviewViralMaterial(asset.path);
+                                }}
+                                role="button"
+                                tabIndex={0}
+                                aria-label="预览车型图"
+                              >
+                                <Maximize2 className="h-3.5 w-3.5" />
+                              </span>
+                            </div>
+                          </button>
+                        );
+                      })
+                    ) : (
+                      <div className="empty-state min-h-0 p-4 text-xs leading-5 text-white/50">暂无可选图片，请先扫描本地素材或在素材库导入车型图。</div>
+                    )}
+                  </div>
+                </div>
+              ) : null}
+            </div>
+          ) : sourceMode === "links" ? (
             <div className="simple-link-panel">
               <div className="mb-2 flex flex-wrap items-center justify-between gap-3">
                 <FieldLabel label="批量链接" />
@@ -4246,6 +4733,27 @@ function SimpleWorkspace({
                   </select>
                 </div>
               </div>
+              {linkPlatform === "dongchedi" ? (
+                <div className="mt-3">
+                  <FieldLabel label="Cookie" />
+                  <textarea
+                    className="field mt-2 min-h-16 resize-none"
+                    value={cookie}
+                    onChange={(event) => onCookieChange(event.target.value)}
+                    disabled={busy || settingsBusy}
+                  />
+                </div>
+              ) : null}
+              <label className="mt-3 flex items-start gap-2 rounded-[8px] border border-white/10 bg-white/[0.035] p-3 text-xs leading-5 text-white/62">
+                <input
+                  className="mt-1 h-4 w-4 accent-[var(--mint)]"
+                  type="checkbox"
+                  checked={videoFrameOriginalReference}
+                  onChange={(event) => onVideoFrameOriginalReferenceChange(event.target.checked)}
+                  disabled={busy || settingsBusy}
+                />
+                <span className="min-w-0">视频高光帧原图引用</span>
+              </label>
             </div>
           ) : sourceMode === "feishu" ? (
             <div className="simple-link-panel">
@@ -4288,6 +4796,57 @@ function SimpleWorkspace({
             </div>
           )}
 
+          {sourceMode !== "viral" && sourceMode !== "original" ? (
+            <div className="grid gap-2">
+              <label className="flex items-start gap-2 rounded-[8px] border border-white/10 bg-white/[0.035] p-3 text-xs leading-5 text-white/62">
+                <input
+                  className="mt-1 h-4 w-4 accent-[var(--mint)]"
+                  type="checkbox"
+                  checked={useComfyUiKlein}
+                  onChange={(event) => onUseComfyUiKleinChange(event.target.checked)}
+                  disabled={busy || settingsBusy}
+                />
+                <span className="min-w-0">启用本地 Klein 模型</span>
+              </label>
+              <label className="flex items-start gap-2 rounded-[8px] border border-white/10 bg-white/[0.035] p-3 text-xs leading-5 text-white/62">
+                <input
+                  className="mt-1 h-4 w-4 accent-[var(--mint)]"
+                  type="checkbox"
+                  checked={directOriginalReference}
+                  onChange={(event) => onDirectOriginalReferenceChange(event.target.checked)}
+                  disabled={busy || settingsBusy}
+                />
+                <span className="min-w-0">直接引用原图</span>
+              </label>
+              <label className="flex items-start gap-2 rounded-[8px] border border-white/10 bg-white/[0.035] p-3 text-xs leading-5 text-white/62">
+                <input
+                  className="mt-1 h-4 w-4 accent-[var(--mint)]"
+                  type="checkbox"
+                  checked={enableVideoTranscription}
+                  onChange={(event) => onEnableVideoTranscriptionChange(event.target.checked)}
+                  disabled={busy || settingsBusy}
+                />
+                <span className="min-w-0">启用视频音频转文字</span>
+              </label>
+            </div>
+          ) : null}
+
+          <label className="simple-write-feishu-row">
+            <input
+              className="h-4 w-4 accent-[var(--mint)]"
+              type="checkbox"
+              checked={writeFeishu}
+              onChange={(event) => onWriteFeishuChange(event.target.checked)}
+              disabled={busy || settingsBusy}
+            />
+            <span className="min-w-0">
+              <span className="block text-xs font-black text-white">写入飞书</span>
+              <span className="mt-1 block text-[11px] leading-5 text-white/50">
+                {writeFeishu ? "生成后自动审查通过并排队写入飞书。" : "只生成本地草稿，稍后到内容审查台人工确认。"}
+              </span>
+            </span>
+          </label>
+
           <div className="simple-policy-preview">
             <div className="flex items-center justify-between gap-3">
               <PanelTitle icon={<Lightbulb className="h-4 w-4" />} title="提示词与图片策略" />
@@ -4323,6 +4882,18 @@ function SimpleWorkspace({
                 compact
                 onChange={onSettingsChange}
               />
+
+              <div className="simple-prompt-block">
+                <FieldLabel label="图片生成尺寸" />
+                <ImageSizeInput
+                  className="field mt-2 h-10 text-xs"
+                  value={settings.imageSize}
+                  onChange={(value) => onSettingsChange({ imageSize: value })}
+                  disabled={busy || settingsBusy}
+                  ariaLabel="简单版图片生成尺寸"
+                  listId="compact-image-size-presets"
+                />
+              </div>
             </div>
 
             <div className="mt-3 flex flex-wrap items-center gap-1.5">
@@ -4355,16 +4926,20 @@ function SimpleWorkspace({
               <FileText className="h-4 w-4" />
             ) : sourceMode === "links" ? (
               <UploadCloud className="h-4 w-4" />
+            ) : sourceMode === "original" ? (
+              <Wand2 className="h-4 w-4" />
             ) : (
               <Send className="h-4 w-4" />
             )}
             {busy
               ? "正在自动执行"
               : sourceMode === "feishu"
-                ? "导入飞书并一键生产内容"
+                ? writeFeishu ? "导入飞书并一键生产写入" : "导入飞书并生成待审查内容"
                 : sourceMode === "links"
-                  ? "导入链接并一键生产内容"
-                  : "开始全自动生产并写入飞书"}
+                  ? writeFeishu ? "导入链接并一键生产写入" : "导入链接并生成待审查内容"
+                  : sourceMode === "original"
+                    ? writeFeishu ? "生成原创并写入飞书" : "生成原创待审查"
+                    : writeFeishu ? "开始全自动生产并写入飞书" : "开始生产待审查内容"}
           </button>
         </div>
 
@@ -4374,7 +4949,7 @@ function SimpleWorkspace({
             progress={{
               title: "简单版自动流程",
               label: "后端正在顺序执行",
-              detail: `${sourceDetail} · 采集、打标、生成、写入飞书会依次完成。`,
+              detail: formatSimpleRunPipelineDetail(sourceMode, sourceDetail, writeFeishu),
               value: 48,
               status: "running",
               total: targetCount,
@@ -4439,6 +5014,12 @@ function SimpleWorkspace({
                     ) : null}
                   </div>
                 </div>
+
+                {runForSummary.viralResult?.pairingNotice ? (
+                  <p className="mt-3 rounded-[8px] border border-white/10 bg-white/[0.035] px-3 py-2 text-xs leading-5 text-white/58">
+                    {runForSummary.viralResult.pairingNotice}
+                  </p>
+                ) : null}
 
                 <div className="simple-stage-list mt-4">
                   {runForSummary.stages.map((stage) => (
@@ -4858,13 +5439,7 @@ function WorkspaceDefaultsPanel({
           <p className="text-[11px] font-semibold text-white/58">图片策略</p>
           <p className="mt-1 text-[11px] leading-5 text-white/42">简单版会根据 GPT 图片标签自动选择原图引用或对应洗图提示词。</p>
         </div>
-        <select className="field h-10 text-xs" value={settings.imageSize} onChange={(event) => onChange({ imageSize: event.target.value })}>
-          {imageGenerationSizeOptions.map((option) => (
-            <option key={option.value} value={option.value}>
-              {option.label}
-            </option>
-          ))}
-        </select>
+        <ImageSizeInput value={settings.imageSize} onChange={(value) => onChange({ imageSize: value })} listId="workspace-image-size-presets" />
         <select
           className="field h-10 text-xs"
           value={settings.imageQuality}
@@ -4882,6 +5457,44 @@ function WorkspaceDefaultsPanel({
         保存为简单版默认策略
       </button>
     </div>
+  );
+}
+
+function ImageSizeInput({
+  value,
+  onChange,
+  disabled,
+  ariaLabel = "图片尺寸",
+  listId,
+  className = "field h-10 text-xs",
+}: {
+  value: string;
+  onChange: (value: string) => void;
+  disabled?: boolean;
+  ariaLabel?: string;
+  listId: string;
+  className?: string;
+}) {
+  return (
+    <>
+      <input
+        className={className}
+        value={value}
+        onChange={(event) => onChange(event.target.value)}
+        disabled={disabled}
+        aria-label={ariaLabel}
+        placeholder="1024x1536"
+        list={listId}
+        inputMode="text"
+      />
+      <datalist id={listId}>
+        {imageGenerationSizeOptions.map((option) => (
+          <option key={option.value} value={option.value}>
+            {option.label}
+          </option>
+        ))}
+      </datalist>
+    </>
   );
 }
 
@@ -4914,10 +5527,15 @@ function ProductionWorkspace({
   instruction,
   imageSize,
   imageQuality,
+  imageUseComfyUiKlein,
+  imageDirectOriginalReference,
   workspaceSettings,
   generateProgress,
   batchProgress,
   publishStatus,
+  feishuVehicleOptions,
+  feishuVehicleFieldName,
+  feishuVehicleOptionsMessage,
   reviewPrompt,
   busy,
   onSelectSource,
@@ -4940,6 +5558,8 @@ function ProductionWorkspace({
   onInstructionChange,
   onImageSizeChange,
   onImageQualityChange,
+  onImageUseComfyUiKleinChange,
+  onImageDirectOriginalReferenceChange,
   onWorkspaceSettingsChange,
   onSaveWorkspaceSettings,
   onGenerateDraft,
@@ -4987,10 +5607,15 @@ function ProductionWorkspace({
   instruction: string;
   imageSize: string;
   imageQuality: ImageGenerationQuality;
+  imageUseComfyUiKlein: boolean;
+  imageDirectOriginalReference: boolean;
   workspaceSettings: WorkspacePromptSettings;
   generateProgress: TaskProgressSnapshot | null;
   batchProgress: TaskProgressSnapshot | null;
   publishStatus: PublishStatusSnapshot | null;
+  feishuVehicleOptions: string[];
+  feishuVehicleFieldName: string;
+  feishuVehicleOptionsMessage: string;
   reviewPrompt: string;
   busy: string | null;
   onSelectSource: (sourceItemId: string) => void;
@@ -5013,6 +5638,8 @@ function ProductionWorkspace({
   onInstructionChange: (value: string) => void;
   onImageSizeChange: (value: string) => void;
   onImageQualityChange: (value: ImageGenerationQuality) => void;
+  onImageUseComfyUiKleinChange: (value: boolean) => void;
+  onImageDirectOriginalReferenceChange: (value: boolean) => void;
   onWorkspaceSettingsChange: (patch: Partial<WorkspacePromptSettings>) => void;
   onSaveWorkspaceSettings: () => void;
   onGenerateDraft: () => void;
@@ -5281,12 +5908,16 @@ function ProductionWorkspace({
             <ProductionPlanCard item={selectedSource} />
             <CreationControlCard
               plan={activeStrategyDraft}
-              imageTasks={activeImageTasks}
+  imageTasks={activeImageTasks}
+  useComfyUiKlein={imageUseComfyUiKlein}
+  directOriginalReference={imageDirectOriginalReference}
               onPlanChange={onPlanChange}
               onGuidanceChange={onGuidanceChange}
               onToggleTask={onToggleTask}
               onTaskChange={onTaskChange}
               onResetTasks={onResetTasks}
+              onUseComfyUiKleinChange={onImageUseComfyUiKleinChange}
+              onDirectOriginalReferenceChange={onImageDirectOriginalReferenceChange}
               onPreviewImage={(_url, index) => onOpenImageGallery(activeImageTasks.map((task) => task.url), index, `待处理图片 ${index + 1}`)}
             />
 
@@ -5300,13 +5931,7 @@ function ProductionWorkspace({
                 </div>
                 <label className="min-w-0">
                   <span className="sr-only">图片尺寸</span>
-                  <select className="field h-10 text-xs" value={imageSize} onChange={(event) => onImageSizeChange(event.target.value)}>
-                    {imageGenerationSizeOptions.map((option) => (
-                      <option key={option.value} value={option.value}>
-                        {option.label}
-                      </option>
-                    ))}
-                  </select>
+                  <ImageSizeInput value={imageSize} onChange={onImageSizeChange} listId="draft-image-size-presets" />
                 </label>
                 <select className="field h-10 text-xs" value={imageQuality} onChange={(event) => onImageQualityChange(event.target.value as ImageGenerationQuality)}>
                   {imageQualityOptions.map((option) => (
@@ -5366,7 +5991,7 @@ function ProductionWorkspace({
               post={post}
               busy={busy}
               publishStatus={publishStatus?.postId === post.id ? publishStatus : null}
-              onApprove={() => onSaveReviewPatch({ status: "approved" })}
+              onApprove={() => onSaveReviewPatch({ title: post.title, body: post.body, imagePrompt: post.imagePrompt, feishuVehicle: post.feishuVehicle, status: "approved" })}
               onOpenImageGallery={onOpenImageGallery}
               onPreviewPost={onPreviewPost}
               onPublish={onPublish}
@@ -5383,10 +6008,26 @@ function ProductionWorkspace({
               <FieldLabel label="图片 Prompt" />
               <textarea className="field mt-2 min-h-28 resize-none" value={post.imagePrompt} onChange={(event) => onSetPost({ ...post, imagePrompt: event.target.value })} />
             </div>
+            <div>
+              <FieldLabel label={`写入飞书${feishuVehicleFieldName}`} />
+              <select
+                className="field mt-2 h-10"
+                value={post.feishuVehicle || post.taskKeyword || ""}
+                onChange={(event) => onSetPost({ ...post, feishuVehicle: event.target.value })}
+              >
+                <option value="">未选择</option>
+                {feishuVehicleOptions.map((option) => (
+                  <option key={option} value={option}>
+                    {option}
+                  </option>
+                ))}
+              </select>
+              {feishuVehicleOptionsMessage ? <p className="mt-1 text-[11px] text-[var(--text-muted)]">{feishuVehicleOptionsMessage}</p> : null}
+            </div>
             <button
               className="soft-button flex h-10 w-full items-center justify-center gap-2"
               type="button"
-              onClick={() => onSaveReviewPatch({ title: post.title, body: post.body, imagePrompt: post.imagePrompt })}
+              onClick={() => onSaveReviewPatch({ title: post.title, body: post.body, imagePrompt: post.imagePrompt, feishuVehicle: post.feishuVehicle })}
               disabled={Boolean(busy)}
             >
               <Check className="h-4 w-4" />
@@ -5397,13 +6038,7 @@ function ProductionWorkspace({
                 {busy === "image" ? <Loader2 className="h-4 w-4 animate-spin" /> : <ImageIcon className="h-4 w-4" />}
                 重新生成图
               </button>
-              <select className="field h-10 text-xs" value={imageSize} onChange={(event) => onImageSizeChange(event.target.value)}>
-                {imageGenerationSizeOptions.map((option) => (
-                  <option key={option.value} value={option.value}>
-                    {option.label}
-                  </option>
-                ))}
-              </select>
+              <ImageSizeInput value={imageSize} onChange={onImageSizeChange} listId="review-image-size-presets" />
               <select className="field h-10 text-xs" value={imageQuality} onChange={(event) => onImageQualityChange(event.target.value as ImageGenerationQuality)}>
                 {imageQualityOptions.map((option) => (
                   <option key={option.value} value={option.value}>
@@ -5419,7 +6054,7 @@ function ProductionWorkspace({
                 className="soft-button mt-2 flex h-10 w-full items-center justify-center gap-2"
                 type="button"
                 onClick={() => {
-                  onSaveReviewPatch({ title: post.title, body: post.body, imagePrompt: post.imagePrompt }, reviewPrompt);
+                  onSaveReviewPatch({ title: post.title, body: post.body, imagePrompt: post.imagePrompt, feishuVehicle: post.feishuVehicle }, reviewPrompt);
                   onReviewPromptChange("");
                 }}
                 disabled={Boolean(busy) || !reviewPrompt.trim()}
@@ -5695,13 +6330,16 @@ function MediaCacheStatusCard({
   item,
   busy,
   onCache,
+  onForceVideoRefresh,
 }: {
   item: NormalizedSourceItem;
   busy: boolean;
   onCache: () => void;
+  onForceVideoRefresh: () => void;
 }) {
   const status = getMediaCacheStatus(item);
   const localCoverage = status.imageTotal ? Math.round((status.localImages / status.imageTotal) * 100) : status.localVideo ? 100 : 0;
+  const canRefreshVideo = Boolean(item.videoUrl || item.downloadedVideoUrl || item.mediaType === "video" || item.mediaType === "mixed");
 
   return (
     <div className="media-cache-card mt-3">
@@ -5729,6 +6367,14 @@ function MediaCacheStatusCard({
           补全当前素材
         </button>
       </div>
+      {canRefreshVideo ? (
+        <div className="mt-2 flex justify-end">
+          <button className="soft-button h-9 px-3 text-xs" type="button" onClick={onForceVideoRefresh} disabled={busy}>
+            {busy ? <Loader2 className="mr-1 inline h-3.5 w-3.5 animate-spin" /> : <CloudDownload className="mr-1 inline h-3.5 w-3.5" />}
+            重新下载高清视频
+          </button>
+        </div>
+      ) : null}
       {status.errors.length ? (
         <p className="mt-2 line-clamp-2 text-[11px] leading-5 text-[var(--amber)]">
           最近错误：{status.errors.join("；")}
@@ -6382,7 +7028,7 @@ function MaterialAssetEditor({
 }) {
   const [draft, setDraft] = useState<MaterialAssetDraft>({ name: asset.name, tags: asset.tags.join(", ") });
 
-  const canPreview = asset.kind === "image" && (/^https?:\/\//.test(asset.path) || asset.path.startsWith("/"));
+  const canPreview = asset.kind === "image" && isPreviewableImageAssetPath(asset.path);
 
   return (
     <article className="rounded-[8px] border border-white/10 bg-white/[0.04] p-3">
@@ -6505,6 +7151,13 @@ function buildSimpleOverallProgressSummaryForRuns(runs: SimpleRun[]) {
     produced: summaries.reduce((sum, summary) => sum + summary.produced, 0),
     published: summaries.reduce((sum, summary) => sum + summary.published, 0),
   };
+}
+
+function formatSimpleRunPipelineDetail(sourceMode: SimpleSourceMode, sourceDetail: string, writeFeishu = true) {
+  const publishStep = writeFeishu ? "写入飞书" : "进入内容审查台";
+  if (sourceMode === "original") return `${sourceDetail} · 原创准备、原创策划、生成图文、${publishStep}会依次完成。`;
+  if (sourceMode === "links" || sourceMode === "feishu" || sourceMode === "viral") return `${sourceDetail} · 导入、打标、生成、${publishStep}会依次完成。`;
+  return `${sourceDetail} · 采集、打标、生成、${publishStep}会依次完成。`;
 }
 
 function buildSimpleOverallProgressSummary(run: SimpleRun | null, busy: boolean, sourceDetail: string, targetCount: number) {
@@ -6975,20 +7628,28 @@ function ProductionPlanCard({ item }: { item: NormalizedSourceItem }) {
 function CreationControlCard({
   plan,
   imageTasks,
+  useComfyUiKlein,
+  directOriginalReference,
   onPlanChange,
   onGuidanceChange,
   onToggleTask,
   onTaskChange,
   onResetTasks,
+  onUseComfyUiKleinChange,
+  onDirectOriginalReferenceChange,
   onPreviewImage,
 }: {
   plan: ProductionPlan | null;
   imageTasks: SourceImageTask[];
+  useComfyUiKlein: boolean;
+  directOriginalReference: boolean;
   onPlanChange: (patch: Partial<ProductionPlan>) => void;
   onGuidanceChange: (field: "textBrief" | "imageBrief", value: string) => void;
   onToggleTask: (taskId: string) => void;
   onTaskChange: (taskId: string, patch: Partial<SourceImageTask>) => void;
   onResetTasks: () => void;
+  onUseComfyUiKleinChange: (value: boolean) => void;
+  onDirectOriginalReferenceChange: (value: boolean) => void;
   onPreviewImage: (url: string, index: number) => void;
 }) {
   const selectedCount = imageTasks.filter((task) => task.selected).length;
@@ -7083,6 +7744,26 @@ function CreationControlCard({
         </button>
       </div>
       <p className="mt-2 text-[11px] leading-5 text-white/45">默认每张图都进入洗图；选择保持原图会直接使用原图，不调用图片模型。</p>
+      <div className="mt-3 grid gap-2 sm:grid-cols-2">
+        <label className="flex items-start gap-2 rounded-[8px] border border-white/10 bg-white/[0.035] p-3 text-xs leading-5 text-white/62">
+          <input
+            className="mt-1 h-4 w-4 accent-[var(--mint)]"
+            type="checkbox"
+            checked={useComfyUiKlein}
+            onChange={(event) => onUseComfyUiKleinChange(event.target.checked)}
+          />
+          <span className="min-w-0">启用本地 Klein 模型</span>
+        </label>
+        <label className="flex items-start gap-2 rounded-[8px] border border-white/10 bg-white/[0.035] p-3 text-xs leading-5 text-white/62">
+          <input
+            className="mt-1 h-4 w-4 accent-[var(--mint)]"
+            type="checkbox"
+            checked={directOriginalReference}
+            onChange={(event) => onDirectOriginalReferenceChange(event.target.checked)}
+          />
+          <span className="min-w-0">直接引用原图</span>
+        </label>
+      </div>
 
       <div className="thin-scrollbar mt-3 grid max-h-[440px] gap-3 overflow-y-auto">
         {imageTasks.length ? (
@@ -7300,6 +7981,94 @@ function splitTags(value: string) {
     .split(/[,\n，]/)
     .map((item) => item.trim())
     .filter(Boolean);
+}
+
+function buildViralMaterialCandidates(materials: MaterialAsset[], libraryAssets: MaterialLibraryAsset[], folders: MaterialFolder[]): ViralMaterialCandidate[] {
+  const seen = new Set<string>();
+  const folderNames = new Map(folders.map((folder) => [folder.id, folder.name]));
+  const candidates: ViralMaterialCandidate[] = [];
+  const addCandidate = (candidate: ViralMaterialCandidate) => {
+    if (!candidate.path || seen.has(candidate.path)) return;
+    seen.add(candidate.path);
+    candidates.push(candidate);
+  };
+
+  libraryAssets.forEach((asset) => {
+    if (asset.kind !== "image" && !isImageMaterialPath(asset.path, asset.extension)) return;
+    addCandidate({
+      id: `library:${asset.id}`,
+      path: asset.path,
+      name: asset.name || getPathFileName(asset.path),
+      sourceLabel: folderNames.get(asset.folderId) || "素材库",
+      folderId: asset.folderId,
+    });
+  });
+
+  materials.forEach((asset) => {
+    if (!isImageMaterialPath(asset.path, asset.extension)) return;
+    addCandidate({
+      id: `scan:${asset.path}`,
+      path: asset.path,
+      name: asset.name || getPathFileName(asset.path),
+      sourceLabel: "扫描素材",
+    });
+  });
+
+  return candidates;
+}
+
+function buildViralMaterialFolders(
+  folders: MaterialFolder[],
+  libraryAssets: MaterialLibraryAsset[],
+  selectedPaths: string[],
+): ViralMaterialFolderCandidate[] {
+  const selectedPathSet = new Set(selectedPaths);
+  return folders
+    .map((folder) => {
+      const paths = libraryAssets
+        .filter((asset) => asset.folderId === folder.id)
+        .filter((asset) => asset.kind === "image" || isImageMaterialPath(asset.path, asset.extension))
+        .map((asset) => asset.path)
+        .filter(Boolean);
+      return {
+        id: folder.id,
+        name: folder.name,
+        imageCount: paths.length,
+        selectedCount: paths.filter((path) => selectedPathSet.has(path)).length,
+        paths,
+      };
+    })
+    .filter((folder) => folder.imageCount > 0);
+}
+
+function findMatchingViralMaterialFolderId(folders: ViralMaterialFolderCandidate[], keyword: string) {
+  const normalizedKeyword = normalizeMaterialFolderMatchText(keyword);
+  if (!normalizedKeyword) return "";
+  const exact = folders.find((folder) => normalizeMaterialFolderMatchText(folder.name) === normalizedKeyword);
+  if (exact) return exact.id;
+  const partial = folders.find((folder) => {
+    const normalizedName = normalizeMaterialFolderMatchText(folder.name);
+    return normalizedName.includes(normalizedKeyword) || normalizedKeyword.includes(normalizedName);
+  });
+  return partial?.id || "";
+}
+
+function normalizeMaterialFolderMatchText(value: string) {
+  return value.trim().toLowerCase().replace(/\s+/g, "");
+}
+
+function isImageMaterialPath(path: string, extension?: string) {
+  const ext = (extension || path.split(/[\\/]/).pop()?.match(/\.[^.]+$/)?.[0] || "").toLowerCase();
+  return [".png", ".jpg", ".jpeg", ".webp", ".gif"].includes(ext);
+}
+
+function getPathFileName(path: string) {
+  return path.split(/[\\/]/).filter(Boolean).pop() || path;
+}
+
+function formatCompactPath(path: string) {
+  const parts = path.split(/[\\/]/).filter(Boolean);
+  return parts.length > 2 ? `.../${parts.slice(-2).join("/")}` : path;
 }
 
 function formatMaterialKind(value: MaterialLibraryAsset["kind"]) {
@@ -7532,8 +8301,8 @@ function getMissingImageStrategyPrompt(settings: WorkspacePromptSettings) {
 }
 
 function normalizeImageSizeInput(value: string) {
-  const normalized = value.trim().toLowerCase();
-  return isImageGenerationSize(normalized) ? normalized : "";
+  const normalized = normalizeImageGenerationSize(value);
+  return isImageGenerationSize(value) ? normalized : "";
 }
 
 function formatSourceTime(value?: string, fallback?: string) {
@@ -7612,8 +8381,13 @@ function isSimpleFeishuRun(run: SimpleRun) {
   return run.input.sourceMode === "feishu";
 }
 
+function isSimpleOriginalRun(run: SimpleRun) {
+  return run.input.sourceMode === "original";
+}
+
 function formatSimpleRunSource(run: SimpleRun) {
   if (isSimpleFeishuRun(run)) return `飞书 ${run.input.feishuTaskNumbers?.length || run.feishuResults?.length || 0} 条`;
+  if (isSimpleOriginalRun(run)) return "原创 1 条";
   if (!isSimpleLinkRun(run)) return `${run.input.platforms.length} 平台`;
   return `链接 ${run.input.links?.length || run.linkResults?.length || 0} 条`;
 }
@@ -7871,7 +8645,16 @@ function toDisplayImageSrc(url?: string) {
   if (!url) return "";
   if (/^https?:\/\//i.test(url)) return `/api/media/proxy?url=${encodeURIComponent(url)}`;
   if (url.startsWith("/media/") || url.startsWith("/generated/")) return appendQueryParam(url, "v", localMediaPreviewVersion);
+  if (isAbsoluteLocalPath(url)) return `/api/materials/preview?path=${encodeURIComponent(url)}`;
   return url;
+}
+
+function isPreviewableImageAssetPath(url: string) {
+  return /^https?:\/\//i.test(url) || url.startsWith("/") || isAbsoluteLocalPath(url);
+}
+
+function isAbsoluteLocalPath(url: string) {
+  return /^[a-zA-Z]:[\\/]/.test(url) || url.startsWith("\\\\");
 }
 
 function appendQueryParam(url: string, key: string, value: string) {

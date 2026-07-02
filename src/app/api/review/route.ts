@@ -16,7 +16,7 @@ export async function POST(request: Request) {
     const body = (await request.json()) as {
       post?: GeneratedPost;
       instruction?: string;
-      manualPatch?: Partial<Pick<GeneratedPost, "title" | "body" | "imagePrompt" | "status" | "imageUrls" | "imageTasks">>;
+      manualPatch?: Partial<Pick<GeneratedPost, "title" | "body" | "imagePrompt" | "status" | "imageUrls" | "imageTasks" | "feishuVehicle">>;
     };
 
     if (!body.post) {
@@ -46,9 +46,17 @@ export async function POST(request: Request) {
     if (!currentPost) return NextResponse.json({ error: "Post not found" }, { status: 404 });
     let post = currentPost;
     if (body.manualPatch) {
+      const allowedPatch: Partial<Pick<GeneratedPost, "title" | "body" | "imagePrompt" | "status" | "imageUrls" | "imageTasks" | "feishuVehicle">> = {};
+      if ("title" in body.manualPatch) allowedPatch.title = body.manualPatch.title;
+      if ("body" in body.manualPatch) allowedPatch.body = body.manualPatch.body;
+      if ("imagePrompt" in body.manualPatch) allowedPatch.imagePrompt = body.manualPatch.imagePrompt;
+      if ("status" in body.manualPatch) allowedPatch.status = body.manualPatch.status;
+      if ("imageUrls" in body.manualPatch) allowedPatch.imageUrls = body.manualPatch.imageUrls;
+      if ("imageTasks" in body.manualPatch) allowedPatch.imageTasks = body.manualPatch.imageTasks;
+      if ("feishuVehicle" in body.manualPatch) allowedPatch.feishuVehicle = body.manualPatch.feishuVehicle;
       post = {
         ...post,
-        ...body.manualPatch,
+        ...allowedPatch,
         updatedAt: new Date().toISOString(),
       };
     }

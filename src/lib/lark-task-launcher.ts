@@ -57,6 +57,38 @@ export function parseLarkTaskCommand(text: string): ParsedLarkTaskCommand | unde
     throw new Error(`Target count ${targetCount} requires confirm=yes.`);
   }
 
+  if (sourceMode === "viral") {
+    const viralUrl = firstNonEmpty(
+      options.viralUrl,
+      options.viralurl,
+      options["viral-url"],
+      options["爆款链接"],
+      options["复刻链接"],
+      options.url,
+      extractUrls([...tokens, ...bodyLines].join("\n"))[0],
+    );
+    if (!viralUrl) throw new Error("Viral source URL is required.");
+    const keyword = firstNonEmpty(
+      options.keyword,
+      options["关键词"],
+      options.vehicle,
+      options["车型"],
+      tokens.filter((token) => !isOptionToken(token) && !isViralModeAlias(token) && !extractUrls(token).length).join(" "),
+    );
+    if (!keyword) throw new Error("Keyword is required.");
+    return {
+      commandText,
+      input: {
+        sourceMode: "viral",
+        keyword,
+        targetCount: 1,
+        platforms: [],
+        materialPaths: [],
+        viralUrl,
+      },
+    };
+  }
+
   if (sourceMode === "links") {
     const inlineLinkPlatform = normalizeModeLinkPlatform(tokens[0]);
     if (inlineLinkPlatform) tokens.shift();
@@ -231,6 +263,9 @@ async function resolveLarkTaskOwner(senderId: string): Promise<WorkspaceAccountR
 
 function buildLaunchReply(runId: string, input: SimpleRunInput) {
   const sourceMode = input.sourceMode || "keyword";
+  if (sourceMode === "viral") {
+    return `已创建 FluxPost 任务：${runId}\n来源：爆款复刻 · ${input.keyword} · ${input.viralUrl || "未提供链接"}\n数量：1`;
+  }
   const sourceText =
     sourceMode === "links"
       ? `${input.links?.length || 0} 条链接`
@@ -246,6 +281,7 @@ function normalizeCommandText(text: string) {
 
 function normalizeModeToken(token?: string): SimpleRunInput["sourceMode"] | undefined {
   const value = (token || "").trim().toLowerCase();
+  if (isViralModeAlias(value)) return "viral";
   if (isXiaopengBbsAlias(value) || isDongchediAlias(value)) return "links";
   if (["keyword", "关键词", "车型", "搜索"].includes(value)) return "keyword";
   if (["links", "link", "链接", "url"].includes(value)) return "links";
@@ -261,6 +297,7 @@ function normalizeModeLinkPlatform(token?: string): SourceLinkPlatform | undefin
 }
 
 function inferSourceMode(options: Record<string, string>, bodyLines: string[], tokens: string[]): SimpleRunInput["sourceMode"] {
+  if (options.viralUrl || options.viralurl || options["viral-url"] || options["爆款链接"] || options["复刻链接"] || tokens.some(isViralModeAlias)) return "viral";
   if (options.tasks || options.task || options.taskNumbers) return "feishu";
   if (extractUrls([...tokens, ...bodyLines].join("\n")).length) return "links";
   return "keyword";
@@ -342,6 +379,15 @@ function splitList(value: string) {
 
 function extractUrls(value: string) {
   return value.match(/https?:\/\/[^\s，,]+/g) || [];
+}
+
+function firstNonEmpty(...values: Array<string | undefined>) {
+  return values.map((value) => value?.trim() || "").find(Boolean) || "";
+}
+
+function isViralModeAlias(token?: string) {
+  const value = (token || "").trim().toLowerCase();
+  return ["viral", "replicate", "replication", "copy", "viral-replicate", "爆款", "复刻", "爆款复刻", "仿写"].includes(value);
 }
 
 function extractLinkInputs(value: string, linkPlatform: SourceLinkPlatform | "auto" | undefined) {

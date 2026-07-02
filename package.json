@@ -10,6 +10,7 @@
     "start:lan": "next start -H 0.0.0.0 -p 3001",
     "local:restart": "powershell -ExecutionPolicy Bypass -File scripts/local/restart.ps1",
     "local:watch-simple": "powershell -ExecutionPolicy Bypass -File scripts/local/watch-simple-runs.ps1",
+    "trellis:check": "powershell -ExecutionPolicy Bypass -File .trellis/verification/check.ps1",
     "lark:tasks": "node scripts/lark-task-runner.mjs",
     "lark:events": "node scripts/lark-task-events.mjs",
     "db:diagnose": "powershell -ExecutionPolicy Bypass -File scripts/local/postgres-diagnose.ps1",

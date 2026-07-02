@@ -17,6 +17,7 @@ export async function POST(request: Request) {
       action?: "set_status" | "delete" | "cache_media";
       ids?: string[];
       status?: SourceUsageStatus;
+      forceVideoRefresh?: boolean;
     };
     const ids = normalizeIds(body.ids);
     if (!ids.length) return NextResponse.json({ error: "Item ids are required" }, { status: 400 });
@@ -43,7 +44,8 @@ export async function POST(request: Request) {
     }
 
     if (body.action === "cache_media") {
-      const result = await backfillSourceItemMedia(ids, account);
+      const forceVideoRefresh = body.forceVideoRefresh === true;
+      const result = await backfillSourceItemMedia(ids, account, { forceVideoRefresh });
       await recordExecutionLog({
         scope: "content/items",
         action: "批量补全本地素材",
@@ -59,6 +61,7 @@ export async function POST(request: Request) {
           localVideos: result.localVideos,
           videoFrames: result.videoFrames,
           errorCount: result.errorCount,
+          forceVideoRefresh,
         },
       });
       return NextResponse.json({ action: body.action, ...result });

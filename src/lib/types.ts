@@ -2,7 +2,7 @@ export type CrawlPlatform = "wechat_channels" | "xiaohongshu" | "douyin" | "weib
 
 export type SourceLinkPlatform = CrawlPlatform | "xiaopeng_bbs" | "dongchedi";
 
-export type Platform = SourceLinkPlatform | "feishu";
+export type Platform = SourceLinkPlatform | "feishu" | "original";
 
 export type CrawlStatus = "queued" | "running" | "completed" | "failed" | "needs_config";
 
@@ -34,6 +34,10 @@ export type FeishuPublishQueueStatus =
   | "cancelled";
 
 export type FeishuPublishJobSource = "manual" | "simple";
+
+export type DistributionDecision = "可分发" | "不可分发";
+
+export type DistributionCheckQueueStatus = "queued" | "running" | "completed" | "partial" | "failed" | "cancelled";
 
 export type WorkspaceAccountRole = "admin" | "operator";
 
@@ -174,6 +178,51 @@ export type ViralAnalysis = {
   keywords: string[];
 };
 
+export type ViralStyleAnalysis = {
+  titlePattern: string;
+  paragraphCount: number;
+  approximateLength: number;
+  tone: string;
+  structure: string;
+  interactionPattern: string;
+  imageCount: number;
+  imageRhythm: string;
+  sourceBrandCandidates: string[];
+};
+
+export type ViralImageSpec = {
+  id: string;
+  index: number;
+  sourceUrl: string;
+  imageType: "photo" | "info_card" | "poster" | "comparison" | "screenshot" | "unknown";
+  shotSize: "wide" | "medium" | "close" | "detail" | "unknown";
+  vehiclePart: "full_vehicle" | "front" | "side" | "rear" | "interior" | "wheel" | "light" | "screen" | "detail" | "unknown";
+  angle: "front" | "front_three_quarter" | "side" | "rear" | "rear_three_quarter" | "top" | "interior" | "unknown";
+  composition: string;
+  hasPeople: boolean;
+  hasText: boolean;
+  colorPalette: string;
+  stylePrompt: string;
+  aestheticKeywords: string[];
+  confidence?: number;
+  recommendedStrategy: "car_reference" | "people_with_car" | "text_image" | "keep_layout";
+};
+
+export type MaterialVisualProfile = {
+  source: "ai" | "filename";
+  vehicleKeywords: string[];
+  imageType: ViralImageSpec["imageType"];
+  shotSize: ViralImageSpec["shotSize"];
+  vehiclePart: ViralImageSpec["vehiclePart"];
+  angle: ViralImageSpec["angle"];
+  hasPeople: boolean;
+  hasText: boolean;
+  quality: "high" | "medium" | "low";
+  indexedAt: string;
+  model?: string;
+  error?: string;
+};
+
 export type ContentDirection = "industry" | "competitor" | "xpeng" | "unknown";
 
 export type ProductionDecision = "adopt" | "observe_only" | "needs_review";
@@ -206,6 +255,7 @@ export type SourceImageTask = {
   selected: boolean;
   mode: SourceImageTaskMode;
   prompt: string;
+  referenceUrls?: string[];
   timestamp?: number;
   provider?: SourceImageTaskProvider;
   strategyKey?: keyof ImageStrategyPrompts;
@@ -293,6 +343,7 @@ export type CrawlInput = {
   timeScope?: string;
   contentType?: string;
   cookie?: string;
+  enableVideoTranscription?: boolean;
 };
 
 export type CrawlJob = {
@@ -317,6 +368,13 @@ export type VideoFrameAsset = {
   reason: string;
   width?: number;
   height?: number;
+  perceptualHash?: string;
+  qualityScore?: number;
+  aestheticScore?: number;
+  aiScore?: number;
+  selectionReason?: string;
+  visualDiversityScore?: number;
+  similarityGroup?: number;
 };
 
 export type SourceMediaCacheState = "none" | "local_complete" | "partial" | "remote_only" | "failed";
@@ -332,6 +390,17 @@ export type SourceMediaCacheStatus = {
   errorCount: number;
   errors: string[];
   updatedAt?: string;
+};
+
+export type SourceVideoTranscript = {
+  status: "success" | "failed";
+  provider: "volcengine_asr" | "ark_video";
+  model?: string;
+  text?: string;
+  audioUrl?: string;
+  requestId?: string;
+  transcribedAt: string;
+  error?: string;
 };
 
 export type NormalizedSourceItem = {
@@ -351,6 +420,8 @@ export type NormalizedSourceItem = {
   downloadedImages?: string[];
   downloadedVideoUrl?: string;
   videoFrames?: VideoFrameAsset[];
+  videoFrameOriginalReference?: boolean;
+  videoTranscript?: SourceVideoTranscript;
   downloadErrors?: string[];
   mediaCache?: SourceMediaCacheStatus;
   crawledAt?: string;
@@ -412,6 +483,8 @@ export type GeneratedPost = {
   version?: number;
   title: string;
   body: string;
+  taskKeyword?: string;
+  feishuVehicle?: string;
   platform: Platform;
   imagePrompt: string;
   imageUrls: string[];
@@ -462,14 +535,25 @@ export type BatchProductionJob = {
 };
 
 export type SimpleRunInput = {
-  sourceMode?: "keyword" | "links" | "feishu";
+  sourceMode?: "keyword" | "links" | "feishu" | "viral" | "original";
   keyword: string;
   targetCount: number;
   platforms: CrawlPlatform[];
   materialPaths: string[];
   links?: string[];
   linkPlatform?: SourceLinkPlatform | "auto";
+  cookie?: string;
+  videoFrameOriginalReference?: boolean;
+  useComfyUiKlein?: boolean;
+  directOriginalReference?: boolean;
+  enableVideoTranscription?: boolean;
+  writeFeishu?: boolean;
   feishuTaskNumbers?: string[];
+  viralUrl?: string;
+  viralImitateImages?: boolean;
+  viralMaterialPaths?: string[];
+  originalPrompt?: string;
+  originalUseWebSearch?: boolean;
   ownerUserId?: string;
   ownerDisplayName?: string;
 };
@@ -492,6 +576,33 @@ export type SimpleRunFeishuResult = {
   vehicle?: string;
   title?: string;
   materialCount?: number;
+  error?: string;
+};
+
+export type SimpleRunViralResult = {
+  url: string;
+  status: "analyzed" | "generated" | "failed";
+  sourceTitle?: string;
+  imageCount?: number;
+  sourceImageCount?: number;
+  vehicleImageCount?: number;
+  pairedImageCount?: number;
+  analyzedImageCount?: number;
+  skippedImageCount?: number;
+  imageAnalysisErrors?: string[];
+  matchedImageCount?: number;
+  pairingNotice?: string;
+  postId?: string;
+  error?: string;
+};
+
+export type SimpleRunOriginalResult = {
+  prompt: string;
+  status: "planned" | "generated" | "failed";
+  webSearch: boolean;
+  imagePromptCount?: number;
+  imageCount?: number;
+  postId?: string;
   error?: string;
 };
 
@@ -557,6 +668,8 @@ export type SimpleRun = {
   platformResults: SimpleRunPlatformResult[];
   linkResults?: SimpleRunLinkResult[];
   feishuResults?: SimpleRunFeishuResult[];
+  viralResult?: SimpleRunViralResult;
+  originalResult?: SimpleRunOriginalResult;
   posts: SimpleRunPostResult[];
   publish?: SimpleRunPublishResult;
   errors: string[];
@@ -595,6 +708,67 @@ export type SimpleRunQueueItem = {
   updatedAt: string;
   startedAt?: string;
   completedAt?: string;
+  error?: string;
+};
+
+export type DistributionScorePrediction = "高潜力" | "可测试" | "低优先级";
+
+export type DistributionScoreDimension = {
+  name: string;
+  score: number;
+  max: number;
+  reason: string;
+};
+
+export type DistributionScore = {
+  total: number;
+  threshold: number;
+  prediction: DistributionScorePrediction;
+  dimensions: DistributionScoreDimension[];
+};
+
+export type DistributionCheckItemResult = {
+  number: string;
+  recordId?: string;
+  status: "updated" | "not_found" | "failed";
+  distribution?: DistributionDecision;
+  score?: DistributionScore;
+  title?: string;
+  vehicle?: string;
+  previousValue?: string;
+  confidence?: number;
+  riskTags?: string[];
+  reasons?: string[];
+  error?: string;
+};
+
+export type DistributionCheckResponse = {
+  total: number;
+  updated: number;
+  distributable: number;
+  blocked: number;
+  failed: number;
+  results: DistributionCheckItemResult[];
+};
+
+export type DistributionCheckJob = DistributionCheckResponse & {
+  id: string;
+  ownerUserId: string;
+  ownerDisplayName?: string;
+  status: DistributionCheckQueueStatus;
+  priority: number;
+  attempts: number;
+  maxAttempts: number;
+  runAfter: string;
+  lockedBy?: string;
+  lockedUntil?: string;
+  createdAt: string;
+  updatedAt: string;
+  startedAt?: string;
+  completedAt?: string;
+  numbers: string[];
+  processed: number;
+  prompt: string;
   error?: string;
 };
 
@@ -686,6 +860,7 @@ export type MaterialLibraryAsset = {
   extension: string;
   kind: MaterialAssetKind;
   tags: string[];
+  visualProfile?: MaterialVisualProfile;
   createdAt: string;
   updatedAt: string;
 };
@@ -706,6 +881,7 @@ export type ConfigStatus = {
   databaseBackend: "sqlite" | "postgres";
   postgresConfigured: boolean;
   textModel: string;
+  openaiTextEndpoint: string;
   imageModel: string;
   imageProvider: string;
   openaiImageRequestTimeoutMs: number;
@@ -721,4 +897,5 @@ export type ConfigStatus = {
   tikhubBaseUrl: string;
   feishuCliBin?: string;
   feishuNotifyConfigured: boolean;
+  volcengineAsrConfigured: boolean;
 };

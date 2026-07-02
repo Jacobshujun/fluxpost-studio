@@ -1,5 +1,6 @@
 import { randomUUID } from "node:crypto";
-import { mkdir, readFile, writeFile } from "node:fs/promises";
+import { execFile } from "node:child_process";
+import { mkdir, readFile, rm, writeFile } from "node:fs/promises";
 import path from "node:path";
 import { compactError, recordExecutionLog } from "./activity-log";
 import { appConfig } from "./config";
@@ -42,6 +43,8 @@ type ComfyObjectInfo = Record<
     };
   }
 >;
+
+const outputMetadataStripTimeoutMs = 60_000;
 
 type ComfyUploadedImage = {
   name?: string;
@@ -421,8 +424,10 @@ function collectHistoryImages(entry?: ComfyHistoryEntry) {
 }
 
 async function saveComfyOutputImages(images: ComfyOutputImage[]) {
-  const outputDir = path.join(/*turbopackIgnore: true*/ process.cwd(), "public", "generated", "klein");
+  const outputDir = path.join(/*turbopackIgnore: true*/ process.cwd(), "public", "generated", "source-edits");
+  const tempDir = path.join(/*turbopackIgnore: true*/ process.cwd(), "data", "tmp", "comfy-output-strip");
   await mkdir(outputDir, { recursive: true });
+  await mkdir(tempDir, { recursive: true });
   const urls: string[] = [];
 
   for (const [index, image] of images.entries()) {
@@ -431,14 +436,45 @@ async function saveComfyOutputImages(images: ComfyOutputImage[]) {
     if (!response.ok) {
       throw new Error(`ComfyUI output download failed: ${response.status}`);
     }
-    const extension = extensionFromFile(image.filename) || extensionFromMimeType(normalizeMimeType(response.headers.get("content-type"), image.filename));
-    const fileName = `klein-${Date.now()}-${randomUUID()}-${index + 1}${extension}`;
-    await writeFile(path.join(outputDir, fileName), Buffer.from(await response.arrayBuffer()));
-    urls.push(`/generated/klein/${fileName}`);
+    const inputExtension = extensionFromFile(image.filename) || extensionFromMimeType(normalizeMimeType(response.headers.get("content-type"), image.filename));
+    const tempBase = `source-edit-input-${Date.now()}-${randomUUID()}-${index + 1}`;
+    const tempInput = path.join(tempDir, `${tempBase}${inputExtension}`);
+    const fileName = `source-edit-${Date.now()}-${randomUUID()}-${index + 1}.png`;
+    const outputFile = path.join(outputDir, fileName);
+
+    try {
+      await writeFile(tempInput, Buffer.from(await response.arrayBuffer()));
+      await stripComfyOutputMetadataWithFfmpeg(tempInput, outputFile);
+      urls.push(`/generated/source-edits/${fileName}`);
+    } catch (error) {
+      await rm(outputFile, { force: true }).catch(() => undefined);
+      throw error;
+    } finally {
+      await rm(tempInput, { force: true }).catch(() => undefined);
+    }
   }
 
   if (!urls.length) throw new Error("ComfyUI output image list was empty.");
   return urls;
+}
+
+function stripComfyOutputMetadataWithFfmpeg(inputFile: string, outputFile: string) {
+  return new Promise<void>((resolve, reject) => {
+    const child = execFile(
+      "ffmpeg",
+      ["-y", "-hide_banner", "-loglevel", "error", "-i", inputFile, "-map_metadata", "-1", "-frames:v", "1", outputFile],
+      { timeout: outputMetadataStripTimeoutMs },
+      (error, _stdout, stderr) => {
+        if (error) {
+          const detail = stderr?.toString().trim().split(/\r?\n/).slice(-2).join(" ") || error.message;
+          reject(new Error(`ComfyUI output metadata strip failed: ${detail.slice(0, 240)}`));
+          return;
+        }
+        resolve();
+      },
+    );
+    child.on("error", reject);
+  });
 }
 
 async function fetchComfyObjectInfo() {

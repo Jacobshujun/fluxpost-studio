@@ -11,6 +11,10 @@ import type { CrawlInput, CrawlPlatform } from "@/lib/types";
 
 export const runtime = "nodejs";
 
+type CrawlJobRequest = Partial<CrawlInput> & {
+  enableVideoTranscription?: boolean;
+};
+
 export async function GET(request: Request) {
   try {
     const account = await requireWorkspaceAccount(request);
@@ -27,7 +31,7 @@ export async function POST(request: Request) {
   const startedAt = Date.now();
   try {
     const account = await requireWorkspaceAccount(request);
-    const body = (await request.json()) as Partial<CrawlInput>;
+    const body = (await request.json()) as CrawlJobRequest;
     const input = parseCrawlInput(body);
     await recordExecutionLog({
       scope: "crawl/jobs",
@@ -156,7 +160,7 @@ export async function POST(request: Request) {
   }
 }
 
-function parseCrawlInput(body: Partial<CrawlInput>): CrawlInput {
+function parseCrawlInput(body: CrawlJobRequest): CrawlInput {
   const platform = body.platform;
   if (!isPlatform(platform)) throw new Error("Unsupported platform");
   const query = typeof body.query === "string" ? body.query.trim() : "";
@@ -176,6 +180,7 @@ function parseCrawlInput(body: Partial<CrawlInput>): CrawlInput {
     timeScope: typeof body.timeScope === "string" ? body.timeScope : undefined,
     contentType: typeof body.contentType === "string" ? body.contentType : undefined,
     cookie: typeof body.cookie === "string" ? body.cookie : undefined,
+    enableVideoTranscription: body.enableVideoTranscription === true,
   };
 }
 

@@ -1,0 +1,265 @@
+{
+  "project": "fluxpost-studio",
+  "status_values": [
+    "not_started",
+    "in_progress",
+    "ready_for_review",
+    "done",
+    "blocked"
+  ],
+  "features": [
+    {
+      "id": "harness-engineering",
+      "title": "Harness Engineering project structure",
+      "status": "done",
+      "definition_of_done": [
+        "AGENTS.md exists and defines startup, work, completion, boundary, and quality protocols",
+        "docs/harness contains project brief, feature state, progress, handoff, decisions, verification, pitfalls, and architecture rules",
+        "scripts/harness/check.ps1 runs real baseline verification without external production service calls",
+        "README explains Harness recovery and baseline verification"
+      ],
+      "evidence": [
+        "2026-06-17 Harness context budget migration completed: AGENTS.md startup reads status.md, feature_list.json, and rules.md; handoff/progress are on-demand history with HARNESS-LATEST markers.",
+        "2026-06-17 baseline passed: powershell -ExecutionPolicy Bypass -File scripts/harness/check.ps1, including default startup context 28.69 KB and typical code-task context 47.03 KB budget gates.",
+        "Detailed historical evidence archived at docs/harness/archive/feature-list-history-2026-06-17.json"
+      ],
+      "notes": "Initialized as the canonical long-term AI collaboration context."
+    },
+    {
+      "id": "keyword-crawl-content-pool",
+      "title": "Keyword crawl and content pool",
+      "status": "ready_for_review",
+      "definition_of_done": [
+        "Users can submit platform, keyword, count, and optional filters",
+        "TikHub results are normalized and written to data/content-pool.json",
+        "Crawled items expose metrics, media URLs, crawled time, and published time when available"
+      ],
+      "evidence": [
+        "Source files present: src/app/api/crawl/jobs/route.ts, src/lib/tikhub.ts, src/lib/content-pool.ts",
+        "2026-06-16 Dongchedi source-link/ID import added through src/lib/dongchedi.ts and src/lib/source-link-import.ts, with advanced/simple link-mode UI/API wiring, generated-post/review labels, and scripts/harness/dongchedi_import_check.mjs in the baseline; verification passed without live Dongchedi/TikHub/OpenAI/image-provider/Feishu production calls",
+        "Detailed historical evidence archived at docs/harness/archive/feature-list-history-2026-06-17.json"
+      ],
+      "notes": "External TikHub behavior is not part of default baseline verification."
+    },
+    {
+      "id": "media-cache-video-frames",
+      "title": "Crawled media cache, video frames, and video transcription",
+      "status": "ready_for_review",
+      "definition_of_done": [
+        "Crawled images and videos can be cached under public/media/crawl",
+        "Downloaded videos can produce cover, interval, or scene-change frames",
+        "Failures are visible to the caller and do not delete unrelated media",
+        "Configured Ark video transcription can merge speech-to-text output into the source body before rewrite"
+      ],
+      "evidence": [
+        "2026-07-01 Douyin video ranking uses resolution, bitrate, URL br/dimension hints, and CDN/download hints; bit_rate[] extraction covers play_addr/play_addr_265/play_addr_h264/download_addr, and content-pool media caching supports explicit force video refresh. video_quality_selection_check.mjs, video_download_fallback_check.mjs, full baseline, and local:restart passed without live provider calls.",
+        "2026-07-01 video high-frame selection now samples across cached videos, adds local quality scoring, filters obvious bad frames, and can apply OpenAI-compatible visual review without requiring complete-car framing; scripts/harness/video_frame_policy_check.mjs plus the full Harness baseline passed without live model calls.",
+        "2026-06-25 video transcription now extracts MP3 audio from cached videos with ffmpeg, uploads the MP3 through Ark Files, calls Ark Responses with input_audio.file_id, stores successful text on videoTranscript, and appends it to contentText before rewrite; scripts/harness/video_transcription_check.mjs and npx --no-install tsc --noEmit passed without live Ark calls."
+      ],
+      "notes": "Requires system ffmpeg on PATH for video frames and MP3 audio extraction. Live transcription requires ARK_API_KEY or the existing VOLCENGINE_ASR_APP_KEY alias, plus optional Ark model/prompt/audio-size/timeout variables; default verification does not call the external Ark service."
+    },
+    {
+      "id": "batch-content-production",
+      "title": "Batch content production",
+      "status": "ready_for_review",
+      "definition_of_done": [
+        "Users can select source items and material paths",
+        "Each source item gets an independent production task",
+        "Generated drafts include title, body, image prompt, image task choices, and review status"
+      ],
+      "evidence": [
+        "Source files present: src/app/api/production/batches/route.ts, src/lib/batch-production.ts, src/lib/openai.ts",
+        "Detailed historical evidence archived at docs/harness/archive/feature-list-history-2026-06-17.json"
+      ],
+      "notes": "OpenAI-compatible external calls are not part of default baseline verification."
+    },
+    {
+      "id": "review-feishu-publish",
+      "title": "Review and Feishu publishing",
+      "status": "ready_for_review",
+      "definition_of_done": [
+        "Users can manually patch or prompt-edit a generated post",
+        "Approved posts can be staged as Feishu payloads",
+        "Configured Feishu CLI can publish using the project wrapper"
+      ],
+      "evidence": [
+        "Source files present: src/app/api/review/route.ts, src/app/api/publish/feishu/route.ts, src/lib/feishu-cli.ts",
+        "2026-06-12 verification passed for /review: npx --no-install tsc --noEmit; npm run lint with existing 3 warnings only; npm run build; powershell -ExecutionPolicy Bypass -File scripts/harness/check.ps1; npm run local:restart",
+        "Detailed historical evidence archived at docs/harness/archive/feature-list-history-2026-06-17.json"
+      ],
+      "notes": "Ready for a real publish test with one approved generated post that has final local images; no real Base record creation has been executed in this verification. Feishu IM notification requires FEISHU_NOTIFY_CHAT_ID or FEISHU_NOTIFY_USER_ID plus bot message permission."
+    },
+    {
+      "id": "feishu-distribution-check",
+      "title": "Feishu distribution audit write-back",
+      "status": "ready_for_review",
+      "definition_of_done": [
+        "Users can bulk input Feishu record numbers from a signed-in browser session",
+        "The app can judge whether each record is distributable to other Xiaohongshu accounts",
+        "The app scores each record with a cheat-on-content-style pre-publication score and prediction without letting score force the distribution decision",
+        "Approved and blocked decisions are written back to the Feishu single-select field 是否分发, and the final numeric score is written to 内容评分",
+        "Default verification covers the tool without triggering live Feishu writes"
+      ],
+      "evidence": [
+        "Source files present: src/lib/distribution-check.ts, src/app/api/distribution-check/route.ts, and src/app/distribution-check/page.tsx",
+        "2026-06-17 distribution audit was upgraded to durable queue/progress mode: /distribution-check POST enqueues owner-scoped jobs, GET polls job/list progress, distribution_check_jobs stores progress/results, dedicated distribution concurrency pools isolate large audits from collection/generation work, and full Harness baseline passed without live Feishu writes.",
+        "Detailed historical evidence archived at docs/harness/archive/feature-list-history-2026-06-17.json"
+      ],
+      "notes": "Ready for a small intentional live validation with real 编号 values. No live Feishu write was triggered by automated verification."
+    },
+    {
+      "id": "execution-observability",
+      "title": "Execution activity log",
+      "status": "ready_for_review",
+      "definition_of_done": [
+        "Backend operations record activity entries",
+        "Frontend can read recent activity",
+        "Users can clear the activity log from the API"
+      ],
+      "evidence": [
+        "Source files present: src/app/api/activity/route.ts, src/lib/activity-log.ts",
+        "Detailed historical evidence archived at docs/harness/archive/feature-list-history-2026-06-17.json"
+      ],
+      "notes": "Stored in SQLite table execution_logs; legacy data/execution-log.json is retained as a migration artifact."
+    },
+    {
+      "id": "sqlite-runtime-persistence",
+      "title": "SQLite runtime persistence",
+      "status": "ready_for_review",
+      "definition_of_done": [
+        "Runtime stores use SQLite instead of JSON files as the primary write path",
+        "Existing JSON runtime data can migrate into SQLite without deleting legacy files",
+        "Baseline verification validates SQLite schema and store availability"
+      ],
+      "evidence": [
+        "Source file present: src/lib/database.ts",
+        "2026-06-02 passed: npm run lint; npx --no-install tsc --noEmit; npm run build; powershell -ExecutionPolicy Bypass -File scripts/harness/check.ps1",
+        "Detailed historical evidence archived at docs/harness/archive/feature-list-history-2026-06-17.json"
+      ],
+      "notes": "Uses Node.js built-in node:sqlite, which requires Node 24+ and emits an expected experimental warning."
+    },
+    {
+      "id": "postgres-runtime-storage",
+      "title": "PostgreSQL runtime storage and migration",
+      "status": "done",
+      "definition_of_done": [
+        "Runtime storage can use PostgreSQL when DATABASE_URL is configured",
+        "The app continues to use SQLite by default when DATABASE_URL is not configured",
+        "A PostgreSQL schema migration exists for the current runtime tables",
+        "A SQLite-to-PostgreSQL migration script can copy current runtime rows without moving media binaries",
+        "Baseline verification checks the PostgreSQL schema without requiring a live PostgreSQL server"
+      ],
+      "evidence": [
+        "2026-06-04 passed: powershell -ExecutionPolicy Bypass -File scripts/harness/check.ps1",
+        "Detailed historical evidence archived at docs/harness/archive/feature-list-history-2026-06-17.json"
+      ],
+      "notes": "Live local migration is complete. Current JSONB-table design preserves existing behavior; high-volume queue tables and SKIP LOCKED workers remain a follow-up."
+    },
+    {
+      "id": "modular-resource-workspaces",
+      "title": "Modular content, production, and material workspaces",
+      "status": "ready_for_review",
+      "definition_of_done": [
+        "The web UI exposes separate top-level modules for content pool management, production, and material library management",
+        "Content pool items can be created manually, edited, and deleted through local API routes",
+        "Generated posts are persisted, selectable, editable, deletable, and can be regenerated as versions",
+        "Material folders and assets can be created, edited, deleted, and used as production material paths"
+      ],
+      "evidence": [
+        "Source files present: src/app/page.tsx, src/app/globals.css",
+        "2026-06-02 passed browser check on http://127.0.0.1:3001/: production module rendered production queue/review/draft library and did not render crawl task, keyword pool, or content pool management on desktop/mobile",
+        "Detailed historical evidence archived at docs/harness/archive/feature-list-history-2026-06-17.json"
+      ],
+      "notes": "External OpenAI/TikHub/Feishu calls are not part of the default baseline. Browser manual UI review is still recommended."
+    },
+    {
+      "id": "ai-source-tagging",
+      "title": "AI auto-tagging for crawled content and visual assets",
+      "status": "ready_for_review",
+      "definition_of_done": [
+        "Crawled source items are automatically tagged with up to four allowed content tags before being persisted",
+        "The first nine source images or video highlight frames can receive one allowed visual tag each",
+        "Content and visual tags can be manually edited from the content-pool management UI",
+        "Manual tag edits are persisted through the existing SQLite-backed content item update path"
+      ],
+      "evidence": [
+        "2026-06-03 video frame-first update: src/lib/source-tagging.ts now uses only videoFrames for video/mixed visual tagging when frames exist; src/app/page.tsx uses frames as the image preview list; npm run lint, tsc, build, local restart, and Harness baseline passed",
+        "Detailed historical evidence archived at docs/harness/archive/feature-list-history-2026-06-17.json"
+      ],
+      "notes": "External GPT vision/text behavior is not part of the default baseline. Visual tagging sends available local media as inline image data where possible; if the relay rejects image inputs, visual tagging records a failed status without blocking content text tags."
+    },
+    {
+      "id": "batch-resource-management",
+      "title": "Batch management for content pool and generated posts",
+      "status": "ready_for_review",
+      "definition_of_done": [
+        "Users can multi-select content pool items and run bulk status or delete actions",
+        "Users can multi-select generated posts and run bulk status or delete actions",
+        "Batch APIs persist changes through the existing SQLite-backed domain stores",
+        "Batch actions record execution-log entries and refresh affected UI state"
+      ],
+      "evidence": [
+        "2026-06-02 Playwright check confirmed visible selection controls: content-pool selection changes from 选择 to 已选, generated-post selection changes from 选择 to 已选, and batch counters update",
+        "Detailed historical evidence archived at docs/harness/archive/feature-list-history-2026-06-17.json"
+      ],
+      "notes": "Bulk delete is destructive and requires browser confirmation. Manual browser walkthrough is still recommended before heavy operational use."
+    },
+    {
+      "id": "shared-workspace-accounts",
+      "title": "V1 whitelist account system with owner isolation",
+      "status": "ready_for_review",
+      "definition_of_done": [
+        "The workspace supports small-team whitelist login from environment configuration",
+        "Whitelist users receive stable account ids for local owner attribution",
+        "Whitelist mode supports administrator users from WORKSPACE_ADMIN_USERS",
+        "Browser sessions use HttpOnly cookies and daily sign-in uses per-user hashed passwords",
+        "Members can access only their own owner-scoped runtime records while admins can access all records",
+        "Write paths attribute new simple runs, content, material entries, generated posts, logs, and Feishu publish jobs to the current account",
+        "Default verification covers account schema and wiring without creating real credentials"
+      ],
+      "evidence": [
+        "Source files present: src/lib/workspace-accounts.ts, src/app/api/accounts/route.ts, src/app/api/accounts/session/route.ts",
+        "2026-06-08 passed: node scripts/harness/workspace_accounts_check.mjs; node scripts/harness/link_import_check.mjs; node scripts/harness/generated_posts_upsert_check.mjs; npx --no-install tsc --noEmit; npm run lint; npm run build; full powershell -ExecutionPolicy Bypass -File scripts/harness/check.ps1; npm run local:watch-simple -- -Once; npm run local:restart; read-only /api/accounts/session verification on http://127.0.0.1:3001",
+        "Detailed historical evidence archived at docs/harness/archive/feature-list-history-2026-06-17.json"
+      ],
+      "notes": "Default whitelist accounts identify operators and partition app-layer runtime records by owner for normal members. Admins can see all records. Direct media URL authorization under /media and /generated remains a V1.1 hardening item. No real whitelist credentials or account-table credentials are created during automated verification."
+    },
+    {
+      "id": "high-throughput-concurrency",
+      "title": "High-throughput provider concurrency",
+      "status": "ready_for_review",
+      "definition_of_done": [
+        "TikHub, media cache, GPT, image generation, Feishu, and production work use shared application-level concurrency pools",
+        "Default pool limits match current product targets: GPT 50, image 100, Feishu 50, with hard caps in code",
+        "Simple-mode platform crawling and post production run concurrently while progress writes remain serialized",
+        "Advanced batch production runs concurrently while task-status writes remain serialized",
+        "Generated post saves use single-row upsert so concurrent status updates do not duplicate primary keys",
+        "Baseline verification includes a static concurrency integration check without calling external services"
+      ],
+      "evidence": [
+        "2026-06-08 collection/generation defaults raised while Feishu writes remain queued: crawl=12, media=30, production=30, SIMPLE_RUN_WORKER_CONCURRENCY=4, Feishu queue worker default=1 with per-owner serialization; concurrency and Feishu queue Harness checks plus full baseline passed",
+        "Detailed historical evidence archived at docs/harness/archive/feature-list-history-2026-06-17.json"
+      ],
+      "notes": "Provider work still uses application-process concurrency pools. Simple-mode queued runs now use a durable database queue, but subtask-level provider replay and Feishu per-post idempotency remain future work. Real large-count simple runs still need manual validation before marking done."
+    },
+    {
+      "id": "simple-auto-workflow",
+      "title": "Simple mode automatic content workflow",
+      "status": "ready_for_review",
+      "definition_of_done": [
+        "Users can switch between simple and advanced workspace modes",
+        "Simple mode accepts keyword crawl, exact links, Feishu task numbers, one viral source link, or one original prompt, plus scoped target/count controls",
+        "Simple mode runs crawl, AI tagging, content production, image processing, approval, and Feishu publish as one backend sequence",
+        "Simple mode avoids unbounded image/keyframe processing per source item",
+        "Advanced mode can edit and save the default text and image prompts used by simple mode",
+        "Generated posts publish content tags to the Feishu Base 内容标签 multi-select field"
+      ],
+      "evidence": [
+        "Source files present: src/lib/simple-runs.ts, src/lib/workspace-settings.ts, src/lib/viral-replication.ts, src/app/api/simple/runs/route.ts, src/app/api/workspace/settings/route.ts",
+        "2026-06-30 simple-mode original generation added: UI/API accept sourceMode original with originalPrompt and default-off originalUseWebSearch; src/lib/original-creation.ts generates one platform=original post, plans up to 5 image prompts, uses the existing image provider path, auto-approves the post, and queues Feishu publish; focused checks simple_original_run_check.mjs, simple_link_run_check.mjs, simple_viral_run_check.mjs, simple_queue_check.mjs, tsc, and lint passed",
+        "Detailed historical evidence archived at docs/harness/archive/feature-list-history-2026-06-17.json"
+      ],
+      "notes": "External TikHub/OpenAI/image-generation/Feishu calls are not part of default baseline verification. A real small-count simple run and a larger two-keyword queue validation are still needed before marking done."
+    }
+  ]
+}

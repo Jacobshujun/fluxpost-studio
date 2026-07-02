@@ -188,13 +188,9 @@ function makeTask(source: NormalizedSourceItem, now: string): ProductionTask {
 }
 
 function buildBatchInstruction(source: NormalizedSourceItem, baseInstruction: string) {
-  const plan = source.productionPlan || buildProductionPlan(source);
   return [
     baseInstruction || "批量制作：逐条学习当前内容的信息结构、网感语气和画面策略，生成可审查图文草稿。",
     "批量模式要求：每条内容独立分析，不复用上一条内容的标题句式和正文结构。",
-    `当前内容方向：${plan.contentDirection}`,
-    `当前制作决策：${plan.decision}`,
-    `当前策略原因：${plan.reason}`,
   ].join("\n");
 }
 

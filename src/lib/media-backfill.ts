@@ -5,7 +5,15 @@ import { replaceVideoFrameUrlsInMediaUrls, selectBestVideoHighlightFrames } from
 import { canAccessWorkspaceOwner, type WorkspaceAccessActor } from "./workspace-ownership";
 import type { NormalizedSourceItem } from "./types";
 
-export async function backfillSourceItemMedia(sourceItemIds: string[], account?: WorkspaceAccessActor) {
+export type BackfillSourceItemMediaOptions = {
+  forceVideoRefresh?: boolean;
+};
+
+export async function backfillSourceItemMedia(
+  sourceItemIds: string[],
+  account?: WorkspaceAccessActor,
+  options: BackfillSourceItemMediaOptions = {},
+) {
   const ids = makeUniqueIds(sourceItemIds);
   const selectedIds = new Set(ids);
   const foundIds = new Set<string>();
@@ -36,7 +44,7 @@ export async function backfillSourceItemMedia(sourceItemIds: string[], account?:
     };
   }
 
-  const cachedItems = await cacheCrawledMedia(itemsToCache);
+  const cachedItems = await cacheCrawledMedia(itemsToCache, { forceVideoRefresh: options.forceVideoRefresh === true });
   const cachedById = new Map(cachedItems.map((item) => [item.id, item]));
   const updatedItems = new Map<string, NormalizedSourceItem>();
 
@@ -53,11 +61,14 @@ export async function backfillSourceItemMedia(sourceItemIds: string[], account?:
       const downloadedVideoUrl = cachedItem.downloadedVideoUrl || item.downloadedVideoUrl;
       const selectedVideoFrames = selectBestVideoHighlightFrames(cachedItem.videoFrames?.length ? cachedItem.videoFrames : item.videoFrames);
       const videoFrames = selectedVideoFrames.length ? selectedVideoFrames : undefined;
+      const videoTranscript = cachedItem.videoTranscript || item.videoTranscript;
       const nextItem: NormalizedSourceItem = {
         ...item,
+        contentText: cachedItem.contentText || item.contentText,
         downloadedImages,
         downloadedVideoUrl,
         videoFrames,
+        videoTranscript,
         downloadErrors: cachedItem.downloadErrors,
         mediaUrls: replaceVideoFrameUrlsInMediaUrls(
           mergeStringArrays(

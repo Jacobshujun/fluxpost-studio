@@ -6,9 +6,11 @@ import { concurrencyConfig, mapWithConcurrency, runWithConcurrencyPool } from ".
 import { extractDouyinCarouselImageUrls } from "./douyin-media";
 import { isLikelyNonContentImageUrl, normalizeContentImageUrls } from "./media-url-filter";
 import { extractPublishedTime } from "./source-timestamps";
+import { rankVideoUrlsByQuality, type VideoQualityCandidate } from "./video-quality";
 import type { CrawlInput, CrawlPlatform, NormalizedSourceItem, Platform } from "./types";
 
 type JsonRecord = Record<string, unknown>;
+type ExtractedMedia = { images: string[]; videos: string[]; videoCandidates?: VideoQualityCandidate[]; links: string[] };
 
 const xiaohongshuSearchEndpoint = "/api/v1/xiaohongshu/app_v2/search_notes";
 const maxXiaohongshuSearchPages = 20;
@@ -35,6 +37,7 @@ export type TikHubSourceLinkInput = {
   url: string;
   platform?: CrawlPlatform;
   cookie?: string;
+  enableVideoTranscription?: boolean;
 };
 
 export async function crawlTikHub(input: CrawlInput): Promise<NormalizedSourceItem[]> {
@@ -62,7 +65,7 @@ export async function crawlTikHub(input: CrawlInput): Promise<NormalizedSourceIt
 
   const filteredItems = dedupeItems(items).slice(0, input.targetCount);
   const { cacheCrawledMedia } = await import("./media-cache");
-  return cacheCrawledMedia(filteredItems);
+  return cacheCrawledMedia(filteredItems, { enableVideoTranscription: input.enableVideoTranscription === true });
 }
 
 export async function fetchTikHubItemBySourceLink(input: TikHubSourceLinkInput): Promise<NormalizedSourceItem[]> {
@@ -95,7 +98,7 @@ export async function fetchTikHubItemBySourceLink(input: TikHubSourceLinkInput):
     .slice(0, 1)
     .map((item) => ensureSourceUrlFromLink(item, input.url));
   const { cacheCrawledMedia } = await import("./media-cache");
-  return cacheCrawledMedia(normalizedItems);
+  return cacheCrawledMedia(normalizedItems, { enableVideoTranscription: input.enableVideoTranscription === true });
 }
 
 export function detectPlatformFromSourceUrl(value: string): CrawlPlatform | undefined {
@@ -360,7 +363,7 @@ export function buildXiaohongshuSearchPath(
     page: String(page),
     sort_type: mapXiaohongshuSort(input.sort),
     note_type: noteTypeParam || mapXiaohongshuNoteType(input.noteType),
-    time_filter: "不限",
+    time_filter: "\u4e0d\u9650",
     source: "explore_feed",
     ai_mode: "0",
   });
@@ -425,10 +428,10 @@ function mapXiaohongshuSort(sort?: string) {
 }
 
 export function mapXiaohongshuNoteType(noteType?: number) {
-  if (noteType === 1) return "视频笔记";
-  if (noteType === 2) return "普通笔记";
-  if (noteType === 3) return "直播笔记";
-  return "不限";
+  if (noteType === 1) return "\u89c6\u9891\u7b14\u8bb0";
+  if (noteType === 2) return "\u666e\u901a\u7b14\u8bb0";
+  if (noteType === 3) return "\u76f4\u64ad\u7b14\u8bb0";
+  return "\u4e0d\u9650";
 }
 
 function extractXiaohongshuSearchPaging(raw: unknown): XiaohongshuSearchPaging {
@@ -469,7 +472,7 @@ async function enrichXiaohongshuDetails(items: NormalizedSourceItem[]) {
     } catch (error) {
       await recordExecutionLog({
         scope: "tikhub",
-        action: "小红书 Web V3 详情补全失败",
+        action: "\u5c0f\u7ea2\u4e66 Web V3 \u8be6\u60c5\u8865\u5168\u5931\u8d25",
         status: "info",
         message: compactError(error),
         details: {
@@ -830,7 +833,7 @@ async function tikhubRequest(path: string, init?: RequestInit): Promise<unknown>
   const body = typeof init?.body === "string" ? init.body : undefined;
   await recordExecutionLog({
     scope: "tikhub",
-    action: "请求 TikHub 接口",
+    action: "\u8bf7\u6c42 TikHub \u63a5\u53e3",
     status: "running",
     message: `${method} ${url.pathname}`,
     details: {
@@ -854,7 +857,7 @@ async function tikhubRequest(path: string, init?: RequestInit): Promise<unknown>
   if (response.status < 200 || response.status >= 300) {
     await recordExecutionLog({
       scope: "tikhub",
-      action: "TikHub 接口失败",
+      action: "TikHub \u63a5\u53e3\u6210\u529f",
       status: "error",
       message: compactError(formatTikHubError(response.status, path, response.body)),
       durationMs: Date.now() - startedAt,
@@ -869,9 +872,9 @@ async function tikhubRequest(path: string, init?: RequestInit): Promise<unknown>
 
   await recordExecutionLog({
     scope: "tikhub",
-    action: "TikHub 接口成功",
+    action: "TikHub 鎺ュ彛鎴愬姛",
     status: "success",
-    message: `${method} ${url.pathname} 返回 ${response.status}`,
+    message: `${method} ${url.pathname} \u8fd4\u56de ${response.status}`,
     durationMs: Date.now() - startedAt,
     details: {
       method,
@@ -952,7 +955,10 @@ export function normalizeTikHubResponse(raw: unknown, platform: Platform): Norma
     const fallbackImages = shouldUseGenericImageFallback(platform, extractedImages) ? collectUrls(normalizedRecord, "image") : [];
     const images = normalizeContentImageUrls(dedupeStrings([...extractedImages, ...fallbackImages]))
       .slice(0, getMaxContentImages(platform));
-    const videos = dedupeStrings([...extractedMedia.videos, ...collectUrls(normalizedRecord, "video")]).slice(0, 8);
+    const videos = rankVideoUrlsByQuality([
+      ...(extractedMedia.videoCandidates || urlsToVideoCandidates(extractedMedia.videos, "extracted")),
+      ...urlsToVideoCandidates(collectUrls(normalizedRecord, "video"), "fallback"),
+    ]).slice(0, 8);
     const links = dedupeStrings([...extractedMedia.links, ...collectUrls(normalizedRecord, "link")]);
     const sourceUrl = normalizeUrl(firstString(normalizedRecord, [
       "share_url",
@@ -1094,9 +1100,16 @@ function dedupeDouyinRecords(records: JsonRecord[]) {
 
 function extractSourceTitle(record: JsonRecord, platform: Platform) {
   if (platform === "douyin") {
-    return firstString(record, ["title", "display_title", "displayTitle"]);
+    const title = firstString(record, ["title", "display_title", "displayTitle"]);
+    return title && !isDouyinNonContentTitle(title) ? title : undefined;
   }
   return firstString(record, ["title", "display_title", "displayTitle", "desc", "content", "text_raw"]);
+}
+
+function isDouyinNonContentTitle(title: string) {
+  const normalized = title.trim();
+  if (!normalized) return true;
+  return /(?:\u521b\u4f5c\u7684\u539f\u58f0|\u539f\u58f0$|original sound|created by)/i.test(normalized);
 }
 
 function extractContentText(record: JsonRecord, platform: Platform) {
@@ -1274,16 +1287,16 @@ function unwrapContentRecord(record: JsonRecord): JsonRecord {
   return content ? { ...record, ...content } : record;
 }
 
-function extractContentMedia(record: JsonRecord, platform: Platform) {
+function extractContentMedia(record: JsonRecord, platform: Platform): ExtractedMedia {
   if (platform === "douyin") return extractDouyinMedia(record);
   if (platform === "weibo") return extractWeiboMedia(record);
   if (platform === "xiaohongshu") return extractXiaohongshuMedia(record);
-  return { images: [] as string[], videos: [] as string[], links: [] as string[] };
+  return { images: [], videos: [], videoCandidates: [], links: [] };
 }
 
-function extractDouyinMedia(record: JsonRecord) {
+function extractDouyinMedia(record: JsonRecord): ExtractedMedia {
   const images: string[] = [];
-  const videos: string[] = [];
+  const videoCandidates: VideoQualityCandidate[] = [];
   const links: string[] = [];
 
   const carouselImages = extractDouyinCarouselImageUrls(record, maxDouyinContentImages);
@@ -1293,13 +1306,21 @@ function extractDouyinMedia(record: JsonRecord) {
   if (video) {
     ["play_addr", "play_addr_265", "play_addr_h264", "download_addr"].forEach((key) => {
       const candidate = getRecord(video[key]);
-      if (candidate) videos.push(...extractUrlList(candidate));
+      if (candidate) videoCandidates.push(...extractVideoCandidates(candidate, `video.${key}`));
     });
     const bitRate = video.bit_rate;
     if (Array.isArray(bitRate)) {
       bitRate.filter(isRecord).forEach((entry) => {
-        const playAddr = getRecord(entry.play_addr);
-        if (playAddr) videos.push(...extractUrlList(playAddr));
+        const inherited = {
+          width: firstNumber(entry, ["width", "w"]),
+          height: firstNumber(entry, ["height", "h"]),
+          bitrate: firstNumber(entry, ["bit_rate", "bitrate", "avg_bitrate", "avgBitrate", "video_bitrate"]),
+          quality: firstString(entry, ["quality_type", "quality", "qualityType", "gear_name", "gearName", "definition", "format", "format_id"]),
+        };
+        ["play_addr", "play_addr_265", "play_addr_h264", "download_addr"].forEach((key) => {
+          const candidate = getRecord(entry[key]);
+          if (candidate) videoCandidates.push(...extractVideoCandidates(candidate, `video.bit_rate.${key}`, inherited));
+        });
       });
     }
     if (!carouselImages.length) {
@@ -1315,15 +1336,16 @@ function extractDouyinMedia(record: JsonRecord) {
 
   return {
     images: normalizeContentImageUrls(dedupeStrings(images)).slice(0, maxDouyinContentImages),
-    videos: dedupeStrings(videos).filter(isDownloadableVideoUrl).slice(0, 8),
+    videos: rankVideoUrlsByQuality(videoCandidates).filter(isDownloadableVideoUrl).slice(0, 8),
+    videoCandidates,
     links: dedupeStrings(links),
   };
 }
 
 
-function extractWeiboMedia(record: JsonRecord) {
+function extractWeiboMedia(record: JsonRecord): ExtractedMedia {
   const images: string[] = [];
-  const videos: string[] = [];
+  const videoCandidates: VideoQualityCandidate[] = [];
   const links: string[] = [];
 
   const media = getRecord(record.media);
@@ -1337,11 +1359,8 @@ function extractWeiboMedia(record: JsonRecord) {
 
   const mediaVideos = media?.videos;
   if (Array.isArray(mediaVideos)) {
-    mediaVideos.filter(isRecord).forEach((item) => {
-      const src = firstString(item, ["src", "url"]);
-      if (src) videos.push(src);
-      const streams = item.streams;
-      if (Array.isArray(streams)) videos.push(...streams.filter((url): url is string => typeof url === "string"));
+    mediaVideos.filter(isRecord).forEach((item, index) => {
+      videoCandidates.push(...extractVideoCandidates(item, `media.videos.${index}`));
       const pageUrl = firstString(item, ["page_url"]);
       if (pageUrl) links.push(pageUrl);
     });
@@ -1388,7 +1407,7 @@ function extractWeiboMedia(record: JsonRecord) {
         "mp4_1080p_mp4",
       ].forEach((key) => {
         const value = mediaInfo[key];
-        if (typeof value === "string") videos.push(value);
+        if (typeof value === "string") videoCandidates.push({ url: value, keyHint: `page_info.media_info.${key}` });
       });
     }
     const pageUrl = firstString(pageInfo, ["page_url", "pageUrl", "object_url", "objectUrl"]);
@@ -1397,7 +1416,8 @@ function extractWeiboMedia(record: JsonRecord) {
 
   return {
     images: normalizeContentImageUrls(dedupeStrings(images)).slice(0, maxContentImages),
-    videos: dedupeStrings(videos).filter(isDownloadableVideoUrl).slice(0, 8),
+    videos: rankVideoUrlsByQuality(videoCandidates).filter(isDownloadableVideoUrl).slice(0, 8),
+    videoCandidates,
     links: dedupeStrings(links),
   };
 }
@@ -1449,9 +1469,9 @@ function extractWeiboImageUrls(value: unknown): string[] {
   return dedupeStrings(urls);
 }
 
-function extractXiaohongshuMedia(record: JsonRecord) {
+function extractXiaohongshuMedia(record: JsonRecord): ExtractedMedia {
   const images: string[] = [];
-  const videos: string[] = [];
+  const videoCandidates: VideoQualityCandidate[] = [];
 
   ["image_list", "images_list", "images", "imageList"].forEach((key) => {
     const value = findByKey(record, key);
@@ -1467,11 +1487,14 @@ function extractXiaohongshuMedia(record: JsonRecord) {
   if (cover) images.push(...extractUrlList(cover));
 
   const video = getRecord(findByKey(record, "video"));
-  if (video) videos.push(...extractUrlList(video).filter(isDownloadableVideoUrl));
+  if (video) videoCandidates.push(...extractVideoCandidates(video, "video"));
+  const videoInfo = getRecord(findByKey(record, "video_info_v2")) || getRecord(findByKey(record, "videoInfoV2"));
+  if (videoInfo) videoCandidates.push(...extractVideoCandidates(videoInfo, "video_info_v2"));
 
   return {
     images: normalizeContentImageUrls(dedupeStrings(images)).slice(0, maxContentImages),
-    videos: dedupeStrings(videos).slice(0, 8),
+    videos: rankVideoUrlsByQuality(videoCandidates).filter(isDownloadableVideoUrl).slice(0, 8),
+    videoCandidates,
     links: [] as string[],
   };
 }
@@ -1497,6 +1520,39 @@ function extractUrlList(record: JsonRecord): string[] {
   return dedupeStrings(urls);
 }
 
+function urlsToVideoCandidates(urls: string[], keyHint: string): VideoQualityCandidate[] {
+  return urls.map((url, index) => ({ url, keyHint, sourcePriority: -index }));
+}
+
+function extractVideoCandidates(value: unknown, keyHint = "", inherited: Partial<VideoQualityCandidate> = {}): VideoQualityCandidate[] {
+  const candidates: VideoQualityCandidate[] = [];
+  const visit = (node: unknown, currentKeyHint: string, context: Partial<VideoQualityCandidate>, depth: number) => {
+    if (depth > 6) return;
+    if (typeof node === "string") {
+      if (isDownloadableVideoUrl(node)) candidates.push({ ...context, url: node, keyHint: [context.keyHint, currentKeyHint].filter(Boolean).join(".") });
+      return;
+    }
+    if (Array.isArray(node)) {
+      node.forEach((child, index) => visit(child, `${currentKeyHint}.${index}`, context, depth + 1));
+      return;
+    }
+    if (!isRecord(node)) return;
+
+    const nextContext: Partial<VideoQualityCandidate> = {
+      ...context,
+      width: firstNumber(node, ["width", "w"]) || context.width,
+      height: firstNumber(node, ["height", "h"]) || context.height,
+      bitrate: firstNumber(node, ["bit_rate", "bitrate", "avg_bitrate", "avgBitrate", "video_bitrate"]) || context.bitrate,
+      quality: firstString(node, ["quality", "quality_type", "qualityType", "gear_name", "gearName", "definition", "format", "format_id"]) || context.quality,
+      keyHint: currentKeyHint || context.keyHint,
+    };
+
+    Object.entries(node).forEach(([key, child]) => visit(child, currentKeyHint ? `${currentKeyHint}.${key}` : key, nextContext, depth + 1));
+  };
+
+  visit(value, keyHint, inherited, 0);
+  return candidates;
+}
 function extractLikelyRecords(value: unknown): JsonRecord[] {
   if (Array.isArray(value) && value.every(isRecord)) return value;
 
@@ -1658,7 +1714,7 @@ function ensureSourceUrlFromLink(item: NormalizedSourceItem, sourceUrl: string):
 function extractFirstHttpUrl(value: string) {
   const match = value.match(/https?:\/\/[^\s"'<>]+/i);
   if (!match) return "";
-  return match[0].replace(/[),.，。；;]+$/u, "");
+  return stripTrailingUrlPunctuation(match[0]);
 }
 
 function extractXiaohongshuLinkInfo(value: string) {
@@ -1699,6 +1755,10 @@ function extractDouyinSingleVideoAwemeId(value: string) {
     const pathParts = parsed.pathname.split("/").map((part) => part.trim()).filter(Boolean);
     const paramCandidate = parsed.searchParams.get("aweme_id") || parsed.searchParams.get("awemeId") || parsed.searchParams.get("id");
     if (paramCandidate && /^\d{8,32}$/.test(paramCandidate)) return paramCandidate;
+    const modalCandidate = parsed.searchParams.get("modal_id");
+    if (modalCandidate && /^\d{8,32}$/.test(modalCandidate) && pathParts.some((part) => /^search$/i.test(part))) {
+      return modalCandidate;
+    }
     const videoIndex = pathParts.findIndex((part) => part === "video");
     const afterVideo = videoIndex >= 0 ? pathParts[videoIndex + 1] : "";
     if (afterVideo && /^\d{8,32}$/.test(afterVideo)) return afterVideo;
@@ -1734,6 +1794,10 @@ function normalizeUrl(value?: string) {
   return value;
 }
 
+function stripTrailingUrlPunctuation(value: string) {
+  return value.replace(/[),."'\u201C\u201D\u2018\u2019\uFF0C\u3002\uFF1B;]+$/u, "");
+}
+
 function shouldExcludeImageUrl(url: string, keyHint: string) {
   return (
     /avatar|author|profile|user_avatar|avatar_larger|avatar_thumb|avatar_medium|music|cha_list|challenge|play_addr|download_addr|bit_rate/i.test(keyHint) ||
@@ -1757,3 +1821,8 @@ function getRecord(value: unknown): JsonRecord | undefined {
 function isRecord(value: unknown): value is JsonRecord {
   return Boolean(value && typeof value === "object" && !Array.isArray(value));
 }
+
+
+
+
+
