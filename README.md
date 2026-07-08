@@ -120,6 +120,7 @@ COMFYUI_KLEIN_WORKFLOW_PATH=
 COMFYUI_KLEIN_CLIENT_ID=fluxpost-studio
 COMFYUI_KLEIN_PROMPT_NODE_ID=39
 COMFYUI_KLEIN_IMAGE_NODE_ID=44
+COMFYUI_KLEIN_STYLE_IMAGE_NODE_ID=
 COMFYUI_KLEIN_KSAMPLER_NODE_ID=28
 COMFYUI_KLEIN_SAVE_NODE_ID=43
 COMFYUI_KLEIN_UPLOAD_SUBFOLDER=fluxpost
@@ -178,7 +179,7 @@ OPENAI_IMAGE_MODEL=gpt-image-2
 
 `OPENAI_IMAGE_API_KEY` can be configured separately for the image provider; when it is empty the app uses `OPENAI_API_KEY`. `OPENAI_IMAGE_BASE_URL` is the primary image API base URL. Optional `OPENAI_IMAGE_BACKUP_BASE_URL` and `OPENAI_IMAGE_BACKUP_API_KEY` configure a backup Images API route: primary route failures switch image generation to the backup route, and backup route failures switch it back to primary. Text-to-image calls use `/images/generations`, and reference-image editing/image-to-image calls use `/images/edits`.
 
-`VIRAL_IMAGE_IMITATION_PROMPT` controls the prompt used when simple-mode viral replication imitates source images. It treats the ordered local vehicle material image as reference image 1 and the viral source image as reference image 2; restart the local app after changing this environment variable.
+`VIRAL_IMAGE_IMITATION_PROMPT` controls the full prompt used when simple-mode viral replication imitates source images, including any image 1/image 2 role constraints you want the model to follow. The code still sends the ordered local vehicle material image as reference image 1 and the viral source image as reference image 2 through `/images/edits`, but it does not add a separate hard-constraint prompt. Restart the local app after changing this environment variable.
 
 Local ComfyUI Klein processing is disabled by default. Keep `COMFYUI_KLEIN_ENABLED=false` to use the OpenAI-compatible `gpt-image-2` Images API path for car-exterior and people-with-car selected source-image tasks. Set `COMFYUI_KLEIN_ENABLED=true` plus either `COMFYUI_KLEIN_WORKFLOW_API_JSON` or `COMFYUI_KLEIN_WORKFLOW_PATH` to route those tasks to the local ComfyUI workflow. Inline API JSON takes precedence over the file path; the file path is read for each task, so edits in that workflow file do not require code changes. The `COMFYUI_KLEIN_KSAMPLER_*` values optionally override seed, steps, cfg, sampler, scheduler, and denoise from environment configuration; changing those env values requires restarting the app. The local workflow is serialized through `WORKER_LOCAL_IMAGE_CONCURRENCY=1`; `COMFYUI_KLEIN_FAILURE_POLICY=fallback_source` keeps a failed Klein image from failing the whole generated post.
 

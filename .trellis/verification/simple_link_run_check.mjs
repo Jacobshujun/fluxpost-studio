@@ -12,6 +12,7 @@ function assertContains(source, pattern, message) {
 }
 
 const page = read("src/app/page.tsx");
+const contentPage = read("src/app/content/page.tsx");
 const route = read("src/app/api/simple/runs/route.ts");
 const simpleRuns = read("src/lib/simple-runs.ts");
 const sourceLinkImport = read("src/lib/source-link-import.ts");
@@ -36,7 +37,7 @@ assertContains(route, /useComfyUiKlein\?:\s*boolean/, "Simple run API should acc
 assertContains(route, /directOriginalReference\?:\s*boolean/, "Simple run API should accept the direct-original switch.");
 assertContains(route, /enableVideoTranscription\?:\s*boolean/, "Simple run API should accept the video transcription switch.");
 assertContains(route, /cookie\?:\s*string/, "Simple run API should accept a request-only link cookie.");
-assertContains(route, /baseSourceMode\s*=\s*body\.sourceMode === "feishu" \? "feishu" : body\.sourceMode === "links" \? "links" : "keyword"/, "Simple run API must preserve link-mode source mapping.");
+assertContains(route, /baseSourceMode\s*=\s*body\.sourceMode === "feishu" \? "feishu" : body\.sourceMode === "links" \? "links"(?: : body\.sourceMode === "pool" \? "pool")? : "keyword"/, "Simple run API must preserve link-mode source mapping.");
 assertContains(route, /sourceMode:\s*body\.sourceMode === "original" \? "original" : body\.sourceMode === "viral" \? "viral" : baseSourceMode/, "Simple run API must forward the resolved source mode.");
 assertContains(route, /links:\s*body\.links/, "Simple run API must forward source links.");
 assertContains(route, /videoFrameOriginalReference:\s*body\.videoFrameOriginalReference !== false/, "Simple run API must default the video-frame original-reference switch on.");
@@ -67,9 +68,12 @@ assertContains(page, /simpleVideoFrameOriginalReference/, "Simple UI should keep
 assertContains(page, /simpleUseComfyUiKlein/, "Simple UI should keep controlled Klein routing switch state.");
 assertContains(page, /simpleDirectOriginalReference/, "Simple UI should keep controlled direct-original switch state.");
 assertContains(page, /simpleEnableVideoTranscription/, "Simple UI should keep controlled video transcription switch state.");
-assertContains(page, /const \[simpleUseComfyUiKlein,\s*setSimpleUseComfyUiKlein\] = useState\(false\)/, "Simple UI should default local Klein routing off.");
-assertContains(page, /const \[simpleDirectOriginalReference,\s*setSimpleDirectOriginalReference\] = useState\(false\)/, "Simple UI should default direct-original reference off.");
-assertContains(page, /const \[simpleEnableVideoTranscription,\s*setSimpleEnableVideoTranscription\] = useState\(false\)/, "Simple UI should default video transcription off.");
+assertContains(types, /export const defaultSimpleRunMediaSettings:[\s\S]*useComfyUiKlein:\s*false/, "Shared simple media defaults should keep local Klein routing off.");
+assertContains(types, /export const defaultSimpleRunMediaSettings:[\s\S]*directOriginalReference:\s*false/, "Shared simple media defaults should keep direct-original reference off.");
+assertContains(types, /export const defaultSimpleRunMediaSettings:[\s\S]*enableVideoTranscription:\s*false/, "Shared simple media defaults should keep video transcription off.");
+assertContains(page, /const \[simpleUseComfyUiKlein,\s*setSimpleUseComfyUiKlein\] = useState\(defaultSimpleRunMediaSettings\.useComfyUiKlein\)/, "Simple UI should initialize local Klein routing from shared defaults.");
+assertContains(page, /const \[simpleDirectOriginalReference,\s*setSimpleDirectOriginalReference\] = useState\(defaultSimpleRunMediaSettings\.directOriginalReference\)/, "Simple UI should initialize direct-original reference from shared defaults.");
+assertContains(page, /const \[simpleEnableVideoTranscription,\s*setSimpleEnableVideoTranscription\] = useState\(defaultSimpleRunMediaSettings\.enableVideoTranscription\)/, "Simple UI should initialize video transcription from shared defaults.");
 assertContains(page, /const \[simpleWriteFeishu,\s*setSimpleWriteFeishu\] = useState\(false\)/, "Simple UI should default Feishu writing off.");
 assertContains(page, /批量导入链接/, "Simple and compact UI should expose the batch-link entry.");
 assertContains(page, /sourceMode,\s*\n\s*keyword:/, "Simple start request must send source mode and keyword.");
@@ -79,8 +83,8 @@ assertContains(page, /useComfyUiKlein:\s*simpleUseComfyUiKlein/, "Simple start r
 assertContains(page, /directOriginalReference:\s*sourceMode === "viral" \|\| sourceMode === "original" \? undefined : simpleDirectOriginalReference/, "Simple start request must send the direct-original switch for non-viral/original runs.");
 assertContains(page, /enableVideoTranscription:\s*simpleEnableVideoTranscription/, "Simple start request must send the video transcription switch.");
 assertContains(page, /cookie:\s*sourceMode === "links" && simpleLinkPlatform === "dongchedi" \? cookie : undefined/, "Simple start request must send Cookie only for Dongchedi link mode.");
-assertContains(page, /\(linkImportPlatform === "douyin" \|\| linkImportPlatform === "dongchedi"\)/, "Advanced source-link import should expose Cookie for Douyin and Dongchedi.");
-assertContains(page, /cookie:\s*linkImportPlatform === "douyin" \|\| linkImportPlatform === "dongchedi" \? cookie : undefined/, "Advanced source-link import must send Cookie for Douyin and Dongchedi.");
+assertContains(contentPage, /linkImportPlatform === "douyin" \|\| linkImportPlatform === "dongchedi"/, "Content desk source-link import should expose Cookie for Douyin and Dongchedi.");
+assertContains(contentPage, /cookie:\s*linkImportPlatform === "douyin" \|\| linkImportPlatform === "dongchedi" \? cookie : undefined/, "Content desk source-link import must send Cookie for Douyin and Dongchedi.");
 assertContains(page, /linkPlatform === "dongchedi"[\s\S]*<FieldLabel label="Cookie" \/>/, "Simple and compact link-mode UI should expose Cookie for Dongchedi.");
 assertContains(page, /variant=\{workspaceMode === "compact" \? "compact" : "standard"\}[\s\S]*sourceMode=\{simpleSourceMode\}[\s\S]*linkText=\{simpleLinkText\}/, "Compact and simple variants must share the link-mode props.");
 

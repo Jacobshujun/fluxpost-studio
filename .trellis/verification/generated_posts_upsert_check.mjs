@@ -30,6 +30,11 @@ assertContains(
 );
 assertContains(
   generatedPosts,
+  /export async function saveGeneratedPost[\s\S]*const ownerAccount = previous \? undefined : account[\s\S]*applyWorkspaceOwner\(post,\s*ownerAccount,\s*previous \|\| post\)/,
+  "saveGeneratedPost must preserve an existing post owner when an admin or another account saves/reviews it.",
+);
+assertContains(
+  generatedPosts,
   /export async function updateGeneratedPost[\s\S]*await saveGeneratedPost\(nextPost,\s*account\)/,
   "updateGeneratedPost should persist through single-row upsert, not full-table replacement.",
 );

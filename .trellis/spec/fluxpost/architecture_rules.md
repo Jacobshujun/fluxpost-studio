@@ -4,7 +4,7 @@ Last updated: 2026-06-24
 
 ## Module Boundaries
 
-- UI entry stays under `src/app/page.tsx` and shared styling under `src/app/globals.css` unless a task explicitly scopes a component split.
+- Main workspace UI stays under `src/app/page.tsx`, standalone content harvesting/pool operations live under `src/app/content/page.tsx`, and shared styling stays under `src/app/globals.css` unless a task explicitly scopes another component split.
 - API routes under `src/app/api/**/route.ts` should stay thin and delegate domain work to `src/lib/*`.
 - Platform crawling belongs in `src/lib/tikhub.ts`.
 - Source link batch-import orchestration belongs in `src/lib/source-link-import.ts`; the API route should stay thin and delegate to that helper. Reusable source-link resolution for simple-run link mode also belongs in this module. TikHub platform detail/share endpoint construction and response normalization for source links still belong in `src/lib/tikhub.ts`.

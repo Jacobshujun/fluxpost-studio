@@ -23,7 +23,7 @@ Last updated: 2026-06-25
 
 1. Configure environment values in `.env.local` from the README Environment section.
 2. Start the local web app.
-3. Search/crawl content by platform and keyword through `/api/crawl/jobs`, batch-import supported source links into the content pool through `/api/crawl/links`, or use `/api/simple/runs` for one-click simple production from keywords, exact source links, Feishu task numbers, or one viral source link.
+3. Search/crawl content by platform and keyword through `/content` and `/api/crawl/jobs`, batch-import supported source links into the content pool through `/content` and `/api/crawl/links`, or use `/api/simple/runs` for one-click production from keywords, exact source links, Feishu task numbers, one viral source link, original prompts, or selected content-pool samples.
 4. Assess harvested items with the crawl-stage content safety gate, then persist retained items into the runtime database-backed content pool.
 5. Optionally scan local image material folders through `/api/materials/scan`.
 6. Generate post drafts through `/api/generate` or through the simple-run one-click workflow, including text and optional image generation.
@@ -57,6 +57,7 @@ Last updated: 2026-06-25
 ## Page, API, CLI Entrypoints
 
 - Main page: `src/app/page.tsx`.
+- Content harvesting and pool desk: `src/app/content/page.tsx`.
 - Root layout: `src/app/layout.tsx`.
 - API routes:
   - `GET|POST /api/accounts`
@@ -97,6 +98,7 @@ Last updated: 2026-06-25
 - Feishu/Lark IM task-launch idempotency rows live in `lark_task_launches` and are keyed by unique `message_id`.
 - Generated AI images: `public/generated/`.
 - Crawled media cache and video frames: `public/media/crawl/`.
+- Source-based generated posts can store final source video materials in optional `GeneratedPost.videoUrls` only when the operator enables the default-off `引用源视频素材` / `includeSourceVideo` switch; resolution prefers cached local `downloadedVideoUrl` over remote `videoUrl`.
 - Local material scanning accepts image extensions only: `.png`, `.jpg`, `.jpeg`, `.webp`, `.gif`.
 - Video frame extraction uses the system `ffmpeg` executable through `src/lib/media-cache.ts`.
 - Video transcription receives the cached local video path from `src/lib/media-cache.ts` only when a crawl/import/simple-run task passes `enableVideoTranscription === true`; when the switch is enabled and `ARK_API_KEY` or the existing `VOLCENGINE_ASR_APP_KEY` alias is configured, `src/lib/video-transcription.ts` extracts MP3 audio with `ffmpeg`, uploads the MP3 to Ark `/files` with `purpose=user_data`, calls Ark `/responses` with `input_audio.file_id`, and merges successful transcript text into `NormalizedSourceItem.contentText` before rewrite.
@@ -117,7 +119,7 @@ Last updated: 2026-06-25
 - GPT-Image-2 image generation uses the OpenAI Images API shape. `OPENAI_IMAGE_BASE_URL` configures the primary image API base URL, `OPENAI_IMAGE_API_KEY` configures the primary image API key with `OPENAI_API_KEY` fallback, optional `OPENAI_IMAGE_BACKUP_BASE_URL` and `OPENAI_IMAGE_BACKUP_API_KEY` configure a backup image route, `OPENAI_IMAGE_ENDPOINT=images` selects Images API dispatch, and `OPENAI_IMAGE_MODEL` defaults to `gpt-image-2`. Text-to-image requests use `/images/generations`; reference-image editing/image-to-image requests use multipart `/images/edits`.
 - Local ComfyUI Klein image processing is configured by `COMFYUI_BASE_URL`, `COMFYUI_KLEIN_WORKFLOW_PATH`, Klein node id env values, KSampler override env values, `COMFYUI_KLEIN_TIMEOUT_MS`, `COMFYUI_KLEIN_POLL_INTERVAL_MS`, and `COMFYUI_KLEIN_FAILURE_POLICY`. It is currently used for car-exterior source-image strategy tasks, including `车型美图`, and people-with-car source-image strategy tasks; it is serialized through `WORKER_LOCAL_IMAGE_CONCURRENCY=1`.
 - Feishu CLI publishing is configured by `FEISHU_CLI_BIN`, optional `FEISHU_CLI_BITABLE_ARGS`, `FEISHU_BITABLE_APP_TOKEN`, `FEISHU_BITABLE_TABLE_ID`, and optional `FEISHU_BITABLE_FIELD_MAP`.
-- Generated-post Feishu CLI publishing defaults to Base fields `动态标题`, `动态正文`, `动态素材`, `内容标签`, `内容创作来源`, and single-select `车型`; the content creation source value comes from the workspace owner display name on the generated post, with owner id as a historical fallback, and `车型` comes from the simple task keyword or imported Feishu vehicle value.
+- Generated-post Feishu CLI publishing defaults to Base fields `动态标题`, `动态正文`, `动态素材`, `内容标签`, `内容创作来源`, and single-select `车型`; the content creation source value comes from the workspace owner display name on the generated post, with owner id as a historical fallback, `车型` comes from the simple task keyword or imported Feishu vehicle value, and `动态素材` attachment upload combines generated images plus local source videos only for posts whose `videoUrls` were populated by the source-video opt-in switch.
 - Feishu task-number content import is configured by optional `FEISHU_CONTENT_IMPORT_BASE_TOKEN`, `FEISHU_CONTENT_IMPORT_TABLE_ID`, and `FEISHU_CONTENT_IMPORT_FIELD_MAP`; base token and table id default to the generated-post publish Base/table when omitted. The default read fields are `任务编号`, `动态标题`, `动态正文`, `动态素材`, and `车型`. Imported `车型` values become the content-pool keyword/project for the source items.
 - Feishu distribution audit is configured by optional `FEISHU_DISTRIBUTION_CHECK_BASE_TOKEN`, `FEISHU_DISTRIBUTION_CHECK_TABLE_ID`, `FEISHU_DISTRIBUTION_CHECK_VIEW_ID`, and `FEISHU_DISTRIBUTION_CHECK_FIELD_MAP`. The default target is Base `JbpPbSIMqaD75wsZ9fAcBy9mnEe`, table `tblA0EfoAF9J4ffi`, view `vewE44G31p`; it reads `编号`, `动态标题`, `动态正文`, `动态素材`, `车型`, and writes single-select `是否分发` plus numeric `内容评分`. Operators can customize the audit prompt from `/distribution-check`; the saved prompt is stored in workspace settings as `distributionCheckPrompt`. The page enqueues durable audit jobs and polls progress instead of waiting for one long request.
 - Optional Feishu IM success notification is configured by exactly one of `FEISHU_NOTIFY_CHAT_ID` or `FEISHU_NOTIFY_USER_ID`; it uses bot identity through `lark-cli im +messages-send`.

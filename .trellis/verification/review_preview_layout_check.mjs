@@ -16,13 +16,13 @@ const globals = read("src/app/globals.css");
 
 assertContains(
   reviewPage,
-  /<div className="review-preview-backdrop" role="dialog" aria-modal="true">[\s\S]*<div className="review-preview-panel">[\s\S]*<div className="review-preview-stage">[\s\S]*<img alt="" src=\{toDisplayImageSrc\(image\)\}/,
-  "Review page should render clicked images inside the preview dialog stage.",
+  /<div className="review-preview-backdrop" role="dialog" aria-modal="true">[\s\S]*<div className="review-preview-panel">[\s\S]*<div className="review-preview-stage">[\s\S]*<video src=\{url\} controls preload="metadata" \/>[\s\S]*<img alt="" src=\{toDisplayImageSrc\(url\)\}/,
+  "Review page should render clicked images and videos inside the preview dialog stage.",
 );
 
 assertContains(
   reviewPage,
-  /<PreviewDialog[\s\S]*onRemove=\{\(index\) => removeDraftImage\(index\)\}[\s\S]*onRegenerate=\{\(index\) => void regenerateDraftImage\(index\)\}/,
+  /<PreviewDialog[\s\S]*onRemove=\{\(kind, index\) => \(kind === "video" \? removeDraftVideo\(index\) : removeDraftImage\(index\)\)\}[\s\S]*onRegenerate=\{\(index\) => void regenerateDraftImage\(index\)\}/,
   "Review preview dialog should receive delete and prompt-regenerate handlers from the review page.",
 );
 
@@ -34,8 +34,8 @@ assertContains(
 
 assertContains(
   reviewPage,
-  /className="review-preview-actions"[\s\S]*onClick=\{\(\) => onRegenerate\(index\)\}[\s\S]*Wand2[\s\S]*Prompt[\s\S]*onClick=\{\(\) => onRemove\(index\)\}[\s\S]*Trash2/,
-  "Review preview dialog should render visible Prompt generation and image deletion buttons.",
+  /className="review-preview-actions"[\s\S]*kind === "image"[\s\S]*onClick=\{\(\) => onRegenerate\(index\)\}[\s\S]*Wand2[\s\S]*Prompt[\s\S]*onClick=\{\(\) => onRemove\(kind, index\)\}[\s\S]*Trash2/,
+  "Review preview dialog should render visible Prompt generation for images and deletion buttons for image/video media.",
 );
 
 assertContains(
@@ -58,8 +58,8 @@ assertContains(
 
 assertContains(
   globals,
-  /\.review-preview-stage img\s*\{[\s\S]*display:\s*block;[\s\S]*width:\s*100%;[\s\S]*height:\s*100%;[\s\S]*min-width:\s*0;[\s\S]*min-height:\s*0;[\s\S]*object-fit:\s*contain;/,
-  "Review preview images should fill the stage box and use object-fit: contain so large images are scaled down instead of clipped.",
+  /\.review-preview-stage img,\s*\.review-preview-stage video\s*\{[\s\S]*display:\s*block;[\s\S]*width:\s*100%;[\s\S]*height:\s*100%;[\s\S]*min-width:\s*0;[\s\S]*min-height:\s*0;[\s\S]*object-fit:\s*contain;/,
+  "Review preview media should fill the stage box and use object-fit: contain so large media are scaled down instead of clipped.",
 );
 
 assertContains(

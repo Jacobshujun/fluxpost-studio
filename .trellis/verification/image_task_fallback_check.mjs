@@ -16,6 +16,7 @@ function assertNotContains(source, pattern, message) {
 }
 
 const imageGeneration = read("src/lib/image-generation.ts");
+const creationControls = read("src/lib/creation-controls.ts");
 const imageSizeOptions = read("src/lib/image-size-options.ts");
 const page = read("src/app/page.tsx");
 const workspaceSettings = read("src/lib/workspace-settings.ts");
@@ -49,8 +50,8 @@ assertContains(
 
 assertContains(
   config,
-  /openaiImageEndpoint:\s*normalizeImageEndpoint\(process\.env\.OPENAI_IMAGE_ENDPOINT\s*\|\|\s*"responses"\)/,
-  "Image endpoint should be normalized so stale provider values cannot dispatch unsupported providers.",
+  /openaiImageEndpoint:\s*normalizeImageEndpoint\(process\.env\.OPENAI_IMAGE_ENDPOINT\s*\|\|\s*"images"\)/,
+  "Image endpoint should default to Images API so reference-image tasks send source images through /images/edits.",
 );
 
 assertContains(
@@ -133,14 +134,68 @@ assertContains(
 
 assertContains(
   imageGeneration,
-  /const taskPrompt = buildSingleImageTaskPrompt\(prompt, task\)[\s\S]*callImagesApi\(taskPrompt, 1, imageOptions, getTaskReferenceImages\(task\)\)/,
+  /const taskPrompt = buildSingleImageTaskPrompt\(prompt, task\)[\s\S]*callImagesApi\(taskPrompt, 1, imageOptions, getTaskReferenceImages\(task\), task\)/,
   "Selected image tasks, including viral replication slots, must send their per-task prompt and task reference images through Images API edits.",
+);
+
+assertContains(
+  imageGeneration,
+  /export type ImageTaskGenerationResult[\s\S]*status:\s*"completed"\s*\|\s*"needs_review"\s*\|\s*"failed"\s*\|\s*"skipped"[\s\S]*fallbackUsed:\s*boolean/,
+  "Image generation should return per-task diagnostics so viral drafts can show review reasons.",
+);
+
+assertContains(
+  imageGeneration,
+  /function isStrictDualReferenceTask\(task: SourceImageTask\)[\s\S]*task\.referencePolicy === "strict_dual_reference"/,
+  "Strict viral image tasks must be distinguishable from ordinary best-effort image tasks.",
+);
+
+assertContains(
+  imageGeneration,
+  /Strict viral image imitation requires OPENAI_IMAGE_ENDPOINT=images[\s\S]*\/images\/edits/,
+  "Strict viral image tasks must refuse non-Images endpoints instead of dropping reference images.",
+);
+
+assertContains(
+  imageGeneration,
+  /preparedReferences\.files\.length !== 2[\s\S]*Strict viral image imitation requires exactly 2 prepared reference images/,
+  "Strict viral image tasks must require exactly two prepared reference files before calling /images/edits.",
+);
+
+assertContains(
+  imageGeneration,
+  /if \(isStrictDualReferenceTask\(task\)\) \{[\s\S]*recordStrictTaskNeedsReview\(task, message, "Strict viral image task needs review"\)/,
+  "Strict viral image tasks must save provider/fallback failures as needs_review instead of using source-image fallback.",
 );
 
 assertContains(
   imageGeneration,
   /function getTaskReferenceImages\(task: SourceImageTask\)[\s\S]*task\.url[\s\S]*task\.referenceUrls/,
   "Selected image tasks should include the primary reference and any ordered additional reference URLs.",
+);
+
+assertContains(
+  creationControls,
+  /task\.referencePolicy === "strict_dual_reference"[\s\S]*Reference image 1[\s\S]*Reference image 2/,
+  "Strict viral image task prompts must preserve the two-reference contract instead of reusing single-reference task wording.",
+);
+
+assertNotContains(
+  config,
+  /VIRAL_IMAGE_REFERENCE_CONSTRAINT_PROMPT|viralImageReferenceConstraintPrompt/,
+  "Strict viral reference wording must not use a separate environment variable; users control it through VIRAL_IMAGE_IMITATION_PROMPT.",
+);
+
+assertNotContains(
+  creationControls,
+  /Reference image 1 has the highest priority for vehicle angle, perspective, scale, placement, exterior geometry, and visible details/,
+  "Strict viral image task prompts must not hard-code reference image 1 constraints.",
+);
+
+assertNotContains(
+  creationControls,
+  /Use reference image 2 (?:as|only as) .*reference/,
+  "Strict viral image task prompts must not hard-code reference image 2 constraints.",
 );
 
 assertContains(
@@ -291,6 +346,12 @@ assertContains(
   imageGeneration,
   /if \(isImageTaskSourceFallbackError\(error\)\) \{[\s\S]*const fallbackUrl = await resolveDirectSourceImageUrl\(task\.url\)[\s\S]*Image task failed; using source image[\s\S]*fallbackUrl: task\.url[\s\S]*outputUrl: fallbackUrl[\s\S]*imageUrls: \[fallbackUrl\]/,
   "Recoverable selected image task failures should return the direct source image URL after WebP-to-JPG normalization.",
+);
+
+assertContains(
+  imageGeneration,
+  /taskResults:\s*taskResultsSummary/,
+  "Selected image task generation should expose taskResults on the returned image result.",
 );
 
 assertContains(

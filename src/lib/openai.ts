@@ -4,6 +4,7 @@ import { runWithConcurrencyPool } from "./concurrency";
 import { formatImageTasksForPrompt, mergeProductionPlan } from "./creation-controls";
 import { makeDemoPost } from "./mock-data";
 import { buildProductionPlan, formatNonTextProductionConstraintsForPrompt } from "./production-plan";
+import { resolveSourceVideoUrls } from "./source-video-reference";
 import {
   clampGeneratedTitleMax,
   countVisibleTitleChars,
@@ -22,6 +23,7 @@ type RewriteInput = {
   instruction?: string;
   productionPlanOverride?: ProductionPlan;
   imageTasks?: SourceImageTask[];
+  includeSourceVideo?: boolean;
 };
 
 type ReviewEditInput = {
@@ -59,9 +61,11 @@ export async function generatePost(input: RewriteInput): Promise<GeneratedPost> 
   }
 
   if (!appConfig.openaiApiKey) {
+    const source = input.source;
     const demoPost = makeDemoPost(input.source, input.materialPaths);
     return {
       ...demoPost,
+      videoUrls: input.includeSourceVideo === true ? resolveSourceVideoUrls(source) : [],
       title: clampGeneratedTitleMax(demoPost.title),
     };
   }
@@ -103,6 +107,7 @@ export async function generatePost(input: RewriteInput): Promise<GeneratedPost> 
     body,
     imagePrompt: stringFromJson(json.imagePrompt, ""),
     imageUrls: [],
+    videoUrls: input.includeSourceVideo === true ? resolveSourceVideoUrls(input.source) : [],
     contentTags: input.source.contentTagging?.tags || [],
     productionPlanOverride: productionPlan,
     imageTasks: input.imageTasks,

@@ -45,7 +45,7 @@ const videoQuality = loadTsModule("src/lib/video-quality.ts");
 const tikhubSource = read("src/lib/tikhub.ts");
 const linkImportSource = read("src/lib/source-link-import.ts");
 const linkRouteSource = read("src/app/api/crawl/links/route.ts");
-const pageSource = read("src/app/page.tsx");
+const contentPageSource = read("src/app/content/page.tsx");
 const checkPs1 = read(".trellis/verification/check.ps1");
 
 assertContains(tikhubSource, /fetchTikHubItemBySourceLink/, "TikHub link import should be owned by src/lib/tikhub.ts.");
@@ -67,11 +67,11 @@ assertContains(linkRouteSource, /importSourceLinks/, "Link import API route must
 assertContains(linkRouteSource, /enableVideoTranscription\?:\s*boolean/, "Link import API route must accept the video transcription switch.");
 assertContains(linkRouteSource, /enableVideoTranscription:\s*body\.enableVideoTranscription === true/, "Link import API route must default video transcription off.");
 assertContains(linkRouteSource, /\/api\/crawl\/links|crawl\/links/, "Link import route must be isolated from keyword crawl route semantics.");
-assertContains(pageSource, /crawlInputMode/, "Frontend must expose a crawl input mode state.");
-assertContains(pageSource, /\/api\/crawl\/links/, "Frontend link import must call the dedicated link import API.");
-assertContains(pageSource, /linkImportText/, "Frontend must keep controlled batch link input state.");
-assertContains(pageSource, /linkImportEnableVideoTranscription/, "Frontend link import must keep video transcription switch state.");
-assertContains(pageSource, /enableVideoTranscription:\s*linkImportEnableVideoTranscription/, "Frontend link import must send the video transcription switch.");
+assertContains(contentPageSource, /crawlInputMode/, "/content must expose a crawl input mode state.");
+assertContains(contentPageSource, /\/api\/crawl\/links/, "/content link import must call the dedicated link import API.");
+assertContains(contentPageSource, /linkImportText/, "/content must keep controlled batch link input state.");
+assertContains(contentPageSource, /linkImportEnableVideoTranscription/, "/content link import must keep video transcription switch state.");
+assertContains(contentPageSource, /enableVideoTranscription:\s*linkImportEnableVideoTranscription/, "/content link import must send the video transcription switch.");
 assertContains(checkPs1, /Link import check/, "Trellis baseline must include the link import check.");
 
 const tikhub = loadTsModule("src/lib/tikhub.ts", {

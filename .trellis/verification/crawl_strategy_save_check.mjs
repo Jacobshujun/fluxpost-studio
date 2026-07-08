@@ -33,29 +33,29 @@ function extractFunction(source, name) {
   throw new Error(`${name} body is not closed.`);
 }
 
-const page = read("src/app/page.tsx");
-const saveHandler = extractFunction(page, "saveCurrentPlatformCrawlSettings");
-const currentSetting = extractFunction(page, "getCurrentPlatformCrawlSetting");
+const contentPage = read("src/app/content/page.tsx");
+const saveHandler = extractFunction(contentPage, "saveCurrentPlatformCrawlSettings");
+const currentSetting = extractFunction(contentPage, "getCurrentPlatformCrawlSetting");
 
 assertContains(
   saveHandler,
-  /const\s+nextSettings\s*=\s*getWorkspaceSettingsWithCurrentPlatformCrawlSetting\(\)/,
-  "Saving crawl strategy should snapshot the current advanced platform controls.",
+  /const\s+nextSettings:\s*WorkspacePromptSettings\s*=\s*\{[\s\S]*platformCrawlSettings:/,
+  "Saving crawl strategy should snapshot the current /content platform controls.",
 );
 assertContains(
   saveHandler,
-  /await\s+persistWorkspaceSettings\(nextSettings\)/,
-  "Saving crawl strategy should persist workspace settings through the shared settings API.",
+  /fetch\("\/api\/workspace\/settings"[\s\S]*method:\s*"PATCH"[\s\S]*body:\s*JSON\.stringify\(nextSettings\)/,
+  "Saving crawl strategy should persist workspace settings through the settings API.",
 );
 assertContains(
   saveHandler,
-  /setWorkspaceSettings\(savedSettings\)/,
+  /setWorkspaceSettings\(data\.settings\)/,
   "Saving crawl strategy should update the local workspace settings from the saved response.",
 );
 assertContains(
   saveHandler,
-  /setMessage\("[^"]*简单版[^"]*"\)/,
-  "Saving crawl strategy should tell operators that simple mode will use the saved setting.",
+  /setMessage\("[^"]*精简版[^"]*内容台[^"]*"\)/,
+  "Saving crawl strategy should tell operators that compact mode and the content desk will use the saved setting.",
 );
 assertNotContains(
   saveHandler,
@@ -64,7 +64,7 @@ assertNotContains(
 );
 
 assertContains(
-  page,
+  contentPage,
   /onClick=\{saveCurrentPlatformCrawlSettings\}[\s\S]*保存采集策略/,
   "Advanced crawl panel should expose a 保存采集策略 button wired to the save handler.",
 );

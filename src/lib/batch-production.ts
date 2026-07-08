@@ -18,6 +18,7 @@ type CreateBatchProductionInput = {
   sourceItemIds: string[];
   materialPaths: string[];
   instruction?: string;
+  includeSourceVideo?: boolean;
 };
 
 const maxBatchItems = 30;
@@ -44,6 +45,7 @@ export async function createAndRunBatchProduction(input: CreateBatchProductionIn
     status: "queued",
     instruction: input.instruction?.trim() || "",
     materialPaths: input.materialPaths.filter(Boolean),
+    includeSourceVideo: input.includeSourceVideo === true,
     sourceItemIds,
     createdAt: now,
     updatedAt: now,
@@ -112,6 +114,7 @@ export async function createAndRunBatchProduction(input: CreateBatchProductionIn
         source,
         materialPaths: job.materialPaths,
         instruction: buildBatchInstruction(source, job.instruction),
+        includeSourceVideo: job.includeSourceVideo === true,
       });
       const ownedPost = applyWorkspaceOwner(post, account, source);
       await savePost(ownedPost, account);

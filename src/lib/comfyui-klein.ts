@@ -100,6 +100,8 @@ export async function runComfyUiKleinImageTask(options: RunComfyUiKleinImageTask
       taskId: options.task.id,
       strategyKey: options.task.strategyKey || null,
       referenceImage: options.task.url,
+      referenceImageCount: getComfyReferenceImages(options.task).length,
+      referencePolicy: options.task.referencePolicy || "best_effort",
     },
   });
 
@@ -154,11 +156,13 @@ async function executeComfyUiKleinJob(job: ImageGenerationQueueJob, options: Run
       baseUrl: appConfig.comfyUiBaseUrl,
       taskId: options.task.id,
       strategyKey: options.task.strategyKey || null,
+      referenceImageCount: getComfyReferenceImages(options.task).length,
+      referencePolicy: options.task.referencePolicy || "best_effort",
     },
   });
 
-  const uploaded = await uploadReferenceImage(options.task.url);
-  const prompt = await buildKleinPrompt(options.prompt, uploaded);
+  const uploadedReferences = await uploadReferenceImages(getComfyReferenceImages(options.task));
+  const prompt = await buildKleinPrompt(options.prompt, uploadedReferences);
   const promptId = await queueComfyPrompt(prompt);
   const outputImages = await waitForComfyOutput(promptId);
   const outputUrls = await saveComfyOutputImages(outputImages);
@@ -197,8 +201,21 @@ async function createKleinQueueJob(options: RunComfyUiKleinImageTaskOptions): Pr
     strategyKey: options.task.strategyKey,
     prompt: options.prompt,
     referenceImage: options.task.url,
+    referenceImages: getComfyReferenceImages(options.task),
     outputUrls: [],
   };
+}
+
+function getComfyReferenceImages(task: SourceImageTask) {
+  return [task.url, ...(task.referenceUrls || [])].filter(Boolean);
+}
+
+async function uploadReferenceImages(referenceImages: string[]) {
+  const uploaded = [];
+  for (const referenceImage of referenceImages) {
+    uploaded.push(await uploadReferenceImage(referenceImage));
+  }
+  return uploaded;
 }
 
 async function uploadReferenceImage(referenceImage: string) {
@@ -258,12 +275,18 @@ async function loadReferenceImageBytes(referenceImage: string) {
   };
 }
 
-async function buildKleinPrompt(taskPrompt: string, uploaded: Required<ComfyUploadedImage>) {
+async function buildKleinPrompt(taskPrompt: string, uploadedReferences: Array<Required<ComfyUploadedImage>>) {
   const workflow = await readKleinWorkflow();
   const prompt = isApiPrompt(workflow) ? clonePrompt(workflow) : await convertUiWorkflowToPrompt(workflow);
+  const [primary, secondary] = uploadedReferences;
+  if (!primary) throw new Error("ComfyUI Klein requires at least one reference image.");
 
   const imageNode = findPromptNode(prompt, appConfig.comfyUiKleinImageNodeId, "LoadImage");
-  imageNode.inputs.image = uploaded.subfolder ? `${uploaded.subfolder}/${uploaded.name}` : uploaded.name;
+  imageNode.inputs.image = formatComfyUploadedImage(primary);
+  if (secondary) {
+    const styleImageNode = findSecondaryLoadImageNode(prompt, imageNode);
+    styleImageNode.inputs.image = formatComfyUploadedImage(secondary);
+  }
 
   const promptNode = findPromptNode(prompt, appConfig.comfyUiKleinPromptNodeId, "JjkText", "CLIPTextEncode");
   promptNode.inputs.text = taskPrompt;
@@ -272,6 +295,21 @@ async function buildKleinPrompt(taskPrompt: string, uploaded: Required<ComfyUplo
   applyKSamplerOverrides(kSamplerNode.inputs);
 
   return prompt;
+}
+
+function formatComfyUploadedImage(uploaded: Required<ComfyUploadedImage>) {
+  return uploaded.subfolder ? `${uploaded.subfolder}/${uploaded.name}` : uploaded.name;
+}
+
+function findSecondaryLoadImageNode(prompt: ComfyPrompt, primaryNode: ComfyPrompt[string]) {
+  if (appConfig.comfyUiKleinStyleImageNodeId) {
+    return findPromptNode(prompt, appConfig.comfyUiKleinStyleImageNodeId, "LoadImage");
+  }
+  const secondary = Object.values(prompt).filter((node) => node.class_type === "LoadImage" && node !== primaryNode)[0];
+  if (!secondary) {
+    throw new Error("ComfyUI Klein strict viral imitation requires a second LoadImage node or COMFYUI_KLEIN_STYLE_IMAGE_NODE_ID.");
+  }
+  return secondary;
 }
 
 async function readKleinWorkflow(): Promise<ComfyPrompt | ComfyUiWorkflow> {

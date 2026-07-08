@@ -20,6 +20,7 @@ const files = {
   activityLog: read("src/lib/activity-log.ts"),
   store: read("src/lib/store.ts"),
   page: read("src/app/page.tsx"),
+  globals: read("src/app/globals.css"),
   httpSmoke: read(".trellis/verification/http_smoke.js"),
   schema: read("db/migrations/001_initial_postgres.sql"),
 };
@@ -115,8 +116,18 @@ for (const route of [
 
 assertContains(files.page, /AccountAccessPanelV2/, "Frontend must render the account access panel.");
 assertContains(files.page, /AccountMenuV2/, "Frontend must render the admin-capable account menu.");
+assertContains(
+  files.globals,
+  /\.studio-topbar\s*>\s*\.design-header\s*\{[\s\S]*overflow:\s*visible;[\s\S]*z-index:\s*(?:[4-9]|\d{2,})\s*;/,
+  "Account menu host must stay above following topbar controls while allowing popover overflow.",
+);
 assertContains(files.page, /初始化管理员/, "Frontend must expose first-admin initialization.");
 assertContains(files.page, /保存账号/, "Frontend admin menu must expose account management.");
+assertNotContains(
+  files.globals,
+  /@media \(min-width:\s*1180px\)\s*\{\s*\.studio-frame\s*\{[\s\S]*?overflow:\s*hidden;/,
+  "Desktop studio-frame viewport lock must be scoped to advanced mode so compact/simple pages can scroll naturally.",
+);
 assertContains(files.httpSmoke, /expectStatus\("\/api\/content-pool",\s*undefined,\s*401\)/, "HTTP smoke must verify private content GETs reject unauthenticated access.");
 
 console.log("Workspace accounts and owner isolation check ok");

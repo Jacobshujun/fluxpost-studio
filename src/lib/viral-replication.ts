@@ -3,7 +3,6 @@ import { stat } from "node:fs/promises";
 import { compactError, recordExecutionLog } from "./activity-log";
 import { appConfig, openaiTextUrl } from "./config";
 import { runWithConcurrencyPool } from "./concurrency";
-import { defaultImageStrategyPrompts } from "./creation-controls";
 import { generatePost } from "./openai";
 import { toModelImageUrl } from "./model-image-input";
 import { buildProductionPlan } from "./production-plan";
@@ -220,6 +219,7 @@ export async function buildViralGeneratedPost(input: {
   imagePairs: ViralImageReferencePair[];
   settings: WorkspacePromptSettings;
   imitateImages?: boolean;
+  useComfyUiKlein?: boolean;
 }): Promise<GeneratedPost> {
   const selectedPairs = input.imitateImages === false ? [] : input.imagePairs.slice(0, maxViralImages);
   const imageTasks = selectedPairs.map((pair, index): SourceImageTask => ({
@@ -230,8 +230,9 @@ export async function buildViralGeneratedPost(input: {
     label: `viral pair ${index + 1}`,
     selected: true,
     mode: "wash",
-    prompt: buildViralImagePrompt(input.targetKeyword, input.settings, pair.sourceSpec),
-    provider: "openai_images",
+    prompt: buildViralImagePrompt(input.targetKeyword, pair.sourceSpec),
+    provider: input.useComfyUiKlein === true ? "comfyui_klein" : "openai_images",
+    referencePolicy: "strict_dual_reference",
     strategyKey: resolveViralImageStrategyKey(pair.sourceSpec),
   }));
   if (input.imitateImages !== false && !imageTasks.length) throw new Error("No paired vehicle material and viral source images were found for viral image generation");
@@ -291,6 +292,7 @@ export async function recordViralImageTaskPlan(input: {
       taskCount: selectedTasks.length,
       pairedImageCount: input.pairs.length,
       referenceShape: selectedTasks.length ? "images/edits" : "none",
+      referencePolicy: selectedTasks.some((task) => task.referencePolicy === "strict_dual_reference") ? "strict_dual_reference" : "best_effort",
       strategies: selectedTasks.map((task) => task.strategyKey || "unknown").join(",") || "none",
       materialFiles: input.pairs.map((pair) => pair.material.name).filter(Boolean).join(",") || "none",
       sourceSlots: input.pairs.map((pair) => pair.index + 1).join(",") || "none",
@@ -560,23 +562,12 @@ function resolveViralImageStrategyKey(sourceSpec?: ViralImageSpec): keyof Worksp
   return "carExterior";
 }
 
-function resolveViralImageStrategyPrompt(settings: WorkspacePromptSettings, sourceSpec?: ViralImageSpec) {
-  const strategyKey = resolveViralImageStrategyKey(sourceSpec);
-  return settings.imageStrategyPrompts[strategyKey] || defaultImageStrategyPrompts[strategyKey];
-}
-
-function buildViralImagePrompt(targetKeyword: string, settings: WorkspacePromptSettings, sourceSpec?: ViralImageSpec) {
-  const strategyPrompt = resolveViralImageStrategyPrompt(settings, sourceSpec);
+function buildViralImagePrompt(targetKeyword: string, sourceSpec?: ViralImageSpec) {
   return [
     appConfig.viralImageImitationPrompt,
-    strategyPrompt,
     `Target vehicle/product keyword: ${targetKeyword}.`,
-    "Reference image 1 is the user-provided target vehicle image. Reference image 2 is the viral source style image.",
-    "Use reference image 1 for vehicle identity, body shape, trim, lights, wheels, and visible details.",
-    "Use reference image 2 for composition, camera distance, subject placement, scene atmosphere, lighting, color grading, and visual rhythm.",
-    "Adapt the source layout and viewpoint to the target vehicle instead of copying the exact source pixels.",
     sourceSpec?.stylePrompt ? `Analyzed artistic style from reference image 2: ${sourceSpec.stylePrompt}.` : "",
-    sourceSpec?.composition ? `Source composition guidance: ${sourceSpec.composition}.` : "",
+    sourceSpec?.composition ? `Source visual guidance: ${sourceSpec.composition}.` : "",
     sourceSpec?.colorPalette ? `Source color palette guidance: ${sourceSpec.colorPalette}.` : "",
     sourceSpec?.aestheticKeywords?.length ? `Source aesthetic keywords: ${sourceSpec.aestheticKeywords.join(", ")}.` : "",
     "Do not publish, copy, or reproduce the original viral source image.",

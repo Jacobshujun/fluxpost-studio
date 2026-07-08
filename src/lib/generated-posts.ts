@@ -34,8 +34,9 @@ export async function saveGeneratedPost(post: GeneratedPost, account?: Workspace
   const previous = store.posts.find((item) => item.id === post.id);
   const access = account || accessActorFromOwner(post.ownerUserId, post.ownerDisplayName);
   if (previous && access) assertCanAccessWorkspaceRecord(access, previous, "Generated post not found");
+  const ownerAccount = previous ? undefined : account;
   const nextPost: GeneratedPost = {
-    ...applyWorkspaceOwner(post, account, previous || post),
+    ...applyWorkspaceOwner(post, ownerAccount, previous || post),
     title: clampGeneratedTitleMax(post.title),
     createdAt: post.createdAt || previous?.createdAt || new Date().toISOString(),
     version: post.version || previous?.version || 1,

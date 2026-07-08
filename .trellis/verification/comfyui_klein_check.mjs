@@ -38,6 +38,7 @@ assertContains(config, /COMFYUI_KLEIN_KSAMPLER_STEPS/, "Klein KSampler steps mus
 assertContains(config, /COMFYUI_KLEIN_KSAMPLER_CFG/, "Klein KSampler cfg must be configurable by env.");
 assertContains(config, /COMFYUI_KLEIN_KSAMPLER_DENOISE/, "Klein KSampler denoise must be configurable by env.");
 assertContains(config, /COMFYUI_KLEIN_FAILURE_POLICY/, "Klein failure policy must be configurable.");
+assertContains(config, /COMFYUI_KLEIN_STYLE_IMAGE_NODE_ID/, "Klein workflow must support an optional second reference image node id.");
 
 assertContains(types, /provider\?: SourceImageTaskProvider/, "Source image tasks must carry optional provider routing.");
 assertContains(types, /comfyUiKleinEnabled:\s*boolean/, "Config status must expose the non-sensitive Klein enabled flag.");
@@ -86,9 +87,14 @@ assertContains(
 );
 
 assertContains(simpleRuns, /buildDefaultImageTasks\(source,\s*settings\.imageStrategyPrompts,\s*\{[\s\S]*useComfyUiKlein:\s*input\.useComfyUiKlein === true && isComfyUiKleinConfigured\(\)[\s\S]*directOriginalReference:\s*input\.directOriginalReference === true/, "Simple runs must route Klein and direct-original tasks from persisted run policy.");
+assertContains(
+  simpleRuns,
+  /buildViralGeneratedPost\(\{[\s\S]*useComfyUiKlein:\s*normalizedInput\.useComfyUiKlein === true && isComfyUiKleinConfigured\(\)/,
+  "Viral imitation tasks must route to ComfyUI only when the user switch is enabled and the local workflow is configured.",
+);
 assertContains(page, /const comfyUiKleinAvailable = Boolean\(config\?\.comfyUiKleinConfigured\)/, "Frontend task previews must use non-sensitive config status for Klein availability.");
 assertContains(page, /const imageUseComfyUiKlein = imageUseComfyUiKleinOverride \?\? comfyUiKleinAvailable/, "Advanced Klein switch must be clickable while defaulting from config availability.");
-assertContains(page, /const \[simpleUseComfyUiKlein,\s*setSimpleUseComfyUiKlein\] = useState\(false\)/, "Simple Klein switch must default off even when local Klein is configured.");
+assertContains(page, /const \[simpleUseComfyUiKlein,\s*setSimpleUseComfyUiKlein\] = useState\(defaultSimpleRunMediaSettings\.useComfyUiKlein\)/, "Simple Klein switch must initialize from the shared default-off setting.");
 assertContains(page, /const useComfyUiKleinTasks = comfyUiKleinAvailable && imageUseComfyUiKlein/, "Frontend Klein routing must require both config availability and the user switch.");
 assertContains(page, /buildDefaultImageTasks\(selectedSource,\s*workspaceSettings\.imageStrategyPrompts,\s*\{[\s\S]*useComfyUiKlein:\s*useComfyUiKleinTasks[\s\S]*directOriginalReference:\s*imageDirectOriginalReference/, "Frontend default image tasks must follow the user image policy switches.");
 assertContains(page, /启用本地 Klein 模型/, "Frontend must expose a Klein routing switch.");
@@ -110,6 +116,9 @@ assertContains(comfyKlein, /appConfig\.comfyUiKleinWorkflowJson\.trim\(\)/, "Kle
 assertContains(comfyKlein, /runWithConcurrencyPool\("localImage"/, "Klein workflow calls must be serialized by the local image pool.");
 assertContains(comfyKlein, /saveImageGenerationQueueJobToDb/, "Klein workflow calls must persist queue/job state.");
 assertContains(comfyKlein, /upload\/image/, "Klein workflow must upload reference images through ComfyUI.");
+assertContains(comfyKlein, /uploadReferenceImages\(getComfyReferenceImages\(options\.task\)\)/, "Klein workflow must upload all task reference images, not only the vehicle image.");
+assertContains(comfyKlein, /findSecondaryLoadImageNode/, "Klein workflow must assign viral style image 2 to a second LoadImage node.");
+assertContains(comfyKlein, /COMFYUI_KLEIN_STYLE_IMAGE_NODE_ID/, "Klein workflow must support configured style/reference image node routing.");
 assertContains(comfyKlein, /comfyUrl\("prompt"\)/, "Klein workflow must submit prompts through ComfyUI.");
 assertContains(comfyKlein, /history\/\$\{encodeURIComponent\(promptId\)\}/, "Klein workflow must poll prompt history for outputs.");
 assertContains(comfyKlein, /comfyUrl\("view"\)/, "Klein workflow must download output images through ComfyUI view.");

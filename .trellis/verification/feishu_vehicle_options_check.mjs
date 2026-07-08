@@ -78,7 +78,8 @@ assertContains(publishRoute, /normalizePostsForFeishuPublish/, "Manual Feishu pu
 assertContains(publishRoute, /normalizeFeishuVehicleValue/, "Manual Feishu publish route must normalize vehicle values against real Base options.");
 assertContains(publishRoute, /Feishu \$\{vehicleOptions\.fieldName\} option not found/, "Manual Feishu publish route must reject unknown vehicle options before queueing.");
 assertContains(publishRoute, /enqueueFeishuPublishJob\(postsForPublish/, "Manual Feishu publish route must enqueue normalized posts.");
-assertContains(reviewRoute, /"title" \| "body" \| "imagePrompt" \| "status" \| "imageUrls" \| "imageTasks" \| "feishuVehicle"/, "Review API manualPatch must allow feishuVehicle.");
+assertContains(reviewRoute, /manualPatch\?: Partial<Pick<GeneratedPost,[\s\S]*"feishuVehicle"/, "Review API manualPatch must allow feishuVehicle.");
+assertContains(reviewRoute, /if \("feishuVehicle" in body\.manualPatch\) allowedPatch\.feishuVehicle = body\.manualPatch\.feishuVehicle/, "Review API must preserve feishuVehicle in manual patches.");
 assertContains(reviewPage, /\/api\/publish\/feishu\/vehicle-options/, "Standalone review page must load Feishu vehicle options.");
 assertContains(reviewPage, /feishuVehicle/, "Standalone review page must render or persist feishuVehicle.");
 assertContains(mainPage, /\/api\/publish\/feishu\/vehicle-options/, "Main workspace must load Feishu vehicle options.");

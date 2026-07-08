@@ -1,5 +1,6 @@
 import { NextResponse } from "next/server";
 import { getSourceItemsByIds } from "@/lib/content-pool";
+import { hasSelectedImageTask } from "@/lib/creation-controls";
 import { getGeneratedPost, makeGeneratedPostVersion } from "@/lib/generated-posts";
 import { generateImagesFromPrompt } from "@/lib/image-generation";
 import { normalizeImageGenerationSize } from "@/lib/image-size-options";
@@ -28,16 +29,18 @@ export async function POST(request: Request) {
     if (!currentPost) return NextResponse.json({ error: "Post not found" }, { status: 404 });
     const source = (await getSourceItemsByIds([currentPost.sourceItemId], account))[0];
     if (!source) return NextResponse.json({ error: "Source item is required" }, { status: 400 });
+    const requestImageTasks = Array.isArray(body.imageTasks) ? body.imageTasks : currentPost.imageTasks;
 
     const nextPost = await generatePost({
       source,
       materialPaths: Array.isArray(body.materialPaths) ? body.materialPaths : currentPost.materialPaths,
       instruction: body.instruction || "重新生成一个差异化版本，保留事实信息，调整标题钩子、段落节奏和表达角度。",
       productionPlanOverride: body.productionPlanOverride || currentPost.productionPlanOverride,
-      imageTasks: Array.isArray(body.imageTasks) ? body.imageTasks : currentPost.imageTasks,
+      imageTasks: requestImageTasks,
     });
 
-    if (body.generateImages !== false) {
+    const generateImages = body.generateImages !== false;
+    if (generateImages && hasSelectedImageTask(nextPost.imageTasks)) {
       const imageSize = normalizeImageGenerationSize(body.imageSize);
       const imageResult = await generateImagesFromPrompt(nextPost.imagePrompt, 1, nextPost.imageTasks, {
         size: imageSize,
@@ -45,6 +48,8 @@ export async function POST(request: Request) {
       });
       nextPost.imageUrls = imageResult.imageUrls;
       nextPost.aiNotes = [...nextPost.aiNotes, `再次生成版本，配图返回 ${imageResult.imageUrls.length} 张。`];
+    } else {
+      nextPost.aiNotes = [...nextPost.aiNotes, generateImages ? "未选择图片任务，重生成只处理文字草稿。" : "图片生成已关闭，重生成只处理文字草稿。"];
     }
 
     const post = await makeGeneratedPostVersion(currentPost, nextPost, account);

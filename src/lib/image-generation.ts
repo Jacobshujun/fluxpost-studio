@@ -33,6 +33,17 @@ type PreparedReferenceImage = {
   bytes: number;
 };
 
+export type ImageTaskGenerationResult = {
+  taskId: string;
+  taskLabel: string;
+  status: "completed" | "needs_review" | "failed" | "skipped";
+  endpointPath?: "images/edits" | "images/generations" | "responses" | "comfyui_klein";
+  referenceImageCount: number;
+  expectedReferenceImageCount?: number;
+  fallbackUsed: boolean;
+  message?: string;
+};
+
 const maxImageAttempts = 3;
 const imageRequestTimeoutMs = appConfig.openaiImageRequestTimeoutMs;
 const remoteReferenceTimeoutMs = 30_000;
@@ -59,6 +70,7 @@ type PreparedReferenceImages = {
 type SelectedImageTaskResult = {
   imageUrls: string[];
   failedTask?: string;
+  taskResult: ImageTaskGenerationResult;
 };
 
 export async function generateImagesFromPrompt(
@@ -88,19 +100,26 @@ export async function generateImagesFromPrompt(
       );
       const imageUrls = taskResults.flatMap((result) => result.imageUrls);
       const failedTasks = taskResults.map((result) => result.failedTask).filter((item): item is string => Boolean(item));
+      const taskResultsSummary = taskResults.map((result) => result.taskResult);
+      const needsReviewTasks = taskResultsSummary.filter((result) => result.status === "needs_review");
 
       if (!imageUrls.length && failedTasks.length) {
         throw new Error(`All image tasks failed: ${failedTasks.join("; ")}`);
       }
 
       return {
-        status: "completed" as const,
+        status: needsReviewTasks.length ? ("needs_review" as const) : ("completed" as const),
         imageUrls,
+        taskResults: taskResultsSummary,
+        message: needsReviewTasks.length
+          ? `Image generation saved for review: ${needsReviewTasks.map((task) => `${task.taskLabel}: ${task.message || task.status}`).join("; ")}`
+          : undefined,
       };
     }
 
     const imageUrls: string[] = [];
     const failedTasks: string[] = [];
+    const taskResultsSummary: ImageTaskGenerationResult[] = [];
     for (const [index, task] of selectedTasks.entries()) {
       await recordExecutionLog({
         scope: "openai/image",
@@ -117,6 +136,11 @@ export async function generateImagesFromPrompt(
       if (task.mode === "keep") {
         const sourceImageUrl = await resolveDirectSourceImageUrl(task.url);
         imageUrls.push(sourceImageUrl);
+        taskResultsSummary.push(makeTaskGenerationResult(task, "skipped", {
+          referenceImageCount: 1,
+          fallbackUsed: false,
+          message: "Keep-mode task used the source image without calling the image model.",
+        }));
         await recordExecutionLog({
           scope: "openai/image",
           action: "Keep source image",
@@ -134,16 +158,28 @@ export async function generateImagesFromPrompt(
 
       const taskPrompt = buildSingleImageTaskPrompt(providerPrompt, task);
       try {
-        const taskUrls =
-          appConfig.openaiImageEndpoint === "images"
-            ? await callImagesApi(taskPrompt, 1, imageOptions, getTaskReferenceImages(task))
-            : await callResponsesImageTool(taskPrompt, 1, imageOptions);
+        const taskUrls = await runImageProviderTask(taskPrompt, task, imageOptions);
         imageUrls.push(...taskUrls);
+        taskResultsSummary.push(makeTaskGenerationResult(task, "completed", {
+          endpointPath: resolveTaskEndpointPath(task),
+          referenceImageCount: getTaskReferenceImages(task).length,
+          fallbackUsed: false,
+        }));
       } catch (error) {
         const message = compactError(error);
+        if (isStrictDualReferenceTask(task)) {
+          taskResultsSummary.push(await recordStrictTaskNeedsReview(task, message, "Strict viral image task needs review"));
+          continue;
+        }
         if (isImageTaskSourceFallbackError(error)) {
           const fallbackUrl = await resolveDirectSourceImageUrl(task.url);
           imageUrls.push(fallbackUrl);
+          taskResultsSummary.push(makeTaskGenerationResult(task, "completed", {
+            endpointPath: appConfig.openaiImageEndpoint === "images" ? "images/edits" : "responses",
+            referenceImageCount: getTaskReferenceImages(task).length,
+            fallbackUsed: true,
+            message,
+          }));
           await recordExecutionLog({
             scope: "openai/image",
             action: isImageTaskTimeoutError(error) ? "Image task timed out; using source image" : "Image task failed; using source image",
@@ -162,6 +198,12 @@ export async function generateImagesFromPrompt(
         }
 
         failedTasks.push(`${task.label}: ${message}`);
+        taskResultsSummary.push(makeTaskGenerationResult(task, "failed", {
+          endpointPath: appConfig.openaiImageEndpoint === "images" ? "images/edits" : "responses",
+          referenceImageCount: getTaskReferenceImages(task).length,
+          fallbackUsed: false,
+          message,
+        }));
         await recordExecutionLog({
           scope: "openai/image",
           action: "Single image task failed",
@@ -180,9 +222,14 @@ export async function generateImagesFromPrompt(
       throw new Error(`All image tasks failed: ${failedTasks.join("; ")}`);
     }
 
+    const needsReviewTasks = taskResultsSummary.filter((result) => result.status === "needs_review");
     return {
-      status: "completed" as const,
+      status: needsReviewTasks.length ? ("needs_review" as const) : ("completed" as const),
       imageUrls,
+      taskResults: taskResultsSummary,
+      message: needsReviewTasks.length
+        ? `Image generation saved for review: ${needsReviewTasks.map((task) => `${task.taskLabel}: ${task.message || task.status}`).join("; ")}`
+        : undefined,
     };
   }
 
@@ -285,6 +332,11 @@ async function runSelectedImageTask(
     });
     return {
       imageUrls: [sourceImageUrl],
+      taskResult: makeTaskGenerationResult(task, "skipped", {
+        referenceImageCount: 1,
+        fallbackUsed: false,
+        message: "Keep-mode task used the source image without calling the image model.",
+      }),
     };
   }
 
@@ -293,9 +345,20 @@ async function runSelectedImageTask(
     const taskUrls = await runImageProviderTask(taskPrompt, task, imageOptions);
     return {
       imageUrls: taskUrls,
+      taskResult: makeTaskGenerationResult(task, "completed", {
+        endpointPath: resolveTaskEndpointPath(task),
+        referenceImageCount: getTaskReferenceImages(task).length,
+        fallbackUsed: false,
+      }),
     };
   } catch (error) {
     const message = compactError(error);
+    if (isStrictDualReferenceTask(task)) {
+      return {
+        imageUrls: [],
+        taskResult: await recordStrictTaskNeedsReview(task, message, "Strict viral image task needs review"),
+      };
+    }
     if (shouldFallbackComfyUiKleinTask(task)) {
       const fallbackUrl = await resolveDirectSourceImageUrl(task.url);
       await recordExecutionLog({
@@ -315,6 +378,12 @@ async function runSelectedImageTask(
       });
       return {
         imageUrls: [fallbackUrl],
+        taskResult: makeTaskGenerationResult(task, "completed", {
+          endpointPath: "images/edits",
+          referenceImageCount: getTaskReferenceImages(task).length,
+          fallbackUsed: true,
+          message,
+        }),
       };
     }
 
@@ -340,6 +409,12 @@ async function runSelectedImageTask(
       });
       return {
         imageUrls: [fallbackUrl],
+        taskResult: makeTaskGenerationResult(task, "completed", {
+          endpointPath: appConfig.openaiImageEndpoint === "images" ? "images/edits" : "responses",
+          referenceImageCount: getTaskReferenceImages(task).length,
+          fallbackUsed: true,
+          message,
+        }),
       };
     }
 
@@ -357,6 +432,12 @@ async function runSelectedImageTask(
     return {
       imageUrls: [],
       failedTask: `${task.label}: ${message}`,
+      taskResult: makeTaskGenerationResult(task, "failed", {
+        endpointPath: appConfig.openaiImageEndpoint === "images" ? "images/edits" : "responses",
+        referenceImageCount: getTaskReferenceImages(task).length,
+        fallbackUsed: false,
+        message,
+      }),
     };
   }
 }
@@ -366,17 +447,73 @@ async function runImageProviderTask(taskPrompt: string, task: SourceImageTask, i
     return runComfyUiKleinImageTask({ prompt: taskPrompt, task });
   }
 
+  if (isStrictDualReferenceTask(task) && appConfig.openaiImageEndpoint !== "images") {
+    throw new Error("Strict viral image imitation requires OPENAI_IMAGE_ENDPOINT=images so reference images are sent through /images/edits.");
+  }
+
   if (!isImageProviderConfigured()) {
     throw new Error("OPENAI_IMAGE_API_KEY or OPENAI_API_KEY is not configured.");
   }
 
   return appConfig.openaiImageEndpoint === "images"
-    ? callImagesApi(taskPrompt, 1, imageOptions, getTaskReferenceImages(task))
+    ? callImagesApi(taskPrompt, 1, imageOptions, getTaskReferenceImages(task), task)
     : callResponsesImageTool(taskPrompt, 1, imageOptions);
 }
 
 function getTaskReferenceImages(task: SourceImageTask) {
   return [task.url, ...(task.referenceUrls || [])].filter(Boolean);
+}
+
+function isStrictDualReferenceTask(task: SourceImageTask) {
+  return task.referencePolicy === "strict_dual_reference";
+}
+
+function makeTaskGenerationResult(
+  task: SourceImageTask,
+  status: ImageTaskGenerationResult["status"],
+  patch: Omit<Partial<ImageTaskGenerationResult>, "taskId" | "taskLabel" | "status">,
+): ImageTaskGenerationResult {
+  return {
+    taskId: task.id,
+    taskLabel: task.label,
+    status,
+    referenceImageCount: patch.referenceImageCount || 0,
+    expectedReferenceImageCount: isStrictDualReferenceTask(task) ? 2 : patch.expectedReferenceImageCount,
+    fallbackUsed: patch.fallbackUsed === true,
+    endpointPath: patch.endpointPath,
+    message: patch.message,
+  };
+}
+
+function resolveTaskEndpointPath(task: SourceImageTask): ImageTaskGenerationResult["endpointPath"] {
+  if (task.provider === "comfyui_klein" && isComfyUiKleinConfigured()) return "comfyui_klein";
+  return appConfig.openaiImageEndpoint === "images" ? "images/edits" : "responses";
+}
+
+async function recordStrictTaskNeedsReview(task: SourceImageTask, message: string, action: string) {
+  const result = makeTaskGenerationResult(task, "needs_review", {
+    endpointPath: resolveTaskEndpointPath(task),
+    referenceImageCount: getTaskReferenceImages(task).length,
+    fallbackUsed: false,
+    message,
+  });
+  await recordExecutionLog({
+    scope: "openai/image",
+    action,
+    status: "info",
+    message: `${task.label} was saved for manual review instead of falling back to a non-viral-style image: ${message}`,
+    details: {
+      taskId: task.id,
+      taskLabel: task.label,
+      referencePolicy: task.referencePolicy || "best_effort",
+      endpointPath: result.endpointPath || "unknown",
+      referenceImageCount: result.referenceImageCount,
+      expectedReferenceImageCount: result.expectedReferenceImageCount || 0,
+      fallbackUsed: false,
+      strategyKey: task.strategyKey || null,
+    },
+  });
+  return result;
 }
 
 function shouldFallbackComfyUiKleinTask(task: SourceImageTask) {
@@ -457,14 +594,20 @@ async function callResponsesImageToolInPool(prompt: string, count: number, optio
   return imageUrls;
 }
 
-async function callImagesApi(prompt: string, count: number, options: ImageGenerationOptions, referenceImages: string[] = []) {
-  return runWithConcurrencyPool("image", () => callImagesApiInPool(prompt, count, options, referenceImages));
+async function callImagesApi(prompt: string, count: number, options: ImageGenerationOptions, referenceImages: string[] = [], task?: SourceImageTask) {
+  return runWithConcurrencyPool("image", () => callImagesApiInPool(prompt, count, options, referenceImages, task));
 }
 
-async function callImagesApiInPool(prompt: string, count: number, options: ImageGenerationOptions, referenceImages: string[] = []) {
+async function callImagesApiInPool(prompt: string, count: number, options: ImageGenerationOptions, referenceImages: string[] = [], task?: SourceImageTask) {
   const startedAt = Date.now();
   const preparedReferences = await prepareReferenceImages(referenceImages, options.size);
   const endpointPath = preparedReferences.files.length ? "images/edits" : "images/generations";
+  if (task && isStrictDualReferenceTask(task) && (endpointPath !== "images/edits" || preparedReferences.files.length !== 2 || referenceImages.length !== 2)) {
+    await cleanupPreparedReferenceImages(preparedReferences);
+    throw new Error(
+      `Strict viral image imitation requires exactly 2 prepared reference images through /images/edits; prepared ${preparedReferences.files.length}/${referenceImages.length}.`,
+    );
+  }
   const sizeConstrainedPrompt = buildImageSizeConstrainedPrompt(prompt, options.size);
   await recordExecutionLog({
     scope: "openai/image",
@@ -476,7 +619,12 @@ async function callImagesApiInPool(prompt: string, count: number, options: Image
       count,
       promptLength: sizeConstrainedPrompt.length,
       endpointPath,
+      taskId: task?.id || null,
+      taskLabel: task?.label || null,
+      referencePolicy: task?.referencePolicy || "best_effort",
       referenceImageCount: preparedReferences.values.length,
+      preparedReferenceFileCount: preparedReferences.files.length,
+      expectedReferenceImageCount: task && isStrictDualReferenceTask(task) ? 2 : referenceImages.length,
       localReferenceCount: preparedReferences.localCount,
       remoteReferenceCount: preparedReferences.remoteCount,
       encodedReferenceCount: preparedReferences.encodedCount,

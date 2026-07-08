@@ -35,7 +35,7 @@ import type { FeishuPostPublishState, FeishuPublishJob, GeneratedPost, Platform 
 
 type ReviewFilter = GeneratedPost["status"] | "all" | "ready";
 type ReviewTimeFilter = "all" | "today" | "7d" | "30d";
-type BusyState = "load" | "save" | "review" | "batch" | "publish" | null;
+type BusyState = "load" | "save" | "approve" | "review" | "batch" | "publish" | null;
 
 type FeishuPublishResponse = {
   status?: "queued" | "running" | "published" | "attachment_failed" | "needs_config" | "skipped" | "failed" | string;
@@ -88,6 +88,7 @@ type PublishSnapshot = {
 type PreviewState = {
   post: GeneratedPost;
   index: number;
+  kind?: "image" | "video";
 } | null;
 
 const localMediaPreviewVersion = "20260605-image-format-v2";
@@ -266,9 +267,23 @@ export default function ReviewPage() {
     setSelectedPostIds(filteredPosts.slice(0, 200).map((post) => post.id));
   }
 
-  async function saveDraft(patch?: Partial<GeneratedPost>, instruction?: string, options?: { nextPostId?: string }) {
+  function mergeSavedPost(savedPost: GeneratedPost, preferredPostId?: string) {
+    const nextPosts = upsertReviewPost(posts, savedPost);
+    const nextSelectedId =
+      preferredPostId && nextPosts.some((post) => post.id === preferredPostId)
+        ? preferredPostId
+        : nextPosts.some((post) => post.id === savedPost.id)
+          ? savedPost.id
+          : nextPosts[0]?.id || "";
+    setPosts(nextPosts);
+    setSelectedPostId(nextSelectedId);
+    setSelectedPostIds((current) => current.filter((id) => nextPosts.some((post) => post.id === id)));
+    setDraft(nextPosts.find((post) => post.id === nextSelectedId) || null);
+  }
+
+  async function saveDraft(patch?: Partial<GeneratedPost>, instruction?: string, options?: { nextPostId?: string; busyState?: BusyState }) {
     if (!draft) return;
-    setBusy(instruction ? "review" : "save");
+    setBusy(options?.busyState || (instruction ? "review" : "save"));
     setMessage("");
     try {
       const manualPatch = {
@@ -276,6 +291,7 @@ export default function ReviewPage() {
         body: draft.body,
         imagePrompt: draft.imagePrompt,
         imageUrls: draft.imageUrls,
+        videoUrls: draft.videoUrls,
         imageTasks: draft.imageTasks,
         feishuVehicle: draft.feishuVehicle,
         ...patch,
@@ -288,9 +304,7 @@ export default function ReviewPage() {
       const data = (await res.json()) as { post?: GeneratedPost; error?: string };
       if (!res.ok || !data.post) throw new Error(data.error || "保存审查修改失败");
       const nextSelectedId = options?.nextPostId || data.post.id;
-      setDraft(data.post);
-      setSelectedPostId(nextSelectedId);
-      await loadPosts(nextSelectedId);
+      mergeSavedPost(data.post, nextSelectedId);
       setMessage(data.post.status === "approved" ? "已通过审查" : "已保存修改");
     } catch (error) {
       setMessage(error instanceof Error ? error.message : "保存审查修改失败");
@@ -302,7 +316,7 @@ export default function ReviewPage() {
   async function approveDraft() {
     if (!draft) return;
     const nextPostId = findNextUnreviewedPostId(posts, draft.id);
-    await saveDraft({ status: "approved" }, undefined, { nextPostId });
+    await saveDraft({ status: "approved" }, undefined, { nextPostId, busyState: "approve" });
   }
 
   function moveDraftImage(index: number, delta: -1 | 1) {
@@ -322,9 +336,21 @@ export default function ReviewPage() {
     setDraft(nextDraft);
     setImagePromptByIndex((current) => removeImagePromptValue(current, draft, index));
     setPreview((current) => {
-      if (!current || current.post.id !== draft.id) return current;
+      if (!current || current.post.id !== draft.id || current.kind === "video") return current;
       if (!imageUrls.length) return null;
-      return { post: nextDraft, index: Math.min(current.index, imageUrls.length - 1) };
+      return { post: nextDraft, index: Math.min(current.index, imageUrls.length - 1), kind: "image" };
+    });
+  }
+
+  function removeDraftVideo(index: number) {
+    if (!draft || !postVideoUrls(draft)[index]) return;
+    const videoUrls = postVideoUrls(draft).filter((_, currentIndex) => currentIndex !== index);
+    const nextDraft = { ...draft, videoUrls };
+    setDraft(nextDraft);
+    setPreview((current) => {
+      if (!current || current.post.id !== draft.id || current.kind !== "video") return current;
+      if (!videoUrls.length) return null;
+      return { post: nextDraft, index: Math.min(current.index, videoUrls.length - 1), kind: "video" };
     });
   }
 
@@ -337,8 +363,8 @@ export default function ReviewPage() {
       imageUrls[index] = imageUrl;
       const nextDraft = { ...currentDraft, imageUrls };
       setPreview((current) => {
-        if (!current || current.post.id !== postId) return current;
-        return { post: nextDraft, index: Math.min(current.index, imageUrls.length - 1) };
+        if (!current || current.post.id !== postId || current.kind === "video") return current;
+        return { post: nextDraft, index: Math.min(current.index, imageUrls.length - 1), kind: "image" };
       });
       return nextDraft;
     });
@@ -352,7 +378,7 @@ export default function ReviewPage() {
       if (!currentDraft || currentDraft.id !== postId) return currentDraft;
       const imageUrls = [...currentDraft.imageUrls, imageUrl];
       const nextDraft = { ...currentDraft, imageUrls };
-      setPreview((current) => (current && current.post.id === postId ? { post: nextDraft, index: current.index } : current));
+      setPreview((current) => (current && current.post.id === postId && current.kind !== "video" ? { post: nextDraft, index: current.index, kind: "image" } : current));
       return nextDraft;
     });
     setMessage(nextMessage);
@@ -526,7 +552,7 @@ export default function ReviewPage() {
       postIds: postsToPublish.map((post) => post.id),
       status: "running",
       title: "正在提交飞书写入队列",
-      detail: `准备写入 ${postsToPublish.length} 条内容，图片素材共 ${countImages(postsToPublish)} 张。`,
+      detail: `准备写入 ${postsToPublish.length} 条内容，素材共 ${countPostMedia(postsToPublish)} 个。`,
       progress: 32,
       notification: "完成后会按当前配置发送飞书通知。",
     });
@@ -572,6 +598,7 @@ export default function ReviewPage() {
           body: value.body,
           imagePrompt: value.imagePrompt,
           imageUrls: value.imageUrls,
+          videoUrls: value.videoUrls,
           imageTasks: value.imageTasks,
           feishuVehicle: value.feishuVehicle,
           status: "approved",
@@ -716,7 +743,7 @@ export default function ReviewPage() {
                           <div className="mt-2 flex flex-wrap gap-1.5">
                             <StatusBadge status={post.status} />
                             <span className="status-badge text-[10px] text-[var(--text-muted)]">{platformLabels[post.platform] || post.platform}</span>
-                            <span className="status-badge text-[10px] text-[var(--text-muted)]">{post.imageUrls.length} 图</span>
+                            <span className="status-badge text-[10px] text-[var(--text-muted)]">{countPostMedia([post])} 素材</span>
                           </div>
                         </div>
                       </div>
@@ -755,7 +782,7 @@ export default function ReviewPage() {
                           tabIndex={0}
                           onPaste={(event) => handleDraftImagePaste(event, index)}
                         >
-                          <button className="review-gallery-preview" type="button" onClick={() => setPreview({ post: draft, index })}>
+                          <button className="review-gallery-preview" type="button" onClick={() => setPreview({ post: draft, index, kind: "image" })}>
                             {/* eslint-disable-next-line @next/next/no-img-element */}
                             <img alt={`最终配图 ${index + 1}`} src={toDisplayImageSrc(url)} referrerPolicy="no-referrer" />
                             <span className="review-gallery-index">{index + 1}</span>
@@ -818,6 +845,19 @@ export default function ReviewPage() {
                     ) : (
                       <ReviewImageAddTile empty busy={Boolean(busy) || Boolean(imageBusyKey)} isUploading={imageBusyKey === "upload:add"} onOpen={() => setImageUploadPanelOpen(true)} />
                     )}
+                    {postVideoUrls(draft).map((url, index) => (
+                      <div key={`${url}-${index}`} className="review-gallery-tile review-video-tile" tabIndex={0}>
+                        <button className="review-gallery-preview" type="button" onClick={() => setPreview({ post: draft, index, kind: "video" })}>
+                          <video src={url} controls preload="metadata" />
+                          <span className="review-gallery-index">V{index + 1}</span>
+                        </button>
+                        <div className="review-gallery-tools" aria-label={`瑙嗛 ${index + 1} 鎿嶄綔`}>
+                          <button className="review-gallery-tool review-gallery-tool-danger" type="button" onClick={() => removeDraftVideo(index)} disabled={Boolean(busy)} aria-label="鍒犻櫎瑙嗛">
+                            <Trash2 className="h-3.5 w-3.5" />
+                          </button>
+                        </div>
+                      </div>
+                    ))}
                   </div>
 
                   <div className="review-editor-fields">
@@ -849,7 +889,7 @@ export default function ReviewPage() {
                 </div>
 
                 <div className="review-action-strip">
-                  <button className="soft-button inline-flex h-11 items-center justify-center gap-2 px-4 text-xs font-black" type="button" onClick={() => setPreview({ post: draft, index: 0 })} disabled={!draft.imageUrls.length}>
+                  <button className="soft-button inline-flex h-11 items-center justify-center gap-2 px-4 text-xs font-black" type="button" onClick={() => setPreview({ post: draft, index: 0, kind: draft.imageUrls.length ? "image" : "video" })} disabled={!countPostMedia([draft])}>
                     <Maximize2 className="h-4 w-4" />
                     大图预览
                   </button>
@@ -858,7 +898,7 @@ export default function ReviewPage() {
                     保存修改
                   </button>
                   <button className="soft-button inline-flex h-11 items-center justify-center gap-2 px-4 text-xs font-black" type="button" onClick={approveDraft} disabled={Boolean(busy)}>
-                    <ShieldCheck className="h-4 w-4 text-[var(--mint)]" />
+                    {busy === "approve" ? <Loader2 className="h-4 w-4 animate-spin" /> : <ShieldCheck className="h-4 w-4 text-[var(--mint)]" />}
                     审查通过
                   </button>
                   <button className="primary-button inline-flex h-11 items-center justify-center gap-2 px-4 text-xs font-black" type="button" onClick={publishSelected} disabled={Boolean(busy)}>
@@ -954,7 +994,7 @@ export default function ReviewPage() {
           busy={Boolean(busy)}
           onClose={() => setPreview(null)}
           onNavigate={(delta) => setPreview((current) => navigatePreview(current, delta))}
-          onRemove={(index) => removeDraftImage(index)}
+          onRemove={(kind, index) => (kind === "video" ? removeDraftVideo(index) : removeDraftImage(index))}
           onRegenerate={(index) => void regenerateDraftImage(index)}
         />
       ) : null}
@@ -1140,13 +1180,14 @@ function PreviewDialog({
   busy: boolean;
   onClose: () => void;
   onNavigate: (delta: number) => void;
-  onRemove: (index: number) => void;
+  onRemove: (kind: "image" | "video", index: number) => void;
   onRegenerate: (index: number) => void;
 }) {
   if (!preview) return null;
-  const images = preview.post.imageUrls;
-  const index = Math.min(Math.max(preview.index, 0), Math.max(images.length - 1, 0));
-  const image = images[index];
+  const kind = preview.kind || "image";
+  const media = kind === "video" ? postVideoUrls(preview.post) : preview.post.imageUrls;
+  const index = Math.min(Math.max(preview.index, 0), Math.max(media.length - 1, 0));
+  const url = media[index];
   const disableImageAction = busy || Boolean(imageBusyKey);
   return (
     <div className="review-preview-backdrop" role="dialog" aria-modal="true">
@@ -1155,7 +1196,7 @@ function PreviewDialog({
           <div className="min-w-0">
             <p className="truncate text-sm font-black">{preview.post.title || "最终配图"}</p>
             <p className="mt-1 text-xs text-[var(--text-muted)]">
-              {index + 1} / {images.length}
+              {index + 1} / {media.length}
             </p>
           </div>
           <button className="soft-button h-10 px-3 text-xs" type="button" onClick={onClose}>
@@ -1163,13 +1204,15 @@ function PreviewDialog({
           </button>
         </div>
         <div className="review-preview-stage">
-          {image ? (
+          {kind === "video" && url ? (
+            <video src={url} controls preload="metadata" />
+          ) : url ? (
             // eslint-disable-next-line @next/next/no-img-element
-            <img alt="" src={toDisplayImageSrc(image)} referrerPolicy="no-referrer" />
+            <img alt="" src={toDisplayImageSrc(url)} referrerPolicy="no-referrer" />
           ) : null}
         </div>
         <div className="review-preview-actions">
-          {images.length > 1 ? (
+          {media.length > 1 ? (
             <>
               <button className="soft-button h-10 text-xs" type="button" onClick={() => onNavigate(-1)}>
                 上一张
@@ -1179,13 +1222,15 @@ function PreviewDialog({
               </button>
             </>
           ) : null}
-          <button className="soft-button h-10 text-xs" type="button" onClick={() => onRegenerate(index)} disabled={disableImageAction || !image}>
-            {imageBusyKey === `regenerate:${index}` ? <Loader2 className="h-3.5 w-3.5 animate-spin" /> : <Wand2 className="h-3.5 w-3.5" />}
-            Prompt 生成
-          </button>
-          <button className="soft-button h-10 text-xs text-[var(--rose)]" type="button" onClick={() => onRemove(index)} disabled={disableImageAction || !image}>
+          {kind === "image" ? (
+            <button className="soft-button h-10 text-xs" type="button" onClick={() => onRegenerate(index)} disabled={disableImageAction || !url}>
+              {imageBusyKey === `regenerate:${index}` ? <Loader2 className="h-3.5 w-3.5 animate-spin" /> : <Wand2 className="h-3.5 w-3.5" />}
+              Prompt 生成
+            </button>
+          ) : null}
+          <button className="soft-button h-10 text-xs text-[var(--rose)]" type="button" onClick={() => onRemove(kind, index)} disabled={disableImageAction || !url}>
             <Trash2 className="h-3.5 w-3.5" />
-            删除图片
+            {kind === "video" ? "删除视频" : "删除图片"}
           </button>
         </div>
       </div>
@@ -1245,6 +1290,12 @@ function findNextUnreviewedPostId(posts: GeneratedPost[], currentPostId: string)
   if (!candidates.length) return undefined;
   const currentIndex = posts.findIndex((post) => post.id === currentPostId);
   return candidates.find((post) => posts.findIndex((item) => item.id === post.id) > currentIndex)?.id || candidates[0]?.id;
+}
+
+function upsertReviewPost(posts: GeneratedPost[], savedPost: GeneratedPost) {
+  const found = posts.some((post) => post.id === savedPost.id);
+  const nextPosts = found ? posts.map((post) => (post.id === savedPost.id ? savedPost : post)) : [savedPost, ...posts];
+  return nextPosts.sort((a, b) => b.updatedAt.localeCompare(a.updatedAt));
 }
 
 function getPersistedPostImageCount(posts: GeneratedPost[], postId: string, fallbackCount: number) {
@@ -1312,7 +1363,7 @@ function buildPublishSnapshot(posts: GeneratedPost[], data: FeishuPublishRespons
     postIds: posts.map((post) => post.id),
     status: data.notification?.status === "failed" ? "warning" : "success",
     title: data.notification?.status === "failed" ? "飞书写入完成，通知失败" : "飞书写入完成",
-    detail: `已写入 ${job?.result?.recordCount || posts.length} 条记录，处理 ${countImages(posts)} 张图片。`,
+    detail: `已写入 ${job?.result?.recordCount || posts.length} 条记录，处理 ${countPostMedia(posts)} 个素材。`,
     progress: 100,
     notification,
   };
@@ -1337,8 +1388,12 @@ function isFeishuPublishQueueLive(status?: FeishuPublishJob["status"]) {
   return status === "queued" || status === "running";
 }
 
-function countImages(posts: GeneratedPost[]) {
-  return posts.reduce((sum, post) => sum + post.imageUrls.length, 0);
+function countPostMedia(posts: GeneratedPost[]) {
+  return posts.reduce((sum, post) => sum + post.imageUrls.length + postVideoUrls(post).length, 0);
+}
+
+function postVideoUrls(post: GeneratedPost) {
+  return Array.isArray(post.videoUrls) ? post.videoUrls.filter(Boolean) : [];
 }
 
 function formatReviewStatus(value: GeneratedPost["status"]) {
@@ -1364,8 +1419,10 @@ function formatShortTime(value?: string) {
 }
 
 function navigatePreview(current: PreviewState, delta: number): PreviewState {
-  if (!current?.post.imageUrls.length) return current;
-  const total = current.post.imageUrls.length;
+  if (!current) return current;
+  const media = current.kind === "video" ? postVideoUrls(current.post) : current.post.imageUrls;
+  if (!media.length) return current;
+  const total = media.length;
   return {
     ...current,
     index: (current.index + delta + total) % total,

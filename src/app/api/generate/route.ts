@@ -2,6 +2,7 @@ import { NextResponse } from "next/server";
 import { compactError, recordExecutionLog } from "@/lib/activity-log";
 import { concurrencyConfig } from "@/lib/concurrency";
 import { getSourceItemsByIds, markSourceRewritten } from "@/lib/content-pool";
+import { hasSelectedImageTask } from "@/lib/creation-controls";
 import { saveGeneratedPost } from "@/lib/generated-posts";
 import { generateImagesFromPrompt } from "@/lib/image-generation";
 import { normalizeImageGenerationSize } from "@/lib/image-size-options";
@@ -22,6 +23,7 @@ export async function POST(request: Request) {
       instruction?: string;
       productionPlanOverride?: ProductionPlan;
       imageTasks?: SourceImageTask[];
+      includeSourceVideo?: boolean;
       generateImages?: boolean;
       imageSize?: string;
       imageQuality?: ImageGenerationQuality;
@@ -39,6 +41,9 @@ export async function POST(request: Request) {
     const source = (await getSourceItemsByIds([body.source.id], account))[0];
     if (!source) return NextResponse.json({ error: "Source item not found" }, { status: 404 });
     const imageSize = normalizeImageGenerationSize(body.imageSize);
+    const requestImageTasks = Array.isArray(body.imageTasks) ? body.imageTasks : undefined;
+    const selectedImageTaskCount = requestImageTasks?.filter((task) => task.selected).length || 0;
+    const generateImages = body.generateImages !== false;
 
     await recordExecutionLog({
       scope: "generate",
@@ -48,12 +53,12 @@ export async function POST(request: Request) {
       details: {
         sourceItemId: source.id,
         platform: source.platform,
-          materialCount: Array.isArray(body.materialPaths) ? body.materialPaths.length : 0,
-          instructionLength: body.instruction?.length || 0,
-          imageTaskCount: Array.isArray(body.imageTasks) ? body.imageTasks.filter((task) => task.selected).length : 0,
-          generateImages: body.generateImages !== false,
-          imageSize,
-          imageQuality: body.imageQuality || "medium",
+        materialCount: Array.isArray(body.materialPaths) ? body.materialPaths.length : 0,
+        instructionLength: body.instruction?.length || 0,
+        imageTaskCount: selectedImageTaskCount,
+        generateImages,
+        imageSize,
+        imageQuality: body.imageQuality || "medium",
       },
     });
 
@@ -62,10 +67,12 @@ export async function POST(request: Request) {
       materialPaths: Array.isArray(body.materialPaths) ? body.materialPaths : [],
       instruction: body.instruction,
       productionPlanOverride: body.productionPlanOverride,
-      imageTasks: Array.isArray(body.imageTasks) ? body.imageTasks : undefined,
+      imageTasks: requestImageTasks,
+      includeSourceVideo: body.includeSourceVideo === true,
     });
 
-    if (body.generateImages !== false) {
+    const canGenerateImages = generateImages && hasSelectedImageTask(post.imageTasks);
+    if (canGenerateImages) {
       try {
         await recordExecutionLog({
           scope: "generate",
@@ -75,7 +82,7 @@ export async function POST(request: Request) {
           details: {
             postId: post.id,
             sourceItemId: post.sourceItemId,
-            imageTaskCount: Array.isArray(body.imageTasks) ? body.imageTasks.filter((task) => task.selected).length : 0,
+            imageTaskCount: selectedImageTaskCount,
             imageSize,
             imageQuality: body.imageQuality || "medium",
           },
@@ -108,6 +115,22 @@ export async function POST(request: Request) {
           },
         });
       }
+    } else {
+      post.aiNotes = [...post.aiNotes, generateImages ? "未选择图片任务，本次只生成文字草稿。" : "图片生成已关闭，本次只生成文字草稿。"];
+      post.updatedAt = new Date().toISOString();
+      await recordExecutionLog({
+        scope: "generate",
+        action: "跳过草稿配图生成",
+        status: "info",
+        message: generateImages ? "未选择图片任务，已跳过图片生成。" : "图片生成已关闭，已跳过图片生成。",
+        durationMs: Date.now() - startedAt,
+        details: {
+          postId: post.id,
+          sourceItemId: post.sourceItemId,
+          imageTaskCount: selectedImageTaskCount,
+          generateImages,
+        },
+      });
     }
 
     const savedPost = await saveGeneratedPost(post, account);

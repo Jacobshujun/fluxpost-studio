@@ -56,6 +56,10 @@ export function buildDefaultImageTasks(
   return imageTasks.slice(0, 12);
 }
 
+export function hasSelectedImageTask(tasks?: SourceImageTask[]) {
+  return Boolean(tasks?.some((task) => task.selected));
+}
+
 export function resolveImageStrategyPrompts(prompts?: Partial<ImageStrategyPrompts> | string): ImageStrategyPrompts {
   if (typeof prompts === "string") {
     return {
@@ -193,6 +197,15 @@ export function buildCombinedImagePrompt(basePrompt: string, tasks?: SourceImage
 export function buildSingleImageTaskPrompt(basePrompt: string, task: SourceImageTask) {
   const taskPrompt = (typeof task.prompt === "string" ? task.prompt.trim() : "") || defaultImageWashPrompt;
   const contextPrompt = typeof basePrompt === "string" ? basePrompt.trim() : "";
+  const strictDualReference = task.referencePolicy === "strict_dual_reference";
+  const referenceGuide =
+    strictDualReference && task.referenceUrls?.[0]
+      ? [
+          `Reference image 1: ${task.url}`,
+          `Reference image 2: ${task.referenceUrls[0]}`,
+          "Override any single-reference wording: this task is a strict dual-reference edit, not a one-image wash.",
+        ].filter(Boolean).join("\n")
+      : "";
   return [
     taskPrompt,
     "",
@@ -201,7 +214,10 @@ export function buildSingleImageTaskPrompt(basePrompt: string, task: SourceImage
     `处理方式: ${formatImageTaskModeForPrompt(task.mode)}`,
     `参考图片链接: ${task.url}`,
     imageReferenceSizeInstruction,
-    "本次只处理这一张参考图片，不要混合其他原图、关键帧或素材任务。",
+    referenceGuide,
+    strictDualReference
+      ? "本次只处理这一组双参考图片，不要混合其他原图、关键帧或素材任务。"
+      : "本次只处理这一张参考图片，不要混合其他原图、关键帧或素材任务。",
     "如果参考图里有文字，只保留原图文字信息的语义和层级，不新增其他文字信息。",
     contextPrompt ? `图文语境参考: ${contextPrompt}` : "",
   ]

@@ -247,6 +247,8 @@ export type SourceImageTaskMode = "wash" | "reconstruct" | "keep";
 
 export type SourceImageTaskProvider = "openai_images" | "comfyui_klein";
 
+export type SourceImageTaskReferencePolicy = "best_effort" | "strict_dual_reference";
+
 export type SourceImageTask = {
   id: string;
   url: string;
@@ -256,6 +258,7 @@ export type SourceImageTask = {
   mode: SourceImageTaskMode;
   prompt: string;
   referenceUrls?: string[];
+  referencePolicy?: SourceImageTaskReferencePolicy;
   timestamp?: number;
   provider?: SourceImageTaskProvider;
   strategyKey?: keyof ImageStrategyPrompts;
@@ -267,6 +270,22 @@ export type ImageStrategyPrompts = {
   carExterior: string;
   textImage: string;
   peopleWithCar: string;
+};
+
+export type SimpleRunMediaSettings = {
+  generateImages: boolean;
+  useComfyUiKlein: boolean;
+  directOriginalReference: boolean;
+  includeSourceVideo: boolean;
+  enableVideoTranscription: boolean;
+};
+
+export const defaultSimpleRunMediaSettings: SimpleRunMediaSettings = {
+  generateImages: true,
+  useComfyUiKlein: false,
+  directOriginalReference: false,
+  includeSourceVideo: false,
+  enableVideoTranscription: false,
 };
 
 export type PlatformCrawlSetting = {
@@ -307,6 +326,7 @@ export type WorkspacePromptSettings = {
   imageSize: string;
   imageQuality: ImageGenerationQuality;
   platformCrawlSettings: PlatformCrawlSettings;
+  simpleRunMediaSettings: SimpleRunMediaSettings;
   updatedAt: string;
 };
 
@@ -488,6 +508,7 @@ export type GeneratedPost = {
   platform: Platform;
   imagePrompt: string;
   imageUrls: string[];
+  videoUrls?: string[];
   contentTags?: ContentTag[];
   productionPlanOverride?: ProductionPlan;
   imageTasks?: SourceImageTask[];
@@ -523,6 +544,7 @@ export type BatchProductionJob = {
   status: BatchProductionStatus;
   instruction: string;
   materialPaths: string[];
+  includeSourceVideo?: boolean;
   sourceItemIds: string[];
   createdAt: string;
   updatedAt: string;
@@ -535,18 +557,21 @@ export type BatchProductionJob = {
 };
 
 export type SimpleRunInput = {
-  sourceMode?: "keyword" | "links" | "feishu" | "viral" | "original";
+  sourceMode?: "keyword" | "links" | "feishu" | "viral" | "original" | "pool";
   keyword: string;
   targetCount: number;
   platforms: CrawlPlatform[];
   materialPaths: string[];
   links?: string[];
+  sourceItemIds?: string[];
   linkPlatform?: SourceLinkPlatform | "auto";
   cookie?: string;
   videoFrameOriginalReference?: boolean;
   useComfyUiKlein?: boolean;
   directOriginalReference?: boolean;
+  includeSourceVideo?: boolean;
   enableVideoTranscription?: boolean;
+  generateImages?: boolean;
   writeFeishu?: boolean;
   feishuTaskNumbers?: string[];
   viralUrl?: string;
@@ -827,6 +852,7 @@ export type ImageGenerationQueueJob = {
   strategyKey?: keyof ImageStrategyPrompts;
   prompt: string;
   referenceImage: string;
+  referenceImages?: string[];
   outputUrls: string[];
   error?: string;
 };

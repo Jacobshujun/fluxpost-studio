@@ -168,7 +168,7 @@ export async function publishPostsToFeishu(posts: GeneratedPost[], options: Publ
     }
 
     if (useDefaultBaseCreate && fieldMap.imageUrls) {
-      const uploadResult = await uploadGeneratedImagesToFeishu(chunk, recordMappings, fieldMap.imageUrls, attachmentFiles);
+      const uploadResult = await uploadGeneratedMediaToFeishu(chunk, recordMappings, fieldMap.imageUrls, attachmentFiles);
       attachmentUploads.push(...uploadResult.uploads);
       attachmentFailures.push(...uploadResult.failures);
     }
@@ -286,16 +286,19 @@ function getBitableFieldMap() {
   }
 }
 
-async function uploadGeneratedImagesToFeishu(
+async function uploadGeneratedMediaToFeishu(
   posts: GeneratedPost[],
   recordMappings: FeishuRecordMapping[],
   attachmentFieldName: string,
   attachmentFiles: PreparedAttachmentFiles,
 ) {
-  if (!posts.some((post) => post.imageUrls.length)) return { uploads: [] as FeishuAttachmentUpload[], failures: [] as FeishuAttachmentFailure[] };
+  if (!posts.some(countPostMedia)) return { uploads: [] as FeishuAttachmentUpload[], failures: [] as FeishuAttachmentFailure[] };
   const recordIdByPostId = new Map(recordMappings.map((item) => [item.postId, item.recordId]));
 
   const results = await mapWithConcurrency(posts, concurrencyConfig.feishuAttachment, async (post) => {
+    const mediaCount = countPostMedia(post);
+    if (!mediaCount) return { upload: null, failure: null };
+
     const recordId = recordIdByPostId.get(post.id);
     if (!recordId) {
       return {
@@ -308,20 +311,17 @@ async function uploadGeneratedImagesToFeishu(
         },
       };
     }
-    const files = attachmentFiles.get(post.id) || resolveLocalImageFiles(post.imageUrls);
+    const files = attachmentFiles.get(post.id) || (await resolvePostAttachmentFiles(post)).files;
     if (!files.length) {
-      if (post.imageUrls.length) {
-        return {
-          upload: null,
-          failure: {
-            postId: post.id,
-            recordId,
-            fileCount: 0,
-            error: `Post ${post.id} has image URLs but no local files that can be uploaded to Feishu attachments.`,
-          },
-        };
-      }
-      return { upload: null, failure: null };
+      return {
+        upload: null,
+        failure: {
+          postId: post.id,
+          recordId,
+          fileCount: 0,
+          error: `Post ${post.id} has media URLs but no local files that can be uploaded to Feishu attachments.`,
+        },
+      };
     }
     if (files.length > 50) {
       return {
@@ -330,7 +330,7 @@ async function uploadGeneratedImagesToFeishu(
           postId: post.id,
           recordId,
           fileCount: files.length,
-          error: `Post ${post.id} has ${files.length} images; Feishu attachment upload supports at most 50 files per cell.`,
+          error: `Post ${post.id} has ${files.length} media files; Feishu attachment upload supports at most 50 files per cell.`,
         },
       };
     }
@@ -456,7 +456,7 @@ function buildFeishuPostStateUpdates(
       postId: post.id,
       feishu: {
         ...next,
-        attachmentStatus: post.imageUrls.length ? "pending" : "skipped",
+        attachmentStatus: countPostMedia(post) ? "pending" : "skipped",
         attachmentFileCount: 0,
         attachmentError: undefined,
       },
@@ -470,7 +470,7 @@ function buildStagedFeishuPostStateUpdates(posts: GeneratedPost[], payloadPath: 
     feishu: {
       ...post.feishu,
       payloadPath,
-      attachmentStatus: post.imageUrls.length ? "pending" : "skipped",
+      attachmentStatus: countPostMedia(post) ? "pending" : "skipped",
       attachmentFileCount: 0,
     },
   }));
@@ -490,19 +490,19 @@ function formatAttachmentFailureMessage(failures: FeishuAttachmentFailure[]) {
 async function prepareAttachmentFilesForPosts(posts: GeneratedPost[]): Promise<PreparedAttachmentFiles> {
   const attachments: PreparedAttachmentFiles = new Map();
   const prepared = await mapWithConcurrency(posts, concurrencyConfig.media, async (post) => {
-    const { files, failures } = await prepareAttachmentFilesForPost(post);
+    const { files, failures } = await resolvePostAttachmentFiles(post);
     if (failures.length) {
       throw new Error(
-        `Post ${post.id} has image URLs that could not be prepared for Feishu attachments: ${failures
+        `Post ${post.id} has media URLs that could not be prepared for Feishu attachments: ${failures
           .slice(0, 5)
           .join("; ")}`,
       );
     }
-    if (!files.length && post.imageUrls.length) {
-      throw new Error(`Post ${post.id} has image URLs but no local files that can be uploaded to Feishu attachments.`);
+    if (!files.length && countPostMedia(post)) {
+      throw new Error(`Post ${post.id} has media URLs but no local files that can be uploaded to Feishu attachments.`);
     }
     if (files.length > 50) {
-      throw new Error(`Post ${post.id} has ${files.length} images; Feishu attachment upload supports at most 50 files per cell.`);
+      throw new Error(`Post ${post.id} has ${files.length} media files; Feishu attachment upload supports at most 50 files per cell.`);
     }
     return { postId: post.id, files };
   });
@@ -512,12 +512,12 @@ async function prepareAttachmentFilesForPosts(posts: GeneratedPost[]): Promise<P
   return attachments;
 }
 
-async function prepareAttachmentFilesForPost(post: GeneratedPost) {
+async function resolvePostAttachmentFiles(post: GeneratedPost) {
   const files: string[] = [];
   const failures: string[] = [];
 
   for (const [index, imageUrl] of post.imageUrls.entries()) {
-    const localFile = resolveLocalImageFile(imageUrl);
+    const localFile = resolveLocalMediaFile(imageUrl, "image");
     if (localFile) {
       files.push(localFile);
       continue;
@@ -534,6 +534,20 @@ async function prepareAttachmentFilesForPost(post: GeneratedPost) {
       failures.push(`image ${index + 1} download failed: ${error instanceof Error ? error.message : "unknown error"}`);
     }
   }
+
+  const localVideoFiles: string[] = [];
+  const videoFailures: string[] = [];
+  for (const [index, url] of postVideoUrls(post).entries()) {
+    const localFile = resolveLocalMediaFile(url, "video");
+    if (localFile) {
+      localVideoFiles.push(localFile);
+      continue;
+    }
+
+    videoFailures.push(`video ${index + 1} is not a local uploadable file`);
+  }
+  files.push(...localVideoFiles);
+  if (!localVideoFiles.length) failures.push(...videoFailures);
 
   return { files, failures };
 }
@@ -644,8 +658,8 @@ function buildPublishNotificationText(
   attachmentUploads: Array<{ postId: string; recordId: string; fileCount: number }>,
   context: FeishuPublishNotificationSummary,
 ) {
-  const imageCount = posts.reduce((total, post) => total + post.imageUrls.length, 0);
-  const uploadedImageCount = attachmentUploads.reduce((total, item) => total + item.fileCount, 0);
+  const mediaCount = posts.reduce((total, post) => total + countPostMedia(post), 0);
+  const uploadedMediaCount = attachmentUploads.reduce((total, item) => total + item.fileCount, 0);
   const createdCount = context.recordMappings.filter((item) => item.created).length;
   const reusedCount = Math.max(0, context.recordMappings.length - createdCount);
   const recordCount = context.recordMappings.length || posts.length;
@@ -663,8 +677,8 @@ function buildPublishNotificationText(
   lines.push(`记录：${formatNotificationRecordLine(recordCount, createdCount, reusedCount)}`);
   lines.push(
     context.status === "attachment_failed"
-      ? `素材：已上传 ${uploadedImageCount} 张，失败 ${context.attachmentFailureCount} 组`
-      : `素材：${uploadedImageCount || imageCount} 张`,
+      ? `素材：已上传 ${uploadedMediaCount} 个，失败 ${context.attachmentFailureCount} 组`
+      : `素材：${uploadedMediaCount || mediaCount} 个`,
   );
   lines.push(...formatNotificationContentLines(posts));
   lines.push(`时间：${formatFeishuDateTime(new Date().toISOString())}`);
@@ -885,16 +899,11 @@ function findRecordIds(value: unknown): string[] {
   return [...current, ...Object.values(record).flatMap((item) => findRecordIds(item))];
 }
 
-function resolveLocalImageFiles(imageUrls: string[]) {
-  return imageUrls
-    .map((url) => resolveLocalImageFile(url))
-    .filter((file): file is string => Boolean(file));
-}
-
-function resolveLocalImageFile(url: string) {
+function resolveLocalMediaFile(url: string, kind: "image" | "video") {
   if (!url || /^https?:\/\//i.test(url)) return null;
 
   const cleanUrl = url.split(/[?#]/, 1)[0];
+  if (!isLikelyLocalMediaKind(cleanUrl, kind)) return null;
   const normalizedUrl = cleanUrl.startsWith("/") ? cleanUrl.slice(1) : cleanUrl;
   const absolutePath = cleanUrl.startsWith("/")
     ? path.join(process.cwd(), "public", normalizedUrl)
@@ -905,6 +914,21 @@ function resolveLocalImageFile(url: string) {
 
   const relativePath = path.relative(process.cwd(), absolutePath);
   return relativePath.startsWith("..") ? absolutePath : `./${relativePath.replaceAll("\\", "/")}`;
+}
+
+function isLikelyLocalMediaKind(url: string, kind: "image" | "video") {
+  const extension = path.extname(url).toLowerCase();
+  if (!extension) return true;
+  if (kind === "video") return [".mp4", ".mov", ".m4v", ".webm"].includes(extension);
+  return [".png", ".jpg", ".jpeg", ".webp", ".gif", ".bmp", ".avif"].includes(extension);
+}
+
+function postVideoUrls(post: GeneratedPost) {
+  return Array.isArray(post.videoUrls) ? post.videoUrls.filter(Boolean) : [];
+}
+
+function countPostMedia(post: GeneratedPost) {
+  return post.imageUrls.length + postVideoUrls(post).length;
 }
 
 function getPostFieldValue(post: GeneratedPost, key: string) {

@@ -27,6 +27,7 @@ export async function POST(request: Request) {
       sourceItemIds?: string[];
       materialPaths?: string[];
       instruction?: string;
+      includeSourceVideo?: boolean;
     };
 
     await recordExecutionLog({
@@ -45,6 +46,7 @@ export async function POST(request: Request) {
       sourceItemIds: Array.isArray(body.sourceItemIds) ? body.sourceItemIds : [],
       materialPaths: Array.isArray(body.materialPaths) ? body.materialPaths : [],
       instruction: body.instruction,
+      includeSourceVideo: body.includeSourceVideo === true,
     }, account);
 
     return NextResponse.json({ job });

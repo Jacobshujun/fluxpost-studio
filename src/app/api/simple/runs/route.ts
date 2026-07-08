@@ -22,17 +22,20 @@ export async function POST(request: Request) {
   try {
     const account = await requireWorkspaceAccount(request);
     const body = (await request.json()) as {
-      sourceMode?: "keyword" | "links" | "feishu" | "viral" | "original";
+      sourceMode?: "keyword" | "links" | "feishu" | "viral" | "original" | "pool";
       keyword?: string;
       targetCount?: number;
       platforms?: CrawlPlatform[];
       links?: string[] | string;
+      sourceItemIds?: string[];
       linkPlatform?: SourceLinkPlatform | "auto";
       cookie?: string;
       videoFrameOriginalReference?: boolean;
       useComfyUiKlein?: boolean;
       directOriginalReference?: boolean;
+      includeSourceVideo?: boolean;
       enableVideoTranscription?: boolean;
+      generateImages?: boolean;
       writeFeishu?: boolean;
       feishuTaskNumbers?: string[] | string;
       viralUrl?: string;
@@ -46,19 +49,23 @@ export async function POST(request: Request) {
     if (body.sourceMode === "original" && body.originalUseWebSearch === true && appConfig.openaiTextEndpoint !== "responses") {
       throw new Error("Original-mode web search requires OPENAI_TEXT_ENDPOINT=responses; turn off web search or switch the text endpoint before starting this run.");
     }
-    const baseSourceMode = body.sourceMode === "feishu" ? "feishu" : body.sourceMode === "links" ? "links" : "keyword";
+    const baseSourceMode =
+      body.sourceMode === "feishu" ? "feishu" : body.sourceMode === "links" ? "links" : body.sourceMode === "pool" ? "pool" : "keyword";
     const run = await startSimpleRun({
       sourceMode: body.sourceMode === "original" ? "original" : body.sourceMode === "viral" ? "viral" : baseSourceMode,
       keyword: body.keyword || "",
       targetCount: body.targetCount === undefined ? undefined : Number(body.targetCount),
       platforms: Array.isArray(body.platforms) ? body.platforms : [],
       links: body.links,
+      sourceItemIds: Array.isArray(body.sourceItemIds) ? body.sourceItemIds : [],
       linkPlatform: body.linkPlatform,
       cookie: body.cookie,
       videoFrameOriginalReference: body.videoFrameOriginalReference !== false,
       useComfyUiKlein: body.useComfyUiKlein === true,
       directOriginalReference: body.directOriginalReference === true,
+      includeSourceVideo: body.includeSourceVideo === true,
       enableVideoTranscription: body.enableVideoTranscription === true,
+      generateImages: body.generateImages !== false,
       writeFeishu: body.writeFeishu === true,
       feishuTaskNumbers: body.feishuTaskNumbers,
       viralUrl: body.viralUrl,

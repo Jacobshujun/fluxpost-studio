@@ -2,7 +2,7 @@ import { defaultImageStrategyPrompts, defaultImageWashPrompt, resolveImageStrate
 import { readAppMetaValue, writeAppMetaValue } from "./database";
 import { defaultDistributionCheckPrompt } from "./distribution-check-prompt";
 import { defaultImageGenerationSize, normalizeImageGenerationSize } from "./image-size-options";
-import type { CrawlPlatform, PlatformCrawlSetting, PlatformCrawlSettings, WorkspacePromptSettings } from "./types";
+import { defaultSimpleRunMediaSettings, type CrawlPlatform, type PlatformCrawlSetting, type PlatformCrawlSettings, type SimpleRunMediaSettings, type WorkspacePromptSettings } from "./types";
 
 const settingsMetaKey = "workspace_prompt_settings_v1";
 const simpleDefaultTextInstruction = "保留“热点观点”角度，换成品牌自己的素材和观点，避免复述原文表达。";
@@ -22,6 +22,7 @@ export const defaultWorkspacePromptSettings: WorkspacePromptSettings = {
   imageSize: defaultImageGenerationSize,
   imageQuality: "medium",
   platformCrawlSettings: defaultPlatformCrawlSettings,
+  simpleRunMediaSettings: defaultSimpleRunMediaSettings,
   updatedAt: new Date(0).toISOString(),
 };
 
@@ -61,6 +62,7 @@ function normalizeWorkspacePromptSettings(input: Partial<WorkspacePromptSettings
     imageSize: normalizeImageGenerationSize(input.imageSize),
     imageQuality: normalizeImageQuality(input.imageQuality),
     platformCrawlSettings: normalizePlatformCrawlSettings(input.platformCrawlSettings),
+    simpleRunMediaSettings: normalizeSimpleRunMediaSettings(input.simpleRunMediaSettings),
     updatedAt: input.updatedAt || new Date().toISOString(),
   };
 }
@@ -71,6 +73,21 @@ function stringOrDefault(value: unknown, fallback: string) {
 
 function normalizeImageQuality(value: unknown): WorkspacePromptSettings["imageQuality"] {
   return value === "low" || value === "medium" || value === "high" ? value : defaultWorkspacePromptSettings.imageQuality;
+}
+
+function normalizeSimpleRunMediaSettings(input: unknown): SimpleRunMediaSettings {
+  const record = isRecord(input) ? input : {};
+  return {
+    generateImages: booleanOrDefault(record.generateImages, defaultSimpleRunMediaSettings.generateImages),
+    useComfyUiKlein: booleanOrDefault(record.useComfyUiKlein, defaultSimpleRunMediaSettings.useComfyUiKlein),
+    directOriginalReference: booleanOrDefault(record.directOriginalReference, defaultSimpleRunMediaSettings.directOriginalReference),
+    includeSourceVideo: booleanOrDefault(record.includeSourceVideo, defaultSimpleRunMediaSettings.includeSourceVideo),
+    enableVideoTranscription: booleanOrDefault(record.enableVideoTranscription, defaultSimpleRunMediaSettings.enableVideoTranscription),
+  };
+}
+
+function booleanOrDefault(value: unknown, fallback: boolean) {
+  return typeof value === "boolean" ? value : fallback;
 }
 
 function normalizePlatformCrawlSettings(input: unknown): PlatformCrawlSettings {

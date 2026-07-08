@@ -6,6 +6,7 @@ import { editPostWithPrompt } from "@/lib/openai";
 import { savePost } from "@/lib/store";
 import { isWorkspaceSignInError, requireWorkspaceAccount } from "@/lib/workspace-accounts";
 import type { GeneratedPost } from "@/lib/types";
+import type { WorkspaceAccessActor } from "@/lib/workspace-ownership";
 
 export const runtime = "nodejs";
 
@@ -16,7 +17,7 @@ export async function POST(request: Request) {
     const body = (await request.json()) as {
       post?: GeneratedPost;
       instruction?: string;
-      manualPatch?: Partial<Pick<GeneratedPost, "title" | "body" | "imagePrompt" | "status" | "imageUrls" | "imageTasks" | "feishuVehicle">>;
+      manualPatch?: Partial<Pick<GeneratedPost, "title" | "body" | "imagePrompt" | "status" | "imageUrls" | "videoUrls" | "imageTasks" | "feishuVehicle">>;
     };
 
     if (!body.post) {
@@ -46,12 +47,13 @@ export async function POST(request: Request) {
     if (!currentPost) return NextResponse.json({ error: "Post not found" }, { status: 404 });
     let post = currentPost;
     if (body.manualPatch) {
-      const allowedPatch: Partial<Pick<GeneratedPost, "title" | "body" | "imagePrompt" | "status" | "imageUrls" | "imageTasks" | "feishuVehicle">> = {};
+      const allowedPatch: Partial<Pick<GeneratedPost, "title" | "body" | "imagePrompt" | "status" | "imageUrls" | "videoUrls" | "imageTasks" | "feishuVehicle">> = {};
       if ("title" in body.manualPatch) allowedPatch.title = body.manualPatch.title;
       if ("body" in body.manualPatch) allowedPatch.body = body.manualPatch.body;
       if ("imagePrompt" in body.manualPatch) allowedPatch.imagePrompt = body.manualPatch.imagePrompt;
       if ("status" in body.manualPatch) allowedPatch.status = body.manualPatch.status;
       if ("imageUrls" in body.manualPatch) allowedPatch.imageUrls = body.manualPatch.imageUrls;
+      if ("videoUrls" in body.manualPatch) allowedPatch.videoUrls = body.manualPatch.videoUrls;
       if ("imageTasks" in body.manualPatch) allowedPatch.imageTasks = body.manualPatch.imageTasks;
       if ("feishuVehicle" in body.manualPatch) allowedPatch.feishuVehicle = body.manualPatch.feishuVehicle;
       post = {
@@ -66,8 +68,9 @@ export async function POST(request: Request) {
     }
 
     const savedPost = await saveGeneratedPost(post, account);
-    await savePost(savedPost, account);
-    await markSourceRewritten(savedPost.sourceItemId, savedPost, account);
+    const sideEffectMode = resolveReviewSideEffectMode(currentPost, savedPost, Boolean(body.instruction?.trim()));
+    if (sideEffectMode === "await") await syncReviewSideEffects(savedPost, account);
+    if (sideEffectMode === "background") queueReviewSideEffects(savedPost, account);
     await recordExecutionLog({
       scope: "review",
       action: "审查更新完成",
@@ -93,4 +96,31 @@ export async function POST(request: Request) {
     });
     return NextResponse.json({ error: message }, { status: isWorkspaceSignInError(error) ? 401 : 500 });
   }
+}
+
+function resolveReviewSideEffectMode(previousPost: GeneratedPost, savedPost: GeneratedPost, usedAiInstruction: boolean) {
+  if (usedAiInstruction) return "await";
+  if (previousPost.status !== savedPost.status) return "background";
+  return savedPost.status === "approved" || savedPost.status === "published" ? "background" : "skip";
+}
+
+async function syncReviewSideEffects(post: GeneratedPost, account: WorkspaceAccessActor) {
+  await savePost(post, account);
+  await markSourceRewritten(post.sourceItemId, post, account);
+}
+
+function queueReviewSideEffects(post: GeneratedPost, account: WorkspaceAccessActor) {
+  void syncReviewSideEffects(post, account).catch(async (error) => {
+    await recordExecutionLog({
+      scope: "review",
+      action: "Review source status sync warning",
+      status: "info",
+      message: compactError(error),
+      details: {
+        postId: post.id,
+        sourceItemId: post.sourceItemId,
+        status: post.status,
+      },
+    });
+  });
 }

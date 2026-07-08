@@ -127,14 +127,62 @@ assertContains(
 
 assertContains(
   reviewPage,
-  /const nextSelectedId = options\?\.nextPostId \|\| data\.post\.id;[\s\S]*await loadPosts\(nextSelectedId\)/,
-  "Approve action should refresh and jump to the next unreviewed post after saving.",
+  /function mergeSavedPost\(savedPost: GeneratedPost,\s*preferredPostId\?: string\)[\s\S]*upsertReviewPost\(posts,\s*savedPost\)[\s\S]*setDraft\(nextPosts\.find\(\(post\) => post\.id === nextSelectedId\) \|\| null\)/,
+  "Review save should merge the returned post locally instead of waiting for a full generated-post reload.",
 );
 
 assertContains(
   reviewPage,
-  /await saveDraft\(\{ status: "approved" \}, undefined, \{ nextPostId \}\)/,
-  "Approve action should save approval and pass the next unreviewed post id to the refresh step.",
+  /const nextSelectedId = options\?\.nextPostId \|\| data\.post\.id;[\s\S]*mergeSavedPost\(data\.post,\s*nextSelectedId\)/,
+  "Approve action should jump to the next unreviewed post after saving without a full list refresh.",
+);
+
+assertNotContains(
+  reviewPage,
+  /async function saveDraft[\s\S]*await loadPosts\(nextSelectedId\)/,
+  "Review save should not block on reloading the full generated-post list.",
+);
+
+assertContains(
+  reviewPage,
+  /function upsertReviewPost\(posts: GeneratedPost\[\],\s*savedPost: GeneratedPost\)[\s\S]*posts\.map\(\(post\) => \(post\.id === savedPost\.id \? savedPost : post\)\)[\s\S]*updatedAt\.localeCompare\(a\.updatedAt\)/,
+  "Review save should keep the local post list updated and sorted from the API response.",
+);
+
+assertContains(
+  reviewRoute,
+  /const sideEffectMode = resolveReviewSideEffectMode\(currentPost,\s*savedPost,\s*Boolean\(body\.instruction\?\.trim\(\)\)\);[\s\S]*if \(sideEffectMode === "await"\)[\s\S]*await syncReviewSideEffects\(savedPost,\s*account\);[\s\S]*if \(sideEffectMode === "background"\)[\s\S]*queueReviewSideEffects\(savedPost,\s*account\);/,
+  "Review API should queue status-change side effects without blocking the approve response.",
+);
+
+assertContains(
+  reviewRoute,
+  /function resolveReviewSideEffectMode\(previousPost: GeneratedPost,\s*savedPost: GeneratedPost,\s*usedAiInstruction: boolean\)[\s\S]*if \(usedAiInstruction\) return "await";[\s\S]*if \(previousPost\.status !== savedPost\.status\) return "background";[\s\S]*return savedPost\.status === "approved" \|\| savedPost\.status === "published" \? "background" : "skip";/,
+  "Review API side-effect policy should await AI edits, background status changes, and skip ordinary manual saves.",
+);
+
+assertContains(
+  reviewRoute,
+  /function queueReviewSideEffects\(post: GeneratedPost,\s*account: WorkspaceAccessActor\)[\s\S]*void syncReviewSideEffects\(post,\s*account\)\.catch\(async \(error\) =>[\s\S]*recordExecutionLog\(\{[\s\S]*status: "info"/,
+  "Review API should log background source-sync failures instead of silently hiding them.",
+);
+
+assertContains(
+  reviewPage,
+  /type BusyState = "load" \| "save" \| "approve" \| "review" \| "batch" \| "publish" \| null/,
+  "Review desk should track approve as its own busy state.",
+);
+
+assertContains(
+  reviewPage,
+  /await saveDraft\(\{ status: "approved" \}, undefined, \{ nextPostId,\s*busyState: "approve" \}\)/,
+  "Approve action should set an approve-specific busy state.",
+);
+
+assertContains(
+  reviewPage,
+  /busy === "approve" \? <Loader2 className="h-4 w-4 animate-spin" \/> : <ShieldCheck className="h-4 w-4 text-\[var\(--mint\)\]" \/>/,
+  "Approve button should show immediate loading feedback on the clicked button.",
 );
 
 assertContains(
@@ -289,8 +337,26 @@ assertContains(
 
 assertContains(
   reviewRoute,
-  /"imageUrls" \| "imageTasks" \| "feishuVehicle"/,
-  "Review API should continue allowing image order/deletion and Feishu vehicle updates.",
+  /if \("imageUrls" in body\.manualPatch\) allowedPatch\.imageUrls = body\.manualPatch\.imageUrls/,
+  "Review API should continue allowing image order/deletion updates.",
+);
+
+assertContains(
+  reviewRoute,
+  /if \("videoUrls" in body\.manualPatch\) allowedPatch\.videoUrls = body\.manualPatch\.videoUrls/,
+  "Review API should preserve source video material updates.",
+);
+
+assertContains(
+  reviewRoute,
+  /if \("imageTasks" in body\.manualPatch\) allowedPatch\.imageTasks = body\.manualPatch\.imageTasks/,
+  "Review API should continue allowing image task updates.",
+);
+
+assertContains(
+  reviewRoute,
+  /if \("feishuVehicle" in body\.manualPatch\) allowedPatch\.feishuVehicle = body\.manualPatch\.feishuVehicle/,
+  "Review API should continue allowing Feishu vehicle updates.",
 );
 
 assertContains(

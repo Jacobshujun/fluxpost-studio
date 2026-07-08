@@ -11,7 +11,6 @@ import {
   ChevronRight,
   Clock3,
   ClipboardCheck,
-  CloudDownload,
   Database,
   ExternalLink,
   FileText,
@@ -28,7 +27,6 @@ import {
   Play,
   Radio,
   RefreshCw,
-  Save,
   Search,
   Send,
   Settings,
@@ -58,42 +56,37 @@ import { defaultImageGenerationSize, imageGenerationSizeOptions, isImageGenerati
 import { mergeDownloadedAndRemoteImages } from "@/lib/media-url-filter";
 import { getStoredTheme, setStoredTheme, subscribeTheme, type ThemeMode } from "@/lib/theme";
 import { selectBestVideoHighlightFrames } from "@/lib/video-frame-policy";
-import { contentTagOptions, visualTagOptions } from "@/lib/types";
-import type {
-  BatchProductionJob,
-  ContentTag,
-  ContentDirection,
-  ConfigStatus,
-  ContentProject,
-  CrawlPlatform,
-  CrawlJob,
-  ExecutionLogEntry,
-  FeishuPublishJob,
-  FeishuPostPublishState,
-  GeneratedPost,
-  ImageGenerationQuality,
-  ImageStrategyPrompts,
-  ImageProductionStrategy,
-  MaterialAsset,
-  MaterialFolder,
-  MaterialLibraryAsset,
-  MaterialLibrarySnapshot,
-  NormalizedSourceItem,
-  Platform,
-  PlatformCrawlSetting,
-  ProductionDecision,
-  ProductionPlan,
-  ProductionTask,
-  SimpleRun,
-  SourceImageTask,
-  SourceLinkPlatform,
-  SourceMediaCacheStatus,
-  SourceVisualTaggingAsset,
-  SourceUsageStatus,
-  TextProductionStrategy,
-  VisualTag,
-  WorkspaceAccount,
-  WorkspacePromptSettings,
+import {
+  defaultSimpleRunMediaSettings,
+  type BatchProductionJob,
+  type ContentTag,
+  type ContentDirection,
+  type ConfigStatus,
+  type ContentProject,
+  type CrawlPlatform,
+  type FeishuPublishJob,
+  type FeishuPostPublishState,
+  type GeneratedPost,
+  type ImageGenerationQuality,
+  type ImageStrategyPrompts,
+  type ImageProductionStrategy,
+  type MaterialAsset,
+  type MaterialFolder,
+  type MaterialLibraryAsset,
+  type MaterialLibrarySnapshot,
+  type NormalizedSourceItem,
+  type Platform,
+  type ProductionDecision,
+  type ProductionPlan,
+  type ProductionTask,
+  type SimpleRun,
+  type SimpleRunMediaSettings,
+  type SourceImageTask,
+  type SourceLinkPlatform,
+  type TextProductionStrategy,
+  type VisualTag,
+  type WorkspaceAccount,
+  type WorkspacePromptSettings,
 } from "@/lib/types";
 
 type PreviewState =
@@ -103,15 +96,19 @@ type PreviewState =
       text?: string;
       imageUrl?: string;
       imageUrls?: string[];
+      videoUrls?: string[];
       imageIndex?: number;
       meta?: string;
       links?: string[];
+      selection?: {
+        selectedImageUrls: string[];
+        maxSelected: number;
+        onToggleImage: (url: string) => void;
+      };
     }
   | null;
 
-type PoolStatusFilter = SourceUsageStatus | "all";
 type PoolPlatformFilter = Platform | "all";
-type CrawlInputMode = "keyword" | "links";
 type LinkImportPlatform = SourceLinkPlatform | "auto";
 type PoolSortMode =
   | "hot_desc"
@@ -123,7 +120,7 @@ type PoolSortMode =
   | "likes_desc"
   | "collects_desc";
 type ProductionQueueFilter = "all" | "ready" | "no_draft" | "has_draft" | "approved" | "published";
-type ActiveModule = "content" | "production" | "materials";
+type ActiveModule = "production" | "materials";
 type WorkspaceMode = "compact" | "simple" | "advanced";
 type SimpleWorkspaceVariant = "standard" | "compact";
 type SimpleSourceMode = "keyword" | "links" | "feishu" | "viral" | "original";
@@ -164,41 +161,6 @@ type PublishStatusSnapshot = {
   queueStatus?: FeishuPublishJob["status"];
 };
 
-type LinkImportResultStatus = "imported" | "filtered" | "duplicate" | "unsupported" | "failed";
-
-type LinkImportResult = {
-  url: string;
-  platform?: Platform;
-  status: LinkImportResultStatus;
-  sourceId?: string;
-  itemId?: string;
-  title?: string;
-  error?: string;
-};
-
-type LinkImportSummary = {
-  total: number;
-  valid: number;
-  imported: number;
-  filteredUnsafe: number;
-  duplicates: number;
-  unsupported: number;
-  failed: number;
-  taggedContent: number;
-  taggedVisual: number;
-  localImages: number;
-  videoFrames: number;
-};
-
-type LinkImportResponse = {
-  query?: string;
-  items?: NormalizedSourceItem[];
-  project?: ContentProject;
-  results?: LinkImportResult[];
-  summary?: LinkImportSummary;
-  error?: string;
-};
-
 type FeishuPublishResponse = {
   status?: "queued" | "running" | "published" | "attachment_failed" | "needs_config" | "skipped" | "failed" | string;
   jobId?: string;
@@ -225,32 +187,6 @@ type FeishuVehicleOptionsResponse = {
   error?: string;
 };
 
-type SourceEditForm = {
-  title: string;
-  contentText: string;
-  authorName: string;
-  sourceUrl: string;
-  contentTags: ContentTag[];
-  visualTags: Array<{ id: string; tag: VisualTag }>;
-  poolStatus: SourceUsageStatus;
-  mediaType: NonNullable<NormalizedSourceItem["mediaType"]>;
-  views: string;
-  reads: string;
-  plays: string;
-  likes: string;
-  collects: string;
-  comments: string;
-  shares: string;
-};
-
-type ManualSourceForm = {
-  title: string;
-  contentText: string;
-  sourceUrl: string;
-  imageUrls: string;
-  videoUrl: string;
-};
-
 type MaterialAssetDraft = {
   name: string;
   tags: string;
@@ -272,14 +208,6 @@ type ViralMaterialFolderCandidate = {
   paths: string[];
 };
 
-type EditableVisualAsset = {
-  id: string;
-  index: number;
-  kind: SourceVisualTaggingAsset["kind"];
-  url: string;
-  tag?: VisualTag;
-};
-
 const themeOptions: Array<{ value: ThemeMode; label: string; icon: ReactNode }> = [
   { value: "professional", label: "专业浅色", icon: <Sun className="h-3.5 w-3.5" /> },
   { value: "editorial", label: "编辑室", icon: <Sparkles className="h-3.5 w-3.5" /> },
@@ -287,7 +215,6 @@ const themeOptions: Array<{ value: ThemeMode; label: string; icon: ReactNode }> 
 ];
 
 const moduleOptions: Array<{ value: ActiveModule; label: string; description: string; icon: ReactNode }> = [
-  { value: "content", label: "采集与内容池", description: "关键词任务、样本沉淀、内容增删改", icon: <Database className="h-4 w-4" /> },
   { value: "production", label: "内容生产", description: "逐条策略、草稿审查、再次生成", icon: <Bot className="h-4 w-4" /> },
   { value: "materials", label: "素材管理", description: "车型资料、图片库、文件夹管理", icon: <FolderOpen className="h-4 w-4" /> },
 ];
@@ -313,79 +240,12 @@ const linkImportPlatforms: Array<{ value: SourceLinkPlatform; label: string; acc
   { value: "dongchedi", label: "\u61c2\u8f66\u5e1d", accent: "bg-lime-300" },
 ];
 
-const platformDocs: Record<CrawlPlatform, string> = {
-  wechat_channels: "https://docs.tikhub.io/419832668e0",
-  xiaohongshu: "https://docs.tikhub.io/420136398e0",
-  douyin: "https://docs.tikhub.io/370212773e0",
-  weibo: "https://docs.tikhub.io/410358109e0",
-};
-
-const sortOptions: Record<CrawlPlatform, Array<{ label: string; value: string }>> = {
-  wechat_channels: [{ label: "相关", value: "relevance" }],
-  xiaohongshu: [
-    { label: "综合", value: "general" },
-    { label: "最新", value: "time_descending" },
-    { label: "最热", value: "popularity_descending" },
-    { label: "最多评论", value: "comment_descending" },
-    { label: "最多收藏", value: "collect_descending" },
-    { label: "英文优先", value: "english_preferred" },
-  ],
-  douyin: [
-    /*
-    { label: "鏈€鏂板彂甯?, value: "2" },
-    { label: "综合", value: "0" },
-    { label: "最多点赞", value: "1" },
-  ],
-    */
-    { label: "\u7efc\u5408", value: "0" },
-    { label: "\u6700\u591a\u70b9\u8d5e", value: "1" },
-    { label: "\u6700\u65b0\u53d1\u5e03", value: "2" },
-  ],
-  weibo: [
-    { label: "综合", value: "all" },
-    { label: "热门", value: "hot" },
-    { label: "原创", value: "original" },
-    { label: "认证用户", value: "verified" },
-    { label: "媒体", value: "media" },
-    { label: "观点", value: "viewpoint" },
-  ],
-};
-
-const weiboIncludeOptions = [
-  { label: "全部内容", value: "all" },
-  { label: "含图片", value: "pic" },
-  { label: "含视频", value: "video" },
-  { label: "含音乐", value: "music" },
-  { label: "含短链", value: "link" },
-];
-
-const douyinContentTypeOptions = [
-  /*
-  { label: "鏂囩珷", value: "3" },
-  { label: "鍏ㄩ儴", value: "0" },
-  { label: "瑙嗛", value: "1" },
-  { label: "鍥炬枃", value: "2" },
-  */
-  { label: "\u5168\u90e8", value: "0" },
-  { label: "\u89c6\u9891", value: "1" },
-  { label: "\u56fe\u7247", value: "2" },
-  { label: "\u6587\u7ae0", value: "3" },
-];
-
-const defaultPlatformCrawlSettings: Record<CrawlPlatform, PlatformCrawlSetting> = {
+const defaultPlatformCrawlSettings: NonNullable<WorkspacePromptSettings["platformCrawlSettings"]> = {
   wechat_channels: { sort: "relevance" },
   xiaohongshu: { sort: "popularity_descending", noteType: 0 },
   douyin: { sort: "0", contentType: "0" },
   weibo: { sort: "hot", searchType: "hot", includeType: "all", timeScope: "" },
 };
-
-const poolStatusOptions: Array<{ label: string; value: PoolStatusFilter }> = [
-  { label: "全部", value: "all" },
-  { label: "未使用", value: "new" },
-  { label: "已仿写", value: "rewritten" },
-  { label: "已审查", value: "approved" },
-  { label: "已发布", value: "published" },
-];
 
 const poolPlatformOptions: Array<{ label: string; value: PoolPlatformFilter }> = [
   { label: "全部平台", value: "all" },
@@ -432,6 +292,7 @@ const defaultWorkspaceSettings: WorkspacePromptSettings = {
   imageSize: defaultImageGenerationSize,
   imageQuality: "medium",
   platformCrawlSettings: defaultPlatformCrawlSettings,
+  simpleRunMediaSettings: defaultSimpleRunMediaSettings,
   updatedAt: new Date(0).toISOString(),
 };
 
@@ -487,9 +348,11 @@ export default function Home() {
   const [simpleLinkPlatform, setSimpleLinkPlatform] = useState<LinkImportPlatform>("auto");
   const [simpleLinkText, setSimpleLinkText] = useState("");
   const [simpleVideoFrameOriginalReference, setSimpleVideoFrameOriginalReference] = useState(true);
-  const [simpleUseComfyUiKlein, setSimpleUseComfyUiKlein] = useState(false);
-  const [simpleDirectOriginalReference, setSimpleDirectOriginalReference] = useState(false);
-  const [simpleEnableVideoTranscription, setSimpleEnableVideoTranscription] = useState(false);
+  const [simpleUseComfyUiKlein, setSimpleUseComfyUiKlein] = useState(defaultSimpleRunMediaSettings.useComfyUiKlein);
+  const [simpleDirectOriginalReference, setSimpleDirectOriginalReference] = useState(defaultSimpleRunMediaSettings.directOriginalReference);
+  const [simpleIncludeSourceVideo, setSimpleIncludeSourceVideo] = useState(defaultSimpleRunMediaSettings.includeSourceVideo);
+  const [simpleEnableVideoTranscription, setSimpleEnableVideoTranscription] = useState(defaultSimpleRunMediaSettings.enableVideoTranscription);
+  const [simpleGenerateImages, setSimpleGenerateImages] = useState(defaultSimpleRunMediaSettings.generateImages);
   const [simpleWriteFeishu, setSimpleWriteFeishu] = useState(false);
   const [simpleViralImitateImages, setSimpleViralImitateImages] = useState(false);
   const [simpleViralMaterialPaths, setSimpleViralMaterialPaths] = useState<string[]>([]);
@@ -500,23 +363,7 @@ export default function Home() {
   const [simpleOriginalUseWebSearch, setSimpleOriginalUseWebSearch] = useState(false);
   const [simpleRuns, setSimpleRuns] = useState<SimpleRun[]>([]);
   const [activeSimpleRunId, setActiveSimpleRunId] = useState("");
-  const [activeModule, setActiveModule] = useState<ActiveModule>("content");
-  const [crawlInputMode, setCrawlInputMode] = useState<CrawlInputMode>("keyword");
-  const [platform, setPlatform] = useState<CrawlPlatform>("xiaohongshu");
-  const [linkImportPlatform, setLinkImportPlatform] = useState<LinkImportPlatform>("auto");
-  const [linkImportText, setLinkImportText] = useState("");
-  const [linkImportVideoFrameOriginalReference, setLinkImportVideoFrameOriginalReference] = useState(true);
-  const [linkImportEnableVideoTranscription, setLinkImportEnableVideoTranscription] = useState(false);
-  const [linkImportResults, setLinkImportResults] = useState<LinkImportResult[]>([]);
-  const [linkImportSummary, setLinkImportSummary] = useState<LinkImportSummary | null>(null);
-  const [query, setQuery] = useState("");
-  const [targetCount, setTargetCount] = useState(20);
-  const [sort, setSort] = useState(defaultPlatformCrawlSettings.xiaohongshu.sort || "general");
-  const [noteType, setNoteType] = useState(0);
-  const [includeType, setIncludeType] = useState("all");
-  const [timeScope, setTimeScope] = useState("");
-  const [contentType, setContentType] = useState("0");
-  const [crawlEnableVideoTranscription, setCrawlEnableVideoTranscription] = useState(false);
+  const [activeModule, setActiveModule] = useState<ActiveModule>("production");
   const [cookie, setCookie] = useState("");
   const [materialPath, setMaterialPath] = useState("");
   const [materials, setMaterials] = useState<MaterialAsset[]>([]);
@@ -528,20 +375,14 @@ export default function Home() {
   const [materialAssetTags, setMaterialAssetTags] = useState("");
   const [activeFolderNameDraftState, setActiveFolderNameDraftState] = useState({ folderId: "", name: "" });
   const [sources, setSources] = useState<NormalizedSourceItem[]>([]);
-  const [projects, setProjects] = useState<ContentProject[]>([]);
   const [activeProject, setActiveProject] = useState<ContentProject | null>(null);
-  const [poolStatusFilter, setPoolStatusFilter] = useState<PoolStatusFilter>("all");
-  const [poolPlatformFilter, setPoolPlatformFilter] = useState<PoolPlatformFilter>("all");
-  const [poolSort, setPoolSort] = useState<PoolSortMode>("hot_desc");
   const [productionQueueFilter, setProductionQueueFilter] = useState<ProductionQueueFilter>("ready");
   const [productionPlatformFilter, setProductionPlatformFilter] = useState<PoolPlatformFilter>("all");
   const [productionSort, setProductionSort] = useState<PoolSortMode>("hot_desc");
   const [selectedSourceId, setSelectedSourceId] = useState<string>("");
-  const [selectedContentItemIds, setSelectedContentItemIds] = useState<string[]>([]);
   const [selectedBatchSourceIds, setSelectedBatchSourceIds] = useState<string[]>([]);
   const [batchJobs, setBatchJobs] = useState<BatchProductionJob[]>([]);
   const [activeBatchJob, setActiveBatchJob] = useState<BatchProductionJob | null>(null);
-  const [job, setJob] = useState<CrawlJob | null>(null);
   const [post, setPost] = useState<GeneratedPost | null>(null);
   const [generatedPosts, setGeneratedPosts] = useState<GeneratedPost[]>([]);
   const [feishuVehicleOptions, setFeishuVehicleOptions] = useState<string[]>([]);
@@ -549,17 +390,6 @@ export default function Home() {
   const [feishuVehicleOptionsMessage, setFeishuVehicleOptionsMessage] = useState("");
   const [selectedGeneratedPostId, setSelectedGeneratedPostId] = useState("");
   const [selectedGeneratedPostIds, setSelectedGeneratedPostIds] = useState<string[]>([]);
-  const [sourceEditState, setSourceEditState] = useState<{ sourceId: string; form: SourceEditForm }>({
-    sourceId: "",
-    form: makeEmptySourceEditForm(),
-  });
-  const [manualSource, setManualSource] = useState<ManualSourceForm>({
-    title: "",
-    contentText: "",
-    sourceUrl: "",
-    imageUrls: "",
-    videoUrl: "",
-  });
   const [instruction, setInstruction] = useState(defaultTextInstruction);
   const [strategyDraft, setStrategyDraft] = useState<ProductionPlan | null>(null);
   const [strategyDraftSourceId, setStrategyDraftSourceId] = useState("");
@@ -567,12 +397,13 @@ export default function Home() {
   const [imageTaskSourceId, setImageTaskSourceId] = useState("");
   const [imageSize, setImageSize] = useState<string>(defaultImageGenerationSize);
   const [imageQuality, setImageQuality] = useState<ImageGenerationQuality>("medium");
+  const [generateImages, setGenerateImages] = useState(true);
   const [imageUseComfyUiKleinOverride, setImageUseComfyUiKleinOverride] = useState<boolean | null>(null);
   const [imageDirectOriginalReference, setImageDirectOriginalReference] = useState(false);
+  const [includeSourceVideo, setIncludeSourceVideo] = useState(false);
   const [reviewPrompt, setReviewPrompt] = useState("");
   const [message, setMessage] = useState("");
   const [preview, setPreview] = useState<PreviewState>(null);
-  const [executionLogs, setExecutionLogs] = useState<ExecutionLogEntry[]>([]);
   const [busy, setBusy] = useState<
     | "crawl"
     | "materials"
@@ -592,26 +423,9 @@ export default function Home() {
     | null
   >(null);
   const [terminatingSimpleRunId, setTerminatingSimpleRunId] = useState("");
-  const [crawlProgress, setCrawlProgress] = useState<TaskProgressSnapshot | null>(null);
   const [generateProgress, setGenerateProgress] = useState<TaskProgressSnapshot | null>(null);
   const [batchProgress, setBatchProgress] = useState<TaskProgressSnapshot | null>(null);
   const [publishStatus, setPublishStatus] = useState<PublishStatusSnapshot | null>(null);
-
-  const visibleSources = useMemo(
-    () => {
-      const filtered = sources.filter((item) => {
-        const statusMatched = poolStatusFilter === "all" || (item.poolStatus || "new") === poolStatusFilter;
-        const platformMatched = poolPlatformFilter === "all" || item.platform === poolPlatformFilter;
-        return statusMatched && platformMatched;
-      });
-      return sortSources(filtered, poolSort);
-    },
-    [poolPlatformFilter, poolSort, poolStatusFilter, sources],
-  );
-  const selectedContentItems = useMemo(
-    () => visibleSources.filter((item) => selectedContentItemIds.includes(item.id)),
-    [selectedContentItemIds, visibleSources],
-  );
 
   const draftCountBySourceId = useMemo(
     () =>
@@ -632,7 +446,7 @@ export default function Home() {
     },
     [draftCountBySourceId, productionPlatformFilter, productionQueueFilter, productionSort, sources],
   );
-  const activeSourceList = activeModule === "production" ? productionSources : visibleSources;
+  const activeSourceList = productionSources;
   const selectedSource = useMemo(
     () => activeSourceList.find((item) => item.id === selectedSourceId) || activeSourceList[0],
     [activeSourceList, selectedSourceId],
@@ -655,7 +469,6 @@ export default function Home() {
   const simpleLinkCount = useMemo(() => splitLines(simpleLinkText).length, [simpleLinkText]);
   const simpleFeishuTaskCount = useMemo(() => splitFeishuTaskNumbers(simpleFeishuTaskText).length, [simpleFeishuTaskText]);
 
-  const projectStats = useMemo(() => buildProjectStats(activeProject), [activeProject]);
   const selectedSourceImages = useMemo(() => (selectedSource ? getDisplayImages(selectedSource) : []), [selectedSource]);
   const selectedSourceFrames = useMemo(() => selectBestVideoHighlightFrames(selectedSource?.videoFrames), [selectedSource]);
   const selectedSourceFrameUrls = useMemo(() => selectedSourceFrames.map((frame) => frame.url), [selectedSourceFrames]);
@@ -686,19 +499,6 @@ export default function Home() {
   );
   const activeImageTasks = imageTaskSourceId === selectedSource?.id ? imageTasks : defaultImageTasks;
   const selectedSourceCanGenerate = activeStrategyDraft?.decision !== "observe_only";
-  const sourceEdit = useMemo(
-    () =>
-      selectedSource
-        ? sourceEditState.sourceId === selectedSource.id
-          ? sourceEditState.form
-          : makeSourceEditForm(selectedSource)
-        : makeEmptySourceEditForm(),
-    [selectedSource, sourceEditState],
-  );
-  const sourceEditVisualAssets = useMemo(
-    () => (selectedSource ? buildEditableVisualAssets(selectedSource) : []),
-    [selectedSource],
-  );
   const activeMaterialFolder = useMemo(
     () => materialLibrary.folders.find((folder) => folder.id === activeMaterialFolderId) || materialLibrary.folders[0],
     [activeMaterialFolderId, materialLibrary.folders],
@@ -760,9 +560,6 @@ export default function Home() {
     loadGeneratedPosts();
     loadMaterialLibrary();
     loadFeishuVehicleOptions();
-    loadExecutionLogs();
-    const timer = window.setInterval(loadExecutionLogs, 2500);
-    return () => window.clearInterval(timer);
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [currentAccount?.id]);
 
@@ -771,7 +568,6 @@ export default function Home() {
     if (!simpleRuns.some(isSimpleRunLive)) return;
     const timer = window.setInterval(() => {
       void loadSimpleRuns(activeSimpleRunId);
-      void loadExecutionLogs();
     }, 3000);
     return () => window.clearInterval(timer);
   }, [currentAccount, simpleRuns, activeSimpleRunId]);
@@ -782,7 +578,6 @@ export default function Home() {
     if (!activeSimpleRun.platformResults.length && !activeSimpleRun.posts.length) return;
     void loadContentPool(getSimpleRunPrimaryProjectQuery(activeSimpleRun));
     void loadGeneratedPosts(activeSimpleRun.posts[0]?.postId);
-    void loadExecutionLogs();
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [activeSimpleRun?.id, activeSimpleRun?.status]);
 
@@ -906,37 +701,31 @@ export default function Home() {
     setSimpleRuns([]);
     setActiveSimpleRunId("");
     setSources([]);
-    setProjects([]);
     setActiveProject(null);
     setBatchJobs([]);
     setActiveBatchJob(null);
     setGeneratedPosts([]);
     setSelectedGeneratedPostId("");
     setSelectedGeneratedPostIds([]);
-    setExecutionLogs([]);
     setPublishStatus(null);
   }
 
-  async function loadContentPool(nextQuery = query) {
+  async function loadContentPool(nextQuery = "") {
     try {
       const params = new URLSearchParams();
       if (nextQuery.trim()) params.set("query", nextQuery.trim());
       const res = await fetch(`/api/content-pool?${params.toString()}`);
-      const data = (await res.json()) as { projects?: ContentProject[]; activeProject?: ContentProject; error?: string };
+      const data = (await res.json()) as { activeProject?: ContentProject; error?: string };
       if (!res.ok) throw new Error(data.error || "内容池读取失败");
       const nextProject = data.activeProject || null;
-      setProjects(data.projects || []);
       setActiveProject(nextProject);
-      if (nextProject && !nextQuery.trim()) setQuery(nextProject.query);
       if (nextProject?.items?.length) {
         setSources(nextProject.items);
         setSelectedSourceId((current) => (nextProject.items.some((item) => item.id === current) ? current : nextProject.items[0].id));
-        setSelectedContentItemIds((current) => current.filter((id) => nextProject.items.some((item) => item.id === id)));
         setSelectedBatchSourceIds((current) => current.filter((id) => nextProject.items.some((item) => item.id === id)));
       } else {
         setSources([]);
         setSelectedSourceId("");
-        setSelectedContentItemIds([]);
         setSelectedBatchSourceIds([]);
       }
     } catch {
@@ -953,7 +742,7 @@ export default function Home() {
       setInstruction(data.settings.textInstruction);
       setImageSize(data.settings.imageSize);
       setImageQuality(data.settings.imageQuality);
-      applyPlatformCrawlControls(platform, data.settings);
+      applySimpleRunMediaSettings(data.settings.simpleRunMediaSettings);
     } catch {
       // 默认策略读取失败时保留客户端默认值，不阻断主工作台渲染。
     }
@@ -1007,9 +796,8 @@ export default function Home() {
         const currentPost = post && data.job.postIds.includes(post.id) ? data.job.posts.find((item) => item.id === post.id) : undefined;
         if (currentPost) setPost(currentPost);
         setMessage(buildPublishMessage(data));
-        await loadContentPool(query);
+        await loadContentPool();
         await loadGeneratedPosts(currentPost?.id || data.job.postIds[0] || selectedGeneratedPostId);
-        await loadExecutionLogs();
       }
     } catch (error) {
       const detail = error instanceof Error ? error.message : "Feishu publish job polling failed";
@@ -1033,73 +821,32 @@ export default function Home() {
     if (typeof patch.textInstruction === "string") setInstruction(patch.textInstruction);
     if (typeof patch.imageSize === "string") setImageSize(patch.imageSize);
     if (patch.imageQuality) setImageQuality(patch.imageQuality);
+    if (patch.simpleRunMediaSettings) applySimpleRunMediaSettings(patch.simpleRunMediaSettings);
   }
 
-  function getPlatformCrawlSettingFromSettings(targetPlatform: CrawlPlatform, settingsSource = workspaceSettings): PlatformCrawlSetting {
-    return {
-      ...defaultPlatformCrawlSettings[targetPlatform],
-      ...(settingsSource.platformCrawlSettings?.[targetPlatform] || {}),
+  function applySimpleRunMediaSettings(mediaSettings: SimpleRunMediaSettings) {
+    setSimpleGenerateImages(mediaSettings.generateImages);
+    setSimpleUseComfyUiKlein(mediaSettings.useComfyUiKlein);
+    setSimpleDirectOriginalReference(mediaSettings.directOriginalReference);
+    setSimpleIncludeSourceVideo(mediaSettings.includeSourceVideo);
+    setSimpleEnableVideoTranscription(mediaSettings.enableVideoTranscription);
+  }
+
+  function updateSimpleRunMediaSettingsDraft(patch: Partial<SimpleRunMediaSettings>) {
+    const simpleRunMediaSettings = {
+      ...defaultSimpleRunMediaSettings,
+      ...workspaceSettings.simpleRunMediaSettings,
+      ...patch,
     };
-  }
-
-  function buildWorkspaceSettingsWithPlatformCrawlSetting(
-    settingsSource: WorkspacePromptSettings,
-    targetPlatform: CrawlPlatform,
-    setting: PlatformCrawlSetting,
-  ): WorkspacePromptSettings {
-    const currentSetting = settingsSource.platformCrawlSettings?.[targetPlatform] || {};
-    return {
-      ...settingsSource,
-      platformCrawlSettings: {
-        ...defaultPlatformCrawlSettings,
-        ...settingsSource.platformCrawlSettings,
-        [targetPlatform]: {
-          ...defaultPlatformCrawlSettings[targetPlatform],
-          ...currentSetting,
-          ...setting,
-        },
+    applySimpleRunMediaSettings(simpleRunMediaSettings);
+    setWorkspaceSettings((current) => ({
+      ...current,
+      simpleRunMediaSettings: {
+        ...defaultSimpleRunMediaSettings,
+        ...current.simpleRunMediaSettings,
+        ...patch,
       },
-      updatedAt: new Date().toISOString(),
-    };
-  }
-
-  function applyPlatformCrawlControls(nextPlatform: CrawlPlatform, settingsSource = workspaceSettings) {
-    const nextSetting = getPlatformCrawlSettingFromSettings(nextPlatform, settingsSource);
-    setSort(nextSetting.sort || sortOptions[nextPlatform][0]?.value || "");
-    setNoteType(Number(nextSetting.noteType ?? 0));
-    setIncludeType(nextPlatform === "weibo" ? nextSetting.includeType || "all" : "all");
-    setTimeScope(nextPlatform === "weibo" ? nextSetting.timeScope || "" : "");
-    setContentType(nextPlatform === "douyin" ? nextSetting.contentType || "0" : "0");
-  }
-
-  function updatePlatformCrawlSettingsDraft(targetPlatform: CrawlPlatform, setting: PlatformCrawlSetting) {
-    setWorkspaceSettings((current) => buildWorkspaceSettingsWithPlatformCrawlSetting(current, targetPlatform, setting));
-  }
-
-  function getCurrentPlatformCrawlSetting(targetPlatform: CrawlPlatform): PlatformCrawlSetting {
-    return {
-      sort,
-      noteType: targetPlatform === "xiaohongshu" ? noteType : undefined,
-      searchType: targetPlatform === "weibo" ? sort : undefined,
-      includeType: targetPlatform === "weibo" ? includeType : undefined,
-      timeScope: targetPlatform === "weibo" ? timeScope : undefined,
-      contentType: targetPlatform === "douyin" ? contentType : undefined,
-    };
-  }
-
-  function getWorkspaceSettingsWithCurrentPlatformCrawlSetting(settingsSource = workspaceSettings) {
-    return buildWorkspaceSettingsWithPlatformCrawlSetting(settingsSource, platform, getCurrentPlatformCrawlSetting(platform));
-  }
-
-  async function persistWorkspaceSettings(nextSettings: WorkspacePromptSettings) {
-    const res = await fetch("/api/workspace/settings", {
-      method: "PATCH",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify(nextSettings),
-    });
-    const data = (await res.json()) as { settings?: WorkspacePromptSettings; error?: string };
-    if (!res.ok || !data.settings) throw new Error(data.error || "榛樿绛栫暐淇濆瓨澶辫触");
-    return data.settings;
+    }));
   }
 
   async function saveWorkspaceSettingsPatch(patch: Partial<WorkspacePromptSettings>) {
@@ -1128,25 +875,6 @@ export default function Home() {
       setMessage("默认生产策略已保存，简单版会自动使用这组策略");
     } catch (error) {
       setMessage(error instanceof Error ? error.message : "默认策略保存失败");
-    } finally {
-      setBusy(null);
-    }
-  }
-
-  async function saveCurrentPlatformCrawlSettings() {
-    const nextSettings = getWorkspaceSettingsWithCurrentPlatformCrawlSetting();
-    setWorkspaceSettings(nextSettings);
-    setBusy("settings");
-    setMessage("");
-    try {
-      const savedSettings = await persistWorkspaceSettings(nextSettings);
-      setWorkspaceSettings(savedSettings);
-      setInstruction(savedSettings.textInstruction);
-      setImageSize(savedSettings.imageSize);
-      setImageQuality(savedSettings.imageQuality);
-      setMessage("采集策略已保存，简单版会自动使用当前平台设置");
-    } catch (error) {
-      setMessage(error instanceof Error ? error.message : "采集策略保存失败");
     } finally {
       setBusy(null);
     }
@@ -1202,28 +930,7 @@ export default function Home() {
     } catch (error) {
       setMessage(error instanceof Error ? error.message : "素材库读取失败");
     }
-  }
-
-  async function loadExecutionLogs() {
-    try {
-      const res = await fetch("/api/activity?limit=80");
-      const data = (await res.json()) as { entries?: ExecutionLogEntry[] };
-      if (res.ok) setExecutionLogs(data.entries || []);
-    } catch {
-      // 执行日志不影响主流程。
-    }
-  }
-
-  async function clearExecutionLogs() {
-    try {
-      await fetch("/api/activity", { method: "DELETE" });
-      await loadExecutionLogs();
-    } catch {
-      setMessage("执行日志清空失败");
-    }
-  }
-
-  function toggleSimplePlatform(value: CrawlPlatform) {
+  }function toggleSimplePlatform(value: CrawlPlatform) {
     setSimplePlatforms((current) => (current.includes(value) ? current.filter((item) => item !== value) : [...current, value]));
   }
 
@@ -1272,6 +979,23 @@ export default function Home() {
     });
   }
 
+  function toggleViralMaterialPathFromPreview(path: string) {
+    onToggleViralMaterialPath(path);
+    setPreview((current) => {
+      if (!current?.selection) return current;
+      const selectedImageUrls = current.selection.selectedImageUrls;
+      const isSelected = selectedImageUrls.includes(path);
+      if (!isSelected && selectedImageUrls.length >= current.selection.maxSelected) return current;
+      return {
+        ...current,
+        selection: {
+          ...current.selection,
+          selectedImageUrls: isSelected ? selectedImageUrls.filter((item) => item !== path) : [...selectedImageUrls, path],
+        },
+      };
+    });
+  }
+
   function onToggleViralMaterialFolder(folderId: string) {
     const folder = viralMaterialFolders.find((item) => item.id === folderId);
     if (!folder) return;
@@ -1299,7 +1023,11 @@ export default function Home() {
     const imageUrls = displayedViralMaterialCandidates.map((asset) => asset.path);
     const index = Math.max(0, imageUrls.indexOf(path));
     const candidate = displayedViralMaterialCandidates.find((asset) => asset.path === path);
-    openImageGallery(imageUrls, index, candidate?.name || "车型图预览", candidate?.sourceLabel || path);
+    openImageGallery(imageUrls, index, candidate?.name || "车型图预览", candidate?.sourceLabel || path, {
+      selectedImageUrls: selectedSimpleViralMaterialPaths,
+      maxSelected: maxSimpleImageTasksPerPost,
+      onToggleImage: toggleViralMaterialPathFromPreview,
+    });
   }
 
   async function startSimpleRun() {
@@ -1335,7 +1063,7 @@ export default function Home() {
       setMessage("请先输入爆款图文链接");
       return;
     }
-    if (sourceMode === "viral" && simpleViralImitateImages && !selectedSimpleViralMaterialPaths.length) {
+    if (sourceMode === "viral" && simpleGenerateImages && simpleViralImitateImages && !selectedSimpleViralMaterialPaths.length) {
       setMessage("请选择至少 1 张车型图用于图片模仿");
       return;
     }
@@ -1352,18 +1080,25 @@ export default function Home() {
       setMessage("请填写文字内容提示词，或恢复默认提示词");
       return;
     }
-    const missingImageStrategyPrompt = getMissingImageStrategyPrompt(workspaceSettings);
+    const missingImageStrategyPrompt = simpleGenerateImages ? getMissingImageStrategyPrompt(workspaceSettings) : "";
     if (missingImageStrategyPrompt) {
       setMessage(`请填写${missingImageStrategyPrompt}提示词，或恢复默认提示词`);
       return;
     }
-    const normalizedImageSize = normalizeImageSizeInput(workspaceSettings.imageSize);
-    if (!normalizedImageSize) {
+    const normalizedImageSize = simpleGenerateImages ? normalizeImageSizeInput(workspaceSettings.imageSize) : defaultImageGenerationSize;
+    if (simpleGenerateImages && !normalizedImageSize) {
       setMessage("请输入 auto 或 64-8192 范围内的 GPT 图片尺寸，例如 1200x1600");
       return;
     }
 
-    const syncedWorkspaceSettings = workspaceMode === "advanced" ? getWorkspaceSettingsWithCurrentPlatformCrawlSetting() : workspaceSettings;
+    const syncedWorkspaceSettings = workspaceSettings;
+    const simpleRunMediaSettings: SimpleRunMediaSettings = {
+      generateImages: simpleGenerateImages,
+      useComfyUiKlein: simpleUseComfyUiKlein,
+      directOriginalReference: simpleDirectOriginalReference,
+      includeSourceVideo: simpleIncludeSourceVideo,
+      enableVideoTranscription: simpleEnableVideoTranscription,
+    };
     const imageStrategyPrompts = trimImageStrategyPrompts(syncedWorkspaceSettings.imageStrategyPrompts);
     const settingsForRun: WorkspacePromptSettings = {
       ...syncedWorkspaceSettings,
@@ -1371,6 +1106,7 @@ export default function Home() {
       imageStrategyPrompts,
       imageWashPrompt: imageStrategyPrompts.textImage,
       imageSize: normalizedImageSize,
+      simpleRunMediaSettings,
       updatedAt: new Date().toISOString(),
     };
     setWorkspaceSettings(settingsForRun);
@@ -1401,12 +1137,14 @@ export default function Home() {
           videoFrameOriginalReference: sourceMode === "links" ? simpleVideoFrameOriginalReference : undefined,
           useComfyUiKlein: simpleUseComfyUiKlein,
           directOriginalReference: sourceMode === "viral" || sourceMode === "original" ? undefined : simpleDirectOriginalReference,
+          includeSourceVideo: simpleIncludeSourceVideo,
           enableVideoTranscription: simpleEnableVideoTranscription,
+          generateImages: simpleGenerateImages,
           writeFeishu: simpleWriteFeishu,
           feishuTaskNumbers: sourceMode === "feishu" ? feishuTaskNumbers : undefined,
           viralUrl: sourceMode === "viral" ? viralUrl : undefined,
           viralImitateImages: sourceMode === "viral" ? simpleViralImitateImages : undefined,
-          viralMaterialPaths: sourceMode === "viral" && simpleViralImitateImages ? selectedSimpleViralMaterialPaths : undefined,
+          viralMaterialPaths: sourceMode === "viral" && simpleGenerateImages && simpleViralImitateImages ? selectedSimpleViralMaterialPaths : undefined,
           originalPrompt: sourceMode === "original" ? originalPrompt : undefined,
           originalUseWebSearch: sourceMode === "original" ? simpleOriginalUseWebSearch : undefined,
           materialPaths: productionMaterialPaths,
@@ -1418,10 +1156,8 @@ export default function Home() {
       setSimpleRuns((current) => [data.run!, ...current.filter((run) => run.id !== data.run!.id)]);
       setActiveSimpleRunId(data.run.id);
       const nextProjectQuery = getSimpleRunPrimaryProjectQuery(data.run);
-      setQuery(nextProjectQuery);
       await loadContentPool(nextProjectQuery);
       await loadGeneratedPosts(data.run.posts[0]?.postId);
-      await loadExecutionLogs();
       setMessage(isSimpleRunLive(data.run) ? "简单版任务已提交，后端正在自动执行，请看任务进度。" : buildSimpleRunMessage(data.run));
     } catch (error) {
       setMessage(error instanceof Error ? error.message : "简单版自动任务失败");
@@ -1449,7 +1185,6 @@ export default function Home() {
       if (!res.ok || !data.run) throw new Error(data.error || "强制终止任务失败");
       setSimpleRuns((current) => [data.run!, ...current.filter((item) => item.id !== data.run!.id)]);
       setActiveSimpleRunId(data.run.id);
-      await loadExecutionLogs();
       setMessage("已强制终止该任务，可以发起新的任务。");
     } catch (error) {
       setMessage(error instanceof Error ? error.message : "强制终止任务失败");
@@ -1457,178 +1192,7 @@ export default function Home() {
       setTerminatingSimpleRunId("");
       await loadSimpleRuns(runId);
     }
-  }
-
-  async function startCrawl() {
-    const crawledPlatform = platform;
-    const crawlSettingForPlatform = getCurrentPlatformCrawlSetting(crawledPlatform);
-    const settingsForCrawl = buildWorkspaceSettingsWithPlatformCrawlSetting(workspaceSettings, crawledPlatform, crawlSettingForPlatform);
-    setWorkspaceSettings(settingsForCrawl);
-    setBusy("crawl");
-    setMessage("");
-    setCrawlProgress({
-      title: "采集任务进度",
-      label: "正在请求采集接口",
-      detail: `${platforms.find((item) => item.value === platform)?.label || platform} · ${query || "未填写关键词"} · 目标 ${targetCount} 条`,
-      value: 28,
-      status: "running",
-      total: targetCount,
-      completed: 0,
-    });
-    try {
-      const savedSettings = await persistWorkspaceSettings(settingsForCrawl);
-      setWorkspaceSettings(savedSettings);
-      const res = await fetch("/api/crawl/jobs", {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({
-          platform: crawledPlatform,
-          query,
-          targetCount,
-          sort,
-          noteType,
-          searchType: crawledPlatform === "weibo" ? sort : undefined,
-          includeType: crawledPlatform === "weibo" ? includeType : undefined,
-          timeScope: crawledPlatform === "weibo" ? timeScope : undefined,
-          contentType: crawledPlatform === "douyin" ? contentType : undefined,
-          cookie: crawledPlatform === "douyin" ? cookie : undefined,
-          enableVideoTranscription: crawlEnableVideoTranscription,
-        }),
-      });
-      const data = (await res.json()) as CrawlJob & { error?: string; project?: ContentProject };
-      if (!res.ok) throw new Error(data.error || "采集失败");
-      setCrawlProgress({
-        title: "采集任务进度",
-        label: "正在同步内容池",
-        detail: `接口返回 ${data.items.length} 条，正在刷新本地内容池视图`,
-        value: 82,
-        status: "running",
-        total: targetCount,
-        completed: data.items.length,
-      });
-      setJob(data);
-      const nextSources = data.project?.items?.length ? data.project.items : data.items;
-      const selectedAfterCrawl = data.items[0] || nextSources.find((item) => item.platform === crawledPlatform) || nextSources[0];
-      setSources(nextSources);
-      setActiveProject(data.project || null);
-      setSelectedSourceId(selectedAfterCrawl?.id || "");
-      setPoolStatusFilter("all");
-      setPoolPlatformFilter(crawledPlatform);
-      setPost(null);
-      await loadContentPool(query);
-      setCrawlProgress({
-        title: "采集任务进度",
-        label: "采集完成",
-        detail: `本次返回 ${data.items.length} 条，内容池累计 ${data.project?.totalItems || nextSources.length} 条`,
-        value: 100,
-        status: "success",
-        total: targetCount,
-        completed: data.items.length,
-      });
-      setMessage(data.warning || `采集完成：本次返回 ${data.items.length} 条，内容池累计 ${data.project?.totalItems || nextSources.length} 条`);
-    } catch (error) {
-      const errorMessage = error instanceof Error ? error.message : "采集失败";
-      setCrawlProgress({
-        title: "采集任务进度",
-        label: "采集失败",
-        detail: errorMessage,
-        value: 100,
-        status: "error",
-        total: targetCount,
-        completed: 0,
-      });
-      setMessage(errorMessage);
-    } finally {
-      setBusy(null);
-    }
-  }
-
-  async function startLinkImport() {
-    const links = splitLines(linkImportText);
-    const importQuery = query.trim();
-    if (!importQuery) {
-      setMessage("请先填写归属关键词 / 内容池项目");
-      return;
-    }
-    if (!links.length) {
-      setMessage("请粘贴需要导入的链接");
-      return;
-    }
-
-    setBusy("crawl");
-    setMessage("");
-    setLinkImportResults([]);
-    setLinkImportSummary(null);
-    setCrawlProgress({
-      title: "链接导入进度",
-      label: "正在解析来源链接",
-      detail: `待处理 ${links.length} 条链接`,
-      value: 24,
-      status: "running",
-      total: links.length,
-      completed: 0,
-    });
-    try {
-      const res = await fetch("/api/crawl/links", {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({
-          query: importQuery,
-          links,
-          platform: linkImportPlatform === "auto" ? undefined : linkImportPlatform,
-          cookie: linkImportPlatform === "douyin" || linkImportPlatform === "dongchedi" ? cookie : undefined,
-          videoFrameOriginalReference: linkImportVideoFrameOriginalReference,
-          enableVideoTranscription: linkImportEnableVideoTranscription,
-        }),
-      });
-      const data = (await res.json()) as LinkImportResponse;
-      if (!res.ok) throw new Error(data.error || "链接导入失败");
-
-      const importedItems = data.items || [];
-      const nextSources = data.project?.items?.length ? data.project.items : importedItems;
-      const firstImported = importedItems[0] || nextSources[0];
-      setLinkImportResults(data.results || []);
-      setLinkImportSummary(data.summary || null);
-      setJob(null);
-      setSources(nextSources);
-      setActiveProject(data.project || null);
-      setSelectedSourceId(firstImported?.id || "");
-      setPoolStatusFilter("all");
-      const importedPlatforms = Array.from(new Set(importedItems.map((item) => item.platform)));
-      setPoolPlatformFilter(importedPlatforms.length === 1 ? importedPlatforms[0] : "all");
-      setPost(null);
-      await loadContentPool(importQuery);
-      await loadExecutionLogs();
-      setCrawlProgress({
-        title: "链接导入进度",
-        label: "链接导入完成",
-        detail: `成功 ${data.summary?.imported || 0} 条，失败 ${data.summary?.failed || 0} 条，过滤 ${data.summary?.filteredUnsafe || 0} 条`,
-        value: 100,
-        status: data.summary?.imported ? "success" : "error",
-        total: data.summary?.total || links.length,
-        completed: data.summary?.imported || 0,
-      });
-      setMessage(
-        `链接导入完成：成功 ${data.summary?.imported || 0} 条，重复 ${data.summary?.duplicates || 0} 条，失败 ${data.summary?.failed || 0} 条`,
-      );
-    } catch (error) {
-      const errorMessage = error instanceof Error ? error.message : "链接导入失败";
-      setCrawlProgress({
-        title: "链接导入进度",
-        label: "链接导入失败",
-        detail: errorMessage,
-        value: 100,
-        status: "error",
-        total: links.length,
-        completed: 0,
-      });
-      setMessage(errorMessage);
-    } finally {
-      setBusy(null);
-    }
-  }
-
-  async function scanMaterials() {
+  }async function scanMaterials() {
     if (!materialPath.trim()) {
       setMessage("请填写本地素材文件夹路径");
       return;
@@ -1647,209 +1211,6 @@ export default function Home() {
       setMessage(`已索引素材：${data.assets?.length || 0} 张图片`);
     } catch (error) {
       setMessage(error instanceof Error ? error.message : "素材扫描失败");
-    } finally {
-      setBusy(null);
-    }
-  }
-
-  async function saveSourceEdits() {
-    if (!selectedSource) return;
-    setBusy("source");
-    setMessage("");
-    try {
-      const now = new Date().toISOString();
-      const visualAssets = buildVisualTagPatchAssets(selectedSource, sourceEdit.visualTags);
-      const patch: Partial<NormalizedSourceItem> = {
-        title: sourceEdit.title.trim(),
-        contentText: sourceEdit.contentText.trim(),
-        authorName: sourceEdit.authorName.trim(),
-        sourceUrl: sourceEdit.sourceUrl.trim(),
-        contentTagging: {
-          tags: sourceEdit.contentTags.slice(0, 4),
-          reasons: selectedSource.contentTagging?.reasons || [],
-          confidence: selectedSource.contentTagging?.confidence,
-          model: selectedSource.contentTagging?.model,
-          taggedAt: selectedSource.contentTagging?.taggedAt,
-          status: "success",
-          updatedBy: "user",
-          updatedAt: now,
-        },
-        visualTagging: {
-          assets: visualAssets,
-          model: selectedSource.visualTagging?.model,
-          taggedAt: selectedSource.visualTagging?.taggedAt,
-          status: visualAssets.length ? "success" : "skipped",
-        },
-        poolStatus: sourceEdit.poolStatus,
-        mediaType: sourceEdit.mediaType,
-        metrics: parseMetricForm(sourceEdit),
-      };
-      const res = await fetch("/api/content/items", {
-        method: "PATCH",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ id: selectedSource.id, patch }),
-      });
-      const data = (await res.json()) as { item?: NormalizedSourceItem; error?: string };
-      if (!res.ok || !data.item) throw new Error(data.error || "内容保存失败");
-      setSources((current) => current.map((item) => (item.id === data.item!.id ? data.item! : item)));
-      await loadContentPool(query);
-      setMessage("内容池样本已保存");
-    } catch (error) {
-      setMessage(error instanceof Error ? error.message : "内容保存失败");
-    } finally {
-      setBusy(null);
-    }
-  }
-
-  async function createManualSourceItem() {
-    const projectQuery = (activeProject?.query || query).trim();
-    if (!projectQuery) {
-      setMessage("请先输入关键词，手工样本会归入该关键词内容池");
-      return;
-    }
-    if (!manualSource.title.trim() && !manualSource.contentText.trim() && !manualSource.imageUrls.trim() && !manualSource.videoUrl.trim()) {
-      setMessage("手工样本至少需要标题、正文、图片或视频之一");
-      return;
-    }
-    setBusy("source");
-    setMessage("");
-    try {
-      const images = splitLines(manualSource.imageUrls);
-      const videoUrl = manualSource.videoUrl.trim();
-      const item = {
-        platform,
-        title: manualSource.title.trim(),
-        contentText: manualSource.contentText.trim(),
-        sourceUrl: manualSource.sourceUrl.trim(),
-        images,
-        videoUrl,
-        mediaUrls: [...images, videoUrl].filter(Boolean),
-        mediaType: videoUrl ? "video" : images.length ? "image" : "text",
-        metrics: {},
-        raw: { manual: true },
-      };
-      const res = await fetch("/api/content/items", {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ query: projectQuery, item }),
-      });
-      const data = (await res.json()) as { item?: NormalizedSourceItem; project?: ContentProject; error?: string };
-      if (!res.ok || !data.item) throw new Error(data.error || "手工样本创建失败");
-      setManualSource({ title: "", contentText: "", sourceUrl: "", imageUrls: "", videoUrl: "" });
-      setSelectedSourceId(data.item.id);
-      await loadContentPool(projectQuery);
-      setMessage("已新增手工样本");
-    } catch (error) {
-      setMessage(error instanceof Error ? error.message : "手工样本创建失败");
-    } finally {
-      setBusy(null);
-    }
-  }
-
-  async function deleteSelectedSource() {
-    if (!selectedSource) return;
-    if (!window.confirm("确认删除当前内容池样本？该操作会更新本地内容池 JSON。")) return;
-    setBusy("source");
-    setMessage("");
-    try {
-      const res = await fetch(`/api/content/items?id=${encodeURIComponent(selectedSource.id)}`, { method: "DELETE" });
-      const data = (await res.json()) as { error?: string };
-      if (!res.ok) throw new Error(data.error || "内容删除失败");
-      const remaining = visibleSources.filter((item) => item.id !== selectedSource.id);
-      setSelectedSourceId(remaining[0]?.id || "");
-      await loadContentPool(query);
-      setMessage("已删除内容池样本");
-    } catch (error) {
-      setMessage(error instanceof Error ? error.message : "内容删除失败");
-    } finally {
-      setBusy(null);
-    }
-  }
-
-  async function updateSelectedContentItemStatus(status: SourceUsageStatus) {
-    if (!selectedContentItemIds.length) {
-      setMessage("请先勾选要批量管理的内容池样本");
-      return;
-    }
-    setBusy("contentBatch");
-    setMessage("");
-    try {
-      const res = await fetch("/api/content/items/batch", {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ action: "set_status", ids: selectedContentItemIds, status }),
-      });
-      const data = (await res.json()) as { updatedCount?: number; notFoundIds?: string[]; error?: string };
-      if (!res.ok) throw new Error(data.error || "内容池批量状态更新失败");
-      clearContentItemSelection();
-      await loadContentPool(query);
-      await loadExecutionLogs();
-      setMessage(`内容池批量更新完成：${data.updatedCount || 0} 条，未命中 ${data.notFoundIds?.length || 0} 条`);
-    } catch (error) {
-      setMessage(error instanceof Error ? error.message : "内容池批量状态更新失败");
-    } finally {
-      setBusy(null);
-    }
-  }
-
-  async function deleteSelectedContentItems() {
-    if (!selectedContentItemIds.length) {
-      setMessage("请先勾选要删除的内容池样本");
-      return;
-    }
-    if (!window.confirm(`确认删除已选 ${selectedContentItemIds.length} 条内容池样本？该操作不可撤销。`)) return;
-    setBusy("contentBatch");
-    setMessage("");
-    try {
-      const res = await fetch("/api/content/items/batch", {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ action: "delete", ids: selectedContentItemIds }),
-      });
-      const data = (await res.json()) as { deletedCount?: number; notFoundIds?: string[]; error?: string };
-      if (!res.ok) throw new Error(data.error || "内容池批量删除失败");
-      clearContentItemSelection();
-      await loadContentPool(query);
-      await loadExecutionLogs();
-      setMessage(`内容池批量删除完成：${data.deletedCount || 0} 条，未命中 ${data.notFoundIds?.length || 0} 条`);
-    } catch (error) {
-      setMessage(error instanceof Error ? error.message : "内容池批量删除失败");
-    } finally {
-      setBusy(null);
-    }
-  }
-
-  async function cacheSelectedContentItemMedia(sourceItemIds = selectedContentItemIds, options: { forceVideoRefresh?: boolean } = {}) {
-    if (!sourceItemIds.length) {
-      setMessage("请先勾选要补全本地素材的内容");
-      return;
-    }
-    setBusy("contentBatch");
-    setMessage("");
-    try {
-      const res = await fetch("/api/content/items/batch", {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ action: "cache_media", ids: sourceItemIds, forceVideoRefresh: options.forceVideoRefresh === true }),
-      });
-      const data = (await res.json()) as {
-        updatedCount?: number;
-        notFoundIds?: string[];
-        localImages?: number;
-        remoteImages?: number;
-        localVideos?: number;
-        videoFrames?: number;
-        errorCount?: number;
-        error?: string;
-      };
-      if (!res.ok) throw new Error(data.error || "本地素材补全失败");
-      await loadContentPool(query);
-      await loadExecutionLogs();
-      setMessage(
-        `素材补全完成：处理 ${data.updatedCount || 0} 条，本地图片 ${data.localImages || 0} 张，本地视频 ${data.localVideos || 0} 个，关键帧 ${data.videoFrames || 0} 张，仍需远程兜底 ${data.remoteImages || 0} 张，错误 ${data.errorCount || 0} 个`,
-      );
-    } catch (error) {
-      setMessage(error instanceof Error ? error.message : "本地素材补全失败");
     } finally {
       setBusy(null);
     }
@@ -2033,6 +1394,7 @@ export default function Home() {
             body: post.body,
             imagePrompt: post.imagePrompt,
             imageUrls: post.imageUrls,
+            videoUrls: post.videoUrls,
             imageTasks: post.imageTasks,
             status: post.status,
           },
@@ -2089,8 +1451,7 @@ export default function Home() {
       const preferredPostId = post && selectedGeneratedPostIds.includes(post.id) ? post.id : selectedGeneratedPostId;
       clearGeneratedPostSelection();
       await loadGeneratedPosts(preferredPostId);
-      if (status === "approved" || status === "published") await loadContentPool(query);
-      await loadExecutionLogs();
+      if (status === "approved" || status === "published") await loadContentPool();
       setMessage(`生成稿批量更新完成：${data.updatedCount || 0} 条，未命中 ${data.notFoundIds?.length || 0} 条`);
     } catch (error) {
       setMessage(error instanceof Error ? error.message : "生成稿批量状态更新失败");
@@ -2121,7 +1482,6 @@ export default function Home() {
       setPost(nextPost);
       setSelectedGeneratedPostId(nextPost?.id || "");
       await loadGeneratedPosts(nextPost?.id);
-      await loadExecutionLogs();
       setMessage(`生成稿批量删除完成：${data.deletedCount || 0} 条，未命中 ${data.notFoundIds?.length || 0} 条`);
     } catch (error) {
       setMessage(error instanceof Error ? error.message : "生成稿批量删除失败");
@@ -2132,8 +1492,8 @@ export default function Home() {
 
   async function regenerateCurrentPost() {
     if (!post) return;
-    const normalizedImageSize = normalizeImageSizeInput(imageSize);
-    if (!normalizedImageSize) {
+    const normalizedImageSize = generateImages ? normalizeImageSizeInput(imageSize) : defaultImageGenerationSize;
+    if (generateImages && !normalizedImageSize) {
       setMessage("请输入 auto 或 64-8192 范围内的 GPT 图片尺寸，例如 1200x1600");
       return;
     }
@@ -2150,7 +1510,7 @@ export default function Home() {
           instruction,
           productionPlanOverride: selectedSource?.id === post.sourceItemId ? activeStrategyDraft : post.productionPlanOverride,
           imageTasks: selectedSource?.id === post.sourceItemId ? activeImageTasks : post.imageTasks,
-          generateImages: true,
+          generateImages: generateImages,
           imageSize: normalizedImageSize,
           imageQuality,
         }),
@@ -2177,18 +1537,25 @@ export default function Home() {
       setMessage("该内容被制作策略标记为仅观察，不进入自动生成流程");
       return;
     }
-    const normalizedImageSize = normalizeImageSizeInput(imageSize);
-    if (!normalizedImageSize) {
+    const normalizedImageSize = generateImages ? normalizeImageSizeInput(imageSize) : defaultImageGenerationSize;
+    if (generateImages && !normalizedImageSize) {
       setMessage("请输入 auto 或 64-8192 范围内的 GPT 图片尺寸，例如 1200x1600");
       return;
     }
     setBusy("generate");
     setMessage("");
     const selectedImageTaskCount = activeImageTasks.filter((task) => task.selected).length;
+    const generateDraftHasImageTasks = generateImages && selectedImageTaskCount > 0;
     setGenerateProgress({
       title: "单条生产进度",
-      label: "正在生成图文草稿",
-      detail: `${selectedSource.title || selectedSource.contentText || selectedSource.id} · ${selectedImageTaskCount} 个配图任务 · ${normalizedImageSize} · ${imageQuality}`,
+      label: generateDraftHasImageTasks ? "正在生成图文草稿" : "正在生成文字草稿",
+      detail: formatDraftGenerationProgressDetail(
+        selectedSource.title || selectedSource.contentText || selectedSource.id,
+        selectedImageTaskCount,
+        generateImages,
+        normalizedImageSize,
+        imageQuality,
+      ),
       value: 36,
       status: "running",
       total: selectedImageTaskCount || 1,
@@ -2204,36 +1571,38 @@ export default function Home() {
           instruction,
           productionPlanOverride: activeStrategyDraft || selectedSource.productionPlan,
           imageTasks: activeImageTasks,
-          generateImages: true,
+          includeSourceVideo: includeSourceVideo,
+          generateImages: generateImages,
           imageSize: normalizedImageSize,
           imageQuality,
         }),
       });
       const data = (await res.json()) as { post?: GeneratedPost; error?: string };
       if (!res.ok || !data.post) throw new Error(data.error || "生成失败");
+      const generatedMediaCount = countPostMedia(data.post);
       setGenerateProgress({
         title: "单条生产进度",
         label: "正在同步草稿与内容池",
-        detail: `已生成 ${data.post.imageUrls.length} 张配图，正在写入草稿库`,
+        detail: formatDraftSyncProgressDetail(generatedMediaCount, generateImages, selectedImageTaskCount),
         value: 84,
         status: "running",
-        total: selectedImageTaskCount || data.post.imageUrls.length || 1,
-        completed: data.post.imageUrls.length,
+        total: selectedImageTaskCount || generatedMediaCount || 1,
+        completed: generatedMediaCount,
       });
       setPost(data.post);
       setSelectedGeneratedPostId(data.post.id);
-      await loadContentPool(query);
+      await loadContentPool();
       await loadGeneratedPosts(data.post.id);
       setGenerateProgress({
         title: "单条生产进度",
-        label: "图文草稿已生成",
-        detail: data.post.imageUrls.length ? `已生成 ${data.post.imageUrls.length} 张配图，可进入审查` : "文字草稿已生成，图片未返回结果",
+        label: generatedMediaCount ? "图文草稿已生成" : "文字草稿已生成",
+        detail: formatDraftDoneProgressDetail(generatedMediaCount, generateImages, selectedImageTaskCount),
         value: 100,
         status: "success",
-        total: selectedImageTaskCount || data.post.imageUrls.length || 1,
-        completed: data.post.imageUrls.length || 1,
+        total: selectedImageTaskCount || generatedMediaCount || 1,
+        completed: generatedMediaCount || 1,
       });
-      setMessage(data.post.imageUrls.length ? `完整图文已生成：${data.post.imageUrls.length} 张图，进入审查` : "文字草稿已生成；图片生成未返回结果，请在审查台重试生成图");
+      setMessage(formatDraftDoneMessage(generatedMediaCount, generateImages, selectedImageTaskCount));
     } catch (error) {
       const errorMessage = error instanceof Error ? error.message : "生成失败";
       setGenerateProgress({
@@ -2273,10 +1642,11 @@ export default function Home() {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
-          title: `${activeProject?.query || query || "来源"} 批量制作`,
+          title: `${activeProject?.query || selectedBatchSources[0]?.title || "??"} ????`,
           sourceItemIds: selectedBatchSourceIds,
           materialPaths: productionMaterialPaths,
           instruction,
+          includeSourceVideo: includeSourceVideo,
         }),
       });
       const data = (await res.json()) as { job?: BatchProductionJob; error?: string };
@@ -2295,10 +1665,9 @@ export default function Home() {
       setBatchJobs((current) => [data.job!, ...current.filter((item) => item.id !== data.job!.id)]);
       const firstPost = data.job.tasks.find((task) => task.post)?.post;
       if (firstPost) setPost(firstPost);
-      await loadContentPool(query);
+      await loadContentPool();
       await loadBatchProductionJobs();
       await loadGeneratedPosts(firstPost?.id);
-      await loadExecutionLogs();
       setBatchProgress({
         title: "批量生产进度",
         label: "批量生产完成",
@@ -2344,7 +1713,7 @@ export default function Home() {
       if (!res.ok || !data.post) throw new Error(data.error || "保存失败");
       setPost(data.post);
       setSelectedGeneratedPostId(data.post.id);
-      await loadContentPool(query);
+      await loadContentPool();
       await loadGeneratedPosts(data.post.id);
       setMessage(data.post.status === "approved" ? "已通过审查" : "已保存修改");
     } catch (error) {
@@ -2403,7 +1772,7 @@ export default function Home() {
       postId: post.id,
       status: "running",
       title: "正在写入飞书",
-      detail: `正在提交「${post.title || "未命名图文"}」，${post.imageUrls.length} 张素材将写入动态素材字段。`,
+      detail: `正在提交「${post.title || "未命名图文"}」，${countPostMedia(post)} 个素材将写入动态素材字段。`,
       progress: 38,
       notification: "写入成功后会按配置发送飞书通知。",
     });
@@ -2418,6 +1787,7 @@ export default function Home() {
             body: post.body,
             imagePrompt: post.imagePrompt,
             imageUrls: post.imageUrls,
+            videoUrls: post.videoUrls,
             imageTasks: post.imageTasks,
             feishuVehicle: post.feishuVehicle,
             status: "approved",
@@ -2442,7 +1812,7 @@ export default function Home() {
       };
       setPost(nextPost);
       setSelectedGeneratedPostId(nextPost.id);
-      await loadContentPool(query);
+      await loadContentPool();
       await loadGeneratedPosts(nextPost.id);
       setPublishStatus(buildPublishStatus(posts, data, nextPost.id));
       setMessage(buildPublishMessage(data));
@@ -2460,40 +1830,6 @@ export default function Home() {
     } finally {
       setBusy(null);
     }
-  }
-
-  function choosePlatform(nextPlatform: CrawlPlatform) {
-    const settingsWithCurrentPlatform = getWorkspaceSettingsWithCurrentPlatformCrawlSetting();
-    setWorkspaceSettings(settingsWithCurrentPlatform);
-    setPlatform(nextPlatform);
-    applyPlatformCrawlControls(nextPlatform, settingsWithCurrentPlatform);
-  }
-
-  function applyProject(project?: ContentProject) {
-    if (!project) return;
-    setActiveProject(project);
-    setSources(project.items);
-    setSelectedSourceId(project.items[0]?.id || "");
-    setSelectedContentItemIds([]);
-    setSelectedBatchSourceIds([]);
-    setQuery(project.query);
-    setPoolStatusFilter("all");
-    setPoolPlatformFilter("all");
-    setPost(null);
-  }
-
-  function toggleContentItemSelection(sourceItemId: string) {
-    setSelectedContentItemIds((current) =>
-      current.includes(sourceItemId) ? current.filter((id) => id !== sourceItemId) : [...current, sourceItemId],
-    );
-  }
-
-  function selectVisibleContentItems() {
-    setSelectedContentItemIds(visibleSources.slice(0, 100).map((item) => item.id));
-  }
-
-  function clearContentItemSelection() {
-    setSelectedContentItemIds([]);
   }
 
   function toggleBatchSource(sourceItemId: string) {
@@ -2598,11 +1934,13 @@ export default function Home() {
 
   function openDraftPreview(value: GeneratedPost) {
     const selectedTasks = (value.imageTasks || []).filter((task) => task.selected);
+    const videoUrls = postVideoUrls(value);
     setPreview({
       kind: "draft",
       title: value.title || "草稿预览",
       imageUrl: value.imageUrls[0],
       imageUrls: value.imageUrls,
+      videoUrls,
       imageIndex: 0,
       text: [
         value.body,
@@ -2611,12 +1949,12 @@ export default function Home() {
           ? `\n\n图片任务：\n${selectedTasks.map((task, index) => `${index + 1}. ${task.label} · ${formatImageTaskMode(task.mode)} · ${task.prompt}`).join("\n")}`
           : "",
       ].join(""),
-      meta: `${platforms.find((option) => option.value === value.platform)?.label || ""} · ${value.status} · ${value.imageUrls.length} 张生成图`,
-      links: [...value.imageUrls, ...selectedTasks.map((task) => task.url)],
+      meta: `${platforms.find((option) => option.value === value.platform)?.label || ""} · ${value.status} · ${countPostMedia(value)} 个素材`,
+      links: [...value.imageUrls, ...videoUrls, ...selectedTasks.map((task) => task.url)],
     });
   }
 
-  function openImageGallery(imageUrls: string[], imageIndex: number, title: string, meta?: string) {
+  function openImageGallery(imageUrls: string[], imageIndex: number, title: string, meta?: string, selection?: NonNullable<PreviewState>["selection"]) {
     const uniqueImages = Array.from(new Set(imageUrls.filter(Boolean)));
     if (!uniqueImages.length) return;
     setPreview({
@@ -2626,6 +1964,7 @@ export default function Home() {
       imageUrls: uniqueImages,
       imageIndex: Math.min(Math.max(imageIndex, 0), uniqueImages.length - 1),
       meta,
+      selection,
     });
   }
 
@@ -2724,6 +2063,10 @@ export default function Home() {
               onAccountsChanged={loadWorkspaceAccounts}
               onLogout={logoutWorkspaceAccount}
             />
+            <Link className="soft-button inline-flex h-10 items-center justify-center gap-2 px-3 text-xs font-black" href="/content">
+              <Database className="h-4 w-4" />
+              采集与内容池
+            </Link>
             <Link className="soft-button inline-flex h-10 items-center justify-center gap-2 px-3 text-xs font-black" href="/review">
               <ExternalLink className="h-4 w-4" />
               内容审查台
@@ -2747,9 +2090,8 @@ export default function Home() {
             <div className="advanced-command-dock">
               <StudioCommandBar
                 activeProject={activeProject}
-                visibleCount={activeModule === "production" ? productionSources.length : visibleSources.length}
+                visibleCount={productionSources.length}
                 totalCount={sources.length}
-                job={job}
                 post={post}
               />
 
@@ -2773,7 +2115,9 @@ export default function Home() {
             videoFrameOriginalReference={simpleVideoFrameOriginalReference}
             useComfyUiKlein={simpleUseComfyUiKlein}
             directOriginalReference={simpleDirectOriginalReference}
+            includeSourceVideo={simpleIncludeSourceVideo}
             enableVideoTranscription={simpleEnableVideoTranscription}
+            generateImages={simpleGenerateImages}
             writeFeishu={simpleWriteFeishu}
             viralImitateImages={simpleViralImitateImages}
             viralMaterialFolders={viralMaterialFolders}
@@ -2802,9 +2146,11 @@ export default function Home() {
             onLinkPlatformChange={setSimpleLinkPlatform}
             onCookieChange={setCookie}
             onVideoFrameOriginalReferenceChange={setSimpleVideoFrameOriginalReference}
-            onUseComfyUiKleinChange={setSimpleUseComfyUiKlein}
-            onDirectOriginalReferenceChange={setSimpleDirectOriginalReference}
-            onEnableVideoTranscriptionChange={setSimpleEnableVideoTranscription}
+            onUseComfyUiKleinChange={(value) => updateSimpleRunMediaSettingsDraft({ useComfyUiKlein: value })}
+            onDirectOriginalReferenceChange={(value) => updateSimpleRunMediaSettingsDraft({ directOriginalReference: value })}
+            onIncludeSourceVideoChange={(value) => updateSimpleRunMediaSettingsDraft({ includeSourceVideo: value })}
+            onEnableVideoTranscriptionChange={(value) => updateSimpleRunMediaSettingsDraft({ enableVideoTranscription: value })}
+            onGenerateImagesChange={(value) => updateSimpleRunMediaSettingsDraft({ generateImages: value })}
             onWriteFeishuChange={setSimpleWriteFeishu}
             onViralImitateImagesChange={setSimpleViralImitateImages}
             onToggleViralMaterialFolder={onToggleViralMaterialFolder}
@@ -2859,7 +2205,7 @@ export default function Home() {
               }}
             />
           </section>
-        ) : activeModule === "production" ? (
+        ) : (
           <ProductionWorkspace
             productionSources={productionSources}
             allSources={sources}
@@ -2889,8 +2235,10 @@ export default function Home() {
             instruction={instruction}
             imageSize={imageSize}
             imageQuality={imageQuality}
+            generateImages={generateImages}
             imageUseComfyUiKlein={imageUseComfyUiKlein}
             imageDirectOriginalReference={imageDirectOriginalReference}
+            includeSourceVideo={includeSourceVideo}
             workspaceSettings={workspaceSettings}
             generateProgress={generateProgress}
             batchProgress={batchProgress}
@@ -2920,8 +2268,10 @@ export default function Home() {
             onInstructionChange={setInstruction}
             onImageSizeChange={setImageSize}
             onImageQualityChange={setImageQuality}
+            onGenerateImagesChange={setGenerateImages}
             onImageUseComfyUiKleinChange={changeImageUseComfyUiKlein}
             onImageDirectOriginalReferenceChange={changeImageDirectOriginalReference}
+            onIncludeSourceVideoChange={setIncludeSourceVideo}
             onWorkspaceSettingsChange={updateWorkspaceSettingsDraft}
             onSaveWorkspaceSettings={() => saveWorkspaceSettingsPatch(workspaceSettings)}
             onGenerateDraft={generateDraft}
@@ -2944,742 +2294,6 @@ export default function Home() {
             onReviewPromptChange={setReviewPrompt}
             onPublish={publishToFeishu}
           />
-        ) : (
-        <section className="studio-workspace">
-          <aside className="glass ops-panel studio-pane thin-scrollbar rounded-[8px] p-3 sm:p-4">
-            <PanelTitle icon={<Radio className="h-4 w-4" />} title="采集任务" />
-            <div className="mt-4 grid grid-cols-2 gap-2">
-              <button
-                className={`soft-button flex h-10 items-center justify-center gap-2 text-xs font-semibold ${crawlInputMode === "keyword" ? "platform-card-active" : ""}`}
-                type="button"
-                aria-pressed={crawlInputMode === "keyword"}
-                onClick={() => setCrawlInputMode("keyword")}
-              >
-                <Search className="h-3.5 w-3.5" />
-                关键词
-              </button>
-              <button
-                className={`soft-button flex h-10 items-center justify-center gap-2 text-xs font-semibold ${crawlInputMode === "links" ? "platform-card-active" : ""}`}
-                type="button"
-                aria-pressed={crawlInputMode === "links"}
-                onClick={() => setCrawlInputMode("links")}
-              >
-                <UploadCloud className="h-3.5 w-3.5" />
-                链接
-              </button>
-            </div>
-
-            {crawlInputMode === "keyword" ? (
-              <>
-            <div className="mt-4 grid grid-cols-2 gap-2">
-              {crawlPlatforms.map((item) => (
-                <button
-                  key={item.value}
-                  className={`platform-card soft-button flex h-12 items-center gap-2 px-3 ${
-                    platform === item.value ? "platform-card-active" : ""
-                  }`}
-                  type="button"
-                  aria-pressed={platform === item.value}
-                  onClick={() => choosePlatform(item.value)}
-                >
-                  <span className={`h-2.5 w-2.5 rounded-full ${item.accent}`} />
-                  <span className="truncate text-xs font-semibold">{item.label}</span>
-                </button>
-              ))}
-            </div>
-
-            <div className="mt-4 space-y-3">
-              <FieldLabel label={platform === "douyin" ? "关键词 / 话题 ID" : "关键词"} />
-              <div className="relative">
-                <Search className="pointer-events-none absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-white/35" />
-                <input className="field search-field" value={query} onChange={(event) => setQuery(event.target.value)} />
-              </div>
-
-              <div className="grid grid-cols-2 gap-3">
-                <div>
-                  <FieldLabel label="数量" />
-                  <input
-                    className="field"
-                    min={1}
-                    max={200}
-                    type="number"
-                    value={targetCount}
-                    onChange={(event) => setTargetCount(Number(event.target.value))}
-                  />
-                </div>
-                <div>
-                  <FieldLabel label={platform === "weibo" ? "搜索类型" : "排序"} />
-                  <select
-                    className="field"
-                    value={sort}
-                    onChange={(event) => {
-                      const nextSort = event.target.value;
-                      setSort(nextSort);
-                      updatePlatformCrawlSettingsDraft(platform, {
-                        sort: nextSort,
-                        searchType: platform === "weibo" ? nextSort : undefined,
-                      });
-                    }}
-                  >
-                    {sortOptions[platform].map((option) => (
-                      <option key={option.value} value={option.value}>
-                        {option.label}
-                      </option>
-                    ))}
-                  </select>
-                </div>
-              </div>
-
-              {platform === "xiaohongshu" ? (
-                <div>
-                  <FieldLabel label="笔记类型" />
-                  <select
-                    className="field"
-                    value={noteType}
-                    onChange={(event) => {
-                      const nextNoteType = Number(event.target.value);
-                      setNoteType(nextNoteType);
-                      updatePlatformCrawlSettingsDraft("xiaohongshu", { noteType: nextNoteType });
-                    }}
-                  >
-                    <option value={0}>全部</option>
-                    <option value={1}>视频</option>
-                    <option value={2}>图文</option>
-                    <option value={3}>直播</option>
-                  </select>
-                </div>
-              ) : null}
-
-              {platform === "weibo" ? (
-                <div className="grid grid-cols-1 gap-3 sm:grid-cols-2 lg:grid-cols-1">
-                  <div>
-                    <FieldLabel label="包含类型" />
-                    <select
-                      className="field"
-                      value={includeType}
-                      onChange={(event) => {
-                        const nextIncludeType = event.target.value;
-                        setIncludeType(nextIncludeType);
-                        updatePlatformCrawlSettingsDraft("weibo", { includeType: nextIncludeType });
-                      }}
-                    >
-                      {weiboIncludeOptions.map((option) => (
-                        <option key={option.value} value={option.value}>
-                          {option.label}
-                        </option>
-                      ))}
-                    </select>
-                  </div>
-                  <div>
-                    <FieldLabel label="时间范围" />
-                    <select
-                      className="field"
-                      value={timeScope}
-                      onChange={(event) => {
-                        const nextTimeScope = event.target.value;
-                        setTimeScope(nextTimeScope);
-                        updatePlatformCrawlSettingsDraft("weibo", { timeScope: nextTimeScope });
-                      }}
-                    >
-                      <option value="">不限</option>
-                      <option value="hour">一小时内</option>
-                      <option value="day">一天内</option>
-                      <option value="week">一周内</option>
-                      <option value="month">一个月内</option>
-                    </select>
-                  </div>
-                </div>
-              ) : null}
-
-              {platform === "douyin" ? (
-                <div>
-                  <FieldLabel label="鍐呭绫诲瀷" />
-                  <select
-                    className="field mt-2"
-                    value={contentType}
-                    onChange={(event) => {
-                      const nextContentType = event.target.value;
-                      setContentType(nextContentType);
-                      updatePlatformCrawlSettingsDraft("douyin", { contentType: nextContentType });
-                    }}
-                  >
-                    {douyinContentTypeOptions.map((option) => (
-                      <option key={option.value} value={option.value}>
-                        {option.label}
-                      </option>
-                    ))}
-                  </select>
-                  <div className="mt-3" />
-                  <FieldLabel label="Cookie" />
-                  <textarea
-                    className="field min-h-20 resize-none"
-                    value={cookie}
-                    onChange={(event) => setCookie(event.target.value)}
-                  />
-                  <p className="mt-2 text-[11px] leading-5 text-white/42">输入纯数字会按话题 ID 采集，输入中文会按关键词搜索视频。</p>
-                </div>
-              ) : null}
-
-              <label className="flex items-start gap-2 rounded-[8px] border border-white/10 bg-white/[0.035] p-3 text-xs leading-5 text-white/62">
-                <input
-                  className="mt-1 h-4 w-4 accent-[var(--mint)]"
-                  type="checkbox"
-                  checked={crawlEnableVideoTranscription}
-                  onChange={(event) => setCrawlEnableVideoTranscription(event.target.checked)}
-                  disabled={Boolean(busy)}
-                />
-                <span className="min-w-0">启用视频音频转文字</span>
-              </label>
-
-              <a className="inline-flex items-center gap-2 text-xs text-[var(--cyan)]" href={platformDocs[platform]} target="_blank" rel="noreferrer">
-                <FileText className="h-3.5 w-3.5" />
-                TikHub 文档
-              </a>
-
-              <button
-                className="soft-button flex h-10 w-full items-center justify-center gap-2"
-                type="button"
-                onClick={saveCurrentPlatformCrawlSettings}
-                disabled={Boolean(busy)}
-              >
-                {busy === "settings" ? <Loader2 className="h-4 w-4 animate-spin" /> : <Save className="h-4 w-4" />}
-                保存采集策略
-              </button>
-
-              <button
-                className="primary-button flex h-11 w-full items-center justify-center gap-2"
-                type="button"
-                onClick={startCrawl}
-                disabled={Boolean(busy)}
-              >
-                {busy === "crawl" ? <Loader2 className="h-4 w-4 animate-spin" /> : <Play className="h-4 w-4" />}
-                开始采集
-              </button>
-              {crawlProgress ? <TaskProgressCard progress={crawlProgress} /> : null}
-            </div>
-              </>
-            ) : (
-              <div className="mt-4 space-y-3">
-                <div>
-                  <FieldLabel label="归属关键词 / 内容池项目" />
-                  <input className="field" value={query} onChange={(event) => setQuery(event.target.value)} />
-                </div>
-                <div>
-                  <FieldLabel label="平台" />
-                  <select className="field" value={linkImportPlatform} onChange={(event) => setLinkImportPlatform(event.target.value as LinkImportPlatform)}>
-                    <option value="auto">自动识别</option>
-                    {linkImportPlatforms.map((item) => (
-                      <option key={item.value} value={item.value}>
-                        {item.label}
-                      </option>
-                    ))}
-                  </select>
-                </div>
-                <div>
-                  <FieldLabel label="链接列表" />
-                  <textarea
-                    className="field min-h-36 resize-y"
-                    value={linkImportText}
-                    onChange={(event) => setLinkImportText(event.target.value)}
-                    placeholder="https://... 或小鹏社区帖子 ID（如 3776077）"
-                  />
-                </div>
-                <label className="flex items-start gap-2 rounded-[8px] border border-white/10 bg-white/[0.035] p-3 text-xs leading-5 text-white/62">
-                  <input
-                    className="mt-1 h-4 w-4 accent-[var(--mint)]"
-                    type="checkbox"
-                    checked={linkImportVideoFrameOriginalReference}
-                    onChange={(event) => setLinkImportVideoFrameOriginalReference(event.target.checked)}
-                    disabled={Boolean(busy)}
-                  />
-                  <span className="min-w-0">视频高光帧原图引用</span>
-                </label>
-                <label className="flex items-start gap-2 rounded-[8px] border border-white/10 bg-white/[0.035] p-3 text-xs leading-5 text-white/62">
-                  <input
-                    className="mt-1 h-4 w-4 accent-[var(--mint)]"
-                    type="checkbox"
-                    checked={linkImportEnableVideoTranscription}
-                    onChange={(event) => setLinkImportEnableVideoTranscription(event.target.checked)}
-                    disabled={Boolean(busy)}
-                  />
-                  <span className="min-w-0">启用视频音频转文字</span>
-                </label>
-                {(linkImportPlatform === "douyin" || linkImportPlatform === "dongchedi") ? (
-                  <div>
-                    <FieldLabel label="Cookie" />
-                    <textarea className="field min-h-16 resize-none" value={cookie} onChange={(event) => setCookie(event.target.value)} />
-                  </div>
-                ) : null}
-                <button
-                  className="primary-button flex h-11 w-full items-center justify-center gap-2"
-                  type="button"
-                  onClick={startLinkImport}
-                  disabled={Boolean(busy)}
-                >
-                  {busy === "crawl" ? <Loader2 className="h-4 w-4 animate-spin" /> : <UploadCloud className="h-4 w-4" />}
-                  导入链接
-                </button>
-                {crawlProgress ? <TaskProgressCard progress={crawlProgress} /> : null}
-                {linkImportSummary ? (
-                  <div className="grid grid-cols-2 gap-2">
-                    <PoolMetric label="成功" value={linkImportSummary.imported} />
-                    <PoolMetric label="失败" value={linkImportSummary.failed} />
-                    <PoolMetric label="过滤" value={linkImportSummary.filteredUnsafe} />
-                    <PoolMetric label="重复" value={linkImportSummary.duplicates} />
-                  </div>
-                ) : null}
-                {linkImportResults.length ? (
-                  <div className="thin-scrollbar max-h-44 space-y-2 overflow-y-auto">
-                    {linkImportResults.slice(0, 24).map((result, index) => (
-                      <div key={`${result.url}-${index}`} className="rounded-[8px] border border-white/10 bg-white/[0.045] p-2">
-                        <div className="flex items-center justify-between gap-2">
-                          <span className="min-w-0 truncate text-[11px] font-semibold text-white/70">{result.title || result.sourceId || result.url}</span>
-                          <span className={`status-badge shrink-0 text-[10px] ${getLinkImportStatusClass(result.status)}`}>
-                            {formatLinkImportStatus(result.status)}
-                          </span>
-                        </div>
-                        <p className="mt-1 truncate text-[10px] text-white/38">{result.error || result.url}</p>
-                      </div>
-                    ))}
-                  </div>
-                ) : null}
-              </div>
-            )}
-
-            <div className="section-divider" />
-
-            <PanelTitle icon={<Layers3 className="h-4 w-4" />} title="关键词内容池" />
-            <div className="content-cluster mt-4">
-              <div className="flex items-start justify-between gap-3">
-                <div className="min-w-0">
-                  <p className="truncate text-sm font-black">{activeProject?.query || query || "暂无关键词"}</p>
-                  <p className="mt-1 text-[11px] text-white/45">
-                    {projects.length ? `${projects.length} 个关键词项目` : "采集后自动创建项目"}
-                  </p>
-                </div>
-                <span className="status-badge text-[11px] text-white/60">
-                  {activeProject?.lastCrawledAt ? formatShortTime(activeProject.lastCrawledAt) : "未更新"}
-                </span>
-              </div>
-              <div className="mt-3 grid grid-cols-2 gap-2">
-                <PoolMetric label="内容池" value={projectStats.total} />
-                <PoolMetric label="当前筛选" value={visibleSources.length} />
-                <PoolMetric label="已仿写" value={projectStats.rewritten} />
-                <PoolMetric label="可分析" value={projectStats.analyzed} />
-              </div>
-              <div className="mt-3 flex flex-wrap gap-1.5">
-                {Object.entries(activeProject?.platforms || {}).map(([itemPlatform, count]) => (
-                  <span key={itemPlatform} className="status-badge text-[11px] text-white/52">
-                    {platforms.find((option) => option.value === itemPlatform)?.label || itemPlatform} {count}
-                  </span>
-                ))}
-              </div>
-              {projects.length ? (
-                <div className="mt-3">
-                  <FieldLabel label="历史关键词项目" />
-                  <div className="flex gap-2">
-                    <select
-                      className="field h-10"
-                      value={activeProject?.id || ""}
-                      onChange={(event) => applyProject(projects.find((item) => item.id === event.target.value))}
-                    >
-                      {projects.map((project) => (
-                        <option key={project.id} value={project.id}>
-                          {project.query} · {project.totalItems} 条
-                        </option>
-                      ))}
-                    </select>
-                    <button
-                      aria-label="刷新内容池"
-                      className="soft-button grid h-10 w-10 shrink-0 place-items-center"
-                      type="button"
-                      onClick={() => loadContentPool(query)}
-                    >
-                      <RefreshCw className="h-4 w-4" />
-                    </button>
-                  </div>
-                </div>
-              ) : null}
-            </div>
-
-          </aside>
-
-          <section className="glass-strong ops-panel studio-samples grid grid-rows-[auto_auto_minmax(0,1fr)] rounded-[8px]">
-            <div className="border-b border-white/10 p-4">
-              <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
-                <PanelTitle icon={<Database className="h-4 w-4" />} title={activeProject ? `${activeProject.query} 内容池` : "爆款样本"} />
-                <div className="flex flex-wrap items-center gap-2 text-xs text-white/55">
-                  <span className="status-dot" />
-                  <span>{job ? `${job.status} · ${visibleSources.length}/${sources.length} 条` : "等待采集"}</span>
-                  {activeProject ? <span>累计 {activeProject.totalItems} 条</span> : null}
-                </div>
-              </div>
-              <div className="mt-3 grid gap-2 xl:grid-cols-[minmax(0,1fr)_minmax(0,1fr)]">
-                <div className="flex min-w-0 flex-wrap gap-1.5">
-                  {poolStatusOptions.map((option) => (
-                    <FilterChip
-                      key={option.value}
-                      active={poolStatusFilter === option.value}
-                      onClick={() => setPoolStatusFilter(option.value)}
-                    >
-                      {option.label} {countSourcesByStatus(sources, option.value)}
-                    </FilterChip>
-                  ))}
-                </div>
-                <div className="flex min-w-0 flex-wrap gap-1.5 xl:justify-end">
-                  {poolPlatformOptions.map((option) => (
-                    <FilterChip
-                      key={option.value}
-                      active={poolPlatformFilter === option.value}
-                      onClick={() => setPoolPlatformFilter(option.value)}
-                    >
-                      {option.label} {countSourcesByPlatform(sources, option.value)}
-                    </FilterChip>
-                  ))}
-                </div>
-              </div>
-              <div className="mt-3 grid gap-2 sm:grid-cols-[minmax(0,220px)_1fr] sm:items-end">
-                <div>
-                  <FieldLabel label="内容池排序" />
-                  <select className="field h-10" value={poolSort} onChange={(event) => setPoolSort(event.target.value as PoolSortMode)}>
-                    {poolSortOptions.map((option) => (
-                      <option key={option.value} value={option.value}>
-                        {option.label}
-                      </option>
-                    ))}
-                  </select>
-                </div>
-                <div className="flex min-w-0 flex-wrap gap-1.5 text-[11px] text-white/45">
-                  <span className="status-badge text-[11px] text-white/52">发布 {countKnownPublishTimes(visibleSources)}/{visibleSources.length}</span>
-                  <span className="status-badge text-[11px] text-white/52">最近抓取 {formatSourceTime(activeProject?.lastCrawledAt)}</span>
-                </div>
-              </div>
-            </div>
-
-            <div className="border-b border-white/10 px-4 py-3">
-              <BatchActionBar
-                selectedCount={selectedContentItems.length}
-                totalCount={visibleSources.length}
-                busy={busy === "contentBatch"}
-                title="内容池批量管理"
-                onSelectVisible={selectVisibleContentItems}
-                onClear={clearContentItemSelection}
-                actions={[
-                  { label: "补全本地素材", onClick: cacheSelectedContentItemMedia },
-                  { label: "标记已分析", onClick: () => updateSelectedContentItemStatus("analyzed") },
-                  { label: "标记已审查", onClick: () => updateSelectedContentItemStatus("approved") },
-                  { label: "标记已发布", onClick: () => updateSelectedContentItemStatus("published") },
-                  { label: "删除已选", danger: true, onClick: deleteSelectedContentItems },
-                ]}
-              />
-            </div>
-
-            <div className="grid min-h-0 grid-cols-1 lg:grid-cols-[minmax(240px,340px)_minmax(0,1fr)]">
-              <div className="thin-scrollbar max-h-[360px] min-h-0 overflow-y-auto border-b border-white/10 p-3 lg:max-h-none lg:border-b-0 lg:border-r">
-                {visibleSources.length ? (
-                  visibleSources.map((item) => (
-                    <div
-                      key={item.id}
-                      className={`source-card mb-2 w-full rounded-[8px] border p-3 text-left transition ${
-                        selectedSource?.id === item.id
-                          ? "source-card-selected border-[var(--mint)]/70 bg-white/12"
-                          : "border-white/10 bg-white/[0.045] hover:bg-white/[0.075]"
-                      }`}
-                    >
-                      <label
-                        className={`selection-toggle ${selectedContentItemIds.includes(item.id) ? "selection-toggle-active" : ""}`}
-                        aria-label="选择内容池样本"
-                      >
-                        <input
-                          className="sr-only"
-                          type="checkbox"
-                          checked={selectedContentItemIds.includes(item.id)}
-                          onChange={() => toggleContentItemSelection(item.id)}
-                        />
-                        <Check className={`h-3.5 w-3.5 ${selectedContentItemIds.includes(item.id) ? "text-[var(--mint)]" : "text-white/30"}`} />
-                        <span>{selectedContentItemIds.includes(item.id) ? "已选" : "选择"}</span>
-                      </label>
-                      <button className="w-full text-left" type="button" onClick={() => setSelectedSourceId(item.id)}>
-                        <div className="flex gap-3">
-                          <SourceThumb item={item} />
-                          <div className="min-w-0 flex-1 pr-16">
-                            <div className="mb-2 flex items-center justify-between gap-2">
-                              <span className="rounded-[6px] bg-white/10 px-2 py-1 text-[11px] text-white/70">
-                                {platforms.find((option) => option.value === item.platform)?.label}
-                              </span>
-                              <span className="text-[11px] text-[var(--mint)]">{item.hotScore || calculateQualityScore(item)} 分</span>
-                            </div>
-                            <p className="line-clamp-2 text-sm font-semibold text-white">{item.title || item.contentText || "未命名内容"}</p>
-                            <p className="mt-2 line-clamp-2 text-xs leading-5 text-white/52">{item.contentText}</p>
-                            <SourceSafetyBadge assessment={item.safetyAssessment} />
-                            <TagChipRow tags={getContentTags(item)} status={item.contentTagging?.status} compact />
-                            <MediaCacheMiniBadge item={item} />
-                            <div className="mt-2 grid gap-1 text-[10px] text-white/42">
-                              <span className="inline-flex min-w-0 items-center gap-1">
-                                <Clock3 className="h-3 w-3 shrink-0" />
-                                <span className="truncate">发布 {formatSourceTime(item.publishedAt, item.publishedLabel)}</span>
-                              </span>
-                              <span className="inline-flex min-w-0 items-center gap-1">
-                                <CloudDownload className="h-3 w-3 shrink-0" />
-                                <span className="truncate">抓取 {formatSourceTime(getCrawlTime(item))}</span>
-                              </span>
-                            </div>
-                            <div className="mt-3 flex items-center justify-between gap-2 text-[11px] text-white/45">
-                              <span>{getPrimaryReachMetric(item).label} {formatNumber(getPrimaryReachMetric(item).value || 0)}</span>
-                              <span>{formatPoolStatus(item.poolStatus)}</span>
-                            </div>
-                          </div>
-                        </div>
-                      </button>
-                      <button
-                        className="mt-3 inline-flex items-center gap-1.5 text-xs font-semibold text-[var(--cyan)]"
-                        type="button"
-                        onClick={() => openSourcePreview(item)}
-                      >
-                        <Maximize2 className="h-3.5 w-3.5" />
-                        预览内容
-                      </button>
-                    </div>
-                  ))
-                ) : (
-                  <EmptyState title={sources.length ? "当前筛选无样本" : "暂无样本"} icon={<Search className="h-5 w-5" />} />
-                )}
-              </div>
-
-              <div className="thin-scrollbar min-h-0 overflow-y-auto p-3 sm:p-4">
-                {selectedSource ? (
-                  <div className="mx-auto max-w-3xl">
-                    <div className="mb-4 grid grid-cols-2 gap-3 sm:grid-cols-3 xl:grid-cols-6">
-                      <Metric label={getPrimaryReachMetric(selectedSource).label} value={getPrimaryReachMetric(selectedSource).value} />
-                      <Metric label="点赞" value={selectedSource.metrics.likes} />
-                      <Metric label="收藏" value={selectedSource.metrics.collects} />
-                      <Metric label="评论" value={selectedSource.metrics.comments} />
-                      <Metric label="转发" value={selectedSource.metrics.shares} />
-                      <Metric label="爆款指数" value={`${selectedSource.hotScore || calculateQualityScore(selectedSource)}分`} />
-                    </div>
-                    <div className="mb-4 grid gap-3 sm:grid-cols-3">
-                      <PoolMetric label="发布时间" value={formatSourceTime(selectedSource.publishedAt, selectedSource.publishedLabel)} />
-                      <PoolMetric label="首次抓取" value={formatSourceTime(selectedSource.firstSeenAt)} />
-                      <PoolMetric label="最近抓取" value={formatSourceTime(getCrawlTime(selectedSource))} />
-                    </div>
-                    <div className="content-cluster">
-                      <div className="mb-4 flex items-center gap-3">
-                        <div className="grid h-10 w-10 place-items-center rounded-[8px] bg-white/10">
-                          <Camera className="h-5 w-5 text-[var(--cyan)]" />
-                        </div>
-                        <div className="min-w-0">
-                          <p className="truncate text-sm font-bold">{selectedSource.authorName || "未知作者"}</p>
-                          <p className="truncate text-xs text-white/45">
-                            {formatMediaType(selectedSource.mediaType)} · 互动率 {formatRate(calculateEngagementRate(selectedSource))}
-                          </p>
-                        </div>
-                      </div>
-                      <TaggingOverview item={selectedSource} />
-                      <SourceSafetyCard item={selectedSource} />
-                      <MediaCacheStatusCard
-                        item={selectedSource}
-                        busy={busy === "contentBatch"}
-                        onCache={() => cacheSelectedContentItemMedia([selectedSource.id])}
-                        onForceVideoRefresh={() => cacheSelectedContentItemMedia([selectedSource.id], { forceVideoRefresh: true })}
-                      />
-                      <button
-                        className="group w-full rounded-[8px] border border-transparent p-3 text-left transition hover:border-white/10 hover:bg-white/[0.035]"
-                        type="button"
-                        onClick={() => openSourcePreview(selectedSource)}
-                      >
-                        <h2 className="text-xl font-black leading-tight text-white sm:text-2xl">{selectedSource.title || "无标题"}</h2>
-                        <p className="mt-4 whitespace-pre-wrap text-sm leading-7 text-white/70">{selectedSource.contentText}</p>
-                        <span className="mt-3 inline-flex items-center gap-1.5 text-xs font-semibold text-[var(--cyan)] opacity-80">
-                          <Maximize2 className="h-3.5 w-3.5" />
-                          点击预览全文
-                        </span>
-                      </button>
-                      <div className="mt-4 flex flex-wrap gap-2">
-                        {selectedSource.sourceUrl ? (
-                          <a
-                            className="soft-button inline-flex h-9 items-center gap-2 px-3 text-xs"
-                            href={selectedSource.sourceUrl}
-                            target="_blank"
-                            rel="noreferrer"
-                          >
-                            <FileText className="h-3.5 w-3.5" />
-                            原文链接
-                          </a>
-                        ) : null}
-                        {getDisplayVideoUrl(selectedSource) ? (
-                          <a
-                            className="soft-button inline-flex h-9 items-center gap-2 px-3 text-xs"
-                            href={getDisplayVideoUrl(selectedSource)}
-                            target="_blank"
-                            rel="noreferrer"
-                          >
-                            <Play className="h-3.5 w-3.5" />
-                            {selectedSource.downloadedVideoUrl ? "本地视频" : "视频链接"}
-                          </a>
-                        ) : null}
-                        {selectedSource.mediaUrls.slice(0, 3).map((url, index) => (
-                          <a
-                            key={url}
-                            className="soft-button inline-flex h-9 items-center gap-2 px-3 text-xs"
-                            href={url}
-                            target="_blank"
-                            rel="noreferrer"
-                          >
-                            <ImageIcon className="h-3.5 w-3.5" />
-                            媒体 {index + 1}
-                          </a>
-                        ))}
-                      </div>
-                      {getDisplayVideoUrl(selectedSource) ? (
-                        <div className="mt-5 overflow-hidden rounded-[8px] border border-white/10 bg-black/20">
-                          <div className="flex items-center justify-between gap-2 border-b border-white/10 px-3 py-2">
-                            <span className="inline-flex items-center gap-2 text-xs font-semibold text-white/62">
-                              <Video className="h-3.5 w-3.5 text-[var(--cyan)]" />
-                              视频预览
-                            </span>
-                            <span className="text-[11px] text-white/42">
-                              {selectedSource.downloadedVideoUrl ? "本地缓存" : "远程链接"}
-                            </span>
-                          </div>
-                          <video
-                            className="aspect-video w-full bg-black object-contain"
-                            controls
-                            preload="metadata"
-                            src={getDisplayVideoUrl(selectedSource)}
-                          />
-                        </div>
-                      ) : null}
-                      {selectedSourceFrames.length && !selectedSourceImagesAreFrameFallback ? (
-                        <div className="mt-5">
-                          <div className="flex items-center justify-between gap-3">
-                            <p className="inline-flex items-center gap-2 text-xs font-semibold text-white/62">
-                              <Camera className="h-3.5 w-3.5 text-[var(--amber)]" />
-                              视频高光帧
-                            </p>
-                            <span className="status-badge text-[11px] text-white/45">共 {selectedSourceFrames.length} 帧</span>
-                          </div>
-                          <div className="mt-2 grid grid-cols-2 gap-2 sm:grid-cols-3 xl:grid-cols-4">
-                            {selectedSourceFrames.map((frame, index) => (
-                              <button
-                                key={`${frame.url}-${index}`}
-                                className="media-tile preview-ratio group"
-                                type="button"
-                                aria-label={`预览视频高光帧 ${index + 1}`}
-                                onClick={() =>
-                                  openImageGallery(
-                                    selectedSourceFrameUrls,
-                                    index,
-                                    `高光帧 ${index + 1}`,
-                                    `${formatFrameType(frame.type)} · ${formatFrameTimestamp(frame.timestamp)} · ${frame.reason}`,
-                                  )
-                                }
-                              >
-                                {/* eslint-disable-next-line @next/next/no-img-element */}
-                                <img alt="" className="h-full w-full object-cover transition duration-300 group-hover:scale-[1.03]" referrerPolicy="no-referrer" src={toDisplayImageSrc(frame.url)} />
-                                <VisualTagBadge item={selectedSource} assetId={`frame-${index + 1}`} />
-                                <span className="absolute left-2 top-2 rounded-[6px] bg-black/55 px-2 py-1 text-[10px] font-black text-white">
-                                  {formatFrameTimestamp(frame.timestamp)}
-                                </span>
-                                <span className="absolute bottom-2 right-2 rounded-[6px] bg-black/55 px-2 py-1 text-[10px] font-black text-white">
-                                  {frame.score}
-                                </span>
-                              </button>
-                            ))}
-                          </div>
-                        </div>
-                      ) : null}
-                      <div className="mt-5 flex items-center justify-between gap-3">
-                        <p className="text-xs font-semibold text-white/62">{selectedSourceImagesAreFrameFallback ? "视频帧预览" : "图片预览"}</p>
-                        {selectedSourceVisualImages.length ? (
-                          <span className="status-badge text-[11px] text-white/45">
-                            共 {selectedSourceVisualImages.length} 张
-                          </span>
-                        ) : null}
-                      </div>
-                      <div className="mt-2 grid grid-cols-2 gap-2 sm:grid-cols-3 xl:grid-cols-4">
-                        {(selectedSourceVisualImages.length ? selectedSourceVisualImages : [0, 1, 2]).map((item, index) => (
-                          <button
-                            key={typeof item === "string" ? item : index}
-                            className="media-tile preview-ratio group"
-                            type="button"
-                            aria-label={typeof item === "string" ? `预览${selectedSourceImagesAreFrameFallback ? "视频帧" : "样本图片"} ${index + 1}` : `素材位 ${index + 1}`}
-                            onClick={() =>
-                              typeof item === "string"
-                                ? openImageGallery(
-                                    selectedSourceVisualImages,
-                                    index,
-                                    `${selectedSourceImagesAreFrameFallback ? "视频帧" : "样本图片"} ${index + 1}`,
-                                    selectedSource.title || selectedSource.contentText,
-                                  )
-                                : undefined
-                            }
-                          >
-                            {typeof item === "string" ? (
-                              <>
-                                {/* eslint-disable-next-line @next/next/no-img-element */}
-                                <img alt="" className="h-full w-full object-cover transition duration-300 group-hover:scale-[1.03]" referrerPolicy="no-referrer" src={toDisplayImageSrc(item)} />
-                                <VisualTagBadge item={selectedSource} assetId={`${selectedSourceImagesAreFrameFallback ? "frame" : "image"}-${index + 1}`} />
-                              </>
-                            ) : (
-                              <div className="grid h-full place-items-center text-xs text-white/35">素材位 {index + 1}</div>
-                            )}
-                          </button>
-                        ))}
-                      </div>
-                    </div>
-
-                    {activeModule === "content" ? (
-                      <SourceManagementCard
-                        form={sourceEdit}
-                        visualAssets={sourceEditVisualAssets}
-                        manualForm={manualSource}
-                        platform={platform}
-                        busy={busy === "source"}
-                        onFormChange={(patch) =>
-                          selectedSource
-                            ? setSourceEditState((current) => ({
-                                sourceId: selectedSource.id,
-                                form: {
-                                  ...(current.sourceId === selectedSource.id ? current.form : makeSourceEditForm(selectedSource)),
-                                  ...patch,
-                                },
-                              }))
-                            : undefined
-                        }
-                        onManualFormChange={(patch) => setManualSource((current) => ({ ...current, ...patch }))}
-                        onSave={saveSourceEdits}
-                        onDelete={deleteSelectedSource}
-                        onCreateManual={createManualSourceItem}
-                      />
-                    ) : null}
-
-                    <AnalysisCard item={selectedSource} />
-                    <ProductionPlanCard item={selectedSource} />
-                  </div>
-                ) : (
-                  <EmptyState title="选择样本后管理内容" icon={<Wand2 className="h-5 w-5" />} />
-                )}
-              </div>
-            </div>
-          </section>
-
-          <aside className="glass ops-panel studio-pane thin-scrollbar rounded-[8px] p-3 sm:p-4">
-            <div className="content-cluster">
-              <PanelTitle icon={<Database className="h-4 w-4" />} title="内容池管理状态" />
-              <div className="mt-4 grid grid-cols-2 gap-2">
-                <PoolMetric label="内容总数" value={sources.length} />
-                <PoolMetric label="当前筛选" value={visibleSources.length} />
-                <PoolMetric label="关键词项目" value={projects.length} />
-                <PoolMetric label="已知发布时间" value={countKnownPublishTimes(visibleSources)} />
-              </div>
-              <p className="mt-3 text-xs leading-5 text-white/52">
-                当前模块只处理采集任务和内容池样本管理；需要生成草稿时切换到“内容生产”。
-              </p>
-            </div>
-
-            <ExecutionConsole entries={executionLogs} onRefresh={loadExecutionLogs} onClear={clearExecutionLogs} />
-          </aside>
-        </section>
         )}
           </>
         )}
@@ -3734,9 +2348,14 @@ function PreviewDialog({
   if (!preview) return null;
   const links = Array.from(new Set(preview.links || [])).slice(0, 8);
   const galleryImages = preview.imageUrls?.length ? preview.imageUrls : preview.imageUrl ? [preview.imageUrl] : [];
+  const galleryVideos = Array.from(new Set(preview.videoUrls || [])).filter(Boolean);
   const currentImageIndex = Math.min(Math.max(preview.imageIndex || 0, 0), Math.max(galleryImages.length - 1, 0));
   const currentImage = galleryImages[currentImageIndex] || preview.imageUrl;
   const canNavigateImages = (preview.kind === "image" || preview.kind === "draft") && galleryImages.length > 1;
+  const currentImageSelected = Boolean(preview.selection && currentImage && preview.selection.selectedImageUrls.includes(currentImage));
+  const currentImageSelectionDisabled = Boolean(
+    preview.selection && currentImage && !currentImageSelected && preview.selection.selectedImageUrls.length >= preview.selection.maxSelected,
+  );
 
   const handleTouchEnd = (event: TouchEvent<HTMLDivElement>) => {
     if (!canNavigateImages || touchStartX.current === null || touchStartY.current === null) return;
@@ -3795,6 +2414,21 @@ function PreviewDialog({
               ) : null}
               {/* eslint-disable-next-line @next/next/no-img-element */}
               <img alt="" className="mx-auto max-h-[72dvh] w-full rounded-[8px] object-contain" referrerPolicy="no-referrer" src={toDisplayImageSrc(currentImage)} />
+              {preview.selection && currentImage ? (
+                <label
+                  className={`gallery-selection-toggle ${currentImageSelected ? "gallery-selection-toggle-active" : ""} ${currentImageSelectionDisabled ? "gallery-selection-toggle-disabled" : ""}`}
+                  onClick={(event) => event.stopPropagation()}
+                >
+                  <input
+                    className="h-4 w-4 accent-[var(--mint)]"
+                    type="checkbox"
+                    checked={currentImageSelected}
+                    disabled={currentImageSelectionDisabled}
+                    onChange={() => preview.selection?.onToggleImage(currentImage)}
+                  />
+                  <span>{currentImageSelected ? "已勾选" : "勾选"}</span>
+                </label>
+              ) : null}
               {canNavigateImages ? (
                 <button
                   className="gallery-nav gallery-nav-right"
@@ -3810,6 +2444,15 @@ function PreviewDialog({
                   {currentImageIndex + 1} / {galleryImages.length}
                 </span>
               ) : null}
+            </div>
+          ) : null}
+          {galleryVideos.length ? (
+            <div className="gallery-video-grid mt-4 grid gap-3 sm:grid-cols-2">
+              {galleryVideos.map((url, index) => (
+                <div key={`${url}-${index}`} className="gallery-video-tile">
+                  <video className="h-full w-full rounded-[8px] bg-black object-contain" src={url} controls preload="metadata" />
+                </div>
+              ))}
             </div>
           ) : null}
           {preview.text ? (
@@ -3959,75 +2602,6 @@ function AccountAccessPanelV2({
         <button className="primary-button mt-5 flex w-full items-center justify-center gap-2" type="submit" disabled={loading || busy}>
           {loading || busy ? <Loader2 className="h-4 w-4 animate-spin" /> : <LogIn className="h-4 w-4" />}
           {loading ? "读取账号状态" : bootstrapRequired ? "创建管理员并进入" : "进入工作台"}
-        </button>
-        {message ? <p className="mt-3 text-xs leading-5 text-white/58">{message}</p> : null}
-      </form>
-    </section>
-  );
-}
-
-function AccountAccessPanel({
-  loading,
-  busy,
-  username,
-  password,
-  message,
-  onUsernameChange,
-  onPasswordChange,
-  onSubmit,
-}: {
-  loading: boolean;
-  busy: boolean;
-  username: string;
-  password: string;
-  message: string;
-  onUsernameChange: (value: string) => void;
-  onPasswordChange: (value: string) => void;
-  onSubmit: () => void;
-}) {
-  return (
-    <section className="account-access-shell">
-      <form
-        className="glass account-access-panel rounded-[8px] p-5"
-        onSubmit={(event) => {
-          event.preventDefault();
-          onSubmit();
-        }}
-      >
-        <div className="flex items-center justify-between gap-3">
-          <PanelTitle icon={<KeyRound className="h-4 w-4" />} title="白名单登录" />
-          <span className="status-badge text-[11px] text-[var(--mint)]">Session</span>
-        </div>
-
-        <div className="mt-5 grid gap-3">
-          <label className="space-y-1">
-            <span className="field-label">账号</span>
-            <input
-              className="field"
-              value={username}
-              autoComplete="username"
-              disabled={loading || busy}
-              onChange={(event) => onUsernameChange(event.target.value)}
-              placeholder="name@example.com"
-            />
-          </label>
-          <label className="space-y-1">
-            <span className="field-label">共享访问密码</span>
-            <input
-              className="field"
-              type="password"
-              value={password}
-              autoComplete="current-password"
-              disabled={loading || busy}
-              onChange={(event) => onPasswordChange(event.target.value)}
-              placeholder="工作台访问密码"
-            />
-          </label>
-        </div>
-
-        <button className="primary-button mt-5 flex w-full items-center justify-center gap-2" type="submit" disabled={loading || busy}>
-          {loading || busy ? <Loader2 className="h-4 w-4 animate-spin" /> : <LogIn className="h-4 w-4" />}
-          {loading ? "读取访问状态" : "进入工作台"}
         </button>
         {message ? <p className="mt-3 text-xs leading-5 text-white/58">{message}</p> : null}
       </form>
@@ -4217,70 +2791,6 @@ function AccountMenuV2({
   );
 }
 
-function AccountMenu({
-  account,
-  accounts,
-  open,
-  busy,
-  message,
-  onToggleOpen,
-  onRefresh,
-  onLogout,
-}: {
-  account: WorkspaceAccount;
-  accounts: WorkspaceAccount[];
-  open: boolean;
-  busy: boolean;
-  message: string;
-  onToggleOpen: () => void;
-  onRefresh: () => void;
-  onLogout: () => void;
-}) {
-  return (
-    <div className="account-menu">
-      <button className="account-chip" type="button" onClick={onToggleOpen} aria-expanded={open}>
-        <User className="h-3.5 w-3.5" />
-        <span className="min-w-0 truncate">{account.displayName || account.username}</span>
-        <span className="account-role">{account.role}</span>
-      </button>
-      {open ? (
-        <div className="account-popover glass rounded-[8px] p-4">
-          <div className="flex items-center justify-between gap-3">
-            <div className="min-w-0">
-              <p className="text-sm font-black text-white">{account.displayName || account.username}</p>
-              <p className="truncate text-[11px] text-white/52">{account.username}</p>
-            </div>
-            <button className="icon-button" type="button" onClick={onRefresh} title="刷新白名单用户">
-              <RefreshCw className="h-4 w-4" />
-            </button>
-          </div>
-
-          <div className="mt-4 space-y-2">
-            <div className="flex items-center gap-2 text-[11px] font-bold uppercase tracking-[0.12em] text-white/45">
-              <Users className="h-3.5 w-3.5" />
-              Accounts
-            </div>
-            <div className="account-list thin-scrollbar">
-              {accounts.map((item) => (
-                <div className="account-list-row" key={item.id}>
-                  <span className="min-w-0 truncate">{item.displayName || item.username}</span>
-                  <span>{item.username === account.username ? "current" : item.role}</span>
-                </div>
-              ))}
-            </div>
-          </div>
-
-          {message ? <p className="mt-3 text-[11px] leading-5 text-white/52">{message}</p> : null}
-          <button className="soft-button mt-3 flex h-9 w-full items-center justify-center gap-2 text-xs font-semibold" type="button" onClick={onLogout} disabled={busy}>
-            <LogOut className="h-3.5 w-3.5" />
-            退出账号
-          </button>
-        </div>
-      ) : null}
-    </div>
-  );
-}
-
 function WorkspaceModeSwitcher({ mode, onChange }: { mode: WorkspaceMode; onChange: (mode: WorkspaceMode) => void }) {
   const options: Array<{ value: WorkspaceMode; label: string; description: string; icon: ReactNode }> = [
     { value: "compact", label: "精简版", description: "只发起任务，底部看总进度", icon: <Radio className="h-4 w-4" /> },
@@ -4321,7 +2831,9 @@ function SimpleWorkspace({
   videoFrameOriginalReference,
   useComfyUiKlein,
   directOriginalReference,
+  includeSourceVideo,
   enableVideoTranscription,
+  generateImages,
   writeFeishu,
   viralImitateImages,
   viralMaterialFolders,
@@ -4352,7 +2864,9 @@ function SimpleWorkspace({
   onVideoFrameOriginalReferenceChange,
   onUseComfyUiKleinChange,
   onDirectOriginalReferenceChange,
+  onIncludeSourceVideoChange,
   onEnableVideoTranscriptionChange,
+  onGenerateImagesChange,
   onWriteFeishuChange,
   onViralImitateImagesChange,
   onToggleViralMaterialFolder,
@@ -4380,7 +2894,9 @@ function SimpleWorkspace({
   videoFrameOriginalReference: boolean;
   useComfyUiKlein: boolean;
   directOriginalReference: boolean;
+  includeSourceVideo: boolean;
   enableVideoTranscription: boolean;
+  generateImages: boolean;
   writeFeishu: boolean;
   viralImitateImages: boolean;
   viralMaterialFolders: ViralMaterialFolderCandidate[];
@@ -4411,7 +2927,9 @@ function SimpleWorkspace({
   onVideoFrameOriginalReferenceChange: (value: boolean) => void;
   onUseComfyUiKleinChange: (value: boolean) => void;
   onDirectOriginalReferenceChange: (value: boolean) => void;
+  onIncludeSourceVideoChange: (value: boolean) => void;
   onEnableVideoTranscriptionChange: (value: boolean) => void;
+  onGenerateImagesChange: (value: boolean) => void;
   onWriteFeishuChange: (value: boolean) => void;
   onViralImitateImagesChange: (value: boolean) => void;
   onToggleViralMaterialFolder: (folderId: string) => void;
@@ -4434,7 +2952,7 @@ function SimpleWorkspace({
   const publishedCount = runForSummary?.posts.filter((post) => post.status === "published").length || 0;
   const originalWebSearchAvailable = config?.openaiTextEndpoint === "responses";
   const selectedViralMaterialCount = selectedViralMaterialPaths.length;
-  const viralImageSelectionMissing = sourceMode === "viral" && viralImitateImages && selectedViralMaterialCount === 0;
+  const viralImageSelectionMissing = sourceMode === "viral" && generateImages && viralImitateImages && selectedViralMaterialCount === 0;
   const selectedPlatformLabels = selectedPlatforms
     .map((value) => platforms.find((platform) => platform.value === value)?.label || value)
     .join("、");
@@ -4452,7 +2970,7 @@ function SimpleWorkspace({
     !viralImageSelectionMissing &&
     !(sourceMode === "original" && originalUseWebSearch && !originalWebSearchAvailable) &&
     Boolean(settings.textInstruction.trim()) &&
-    !getMissingImageStrategyPrompt(settings);
+    (!generateImages || !getMissingImageStrategyPrompt(settings));
 
   return (
     <section className={`simple-workspace ${isCompact ? "simple-workspace-compact" : ""}`}>
@@ -4796,8 +3314,19 @@ function SimpleWorkspace({
             </div>
           )}
 
+          <div className="grid gap-2">
+            <label className="flex items-start gap-2 rounded-[8px] border border-white/10 bg-white/[0.035] p-3 text-xs leading-5 text-white/62">
+              <input
+                className="mt-1 h-4 w-4 accent-[var(--mint)]"
+                type="checkbox"
+                checked={generateImages}
+                onChange={(event) => onGenerateImagesChange(event.target.checked)}
+                disabled={busy || settingsBusy}
+              />
+              <span className="min-w-0">图片生成</span>
+            </label>
           {sourceMode !== "viral" && sourceMode !== "original" ? (
-            <div className="grid gap-2">
+            <>
               <label className="flex items-start gap-2 rounded-[8px] border border-white/10 bg-white/[0.035] p-3 text-xs leading-5 text-white/62">
                 <input
                   className="mt-1 h-4 w-4 accent-[var(--mint)]"
@@ -4822,14 +3351,25 @@ function SimpleWorkspace({
                 <input
                   className="mt-1 h-4 w-4 accent-[var(--mint)]"
                   type="checkbox"
+                  checked={includeSourceVideo}
+                  onChange={(event) => onIncludeSourceVideoChange(event.target.checked)}
+                  disabled={busy || settingsBusy}
+                />
+                <span className="min-w-0">引用源视频素材</span>
+              </label>
+              <label className="flex items-start gap-2 rounded-[8px] border border-white/10 bg-white/[0.035] p-3 text-xs leading-5 text-white/62">
+                <input
+                  className="mt-1 h-4 w-4 accent-[var(--mint)]"
+                  type="checkbox"
                   checked={enableVideoTranscription}
                   onChange={(event) => onEnableVideoTranscriptionChange(event.target.checked)}
                   disabled={busy || settingsBusy}
                 />
                 <span className="min-w-0">启用视频音频转文字</span>
               </label>
-            </div>
+            </>
           ) : null}
+          </div>
 
           <label className="simple-write-feishu-row">
             <input
@@ -4907,7 +3447,7 @@ function SimpleWorkspace({
               className="soft-button mt-3 flex h-10 w-full items-center justify-center gap-2 text-xs font-semibold"
               type="button"
               onClick={onSaveSettings}
-              disabled={busy || settingsBusy || !settings.textInstruction.trim() || Boolean(getMissingImageStrategyPrompt(settings))}
+              disabled={busy || settingsBusy || !settings.textInstruction.trim() || (generateImages && Boolean(getMissingImageStrategyPrompt(settings)))}
             >
               {settingsBusy ? <Loader2 className="h-4 w-4 animate-spin" /> : <Check className="h-4 w-4" />}
               {settingsBusy ? "正在保存提示词" : "保存当前提示词为默认"}
@@ -4949,7 +3489,7 @@ function SimpleWorkspace({
             progress={{
               title: "简单版自动流程",
               label: "后端正在顺序执行",
-              detail: formatSimpleRunPipelineDetail(sourceMode, sourceDetail, writeFeishu),
+              detail: formatSimpleRunPipelineDetail(sourceMode, sourceDetail, writeFeishu, generateImages),
               value: 48,
               status: "running",
               total: targetCount,
@@ -5059,7 +3599,7 @@ function SimpleWorkspace({
 
             <aside className="space-y-4">
               <article className="content-cluster">
-                <PanelTitle icon={<BarChart3 className="h-4 w-4" />} title={isSimpleLinkRun(runForSummary) || isSimpleFeishuRun(runForSummary) ? "来源结果" : "平台结果"} />
+                <PanelTitle icon={<BarChart3 className="h-4 w-4" />} title={isSimpleLinkRun(runForSummary) || isSimpleFeishuRun(runForSummary) || isSimplePoolRun(runForSummary) ? "来源结果" : "平台结果"} />
                 <div className="mt-3 space-y-2">
                   {runForSummary.platformResults.length ? (
                     runForSummary.platformResults.map((result) => (
@@ -5527,8 +4067,10 @@ function ProductionWorkspace({
   instruction,
   imageSize,
   imageQuality,
+  generateImages,
   imageUseComfyUiKlein,
   imageDirectOriginalReference,
+  includeSourceVideo,
   workspaceSettings,
   generateProgress,
   batchProgress,
@@ -5558,8 +4100,10 @@ function ProductionWorkspace({
   onInstructionChange,
   onImageSizeChange,
   onImageQualityChange,
+  onGenerateImagesChange,
   onImageUseComfyUiKleinChange,
   onImageDirectOriginalReferenceChange,
+  onIncludeSourceVideoChange,
   onWorkspaceSettingsChange,
   onSaveWorkspaceSettings,
   onGenerateDraft,
@@ -5607,8 +4151,10 @@ function ProductionWorkspace({
   instruction: string;
   imageSize: string;
   imageQuality: ImageGenerationQuality;
+  generateImages: boolean;
   imageUseComfyUiKlein: boolean;
   imageDirectOriginalReference: boolean;
+  includeSourceVideo: boolean;
   workspaceSettings: WorkspacePromptSettings;
   generateProgress: TaskProgressSnapshot | null;
   batchProgress: TaskProgressSnapshot | null;
@@ -5638,8 +4184,10 @@ function ProductionWorkspace({
   onInstructionChange: (value: string) => void;
   onImageSizeChange: (value: string) => void;
   onImageQualityChange: (value: ImageGenerationQuality) => void;
+  onGenerateImagesChange: (value: boolean) => void;
   onImageUseComfyUiKleinChange: (value: boolean) => void;
   onImageDirectOriginalReferenceChange: (value: boolean) => void;
+  onIncludeSourceVideoChange: (value: boolean) => void;
   onWorkspaceSettingsChange: (patch: Partial<WorkspacePromptSettings>) => void;
   onSaveWorkspaceSettings: () => void;
   onGenerateDraft: () => void;
@@ -5924,6 +4472,29 @@ function ProductionWorkspace({
             <div className="content-cluster mt-4">
               <FieldLabel label="生产要求" />
               <textarea className="field mt-2 min-h-24 resize-none" value={instruction} onChange={(event) => onInstructionChange(event.target.value)} />
+              <div className="mt-3">
+                <FieldLabel label="图片生成" />
+                <label className="mt-2 flex items-start gap-2 rounded-[8px] border border-white/10 bg-white/[0.035] p-3 text-xs leading-5 text-white/62">
+                  <input
+                    className="mt-1 h-4 w-4 accent-[var(--mint)]"
+                    type="checkbox"
+                    checked={generateImages}
+                    onChange={(event) => onGenerateImagesChange(event.target.checked)}
+                    disabled={Boolean(busy)}
+                  />
+                  <span className="min-w-0">开启后自动生成配图；关闭时只生成文字草稿。</span>
+                </label>
+              </div>
+              <label className="mt-2 flex items-start gap-2 rounded-[8px] border border-white/10 bg-white/[0.035] p-3 text-xs leading-5 text-white/62">
+                <input
+                  className="mt-1 h-4 w-4 accent-[var(--mint)]"
+                  type="checkbox"
+                  checked={includeSourceVideo}
+                  onChange={(event) => onIncludeSourceVideoChange(event.target.checked)}
+                  disabled={Boolean(busy)}
+                />
+                <span className="min-w-0">引用源视频素材</span>
+              </label>
               <div className="production-setting-grid mt-3">
                 <div className="production-setting-summary">
                   <p className="text-[11px] font-semibold text-white/55">生成草稿时自动处理配图</p>
@@ -5931,9 +4502,9 @@ function ProductionWorkspace({
                 </div>
                 <label className="min-w-0">
                   <span className="sr-only">图片尺寸</span>
-                  <ImageSizeInput value={imageSize} onChange={onImageSizeChange} listId="draft-image-size-presets" />
+                  <ImageSizeInput value={imageSize} onChange={onImageSizeChange} disabled={!generateImages} listId="draft-image-size-presets" />
                 </label>
-                <select className="field h-10 text-xs" value={imageQuality} onChange={(event) => onImageQualityChange(event.target.value as ImageGenerationQuality)}>
+                <select className="field h-10 text-xs" value={imageQuality} onChange={(event) => onImageQualityChange(event.target.value as ImageGenerationQuality)} disabled={!generateImages}>
                   {imageQualityOptions.map((option) => (
                     <option key={option.value} value={option.value}>
                       {option.label}
@@ -5948,7 +4519,7 @@ function ProductionWorkspace({
                 disabled={Boolean(busy) || !selectedSource || !selectedSourceCanGenerate}
               >
                 {busy === "generate" ? <Loader2 className="h-4 w-4 animate-spin" /> : <Bot className="h-4 w-4" />}
-                生成图文草稿
+                {generateImages ? "生成图文草稿" : "生成文字草稿"}
               </button>
               {generateProgress ? <TaskProgressCard className="mt-3" progress={generateProgress} /> : null}
             </div>
@@ -6100,10 +4671,12 @@ function ReviewPackageCard({
   onPublish: () => void;
 }) {
   const platformLabel = platforms.find((option) => option.value === post.platform)?.label || post.platform;
+  const videoUrls = postVideoUrls(post);
+  const mediaCount = countPostMedia(post);
   const checklist = [
     { label: "标题", active: Boolean(post.title.trim()) },
     { label: "正文", active: Boolean(post.body.trim()) },
-    { label: "配图", active: post.imageUrls.length > 0 },
+    { label: "配图", active: mediaCount > 0 },
   ];
 
   return (
@@ -6117,35 +4690,46 @@ function ReviewPackageCard({
 
       <div className="mt-3 flex flex-wrap gap-1.5">
         <span className="status-badge text-[11px] text-white/55">{platformLabel}</span>
-        <span className="status-badge text-[11px] text-white/55">{post.imageUrls.length} 张图</span>
+        <span className="status-badge text-[11px] text-white/55">{mediaCount} 个素材</span>
         <span className="status-badge text-[11px] text-white/55">版本 {post.version || 1}</span>
         <span className="status-badge text-[11px] text-white/55">更新 {formatShortTime(post.updatedAt)}</span>
       </div>
 
       <div className="review-package-body">
         <div className="review-media-board">
-          {post.imageUrls.length ? (
-            post.imageUrls.slice(0, 6).map((imageUrl, index) => (
-              <button
-                key={`${imageUrl}-${index}`}
-                className={`review-media-tile group ${index === 0 ? "review-media-primary" : ""}`}
-                type="button"
-                aria-label={`预览最终配图 ${index + 1}`}
-                onClick={() => onOpenImageGallery(post.imageUrls, index, `最终配图 ${index + 1}`, post.title)}
-              >
-                {/* eslint-disable-next-line @next/next/no-img-element */}
-                <img alt={`最终配图 ${index + 1}`} className="h-full w-full object-cover transition duration-300 group-hover:scale-[1.03]" referrerPolicy="no-referrer" src={toDisplayImageSrc(imageUrl)} />
-                {index === 5 && post.imageUrls.length > 6 ? (
-                  <span className="review-media-more">+{post.imageUrls.length - 6}</span>
-                ) : null}
-              </button>
-            ))
-          ) : (
+          {post.imageUrls.slice(0, 6).map((imageUrl, index) => (
+            <button
+              key={`${imageUrl}-${index}`}
+              className={`review-media-tile group ${index === 0 ? "review-media-primary" : ""}`}
+              type="button"
+              aria-label={`预览最终配图 ${index + 1}`}
+              onClick={() => onOpenImageGallery(post.imageUrls, index, `最终配图 ${index + 1}`, post.title)}
+            >
+              {/* eslint-disable-next-line @next/next/no-img-element */}
+              <img alt={`最终配图 ${index + 1}`} className="h-full w-full object-cover transition duration-300 group-hover:scale-[1.03]" referrerPolicy="no-referrer" src={toDisplayImageSrc(imageUrl)} />
+              {index === 5 && post.imageUrls.length > 6 ? (
+                <span className="review-media-more">+{post.imageUrls.length - 6}</span>
+              ) : null}
+            </button>
+          ))}
+          {videoUrls.map((videoUrl, index) => (
+            <div
+              key={`${videoUrl}-${index}`}
+              className={`review-media-tile review-video-tile ${!post.imageUrls.length && index === 0 ? "review-media-primary" : ""}`}
+            >
+              <video className="h-full w-full bg-black object-cover" src={videoUrl} controls preload="metadata" />
+              <span className="review-media-kind">
+                <Video className="h-3 w-3" />
+                视频 {index + 1}
+              </span>
+            </div>
+          ))}
+          {!mediaCount ? (
             <div className="review-media-empty">
               <ImageIcon className="h-6 w-6 text-white/35" />
-              <span>暂无最终配图</span>
+              <span>暂无最终素材</span>
             </div>
-          )}
+          ) : null}
         </div>
 
         <article className="review-copy-card">
@@ -6209,59 +4793,6 @@ function ReviewPackageCard({
   );
 }
 
-function SourceSafetyBadge({ assessment }: { assessment?: NormalizedSourceItem["safetyAssessment"] }) {
-  if (!assessment) return null;
-  const tone =
-    assessment.decision === "filter"
-      ? "text-[var(--rose)]"
-      : assessment.decision === "review"
-        ? "text-[var(--amber)]"
-        : "text-[var(--mint)]";
-  return (
-    <div className="mt-2 flex min-w-0 flex-wrap items-center gap-1.5">
-      <span className={`status-badge inline-flex items-center gap-1 text-[10px] ${tone}`}>
-        <ShieldCheck className="h-3 w-3" />
-        安全 {formatSourceSafetyDecision(assessment.decision)}
-      </span>
-      {assessment.categories.slice(0, 2).map((category) => (
-        <span key={category} className="status-badge text-[10px] text-white/45">
-          {formatSourceSafetyCategory(category)}
-        </span>
-      ))}
-    </div>
-  );
-}
-
-function SourceSafetyCard({ item }: { item: NormalizedSourceItem }) {
-  const assessment = item.safetyAssessment;
-  if (!assessment) return null;
-  return (
-    <div className="mt-4 rounded-[8px] border border-white/10 bg-white/[0.035] p-3">
-      <div className="flex flex-wrap items-center justify-between gap-2">
-        <div className="flex min-w-0 items-center gap-2">
-          <ShieldCheck className="h-4 w-4 text-[var(--mint)]" />
-          <p className="truncate text-xs font-black text-white">内容安全</p>
-        </div>
-        <span className="status-badge text-[11px] text-white/58">
-          {formatSourceSafetyDecision(assessment.decision)} · {formatSourceSafetySeverity(assessment.severity)}
-        </span>
-      </div>
-      {assessment.categories.length ? (
-        <div className="mt-3 flex flex-wrap gap-1.5">
-          {assessment.categories.map((category) => (
-            <span key={category} className="status-badge text-[10px] text-white/52">
-              {formatSourceSafetyCategory(category)}
-            </span>
-          ))}
-        </div>
-      ) : null}
-      {assessment.reasons.length ? (
-        <p className="mt-3 text-xs leading-5 text-white/58">{assessment.reasons.join("；")}</p>
-      ) : null}
-    </div>
-  );
-}
-
 function TagChipRow({ tags, status, compact = false }: { tags: ContentTag[]; status?: string; compact?: boolean }) {
   if (!tags.length && !status) return null;
   return (
@@ -6276,357 +4807,6 @@ function TagChipRow({ tags, status, compact = false }: { tags: ContentTag[]; sta
           {formatTaggingStatus(status)}
         </span>
       ) : null}
-    </div>
-  );
-}
-
-function TaggingOverview({ item }: { item: NormalizedSourceItem }) {
-  const tags = getContentTags(item);
-  const visualAssets = getVisualTagAssets(item);
-  const reasons = item.contentTagging?.reasons || [];
-  return (
-    <div className="mt-3 rounded-[8px] border border-white/10 bg-white/[0.035] p-3">
-      <div className="flex flex-wrap items-center justify-between gap-2">
-        <p className="text-xs font-black text-white">AI 标签</p>
-        <div className="flex flex-wrap gap-1.5">
-          <span className="status-badge text-[10px] text-white/52">{formatTaggingStatus(item.contentTagging?.status)}</span>
-          <span className="status-badge text-[10px] text-white/52">视觉 {visualAssets.length}/9</span>
-        </div>
-      </div>
-      <TagChipRow tags={tags} />
-      {reasons.length ? <p className="mt-2 line-clamp-2 text-[11px] leading-5 text-white/50">{reasons.join("；")}</p> : null}
-      {visualAssets.length ? (
-        <div className="mt-2 flex flex-wrap gap-1.5">
-          {visualAssets.slice(0, 9).map((asset) => (
-            <span key={asset.id} className="status-badge text-[10px] text-white/58">
-              {asset.index + 1}. {asset.tag}
-            </span>
-          ))}
-        </div>
-      ) : null}
-    </div>
-  );
-}
-
-function MediaCacheMiniBadge({ item }: { item: NormalizedSourceItem }) {
-  const status = getMediaCacheStatus(item);
-  if (status.status === "none") return null;
-  return (
-    <div className="mt-2 flex flex-wrap gap-1.5">
-      <span className={`status-badge text-[10px] ${getMediaCacheStatusClass(status.status)}`}>
-        {formatMediaCacheState(status.status)}
-      </span>
-      <span className="status-badge text-[10px] text-white/45">
-        本地 {status.localImages}/{status.imageTotal} 图
-      </span>
-      {status.frameCount ? (
-        <span className="status-badge text-[10px] text-white/45">帧 {status.frameCount}</span>
-      ) : null}
-    </div>
-  );
-}
-
-function MediaCacheStatusCard({
-  item,
-  busy,
-  onCache,
-  onForceVideoRefresh,
-}: {
-  item: NormalizedSourceItem;
-  busy: boolean;
-  onCache: () => void;
-  onForceVideoRefresh: () => void;
-}) {
-  const status = getMediaCacheStatus(item);
-  const localCoverage = status.imageTotal ? Math.round((status.localImages / status.imageTotal) * 100) : status.localVideo ? 100 : 0;
-  const canRefreshVideo = Boolean(item.videoUrl || item.downloadedVideoUrl || item.mediaType === "video" || item.mediaType === "mixed");
-
-  return (
-    <div className="media-cache-card mt-3">
-      <div className="flex flex-wrap items-center justify-between gap-3">
-        <PanelTitle icon={<CloudDownload className="h-4 w-4" />} title="本地素材缓存" />
-        <span className={`status-badge text-[11px] ${getMediaCacheStatusClass(status.status)}`}>
-          {formatMediaCacheState(status.status)}
-        </span>
-      </div>
-      <div className="mt-3 grid grid-cols-2 gap-2 sm:grid-cols-4">
-        <PoolMetric label="本地图片" value={`${status.localImages}/${status.imageTotal}`} />
-        <PoolMetric label="远程兜底" value={status.remoteImages} />
-        <PoolMetric label="本地视频" value={status.localVideo ? "已缓存" : status.videoPresent ? "未缓存" : "无视频"} />
-        <PoolMetric label="关键帧" value={status.frameCount} />
-      </div>
-      <div className="mt-3 h-2 overflow-hidden rounded-full bg-white/10">
-        <div className="h-full rounded-full bg-[var(--mint)] transition-all" style={{ width: `${Math.min(localCoverage, 100)}%` }} />
-      </div>
-      <div className="mt-3 flex flex-wrap items-center justify-between gap-2">
-        <p className="text-[11px] leading-5 text-white/45">
-          本地文件保存在 <span className="font-mono text-white/58">public/media/crawl</span>，远程链接只作为兜底和溯源。
-        </p>
-        <button className="soft-button h-9 px-3 text-xs" type="button" onClick={onCache} disabled={busy}>
-          {busy ? <Loader2 className="mr-1 inline h-3.5 w-3.5 animate-spin" /> : <CloudDownload className="mr-1 inline h-3.5 w-3.5" />}
-          补全当前素材
-        </button>
-      </div>
-      {canRefreshVideo ? (
-        <div className="mt-2 flex justify-end">
-          <button className="soft-button h-9 px-3 text-xs" type="button" onClick={onForceVideoRefresh} disabled={busy}>
-            {busy ? <Loader2 className="mr-1 inline h-3.5 w-3.5 animate-spin" /> : <CloudDownload className="mr-1 inline h-3.5 w-3.5" />}
-            重新下载高清视频
-          </button>
-        </div>
-      ) : null}
-      {status.errors.length ? (
-        <p className="mt-2 line-clamp-2 text-[11px] leading-5 text-[var(--amber)]">
-          最近错误：{status.errors.join("；")}
-        </p>
-      ) : null}
-    </div>
-  );
-}
-
-function VisualTagBadge({ item, assetId }: { item: NormalizedSourceItem; assetId: string }) {
-  const asset = getVisualTagAssets(item).find((candidate) => candidate.id === assetId);
-  if (!asset) return null;
-  return (
-    <span className="absolute bottom-2 left-2 rounded-[6px] bg-black/60 px-2 py-1 text-[10px] font-black text-white">
-      {asset.tag}
-    </span>
-  );
-}
-
-function SourceManagementCard({
-  form,
-  visualAssets,
-  manualForm,
-  platform,
-  busy,
-  onFormChange,
-  onManualFormChange,
-  onSave,
-  onDelete,
-  onCreateManual,
-}: {
-  form: SourceEditForm;
-  visualAssets: EditableVisualAsset[];
-  manualForm: ManualSourceForm;
-  platform: Platform;
-  busy: boolean;
-  onFormChange: (patch: Partial<SourceEditForm>) => void;
-  onManualFormChange: (patch: Partial<ManualSourceForm>) => void;
-  onSave: () => void;
-  onDelete: () => void;
-  onCreateManual: () => void;
-}) {
-  const metricFields: Array<{ key: keyof SourceEditForm; label: string }> = [
-    { key: "views", label: "浏览" },
-    { key: "reads", label: "阅读" },
-    { key: "plays", label: "播放" },
-    { key: "likes", label: "点赞" },
-    { key: "collects", label: "收藏" },
-    { key: "comments", label: "评论" },
-    { key: "shares", label: "转发" },
-  ];
-
-  return (
-    <div className="content-cluster mt-4">
-      <div className="flex items-center justify-between gap-3">
-        <PanelTitle icon={<Database className="h-4 w-4" />} title="内容池样本管理" />
-        <span className="status-badge text-[11px] text-white/55">增删改</span>
-      </div>
-
-      <div className="mt-4 grid gap-3 md:grid-cols-2">
-        <div>
-          <FieldLabel label="标题" />
-          <input className="field" value={form.title} onChange={(event) => onFormChange({ title: event.target.value })} />
-        </div>
-        <div>
-          <FieldLabel label="作者" />
-          <input className="field" value={form.authorName} onChange={(event) => onFormChange({ authorName: event.target.value })} />
-        </div>
-        <div>
-          <FieldLabel label="内容状态" />
-          <select className="field" value={form.poolStatus} onChange={(event) => onFormChange({ poolStatus: event.target.value as SourceUsageStatus })}>
-            {poolStatusOptions.filter((option) => option.value !== "all").map((option) => (
-              <option key={option.value} value={option.value}>
-                {option.label}
-              </option>
-            ))}
-          </select>
-        </div>
-        <div>
-          <FieldLabel label="内容形式" />
-          <select
-            className="field"
-            value={form.mediaType}
-            onChange={(event) => onFormChange({ mediaType: event.target.value as SourceEditForm["mediaType"] })}
-          >
-            <option value="image">图文</option>
-            <option value="video">视频</option>
-            <option value="mixed">图文+视频</option>
-            <option value="text">文字</option>
-            <option value="unknown">未知</option>
-          </select>
-        </div>
-      </div>
-
-      <div className="mt-3">
-        <FieldLabel label="原文链接" />
-        <input className="field" value={form.sourceUrl} onChange={(event) => onFormChange({ sourceUrl: event.target.value })} />
-      </div>
-      <div className="mt-3">
-        <FieldLabel label="正文全文" />
-        <textarea
-          className="field mt-2 min-h-36 resize-none leading-7"
-          value={form.contentText}
-          onChange={(event) => onFormChange({ contentText: event.target.value })}
-        />
-      </div>
-
-      <div className="mt-4">
-        <div className="flex items-center justify-between gap-3">
-          <FieldLabel label="内容标签" />
-          <span className="status-badge text-[10px] text-white/45">最多 4 个</span>
-        </div>
-        <div className="mt-2 flex flex-wrap gap-2">
-          {contentTagOptions.map((tag) => {
-            const active = form.contentTags.includes(tag);
-            return (
-              <button
-                key={tag}
-                className={`filter-chip ${active ? "filter-chip-active" : ""}`}
-                type="button"
-                onClick={() =>
-                  onFormChange({
-                    contentTags: active
-                      ? form.contentTags.filter((item) => item !== tag)
-                      : form.contentTags.length >= 4
-                        ? form.contentTags
-                        : [...form.contentTags, tag],
-                  })
-                }
-              >
-                {tag}
-              </button>
-            );
-          })}
-        </div>
-        <p className="mt-2 text-[11px] text-white/45">已选 {form.contentTags.length} 个，保存后会作为用户修订标签保留。</p>
-      </div>
-
-      <div className="mt-4">
-        <div className="flex items-center justify-between gap-3">
-          <FieldLabel label="图片 / 关键帧标签" />
-          <span className="status-badge text-[10px] text-white/45">前 9 张</span>
-        </div>
-        <div className="thin-scrollbar mt-2 grid max-h-[360px] gap-3 overflow-y-auto">
-          {visualAssets.length ? (
-            visualAssets.map((asset, index) => (
-              <article key={asset.id} className="rounded-[8px] border border-white/10 bg-white/[0.04] p-3">
-                <div className="grid gap-3 sm:grid-cols-[96px_minmax(0,1fr)]">
-                  <div className="media-tile preview-ratio overflow-hidden">
-                    {/* eslint-disable-next-line @next/next/no-img-element */}
-                    <img alt="" className="h-full w-full object-cover" referrerPolicy="no-referrer" src={toDisplayImageSrc(asset.url)} />
-                  </div>
-                  <div className="min-w-0">
-                    <div className="flex items-center justify-between gap-2">
-                      <p className="truncate text-xs font-black text-white">
-                        {asset.kind === "video_frame" ? "关键帧" : "图片"} {index + 1}
-                      </p>
-                      <span className="status-badge text-[10px] text-white/45">{asset.kind === "video_frame" ? "frame" : "image"}</span>
-                    </div>
-                    <div className="mt-2 flex flex-wrap gap-1.5">
-                      {visualTagOptions.map((tag) => (
-                        <button
-                          key={tag}
-                          className={`filter-chip ${getFormVisualTag(form, asset.id) === tag ? "filter-chip-active" : ""}`}
-                          type="button"
-                          onClick={() =>
-                            onFormChange({
-                              visualTags: upsertVisualTag(form.visualTags, asset.id, tag),
-                            })
-                          }
-                        >
-                          {tag}
-                        </button>
-                      ))}
-                    </div>
-                  </div>
-                </div>
-              </article>
-            ))
-          ) : (
-            <div className="empty-state min-h-0 p-4 text-xs text-white/50">当前样本没有可编辑的图片或关键帧。</div>
-          )}
-        </div>
-      </div>
-
-      <div className="mt-4 grid gap-2 sm:grid-cols-4">
-        {metricFields.map((field) => (
-          <label key={field.key} className="min-w-0">
-            <FieldLabel label={field.label} />
-            <input
-              className="field h-10 text-xs"
-              inputMode="numeric"
-              value={String(form[field.key] || "")}
-              onChange={(event) => onFormChange({ [field.key]: event.target.value } as Partial<SourceEditForm>)}
-            />
-          </label>
-        ))}
-      </div>
-
-      <div className="mt-4 grid gap-2 sm:grid-cols-2">
-        <button className="soft-button flex h-10 items-center justify-center gap-2" type="button" onClick={onSave} disabled={busy}>
-          {busy ? <Loader2 className="h-4 w-4 animate-spin" /> : <Check className="h-4 w-4" />}
-          保存样本
-        </button>
-        <button className="soft-button flex h-10 items-center justify-center gap-2 text-[var(--rose)]" type="button" onClick={onDelete} disabled={busy}>
-          <Trash2 className="h-4 w-4" />
-          删除样本
-        </button>
-      </div>
-
-      <div className="section-divider" />
-
-      <PanelTitle icon={<UploadCloud className="h-4 w-4" />} title="手工新增样本" />
-      <p className="mt-2 text-[11px] leading-5 text-white/45">
-        新增内容会归入当前关键词内容池，平台默认使用当前采集平台：{platforms.find((item) => item.value === platform)?.label || platform}。
-      </p>
-      <div className="mt-3 grid gap-3 md:grid-cols-2">
-        <div>
-          <FieldLabel label="标题" />
-          <input className="field" value={manualForm.title} onChange={(event) => onManualFormChange({ title: event.target.value })} />
-        </div>
-        <div>
-          <FieldLabel label="原文链接" />
-          <input className="field" value={manualForm.sourceUrl} onChange={(event) => onManualFormChange({ sourceUrl: event.target.value })} />
-        </div>
-      </div>
-      <div className="mt-3">
-        <FieldLabel label="正文" />
-        <textarea
-          className="field mt-2 min-h-28 resize-none"
-          value={manualForm.contentText}
-          onChange={(event) => onManualFormChange({ contentText: event.target.value })}
-        />
-      </div>
-      <div className="mt-3 grid gap-3 md:grid-cols-2">
-        <div>
-          <FieldLabel label="图片链接，每行一个" />
-          <textarea
-            className="field mt-2 min-h-24 resize-none"
-            value={manualForm.imageUrls}
-            onChange={(event) => onManualFormChange({ imageUrls: event.target.value })}
-          />
-        </div>
-        <div>
-          <FieldLabel label="视频链接" />
-          <input className="field" value={manualForm.videoUrl} onChange={(event) => onManualFormChange({ videoUrl: event.target.value })} />
-        </div>
-      </div>
-      <button className="primary-button mt-3 flex h-10 w-full items-center justify-center gap-2" type="button" onClick={onCreateManual} disabled={busy}>
-        {busy ? <Loader2 className="h-4 w-4 animate-spin" /> : <UploadCloud className="h-4 w-4" />}
-        新增到内容池
-      </button>
     </div>
   );
 }
@@ -6727,7 +4907,7 @@ function GeneratedPostLibraryCard({
                         V{item.version || 1} · {formatReviewStatus(item.status)} · {formatShortTime(item.updatedAt)}
                       </p>
                     </div>
-                    <span className="status-badge shrink-0 text-[10px] text-white/45">{item.imageUrls.length} 图</span>
+                    <span className="status-badge shrink-0 text-[10px] text-white/45">{countPostMedia(item)} 素材</span>
                   </div>
                 </button>
                 <button className="mt-2 inline-flex items-center gap-1.5 text-[11px] font-semibold text-[var(--cyan)]" type="button" onClick={() => onPreviewPost(item)}>
@@ -7153,11 +5333,12 @@ function buildSimpleOverallProgressSummaryForRuns(runs: SimpleRun[]) {
   };
 }
 
-function formatSimpleRunPipelineDetail(sourceMode: SimpleSourceMode, sourceDetail: string, writeFeishu = true) {
+function formatSimpleRunPipelineDetail(sourceMode: SimpleSourceMode, sourceDetail: string, writeFeishu = true, generateImages = true) {
   const publishStep = writeFeishu ? "写入飞书" : "进入内容审查台";
-  if (sourceMode === "original") return `${sourceDetail} · 原创准备、原创策划、生成图文、${publishStep}会依次完成。`;
-  if (sourceMode === "links" || sourceMode === "feishu" || sourceMode === "viral") return `${sourceDetail} · 导入、打标、生成、${publishStep}会依次完成。`;
-  return `${sourceDetail} · 采集、打标、生成、${publishStep}会依次完成。`;
+  const generateStep = generateImages ? "生成图文" : "生成文字";
+  if (sourceMode === "original") return `${sourceDetail} · 原创准备、原创策划、${generateStep}、${publishStep}会依次完成。`;
+  if (sourceMode === "links" || sourceMode === "feishu" || sourceMode === "viral") return `${sourceDetail} · 导入、打标、${generateStep}、${publishStep}会依次完成。`;
+  return `${sourceDetail} · 采集、打标、${generateStep}、${publishStep}会依次完成。`;
 }
 
 function buildSimpleOverallProgressSummary(run: SimpleRun | null, busy: boolean, sourceDetail: string, targetCount: number) {
@@ -7193,7 +5374,7 @@ function buildSimpleOverallProgressSummary(run: SimpleRun | null, busy: boolean,
     activeStage?.message ||
     run.publish?.message ||
     run.errors[0] ||
-    `${isSimpleLinkRun(run) ? "导入" : "采集"} ${crawled}/${run.input.targetCount} 条 · 生成 ${produced} 条 · 飞书 ${formatSimplePublishStatus(run.publish?.status)}`;
+    `${formatSimpleRunCollectionAction(run)} ${crawled}/${run.input.targetCount} 条 · 生成 ${produced} 条 · 飞书 ${formatSimplePublishStatus(run.publish?.status)}`;
 
   return {
     title: run.input.keyword || "整体进度",
@@ -7222,43 +5403,40 @@ function getSimpleOverallProgressTone(run: SimpleRun): SimpleOverallProgressTone
   if (run.status === "completed") return "success";
   return "idle";
 }
-
 function StudioCommandBar({
   activeProject,
   visibleCount,
   totalCount,
-  job,
   post,
 }: {
   activeProject: ContentProject | null;
   visibleCount: number;
   totalCount: number;
-  job: CrawlJob | null;
   post: GeneratedPost | null;
 }) {
   const steps = [
     {
-      icon: <CloudDownload className="h-4 w-4" />,
-      label: "关键词采集",
-      value: activeProject ? `${activeProject.query} · ${totalCount} 条` : "等待关键词",
+      icon: <Database className="h-4 w-4" />,
+      label: "?????",
+      value: activeProject ? `${activeProject.query} ? ${totalCount} ?` : "?????",
       active: Boolean(activeProject),
     },
     {
       icon: <BarChart3 className="h-4 w-4" />,
-      label: "样本分析",
-      value: visibleCount ? `${visibleCount} 条可选样本` : "暂无可选样本",
+      label: "????",
+      value: visibleCount ? `${visibleCount} ?????` : "??????",
       active: visibleCount > 0,
     },
     {
       icon: <ClipboardCheck className="h-4 w-4" />,
-      label: "逐条仿写",
-      value: post ? formatReviewStatus(post.status) : "未生成草稿",
+      label: "????",
+      value: post ? formatReviewStatus(post.status) : "?????",
       active: Boolean(post),
     },
     {
       icon: <UploadCloud className="h-4 w-4" />,
-      label: "飞书入库",
-      value: post?.status === "published" ? "已发布" : "待审查通过",
+      label: "????",
+      value: post?.status === "published" ? "???" : "?????",
       active: post?.status === "published",
     },
   ];
@@ -7275,15 +5453,9 @@ function StudioCommandBar({
           </div>
         </div>
       ))}
-      {job?.error ? (
-        <div className="col-span-full rounded-[8px] border border-[var(--rose)]/35 bg-[rgba(243,139,163,0.1)] p-3 text-xs leading-5 text-[var(--rose)]">
-          {job.error}
-        </div>
-      ) : null}
     </section>
   );
 }
-
 function BatchProductionStatusCard({
   job,
   jobCount,
@@ -7405,76 +5577,6 @@ function SourceThumb({ item }: { item: NormalizedSourceItem }) {
           {frameCount}
         </span>
       ) : null}
-    </div>
-  );
-}
-
-function ExecutionConsole({
-  entries,
-  onRefresh,
-  onClear,
-}: {
-  entries: ExecutionLogEntry[];
-  onRefresh: () => void;
-  onClear: () => void;
-}) {
-  const latest = entries.slice(0, 14);
-  const runningCount = entries.filter((entry) => entry.status === "running").length;
-  const errorCount = entries.filter((entry) => entry.status === "error").length;
-
-  return (
-    <div className="mt-5 border-t border-white/10 pt-5">
-      <div className="flex items-center justify-between gap-3">
-        <PanelTitle icon={<Terminal className="h-4 w-4" />} title="后台执行观察窗" />
-        <div className="flex gap-1.5">
-          <button className="soft-button grid h-8 w-8 place-items-center" type="button" onClick={onRefresh} aria-label="刷新执行日志">
-            <RefreshCw className="h-3.5 w-3.5" />
-          </button>
-          <button className="soft-button grid h-8 w-8 place-items-center" type="button" onClick={onClear} aria-label="清空执行日志">
-            <Trash2 className="h-3.5 w-3.5" />
-          </button>
-        </div>
-      </div>
-
-      <div className="mt-3 grid grid-cols-3 gap-2">
-        <PoolMetric label="记录" value={entries.length} />
-        <PoolMetric label="执行中" value={runningCount} />
-        <PoolMetric label="异常" value={errorCount} />
-      </div>
-
-      <div className="execution-console thin-scrollbar mt-3 space-y-2 overflow-y-auto">
-        {latest.length ? (
-          latest.map((entry) => (
-            <article key={entry.id} className="execution-entry">
-              <div className="flex items-start justify-between gap-2">
-                <div className="min-w-0">
-                  <div className="flex min-w-0 items-center gap-2">
-                    <span className={`execution-status execution-status-${entry.status}`} />
-                    <p className="truncate text-xs font-black text-white">{entry.action}</p>
-                  </div>
-                  <p className="mt-1 truncate font-mono text-[10px] text-white/42">{entry.scope}</p>
-                </div>
-                <span className="shrink-0 rounded-[6px] border border-white/10 bg-white/[0.06] px-2 py-1 text-[10px] text-white/52">
-                  {formatExecutionStatus(entry.status)}
-                </span>
-              </div>
-              <p className="mt-2 text-xs leading-5 text-white/62">{entry.message}</p>
-              <div className="mt-2 flex flex-wrap items-center gap-2 text-[10px] text-white/42">
-                <span className="inline-flex items-center gap-1">
-                  <Clock3 className="h-3 w-3" />
-                  {formatLogTime(entry.createdAt)}
-                </span>
-                {typeof entry.durationMs === "number" ? <span>{formatDuration(entry.durationMs)}</span> : null}
-              </div>
-              {entry.details ? <p className="mt-2 break-words font-mono text-[10px] leading-4 text-white/38">{formatLogDetails(entry.details)}</p> : null}
-            </article>
-          ))
-        ) : (
-          <div className="empty-state min-h-0 p-4 text-xs leading-5 text-white/50">
-            暂无后台日志。执行采集、素材扫描、生成或写入飞书后，这里会自动出现调用链。
-          </div>
-        )}
-      </div>
     </div>
   );
 }
@@ -7835,129 +5937,6 @@ function EmptyState({ title, icon }: { title: string; icon: ReactNode }) {
   );
 }
 
-function getContentTags(item: NormalizedSourceItem): ContentTag[] {
-  return (item.contentTagging?.tags || []).filter((tag): tag is ContentTag => contentTagOptions.includes(tag));
-}
-
-function getVisualTagAssets(item: NormalizedSourceItem): SourceVisualTaggingAsset[] {
-  return item.visualTagging?.assets || [];
-}
-
-function buildEditableVisualAssets(item: NormalizedSourceItem): EditableVisualAsset[] {
-  const taggedById = new Map(getVisualTagAssets(item).map((asset) => [asset.id, asset]));
-  const frames = selectBestVideoHighlightFrames(item.videoFrames).map((frame, index) => ({
-    id: `frame-${index + 1}`,
-    index,
-    kind: "video_frame" as const,
-    url: frame.url,
-  }));
-
-  const assets = shouldUseVideoFramesAsImagePreview(item) && frames.length
-    ? frames
-    : getDisplayImages(item).map((url, index) => ({
-        id: `image-${index + 1}`,
-        index,
-        kind: "image" as const,
-        url,
-      }));
-
-  return assets.slice(0, 9).map((asset) => ({
-    ...asset,
-    tag: taggedById.get(asset.id)?.tag,
-  }));
-}
-
-function getFormVisualTag(form: SourceEditForm, assetId: string) {
-  return form.visualTags.find((item) => item.id === assetId)?.tag;
-}
-
-function upsertVisualTag(tags: SourceEditForm["visualTags"], assetId: string, tag: VisualTag) {
-  const exists = tags.some((item) => item.id === assetId);
-  if (exists) return tags.map((item) => (item.id === assetId ? { ...item, tag } : item));
-  return [...tags, { id: assetId, tag }];
-}
-
-function buildVisualTagPatchAssets(item: NormalizedSourceItem, formTags: SourceEditForm["visualTags"]): SourceVisualTaggingAsset[] {
-  const tagById = new Map(formTags.map((entry) => [entry.id, entry.tag]));
-  return buildEditableVisualAssets(item).reduce<SourceVisualTaggingAsset[]>((assets, asset) => {
-    const tag = tagById.get(asset.id);
-    if (!tag) return assets;
-    assets.push({
-        id: asset.id,
-        index: asset.index,
-        kind: asset.kind,
-        url: asset.url,
-        tag,
-        updatedBy: "user" as const,
-        updatedAt: new Date().toISOString(),
-    });
-    return assets;
-  }, []);
-}
-
-function makeEmptySourceEditForm(): SourceEditForm {
-  return {
-    title: "",
-    contentText: "",
-    authorName: "",
-    sourceUrl: "",
-    contentTags: [],
-    visualTags: [],
-    poolStatus: "new",
-    mediaType: "unknown",
-    views: "",
-    reads: "",
-    plays: "",
-    likes: "",
-    collects: "",
-    comments: "",
-    shares: "",
-  };
-}
-
-function makeSourceEditForm(item: NormalizedSourceItem): SourceEditForm {
-  return {
-    title: item.title || "",
-    contentText: item.contentText || "",
-    authorName: item.authorName || "",
-    sourceUrl: item.sourceUrl || "",
-    contentTags: getContentTags(item),
-    visualTags: getVisualTagAssets(item).map((asset) => ({ id: asset.id, tag: asset.tag })),
-    poolStatus: item.poolStatus || "new",
-    mediaType: item.mediaType || "unknown",
-    views: formatEditableMetric(item.metrics.views),
-    reads: formatEditableMetric(item.metrics.reads),
-    plays: formatEditableMetric(item.metrics.plays),
-    likes: formatEditableMetric(item.metrics.likes),
-    collects: formatEditableMetric(item.metrics.collects),
-    comments: formatEditableMetric(item.metrics.comments),
-    shares: formatEditableMetric(item.metrics.shares),
-  };
-}
-
-function parseMetricForm(form: SourceEditForm): NormalizedSourceItem["metrics"] {
-  return {
-    views: parseOptionalNumber(form.views),
-    reads: parseOptionalNumber(form.reads),
-    plays: parseOptionalNumber(form.plays),
-    likes: parseOptionalNumber(form.likes),
-    collects: parseOptionalNumber(form.collects),
-    comments: parseOptionalNumber(form.comments),
-    shares: parseOptionalNumber(form.shares),
-  };
-}
-
-function formatEditableMetric(value?: number) {
-  return typeof value === "number" && Number.isFinite(value) ? String(value) : "";
-}
-
-function parseOptionalNumber(value: string) {
-  const trimmed = value.trim();
-  if (!trimmed) return undefined;
-  const parsed = Number(trimmed.replace(/,/g, ""));
-  return Number.isFinite(parsed) ? Math.max(0, Math.round(parsed)) : undefined;
-}
-
 function splitLines(value: string) {
   return value
     .split(/\r?\n/)
@@ -8086,14 +6065,6 @@ function formatNumber(value: number) {
   return String(value);
 }
 
-function buildProjectStats(project: ContentProject | null) {
-  return {
-    total: project?.totalItems || 0,
-    analyzed: project?.analyzedItems || 0,
-    rewritten: (project?.rewrittenItems || 0) + (project?.approvedItems || 0) + (project?.publishedItems || 0),
-  };
-}
-
 function cloneProductionPlan(plan: ProductionPlan): ProductionPlan {
   return {
     ...plan,
@@ -8129,16 +6100,6 @@ function makeFallbackProductionPlan(item: NormalizedSourceItem): ProductionPlan 
   };
 }
 
-function countSourcesByStatus(items: NormalizedSourceItem[], status: PoolStatusFilter) {
-  if (status === "all") return items.length;
-  return items.filter((item) => (item.poolStatus || "new") === status).length;
-}
-
-function countSourcesByPlatform(items: NormalizedSourceItem[], itemPlatform: PoolPlatformFilter) {
-  if (itemPlatform === "all") return items.length;
-  return items.filter((item) => item.platform === itemPlatform).length;
-}
-
 function countSourcesByProductionQueue(
   items: NormalizedSourceItem[],
   filter: ProductionQueueFilter,
@@ -8154,10 +6115,6 @@ function matchesProductionQueueFilter(item: NormalizedSourceItem, filter: Produc
   if (filter === "no_draft") return draftCount === 0;
   if (filter === "has_draft") return draftCount > 0;
   return status === filter;
-}
-
-function countKnownPublishTimes(items: NormalizedSourceItem[]) {
-  return items.filter((item) => Boolean(item.publishedAt || item.publishedLabel)).length;
 }
 
 function sortSources(items: NormalizedSourceItem[], sortMode: PoolSortMode) {
@@ -8300,6 +6257,33 @@ function getMissingImageStrategyPrompt(settings: WorkspacePromptSettings) {
   return missing?.title || "";
 }
 
+function formatDraftGenerationProgressDetail(sourceLabel: string, selectedImageTaskCount: number, generateImages: boolean, imageSize: string, imageQuality: ImageGenerationQuality) {
+  if (!generateImages) return `${sourceLabel} · 图片生成已关闭 · 只生成文字`;
+  if (!selectedImageTaskCount) return `${sourceLabel} · 未选择图片任务 · 只生成文字`;
+  return `${sourceLabel} · ${selectedImageTaskCount} 个配图任务 · ${imageSize} · ${imageQuality}`;
+}
+
+function formatDraftSyncProgressDetail(imageCount: number, generateImages: boolean, selectedImageTaskCount: number) {
+  if (imageCount > 0) return `已生成 ${imageCount} 张配图，正在写入草稿库`;
+  if (!generateImages) return "图片生成已关闭，正在写入文字草稿";
+  if (!selectedImageTaskCount) return "未选择图片任务，正在写入文字草稿";
+  return "未返回配图，正在写入文字草稿";
+}
+
+function formatDraftDoneProgressDetail(imageCount: number, generateImages: boolean, selectedImageTaskCount: number) {
+  if (imageCount > 0) return `已生成 ${imageCount} 张配图，可进入审查`;
+  if (!generateImages) return "文字草稿已生成，图片生成已关闭";
+  if (!selectedImageTaskCount) return "文字草稿已生成，未选择图片任务";
+  return "文字草稿已生成，图片未返回结果";
+}
+
+function formatDraftDoneMessage(imageCount: number, generateImages: boolean, selectedImageTaskCount: number) {
+  if (imageCount > 0) return `完整图文已生成：${imageCount} 张图，进入审查`;
+  if (!generateImages) return "文字草稿已生成；图片生成已关闭";
+  if (!selectedImageTaskCount) return "文字草稿已生成；未选择图片任务";
+  return "文字草稿已生成；图片生成未返回结果，请在审查台重试生成图";
+}
+
 function normalizeImageSizeInput(value: string) {
   const normalized = normalizeImageGenerationSize(value);
   return isImageGenerationSize(value) ? normalized : "";
@@ -8347,7 +6331,7 @@ function formatReviewStatus(value: GeneratedPost["status"]) {
 function buildSimpleRunMessage(run: SimpleRun) {
   const crawledCount = run.platformResults.reduce((sum, result) => sum + result.crawled, 0);
   const publishLabel = formatSimplePublishStatus(run.publish?.status);
-  return `简单版任务完成：${isSimpleLinkRun(run) ? "导入" : "采集"} ${crawledCount} 条，生成 ${run.posts.length} 条，飞书 ${publishLabel}`;
+  return `简单版任务完成：${formatSimpleRunCollectionAction(run)} ${crawledCount} 条，生成 ${run.posts.length} 条，飞书 ${publishLabel}`;
 }
 
 function isSimpleRunLive(run: SimpleRun) {
@@ -8385,11 +6369,22 @@ function isSimpleOriginalRun(run: SimpleRun) {
   return run.input.sourceMode === "original";
 }
 
+function isSimplePoolRun(run: SimpleRun) {
+  return run.input.sourceMode === "pool";
+}
+
 function formatSimpleRunSource(run: SimpleRun) {
   if (isSimpleFeishuRun(run)) return `飞书 ${run.input.feishuTaskNumbers?.length || run.feishuResults?.length || 0} 条`;
   if (isSimpleOriginalRun(run)) return "原创 1 条";
+  if (isSimplePoolRun(run)) return `内容池 ${run.input.sourceItemIds?.length || run.input.targetCount} 条`;
   if (!isSimpleLinkRun(run)) return `${run.input.platforms.length} 平台`;
   return `链接 ${run.input.links?.length || run.linkResults?.length || 0} 条`;
+}
+
+function formatSimpleRunCollectionAction(run: SimpleRun) {
+  if (isSimpleLinkRun(run) || isSimpleFeishuRun(run)) return "导入";
+  if (isSimplePoolRun(run)) return "取样";
+  return "采集";
 }
 
 function getSimpleRunPrimaryProjectQuery(run: SimpleRun) {
@@ -8493,8 +6488,8 @@ function getSimplePublishStatusClass(value?: NonNullable<SimpleRun["publish"]>["
 function buildPublishStatus(posts: GeneratedPost[], data: FeishuPublishResponse, fallbackPostId?: string): PublishStatusSnapshot {
   const notification = formatPublishNotification(data.notification);
   const uploadedCount = (data.attachmentUploads || []).reduce((total, item) => total + (item.fileCount || 0), 0);
-  const sourceImageCount = posts.reduce((total, item) => total + item.imageUrls.length, 0);
-  const imageCount = uploadedCount || sourceImageCount;
+  const sourceMediaCount = posts.reduce((total, item) => total + countPostMedia(item), 0);
+  const mediaCount = uploadedCount || sourceMediaCount;
   const postId = fallbackPostId || posts[0]?.id || data.job?.postIds[0] || "";
   const jobId = data.jobId || data.job?.id;
   const queueStatus = data.queueStatus || data.job?.status;
@@ -8542,7 +6537,7 @@ function buildPublishStatus(posts: GeneratedPost[], data: FeishuPublishResponse,
     postId,
     status: data.notification?.status === "failed" ? "warning" : "success",
     title: data.notification?.status === "failed" ? "飞书写入完成，通知失败" : "飞书写入完成",
-    detail: `已写入 ${posts.length} 条记录，${imageCount} 张素材已处理。`,
+    detail: `已写入 ${posts.length} 条记录，${mediaCount} 个素材已处理。`,
     progress: 100,
     notification,
     jobId,
@@ -8596,33 +6591,6 @@ function getTaskStatusClass(value: ProductionTask["status"]) {
   return "text-white/45";
 }
 
-function formatExecutionStatus(value: ExecutionLogEntry["status"]) {
-  const labels: Record<ExecutionLogEntry["status"], string> = {
-    running: "执行中",
-    success: "成功",
-    error: "异常",
-    info: "信息",
-  };
-  return labels[value];
-}
-
-function formatLogTime(value: string) {
-  const date = new Date(value);
-  if (Number.isNaN(date.getTime())) return "未知时间";
-  return `${String(date.getHours()).padStart(2, "0")}:${String(date.getMinutes()).padStart(2, "0")}:${String(date.getSeconds()).padStart(2, "0")}`;
-}
-
-function formatDuration(value: number) {
-  if (value < 1000) return `${value}ms`;
-  return `${(value / 1000).toFixed(value > 10000 ? 1 : 2)}s`;
-}
-
-function formatLogDetails(details: NonNullable<ExecutionLogEntry["details"]>) {
-  return Object.entries(details)
-    .map(([key, value]) => `${key}=${value === null ? "null" : String(value)}`)
-    .join(" · ");
-}
-
 function getPrimaryReachMetric(item: NormalizedSourceItem) {
   if (item.platform === "douyin" || item.platform === "wechat_channels") {
     return { label: "播放", value: item.metrics.plays || item.metrics.views };
@@ -8647,6 +6615,14 @@ function toDisplayImageSrc(url?: string) {
   if (url.startsWith("/media/") || url.startsWith("/generated/")) return appendQueryParam(url, "v", localMediaPreviewVersion);
   if (isAbsoluteLocalPath(url)) return `/api/materials/preview?path=${encodeURIComponent(url)}`;
   return url;
+}
+
+function postVideoUrls(post: GeneratedPost) {
+  return Array.isArray(post.videoUrls) ? post.videoUrls.filter(Boolean) : [];
+}
+
+function countPostMedia(post: GeneratedPost) {
+  return post.imageUrls.length + postVideoUrls(post).length;
 }
 
 function isPreviewableImageAssetPath(url: string) {
@@ -8679,85 +6655,6 @@ function sameStringList(left: string[], right: string[]) {
 
 function getDisplayVideoUrl(item: NormalizedSourceItem) {
   return item.downloadedVideoUrl || item.videoUrl;
-}
-
-function getMediaCacheStatus(item: NormalizedSourceItem): SourceMediaCacheStatus {
-  if (item.mediaCache) return item.mediaCache;
-  const imageTotal = item.images?.length || 0;
-  const localImages = (item.downloadedImages || []).filter(isLocalAppMediaUrl).length;
-  const videoPresent = Boolean(
-    item.videoUrl ||
-      item.downloadedVideoUrl ||
-      item.videoFrames?.length ||
-      item.mediaType === "video" ||
-      item.mediaType === "mixed",
-  );
-  const localVideo = Boolean(item.downloadedVideoUrl && isLocalAppMediaUrl(item.downloadedVideoUrl));
-  const frameCount = selectBestVideoHighlightFrames(item.videoFrames).filter((frame) => isLocalAppMediaUrl(frame.url)).length;
-  const errorCount = item.downloadErrors?.length || 0;
-  const status = resolveMediaCacheState({
-    hasMedia: imageTotal > 0 || videoPresent,
-    localAssetCount: localImages + (localVideo ? 1 : 0) + frameCount,
-    imagesComplete: imageTotal === 0 || localImages >= imageTotal,
-    videoComplete: !videoPresent || localVideo,
-    errorCount,
-  });
-
-  return {
-    status,
-    imageTotal,
-    localImages,
-    remoteImages: Math.max(imageTotal - localImages, 0),
-    videoPresent,
-    localVideo,
-    frameCount,
-    errorCount,
-    errors: (item.downloadErrors || []).slice(0, 6),
-    updatedAt: item.crawledAt || item.lastSeenAt,
-  };
-}
-
-function resolveMediaCacheState({
-  hasMedia,
-  localAssetCount,
-  imagesComplete,
-  videoComplete,
-  errorCount,
-}: {
-  hasMedia: boolean;
-  localAssetCount: number;
-  imagesComplete: boolean;
-  videoComplete: boolean;
-  errorCount: number;
-}): SourceMediaCacheStatus["status"] {
-  if (!hasMedia) return "none";
-  if (imagesComplete && videoComplete && errorCount === 0) return "local_complete";
-  if (localAssetCount > 0) return "partial";
-  if (errorCount > 0) return "failed";
-  return "remote_only";
-}
-
-function isLocalAppMediaUrl(url?: string) {
-  return Boolean(url && (url.startsWith("/media/") || url.startsWith("/generated/")));
-}
-
-function formatMediaCacheState(value: SourceMediaCacheStatus["status"]) {
-  const labels: Record<SourceMediaCacheStatus["status"], string> = {
-    none: "无素材",
-    local_complete: "已本地化",
-    partial: "部分本地",
-    remote_only: "仅远程",
-    failed: "缓存失败",
-  };
-  return labels[value];
-}
-
-function getMediaCacheStatusClass(value: SourceMediaCacheStatus["status"]) {
-  if (value === "local_complete") return "text-[var(--mint)]";
-  if (value === "partial") return "text-[var(--amber)]";
-  if (value === "remote_only") return "text-[var(--cyan)]";
-  if (value === "failed") return "text-[var(--rose)]";
-  return "text-white/45";
 }
 
 function formatFrameTimestamp(value?: number) {
@@ -8811,50 +6708,4 @@ function formatMediaType(value: NormalizedSourceItem["mediaType"]) {
     unknown: "未知类型",
   };
   return labels[value || "unknown"];
-}
-
-function formatSourceSafetyDecision(value: NonNullable<NormalizedSourceItem["safetyAssessment"]>["decision"]) {
-  const labels: Record<NonNullable<NormalizedSourceItem["safetyAssessment"]>["decision"], string> = {
-    allow: "通过",
-    review: "复核",
-    filter: "过滤",
-  };
-  return labels[value];
-}
-
-function formatSourceSafetySeverity(value: NonNullable<NormalizedSourceItem["safetyAssessment"]>["severity"]) {
-  const labels: Record<NonNullable<NormalizedSourceItem["safetyAssessment"]>["severity"], string> = {
-    low: "低风险",
-    medium: "中风险",
-    high: "高风险",
-  };
-  return labels[value];
-}
-
-function formatSourceSafetyCategory(value: NonNullable<NormalizedSourceItem["safetyAssessment"]>["categories"][number]) {
-  const labels: Record<NonNullable<NormalizedSourceItem["safetyAssessment"]>["categories"][number], string> = {
-    profanity: "脏话",
-    insult: "辱骂",
-    strong_negative_sentiment: "强负面",
-    competitor_bashing: "拉踩竞品",
-  };
-  return labels[value];
-}
-
-function formatLinkImportStatus(value: LinkImportResultStatus) {
-  const labels: Record<LinkImportResultStatus, string> = {
-    imported: "已导入",
-    filtered: "已过滤",
-    duplicate: "重复",
-    unsupported: "不支持",
-    failed: "失败",
-  };
-  return labels[value];
-}
-
-function getLinkImportStatusClass(value: LinkImportResultStatus) {
-  if (value === "imported") return "text-[var(--mint)]";
-  if (value === "filtered" || value === "duplicate") return "text-[var(--amber)]";
-  if (value === "failed" || value === "unsupported") return "text-[var(--rose)]";
-  return "text-white/45";
 }

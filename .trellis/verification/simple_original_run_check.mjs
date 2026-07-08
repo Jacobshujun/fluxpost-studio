@@ -59,7 +59,8 @@ has(simpleRuns, /sourceMode === "original" && !originalPrompt/, "Original input 
 has(simpleRuns, /sourceMode === "original" && !keyword/, "Original input validation must require a vehicle keyword.");
 has(simpleRuns, /targetCount:\s*1/, "Original mode must force targetCount to one.");
 has(simpleRuns, /vehicleKeyword:\s*normalizedInput\.keyword/, "Original workflow must pass the simple keyword as the Feishu vehicle keyword.");
-has(simpleRuns, /generateImagesFromPromptList\(draft\.imagePrompts/, "Original workflow must generate images from planned prompts.");
+has(simpleRuns, /const imageResult = generateImages[\s\S]*generateImagesFromPromptList\(draft\.imagePrompts/, "Original workflow must generate images from planned prompts only when image generation is enabled.");
+has(simpleRuns, /makeImageGenerationSkippedResult\("Image generation is disabled for this original run\."\)/, "Original workflow must skip image generation when disabled.");
 has(simpleRuns, /enqueueFeishuPublishJob\(approvedPosts/, "Original workflow must reuse the Feishu publish queue.");
 has(simpleRuns, /function makeOriginalStageTitles/, "Original workflow must use original-specific stage titles.");
 has(simpleRuns, /tag:\s*"原创策划"/, "Original stage titles must replace AI tagging with original planning.");
@@ -89,7 +90,8 @@ has(page, /originalUseWebSearch:\s*sourceMode === "original" \? simpleOriginalUs
 has(page, /生成原创并写入飞书/, "Simple start button must describe the original publish flow.");
 has(page, /formatSimpleRunPipelineDetail/, "Simple UI must render source-mode-specific pipeline progress copy.");
 has(page, /const publishStep = writeFeishu \? "写入飞书" : "进入内容审查台"/, "Simple original progress copy should follow the writeFeishu switch.");
-has(page, /sourceMode === "original"\) return `\$\{sourceDetail\} · 原创准备、原创策划、生成图文、\$\{publishStep\}会依次完成。`/, "Simple original progress copy must not mention crawl or AI tagging.");
+has(page, /const generateStep = generateImages \? "生成图文" : "生成文字"/, "Simple original progress copy should switch between text-only and image generation.");
+has(page, /sourceMode === "original"\) return `\$\{sourceDetail\} · 原创准备、原创策划、\$\{generateStep\}、\$\{publishStep\}会依次完成。`/, "Simple original progress copy must not mention crawl or AI tagging.");
 
 has(feishu, /original:\s*"原创"/, "Feishu platform formatter must label original posts.");
 has(check, /Simple original run check/, "Trellis baseline must include the simple original run check.");

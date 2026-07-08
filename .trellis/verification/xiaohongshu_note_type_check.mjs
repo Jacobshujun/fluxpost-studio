@@ -6,7 +6,7 @@ import ts from "typescript";
 const projectRoot = process.cwd();
 const sourcePath = path.join(projectRoot, "src/lib/tikhub.ts");
 const source = readFileSync(sourcePath, "utf8");
-const pageSource = readFileSync(path.join(projectRoot, "src/app/page.tsx"), "utf8");
+const contentPageSource = readFileSync(path.join(projectRoot, "src/app/content/page.tsx"), "utf8");
 
 if (/filterXiaohongshuItemsByRequestedNoteType|isXiaohongshuRequestedNoteType|shouldApplyXiaohongshuLocalTypeFilter|droppedByNoteTypeCount/.test(source)) {
   throw new Error("src/lib/tikhub.ts must not contain local Xiaohongshu post-crawl note-type filtering helpers or dropped-count diagnostics.");
@@ -20,17 +20,17 @@ if (/web_v3\/fetch_search_notes/.test(source)) {
   throw new Error("Xiaohongshu search must use App V2 search_notes, not Web V3 fetch_search_notes.");
 }
 
-if (!/xiaohongshu:\s*"https:\/\/docs\.tikhub\.io\/420136398e0"/.test(pageSource) || /438852171e0/.test(pageSource)) {
+if (!/xiaohongshu:\s*"https:\/\/docs\.tikhub\.io\/420136398e0"/.test(contentPageSource) || /438852171e0/.test(contentPageSource)) {
   throw new Error("Frontend Xiaohongshu docs link must point to the updated TikHub App V2 search_notes document.");
 }
 
 for (const sortValue of ["comment_descending", "collect_descending", "english_preferred"]) {
-  if (!pageSource.includes(`value: "${sortValue}"`)) {
+  if (!contentPageSource.includes(`value: "${sortValue}"`)) {
     throw new Error(`Frontend Xiaohongshu sort options should expose ${sortValue}.`);
   }
 }
 
-if (!pageSource.includes("<option value={3}>直播</option>")) {
+if (!contentPageSource.includes("<option value={3}>直播</option>")) {
   throw new Error("Frontend Xiaohongshu note type options should expose TikHub App V2 live notes.");
 }
 

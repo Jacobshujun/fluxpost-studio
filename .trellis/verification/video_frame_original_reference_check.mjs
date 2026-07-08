@@ -15,7 +15,7 @@ const types = read("src/lib/types.ts");
 const sourceLinkImport = read("src/lib/source-link-import.ts");
 const creationControls = read("src/lib/creation-controls.ts");
 const crawlLinksRoute = read("src/app/api/crawl/links/route.ts");
-const page = read("src/app/page.tsx");
+const contentPage = read("src/app/content/page.tsx");
 const checkPs1 = read(".trellis/verification/check.ps1");
 
 assertContains(types, /NormalizedSourceItem[\s\S]*videoFrameOriginalReference\?:\s*boolean/, "NormalizedSourceItem must persist the video-frame original-reference import preference.");
@@ -32,8 +32,8 @@ assertContains(creationControls, /return frameTasks\.slice\(0,\s*maxVideoHighlig
 
 assertContains(crawlLinksRoute, /videoFrameOriginalReference\?:\s*boolean/, "Advanced source-link API must accept the video-frame original-reference switch.");
 assertContains(crawlLinksRoute, /videoFrameOriginalReference:\s*body\.videoFrameOriginalReference !== false/, "Advanced source-link API must default the video-frame original-reference switch on.");
-assertContains(page, /linkImportVideoFrameOriginalReference/, "Advanced source-link UI must expose the video-frame original-reference switch state.");
-assertContains(page, /videoFrameOriginalReference:\s*linkImportVideoFrameOriginalReference/, "Advanced source-link request payload must send the video-frame original-reference switch.");
+assertContains(contentPage, /linkImportVideoFrameOriginalReference/, "/content source-link UI must expose the video-frame original-reference switch state.");
+assertContains(contentPage, /videoFrameOriginalReference:\s*linkImportVideoFrameOriginalReference/, "/content source-link request payload must send the video-frame original-reference switch.");
 
 assertContains(checkPs1, /Video frame original-reference check/, "Trellis baseline must include the video-frame original-reference check.");
 

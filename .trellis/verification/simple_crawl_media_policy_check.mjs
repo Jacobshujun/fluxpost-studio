@@ -25,25 +25,26 @@ assertContains(simpleRuns, /const requested = previousRequested \+ missing/, "To
 assertContains(simpleRuns, /buildDefaultCrawlInput\(platform,\s*input\.keyword,\s*requested,\s*settings\)/, "Top-up must use normal platform request parameters.");
 assertContains(simpleRuns, /Simple run crawl top-up/, "Top-up attempts must be observable in execution logs.");
 
-assertContains(simpleRuns, /selectSimpleProductionItems\(rankedProductionCandidates,\s*normalizedInput\.targetCount\)/, "Simple production must select media-eligible candidates before generation.");
+assertContains(simpleRuns, /const generateImages = shouldGenerateImages\(normalizedInput\)[\s\S]*selectSimpleProductionItems\(rankedProductionCandidates,\s*normalizedInput\.targetCount,[\s\S]*requireVisualSource:\s*generateImages/, "Simple production must require media-eligible candidates only when image generation is enabled.");
 assertContains(simpleRuns, /function hasSimpleProductionVisualSource\(source: NormalizedSourceItem\)/, "Simple production media eligibility helper is missing.");
 assertContains(simpleRuns, /function hasSimpleProductionPickupRecordTag\(source: NormalizedSourceItem\)/, "Simple production must identify pickup-record content tags.");
 assertContains(simpleRuns, /hasSimpleProductionPickupRecordTag\(source\)\)\s*return false/, "Pickup-record sources must not be eligible for simple automatic production.");
+assertContains(simpleRuns, /if \(hasSimpleProductionPickupRecordTag\(item\)\)[\s\S]*noMediaItems\.push\(item\)/, "Pickup-record sources must still be skipped even when image generation is disabled.");
 assertContains(simpleRuns, /source\.downloadedImages\?\.length/, "Media eligibility must consider downloaded images.");
 assertContains(simpleRuns, /source\.images\.length/, "Media eligibility must consider source images.");
 assertContains(simpleRuns, /source\.videoFrames\?\.length/, "Media eligibility must consider video frames.");
 assertContains(simpleRuns, /function isSimpleProductionVideoLikeSource\(source: NormalizedSourceItem\)/, "Simple production must distinguish video-like sources from image-only sources.");
-assertContains(simpleRuns, /source\.mediaType === "video"/, "Video mediaType must be treated as video-like for simple production.");
-assertContains(simpleRuns, /source\.mediaType === "mixed"/, "Mixed mediaType must be treated as video-like for simple production.");
-assertContains(simpleRuns, /source\.mediaCache\?\.videoPresent/, "Media-cache video presence must be treated as video-like for simple production.");
-assertContains(simpleRuns, /if \(isSimpleProductionVideoLikeSource\(source\)\)\s*return Boolean\(source\.videoFrames\?\.length\)/, "Video-like simple production sources must require extracted video frames instead of falling back to cover/source images.");
-assertContains(simpleRuns, /Skipped video source without extracted video frames\./, "Video-like no-frame skips must be logged with a specific operator-facing reason.");
+assertContains(simpleRuns, /isSimpleProductionVideoLikeSource\(source\)[\s\S]*isSourceVideoLike\(source\)/, "Simple production must use the shared source-video-like helper.");
+assertContains(simpleRuns, /function hasSimpleProductionVideoReference\(source: NormalizedSourceItem\)/, "Simple production must use a shared source-video reference helper.");
+assertContains(simpleRuns, /hasSimpleProductionVideoReference\(source\)[\s\S]*hasSourceVideoReference\(source\)/, "Simple production video references must resolve through the shared helper.");
+assertContains(simpleRuns, /if \(isSimpleProductionVideoLikeSource\(source\)\)\s*return Boolean\(hasSimpleProductionVideoReference\(source\) \|\| source\.videoFrames\?\.length\)/, "Video-like simple production sources must allow source-video references or extracted video frames.");
+assertContains(simpleRuns, /Skipped video source without a source video reference or extracted video frames\./, "Video-like skips must mention missing source videos and frames.");
 assertContains(simpleRuns, /Skipped pickup record source excluded from production\./, "Pickup-record skips must be logged with a specific operator-facing reason.");
 assertContains(simpleRuns, /pickupRecord:\s*hasSimpleProductionPickupRecordTag\(source\)/, "Pickup-record skip details must be visible in execution logs.");
 assertContains(simpleRuns, /noMediaItems/, "Simple production must track no-media skipped items.");
 assertContains(simpleRuns, /Simple production source skipped/, "No-media skips must be logged.");
 assertContains(simpleRuns, /total:\s*productionItems\.length \+ noMediaItems\.length/, "Produce stage total must include skipped no-media candidates.");
-assertContains(simpleRuns, /mapWithConcurrency\(productionItems,\s*concurrencyConfig\.production/, "Only media-eligible production items should enter generation.");
+assertContains(simpleRuns, /mapWithConcurrency\(productionItems,\s*concurrencyConfig\.production/, "Only selected production items should enter generation.");
 assertNotContains(
   simpleRuns,
   /\.sort\(\(a, b\) => b\.score - a\.score\)\s*\.slice\(0,\s*normalizedInput\.targetCount\)\s*\.map\(\(\{ item \}\) => item\)/,

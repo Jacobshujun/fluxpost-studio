@@ -48,11 +48,11 @@ const sourceLinkImport = read("src/lib/source-link-import.ts");
 const route = read("src/app/api/crawl/links/route.ts");
 const simpleRoute = read("src/app/api/simple/runs/route.ts");
 const simpleRuns = read("src/lib/simple-runs.ts");
-const page = read("src/app/page.tsx");
+const contentPage = read("src/app/content/page.tsx");
 const checkPs1 = read(".trellis/verification/check.ps1");
 
-assertContains(types, /export type SourceLinkPlatform = CrawlPlatform \| "xiaopeng_bbs"/, "Xiaopeng BBS should be a source-link platform, not a keyword crawl platform.");
-assertContains(types, /export type Platform = SourceLinkPlatform \| "feishu"/, "Platform union must include Xiaopeng BBS through SourceLinkPlatform.");
+assertContains(types, /export type SourceLinkPlatform = CrawlPlatform \| "xiaopeng_bbs" \| "dongchedi"/, "Xiaopeng BBS should be a source-link platform, not a keyword crawl platform.");
+assertContains(types, /export type Platform = SourceLinkPlatform \| "feishu" \| "original"/, "Platform union must include Xiaopeng BBS through SourceLinkPlatform.");
 assertContains(xiaopeng, /extractXiaopengBbsThreadId/, "Xiaopeng BBS importer must parse thread ids.");
 assertContains(xiaopeng, /pageData/, "Xiaopeng BBS importer must parse Next pageData.");
 assertContains(sourceLinkImport, /fetchXiaopengBbsItemBySource/, "Source-link import must dispatch Xiaopeng BBS links to the local importer.");
@@ -61,9 +61,9 @@ assertContains(sourceLinkImport, /normalizeXiaopengBbsInput/, "Pure Xiaopeng BBS
 assertContains(route, /SourceLinkPlatform \| "auto"/, "Advanced link import route must accept source-link platforms.");
 assertContains(simpleRoute, /SourceLinkPlatform \| "auto"/, "Simple run route must accept Xiaopeng BBS link platform.");
 assertContains(simpleRuns, /isSourceLinkPlatform\(normalizedInput\.linkPlatform\)/, "Simple link mode must forward Xiaopeng BBS platform to the resolver.");
-assertContains(page, /linkImportPlatforms/, "Frontend should use a dedicated link-import platform list.");
-assertContains(page, /xiaopeng_bbs", label: "小鹏社区"/, "Frontend link import should expose Xiaopeng BBS.");
-assertContains(page, /小鹏社区帖子 ID/, "Frontend should hint that pure Xiaopeng BBS ids are accepted.");
+assertContains(contentPage, /linkImportPlatforms/, "/content should use a dedicated link-import platform list.");
+assertContains(contentPage, /xiaopeng_bbs", label: "小鹏社区"/, "/content link import should expose Xiaopeng BBS.");
+assertContains(contentPage, /小鹏社区帖子 ID/, "/content should hint that pure Xiaopeng BBS ids are accepted.");
 assertContains(checkPs1, /Xiaopeng BBS import check/, "Trellis baseline must include the Xiaopeng BBS import check.");
 
 const xiaopengModule = loadTsModule("src/lib/xiaopeng-bbs.ts", {

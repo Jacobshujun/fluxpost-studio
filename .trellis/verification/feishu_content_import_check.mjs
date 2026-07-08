@@ -53,8 +53,8 @@ assertContains(contentImport, /runWithConcurrencyPool\("feishu"/, "Feishu import
 assertContains(contentImport, /sanitizeCliText/, "Feishu import errors must be sanitized before surfacing.");
 
 assertContains(types, /export type SourceLinkPlatform = CrawlPlatform \| "xiaopeng_bbs"/, "Source-link platforms should extend crawl platforms without adding Feishu as a TikHub platform.");
-assertContains(types, /export type Platform = SourceLinkPlatform \| "feishu"/, "Platform type must include Feishu as an import source.");
-assertContains(types, /sourceMode\?:\s*"keyword"\s*\|\s*"links"\s*\|\s*"feishu"/, "SimpleRunInput must persist Feishu source mode.");
+assertContains(types, /export type Platform = SourceLinkPlatform \| "feishu" \| "original"/, "Platform type must include Feishu as an import source.");
+assertContains(types, /sourceMode\?:\s*"keyword"\s*\|\s*"links"\s*\|\s*"feishu"[\s\S]*"pool"/, "SimpleRunInput must persist Feishu source mode.");
 assertContains(types, /feishuTaskNumbers\?:\s*string\[\]/, "SimpleRunInput must persist Feishu task numbers.");
 assertContains(types, /export type SimpleRunFeishuResult = \{[\s\S]*status:\s*"imported"\s*\|\s*"not_found"\s*\|\s*"failed"/, "SimpleRun must persist per-task Feishu import results.");
 assertContains(types, /feishuResults\?:\s*SimpleRunFeishuResult\[\]/, "SimpleRun must carry Feishu import results.");
@@ -68,9 +68,9 @@ assertContains(simpleRuns, /ingestSimpleTaggedItems\(normalizedInput,\s*taggedIt
 assertContains(simpleRuns, /groupFeishuItemsByVehicle/, "Feishu imported items must be grouped by vehicle before content-pool ingest.");
 assertContains(simpleRuns, /raw\.feishu\?\.vehicle\?\.trim\(\)/, "Feishu vehicle must map to the content project keyword.");
 
-assertContains(route, /sourceMode\?:\s*"keyword"\s*\|\s*"links"\s*\|\s*"feishu"/, "Simple run API must accept Feishu source mode.");
+assertContains(route, /sourceMode\?:\s*"keyword"\s*\|\s*"links"\s*\|\s*"feishu"[\s\S]*"pool"/, "Simple run API must accept Feishu source mode.");
 assertContains(route, /feishuTaskNumbers\?:\s*string\[\]\s*\|\s*string/, "Simple run API must accept Feishu task numbers.");
-assertContains(route, /baseSourceMode\s*=\s*body\.sourceMode === "feishu" \? "feishu" : body\.sourceMode === "links" \? "links" : "keyword"/, "Simple run API must preserve Feishu/link/keyword source mode mapping.");
+assertContains(route, /baseSourceMode\s*=\s*body\.sourceMode === "feishu" \? "feishu" : body\.sourceMode === "links" \? "links" : body\.sourceMode === "pool" \? "pool" : "keyword"/, "Simple run API must preserve Feishu/link/pool/keyword source mode mapping.");
 assertContains(route, /sourceMode:\s*body\.sourceMode === "original" \? "original" : body\.sourceMode === "viral" \? "viral" : baseSourceMode/, "Simple run API must forward the resolved source mode.");
 assertContains(route, /feishuTaskNumbers:\s*body\.feishuTaskNumbers/, "Simple run API must forward Feishu task numbers.");
 

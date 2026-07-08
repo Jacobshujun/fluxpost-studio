@@ -1,8 +1,8 @@
 import { compactError, recordExecutionLog, runWithExecutionLogOwner } from "./activity-log";
 import { appConfig } from "./config";
-import { buildDefaultImageTasks } from "./creation-controls";
+import { buildDefaultImageTasks, hasSelectedImageTask } from "./creation-controls";
 import { concurrencyConfig, mapWithConcurrency, runWithConcurrencyPool } from "./concurrency";
-import { calculateHotScore, ingestCrawlItems, markSourceRewritten } from "./content-pool";
+import { calculateHotScore, getSourceItemsByIds, ingestCrawlItems, markSourceRewritten } from "./content-pool";
 import {
   claimNextSimpleRunQueueItem,
   completeSimpleRunQueueItem,
@@ -24,6 +24,7 @@ import { buildOriginalGeneratedPost, extractOriginalTopic } from "./original-cre
 import { isComfyUiKleinConfigured } from "./comfyui-klein";
 import { buildProductionPlan } from "./production-plan";
 import { savePost } from "./store";
+import { hasSourceVideoReference, isSourceVideoLike } from "./source-video-reference";
 import { resolveSourceLinks, type SourceLinkImportResult } from "./source-link-import";
 import { filterUnsafeSourceItems } from "./source-safety";
 import { tagSourceItems } from "./source-tagging";
@@ -60,13 +61,14 @@ import type {
 
 type CreateSimpleRunInput = Omit<
   SimpleRunInput,
-  "materialPaths" | "platforms" | "targetCount" | "links" | "linkPlatform" | "feishuTaskNumbers" | "sourceMode"
+  "materialPaths" | "platforms" | "targetCount" | "links" | "linkPlatform" | "feishuTaskNumbers" | "sourceMode" | "sourceItemIds"
 > & {
   sourceMode?: SimpleRunInput["sourceMode"];
   targetCount?: number;
   platforms?: CrawlPlatform[];
   materialPaths?: string[];
   links?: string[] | string;
+  sourceItemIds?: string[];
   linkPlatform?: SimpleRunInput["linkPlatform"];
   cookie?: string;
   feishuTaskNumbers?: string[] | string;
@@ -77,7 +79,9 @@ type CreateSimpleRunInput = Omit<
   originalUseWebSearch?: boolean;
   useComfyUiKlein?: boolean;
   directOriginalReference?: boolean;
+  includeSourceVideo?: boolean;
   enableVideoTranscription?: boolean;
+  generateImages?: boolean;
   ownerUserId?: string;
   ownerDisplayName?: string;
   settings?: Partial<WorkspacePromptSettings>;
@@ -105,6 +109,15 @@ function makeOriginalStageTitles(): Record<SimpleRunStageId, string> {
     tag: "原创策划",
     produce: "生成图文",
     publish: "写入飞书",
+  };
+}
+
+function makePoolStageTitles(): Record<SimpleRunStageId, string> {
+  return {
+    crawl: "内容池取样",
+    tag: "AI 鎵撴爣",
+    produce: "鐢熸垚鍥炬枃",
+    publish: "鍐欏叆椋炰功",
   };
 }
 
@@ -199,6 +212,7 @@ async function prepareSimpleRun(input: CreateSimpleRunInput) {
       linkPlatform: normalizedInput.linkPlatform || "",
       hasCookie: Boolean(normalizedInput.cookie),
       materialCount: normalizedInput.materialPaths.length,
+      generateImages: shouldGenerateImages(normalizedInput),
       ownerUserId: normalizedInput.ownerUserId || "local",
     },
     ownerUserId: normalizedInput.ownerUserId,
@@ -275,6 +289,14 @@ function settingsFromRun(run: SimpleRun): WorkspacePromptSettings {
     imageSize: run.imageSize,
     imageQuality: run.imageQuality,
     platformCrawlSettings: run.platformCrawlSettings || defaultWorkspacePromptSettings.platformCrawlSettings,
+    simpleRunMediaSettings: {
+      ...defaultWorkspacePromptSettings.simpleRunMediaSettings,
+      generateImages: run.input.generateImages !== false,
+      useComfyUiKlein: run.input.useComfyUiKlein === true,
+      directOriginalReference: run.input.directOriginalReference === true,
+      includeSourceVideo: run.input.includeSourceVideo === true,
+      enableVideoTranscription: run.input.enableVideoTranscription === true,
+    },
     updatedAt: run.updatedAt,
   };
 }
@@ -293,6 +315,56 @@ function isSimpleRunViralMode(input: SimpleRunInput) {
 
 function isSimpleRunOriginalMode(input: SimpleRunInput) {
   return input.sourceMode === "original";
+}
+
+function isSimpleRunPoolMode(input: SimpleRunInput) {
+  return input.sourceMode === "pool";
+}
+
+function shouldGenerateImages(input: SimpleRunInput) {
+  return input.generateImages !== false;
+}
+
+function makeImageGenerationSkippedResult(message: string) {
+  return {
+    status: "skipped" as const,
+    imageUrls: [] as string[],
+    message,
+  };
+}
+
+function formatImageTaskResultNotes(
+  taskResults:
+    | Array<{
+        taskLabel: string;
+        status: string;
+        endpointPath?: string;
+        referenceImageCount: number;
+        expectedReferenceImageCount?: number;
+        fallbackUsed: boolean;
+        message?: string;
+      }>
+    | undefined,
+) {
+  if (!taskResults?.length) return [];
+  return taskResults.map((task) => {
+    const referenceSummary = task.expectedReferenceImageCount
+      ? `${task.referenceImageCount}/${task.expectedReferenceImageCount} references`
+      : `${task.referenceImageCount} references`;
+    return [
+      `Image task ${task.taskLabel}: ${task.status}`,
+      task.endpointPath ? `endpoint=${task.endpointPath}` : "",
+      referenceSummary,
+      task.fallbackUsed ? "fallback=used" : "fallback=none",
+      task.message ? `message=${compactPromptText(task.message, 160)}` : "",
+    ]
+      .filter(Boolean)
+      .join("; ");
+  });
+}
+
+function resolveSimpleImageSkipMessage(generateImages: boolean, scope: string) {
+  return generateImages ? `No selected image task; skipped image generation for this ${scope}.` : `Image generation is disabled for this ${scope}.`;
 }
 
 function simpleRunAccessActor(input: SimpleRunInput) {
@@ -331,6 +403,8 @@ async function runSimpleRunWorkflow(
     ? await collectSimpleFeishuItems(run, crawledItems, normalizedInput)
     : isSimpleRunLinkMode(normalizedInput)
     ? await collectSimpleLinkItems(run, crawledItems, normalizedInput)
+    : isSimpleRunPoolMode(normalizedInput)
+    ? await collectSimplePoolItems(run, crawledItems, normalizedInput)
     : await collectSimpleKeywordItems(run, crawledItems, normalizedInput, settings);
   await assertSimpleRunNotForceTerminated(run.id);
   const safetyResult = await filterUnsafeSourceItems(crawledItems, {
@@ -357,6 +431,12 @@ async function runSimpleRunWorkflow(
   run = await setStage(run, "crawl", {
     message: `${isSimpleRunLinkMode(normalizedInput) || isSimpleRunFeishuMode(normalizedInput) ? "已导入" : "已采集"} ${crawledItems.length} 条候选内容，内容安全过滤 ${safetyResult.filtered.length} 条，保留 ${safeCrawledItems.length} 条`,
   });
+
+  if (isSimpleRunPoolMode(normalizedInput)) {
+    run = await setStage(run, "crawl", {
+      message: `内容池取样 ${crawledItems.length} 条候选内容，内容安全过滤 ${safetyResult.filtered.length} 条，保留 ${safeCrawledItems.length} 条。`,
+    });
+  }
 
   if (!safeCrawledItems.length) {
     run = await failRun(run, "没有采集到可生产的内容");
@@ -416,7 +496,10 @@ async function runSimpleRunWorkflow(
       score: item.hotScore || calculateHotScore(item),
     }))
     .sort((a, b) => b.score - a.score);
-  const { productionItems, noMediaItems } = selectSimpleProductionItems(rankedProductionCandidates, normalizedInput.targetCount);
+  const generateImages = shouldGenerateImages(normalizedInput);
+  const { productionItems, noMediaItems } = selectSimpleProductionItems(rankedProductionCandidates, normalizedInput.targetCount, {
+    requireVisualSource: generateImages,
+  });
 
   await assertSimpleRunNotForceTerminated(run.id);
   run = await setStage(run, "produce", {
@@ -468,14 +551,18 @@ async function runSimpleRunWorkflow(
           },
         },
         imageTasks,
+        includeSourceVideo: normalizedInput.includeSourceVideo === true,
       });
 
       const imagePrompt = resolveSimpleImagePrompt(draft, source);
-      const imageResult = await generateImagesFromPrompt(imagePrompt, 1, draft.imageTasks, {
-        size: settings.imageSize,
-        quality: settings.imageQuality,
-        taskConcurrency: concurrencyConfig.image,
-      });
+      const canRunImageTasks = generateImages && hasSelectedImageTask(draft.imageTasks);
+      const imageResult = canRunImageTasks
+        ? await generateImagesFromPrompt(imagePrompt, 1, draft.imageTasks, {
+            size: settings.imageSize,
+            quality: settings.imageQuality,
+            taskConcurrency: concurrencyConfig.image,
+          })
+        : makeImageGenerationSkippedResult(resolveSimpleImageSkipMessage(generateImages, "simple run"));
       const access = simpleRunAccessActor(normalizedInput);
       const post: GeneratedPost = applyWorkspaceOwner({
         ...draft,
@@ -486,7 +573,11 @@ async function runSimpleRunWorkflow(
         imageTasks,
         aiNotes: [
           ...draft.aiNotes,
-          imageResult.status === "completed"
+          !generateImages
+            ? "Only text was generated; image generation is disabled for this simple run."
+            : !canRunImageTasks
+              ? "Only text was generated; no image task was selected for this simple run."
+            : imageResult.status === "completed"
             ? `简单版自动生成 ${imageResult.imageUrls.length} 张配图。`
             : imageResult.message || "图片模型未返回配图。",
         ],
@@ -631,7 +722,8 @@ async function runSimpleViralWorkflow(
   startedAt: number,
 ) {
   const viralUrl = normalizedInput.viralUrl?.trim() || "";
-  const imitateImages = normalizedInput.viralImitateImages === true;
+  const generateImages = shouldGenerateImages(normalizedInput);
+  const imitateImages = generateImages && normalizedInput.viralImitateImages === true;
   const viralMaterialPaths = normalizedInput.viralMaterialPaths || [];
   const access = simpleRunAccessActor(normalizedInput);
   let completedPost: GeneratedPost | undefined;
@@ -756,16 +848,24 @@ async function runSimpleViralWorkflow(
       imagePairs,
       settings,
       imitateImages,
+      useComfyUiKlein: normalizedInput.useComfyUiKlein === true && isComfyUiKleinConfigured(),
     });
     const pairingNotice = imitateImages ? buildViralPairingNotice(matchedImageCount, sourceImageCount, vehicleImageCount) : "";
     const imagePrompt = resolveSimpleImagePrompt(draft, source.item);
-    const imageResult = imitateImages
+    const canRunImageTasks = imitateImages && hasSelectedImageTask(draft.imageTasks);
+    const imageResult = canRunImageTasks
       ? await generateImagesFromPrompt(imagePrompt, 1, draft.imageTasks, {
           size: settings.imageSize,
           quality: settings.imageQuality,
           taskConcurrency: concurrencyConfig.image,
         })
-      : { status: "skipped" as const, imageUrls: [] as string[], message: "Viral image imitation is disabled." };
+      : makeImageGenerationSkippedResult(
+          imitateImages ? resolveSimpleImageSkipMessage(generateImages, "viral run") : generateImages ? "Viral image imitation is disabled." : "Image generation is disabled for this viral run.",
+        );
+    const imageTaskResults = "taskResults" in imageResult ? imageResult.taskResults : undefined;
+    const viralImageNeedsReview = canRunImageTasks && imageResult.status === "needs_review";
+    const imageTaskNotes = formatImageTaskResultNotes(imageTaskResults);
+    const viralReviewNote = viralImageNeedsReview ? "爆款风格图生成待复核：至少一个图片槽没有完成严格双参考图生成，已保存草稿并跳过自动发布。" : "";
     const post = applyWorkspaceOwner(
       {
         ...draft,
@@ -776,9 +876,15 @@ async function runSimpleViralWorkflow(
         aiNotes: [
           ...draft.aiNotes,
           imitateImages
-            ? pairingNotice
-            : "Viral image imitation disabled; generated copy only.",
-          imitateImages ? (imageResult.status === "completed" ? `Generated ${imageResult.imageUrls.length} viral-style image(s).` : imageResult.message || "Image provider did not return images.") : "",
+            ? canRunImageTasks
+              ? pairingNotice
+              : "Only text was generated; no viral image task was selected."
+            : generateImages
+              ? "Viral image imitation disabled; generated copy only."
+              : "Only text was generated; image generation is disabled for this viral run.",
+          canRunImageTasks ? (imageResult.status === "completed" ? `Generated ${imageResult.imageUrls.length} viral-style image(s).` : imageResult.message || "Image provider did not return images.") : "",
+          viralReviewNote,
+          ...imageTaskNotes,
         ].filter(Boolean),
         status: "draft" as const,
         updatedAt: new Date().toISOString(),
@@ -809,9 +915,9 @@ async function runSimpleViralWorkflow(
       updatedAt: new Date().toISOString(),
     });
     run = await setStage(run, "produce", {
-      status: "success",
+      status: viralImageNeedsReview ? "warning" : "success",
       completed: 1,
-      message: imitateImages ? "Generated one viral-style post." : "Generated one viral-style copy post.",
+      message: viralImageNeedsReview ? "Generated one viral-style post; image generation needs manual review." : imitateImages ? "Generated one viral-style post." : "Generated one viral-style copy post.",
     });
   } catch (error) {
     const message = compactError(error);
@@ -836,20 +942,23 @@ async function runSimpleViralWorkflow(
     return finishSimpleRun(run, startedAt);
   }
 
-  if (!normalizedInput.writeFeishu) {
+  const postNeedsManualReview = completedPost.aiNotes.some((note) => note.includes("爆款风格图生成待复核"));
+  if (!normalizedInput.writeFeishu || postNeedsManualReview) {
     run = {
       ...run,
       publish: {
         status: "skipped",
         postCount: 1,
-        message: "已按开关跳过自动写入飞书，生成稿保留在内容审查台等待人工确认。",
+        message: postNeedsManualReview
+          ? "爆款风格图生成待复核，已跳过自动写入飞书，生成稿保留在内容审查台等待人工确认。"
+          : "已按开关跳过自动写入飞书，生成稿保留在内容审查台等待人工确认。",
       },
     };
     run = await setStage(run, "publish", {
       status: "skipped",
       total: 1,
       skipped: 1,
-      message: "已跳过自动写入飞书，等待内容审查台人工审查。",
+      message: postNeedsManualReview ? "爆款风格图需要人工复核，已跳过自动写入飞书。" : "已跳过自动写入飞书，等待内容审查台人工审查。",
     });
     return finishSimpleRun(run, startedAt);
   }
@@ -979,14 +1088,17 @@ async function runSimpleOriginalWorkflow(
     run = await setStage(run, "produce", {
       status: "running",
       total: 1,
-      message: "Generating original post and images.",
+      message: shouldGenerateImages(normalizedInput) ? "Generating original post and images." : "Generating original post copy.",
     });
 
-    const imageResult = await generateImagesFromPromptList(draft.imagePrompts, {
-      size: settings.imageSize,
-      quality: settings.imageQuality,
-      taskConcurrency: concurrencyConfig.image,
-    });
+    const generateImages = shouldGenerateImages(normalizedInput);
+    const imageResult = generateImages
+      ? await generateImagesFromPromptList(draft.imagePrompts, {
+          size: settings.imageSize,
+          quality: settings.imageQuality,
+          taskConcurrency: concurrencyConfig.image,
+        })
+      : makeImageGenerationSkippedResult("Image generation is disabled for this original run.");
     const post = applyWorkspaceOwner(
       {
         ...draft.post,
@@ -994,7 +1106,9 @@ async function runSimpleOriginalWorkflow(
         aiNotes: [
           ...draft.post.aiNotes,
           `Original mode planned ${draft.imagePrompts.length} image prompt(s).`,
-          imageResult.status === "completed"
+          !generateImages
+            ? "Only text was generated; image generation is disabled for this original run."
+            : imageResult.status === "completed"
             ? `Generated ${imageResult.imageUrls.length} original image(s).`
             : imageResult.message || "Image provider did not return original images.",
         ],
@@ -1386,6 +1500,67 @@ async function collectSimpleLinkItems(run: SimpleRun, crawledItems: NormalizedSo
   return nextRun;
 }
 
+async function collectSimplePoolItems(run: SimpleRun, crawledItems: NormalizedSourceItem[], normalizedInput: SimpleRunInput) {
+  const sourceItemIds = normalizedInput.sourceItemIds || [];
+  run = await setStage(run, "crawl", {
+    status: "running",
+    total: sourceItemIds.length,
+    message: `正在从内容池读取 ${sourceItemIds.length} 条样本。`,
+  });
+
+  await recordExecutionLog({
+    scope: "simple/run",
+    action: "Simple run content-pool source started",
+    status: "running",
+    message: `Using ${sourceItemIds.length} content pool item(s) for secondary creation.`,
+    details: {
+      runId: run.id,
+      keyword: normalizedInput.keyword,
+      sourceItemCount: sourceItemIds.length,
+    },
+  });
+
+  const items = await getSourceItemsByIds(sourceItemIds, simpleRunAccessActor(normalizedInput));
+  crawledItems.push(...items);
+
+  let nextRun = run;
+  const requestedByPlatform = countRequestedSourceIdsByPlatform(sourceItemIds, items);
+  const crawledByPlatform = countItemsByPlatform(items);
+  for (const [platform, requested] of requestedByPlatform) {
+    nextRun = await addPlatformResult(nextRun, {
+      platform,
+      requested,
+      crawled: crawledByPlatform.get(platform) || 0,
+      taggedContent: 0,
+      taggedVisual: 0,
+    });
+  }
+
+  const missingCount = Math.max(sourceItemIds.length - items.length, 0);
+  nextRun = await setStage(nextRun, "crawl", {
+    total: sourceItemIds.length,
+    completed: items.length,
+    skipped: missingCount,
+    message: `内容池取样 ${items.length}/${sourceItemIds.length} 条，缺失或无权限 ${missingCount} 条。`,
+  });
+
+  await recordExecutionLog({
+    scope: "simple/run",
+    action: "Simple run content-pool source completed",
+    status: items.length ? "success" : "error",
+    message: `Loaded ${items.length}/${sourceItemIds.length} content pool item(s).`,
+    details: {
+      runId: nextRun.id,
+      keyword: normalizedInput.keyword,
+      requested: sourceItemIds.length,
+      loaded: items.length,
+      missing: missingCount,
+    },
+  });
+
+  return nextRun;
+}
+
 async function collectSimpleFeishuItems(run: SimpleRun, crawledItems: NormalizedSourceItem[], normalizedInput: SimpleRunInput) {
   const taskNumbers = normalizedInput.feishuTaskNumbers || [];
   run = await setStage(run, "crawl", {
@@ -1460,6 +1635,17 @@ function countItemsByPlatform(items: NormalizedSourceItem[]) {
   const counts = new Map<Platform, number>();
   items.forEach((item) => {
     counts.set(item.platform, (counts.get(item.platform) || 0) + 1);
+  });
+  return counts;
+}
+
+function countRequestedSourceIdsByPlatform(sourceItemIds: string[], items: NormalizedSourceItem[]) {
+  const platformById = new Map(items.map((item) => [item.id, item.platform]));
+  const counts = new Map<Platform, number>();
+  sourceItemIds.forEach((id) => {
+    const platform = platformById.get(id);
+    if (!platform) return;
+    counts.set(platform, (counts.get(platform) || 0) + 1);
   });
   return counts;
 }
@@ -1667,13 +1853,18 @@ async function applyUnsafeFilterPlatformCounts(run: SimpleRun, filteredItems: No
 function selectSimpleProductionItems(
   candidates: Array<{ item: NormalizedSourceItem; score: number }>,
   targetCount: number,
+  options: { requireVisualSource?: boolean } = {},
 ) {
   const productionItems: NormalizedSourceItem[] = [];
   const noMediaItems: NormalizedSourceItem[] = [];
 
   for (const { item } of candidates) {
     if (productionItems.length >= targetCount) break;
-    if (!hasSimpleProductionVisualSource(item)) {
+    if (hasSimpleProductionPickupRecordTag(item)) {
+      noMediaItems.push(item);
+      continue;
+    }
+    if (options.requireVisualSource !== false && !hasSimpleProductionVisualSource(item)) {
       noMediaItems.push(item);
       continue;
     }
@@ -1685,7 +1876,7 @@ function selectSimpleProductionItems(
 
 function hasSimpleProductionVisualSource(source: NormalizedSourceItem) {
   if (hasSimpleProductionPickupRecordTag(source)) return false;
-  if (isSimpleProductionVideoLikeSource(source)) return Boolean(source.videoFrames?.length);
+  if (isSimpleProductionVideoLikeSource(source)) return Boolean(hasSimpleProductionVideoReference(source) || source.videoFrames?.length);
   return Boolean((source.downloadedImages?.length || 0) > 0 || source.images.length > 0);
 }
 
@@ -1694,18 +1885,16 @@ function hasSimpleProductionPickupRecordTag(source: NormalizedSourceItem) {
 }
 
 function isSimpleProductionVideoLikeSource(source: NormalizedSourceItem) {
-  return Boolean(
-    source.mediaType === "video" ||
-      source.mediaType === "mixed" ||
-      source.videoUrl ||
-      source.downloadedVideoUrl ||
-      source.mediaCache?.videoPresent,
-  );
+  return isSourceVideoLike(source);
+}
+
+function hasSimpleProductionVideoReference(source: NormalizedSourceItem) {
+  return hasSourceVideoReference(source);
 }
 
 function describeSimpleProductionMediaSkip(source: NormalizedSourceItem) {
   if (hasSimpleProductionPickupRecordTag(source)) return "Skipped pickup record source excluded from production.";
-  if (isSimpleProductionVideoLikeSource(source)) return "Skipped video source without extracted video frames.";
+  if (isSimpleProductionVideoLikeSource(source)) return "Skipped video source without a source video reference or extracted video frames.";
   return "Skipped source without images, downloaded images, or video frames.";
 }
 
@@ -1798,24 +1987,37 @@ function normalizeSimpleRunInput(input: CreateSimpleRunInput): SimpleRunInput {
           ? "feishu"
           : input.sourceMode === "links"
             ? "links"
+            : input.sourceMode === "pool"
+              ? "pool"
             : "keyword";
   const platforms = Array.from(new Set((input.platforms || []).filter(isPlatform)));
   const links = normalizeSourceLinkInput(input.links);
+  const sourceItemIds = normalizeSourceItemIdInput(input.sourceItemIds);
   const feishuTaskNumbers = normalizeFeishuTaskNumberInput(input.feishuTaskNumbers);
   const viralUrl = normalizeViralUrlInput(input.viralUrl);
   const originalPrompt = normalizeOriginalPromptInput(input.originalPrompt);
   const originalTopic = sourceMode === "original" ? extractOriginalTopic(originalPrompt || "") : "";
-  if (sourceMode !== "feishu" && sourceMode !== "original" && !keyword) throw new Error("Keyword is required");
+  if (sourceMode !== "feishu" && sourceMode !== "original" && sourceMode !== "pool" && !keyword) throw new Error("Keyword is required");
   if (sourceMode === "original" && !keyword) throw new Error("Original vehicle keyword is required");
   if (sourceMode === "keyword" && !platforms.length) throw new Error("At least one platform is required");
   if (sourceMode === "links" && !links.length) throw new Error("At least one source link is required");
+  if (sourceMode === "pool" && !sourceItemIds.length) throw new Error("At least one content pool item is required");
   if (sourceMode === "feishu" && !feishuTaskNumbers.length) throw new Error("At least one Feishu task number is required");
   if (sourceMode === "viral" && !viralUrl) throw new Error("Viral source URL is required");
-  if (sourceMode === "viral" && input.viralImitateImages === true && !normalizeMaterialPaths(input.viralMaterialPaths).length) {
+  if (sourceMode === "viral" && input.generateImages !== false && input.viralImitateImages === true && !normalizeMaterialPaths(input.viralMaterialPaths).length) {
     throw new Error("请选择至少 1 张车型图用于图片模仿");
   }
   if (sourceMode === "original" && !originalPrompt) throw new Error("Original prompt is required");
-  const targetCountFallback = sourceMode === "feishu" ? feishuTaskNumbers.length : sourceMode === "links" ? links.length : sourceMode === "original" ? 1 : 10;
+  const targetCountFallback =
+    sourceMode === "feishu"
+      ? feishuTaskNumbers.length
+      : sourceMode === "links"
+        ? links.length
+        : sourceMode === "pool"
+          ? sourceItemIds.length
+          : sourceMode === "original"
+            ? 1
+            : 10;
   const targetCount = Math.min(Math.max(Number(input.targetCount || targetCountFallback), 1), maxSimpleRunItems);
   const normalizedInput: SimpleRunInput = {
     sourceMode,
@@ -1826,18 +2028,23 @@ function normalizeSimpleRunInput(input: CreateSimpleRunInput): SimpleRunInput {
         ? Math.min(targetCount, feishuTaskNumbers.length)
         : sourceMode === "links"
           ? Math.min(targetCount, links.length)
+          : sourceMode === "pool"
+            ? Math.min(targetCount, sourceItemIds.length)
           : sourceMode === "viral"
             ? 1
           : targetCount,
     materialPaths: normalizeMaterialPaths(input.materialPaths),
     links: sourceMode === "links" ? links : undefined,
+    sourceItemIds: sourceMode === "pool" ? sourceItemIds : undefined,
     linkPlatform: sourceMode === "links" ? normalizeLinkPlatform(input.linkPlatform) : undefined,
     cookie: sourceMode === "links" ? normalizeRequestCookie(input.cookie) : undefined,
     videoFrameOriginalReference: sourceMode === "links" ? input.videoFrameOriginalReference !== false : undefined,
     useComfyUiKlein: input.useComfyUiKlein === true,
     directOriginalReference: sourceMode === "viral" ? undefined : input.directOriginalReference === true,
+    includeSourceVideo: sourceMode === "viral" || sourceMode === "original" ? undefined : input.includeSourceVideo === true,
     enableVideoTranscription: input.enableVideoTranscription === true,
-    writeFeishu: input.writeFeishu === true,
+    generateImages: input.generateImages !== false,
+    writeFeishu: sourceMode === "pool" ? false : input.writeFeishu === true,
     feishuTaskNumbers: sourceMode === "feishu" ? feishuTaskNumbers : undefined,
     viralUrl: sourceMode === "viral" ? viralUrl : undefined,
     viralImitateImages: sourceMode === "viral" ? input.viralImitateImages === true : undefined,
@@ -1859,6 +2066,18 @@ function normalizeSimpleRunInput(input: CreateSimpleRunInput): SimpleRunInput {
 
 function normalizeSourceLinkInput(input: unknown) {
   const values = Array.isArray(input) ? input : typeof input === "string" ? input.split(/\r?\n/) : [];
+  return Array.from(
+    new Set(
+      values
+        .filter((value): value is string => typeof value === "string")
+        .map((value) => value.trim())
+        .filter(Boolean),
+    ),
+  ).slice(0, 200);
+}
+
+function normalizeSourceItemIdInput(input: unknown) {
+  const values = Array.isArray(input) ? input : [];
   return Array.from(
     new Set(
       values
@@ -1923,7 +2142,9 @@ function makeInitialRun(input: SimpleRunInput, settings: WorkspacePromptSettings
     imageSize: settings.imageSize,
     imageQuality: settings.imageQuality,
     platformCrawlSettings: settings.platformCrawlSettings,
-    stages: (Object.keys(stageTitles) as SimpleRunStageId[]).map((id) => makeStage(id, now, input.sourceMode === "original" ? makeOriginalStageTitles() : stageTitles)),
+    stages: (Object.keys(stageTitles) as SimpleRunStageId[]).map((id) =>
+      makeStage(id, now, input.sourceMode === "original" ? makeOriginalStageTitles() : input.sourceMode === "pool" ? makePoolStageTitles() : stageTitles),
+    ),
     platformResults: [],
     posts: [],
     errors: [],

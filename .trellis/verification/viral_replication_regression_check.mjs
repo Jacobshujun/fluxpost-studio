@@ -137,20 +137,27 @@ assertIncludes(types, "analyzedImageCount?: number", "SimpleRunViralResult must 
 assertIncludes(types, "skippedImageCount?: number", "SimpleRunViralResult must expose skipped viral image analysis count.");
 assertIncludes(types, "imageAnalysisErrors?: string[]", "SimpleRunViralResult must expose viral image analysis errors.");
 assertIncludes(types, "referenceUrls?: string[]", "SourceImageTask must support additional reference image URLs.");
+assertIncludes(types, 'SourceImageTaskReferencePolicy = "best_effort" | "strict_dual_reference"', "SourceImageTask must expose a strict dual-reference policy.");
+assertIncludes(types, "referencePolicy?: SourceImageTaskReferencePolicy", "SourceImageTask must store the reference policy.");
 assertIncludes(types, "pairedImageCount?: number", "SimpleRunViralResult must expose ordered paired image count.");
 assertIncludes(types, "pairingNotice?: string", "SimpleRunViralResult must expose viral image pairing coverage notice.");
 assertIncludes(viral, "export type ViralImageAnalysisResult", "Viral image analysis must expose partial-success result metadata.");
 assertIncludes(viral, "toModelImageUrl", "Viral image analysis must prepare real model-readable image inputs.");
 assertIncludes(viral, "pairViralImagesWithMaterials", "Viral replication must expose ordered source/material pairing.");
 assertIncludes(viral, "appConfig.viralImageImitationPrompt", "Viral image prompts must use the environment-configured imitation prompt.");
+assertNotIncludes(viral, "appConfig.viralImageReferenceConstraintPrompt", "Viral image prompts must not use a separate reference-constraint environment variable.");
 assertIncludes(viral, "referenceUrls: [pair.sourceImageUrl]", "Viral image tasks must attach the viral source image as image 2.");
+assertIncludes(viral, 'referencePolicy: "strict_dual_reference"', "Viral image tasks must require strict dual-reference editing.");
 assertIncludes(viral, "sourceSpec?: ViralImageSpec", "Viral image pairs must carry analyzed source-image style metadata.");
 assertIncludes(viral, "sourceSpec?.stylePrompt", "Viral image task prompts must include the analyzed source-image style prompt.");
 assertNotIncludes(viral, 'colorPalette: "match source visual mood"', "Viral image analysis must not use a fixed fake source mood.");
 assertIncludes(viral, "resolveViralImageStrategyKey", "Viral image tasks must route strategyKey from source recommendedStrategy.");
 assertIncludes(viral, 'return "peopleWithCar"', "Viral people-with-car source images must route to the peopleWithCar strategy prompt.");
 assertIncludes(viral, 'return "textImage"', "Viral poster/text source images must route to the textImage strategy prompt.");
-assertIncludes(viral, "Use reference image 2 for composition, camera distance, subject placement, scene atmosphere, lighting, color grading, and visual rhythm.", "Viral image prompt must strongly reference source composition and visual rhythm.");
+assertNotIncludes(viral, "Reference image 1 has the highest priority for vehicle angle, perspective, scale, placement, exterior geometry, and visible details.", "Viral reference constraints must come from config, not hard-coded prompt strings.");
+assertNotIncludes(viral, "Use reference image 2 only as a background scene, aesthetic style, lighting, color grading, paint texture, and social-media beauty-shot reference.", "Viral reference constraints must come from config, not hard-coded prompt strings.");
+assertNotIncludes(viral, "Use reference image 2 for composition, camera distance, subject placement", "Viral image prompt must not let reference image 2 control target vehicle framing.");
+assertNotIncludes(viral, "viewpoint to the target vehicle", "Viral image prompt must not adapt the target vehicle viewpoint from reference image 2.");
 assertIncludes(viral, "recordViralImageTaskPlan", "Viral replication must log safe per-slot image task planning summaries.");
 assertIncludes(viral, "images/edits", "Viral replication observability should identify image edit/reference-image request shape.");
 assertIncludes(scoreFunction, "return Math.max(score, 0)", "Viral material score should be clamped after penalties.");
@@ -158,11 +165,19 @@ assertIncludes(imageGeneration, "function resolveLocalReferenceFilePath(", "Imag
 assertIncludes(imageGeneration, "path.isAbsolute(value)", "Local absolute paths should be accepted as image edit references.");
 assertIncludes(imageGeneration, "function getTaskReferenceImages", "Image generation must gather the primary and additional task references.");
 assertIncludes(imageGeneration, "task.referenceUrls", "Image generation must submit task referenceUrls to the Images API.");
+assertIncludes(imageGeneration, "isStrictDualReferenceTask", "Image generation must identify strict viral dual-reference tasks.");
+assertIncludes(imageGeneration, "Strict viral image imitation requires exactly 2 prepared reference images", "Strict viral image tasks must fail closed when both references are not prepared.");
+assertIncludes(imageGeneration, "recordStrictTaskNeedsReview", "Strict viral image task fallback should produce needs-review diagnostics instead of source-image fallback.");
 assertIncludes(imageGeneration, "referenceImages.slice(0, 4)", "Images API edit requests must upload multiple ordered reference images, including viral source style references.");
 assertIncludes(imageGeneration, 'const endpointPath = preparedReferences.files.length ? "images/edits" : "images/generations"', "Images API request logging must resolve the actual endpoint path before recording.");
 assertIncludes(imageGeneration, "Preparing to generate images through ${endpointPath}", "Images API request log message must name images/edits when references are uploaded.");
 assertIncludes(imageGeneration, "endpointPath,", "Images API request log details must include endpointPath for diagnosis.");
-assertIncludes(read("src/lib/simple-runs.ts"), "buildViralPairingNotice", "Simple viral runs must record explicit source/material pairing coverage.");
+const simpleRuns = read("src/lib/simple-runs.ts");
+assertIncludes(simpleRuns, "buildViralPairingNotice", "Simple viral runs must record explicit source/material pairing coverage.");
+assertIncludes(simpleRuns, "useComfyUiKlein: normalizedInput.useComfyUiKlein === true && isComfyUiKleinConfigured()", "Simple viral runs must respect the user Klein switch instead of auto-routing to Klein whenever configured.");
+assertNotIncludes(simpleRuns, "useComfyUiKlein: isComfyUiKleinConfigured()", "Simple viral runs must not auto-enable Klein for viral image imitation.");
+assertIncludes(simpleRuns, "爆款风格图生成待复核", "Simple viral runs must save strict-reference image failures as review notes.");
+assertIncludes(simpleRuns, "postNeedsManualReview", "Simple viral runs must skip automatic Feishu publishing for strict-reference image review cases.");
 assertIncludes(read("src/app/page.tsx"), "runForSummary.viralResult?.pairingNotice", "Simple run UI must show viral pairing coverage notice.");
 assertIncludes(check, "Viral replication regression check", "Trellis baseline must include this regression check.");
 
@@ -246,14 +261,17 @@ if (generated.imageTasks?.[2]?.url !== "C:/private/materials/g6-rear.png" || gen
 if (!prompts[0]?.includes("env prompt: image 1 vehicle, image 2 viral style")) {
   throw new Error("Viral image task prompt must include the environment-configured imitation prompt.");
 }
-if (!prompts[0]?.includes("Reference image 1 is the user-provided target vehicle image") || !prompts[0]?.includes("Reference image 2 is the viral source style image")) {
-  throw new Error("Viral image task prompt must describe image 1/image 2 roles.");
+if (prompts[0]?.includes("env constraint: lock image 1 vehicle, use image 2 style only")) {
+  throw new Error("Viral image task prompt must not include a separate reference constraint prompt.");
 }
 if (!prompts[0]?.includes("cinematic dusk automotive poster, cool cyan rim light, glossy reflections, premium social media finish")) {
   throw new Error("Viral image task prompt must include the analyzed artistic style from the corresponding source image.");
 }
 if (!generated.imageTasks?.every((task) => task.provider === "openai_images" && task.mode === "wash" && task.strategyKey === "carExterior")) {
   throw new Error("Viral image tasks must use OpenAI Images edit references with the carExterior strategy.");
+}
+if (!generated.imageTasks?.every((task) => task.referencePolicy === "strict_dual_reference")) {
+  throw new Error("Viral image tasks must use strict dual-reference policy.");
 }
 
 if (typeof viralModule.recordViralImageTaskPlan !== "function") {
@@ -266,7 +284,7 @@ await viralModule.recordViralImageTaskPlan({
 });
 const taskPlanLog = viralModule.__executionLogs.find((entry) => entry.action === "Plan viral image tasks");
 if (!taskPlanLog) throw new Error("Viral image task planning should write an execution log entry.");
-if (taskPlanLog.details.referenceShape !== "images/edits" || taskPlanLog.details.taskCount !== generated.imageTasks.length) {
+if (taskPlanLog.details.referenceShape !== "images/edits" || taskPlanLog.details.referencePolicy !== "strict_dual_reference" || taskPlanLog.details.taskCount !== generated.imageTasks.length) {
   throw new Error("Viral image task planning log should summarize Images API edit request shape and task count.");
 }
 if (JSON.stringify(taskPlanLog.details).includes("C:/private/materials")) {

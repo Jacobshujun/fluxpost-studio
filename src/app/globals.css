@@ -403,34 +403,34 @@ a {
 }
 
 @media (min-width: 1180px) {
-  .studio-frame {
+  .app-shell-advanced .studio-frame {
     height: 100vh;
     height: 100dvh;
     overflow: hidden;
   }
 
-  .studio-workspace {
+  .app-shell-advanced .studio-workspace {
     grid-template-columns: clamp(250px, 21vw, 320px) minmax(0, 1fr) clamp(300px, 26vw, 400px);
     overflow: hidden;
   }
 
-  .studio-pane,
-  .studio-samples {
+  .app-shell-advanced .studio-pane,
+  .app-shell-advanced .studio-samples {
     min-height: 0;
     overflow-y: auto;
   }
 
-  .studio-samples {
+  .app-shell-advanced .studio-samples {
     min-height: 0;
   }
 
-  .studio-workspace > .studio-pane:last-child {
+  .app-shell-advanced .studio-workspace > .studio-pane:last-child {
     grid-column: auto;
   }
 }
 
 @media (min-width: 1500px) {
-  .studio-workspace {
+  .app-shell-advanced .studio-workspace {
     grid-template-columns: clamp(300px, 20vw, 360px) minmax(0, 1fr) clamp(360px, 24vw, 460px);
   }
 }
@@ -807,7 +807,7 @@ a {
   flex: 1;
   grid-template-rows: minmax(0, 1fr) auto;
   align-content: stretch;
-  padding-bottom: 132px;
+  padding-bottom: clamp(14px, 1.2vw, 22px);
 }
 
 .simple-control-panel,
@@ -1061,12 +1061,10 @@ a {
 }
 
 .simple-workspace-compact .simple-overall-progress {
-  position: fixed;
-  right: auto;
+  position: sticky;
   bottom: clamp(10px, 1.1vw, 20px);
-  left: 50%;
-  width: min(calc(100vw - clamp(20px, 2.2vw, 40px)), 1680px);
-  transform: translateX(-50%);
+  width: 100%;
+  transform: none;
 }
 
 .simple-overall-progress::before {
@@ -1266,7 +1264,7 @@ a {
 
 @media (max-width: 720px) {
   .simple-workspace-compact {
-    padding-bottom: 188px;
+    padding-bottom: 14px;
   }
 
   .simple-overall-progress-head {
@@ -1292,12 +1290,12 @@ a {
 @media (min-width: 1180px) {
   .simple-workspace {
     grid-template-columns: minmax(340px, 0.72fr) minmax(560px, 1.28fr);
-    overflow: hidden;
   }
 
   .simple-workspace-compact {
     grid-template-columns: minmax(0, 1fr);
-    grid-template-rows: minmax(0, 1fr) auto;
+    grid-template-rows: auto auto;
+    overflow: visible;
   }
 
   .simple-control-panel,
@@ -1309,7 +1307,8 @@ a {
   .simple-workspace-compact .simple-control-panel {
     grid-column: 1 / -1;
     grid-row: 1;
-    max-height: 100%;
+    max-height: none;
+    overflow: visible;
   }
 
   .simple-workspace-compact .simple-overall-progress {
@@ -1524,6 +1523,21 @@ a {
   font-size: 18px;
   font-weight: 900;
   backdrop-filter: blur(10px);
+}
+
+.review-media-kind {
+  position: absolute;
+  left: 8px;
+  top: 8px;
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  border-radius: 6px;
+  background: rgba(0, 0, 0, 0.58);
+  padding: 4px 7px;
+  color: #ffffff;
+  font-size: 10px;
+  font-weight: 900;
 }
 
 .review-media-empty {
@@ -1881,14 +1895,29 @@ a {
 }
 
 .review-gallery-tile img,
-.review-preview-stage img {
+.review-gallery-tile video,
+.review-preview-stage img,
+.review-preview-stage video {
   width: 100%;
   height: 100%;
   object-fit: contain;
 }
 
-.review-gallery-tile img {
+.review-gallery-tile img,
+.review-gallery-tile video {
   object-fit: cover;
+}
+
+.review-video-tile video {
+  background: #050505;
+}
+
+.gallery-video-tile {
+  aspect-ratio: 16 / 9;
+  overflow: hidden;
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  background: #050505;
 }
 
 .review-gallery-index {
@@ -2466,6 +2495,37 @@ a {
   backdrop-filter: blur(16px);
 }
 
+.gallery-selection-toggle {
+  position: absolute;
+  top: 12px;
+  right: 12px;
+  z-index: 3;
+  display: inline-flex;
+  min-height: 36px;
+  align-items: center;
+  gap: 8px;
+  border: 1px solid rgba(255, 255, 255, 0.16);
+  border-radius: 8px;
+  background: rgba(0, 0, 0, 0.58);
+  color: #ffffff;
+  padding: 8px 10px;
+  font-size: 12px;
+  font-weight: 900;
+  backdrop-filter: blur(16px);
+  cursor: pointer;
+  transition: background 160ms ease, border-color 160ms ease, opacity 160ms ease;
+}
+
+.gallery-selection-toggle-active {
+  border-color: color-mix(in srgb, var(--mint) 58%, white);
+  background: color-mix(in srgb, var(--mint) 22%, rgba(0, 0, 0, 0.7));
+}
+
+.gallery-selection-toggle-disabled {
+  cursor: not-allowed;
+  opacity: 0.58;
+}
+
 .gallery-thumb {
   width: 58px;
   height: 72px;
@@ -2754,6 +2814,7 @@ body {
 
 .studio-topbar > .design-header {
   overflow: visible;
+  z-index: 40;
 }
 
 .advanced-command-dock {
@@ -3134,8 +3195,154 @@ body {
   font-weight: 800;
 }
 
+.content-desk-shell {
+  min-height: 100vh;
+  min-height: 100dvh;
+  color: var(--foreground);
+}
+
+.content-desk-frame {
+  min-height: 100vh;
+  min-height: 100dvh;
+  padding: clamp(10px, 1vw, 16px);
+}
+
+.content-desk-header {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr);
+  gap: 12px;
+  padding: 14px;
+}
+
+.content-desk-header-actions {
+  display: flex;
+  min-width: 0;
+  flex-wrap: wrap;
+  gap: 8px;
+}
+
+.content-desk-metrics {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 8px;
+}
+
+.content-desk-workspace {
+  display: grid;
+  flex: 1;
+  grid-template-columns: minmax(0, 1fr);
+  gap: clamp(10px, 1vw, 16px);
+  min-height: 0;
+}
+
+.content-desk-pane {
+  min-width: 0;
+  padding: clamp(12px, 1vw, 16px);
+}
+
+.content-desk-capture,
+.content-desk-pool,
+.content-desk-detail {
+  min-height: 0;
+}
+
+.content-desk-toolbar {
+  display: grid;
+  gap: 10px;
+}
+
+.content-desk-filter-grid {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr);
+  gap: 8px;
+}
+
+.content-desk-list {
+  display: grid;
+  gap: 10px;
+  margin-top: 12px;
+}
+
+.content-desk-source-card {
+  position: relative;
+  min-width: 0;
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  background:
+    linear-gradient(135deg, color-mix(in srgb, var(--cyan) 7%, transparent), transparent 62%),
+    color-mix(in srgb, var(--surface-soft) 86%, transparent);
+  padding: 10px;
+  transition:
+    border-color 160ms ease,
+    background 160ms ease,
+    transform 160ms ease;
+}
+
+.content-desk-source-card:hover {
+  border-color: color-mix(in srgb, var(--cyan) 34%, var(--line));
+  transform: translateY(-1px);
+}
+
+.content-desk-source-card-active {
+  border-color: color-mix(in srgb, var(--mint) 54%, var(--line));
+  background:
+    linear-gradient(135deg, color-mix(in srgb, var(--mint) 10%, transparent), transparent 66%),
+    color-mix(in srgb, var(--surface-raised) 90%, transparent);
+}
+
+@media (min-width: 760px) {
+  .content-desk-header {
+    grid-template-columns: minmax(0, 1fr) auto;
+    align-items: center;
+  }
+
+  .content-desk-header-actions {
+    justify-content: flex-end;
+  }
+
+  .content-desk-metrics {
+    grid-template-columns: repeat(5, minmax(0, 1fr));
+  }
+
+  .content-desk-filter-grid {
+    grid-template-columns: repeat(3, minmax(0, 1fr));
+  }
+}
+
+@media (min-width: 1180px) {
+  .content-desk-frame {
+    height: 100vh;
+    height: 100dvh;
+    overflow: hidden;
+  }
+
+  .content-desk-workspace {
+    grid-template-columns: clamp(280px, 21vw, 360px) minmax(380px, 1fr) clamp(320px, 24vw, 440px);
+    overflow: hidden;
+  }
+
+  .content-desk-capture,
+  .content-desk-pool,
+  .content-desk-detail {
+    overflow-x: hidden;
+    overflow-y: auto;
+    overscroll-behavior: contain;
+    scrollbar-gutter: stable;
+  }
+
+  .content-desk-list {
+    max-height: none;
+  }
+}
+
+@media (min-width: 1540px) {
+  .content-desk-workspace {
+    grid-template-columns: clamp(320px, 20vw, 400px) minmax(460px, 1fr) clamp(360px, 23vw, 480px);
+  }
+}
+
 .simple-workspace-compact {
-  padding-bottom: 128px;
+  padding-bottom: clamp(14px, 1.2vw, 22px);
 }
 
 .simple-workspace-compact .simple-control-panel {
@@ -3187,6 +3394,8 @@ body {
 
 .simple-workspace-compact .simple-overall-progress {
   bottom: clamp(10px, 1.1vw, 18px);
+  width: 100%;
+  transform: none;
 }
 
 .simple-overall-progress::before {
@@ -3382,7 +3591,7 @@ body {
 }
 
 @media (min-width: 1180px) {
-  .studio-frame {
+  .app-shell-advanced .studio-frame {
     height: 100dvh;
   }
 
@@ -3390,27 +3599,19 @@ body {
     grid-template-columns: clamp(260px, 20vw, 340px) minmax(0, 1fr) clamp(320px, 24vw, 430px);
   }
 
-  .app-shell-compact .studio-frame,
-  .app-shell-simple .studio-frame,
   .app-shell-advanced .studio-frame {
     overflow: hidden;
   }
 
-  .app-shell-compact .studio-body,
-  .app-shell-simple .studio-body,
   .app-shell-advanced .studio-body {
     overflow: hidden;
   }
 
-  .app-shell-simple .simple-workspace,
   .app-shell-advanced .studio-workspace {
     min-height: 0;
     overflow: hidden;
   }
 
-  .simple-workspace-compact .simple-control-panel,
-  .app-shell-simple .simple-control-panel,
-  .app-shell-simple .simple-run-panel,
   .app-shell-advanced .studio-pane,
   .app-shell-advanced .studio-samples {
     overflow-x: hidden;
@@ -3462,7 +3663,7 @@ body {
   }
 
   .simple-workspace-compact {
-    padding-bottom: 190px;
+    padding-bottom: 14px;
   }
 
   .simple-workspace-compact .simple-control-panel {
@@ -3471,10 +3672,6 @@ body {
 
   .simple-overall-progress {
     padding: 12px;
-  }
-
-  .simple-workspace-compact .simple-overall-progress {
-    width: calc(100vw - 20px);
   }
 
   .simple-overall-progress-foot {
@@ -3511,7 +3708,7 @@ body {
 }
 
 .simple-workspace-compact {
-  padding-bottom: 208px;
+  padding-bottom: clamp(14px, 1.2vw, 22px);
 }
 
 .simple-overall-progress-multi {
@@ -3643,7 +3840,7 @@ body {
 
 @media (max-width: 720px) {
   .simple-workspace-compact {
-    padding-bottom: 252px;
+    padding-bottom: 14px;
   }
 
   .simple-overall-progress-multi {
