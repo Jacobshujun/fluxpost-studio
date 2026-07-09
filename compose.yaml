@@ -1,0 +1,67 @@
+services:
+  postgres:
+    image: postgres:17-alpine
+    container_name: fluxpost-postgres
+    restart: unless-stopped
+    env_file:
+      - ./deploy/env.production
+    volumes:
+      - fluxpost-postgres-data:/var/lib/postgresql/data
+      - ./db/migrations/001_initial_postgres.sql:/docker-entrypoint-initdb.d/001_initial_postgres.sql:ro
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U \"$${POSTGRES_USER}\" -d \"$${POSTGRES_DB}\""]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+
+  app:
+    build:
+      context: .
+    container_name: fluxpost-app
+    restart: unless-stopped
+    depends_on:
+      postgres:
+        condition: service_healthy
+    env_file:
+      - ./deploy/env.production
+    environment:
+      NODE_ENV: production
+      PORT: 3000
+      HOSTNAME: 0.0.0.0
+    ports:
+      - "127.0.0.1:3101:3000"
+    volumes:
+      - fluxpost-data:/app/data
+      - fluxpost-public-media:/app/public/media
+      - fluxpost-public-generated:/app/public/generated
+      - fluxpost-node-home:/home/node
+    healthcheck:
+      test: ["CMD-SHELL", "curl -fsS http://127.0.0.1:3000/api/config >/dev/null || exit 1"]
+      interval: 30s
+      timeout: 10s
+      retries: 5
+      start_period: 30s
+
+  proxy:
+    image: caddy:2-alpine
+    container_name: fluxpost-proxy
+    restart: unless-stopped
+    depends_on:
+      app:
+        condition: service_healthy
+    command: caddy reverse-proxy --from bbs.vollov1.xyz --to app:3000
+    ports:
+      - "80:80"
+      - "443:443"
+    volumes:
+      - fluxpost-caddy-data:/data
+      - fluxpost-caddy-config:/config
+
+volumes:
+  fluxpost-postgres-data:
+  fluxpost-data:
+  fluxpost-public-media:
+  fluxpost-public-generated:
+  fluxpost-node-home:
+  fluxpost-caddy-data:
+  fluxpost-caddy-config:

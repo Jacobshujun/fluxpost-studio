@@ -2075,6 +2075,12 @@ export default function Home() {
               <ShieldCheck className="h-4 w-4" />
               是否分发
             </Link>
+            {currentAccount.role === "admin" ? (
+              <Link className="soft-button inline-flex h-10 items-center justify-center gap-2 px-3 text-xs font-black" href="/config">
+                <Settings className="h-4 w-4" />
+                高级配置
+              </Link>
+            ) : null}
             <ConfigChip label="TikHub" ok={Boolean(config?.tikhubConfigured)} />
             <ConfigChip label={config?.textModel || "GPT"} ok={Boolean(config?.openaiConfigured)} />
             <ConfigChip label="Feishu CLI" ok={Boolean(config?.feishuConfigured)} />

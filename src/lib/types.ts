@@ -925,3 +925,35 @@ export type ConfigStatus = {
   feishuNotifyConfigured: boolean;
   volcengineAsrConfigured: boolean;
 };
+
+export type AdvancedConfigFieldKind = "text" | "secret" | "number" | "boolean" | "select" | "textarea";
+
+export type AdvancedConfigField = {
+  key: string;
+  label: string;
+  description: string;
+  kind: AdvancedConfigFieldKind;
+  category: string;
+  value?: string;
+  configured: boolean;
+  required?: boolean;
+  options?: string[];
+};
+
+export type AdvancedConfigGroup = {
+  id: string;
+  title: string;
+  description: string;
+  fields: AdvancedConfigField[];
+};
+
+export type AdvancedConfigSnapshot = {
+  groups: AdvancedConfigGroup[];
+  updatedAt: string;
+};
+
+export type AdvancedConfigPatchValue = string | number | boolean | null;
+
+export type AdvancedConfigPatch = {
+  values: Record<string, AdvancedConfigPatchValue>;
+};

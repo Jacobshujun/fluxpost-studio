@@ -19,6 +19,7 @@ Last updated: 2026-06-24
 - Normal execution-log appends use the row-level append helper in `src/lib/database.ts`; regular log writes must not read and rewrite the whole execution-log table.
 - Runtime storage backend selection, SQLite/PostgreSQL connection setup, schema setup, legacy JSON migration, and persistence helpers belong in `src/lib/database.ts`.
 - Workspace account/session persistence schema belongs in `src/lib/database.ts` and `db/migrations/001_initial_postgres.sql`; whitelist auth parsing, admin username parsing, account-table creation/password hashing, session lookup, and request auth helpers belong in `src/lib/workspace-accounts.ts`.
+- Environment-derived app configuration belongs in `src/lib/config.ts`. Advanced configuration UI may read/write only the allow-listed definitions in that module through `src/app/api/config/route.ts`; do not read `.env.local` in React components or expose raw `process.env` values through API responses.
 - Workspace owner-scope helpers belong in `src/lib/workspace-ownership.ts`. Domain stores should use those helpers instead of duplicating admin/member owner checks.
 - Durable simple-run queue schema, enqueue/claim/heartbeat helpers, and PostgreSQL `FOR UPDATE SKIP LOCKED` queue claiming belong in `src/lib/database.ts`; simple-run worker orchestration belongs in `src/lib/simple-runs.ts`.
 - Durable Feishu publish queue schema, save/list/claim/heartbeat helpers, and PostgreSQL `FOR UPDATE SKIP LOCKED` queue claiming belong in `src/lib/database.ts`; Feishu publish queue orchestration belongs in `src/lib/feishu-publish-queue.ts`.
@@ -75,6 +76,59 @@ Last updated: 2026-06-24
 - Source visual tagging must preflight remote HTTP(S) image assets and sniff local app-served image bytes before model calls: use shared media request headers, validate supported JPEG/PNG/GIF/WebP content, convert valid images to inline data URLs, and record per-asset skips for invalid/unsupported assets.
 - Crawled image cache paths must be browser-readable before they are exposed as `downloadedImages`; HEIC bytes should be converted to JPEG in place, and unsupported cached image bytes should be surfaced as download errors instead of silent broken previews.
 - Do not use production external services in default verification.
+
+## Scenario: Admin Advanced Environment Configuration
+
+### 1. Scope / Trigger
+
+- Trigger: `/config` crosses frontend, API, environment-file persistence, and workspace admin authorization.
+- Applies to: `src/lib/config.ts`, `src/app/api/config/route.ts`, `src/app/config/page.tsx`, `src/lib/types.ts`, and `.trellis/verification/advanced_config_check.mjs`.
+
+### 2. Signatures
+
+- `GET /api/config`: returns non-sensitive `ConfigStatus` and must remain usable by unauthenticated status chips.
+- `GET /api/config?advanced=1`: requires `requireWorkspaceAccount(request)` and `isWorkspaceAdmin(account)`, returns `{ status: ConfigStatus, advanced: AdvancedConfigSnapshot }`.
+- `PATCH /api/config`: requires admin role, accepts `{ values: Record<string, string | number | boolean | null> }`, and returns `{ status, advanced }`.
+
+### 3. Contracts
+
+- Secret fields use `kind: "secret"` in `src/lib/config.ts` and return only `configured: boolean`; `value` must be `undefined`.
+- Writable keys must be present in the allow-list built from `advancedConfigGroups`; unknown keys are rejected.
+- `null` patch values mean clear/remove the environment key. Empty strings also remove the key from `.env.local`.
+- Successful writes update `.env.local`, update `process.env` for the current process, and call `reloadAppConfig()`.
+
+### 4. Validation & Error Matrix
+
+- Missing sign-in -> HTTP 401.
+- Signed-in non-admin -> HTTP 403.
+- Unknown config key -> HTTP 400.
+- Invalid number/select/boolean payload -> HTTP 400.
+- Plain `GET /api/config` -> no secret values and no advanced metadata.
+
+### 5. Good/Base/Bad Cases
+
+- Good: admin overwrites `OPENAI_IMAGE_MODEL`; the UI receives the new non-secret value and status refreshes.
+- Base: admin opens a configured secret such as `OPENAI_API_KEY`; UI shows "configured" and an empty password input.
+- Bad: operator calls `PATCH /api/config`; route returns 403 and does not write `.env.local`.
+
+### 6. Tests Required
+
+- `.trellis/verification/advanced_config_check.mjs` must assert plain status compatibility, admin-only advanced read/write, secret masking, allow-list rejection, and admin-only navigation.
+- Full baseline must include the advanced config check before lint/type-check/build.
+
+### 7. Wrong vs Correct
+
+#### Wrong
+
+```typescript
+return NextResponse.json(process.env);
+```
+
+#### Correct
+
+```typescript
+return NextResponse.json({ status: getConfigStatus(), advanced: getAdvancedConfigSnapshot() });
+```
 
 ## Frontend Rules
 
