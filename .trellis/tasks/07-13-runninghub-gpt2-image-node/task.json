@@ -1,0 +1,28 @@
+{
+  "id": "runninghub-gpt2-image-node",
+  "name": "runninghub-gpt2-image-node",
+  "title": "RunningHub GPT2 image ComfyUI node",
+  "description": "Build and publish a ComfyUI node for RunningHub's official GPT Image 2 image-to-image JSON API.",
+  "status": "in_progress",
+  "dev_type": null,
+  "scope": "Standalone ComfyUI custom-node repository; exact RunningHub image-to-image contract only.",
+  "package": "external:gpt2-image-run",
+  "priority": "P2",
+  "creator": "codex",
+  "assignee": "codex",
+  "createdAt": "2026-07-13",
+  "completedAt": null,
+  "branch": "main",
+  "base_branch": "main",
+  "worktree_path": null,
+  "commit": "e23aa62ca8a6d00dce9317b90d292e1ac73a4f02",
+  "pr_url": null,
+  "subtasks": [],
+  "children": [],
+  "parent": null,
+  "relatedFiles": [
+    "https://github.com/Jacobshujun/gpt2-image-run"
+  ],
+  "notes": "Published and remotely verified without a live paid RunningHub request.",
+  "meta": {}
+}
