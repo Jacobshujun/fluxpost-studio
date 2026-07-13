@@ -39,3 +39,36 @@ Built, tested, and published Jacobshujun/gpt2-image-API; verified the node under
 ### Next Steps
 
 - None - task complete
+
+
+## Session 2: Publish RunningHub GPT2 image ComfyUI node
+
+**Date**: 2026-07-13
+**Task**: Publish RunningHub GPT2 image ComfyUI node
+**Branch**: `main`
+
+### Summary
+
+Published Jacobshujun/gpt2-image-run at e23aa62ca8a6d00dce9317b90d292e1ac73a4f02; mocked node tests, local ComfyUI loading, remote hash verification, and the full FluxPost baseline passed without a live paid request.
+
+### Main Changes
+
+(Add details)
+
+### Git Commits
+
+| Hash | Message |
+|------|---------|
+| `4d94fb6` | (see git log) |
+
+### Testing
+
+- [OK] (Add test results)
+
+### Status
+
+[OK] **Completed**
+
+### Next Steps
+
+- None - task complete
