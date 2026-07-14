@@ -28,7 +28,7 @@ ssh root@104.243.21.233 -p 29891
 - `/opt/fluxpost-studio/repo`: GitHub clone of `main`.
 - `/opt/fluxpost-studio/releases/<timestamp>`: clean source release from `git archive`.
 - `/opt/fluxpost-studio/current`: symlink to the active release.
-- `/opt/fluxpost-studio/shared/env.production`: the only production env file.
+- `/opt/fluxpost-studio/shared/env.production`: the operator-managed base environment file.
 - `/opt/fluxpost-studio/bin/deploy.sh`: one-command deploy wrapper.
 
 Do not edit application source in `current`. Change code locally, push to GitHub, then deploy.
@@ -45,15 +45,19 @@ COMPOSE_PROJECT_NAME=fluxpost docker compose logs -f app
 
 The app binds `127.0.0.1:3101`, Caddy exposes `https://bbs.vollov1.xyz`, and PostgreSQL has no public host port.
 
+Advanced configuration saved by an admin is stored separately in the Docker named volume `fluxpost_fluxpost-config`. The app loads those persisted overrides after the base values from `shared/env.production`, so UI changes survive app-container replacement and take precedence over matching base values. Clearing a value in the UI also persists across restarts.
+
 ## Secrets
 
-Never commit secrets. Keep real values only in:
+Never commit secrets. Keep operator-managed base values only in:
 
 ```text
 /opt/fluxpost-studio/shared/env.production
 ```
 
 The GitHub repository may contain `deploy/env.production.example`, but not `deploy/env.production`, `.env.local`, generated media, runtime data, or database files.
+
+Do not remove the `fluxpost_fluxpost-config` volume during routine deploys or cleanup; it can contain admin-managed secrets. Values previously saved only inside a replaced app container cannot be recovered automatically and must be entered again once after this fix is deployed.
 
 ## Rollback
 

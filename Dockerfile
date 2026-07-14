@@ -28,7 +28,7 @@ COPY --from=builder /app/public ./public
 COPY --from=builder /app/.next/standalone ./
 COPY --from=builder /app/.next/static ./.next/static
 
-RUN mkdir -p data public/media public/generated \
+RUN mkdir -p config data public/media public/generated \
   && chown -R node:node /app
 
 USER node

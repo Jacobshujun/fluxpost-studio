@@ -94,8 +94,9 @@ Last updated: 2026-06-24
 
 - Secret fields use `kind: "secret"` in `src/lib/config.ts` and return only `configured: boolean`; `value` must be `undefined`.
 - Writable keys must be present in the allow-list built from `advancedConfigGroups`; unknown keys are rejected.
-- `null` patch values mean clear/remove the environment key. Empty strings also remove the key from `.env.local`.
-- Successful writes update `.env.local`, update `process.env` for the current process, and call `reloadAppConfig()`.
+- `null` patch values mean clear/remove the environment key. Local `.env.local` writes remove cleared keys; an explicit `FLUXPOST_CONFIG_FILE` retains empty tombstones so inherited base values stay cleared after restart.
+- Successful writes update the selected environment file, update `process.env` for the current process, and call `reloadAppConfig()`.
+- Docker production sets `FLUXPOST_CONFIG_FILE=/app/config/.env.local`, mounts the `fluxpost-config` named volume at `/app/config`, and loads persisted overrides before `appConfig` initialization. Persisted values take precedence over `deploy/env.production` base values.
 
 ### 4. Validation & Error Matrix
 
@@ -109,11 +110,11 @@ Last updated: 2026-06-24
 
 - Good: admin overwrites `OPENAI_IMAGE_MODEL`; the UI receives the new non-secret value and status refreshes.
 - Base: admin opens a configured secret such as `OPENAI_API_KEY`; UI shows "configured" and an empty password input.
-- Bad: operator calls `PATCH /api/config`; route returns 403 and does not write `.env.local`.
+- Bad: operator calls `PATCH /api/config`; route returns 403 and does not write the selected environment file.
 
 ### 6. Tests Required
 
-- `.trellis/verification/advanced_config_check.mjs` must assert plain status compatibility, admin-only advanced read/write, secret masking, allow-list rejection, and admin-only navigation.
+- `.trellis/verification/advanced_config_check.mjs` must assert plain status compatibility, admin-only advanced read/write, secret masking, allow-list rejection, admin-only navigation, persistent Compose mounting, pre-initialization override loading, clear tombstones, and mount-point ownership.
 - Full baseline must include the advanced config check before lint/type-check/build.
 
 ### 7. Wrong vs Correct

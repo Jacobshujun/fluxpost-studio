@@ -1,6 +1,6 @@
 # Trellis Status
 
-Last updated: 2026-07-13
+Last updated: 2026-07-14
 
 ## One-Line Status
 
@@ -11,7 +11,7 @@ FluxPost Studio uses Trellis as the active project context system. A Docker depl
 - Trellis CLI 0.6.5 is installed; `.trellis/spec/fluxpost` and `.trellis/verification` are the active context and baseline locations.
 - `docs/harness.disabled/` and `scripts/harness.disabled/` are migration archives only.
 - Trellis spec discovery sees `fluxpost` and `frontend` via `python ./.trellis/scripts/get_context.py --mode packages`.
-- `/config` is an admin-only advanced config page. It reads `GET /api/config?advanced=1`, writes allow-listed env keys through `PATCH /api/config`, masks secrets, and writes changes to `.env.local`.
+- `/config` is an admin-only advanced config page. It reads `GET /api/config?advanced=1`, writes allow-listed env keys through `PATCH /api/config`, and masks secrets. Local development writes `.env.local`; Docker production writes `/app/config/.env.local` in the persistent `fluxpost-config` volume and reloads those overrides before `appConfig` initialization.
 - VPS deployment is GitHub-driven. Local development happens in this Git repository, then VPS deploys from `https://github.com/Jacobshujun/fluxpost-studio.git` into `/opt/fluxpost-studio/releases/<timestamp>` with `/opt/fluxpost-studio/current` as the active symlink. Docker Compose project `fluxpost` runs `app + postgres + proxy`; app is bound to `127.0.0.1:3101`, proxy exposes `bbs.vollov1.xyz` on HTTP `:80` and HTTPS `:443`, and Postgres has no host port. The FluxPost app image includes `lark-cli` via `@larksuite/cli@1.0.67`, with `FEISHU_CLI_BIN=lark-cli`.
 - Default startup context must stay under 45 KB, and typical code-task context under 70 KB. Keep this file lightweight and move history to archives when it grows.
 
@@ -25,6 +25,7 @@ FluxPost Studio uses Trellis as the active project context system. A Docker depl
 
 ## Recent Verification
 
+- 2026-07-14: Fixed advanced configuration loss across Docker app-container replacement. Production now mounts `fluxpost-config` at `/app/config`, sets `FLUXPOST_CONFIG_FILE=/app/config/.env.local`, loads persisted values over the base Compose environment before `appConfig` initialization, and retains empty tombstones so cleared base values do not return after restart. Focused checks, an isolated fresh-process precedence/clear smoke, type-check, lint, build, and the full Trellis baseline passed; the existing 15 Turbopack broad-path warnings remain.
 - 2026-07-13: Fixed local discovery for `GPT2-image-run`: the plugin was cloned to `D:\Comfyui\comfyui\custom_nodes\gpt2-image-run` after the active ComfyUI process had started, so it was absent from `/object_info`. Fully restarted ComfyUI on `127.0.0.1:8188`; startup logs now list `gpt2-image-run`, and `/object_info/GPT2ImageRun` returns display name `GPT2-image-run`, category `image/api`, all expected inputs, `IMAGE` output, and search aliases.
 - 2026-07-13: Published `Jacobshujun/gpt2-image-run` at commit `e23aa62ca8a6d00dce9317b90d292e1ac73a4f02`. The standalone ComfyUI node calls RunningHub's official GPT Image 2 image-to-image endpoint with the exact five-field JSON contract, returns downloaded results as a BHWC float32 `IMAGE` batch, compacts HTTP 524 diagnostics, and redacts keys and signed URLs. All 10 mocked tests, syntax compilation, cached-diff checks, sensitive-value scanning, local ComfyUI Python loading, remote hash verification, and the full FluxPost baseline passed; no live paid generation was run. Existing 15 Turbopack broad-path warnings remain.
 - 2026-07-13: Fixed the published ComfyUI node discovery issue in `Jacobshujun/gpt2-image-API` at commit `2173700` by adding ComfyUI `SEARCH_ALIASES` (`gpt2-image`, `gpt-image-2`, OpenAI/image API, and Chinese aliases). Fast-forwarded the live clone at `D:\Comfyui\comfyui\custom_nodes\gpt2-image-API`, restarted the local `127.0.0.1:8188` ComfyUI process, verified `/object_info/GPTImage2CustomAPI` exposes the aliases, and confirmed the frontend path `添加节点 -> 图像 -> API -> GPT Image 2 - Custom API`.
@@ -42,7 +43,7 @@ FluxPost Studio uses Trellis as the active project context system. A Docker depl
 - Do not mutate `data/`, `public/generated/`, `public/media/`, debug artifacts, or runtime databases during Trellis-only work.
 - Do not trigger live TikHub, OpenAI-compatible text/image providers, ComfyUI, Feishu writes, Lark replies, or simple-run production as default verification.
 - Do not use `docs/harness.disabled/` or `scripts/harness.disabled/` as active context/check paths unless explicitly doing migration archaeology.
-- VPS production secrets live in `/opt/fluxpost-studio/shared/env.production`; releases symlink it as `deploy/env.production`. Do not print the full file or copy secrets into Trellis/final answers.
+- VPS operator-managed base secrets live in `/opt/fluxpost-studio/shared/env.production`; admin-managed overrides live in the `fluxpost_fluxpost-config` Docker volume. Do not print either source, copy secrets into Trellis/final answers, or remove the config volume during routine cleanup.
 - Existing VPS services include 3x-ui/xray/frps. Do not bind FluxPost to ports already used by those services; current FluxPost public exposure is `bbs.vollov1.xyz` on HTTP `:80` and HTTPS `:443`, with app loopback `127.0.0.1:3101`.
 - `handoff.md` and `progress.md` are history libraries now; do not append routine conversation logs there.
 - Long historical evidence is archived, not deleted. Use archive files only when the lightweight entry does not answer the task.

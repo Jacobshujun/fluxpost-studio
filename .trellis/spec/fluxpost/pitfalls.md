@@ -1,10 +1,11 @@
 # Pitfalls
 
-Last updated: 2026-06-24
+Last updated: 2026-07-14
 
 ## Known Project Pitfalls
 
 - `.env.local` contains secrets and must not be read into Trellis docs or final answers.
+- Do not store production UI-managed advanced config only in the app container writable layer. Docker production uses `FLUXPOST_CONFIG_FILE=/app/config/.env.local` backed by the `fluxpost-config` named volume; removing that volume loses admin-managed secrets and overrides. `shared/env.production` remains the deployment-owned base layer.
 - For local PostgreSQL debugging, use `npm run db:diagnose` and the dedicated read-only `fluxpost_reader` connection from `FLUXPOST_DIAG_DATABASE_URL`. Do not read or print `.env.local`, `DATABASE_URL`, or app write-role credentials just to inspect runtime state.
 - The project path is now expected to be a Git repository initialized from the local source snapshot. Local secrets, runtime data, generated/cached media, debug JSON, `test-artifacts/`, `.next/`, and `node_modules/` still exist on disk in this workspace, so verify `.gitignore` and staged files before every push.
 - Runtime data is stored in SQLite at `data/fluxpost.db` by default; when `DATABASE_URL` is configured the app uses PostgreSQL instead. Legacy JSON files under `data/` are migration/compatibility artifacts.

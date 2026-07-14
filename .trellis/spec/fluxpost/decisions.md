@@ -1,6 +1,6 @@
 # Decisions
 
-Last updated: 2026-07-03
+Last updated: 2026-07-14
 
 ## Stable Decisions
 
@@ -14,6 +14,7 @@ Last updated: 2026-07-03
 - Source upload remote is `https://github.com/Jacobshujun/fluxpost-studio.git`. The 2026-06-08 upload treats the local workspace as the initial Git snapshot because the remote returned no refs before pushing.
 - The app currently uses Next.js App Router with API routes under `src/app/api`.
 - Runtime state uses PostgreSQL when `DATABASE_URL` is configured; `src/lib/database.ts` owns the backend selection.
+- Production configuration has two layers: `/opt/fluxpost-studio/shared/env.production` is the operator-managed Compose base, while admin changes from `/config` persist in the `fluxpost_fluxpost-config` named volume and override matching base values. Empty persisted assignments are intentional clear tombstones. The container must not write the host base environment file.
 - This local workspace is configured to use PostgreSQL through `.env.local`; SQLite at `data/fluxpost.db` remains the fallback when `DATABASE_URL` is absent.
 - PostgreSQL schema lives in `db/migrations/001_initial_postgres.sql`, and SQLite-to-PostgreSQL row copy lives in `scripts/db/migrate-sqlite-to-postgres.mjs`.
 - Local PostgreSQL diagnosis uses dedicated read-only role `fluxpost_reader` and Windows user environment variable `FLUXPOST_DIAG_DATABASE_URL`; use `npm run db:diagnose` instead of reading `.env.local` or printing `DATABASE_URL`. The role reads app runtime tables, safe account/session views under `diagnostics`, and PostgreSQL stats/settings for lock/session diagnosis.

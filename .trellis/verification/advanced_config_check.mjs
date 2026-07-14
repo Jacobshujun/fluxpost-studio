@@ -6,6 +6,8 @@ const projectRoot = process.cwd();
 const files = {
   route: read("src/app/api/config/route.ts"),
   config: read("src/lib/config.ts"),
+  compose: read("compose.yaml"),
+  dockerfile: read("Dockerfile"),
   types: read("src/lib/types.ts"),
   page: read("src/app/config/page.tsx"),
   home: read("src/app/page.tsx"),
@@ -23,10 +25,19 @@ assertContains(files.route, /saveAdvancedConfigPatch\(body\)/, "Advanced config 
 assertContains(files.config, /value:\s*field\.kind === "secret" \? undefined : field\.read\(\) \?\? ""/, "Advanced config snapshot must not return secret values.");
 assertContains(files.config, /const advancedConfigByKey = new Map/, "Advanced config writes must be allow-listed by known keys.");
 assertContains(files.config, /if \(!definition\) throw new Error\(`Unsupported config key:/, "Unknown config keys must be rejected.");
-assertContains(files.config, /path\.join\(process\.cwd\(\),\s*"\.env\.local"\)/, "Advanced config must target .env.local through the helper.");
+assertContains(files.config, /process\.env\.FLUXPOST_CONFIG_FILE\?\.trim\(\)/, "Advanced config must support an explicit persistent config file.");
+assertContains(files.config, /path\.join\(process\.cwd\(\),\s*"\.env\.local"\)/, "Local advanced config must still default to .env.local.");
+assertContains(files.config, /if \(configuredEnvironmentFile\) loadEnvironmentOverrides\(advancedEnvironmentFilePath\);[\s\S]*export let appConfig = readAppConfig\(\)/, "Persistent overrides must load before appConfig initialization.");
 assertContains(files.config, /writeFileSync\(envPath,/, "Advanced config must write environment changes through the helper.");
+assertContains(files.config, /const persistEmptyValues = Boolean\(configuredEnvironmentFile\)/, "Persistent config writes must retain clear tombstones.");
+assertContains(files.config, /if \(value === ""\) \{[\s\S]*delete process\.env\[key\]/, "Persistent empty values must clear inherited environment values.");
 assertContains(files.config, /delete process\.env\[key\]/, "Clearing a config value must remove it from the current process env.");
 assertContains(files.config, /reloadAppConfig\(\)/, "Saving advanced config must refresh the in-process app config.");
+
+assertContains(files.compose, /FLUXPOST_CONFIG_FILE:\s*\/app\/config\/\.env\.local/, "Production app must select the persistent advanced config file.");
+assertContains(files.compose, /- fluxpost-config:\/app\/config/, "Production app must mount the advanced config volume.");
+assertContains(files.compose, /\n\s{2}fluxpost-config:\s*(?:\r?\n|$)/, "Compose must declare the advanced config volume.");
+assertContains(files.dockerfile, /mkdir -p config data public\/media public\/generated[\s\S]*chown -R node:node \/app/, "The persistent config mount point must be writable by the app user.");
 
 assertContains(files.page, /sessionData\.account\.role !== "admin"/, "Advanced config page must block non-admin users.");
 assertContains(files.page, /field\.kind === "secret" \? "" : field\.value \|\| ""/, "Advanced config page must not initialize secret inputs with secret values.");

@@ -28,9 +28,11 @@ services:
       NODE_ENV: production
       PORT: 3000
       HOSTNAME: 0.0.0.0
+      FLUXPOST_CONFIG_FILE: /app/config/.env.local
     ports:
       - "127.0.0.1:3101:3000"
     volumes:
+      - fluxpost-config:/app/config
       - fluxpost-data:/app/data
       - fluxpost-public-media:/app/public/media
       - fluxpost-public-generated:/app/public/generated
@@ -59,6 +61,7 @@ services:
 
 volumes:
   fluxpost-postgres-data:
+  fluxpost-config:
   fluxpost-data:
   fluxpost-public-media:
   fluxpost-public-generated:

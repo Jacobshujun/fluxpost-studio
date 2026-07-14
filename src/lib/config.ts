@@ -26,6 +26,13 @@ type ConfigDefinitionGroup = {
   fields: ConfigDefinition[];
 };
 
+const configuredEnvironmentFile = process.env.FLUXPOST_CONFIG_FILE?.trim();
+const advancedEnvironmentFilePath = configuredEnvironmentFile
+  ? path.resolve(configuredEnvironmentFile)
+  : path.join(process.cwd(), ".env.local");
+
+if (configuredEnvironmentFile) loadEnvironmentOverrides(advancedEnvironmentFilePath);
+
 export let appConfig = readAppConfig();
 
 function readAppConfig() {
@@ -536,7 +543,8 @@ function normalizeAdvancedConfigValue(definition: ConfigDefinition, value: Advan
 }
 
 function writeEnvironmentFile(values: Record<string, string>) {
-  const envPath = path.join(process.cwd(), ".env.local");
+  const envPath = advancedEnvironmentFilePath;
+  const persistEmptyValues = Boolean(configuredEnvironmentFile);
   const lines = existsSync(envPath) ? readFileSync(envPath, "utf8").split(/\r?\n/) : [];
   const handled = new Set<string>();
   const nextLines: string[] = [];
@@ -553,15 +561,49 @@ function writeEnvironmentFile(values: Record<string, string>) {
       continue;
     }
     handled.add(key);
-    if (values[key] !== "") nextLines.push(`${key}=${formatEnvValue(values[key])}`);
+    if (values[key] !== "") {
+      nextLines.push(`${key}=${formatEnvValue(values[key])}`);
+    } else if (persistEmptyValues) {
+      nextLines.push(`${key}=`);
+    }
   }
 
   for (const [key, value] of Object.entries(values)) {
-    if (handled.has(key) || value === "") continue;
-    nextLines.push(`${key}=${formatEnvValue(value)}`);
+    if (handled.has(key)) continue;
+    if (value !== "") {
+      nextLines.push(`${key}=${formatEnvValue(value)}`);
+    } else if (persistEmptyValues) {
+      nextLines.push(`${key}=`);
+    }
   }
 
   writeFileSync(envPath, `${trimTrailingBlankLines(nextLines).join("\n")}\n`, "utf8");
+}
+
+function loadEnvironmentOverrides(envPath: string) {
+  if (!existsSync(envPath)) return;
+
+  for (const line of readFileSync(envPath, "utf8").split(/\r?\n/)) {
+    const match = line.match(/^([A-Za-z_][A-Za-z0-9_]*)\s*=\s*(.*)$/);
+    if (!match) continue;
+
+    const [, key, rawValue] = match;
+    const value = parseEnvironmentValue(rawValue);
+    if (value === "") {
+      delete process.env[key];
+    } else {
+      process.env[key] = value;
+    }
+  }
+}
+
+function parseEnvironmentValue(rawValue: string) {
+  const trimmed = rawValue.trim();
+  if (!trimmed.startsWith('"')) return trimmed;
+
+  const parsed: unknown = JSON.parse(trimmed);
+  if (typeof parsed !== "string") throw new Error("Advanced config values must be strings.");
+  return parsed;
 }
 
 function formatEnvValue(value: string) {
