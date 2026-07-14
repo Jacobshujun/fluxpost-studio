@@ -23,9 +23,8 @@ const endpointByPlatform: Record<CrawlPlatform, string> = {
 };
 
 const douyinKeywordSearchEndpoint = "/api/v1/douyin/search/fetch_general_search_v1";
-const xiaohongshuWebNoteDetailEndpoint = "/api/v1/xiaohongshu/web_v3/fetch_note_detail";
-const xiaohongshuNoteInfoV4Endpoint = "/api/v1/xiaohongshu/web/get_note_info_v4";
-const xiaohongshuShareInfoEndpoint = "/api/v1/xiaohongshu/web/extract_share_info";
+const xiaohongshuImageNoteDetailEndpoint = "/api/v1/xiaohongshu/app_v2/get_image_note_detail";
+const xiaohongshuVideoNoteDetailEndpoint = "/api/v1/xiaohongshu/app_v2/get_video_note_detail";
 const douyinShareVideoEndpoint = "/api/v1/douyin/web/fetch_one_video_by_share_url";
 const douyinSingleVideoEndpoint = "/api/v1/douyin/web/fetch_one_video_v3";
 const weiboPostDetailEndpoint = "/api/v1/weibo/web_v2/fetch_post_detail";
@@ -119,23 +118,20 @@ export function detectPlatformFromSourceUrl(value: string): CrawlPlatform | unde
   return undefined;
 }
 
-export function buildXiaohongshuShareInfoPath(shareUrl: string) {
-  const params = new URLSearchParams({ share_text: shareUrl });
-  return `${xiaohongshuShareInfoEndpoint}?${params.toString()}`;
+export function buildXiaohongshuImageNoteDetailPath(noteId?: string, shareText?: string) {
+  return buildXiaohongshuAppV2DetailPath(xiaohongshuImageNoteDetailEndpoint, noteId, shareText);
 }
 
-export function buildXiaohongshuNoteInfoV4Path(noteId: string, xsecToken?: string) {
-  const params = new URLSearchParams({ note_id: noteId });
-  if (xsecToken) params.set("xsec_token", xsecToken);
-  return `${xiaohongshuNoteInfoV4Endpoint}?${params.toString()}`;
+export function buildXiaohongshuVideoNoteDetailPath(noteId?: string, shareText?: string) {
+  return buildXiaohongshuAppV2DetailPath(xiaohongshuVideoNoteDetailEndpoint, noteId, shareText);
 }
 
-export function buildXiaohongshuWebNoteDetailPath(noteId: string, xsecToken: string) {
-  const params = new URLSearchParams({
-    note_id: noteId,
-    xsec_token: xsecToken,
-  });
-  return `${xiaohongshuWebNoteDetailEndpoint}?${params.toString()}`;
+function buildXiaohongshuAppV2DetailPath(endpoint: string, noteId?: string, shareText?: string) {
+  const params = new URLSearchParams();
+  if (noteId?.trim()) params.set("note_id", noteId.trim());
+  if (shareText?.trim()) params.set("share_text", shareText.trim());
+  if (!params.size) throw new Error("Xiaohongshu App V2 detail requires note_id or share_text");
+  return `${endpoint}?${params.toString()}`;
 }
 
 export function buildDouyinShareVideoPath(shareUrl: string) {
@@ -172,62 +168,37 @@ function getCollectionTarget(targetCount: number) {
 
 async function fetchXiaohongshuBySourceLink(sourceUrl: string) {
   const localInfo = extractXiaohongshuLinkInfo(sourceUrl);
-  let noteId = localInfo.noteId;
-  let xsecToken = localInfo.xsecToken;
-  let items: NormalizedSourceItem[] = [];
+  return fetchXiaohongshuAppV2Detail({
+    noteId: localInfo.noteId,
+    shareText: sourceUrl,
+  });
+}
 
-  if (!noteId || !xsecToken) {
+type XiaohongshuDetailKind = "image" | "video";
+
+async function fetchXiaohongshuAppV2Detail(input: {
+  noteId?: string;
+  shareText?: string;
+  preferredKind?: XiaohongshuDetailKind;
+}) {
+  const kinds: XiaohongshuDetailKind[] = input.preferredKind === "video" ? ["video", "image"] : ["image", "video"];
+  const failures: string[] = [];
+
+  for (const kind of kinds) {
+    const path = kind === "image"
+      ? buildXiaohongshuImageNoteDetailPath(input.noteId, input.shareText)
+      : buildXiaohongshuVideoNoteDetailPath(input.noteId, input.shareText);
     try {
-      const shareRaw = await tikhubRequest(buildXiaohongshuShareInfoPath(sourceUrl));
-      const shareInfo = extractXiaohongshuShareInfo(shareRaw);
-      noteId ||= shareInfo.noteId;
-      xsecToken ||= shareInfo.xsecToken;
-      items = normalizeTikHubResponse(shareRaw, "xiaohongshu");
+      const raw = await tikhubRequest(path);
+      const items = normalizeTikHubResponse(raw, "xiaohongshu");
+      if (items.length) return items;
+      failures.push(`${kind}: empty response`);
     } catch (error) {
-      await recordExecutionLog({
-        scope: "tikhub",
-        action: "Xiaohongshu link share info failed",
-        status: "info",
-        message: compactError(error),
-      });
+      failures.push(`${kind}: ${compactError(error)}`);
     }
   }
 
-  if (noteId) {
-    try {
-      const raw = await tikhubRequest(buildXiaohongshuNoteInfoV4Path(noteId, xsecToken));
-      items = normalizeTikHubResponse(raw, "xiaohongshu");
-    } catch (error) {
-      await recordExecutionLog({
-        scope: "tikhub",
-        action: "Xiaohongshu link note info failed",
-        status: "info",
-        message: compactError(error),
-        details: { sourceId: noteId },
-      });
-    }
-  }
-
-  if (noteId && xsecToken) {
-    try {
-      const raw = await tikhubRequest(buildXiaohongshuWebNoteDetailPath(noteId, xsecToken));
-      const detail = normalizeTikHubResponse(raw, "xiaohongshu");
-      const matchedDetail = items[0] ? pickMatchingDetail(items[0], detail) : detail[0];
-      if (matchedDetail) {
-        items = items[0] ? [mergeXiaohongshuDetail(items[0], matchedDetail)] : [matchedDetail];
-      }
-    } catch (error) {
-      await recordExecutionLog({
-        scope: "tikhub",
-        action: "Xiaohongshu link Web detail failed",
-        status: "info",
-        message: compactError(error),
-        details: { sourceId: noteId },
-      });
-    }
-  }
-
-  return items;
+  throw new Error(`Xiaohongshu App V2 detail failed | ${failures.join(" | ")}`);
 }
 
 async function fetchDouyinBySourceLink(sourceUrl: string, cookie?: string) {
@@ -459,20 +430,16 @@ async function enrichXiaohongshuDetails(items: NormalizedSourceItem[]) {
     if (isGeneratedXiaohongshuSourceId(item.sourceId)) return item;
 
     try {
-      const xsecToken = firstString(getRecord(item.raw) || {}, ["xsec_token", "xsecToken"]);
-      if (!xsecToken) return item;
-
-      const webParams = new URLSearchParams({
-        note_id: item.sourceId,
-        xsec_token: xsecToken,
+      const details = await fetchXiaohongshuAppV2Detail({
+        noteId: item.sourceId,
+        preferredKind: item.mediaType === "video" ? "video" : "image",
       });
-      const webRaw = await tikhubRequest(`${xiaohongshuWebNoteDetailEndpoint}?${webParams.toString()}`);
-      const webDetail = pickMatchingDetail(item, normalizeTikHubResponse(webRaw, item.platform));
-      return webDetail ? mergeXiaohongshuDetail(item, webDetail) : item;
+      const detail = pickMatchingDetail(item, details);
+      return detail ? mergeXiaohongshuDetail(item, detail) : item;
     } catch (error) {
       await recordExecutionLog({
         scope: "tikhub",
-        action: "\u5c0f\u7ea2\u4e66 Web V3 \u8be6\u60c5\u8865\u5168\u5931\u8d25",
+        action: "\u5c0f\u7ea2\u4e66 App V2 \u8be6\u60c5\u8865\u5168\u5931\u8d25",
         status: "info",
         message: compactError(error),
         details: {
@@ -855,11 +822,12 @@ async function tikhubRequest(path: string, init?: RequestInit): Promise<unknown>
   );
 
   if (response.status < 200 || response.status >= 300) {
+    const errorMessage = formatTikHubError(response.status, url.pathname, response.body);
     await recordExecutionLog({
       scope: "tikhub",
-      action: "TikHub \u63a5\u53e3\u6210\u529f",
+      action: "TikHub \u63a5\u53e3\u5931\u8d25",
       status: "error",
-      message: compactError(formatTikHubError(response.status, path, response.body)),
+      message: compactError(errorMessage),
       durationMs: Date.now() - startedAt,
       details: {
         method,
@@ -867,7 +835,44 @@ async function tikhubRequest(path: string, init?: RequestInit): Promise<unknown>
         status: response.status,
       },
     });
-    throw new Error(formatTikHubError(response.status, path, response.body));
+    throw new Error(errorMessage);
+  }
+
+  let parsed: unknown;
+  try {
+    parsed = JSON.parse(response.body);
+  } catch {
+    const errorMessage = `TikHub request failed: invalid JSON | endpoint=${url.pathname} | response_bytes=${response.body.length}`;
+    await recordExecutionLog({
+      scope: "tikhub",
+      action: "TikHub \u63a5\u53e3\u5931\u8d25",
+      status: "error",
+      message: errorMessage,
+      durationMs: Date.now() - startedAt,
+      details: {
+        method,
+        endpoint: url.pathname,
+        status: response.status,
+      },
+    });
+    throw new Error(errorMessage);
+  }
+
+  const businessError = getTikHubBusinessError(parsed, url.pathname);
+  if (businessError) {
+    await recordExecutionLog({
+      scope: "tikhub",
+      action: "TikHub \u4e1a\u52a1\u8bf7\u6c42\u5931\u8d25",
+      status: "error",
+      message: businessError,
+      durationMs: Date.now() - startedAt,
+      details: {
+        method,
+        endpoint: url.pathname,
+        status: response.status,
+      },
+    });
+    throw new Error(businessError);
   }
 
   await recordExecutionLog({
@@ -883,7 +888,7 @@ async function tikhubRequest(path: string, init?: RequestInit): Promise<unknown>
       responseBytes: response.body.length,
     },
   });
-  return JSON.parse(response.body);
+  return parsed;
 }
 
 function nodeRequest(
@@ -915,7 +920,7 @@ function normalizeHeaders(headers?: HeadersInit) {
   return Object.fromEntries(Object.entries(headers).map(([key, value]) => [key, String(value)]));
 }
 
-function formatTikHubError(status: number, path: string, body: string) {
+function formatTikHubError(status: number, endpoint: string, body: string) {
   try {
     const parsed = JSON.parse(body) as unknown;
     const detail = getRecord(parsed)?.detail;
@@ -925,15 +930,62 @@ function formatTikHubError(status: number, path: string, body: string) {
     const requestId = firstString(detailRecord || getRecord(parsed) || {}, ["request_id", "requestId"]);
     return [
       `TikHub request failed: ${status}`,
-      messageZh || message || body.slice(0, 220),
-      `endpoint=${path}`,
+      messageZh || message || "provider error response",
+      `endpoint=${endpoint}`,
       requestId ? `request_id=${requestId}` : "",
     ]
       .filter(Boolean)
       .join(" | ");
   } catch {
-    return `TikHub request failed: ${status} | endpoint=${path} | ${body.slice(0, 260)}`;
+    return `TikHub request failed: ${status} | endpoint=${endpoint} | response_bytes=${body.length}`;
   }
+}
+
+export function getTikHubBusinessError(raw: unknown, endpoint: string) {
+  const root = getRecord(raw);
+  if (!root) return undefined;
+  const data = getRecord(root.data);
+  const detail = getRecord(root.detail) || getRecord(data?.detail);
+  const records = [root, data].filter((record): record is JsonRecord => Boolean(record));
+  const explicitFailure = records.some((record) => record.ok === false || record.success === false);
+  const failingCode = findFailingTikHubBusinessCode(root, data);
+  if (!explicitFailure && !failingCode) return undefined;
+
+  const messageSource = detail || data || root;
+  const message = firstString(messageSource, ["message_zh", "msg_zh", "message", "msg", "detail", "error"]);
+  const requestId = firstString(detail || root, ["request_id", "requestId"]);
+  return [
+    "TikHub business request failed",
+    failingCode ? `${failingCode.key}=${failingCode.value}` : "ok=false",
+    message || "provider reported a business failure",
+    `endpoint=${endpoint}`,
+    requestId ? `request_id=${requestId}` : "",
+  ]
+    .filter(Boolean)
+    .join(" | ");
+}
+
+function findFailingTikHubBusinessCode(root: JsonRecord, data?: JsonRecord) {
+  const candidates: Array<{ key: string; value: unknown; allowZero: boolean }> = [
+    { key: "code", value: root.code, allowZero: true },
+    { key: "status", value: root.status, allowZero: false },
+    { key: "status_code", value: root.status_code, allowZero: false },
+    { key: "data.code", value: data?.code, allowZero: true },
+    { key: "data.status", value: data?.status, allowZero: false },
+    { key: "data.status_code", value: data?.status_code, allowZero: false },
+  ];
+
+  for (const candidate of candidates) {
+    const numeric = typeof candidate.value === "number"
+      ? candidate.value
+      : typeof candidate.value === "string" && candidate.value.trim()
+        ? Number(candidate.value)
+        : Number.NaN;
+    if (!Number.isFinite(numeric)) continue;
+    if (candidate.allowZero && numeric !== 0 && numeric !== 200) return { key: candidate.key, value: numeric };
+    if (!candidate.allowZero && numeric >= 400) return { key: candidate.key, value: numeric };
+  }
+  return undefined;
 }
 
 export function normalizeTikHubResponse(raw: unknown, platform: Platform): NormalizedSourceItem[] {
@@ -1727,24 +1779,12 @@ function extractXiaohongshuLinkInfo(value: string) {
       parsed.searchParams.get("note_id") ||
       parsed.searchParams.get("noteId") ||
       pathParts.find((part) => /^[0-9a-f]{16,32}$/i.test(part));
-    const xsecToken =
-      parsed.searchParams.get("xsec_token") ||
-      parsed.searchParams.get("xsecToken");
     return {
       noteId: noteId || undefined,
-      xsecToken: xsecToken || undefined,
     };
   } catch {
     return {};
   }
-}
-
-function extractXiaohongshuShareInfo(raw: unknown) {
-  const record = getRecord(raw) || {};
-  return {
-    noteId: firstString(record, ["note_id", "noteId", "id"]),
-    xsecToken: firstString(record, ["xsec_token", "xsecToken"]),
-  };
 }
 
 function extractDouyinSingleVideoAwemeId(value: string) {

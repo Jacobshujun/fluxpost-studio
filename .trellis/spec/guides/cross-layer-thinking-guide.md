@@ -53,6 +53,18 @@ For each boundary:
 
 ## Common Cross-Layer Mistakes
 
+### External API Version Migration
+
+An external API version change is a change-propagation task, not a one-call-site edit. Before removing the old contract:
+
+- Search endpoint constants, path builders, direct imports, enrichment/hydration calls, fallback branches, fixtures, and negative assertions.
+- Map every product entry path that reaches the provider, such as keyword search, exact source-link import, queued workflows, and background enrichment.
+- Validate the provider's business envelope at the HTTP boundary. A 2xx transport response with `ok: false`, an error status, or a failing business code must not reach normalizers as successful empty data.
+- Add deterministic fixtures for every replacement response shape and an executable fallback-order test. Also assert that removed endpoint strings are absent from active source.
+- Keep live provider probes outside the default baseline and require explicit approval when they consume paid quota.
+
+**Real-world example**: Xiaohongshu keyword search moved to TikHub App V2, but source-link import, search-result detail enrichment, and regression expectations still referenced removed Web/Web V3 endpoints. The old fallback returned HTTP 200 with `data.ok=false` and `data.status=461`, which the HTTP-only success check normalized as zero items. The durable fix migrated every detail consumer, validated the business envelope once in the TikHub request boundary, and added offline image/video/failure fixtures plus a request-order regression.
+
 ### Mistake 1: Implicit Format Assumptions
 
 **Bad**: Assuming date format without checking

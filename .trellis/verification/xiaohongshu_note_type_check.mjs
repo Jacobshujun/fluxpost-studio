@@ -12,8 +12,12 @@ if (/filterXiaohongshuItemsByRequestedNoteType|isXiaohongshuRequestedNoteType|sh
   throw new Error("src/lib/tikhub.ts must not contain local Xiaohongshu post-crawl note-type filtering helpers or dropped-count diagnostics.");
 }
 
-if (/get_image_note_detail|get_video_note_detail/.test(source)) {
-  throw new Error("Xiaohongshu crawl must not call legacy App V2 detail endpoints.");
+if (!/app_v2\/get_image_note_detail/.test(source) || !/app_v2\/get_video_note_detail/.test(source)) {
+  throw new Error("Xiaohongshu detail enrichment must use the current App V2 image/video endpoints.");
+}
+
+if (/xiaohongshu\/(?:web\/get_note_info_v4|web\/extract_share_info|web_v3\/fetch_note_detail)/.test(source)) {
+  throw new Error("Xiaohongshu detail enrichment must not use removed Web or Web V3 endpoints.");
 }
 
 if (/web_v3\/fetch_search_notes/.test(source)) {
@@ -207,7 +211,7 @@ if (allAttempts.join(",") !== "不限") {
   throw new Error(`All-note search should only request App V2 note_type=不限 once, got ${allAttempts.join(",")}`);
 }
 
-const webV3Fixture = {
+const appV2SearchFixture = {
   data: {
     items: [
       {
@@ -230,25 +234,25 @@ const webV3Fixture = {
     ],
   },
 };
-const normalized = normalizeTikHubResponse(webV3Fixture, "xiaohongshu");
+const normalized = normalizeTikHubResponse(appV2SearchFixture, "xiaohongshu");
 if (normalized.length !== 1) {
   throw new Error(`Expected one Xiaohongshu fixture item, got ${normalized.length}`);
 }
 const [fixtureItem] = normalized;
 if (fixtureItem.sourceId !== "6a0db7220000000006020fad") {
-  throw new Error(`Web V3 wrapper id should be preserved, got ${fixtureItem.sourceId}`);
+  throw new Error(`App V2 search wrapper id should be preserved, got ${fixtureItem.sourceId}`);
 }
 if (fixtureItem.id !== "xiaohongshu-6a0db7220000000006020fad") {
-  throw new Error(`Web V3 normalized id should use the real note id, got ${fixtureItem.id}`);
+  throw new Error(`App V2 normalized id should use the real note id, got ${fixtureItem.id}`);
 }
 if (/^xiaohongshu-\d+$/.test(fixtureItem.sourceId)) {
-  throw new Error("Web V3 fixture must not produce generated temporary Xiaohongshu source ids.");
+  throw new Error("App V2 fixture must not produce generated temporary Xiaohongshu source ids.");
 }
 if (fixtureItem.raw?.xsec_token !== "test-xsec-token") {
-  throw new Error("Web V3 wrapper xsec_token should be preserved for Web V3 detail calls.");
+  throw new Error("App V2 search wrapper xsec_token should be preserved during normalization.");
 }
 if (fixtureItem.title !== "小鹏G6 正确图文笔记") {
-  throw new Error(`Web V3 noteCard displayTitle should be normalized as title, got ${fixtureItem.title}`);
+  throw new Error(`App V2 noteCard displayTitle should be normalized as title, got ${fixtureItem.title}`);
 }
 
 console.log("Xiaohongshu request mapping and no post-crawl type filter/fallback check passed.");

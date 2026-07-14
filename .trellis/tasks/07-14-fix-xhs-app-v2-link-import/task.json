@@ -1,0 +1,31 @@
+{
+  "id": "fix-xhs-app-v2-link-import",
+  "name": "fix-xhs-app-v2-link-import",
+  "title": "修复小红书来源链接 App V2 导入",
+  "description": "Migrate all Xiaohongshu detail requests from removed Web APIs to App V2 and reject HTTP-200 business failures.",
+  "status": "in_progress",
+  "dev_type": "bugfix",
+  "scope": "src/lib/tikhub.ts and deterministic TikHub contract verification",
+  "package": "fluxpost",
+  "priority": "P1",
+  "creator": "codex",
+  "assignee": "codex",
+  "createdAt": "2026-07-14",
+  "completedAt": null,
+  "branch": null,
+  "base_branch": "main",
+  "worktree_path": null,
+  "commit": null,
+  "pr_url": null,
+  "subtasks": [],
+  "children": [],
+  "parent": null,
+  "relatedFiles": [
+    "src/lib/tikhub.ts",
+    ".trellis/verification/link_import_check.mjs",
+    ".trellis/verification/xiaohongshu_note_type_check.mjs",
+    ".trellis/spec/fluxpost/pitfalls.md"
+  ],
+  "notes": "",
+  "meta": {}
+}

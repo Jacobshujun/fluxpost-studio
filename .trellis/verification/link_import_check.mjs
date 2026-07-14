@@ -47,14 +47,48 @@ const linkImportSource = read("src/lib/source-link-import.ts");
 const linkRouteSource = read("src/app/api/crawl/links/route.ts");
 const contentPageSource = read("src/app/content/page.tsx");
 const checkPs1 = read(".trellis/verification/check.ps1");
+const requestedTikHubPaths = [];
+
+function mockTikHubRequest(url, _options, callback) {
+  requestedTikHubPaths.push(url.pathname);
+  const body = url.pathname.endsWith("get_image_note_detail")
+    ? JSON.stringify({ code: 200, data: { ok: false, status: 461, message: "fixture type mismatch" } })
+    : JSON.stringify({
+        code: 200,
+        data: {
+          ok: true,
+          note_id: "6a0db7220000000006020fae",
+          type: "video",
+          title: "App V2 fallback video note",
+          desc: "Video detail body",
+          video_info_v2: {
+            media: { stream: { h264: [{ master_url: "https://sns-video.example.invalid/fallback.mp4" }] } },
+          },
+        },
+      });
+  return {
+    on: () => undefined,
+    write: () => undefined,
+    end: () => callback({
+      statusCode: 200,
+      on: (event, handler) => {
+        if (event === "data") handler(Buffer.from(body));
+        if (event === "end") handler();
+      },
+    }),
+  };
+}
 
 assertContains(tikhubSource, /fetchTikHubItemBySourceLink/, "TikHub link import should be owned by src/lib/tikhub.ts.");
 assertContains(tikhubSource, /fetch_one_video_by_share_url/, "Douyin link import must use the share-url detail endpoint.");
 assertContains(tikhubSource, /fetch_one_video_v3/, "Douyin direct aweme-id links should use the single-video detail endpoint.");
 assertContains(tikhubSource, /fetch_post_detail/, "Weibo link import must use the post detail endpoint.");
 assertContains(tikhubSource, /fetch_video_by_share_url/, "WeChat Channels link import must use the share-url detail endpoint.");
-assertContains(tikhubSource, /web\/get_note_info_v4/, "Xiaohongshu link import must use note info detail.");
-assertContains(tikhubSource, /web\/extract_share_info/, "Xiaohongshu short/share links must use share-info extraction.");
+assertContains(tikhubSource, /app_v2\/get_image_note_detail/, "Xiaohongshu image-note links must use App V2 detail.");
+assertContains(tikhubSource, /app_v2\/get_video_note_detail/, "Xiaohongshu video-note links must use App V2 detail.");
+if (/xiaohongshu\/(?:web\/get_note_info_v4|web\/extract_share_info|web_v3\/fetch_note_detail)/.test(tikhubSource)) {
+  throw new Error("Removed Xiaohongshu Web detail endpoints must not remain in active TikHub source.");
+}
 
 assertContains(linkImportSource, /mapWithConcurrency<ParsedSourceLink,\s*FetchedSourceLink>\(candidates,\s*concurrencyConfig\.crawl/, "Link import fetch fan-out must be bounded by crawl concurrency.");
 assertContains(linkImportSource, /filterUnsafeSourceItems\(dedupedItems/, "Link import must apply source safety before tagging and ingest.");
@@ -76,14 +110,10 @@ assertContains(checkPs1, /Link import check/, "Trellis baseline must include the
 
 const tikhub = loadTsModule("src/lib/tikhub.ts", {
   "node:http": {
-    request: () => {
-      throw new Error("Network request is disabled in link import check.");
-    },
+    request: mockTikHubRequest,
   },
   "node:https": {
-    request: () => {
-      throw new Error("Network request is disabled in link import check.");
-    },
+    request: mockTikHubRequest,
   },
   "./activity-log": {
     compactError: (error) => String(error?.message || error),
@@ -118,18 +148,22 @@ const tikhub = loadTsModule("src/lib/tikhub.ts", {
     extractPublishedTime: () => ({}),
   },
   "./video-quality": videoQuality,
+  "./media-cache": {
+    cacheCrawledMedia: async (items) => items,
+  },
 });
 
 const {
+  fetchTikHubItemBySourceLink,
   detectPlatformFromSourceUrl,
-  buildXiaohongshuShareInfoPath,
-  buildXiaohongshuNoteInfoV4Path,
-  buildXiaohongshuWebNoteDetailPath,
+  buildXiaohongshuImageNoteDetailPath,
+  buildXiaohongshuVideoNoteDetailPath,
   buildDouyinShareVideoPath,
   buildDouyinSingleVideoPath,
   buildDouyinSourceLinkPath,
   buildWeiboPostDetailPath,
   buildWechatChannelsShareVideoPath,
+  getTikHubBusinessError,
   normalizeTikHubResponse,
 } = tikhub;
 
@@ -149,19 +183,89 @@ if (detectPlatformFromSourceUrl("https://channels.weixin.qq.com/share/video?id=t
   throw new Error("WeChat Channels links should be auto-detected.");
 }
 
-const xhsShareUrl = new URL(buildXiaohongshuShareInfoPath("https://xhslink.com/a/test"), "https://example.invalid");
-if (xhsShareUrl.pathname !== "/api/v1/xiaohongshu/web/extract_share_info" || xhsShareUrl.searchParams.get("share_text") !== "https://xhslink.com/a/test") {
-  throw new Error("Xiaohongshu share-info path should carry share_text.");
+const xhsImageUrl = new URL(
+  buildXiaohongshuImageNoteDetailPath("6a0db7220000000006020fad", "https://xhslink.com/a/test"),
+  "https://example.invalid",
+);
+if (
+  xhsImageUrl.pathname !== "/api/v1/xiaohongshu/app_v2/get_image_note_detail" ||
+  xhsImageUrl.searchParams.get("note_id") !== "6a0db7220000000006020fad" ||
+  xhsImageUrl.searchParams.get("share_text") !== "https://xhslink.com/a/test"
+) {
+  throw new Error("Xiaohongshu App V2 image detail path should carry note_id and share_text.");
 }
 
-const xhsInfoUrl = new URL(buildXiaohongshuNoteInfoV4Path("6a0db7220000000006020fad", "xsec-test"), "https://example.invalid");
-if (xhsInfoUrl.pathname !== "/api/v1/xiaohongshu/web/get_note_info_v4" || xhsInfoUrl.searchParams.get("note_id") !== "6a0db7220000000006020fad" || xhsInfoUrl.searchParams.get("xsec_token") !== "xsec-test") {
-  throw new Error("Xiaohongshu note-info path should carry note_id and xsec_token.");
+const xhsVideoUrl = new URL(
+  buildXiaohongshuVideoNoteDetailPath(undefined, "https://xhslink.com/a/video-test"),
+  "https://example.invalid",
+);
+if (
+  xhsVideoUrl.pathname !== "/api/v1/xiaohongshu/app_v2/get_video_note_detail" ||
+  xhsVideoUrl.searchParams.has("note_id") ||
+  xhsVideoUrl.searchParams.get("share_text") !== "https://xhslink.com/a/video-test"
+) {
+  throw new Error("Xiaohongshu App V2 video detail path should support share_text without a local note id.");
 }
 
-const xhsWebUrl = new URL(buildXiaohongshuWebNoteDetailPath("6a0db7220000000006020fad", "xsec-test"), "https://example.invalid");
-if (xhsWebUrl.pathname !== "/api/v1/xiaohongshu/web_v3/fetch_note_detail") {
-  throw new Error("Xiaohongshu Web detail path should use the existing Web V3 detail endpoint.");
+const xhsImageItems = normalizeTikHubResponse({
+  code: 200,
+  data: {
+    ok: true,
+    note_id: "6a0db7220000000006020fad",
+    type: "normal",
+    title: "App V2 image note",
+    desc: "Image note body",
+    image_list: [{ url: "https://sns-img.example.invalid/image.webp" }],
+    liked_count: 12,
+  },
+}, "xiaohongshu");
+if (xhsImageItems[0]?.sourceId !== "6a0db7220000000006020fad" || xhsImageItems[0]?.images.length !== 1) {
+  throw new Error("Xiaohongshu App V2 image detail fixture should normalize note identity and images.");
+}
+
+const xhsVideoItems = normalizeTikHubResponse({
+  code: 200,
+  data: {
+    ok: true,
+    note_id: "6a0db7220000000006020fae",
+    type: "video",
+    title: "App V2 video note",
+    desc: "Video note body",
+    video_info_v2: {
+      media: { stream: { h264: [{ master_url: "https://sns-video.example.invalid/video.mp4", width: 1080, height: 1920 }] } },
+    },
+  },
+}, "xiaohongshu");
+if (xhsVideoItems[0]?.sourceId !== "6a0db7220000000006020fae" || xhsVideoItems[0]?.videoUrl !== "https://sns-video.example.invalid/video.mp4") {
+  throw new Error("Xiaohongshu App V2 video detail fixture should normalize note identity and video media.");
+}
+
+const businessError = getTikHubBusinessError({
+  code: 200,
+  data: { ok: false, status: 461, message: "fixture business failure" },
+}, "/api/v1/xiaohongshu/app_v2/get_image_note_detail");
+if (!businessError || !businessError.includes("data.status=461") || !businessError.includes("get_image_note_detail")) {
+  throw new Error("TikHub HTTP-200 business failures must be rejected with status and endpoint context.");
+}
+if (getTikHubBusinessError({ code: 200, data: { ok: true, status: 200 } }, "/success")) {
+  throw new Error("TikHub success envelopes must not be classified as business failures.");
+}
+
+const xhsFallbackItems = await fetchTikHubItemBySourceLink({
+  url: "https://www.xiaohongshu.com/explore/6a0db7220000000006020fae",
+  platform: "xiaohongshu",
+});
+if (
+  requestedTikHubPaths.join(",") !==
+    "/api/v1/xiaohongshu/app_v2/get_image_note_detail,/api/v1/xiaohongshu/app_v2/get_video_note_detail"
+) {
+  throw new Error(`Xiaohongshu App V2 link fallback should try image then video detail, got ${requestedTikHubPaths.join(",")}`);
+}
+if (
+  xhsFallbackItems[0]?.sourceId !== "6a0db7220000000006020fae" ||
+  xhsFallbackItems[0]?.videoUrl !== "https://sns-video.example.invalid/fallback.mp4"
+) {
+  throw new Error("Xiaohongshu link import should return the App V2 video detail after an image business failure.");
 }
 
 const dyShareUrl = new URL(buildDouyinShareVideoPath("https://v.douyin.com/abc/"), "https://example.invalid");
