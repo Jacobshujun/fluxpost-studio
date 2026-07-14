@@ -72,3 +72,36 @@ Published Jacobshujun/gpt2-image-run at e23aa62ca8a6d00dce9317b90d292e1ac73a4f02
 ### Next Steps
 
 - None - task complete
+
+
+## Session 3: Persist advanced Docker config
+
+**Date**: 2026-07-14
+**Task**: Persist advanced Docker config
+**Branch**: `main`
+
+### Summary
+
+Fixed admin advanced config loss by adding a persistent Docker config volume, loading runtime overrides before appConfig initialization, preserving clear tombstones, and extending deployment verification and documentation.
+
+### Main Changes
+
+(Add details)
+
+### Git Commits
+
+| Hash | Message |
+|------|---------|
+| `8000a49` | (see git log) |
+
+### Testing
+
+- [OK] (Add test results)
+
+### Status
+
+[OK] **Completed**
+
+### Next Steps
+
+- None - task complete
