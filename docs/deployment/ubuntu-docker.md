@@ -19,7 +19,7 @@ The installer does not change SSH, UFW, cloud firewall, or DNS settings. It crea
 Sign in to the new VPS, replace `myadmin` with your intended login username, and paste this command:
 
 ```bash
-curl -fsSL https://raw.githubusercontent.com/Jacobshujun/fluxpost-studio/main/scripts/deploy/vps-bootstrap.sh -o /tmp/fluxpost-bootstrap.sh && sudo bash /tmp/fluxpost-bootstrap.sh --admin-user myadmin
+sudo apt-get update && sudo apt-get install -y curl && curl -fsSL https://raw.githubusercontent.com/Jacobshujun/fluxpost-studio/main/scripts/deploy/vps-bootstrap.sh -o /tmp/fluxpost-bootstrap.sh && sudo bash /tmp/fluxpost-bootstrap.sh --admin-user myadmin
 ```
 
 The installer:

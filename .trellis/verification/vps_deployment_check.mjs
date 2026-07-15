@@ -90,6 +90,7 @@ for (const value of ["change-this-long-random-password", "change-this-first-admi
 }
 
 assertContains(files.docs, /vps-bootstrap\.sh[\s\S]*--admin-user/, "Deployment docs must show the bootstrap entry command.");
+assertContains(files.docs, /apt-get install -y curl[\s\S]*raw\.githubusercontent\.com[\s\S]*vps-bootstrap\.sh/, "One-paste install must work even when a minimal Ubuntu image lacks curl.");
 assertContains(files.docs, /ssh -L 3101:127\.0\.0\.1:3101/, "Deployment docs must explain the Windows SSH tunnel.");
 assertContains(files.docs, /enable-domain\.sh/, "Deployment docs must explain later HTTPS enablement.");
 assertContains(files.docs, /docker compose down -v/, "Deployment docs must explicitly warn against deleting volumes.");
