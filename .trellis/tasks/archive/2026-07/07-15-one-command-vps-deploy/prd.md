@@ -34,7 +34,7 @@ Let a beginner bootstrap a fresh Ubuntu 24.04 VPS from the public GitHub reposit
 - [x] Re-running deploy preserves all named volume declarations and never removes volumes.
 - [x] Bootstrap/domain/deploy scripts pass syntax and deterministic contract checks.
 - [x] Type-check, lint, build, and the full Trellis baseline pass.
-- [ ] Changes are committed and pushed to GitHub `main`; no live new-VPS installation is attempted without target SSH access.
+- [x] Changes are committed and pushed to GitHub `main`; no live new-VPS installation is attempted without target SSH access.
 
 ## Out Of Scope
 

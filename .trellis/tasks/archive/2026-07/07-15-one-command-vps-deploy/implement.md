@@ -7,4 +7,4 @@
 - [x] Add deterministic deployment contract coverage to the Trellis baseline.
 - [x] Update deployment example and beginner-facing deployment documentation.
 - [x] Run focused checks, Bash syntax, YAML parsing, private/HTTPS/legacy plan execution, type-check, lint, build, and full Trellis baseline.
-- [ ] Commit scoped files and push GitHub `main`.
+- [x] Commit scoped files and push GitHub `main` as `0cdae8a`.
