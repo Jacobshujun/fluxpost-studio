@@ -156,6 +156,22 @@
       "notes": "Live local migration is complete. Current JSONB-table design preserves existing behavior; high-volume queue tables and SKIP LOCKED workers remain a follow-up."
     },
     {
+      "id": "one-command-vps-deployment",
+      "title": "One-command Ubuntu VPS deployment",
+      "status": "ready_for_review",
+      "definition_of_done": [
+        "A fresh Ubuntu 24.04 VPS can bootstrap from GitHub with generated root-only base secrets",
+        "Pre-domain deployment starts only app and PostgreSQL on a loopback port for SSH-tunnel access",
+        "A validated DNS hostname can enable Caddy HTTPS through one command",
+        "Routine updates preserve PostgreSQL, advanced configuration, runtime data, media, and Caddy named volumes",
+        "Default verification covers Compose parsing, Bash syntax, destructive-command absence, and private/HTTPS/legacy deployment plans without live infrastructure changes"
+      ],
+      "evidence": [
+        "2026-07-15 repository implementation includes parameterized compose.yaml, vps-bootstrap.sh, vps-deploy.sh --check, vps-enable-domain.sh, beginner deployment documentation, and .trellis/verification/vps_deployment_check.mjs. Private/HTTPS/legacy plan execution, Bash syntax, YAML parsing, focused checks, type-check, lint, build, and full baseline passed without a live VPS install."
+      ],
+      "notes": "Ready for review because the deterministic contracts pass; mark done only after one intentional clean Ubuntu 24.04 installation and later domain/HTTPS enablement are verified."
+    },
+    {
       "id": "modular-resource-workspaces",
       "title": "Modular content, production, and material workspaces",
       "status": "ready_for_review",

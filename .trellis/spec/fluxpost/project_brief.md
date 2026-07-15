@@ -136,12 +136,16 @@ Last updated: 2026-06-25
 - Confirmed production entry: `npm run build` followed by `npm run start`.
 - Confirmed local LAN production refresh entry: `npm run local:restart`.
 - `next.config.ts` sets Turbopack root to `process.cwd()`.
-- Server IP, domain, reverse proxy, process manager, and production deployment target: 待确认.
+- GitHub-driven Ubuntu 24.04 deployment is owned by `scripts/deploy/vps-bootstrap.sh`, `scripts/deploy/vps-deploy.sh`, `scripts/deploy/vps-enable-domain.sh`, `compose.yaml`, and `docs/deployment/ubuntu-docker.md`.
+- A fresh bootstrap requires at least 2 GB RAM, installs Docker Engine/Compose from Docker's official Ubuntu repository, generates PostgreSQL and first-admin setup secrets, writes `/opt/fluxpost-studio/shared/env.production` with mode `0600`, and creates the standard repo/releases/current/bin layout.
+- Pre-domain mode sets `FLUXPOST_PROXY_ENABLED=false`, starts only PostgreSQL and app, and binds the app to `127.0.0.1:${FLUXPOST_APP_PORT:-3101}` for SSH-tunnel access. `enable-domain.sh` requires resolvable DNS, persists `FLUXPOST_PUBLIC_HOST`, enables Caddy, and verifies public HTTPS.
+- Existing deployments without the new deployment keys retain compatibility defaults: proxy enabled, public host `bbs.vollov1.xyz`, and loopback app port `3101`.
+- The confirmed production VPS at `104.243.21.233` uses Docker Compose project `fluxpost`, Caddy HTTPS, PostgreSQL without a public host port, and GitHub release directories under `/opt/fluxpost-studio`.
 
 ## Not Covered Or Pending Confirmation
 
 - Formal user roles beyond V1 `admin`/`operator`: 待确认.
-- Server deployment runbook: 待确认.
+- Live installation on a second VPS remains pending target SSH access; the runbook and deterministic deployment contracts are repository-backed.
 - Generated-post Feishu target Base token and table ID for deployment: 待确认. Source-link import sync has a user-requested default target in `src/lib/config.ts`.
 - Safe isolated test credentials for TikHub/OpenAI/Feishu: 待确认.
 - PostgreSQL server installation, database/user provisioning, and live migration execution: confirmed locally on 2026-06-04.

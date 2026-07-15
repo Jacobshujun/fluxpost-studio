@@ -6,5 +6,5 @@
 - [x] Replace obsolete endpoint assertions with App V2 builders, fixtures, failure cases, and negative checks.
 - [x] Run focused verification, type-check, lint, build, and full Trellis baseline.
 - [x] Capture the endpoint-migration prevention rule and update current Trellis status/evidence.
-- [ ] Commit, push `main`, ensure VPS queues are idle, and deploy exactly once.
-- [ ] Run one controlled VPS source-link task with Feishu publishing disabled.
+- [x] Commit, push `main`, ensure VPS queues are idle, and deploy exactly once.
+- [x] Confirm the deployed workflow with the user's 2026-07-15 report that all functions passed verification.

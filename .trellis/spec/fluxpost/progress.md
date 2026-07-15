@@ -6,24 +6,17 @@ This file is an on-demand history library. Current state belongs in `.trellis/sp
 
 ## 最近一条
 <!-- TRELLIS-LATEST-START -->
-2026-07-01 Trellis migration work:
+2026-07-15 Ubuntu VPS bootstrap work:
 
 Done:
-- Installed `@mindfoldhq/trellis` globally; `trellis --version` is `0.6.5`.
-- Initialized Trellis with `trellis init --codex -u codex --yes --skip-existing`.
-- Migrated FluxPost project context from `docs/harness/` into `.trellis/spec/fluxpost/`.
-- Migrated deterministic baseline scripts from `scripts/harness/` into `.trellis/verification/`.
-- Renamed old Harness paths to `docs/harness.disabled/` and `scripts/harness.disabled/`.
-- Rewrote `AGENTS.md`, `README.md`, `package.json`, `eslint.config.mjs`, and `scripts/local/restart.ps1` to use Trellis paths and ignore disabled archives during lint.
-- Added `.trellis/spec/fluxpost/index.md`.
-- Filled `.trellis/spec/frontend/` with project-backed FluxPost frontend rules.
-- Verified Trellis sees spec layers `fluxpost` and `frontend`.
-- Full migrated baseline passed with `TRELLIS_SMOKE_PORT=45678 powershell -ExecutionPolicy Bypass -File .trellis/verification/check.ps1`.
-- Archived bootstrap task to `.trellis/tasks/archive/2026-07/00-bootstrap-guidelines/` with `--no-commit`.
+- Parameterized the loopback app port and Caddy hostname without breaking the existing VPS defaults.
+- Added root-only Ubuntu bootstrap, private pre-domain mode, persistent random base secrets, domain/HTTPS enablement, installed wrapper refresh, and read-only deployment plan output.
+- Added beginner instructions for one-paste install, Windows SSH tunnel, first-admin setup, advanced configuration, DNS enablement, updates, diagnostics, persistent data, and private/HTTPS rollback.
+- Added deterministic baseline coverage for Compose structure, all named volumes, Bash syntax, private/HTTPS/legacy plan behavior, root/Ubuntu/Docker/secret contracts, hostname/DNS guards, and prohibited destructive/SSH/firewall commands.
+- Full Trellis baseline passed with the existing class of Turbopack path-tracing warnings.
 
 Next:
-- Use Trellis paths for all future startup, context, task, and verification work.
-- Keep `docs/harness.disabled/` and `scripts/harness.disabled/` as disabled migration archives only.
+- Run one intentional fresh Ubuntu 24.04 installation when target SSH access is available, then enable a real DNS hostname and verify HTTPS before changing the feature from `ready_for_review` to `done`.
 <!-- TRELLIS-LATEST-END -->
 
 ## 历史记录

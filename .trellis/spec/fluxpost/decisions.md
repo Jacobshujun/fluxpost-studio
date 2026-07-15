@@ -1,6 +1,6 @@
 # Decisions
 
-Last updated: 2026-07-14
+Last updated: 2026-07-15
 
 ## Stable Decisions
 
@@ -15,6 +15,7 @@ Last updated: 2026-07-14
 - The app currently uses Next.js App Router with API routes under `src/app/api`.
 - Runtime state uses PostgreSQL when `DATABASE_URL` is configured; `src/lib/database.ts` owns the backend selection.
 - Production configuration has two layers: `/opt/fluxpost-studio/shared/env.production` is the operator-managed Compose base, while admin changes from `/config` persist in the `fluxpost_fluxpost-config` named volume and override matching base values. Empty persisted assignments are intentional clear tombstones. The container must not write the host base environment file.
+- Fresh Ubuntu production uses the repository bootstrap and release scripts rather than ad hoc server edits. Before DNS is ready, deployment starts only PostgreSQL and app and keeps the app on loopback for SSH-tunnel access; Caddy starts only after `enable-domain.sh` validates a DNS hostname. `FLUXPOST_PROXY_ENABLED` defaults true, `FLUXPOST_PUBLIC_HOST` defaults `bbs.vollov1.xyz`, and `FLUXPOST_APP_PORT` defaults `3101` so the existing VPS remains backward compatible. Deployment never removes named volumes and does not modify SSH, DNS, or firewall rules.
 - This local workspace is configured to use PostgreSQL through `.env.local`; SQLite at `data/fluxpost.db` remains the fallback when `DATABASE_URL` is absent.
 - PostgreSQL schema lives in `db/migrations/001_initial_postgres.sql`, and SQLite-to-PostgreSQL row copy lives in `scripts/db/migrate-sqlite-to-postgres.mjs`.
 - Local PostgreSQL diagnosis uses dedicated read-only role `fluxpost_reader` and Windows user environment variable `FLUXPOST_DIAG_DATABASE_URL`; use `npm run db:diagnose` instead of reading `.env.local` or printing `DATABASE_URL`. The role reads app runtime tables, safe account/session views under `diagnostics`, and PostgreSQL stats/settings for lock/session diagnosis.

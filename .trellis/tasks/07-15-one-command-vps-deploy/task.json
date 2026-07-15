@@ -1,0 +1,33 @@
+{
+  "id": "one-command-vps-deploy",
+  "name": "one-command-vps-deploy",
+  "title": "Add one-command Ubuntu VPS deployment",
+  "description": "Add a safe one-command Ubuntu 24.04 bootstrap with private pre-domain access and later HTTPS enablement.",
+  "status": "in_progress",
+  "dev_type": "feature",
+  "scope": "Docker Compose deployment, Ubuntu bootstrap, domain enablement, deterministic deployment verification, and operator documentation",
+  "package": "fluxpost",
+  "priority": "P1",
+  "creator": "codex",
+  "assignee": "codex",
+  "createdAt": "2026-07-15",
+  "completedAt": null,
+  "branch": null,
+  "base_branch": "main",
+  "worktree_path": null,
+  "commit": null,
+  "pr_url": null,
+  "subtasks": [],
+  "children": [],
+  "parent": null,
+  "relatedFiles": [
+    "compose.yaml",
+    "scripts/deploy/vps-bootstrap.sh",
+    "scripts/deploy/vps-deploy.sh",
+    "scripts/deploy/vps-enable-domain.sh",
+    "docs/deployment/ubuntu-docker.md",
+    ".trellis/verification/vps_deployment_check.mjs"
+  ],
+  "notes": "",
+  "meta": {}
+}

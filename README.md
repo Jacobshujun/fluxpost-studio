@@ -36,6 +36,10 @@ npm install
 npm run dev
 ```
 
+## Ubuntu VPS Deployment
+
+For a fresh Ubuntu 24.04 VPS, use the one-command Docker bootstrap and private SSH-tunnel flow documented in [docs/deployment/ubuntu-docker.md](docs/deployment/ubuntu-docker.md). The installer keeps the app on `127.0.0.1:3101` until you explicitly enable a DNS hostname and HTTPS.
+
 Windows PowerShell:
 
 ```powershell

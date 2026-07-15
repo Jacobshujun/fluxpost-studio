@@ -171,6 +171,11 @@ return NextResponse.json({ status: getConfigStatus(), advanced: getAdvancedConfi
 - Confirmed entries are `npm run dev`, `npm run build`, and `npm run start`.
 - For the local LAN production server on port `3001`, use `npm run local:restart` after frontend or API code changes. Do not rely on `npm run build` alone to refresh an already-running `next start` process.
 - Use `npm run dev:lan` when hot reload is desired during active frontend development.
+- GitHub-driven Ubuntu production is owned by `scripts/deploy/vps-bootstrap.sh`, `scripts/deploy/vps-deploy.sh`, `scripts/deploy/vps-enable-domain.sh`, root `compose.yaml`, and `docs/deployment/ubuntu-docker.md`; do not add a second server layout or competing update script.
+- New pre-domain installs must keep the app on `127.0.0.1:${FLUXPOST_APP_PORT:-3101}`, start only `postgres app`, and use SSH tunneling. Caddy ports 80/443 start only when `FLUXPOST_PROXY_ENABLED=true` and `FLUXPOST_PUBLIC_HOST` is a validated DNS hostname.
+- Deployment code may read only explicit deployment controls from `shared/env.production`; it must not source the file as shell code. The file is root-only mode `0600`, while admin UI overrides remain in the `fluxpost-config` volume.
+- Routine install, deploy, domain, diagnostic, and rollback commands must preserve all named volumes. Never add `docker compose down -v` or an equivalent volume deletion path.
+- Bootstrap must not change SSH daemon settings, host firewall rules, cloud security groups, or DNS. Those are operator/provider boundaries.
 - Do not add a new deployment path, process manager, service file, or server target without updating `project_brief.md`, `decisions.md`, `verification.md`, and `handoff.md`.
 
 ## Trellis Rules

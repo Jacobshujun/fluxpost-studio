@@ -1,6 +1,6 @@
 # Trellis Status
 
-Last updated: 2026-07-14
+Last updated: 2026-07-15
 
 ## One-Line Status
 
@@ -14,6 +14,7 @@ FluxPost Studio uses Trellis as the active project context system. A Docker depl
 - `/config` is an admin-only advanced config page. It reads `GET /api/config?advanced=1`, writes allow-listed env keys through `PATCH /api/config`, and masks secrets. Local development writes `.env.local`; Docker production writes `/app/config/.env.local` in the persistent `fluxpost-config` volume and reloads those overrides before `appConfig` initialization.
 - Xiaohongshu keyword search and all detail consumers use TikHub App V2. Exact source-link import and keyword-result enrichment use the App V2 image/video detail endpoints, and the TikHub request boundary rejects provider business failures even when transport status is HTTP 200.
 - VPS deployment is GitHub-driven. Local development happens in this Git repository, then VPS deploys from `https://github.com/Jacobshujun/fluxpost-studio.git` into `/opt/fluxpost-studio/releases/<timestamp>` with `/opt/fluxpost-studio/current` as the active symlink. Docker Compose project `fluxpost` runs `app + postgres + proxy`; app is bound to `127.0.0.1:3101`, proxy exposes `bbs.vollov1.xyz` on HTTP `:80` and HTTPS `:443`, and Postgres has no host port. The FluxPost app image includes `lark-cli` via `@larksuite/cli@1.0.67`, with `FEISHU_CLI_BIN=lark-cli`.
+- Fresh Ubuntu 24.04 VPS installation uses `scripts/deploy/vps-bootstrap.sh`. Without a domain it starts only app/PostgreSQL on loopback for SSH-tunnel access; `/opt/fluxpost-studio/bin/enable-domain.sh <hostname>` later enables Caddy/HTTPS. Updates remain `/opt/fluxpost-studio/bin/deploy.sh`, and `deploy.sh --check` previews the mode without changing services.
 - Default startup context must stay under 45 KB, and typical code-task context under 70 KB. Keep this file lightweight and move history to archives when it grows.
 
 ## Next Entry
@@ -22,10 +23,12 @@ FluxPost Studio uses Trellis as the active project context system. A Docker depl
 2. For config/admin work, inspect `src/lib/config.ts`, `src/app/api/config/route.ts`, `src/app/config/page.tsx`, and `.trellis/verification/advanced_config_check.mjs` first.
 3. For Feishu publish issues, inspect `src/lib/feishu-cli.ts`, `src/lib/feishu-publish-queue.ts`, `src/lib/feishu-field-options.ts`, and `src/app/api/publish/feishu/route.ts` first.
 4. For VPS deployment follow-up, use `ssh root@104.243.21.233 -p 29891`, then run `/opt/fluxpost-studio/bin/deploy.sh` to deploy from GitHub, or `cd /opt/fluxpost-studio/current` and `COMPOSE_PROJECT_NAME=fluxpost docker compose ps/logs`. Do not stop or restart `x-ui`, `xray`, or `frps`.
-5. Before completion, read `.trellis/spec/fluxpost/verification.md` and run `powershell -ExecutionPolicy Bypass -File .trellis/verification/check.ps1`, or explain why it could not run.
+5. For a fresh VPS, follow `docs/deployment/ubuntu-docker.md`; do not copy old VPS secrets or volumes into GitHub.
+6. Before completion, read `.trellis/spec/fluxpost/verification.md` and run `powershell -ExecutionPolicy Bypass -File .trellis/verification/check.ps1`, or explain why it could not run.
 
 ## Recent Verification
 
+- 2026-07-15: Added a fresh Ubuntu 24.04 one-command bootstrap, private pre-domain SSH-tunnel mode, later one-command Caddy/HTTPS enablement, configurable loopback port/domain, and non-mutating `deploy.sh --check`. Deterministic tests parse Compose, run Bash syntax, execute private/HTTPS/legacy plans, guard all named volumes, and reject SSH/firewall/destructive-volume commands. Focused checks and the full Trellis baseline passed; build retains 15 Turbopack path-tracing warnings. No live second-VPS install, DNS change, Docker operation, or external provider call was performed.
 - 2026-07-14: Migrated Xiaohongshu source-link and keyword-enrichment details from removed TikHub Web/Web V3 endpoints to App V2 image/video details. Added request-boundary business-envelope validation and offline regression coverage for image/video normalization, image-to-video fallback, HTTP-200 `status=461` failure, and old-endpoint absence. Focused checks, type-check, lint, build, and the full Trellis baseline passed without live external calls; existing 15 Turbopack warnings remain.
 - 2026-07-14: Fixed advanced configuration loss across Docker app-container replacement. Production now mounts `fluxpost-config` at `/app/config`, sets `FLUXPOST_CONFIG_FILE=/app/config/.env.local`, loads persisted values over the base Compose environment before `appConfig` initialization, and retains empty tombstones so cleared base values do not return after restart. Focused checks, an isolated fresh-process precedence/clear smoke, type-check, lint, build, and the full Trellis baseline passed; the existing 15 Turbopack broad-path warnings remain.
 - 2026-07-13: Fixed local discovery for `GPT2-image-run`: the plugin was cloned to `D:\Comfyui\comfyui\custom_nodes\gpt2-image-run` after the active ComfyUI process had started, so it was absent from `/object_info`. Fully restarted ComfyUI on `127.0.0.1:8188`; startup logs now list `gpt2-image-run`, and `/object_info/GPT2ImageRun` returns display name `GPT2-image-run`, category `image/api`, all expected inputs, `IMAGE` output, and search aliases.
