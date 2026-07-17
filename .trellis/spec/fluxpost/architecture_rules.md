@@ -131,6 +131,34 @@ return NextResponse.json(process.env);
 return NextResponse.json({ status: getConfigStatus(), advanced: getAdvancedConfigSnapshot() });
 ```
 
+## Scenario: Feishu CLI Application Identity
+
+### 1. Scope / Trigger
+- Trigger: any publish, import, field-option, notification, or distribution path invokes `lark-cli` as bot.
+
+### 2. Signatures
+- Advanced keys: `FEISHU_APP_ID`, secret `FEISHU_APP_SECRET`, and `FEISHU_BRAND=feishu|lark`.
+- Init command: `lark-cli config init --app-id <id> --app-secret-stdin --brand <brand>`.
+
+### 3. Contracts
+- `ensureConfiguredFeishuCliIdentity(...)` must run before every application-owned CLI path; its fingerprint cache performs one idempotent init per process/credential set and serializes concurrent callers.
+- Secret travels only through child stdin. Advanced reads expose configured state only; `fluxpost-config` stores env overrides and `fluxpost-node-home` stores CLI state.
+
+### 4. Validation & Error Matrix
+- Missing App ID/Secret -> `needs_config` for publishing or an explicit config error before other CLI work.
+- Init failure -> sanitized error; requested Base/IM command does not run. Changed fingerprint -> reinitialize.
+
+### 5. Good/Base/Bad Cases
+- Good: a new VPS receives credentials through `/config`; first publish initializes CLI and writes Base records.
+- Base: later calls reuse the successful fingerprint. Bad: App Secret appears in argv, API output, or logs.
+
+### 6. Tests Required
+- `.trellis/verification/feishu_cli_identity_check.mjs` covers missing fields, stdin argv shape, caching, rotation, concurrency, retry, redaction, all CLI paths, and both persistent volumes without live Feishu calls.
+
+### 7. Wrong vs Correct
+- Wrong: `lark-cli config init --app-secret <secret>`.
+- Correct: use `--app-secret-stdin`, write the secret to stdin, and sanitize subprocess failures.
+
 ## Frontend Rules
 
 - Keep the first screen as the usable workspace, not a landing page.

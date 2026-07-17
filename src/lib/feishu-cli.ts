@@ -8,6 +8,7 @@ import { promisify } from "node:util";
 import { recordExecutionLog } from "./activity-log";
 import { appConfig } from "./config";
 import { concurrencyConfig, mapWithConcurrency, runWithConcurrencyPool } from "./concurrency";
+import { ensureFeishuCliIdentity } from "./feishu-cli-identity";
 import { buildMediaRequestHeaders, isProxyableRemoteMediaUrl } from "./media-request";
 import type { FeishuPostPublishState, FeishuPublishJobSource, GeneratedPost } from "./types";
 
@@ -18,6 +19,12 @@ export const feishuRecordBatchSize = 50;
 type CliInvocation = {
   file: string;
   argsPrefix: string[];
+};
+
+type FeishuCliRunOptions = {
+  timeout: number;
+  maxBuffer: number;
+  env: NodeJS.ProcessEnv;
 };
 
 type FeishuNotificationResult = {
@@ -90,6 +97,18 @@ export async function publishPostsToFeishu(posts: GeneratedPost[], options: Publ
       status: "needs_config" as const,
       payloadPath,
       message: "FEISHU_CLI_BIN is not configured. Payload has been staged locally.",
+      recordMappings: [] as FeishuRecordMapping[],
+      postStates: buildStagedFeishuPostStateUpdates(posts, payloadPath),
+      attachmentUploads: [] as FeishuAttachmentUpload[],
+      attachmentFailures: [] as FeishuAttachmentFailure[],
+    };
+  }
+
+  if (!appConfig.feishuAppId || !appConfig.feishuAppSecret) {
+    return {
+      status: "needs_config" as const,
+      payloadPath,
+      message: "FEISHU_APP_ID or FEISHU_APP_SECRET is not configured. Payload has been staged locally.",
       recordMappings: [] as FeishuRecordMapping[],
       postStates: buildStagedFeishuPostStateUpdates(posts, payloadPath),
       attachmentUploads: [] as FeishuAttachmentUpload[],
@@ -739,10 +758,27 @@ function getCliOutput(error: unknown, key: "stdout" | "stderr") {
   return typeof value === "string" ? sanitizeCliText(value) : undefined;
 }
 
-async function runFeishuCli(args: string[], options: { timeout: number; maxBuffer: number; env: NodeJS.ProcessEnv }) {
+export async function ensureConfiguredFeishuCliIdentity(options: FeishuCliRunOptions) {
+  const invocation = resolveFeishuCliInvocation(appConfig.feishuCliBin);
+  try {
+    await ensureFeishuCliIdentity(
+      {
+        appId: appConfig.feishuAppId,
+        appSecret: appConfig.feishuAppSecret,
+        brand: appConfig.feishuBrand,
+      },
+      (identityArgs, input) => execFeishuCliWithInput(invocation, identityArgs, options, input),
+    );
+  } catch (error) {
+    throw sanitizeCliError(error);
+  }
+}
+
+async function runFeishuCli(args: string[], options: FeishuCliRunOptions) {
   const invocation = resolveFeishuCliInvocation(appConfig.feishuCliBin);
   return runWithConcurrencyPool("feishu", async () => {
     try {
+      await ensureConfiguredFeishuCliIdentity(options);
       return await execFileAsync(invocation.file, [...invocation.argsPrefix, ...args], {
         timeout: options.timeout,
         windowsHide: true,
@@ -752,6 +788,46 @@ async function runFeishuCli(args: string[], options: { timeout: number; maxBuffe
     } catch (error) {
       throw sanitizeCliError(error);
     }
+  });
+}
+
+function execFeishuCliWithInput(
+  invocation: CliInvocation,
+  args: string[],
+  options: FeishuCliRunOptions,
+  input: string,
+) {
+  return new Promise<{ stdout: string; stderr: string }>((resolve, reject) => {
+    const child = execFile(
+      invocation.file,
+      [...invocation.argsPrefix, ...args],
+      {
+        timeout: options.timeout,
+        windowsHide: true,
+        maxBuffer: options.maxBuffer,
+        env: options.env,
+        encoding: "utf8",
+      },
+      (error, stdout, stderr) => {
+        if (error) {
+          const failure = error as Error & { stdout?: string; stderr?: string };
+          failure.stdout = stdout;
+          failure.stderr = stderr;
+          reject(failure);
+          return;
+        }
+        resolve({ stdout, stderr });
+      },
+    );
+    if (!child.stdin) {
+      child.kill();
+      reject(new Error("Feishu CLI stdin is unavailable."));
+      return;
+    }
+    child.stdin.on("error", (error: NodeJS.ErrnoException) => {
+      if (error.code !== "EPIPE") reject(error);
+    });
+    child.stdin.end(input);
   });
 }
 
@@ -771,6 +847,9 @@ function sanitizeCliText(value: string) {
   let next = value.replace(/Bearer\s+[A-Za-z0-9._~+/=-]+/g, "Bearer ***").replace(/(--base-token\s+)(\S+)/gi, "$1***");
   if (appConfig.feishuBitableAppToken) {
     next = next.replaceAll(appConfig.feishuBitableAppToken, "***");
+  }
+  if (appConfig.feishuAppSecret) {
+    next = next.replaceAll(appConfig.feishuAppSecret, "***");
   }
   return next;
 }

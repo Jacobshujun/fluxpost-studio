@@ -7,7 +7,7 @@ import { promisify } from "node:util";
 import { compactError, recordExecutionLog } from "./activity-log";
 import { appConfig } from "./config";
 import { runWithConcurrencyPool } from "./concurrency";
-import { resolveFeishuCliInvocation } from "./feishu-cli";
+import { ensureConfiguredFeishuCliIdentity, resolveFeishuCliInvocation } from "./feishu-cli";
 import { cacheCrawledMedia } from "./media-cache";
 import type { NormalizedSourceItem, SimpleRunFeishuResult } from "./types";
 
@@ -61,8 +61,14 @@ export async function importFeishuContentByTaskNumbers(taskNumbers: string[], op
   const startedAt = Date.now();
   const normalizedTaskNumbers = normalizeTaskNumbers(taskNumbers);
   if (!normalizedTaskNumbers.length) throw new Error("At least one Feishu task number is required");
-  if (!appConfig.feishuCliBin || !appConfig.feishuContentImportBaseToken || !appConfig.feishuContentImportTableId) {
-    throw new Error("Feishu content import needs FEISHU_CLI_BIN and Feishu Base table config.");
+  if (
+    !appConfig.feishuCliBin ||
+    !appConfig.feishuAppId ||
+    !appConfig.feishuAppSecret ||
+    !appConfig.feishuContentImportBaseToken ||
+    !appConfig.feishuContentImportTableId
+  ) {
+    throw new Error("Feishu content import needs app identity, FEISHU_CLI_BIN, and Feishu Base table config.");
   }
 
   const fieldMap = getFeishuContentImportFieldMap();
@@ -284,6 +290,11 @@ async function runFeishuContentCli(args: string[], timeout: number): Promise<Cli
   const invocation = resolveFeishuCliInvocation(appConfig.feishuCliBin);
   return runWithConcurrencyPool("feishu", async () => {
     try {
+      await ensureConfiguredFeishuCliIdentity({
+        timeout,
+        maxBuffer: 1024 * 1024 * 8,
+        env: buildCliEnv(process.env),
+      });
       const result = await execFileAsync(invocation.file, [...invocation.argsPrefix, ...args], {
         timeout,
         windowsHide: true,

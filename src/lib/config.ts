@@ -73,6 +73,9 @@ function readAppConfig() {
   comfyUiKleinScheduler: process.env.COMFYUI_KLEIN_KSAMPLER_SCHEDULER || "",
   comfyUiKleinDenoise: optionalNumber(process.env.COMFYUI_KLEIN_KSAMPLER_DENOISE),
   comfyUiKleinFailurePolicy: normalizeKleinFailurePolicy(process.env.COMFYUI_KLEIN_FAILURE_POLICY || "fallback_source"),
+  feishuAppId: process.env.FEISHU_APP_ID || "",
+  feishuAppSecret: process.env.FEISHU_APP_SECRET || "",
+  feishuBrand: normalizeFeishuBrand(process.env.FEISHU_BRAND || "feishu"),
   feishuCliBin: process.env.FEISHU_CLI_BIN || "",
   feishuCliArgs: process.env.FEISHU_CLI_BITABLE_ARGS || "",
   feishuBitableAppToken: process.env.FEISHU_BITABLE_APP_TOKEN || "",
@@ -120,12 +123,26 @@ export function getConfigStatus(): ConfigStatus {
     openaiConfigured: Boolean(appConfig.openaiApiKey),
     openaiImageConfigured: Boolean(appConfig.openaiImageApiKey || (appConfig.openaiImageBackupBaseUrl && appConfig.openaiImageBackupApiKey)),
     openaiImageBackupConfigured: Boolean(appConfig.openaiImageBackupBaseUrl && appConfig.openaiImageBackupApiKey),
-    feishuConfigured: Boolean(appConfig.feishuCliBin && appConfig.feishuBitableAppToken && appConfig.feishuBitableTableId),
+    feishuConfigured: Boolean(
+      appConfig.feishuCliBin &&
+        appConfig.feishuAppId &&
+        appConfig.feishuAppSecret &&
+        appConfig.feishuBitableAppToken &&
+        appConfig.feishuBitableTableId,
+    ),
     feishuContentImportConfigured: Boolean(
-      appConfig.feishuCliBin && appConfig.feishuContentImportBaseToken && appConfig.feishuContentImportTableId,
+      appConfig.feishuCliBin &&
+        appConfig.feishuAppId &&
+        appConfig.feishuAppSecret &&
+        appConfig.feishuContentImportBaseToken &&
+        appConfig.feishuContentImportTableId,
     ),
     feishuDistributionCheckConfigured: Boolean(
-      appConfig.feishuCliBin && appConfig.feishuDistributionCheckBaseToken && appConfig.feishuDistributionCheckTableId,
+      appConfig.feishuCliBin &&
+        appConfig.feishuAppId &&
+        appConfig.feishuAppSecret &&
+        appConfig.feishuDistributionCheckBaseToken &&
+        appConfig.feishuDistributionCheckTableId,
     ),
     databaseBackend: database.backend,
     postgresConfigured: database.postgresConfigured,
@@ -230,6 +247,10 @@ function normalizeKleinFailurePolicy(value: string) {
   const policy = value.trim().toLowerCase();
   if (policy === "fail") return "fail";
   return "fallback_source";
+}
+
+function normalizeFeishuBrand(value: string): "feishu" | "lark" {
+  return value.trim().toLowerCase() === "lark" ? "lark" : "feishu";
 }
 
 function numberOrDefault(value: string | undefined, fallback: number) {
@@ -392,6 +413,23 @@ const advancedConfigGroups: ConfigDefinitionGroup[] = [
       configField("COMFYUI_KLEIN_FAILURE_POLICY", "失败策略", "fallback_source 失败回退源图；fail 直接失败。", "select", "comfyui", {
         options: ["fallback_source", "fail"],
         read: () => appConfig.comfyUiKleinFailurePolicy,
+      }),
+    ],
+  },
+  {
+    id: "feishu-identity",
+    title: "飞书应用身份",
+    description: "配置飞书开放平台应用，并在发布前自动初始化 lark-cli Bot 身份。",
+    fields: [
+      configField("FEISHU_APP_ID", "飞书 App ID", "飞书开放平台应用的 App ID。", "text", "feishu", {
+        read: () => appConfig.feishuAppId,
+      }),
+      configField("FEISHU_APP_SECRET", "飞书 App Secret", "仅通过 stdin 传递给 lark-cli，页面不会回显。", "secret", "feishu", {
+        configured: () => Boolean(appConfig.feishuAppSecret),
+      }),
+      configField("FEISHU_BRAND", "飞书品牌", "中国版使用 feishu，国际版使用 lark。", "select", "feishu", {
+        options: ["feishu", "lark"],
+        read: () => appConfig.feishuBrand,
       }),
     ],
   },

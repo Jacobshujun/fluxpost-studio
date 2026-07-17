@@ -64,6 +64,7 @@ export function compactError(error: unknown) {
     .replace(/Bearer\s+[A-Za-z0-9._~+/=-]+/g, "Bearer ***")
     .replace(/(--base-token\s+)(\S+)/gi, "$1***")
     .replace(/(FEISHU_BITABLE_APP_TOKEN=)(\S+)/gi, "$1***")
+    .replace(/(FEISHU_APP_SECRET=)(\S+)/gi, "$1***")
     .slice(0, 420);
 }
 

@@ -12,7 +12,7 @@ import {
   saveDistributionCheckJobToDb,
 } from "./database";
 import { defaultDistributionCheckPrompt } from "./distribution-check-prompt";
-import { resolveFeishuCliInvocation } from "./feishu-cli";
+import { ensureConfiguredFeishuCliIdentity, resolveFeishuCliInvocation } from "./feishu-cli";
 import { filterWorkspaceOwnedRecords, type WorkspaceAccessActor } from "./workspace-ownership";
 import type {
   DistributionCheckItemResult,
@@ -516,8 +516,14 @@ async function saveTerminalDistributionCheckJob(job: DistributionCheckJob, patch
 }
 
 function assertDistributionConfigured() {
-  if (!appConfig.feishuCliBin || !appConfig.feishuDistributionCheckBaseToken || !appConfig.feishuDistributionCheckTableId) {
-    throw new Error("Distribution check needs FEISHU_CLI_BIN and Feishu Base table config.");
+  if (
+    !appConfig.feishuCliBin ||
+    !appConfig.feishuAppId ||
+    !appConfig.feishuAppSecret ||
+    !appConfig.feishuDistributionCheckBaseToken ||
+    !appConfig.feishuDistributionCheckTableId
+  ) {
+    throw new Error("Distribution check needs app identity, FEISHU_CLI_BIN, and Feishu Base table config.");
   }
 }
 
@@ -939,6 +945,11 @@ async function runFeishuDistributionCli(args: string[], timeout: number, pool: E
     let lastError: Error | undefined;
     for (let attempt = 1; attempt <= feishuDistributionCliMaxAttempts; attempt += 1) {
       try {
+        await ensureConfiguredFeishuCliIdentity({
+          timeout,
+          maxBuffer: 1024 * 1024 * 8,
+          env: buildCliEnv(process.env),
+        });
         const result = await execFileAsync(invocation.file, [...invocation.argsPrefix, ...args], {
           timeout,
           windowsHide: true,

@@ -2,7 +2,7 @@ import { execFile } from "node:child_process";
 import { promisify } from "node:util";
 import { appConfig } from "./config";
 import { runWithConcurrencyPool } from "./concurrency";
-import { resolveFeishuCliInvocation } from "./feishu-cli";
+import { ensureConfiguredFeishuCliIdentity, resolveFeishuCliInvocation } from "./feishu-cli";
 
 const execFileAsync = promisify(execFile);
 
@@ -31,7 +31,13 @@ export type FeishuVehicleNormalization = {
 
 export async function listFeishuVehicleOptions(): Promise<FeishuVehicleOptionsResponse> {
   const fieldName = getPublishVehicleFieldName();
-  if (!appConfig.feishuCliBin || !appConfig.feishuBitableAppToken || !appConfig.feishuBitableTableId) {
+  if (
+    !appConfig.feishuCliBin ||
+    !appConfig.feishuAppId ||
+    !appConfig.feishuAppSecret ||
+    !appConfig.feishuBitableAppToken ||
+    !appConfig.feishuBitableTableId
+  ) {
     return {
       options: [],
       fieldName,
@@ -121,6 +127,11 @@ async function runFeishuFieldCli(args: string[], timeout: number): Promise<CliRe
   const invocation = resolveFeishuCliInvocation(appConfig.feishuCliBin);
   return runWithConcurrencyPool("feishu", async () => {
     try {
+      await ensureConfiguredFeishuCliIdentity({
+        timeout,
+        maxBuffer: 1024 * 1024 * 8,
+        env: buildCliEnv(process.env),
+      });
       const result = await execFileAsync(invocation.file, [...invocation.argsPrefix, ...args], {
         timeout,
         windowsHide: true,

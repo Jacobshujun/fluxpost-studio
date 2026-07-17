@@ -209,6 +209,7 @@ Invoke-NativeStep "Parse project JSON" $nodePath @(
 Invoke-NativeStep "PostgreSQL schema check" $nodePath @(".trellis/verification/postgres_schema_check.mjs")
 Invoke-NativeStep "Workspace accounts check" $nodePath @(".trellis/verification/workspace_accounts_check.mjs")
 Invoke-NativeStep "Advanced config admin boundary check" $nodePath @(".trellis/verification/advanced_config_check.mjs")
+Invoke-NativeStep "Feishu CLI identity auto-init check" $nodePath @(".trellis/verification/feishu_cli_identity_check.mjs")
 Invoke-NativeStep "Ubuntu VPS deployment check" $nodePath @(".trellis/verification/vps_deployment_check.mjs")
 Invoke-NativeStep "Execution log append check" $nodePath @(".trellis/verification/execution_log_append_check.mjs")
 Invoke-NativeStep "Keyword relevance check" $nodePath @(".trellis/verification/keyword_relevance_check.mjs")
