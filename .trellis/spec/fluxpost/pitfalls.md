@@ -119,6 +119,7 @@ Last updated: 2026-07-20
 ## TOS Runtime Media Pitfalls
 
 - `@volcengine/tos-sdk@2.9.1` currently pulls Axios versions with published high-severity advisories and no fixed SDK release. Keep TOS endpoint/public-base values admin-controlled, force SDK HTTPS with certificate verification, disable proxy use and SDK retries, redact AK/SK from errors, and re-evaluate the dependency when Volcengine publishes an updated SDK.
+- After adding a dependency on Windows, do not assume a local build proves `package-lock.json` is Linux-complete. npm can omit Linux optional peer entries such as top-level `@emnapi/core` and `@emnapi/runtime`; regenerate the lock with the deployment Node image and run Linux `npm ci --dry-run` before pushing a dependency-changing deployment.
 - This Windows development environment has been observed with `NODE_TLS_REJECT_UNAUTHORIZED=0`. That setting weakens TLS globally and must not be copied to the VPS; verify it is unset in the FluxPost container before enabling TOS.
 - A successful PUT alone is insufficient. Accept a media URL only after HEAD returns the expected byte length and a non-empty ETag; otherwise the only recoverable copy must remain in `data/tos-pending`.
 - Do not solve an anonymous GET failure by changing the whole Bucket ACL. The production contract requires object-level `public-read`; keep `TOS_ENABLED=false` until the admin probe passes.
