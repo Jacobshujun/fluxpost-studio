@@ -1,6 +1,6 @@
 # Pitfalls
 
-Last updated: 2026-07-14
+Last updated: 2026-07-20
 
 ## Known Project Pitfalls
 
@@ -115,6 +115,14 @@ Last updated: 2026-07-14
 - Image provider requests must not be submitted with an empty prompt. No-media source items can produce `imageTasks=[]`; if the text model also returns an empty `imagePrompt`, the app must use the simple-mode fallback prompt or skip locally instead of submitting the provider request.
 - Viral imitation image tasks are not ordinary best-effort source-image tasks. If the run is imitating source images, each selected viral image task must keep `referencePolicy="strict_dual_reference"` and reach `/images/edits` with exactly two prepared reference files: the selected local vehicle material and the viral source style image. The final per-task prompt wrapper must also preserve the Reference image 1/2 roles; do not let generic single-reference wording make the model ignore the viral style reference. Do not allow timeout/5xx/429/upload failures to fall back to the local vehicle image as a successful generated image; save the draft with `needs_review` diagnostics and skip automatic Feishu publishing so the review desk can make the decision.
 - Default baseline verification must not submit real GPT-Image-2 generation tasks. Use static request-shape checks, local config/status checks, and the project baseline unless the user explicitly asks for a paid/live generation test.
+
+## TOS Runtime Media Pitfalls
+
+- `@volcengine/tos-sdk@2.9.1` currently pulls Axios versions with published high-severity advisories and no fixed SDK release. Keep TOS endpoint/public-base values admin-controlled, force SDK HTTPS with certificate verification, disable proxy use and SDK retries, redact AK/SK from errors, and re-evaluate the dependency when Volcengine publishes an updated SDK.
+- This Windows development environment has been observed with `NODE_TLS_REJECT_UNAUTHORIZED=0`. That setting weakens TLS globally and must not be copied to the VPS; verify it is unset in the FluxPost container before enabling TOS.
+- A successful PUT alone is insufficient. Accept a media URL only after HEAD returns the expected byte length and a non-empty ETag; otherwise the only recoverable copy must remain in `data/tos-pending`.
+- Do not solve an anonymous GET failure by changing the whole Bucket ACL. The production contract requires object-level `public-read`; keep `TOS_ENABLED=false` until the admin probe passes.
+- Reconciliation uploads retained bytes but intentionally does not replay or mark the original crawl/generation/import task successful. An operator must review and retry the business workflow after storage recovery.
 
 ## Verification Pitfalls
 

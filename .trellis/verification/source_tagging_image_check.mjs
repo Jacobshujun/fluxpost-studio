@@ -185,18 +185,17 @@ async function fetchMock(url, options = {}) {
 const modelImageInput = loadTsModule(
   "src/lib/model-image-input.ts",
   {
-    "node:fs/promises": {
-      readFile: async (filePath) => {
-        localReads.push(filePath);
-        return String(filePath).includes("image-1.jpg") ? heicBytes : pngBytes;
-      },
-    },
-    "node:path": path,
     "./image-format": imageFormat,
     "./media-request": {
       buildMediaRequestHeaders: () => ({
         Referer: "https://cdn.example.invalid/",
       }),
+    },
+    "./runtime-media-materializer": {
+      readRuntimeMedia: async (url) => {
+        localReads.push(url);
+        return String(url).includes("image-1.jpg") ? heicBytes : pngBytes;
+      },
     },
   },
   {

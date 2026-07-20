@@ -1,4 +1,5 @@
 import { filterAlignedDownloadedImages, normalizeContentImageUrls } from "./media-url-filter";
+import { isManagedRuntimeMediaUrl } from "./runtime-media-storage";
 import type { NormalizedSourceItem, SourceMediaCacheStatus } from "./types";
 
 export function buildMediaCacheStatus(item: NormalizedSourceItem, updatedAt?: string): SourceMediaCacheStatus {
@@ -6,7 +7,7 @@ export function buildMediaCacheStatus(item: NormalizedSourceItem, updatedAt?: st
   const alignedLocalImages = sourceImages.length
     ? filterAlignedDownloadedImages(item.downloadedImages, sourceImages) || []
     : item.downloadedImages || [];
-  const localImages = Array.from(new Set(alignedLocalImages.filter(isLocalAppMediaUrl)));
+  const localImages = Array.from(new Set(alignedLocalImages.filter(isDurableCachedMediaUrl)));
   const videoPresent = Boolean(
     item.videoUrl ||
       item.downloadedVideoUrl ||
@@ -14,8 +15,8 @@ export function buildMediaCacheStatus(item: NormalizedSourceItem, updatedAt?: st
       item.mediaType === "video" ||
       item.mediaType === "mixed",
   );
-  const localVideo = Boolean(item.downloadedVideoUrl && isLocalAppMediaUrl(item.downloadedVideoUrl));
-  const frameCount = item.videoFrames?.filter((frame) => isLocalAppMediaUrl(frame.url)).length || 0;
+  const localVideo = Boolean(item.downloadedVideoUrl && isDurableCachedMediaUrl(item.downloadedVideoUrl));
+  const frameCount = item.videoFrames?.filter((frame) => isDurableCachedMediaUrl(frame.url)).length || 0;
   const errorCount = item.downloadErrors?.length || 0;
   const remoteImages = Math.max(sourceImages.length - localImages.length, 0);
   const hasMedia = sourceImages.length > 0 || videoPresent;
@@ -65,4 +66,8 @@ function resolveMediaCacheState({
 
 function isLocalAppMediaUrl(url?: string) {
   return Boolean(url && (url.startsWith("/media/") || url.startsWith("/generated/")));
+}
+
+function isDurableCachedMediaUrl(url?: string) {
+  return isLocalAppMediaUrl(url) || isManagedRuntimeMediaUrl(url);
 }

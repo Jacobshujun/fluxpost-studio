@@ -1,7 +1,6 @@
-import { readFile } from "node:fs/promises";
-import path from "node:path";
 import { normalizeModelSupportedImageMime, sniffModelSupportedImageMime } from "./image-format";
 import { buildMediaRequestHeaders } from "./media-request";
+import { readRuntimeMedia } from "./runtime-media-materializer";
 
 const maxInlineImageBytes = 7 * 1024 * 1024;
 const remoteImageFetchTimeoutMs = 20_000;
@@ -11,9 +10,7 @@ export async function toModelImageUrl(url: string) {
   if (/^https?:\/\//i.test(url)) return remoteImageToDataUrl(url);
   if (!isAppLocalMediaUrl(url)) return undefined;
 
-  const relative = url.replace(/^\/+/, "");
-  const filePath = path.join(/*turbopackIgnore: true*/ process.cwd(), "public", relative);
-  const buffer = await readFile(filePath);
+  const buffer = await readRuntimeMedia(url, maxInlineImageBytes);
   if (buffer.length > maxInlineImageBytes) {
     throw new Error(`Visual asset is too large for inline model input: ${url}`);
   }

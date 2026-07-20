@@ -1,6 +1,6 @@
 # Architecture Rules
 
-Last updated: 2026-06-24
+Last updated: 2026-07-20
 
 ## Module Boundaries
 
@@ -205,6 +205,76 @@ return NextResponse.json({ status: getConfigStatus(), advanced: getAdvancedConfi
 - Routine install, deploy, domain, diagnostic, and rollback commands must preserve all named volumes. Never add `docker compose down -v` or an equivalent volume deletion path.
 - Bootstrap must not change SSH daemon settings, host firewall rules, cloud security groups, or DNS. Those are operator/provider boundaries.
 - Do not add a new deployment path, process manager, service file, or server target without updating `project_brief.md`, `decisions.md`, `verification.md`, and `handoff.md`.
+
+## Scenario: Volcengine TOS Runtime Media Storage
+
+### 1. Scope / Trigger
+
+- Applies when changing runtime image/video/frame production, media consumers that require local files, advanced TOS configuration, pending-upload reconciliation, or the `82.158.226.10` deployment.
+- Historical local URLs and administrator-managed external material directories stay outside this migration; the storage backend is selected only when a new runtime media file is persisted.
+
+### 2. Signatures
+
+- `persistRuntimeMedia({ filePath, publicPath, contentType?, overwrite? }): Promise<string>` persists a staged file and returns either the existing local public path or an absolute TOS URL.
+- `findExistingRuntimeMedia(publicPath): Promise<string | undefined>` reuses a verified same-key/same-length object when TOS is enabled.
+- `materializeRuntimeMedia(url, { maxBytes, kind }): Promise<{ filePath, temporary, cleanup }>` resolves local app media or downloads HTTP(S) media for file-only consumers.
+- `POST /api/config/tos-check` is admin-only and returns `TosStorageProbeResult` after upload, HEAD, anonymous GET, Range, and cleanup checks.
+- `POST /api/config/tos-reconcile` is admin-only and returns `{ uploaded: number, failed: number, errors: string[] }`.
+- `GET /api/config` adds only `tosConfigured: boolean` and `tosEnabled: boolean`; advanced `PATCH /api/config` accepts only the allow-listed TOS keys.
+
+### 3. Contracts
+
+- Config keys are `TOS_ENABLED`, `TOS_ACCESS_KEY_ID`, `TOS_ACCESS_KEY_SECRET`, `TOS_BUCKET`, `TOS_ENDPOINT`, `TOS_REGION`, `TOS_PUBLIC_BASE_URL`, and `TOS_OBJECT_PREFIX`. AK/SK are `kind: "secret"` and never returned as values or logged.
+- `TOS_ENABLED=false` preserves the complete local-storage path. Enabling TOS requires all credential, bucket, endpoint, region, and public-base fields; the deployment prefix is `fluxpost/flux-lightmoment` and region is `cn-guangzhou`.
+- Object keys are `<normalized-prefix>/<logical-public-path>`. Successful URLs use the configured HTTPS public base and append the normalized HEAD ETag as `?v=`.
+- Uploads use object-level `public-read`, at most three application attempts, and SDK retries disabled. A successful PUT is not accepted until HEAD reports the expected length and a non-empty ETag.
+- Upload success deletes the staged file. Final failure moves it to `data/tos-pending/<object-key>`, records only redacted diagnostics, throws, and must not persist an unverified business URL.
+- Reconciliation is idempotent: it uploads pending keys without overwrite, deletes successfully verified pending files, reports failures, and does not alter the original business task state.
+- Video processing materializes the complete source on the VPS before frame extraction/transcription; only the source video and newly selected final frames are persisted. Historical frames are not uploaded during ordinary cache reads. Temporary HTTP downloads, intermediate frames, audio, and Feishu attachment copies must be cleaned in `finally` paths.
+- `GeneratedPost.imageUrls`, `videoUrls`, `downloadedImages`, `downloadedVideoUrl`, and frame URLs remain strings and may contain either historical relative URLs or absolute TOS HTTP(S) URLs.
+
+### 4. Validation & Error Matrix
+
+- Enabled with incomplete TOS config -> fail explicitly before upload; do not fall back to local storage.
+- Empty staged file, unsafe path segment, empty bucket/key, invalid public base -> fail before writing a business URL.
+- PUT transport error, HTTP 408/429/5xx, or retryable network error -> retry up to the bounded attempt count; retain pending file after exhaustion.
+- HEAD missing length/ETag or length mismatch -> treat upload as failed and retain pending file.
+- Existing object has the expected length and overwrite is false -> reuse its ETag URL without PUT; force refresh sets overwrite true.
+- Media materialization receives unsupported non-local/non-HTTP input, non-2xx response, empty body, or a byte-limit violation -> fail and remove any temporary directory.
+- Missing sign-in on TOS admin routes -> HTTP 401; signed-in non-admin -> HTTP 403; failed live probe -> HTTP 502. Probe responses contain boolean check fields only; detailed errors stay in server execution logs.
+
+### 5. Good/Base/Bad Cases
+
+- Good: a newly generated image uploads, HEAD length and ETag match, the local staging file is removed, and the post stores `https://<public-base>/fluxpost/flux-lightmoment/generated/...?...`.
+- Base: `TOS_ENABLED=false`; the same producer returns `/generated/...` or `/media/...`, preserving historical behavior and local consumers.
+- Bad: TOS upload fails and code silently returns the local URL or deletes the only staged copy; the correct behavior is to retain it under `data/tos-pending` and fail the operation.
+
+### 6. Tests Required
+
+- `.trellis/verification/tos_runtime_media_check.mjs` must assert disabled behavior, key/URL mapping, managed-cache recognition, retries, same-size reuse, overwrite, HEAD mismatch failure, pending retention, successful cleanup, no ordinary historical-frame migration, producer/consumer wiring, route authorization, boolean-only probe responses, and secret masking.
+- Advanced-config checks must assert all eight keys are allow-listed while AK/SK values never appear in public or advanced responses.
+- The default baseline remains offline. A manual live probe may use isolated credentials to assert PUT, HEAD, anonymous GET, video Range `206`, and DELETE without retaining or printing secrets.
+- Deployment verification must prove `NODE_TLS_REJECT_UNAUTHORIZED` is unset, start disabled, pass the admin probe before enabling, and preserve historical local media plus unrelated VPS services.
+
+### 7. Wrong vs Correct
+
+#### Wrong
+
+```typescript
+try {
+  return await uploadToTos(filePath);
+} catch {
+  return publicPath;
+}
+```
+
+#### Correct
+
+```typescript
+const url = await persistRuntimeMedia({ filePath, publicPath, contentType });
+// The helper returns a verified URL or throws after retaining the staged file.
+return url;
+```
 
 ## Trellis Rules
 

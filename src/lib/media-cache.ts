@@ -9,6 +9,8 @@ import { concurrencyConfig, mapWithConcurrency } from "./concurrency";
 import { sniffImageFormat } from "./image-format";
 import { buildMediaCacheStatus } from "./media-cache-status";
 import { buildMediaRequestHeaders } from "./media-request";
+import { materializeRuntimeMedia } from "./runtime-media-materializer";
+import { findExistingRuntimeMedia, isManagedRuntimeMediaUrl, persistRuntimeMedia } from "./runtime-media-storage";
 import { cleanCachedSourceImage, shouldCleanCachedSourceImage } from "./source-image-cleanup";
 import { isVideoFrameAiReviewConfigured, reviewVideoFramesWithAi } from "./video-frame-review";
 import { isArkVideoTranscriptionConfigured, mergeTranscriptIntoContentText, transcribeVideoContent } from "./video-transcription";
@@ -40,7 +42,7 @@ export async function cacheCrawledMedia(items: NormalizedSourceItem[], options: 
 
     const downloadedImages: string[] = [];
     for (const [index, imageUrl] of item.images.slice(0, maxImagesToCache).entries()) {
-      if (isLocalAppMediaUrl(imageUrl)) {
+      if (isLocalAppMediaUrl(imageUrl) || isManagedRuntimeMediaUrl(imageUrl)) {
         downloadedImages.push(imageUrl);
         continue;
       }
@@ -57,57 +59,89 @@ export async function cacheCrawledMedia(items: NormalizedSourceItem[], options: 
     }
 
     let downloadedVideoUrl = item.downloadedVideoUrl;
+    let videoNeedsPersistence = false;
     const shouldRefreshVideo = shouldRefreshVideoCacheForItem(item, options);
     if (shouldRefreshVideo) {
       const videoResult = await cacheRemoteVideoCandidates(item, itemDir, publicDir, { overwrite: options.forceVideoRefresh === true });
       downloadedVideoUrl = videoResult.downloadedVideoUrl || downloadedVideoUrl;
+      videoNeedsPersistence = Boolean(videoResult.downloadedVideoUrl && isLocalAppMediaUrl(videoResult.downloadedVideoUrl));
       downloadErrors.push(...videoResult.errors);
     } else if (!downloadedVideoUrl && item.videoUrl && isLocalAppMediaUrl(item.videoUrl)) {
       downloadedVideoUrl = item.videoUrl;
     } else if (!downloadedVideoUrl) {
       const videoResult = await cacheRemoteVideoCandidates(item, itemDir, publicDir);
       downloadedVideoUrl = videoResult.downloadedVideoUrl;
+      videoNeedsPersistence = Boolean(videoResult.downloadedVideoUrl && isLocalAppMediaUrl(videoResult.downloadedVideoUrl));
       downloadErrors.push(...videoResult.errors);
     }
 
     let videoFrames: VideoFrameAsset[] | undefined = item.videoFrames;
+    let videoFramesNeedPersistence = false;
     let videoTranscript: SourceVideoTranscript | undefined = item.videoTranscript;
     let contentText = item.contentText;
-    if (downloadedVideoUrl) {
+    const shouldExtractVideoFrames = !videoFrames?.length || (options.forceVideoRefresh === true && shouldRefreshVideo);
+    const shouldTranscribeVideo =
+      options.enableVideoTranscription === true && isArkVideoTranscriptionConfigured() && videoTranscript?.status !== "success";
+    if (downloadedVideoUrl && (shouldExtractVideoFrames || shouldTranscribeVideo)) {
+      const materializedVideo = await materializeRuntimeMedia(downloadedVideoUrl, { maxBytes: 150 * 1024 * 1024, kind: "video" });
       try {
-        const frames = await cacheVideoFrames(downloadedVideoUrl, itemDir, publicDir, item.id, { refresh: options.forceVideoRefresh === true && shouldRefreshVideo });
-        videoFrames = frames.length ? frames : videoFrames;
-      } catch (error) {
-        downloadErrors.push(`video-frames: ${error instanceof Error ? error.message : "extraction failed"}`);
-      }
-      if (options.enableVideoTranscription === true && isArkVideoTranscriptionConfigured() && videoTranscript?.status !== "success") {
-        try {
-          const videoPath = publicUrlToFilePath(downloadedVideoUrl);
-          if (!videoPath) throw new Error("downloaded video is not a local media URL");
-          videoTranscript = await transcribeVideoContent({
-            videoPath,
-            videoPublicUrl: downloadedVideoUrl,
-            sourceItemId: item.id,
-          });
-          if (videoTranscript.status === "success") {
-            contentText = mergeTranscriptIntoContentText(contentText, videoTranscript.text);
-          } else if (videoTranscript.error) {
-            downloadErrors.push(`video-transcript: ${videoTranscript.error}`);
+        if (shouldExtractVideoFrames) {
+          try {
+            const frames = await cacheVideoFrames(materializedVideo.filePath, itemDir, publicDir, item.id, {
+              refresh: options.forceVideoRefresh === true && shouldRefreshVideo,
+            });
+            if (frames.length) {
+              videoFrames = frames;
+              videoFramesNeedPersistence = true;
+            }
+          } catch (error) {
+            downloadErrors.push(`video-frames: ${error instanceof Error ? error.message : "extraction failed"}`);
           }
-        } catch (error) {
-          const message = error instanceof Error ? error.message : "transcription failed";
-          videoTranscript = {
-            status: "failed",
-            provider: "ark_video",
-            transcribedAt: new Date().toISOString(),
-            error: message,
-          };
-          downloadErrors.push(`video-transcript: ${message}`);
         }
+        if (shouldTranscribeVideo) {
+          try {
+            videoTranscript = await transcribeVideoContent({
+              videoPath: materializedVideo.filePath,
+              videoPublicUrl: downloadedVideoUrl,
+              sourceItemId: item.id,
+            });
+            if (videoTranscript.status === "success") {
+              contentText = mergeTranscriptIntoContentText(contentText, videoTranscript.text);
+            } else if (videoTranscript.error) {
+              downloadErrors.push(`video-transcript: ${videoTranscript.error}`);
+            }
+          } catch (error) {
+            const message = error instanceof Error ? error.message : "transcription failed";
+            videoTranscript = {
+              status: "failed",
+              provider: "ark_video",
+              transcribedAt: new Date().toISOString(),
+              error: message,
+            };
+            downloadErrors.push(`video-transcript: ${message}`);
+          }
+        }
+      } finally {
+        await materializedVideo.cleanup();
       }
     }
 
-    const selectedVideoFrames = selectBestVideoHighlightFrames(videoFrames);
+    let selectedVideoFrames = selectBestVideoHighlightFrames(videoFrames);
+    if (videoFramesNeedPersistence) {
+      selectedVideoFrames = await persistSelectedVideoFrames(selectedVideoFrames, options.forceVideoRefresh === true);
+    }
+    if (downloadedVideoUrl && videoNeedsPersistence) {
+      const videoPath = publicUrlToFilePath(downloadedVideoUrl);
+      if (!videoPath) throw new Error("Newly downloaded video staging file is missing.");
+      downloadedVideoUrl = await persistRuntimeMedia({
+        filePath: videoPath,
+        publicPath: downloadedVideoUrl,
+        overwrite: options.forceVideoRefresh === true,
+      });
+    }
+    if (videoFramesNeedPersistence && selectedVideoFrames.some((frame) => isManagedRuntimeMediaUrl(frame.url))) {
+      await rm(path.join(itemDir, "frames"), { recursive: true, force: true });
+    }
 
     const nextItem: NormalizedSourceItem = {
       ...item,
@@ -237,10 +271,18 @@ async function cacheRemoteMedia(
   const publicUrl = `${publicDir}/${hashedBasename}`;
 
   if (!options.overwrite) {
+    const existingObjectUrl = await findExistingRuntimeMedia(publicUrl);
+    if (existingObjectUrl) return existingObjectUrl;
+  }
+
+  if (!options.overwrite) {
     try {
       const existing = await stat(filePath);
       if (existing.size > 0) {
-        if (kind === "image") return ensureCachedSourceImage(filePath, publicUrl, options.sourceItem, false);
+        if (kind === "image") {
+          const readableUrl = await ensureCachedSourceImage(filePath, publicUrl, options.sourceItem, false);
+          return persistRuntimeMedia({ filePath, publicPath: readableUrl });
+        }
         return publicUrl;
       }
     } catch {
@@ -250,8 +292,27 @@ async function cacheRemoteMedia(
 
   await mkdir(itemDir, { recursive: true });
   await downloadRemoteFile(url, filePath, kind === "video" ? 120 * 1024 * 1024 : 12 * 1024 * 1024);
-  if (kind === "image") return ensureCachedSourceImage(filePath, publicUrl, options.sourceItem, true);
+  if (kind === "image") {
+    const readableUrl = await ensureCachedSourceImage(filePath, publicUrl, options.sourceItem, true);
+    return persistRuntimeMedia({ filePath, publicPath: readableUrl, overwrite: options.overwrite === true });
+  }
   return publicUrl;
+}
+
+async function persistSelectedVideoFrames(frames: VideoFrameAsset[], overwrite: boolean) {
+  const persisted: VideoFrameAsset[] = [];
+  for (const frame of frames) {
+    const framePath = publicUrlToFilePath(frame.url);
+    if (!framePath) {
+      persisted.push(frame);
+      continue;
+    }
+    persisted.push({
+      ...frame,
+      url: await persistRuntimeMedia({ filePath: framePath, publicPath: frame.url, contentType: "image/jpeg", overwrite }),
+    });
+  }
+  return persisted;
 }
 
 async function ensureCachedSourceImage(filePath: string, publicUrl: string, sourceItem?: NormalizedSourceItem, forceCleanup = false) {
@@ -299,15 +360,12 @@ async function transcodeImageToJpeg(filePath: string) {
 }
 
 async function cacheVideoFrames(
-  downloadedVideoUrl: string,
+  videoPath: string,
   itemDir: string,
   publicDir: string,
   sourceItemId?: string,
   options: { refresh?: boolean } = {},
 ) {
-  const videoPath = publicUrlToFilePath(downloadedVideoUrl);
-  if (!videoPath) return [];
-
   const videoStat = await stat(videoPath).catch(() => undefined);
   if (!videoStat?.size) return [];
 

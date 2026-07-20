@@ -57,6 +57,16 @@ const mediaCache = loadTsModule("src/lib/media-cache.ts", {
   "./media-request": {
     buildMediaRequestHeaders: () => ({}),
   },
+  "./runtime-media-materializer": {
+    materializeRuntimeMedia: async () => {
+      throw new Error("materializer should not run in fallback ordering checks");
+    },
+  },
+  "./runtime-media-storage": {
+    findExistingRuntimeMedia: async () => undefined,
+    isManagedRuntimeMediaUrl: () => false,
+    persistRuntimeMedia: async ({ publicPath }) => publicPath,
+  },
   "./source-image-cleanup": {
     cleanCachedSourceImage: async () => undefined,
     shouldCleanCachedSourceImage: () => false,

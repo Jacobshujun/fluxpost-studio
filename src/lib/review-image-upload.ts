@@ -2,6 +2,7 @@ import { randomUUID } from "node:crypto";
 import { mkdir, writeFile } from "node:fs/promises";
 import path from "node:path";
 import { sniffImageFormat } from "./image-format";
+import { persistRuntimeMedia } from "./runtime-media-storage";
 
 export type ReviewImageUploadResult = {
   imageUrl: string;
@@ -33,10 +34,16 @@ export async function saveReviewImageUpload(file: File): Promise<ReviewImageUplo
   await mkdir(uploadDir, { recursive: true });
 
   const fileName = `review-${Date.now()}-${randomUUID()}${format.extension}`;
-  await writeFile(path.join(uploadDir, fileName), buffer);
+  const filePath = path.join(uploadDir, fileName);
+  await writeFile(filePath, buffer);
+  const imageUrl = await persistRuntimeMedia({
+    filePath,
+    publicPath: `/generated/review-uploads/${fileName}`,
+    contentType: format.mimeType,
+  });
 
   return {
-    imageUrl: `/generated/review-uploads/${fileName}`,
+    imageUrl,
     bytes: buffer.length,
     mimeType: format.mimeType,
   };

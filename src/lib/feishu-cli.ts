@@ -9,7 +9,8 @@ import { recordExecutionLog } from "./activity-log";
 import { appConfig } from "./config";
 import { concurrencyConfig, mapWithConcurrency, runWithConcurrencyPool } from "./concurrency";
 import { ensureFeishuCliIdentity } from "./feishu-cli-identity";
-import { buildMediaRequestHeaders, isProxyableRemoteMediaUrl } from "./media-request";
+import { isProxyableRemoteMediaUrl } from "./media-request";
+import { materializeRuntimeMedia } from "./runtime-media-materializer";
 import type { FeishuPostPublishState, FeishuPublishJobSource, GeneratedPost } from "./types";
 
 const execFileAsync = promisify(execFile);
@@ -35,7 +36,12 @@ type FeishuNotificationResult = {
   stderr?: string;
 };
 
-type PreparedAttachmentFiles = Map<string, string[]>;
+type PreparedAttachmentSet = {
+  files: string[];
+  cleanup: () => Promise<void>;
+};
+
+type PreparedAttachmentFiles = Map<string, PreparedAttachmentSet>;
 
 type FeishuAttachmentUpload = {
   postId: string;
@@ -131,8 +137,9 @@ export async function publishPostsToFeishu(posts: GeneratedPost[], options: Publ
   const fieldMap = getBitableFieldMap();
   const useDefaultBaseCreate = !appConfig.feishuCliArgs.trim();
   const attachmentFiles =
-    useDefaultBaseCreate && fieldMap.imageUrls ? await prepareAttachmentFilesForPosts(posts) : new Map<string, string[]>();
+    useDefaultBaseCreate && fieldMap.imageUrls ? await prepareAttachmentFilesForPosts(posts) : new Map<string, PreparedAttachmentSet>();
 
+  try {
   const recordPayloadPaths: string[] = [];
   const stdoutParts: string[] = [];
   const stderrParts: string[] = [];
@@ -232,6 +239,9 @@ export async function publishPostsToFeishu(posts: GeneratedPost[], options: Publ
     stdout: stdoutParts.filter(Boolean).join("\n"),
     stderr: stderrParts.filter(Boolean).join("\n"),
   };
+  } finally {
+    await cleanupPreparedAttachmentFiles(attachmentFiles);
+  }
 }
 
 function chunkPosts<T>(items: T[], size: number) {
@@ -330,8 +340,10 @@ async function uploadGeneratedMediaToFeishu(
         },
       };
     }
-    const files = attachmentFiles.get(post.id) || (await resolvePostAttachmentFiles(post)).files;
-    if (!files.length) {
+    const prepared = attachmentFiles.get(post.id) || (await resolvePostAttachmentFiles(post));
+    const files = prepared.files;
+    try {
+      if (!files.length) {
       return {
         upload: null,
         failure: {
@@ -341,8 +353,8 @@ async function uploadGeneratedMediaToFeishu(
           error: `Post ${post.id} has media URLs but no local files that can be uploaded to Feishu attachments.`,
         },
       };
-    }
-    if (files.length > 50) {
+      }
+      if (files.length > 50) {
       return {
         upload: null,
         failure: {
@@ -352,9 +364,9 @@ async function uploadGeneratedMediaToFeishu(
           error: `Post ${post.id} has ${files.length} media files; Feishu attachment upload supports at most 50 files per cell.`,
         },
       };
-    }
+      }
 
-    if (post.feishu?.recordId === recordId && post.feishu.attachmentStatus === "uploaded" && post.feishu.attachmentFileCount === files.length) {
+      if (post.feishu?.recordId === recordId && post.feishu.attachmentStatus === "uploaded" && post.feishu.attachmentFileCount === files.length) {
       return {
         upload: {
           postId: post.id,
@@ -366,9 +378,9 @@ async function uploadGeneratedMediaToFeishu(
         },
         failure: null,
       };
-    }
+      }
 
-    const args = [
+      const args = [
       "base",
       "+record-upload-attachment",
       "--as",
@@ -384,13 +396,13 @@ async function uploadGeneratedMediaToFeishu(
       ...files.flatMap((file) => ["--file", file]),
     ];
 
-    try {
-      const result = await runFeishuCli(args, {
+      try {
+        const result = await runFeishuCli(args, {
         timeout: 300_000,
         maxBuffer: 1024 * 1024 * 8,
         env: buildCliEnv(process.env),
       });
-      return {
+        return {
         upload: {
           postId: post.id,
           recordId,
@@ -401,8 +413,8 @@ async function uploadGeneratedMediaToFeishu(
         },
         failure: null,
       };
-    } catch (error) {
-      return {
+      } catch (error) {
+        return {
         upload: null,
         failure: {
           postId: post.id,
@@ -412,7 +424,10 @@ async function uploadGeneratedMediaToFeishu(
           stdout: getCliOutput(error, "stdout"),
           stderr: getCliOutput(error, "stderr"),
         },
-      };
+        };
+      }
+    } finally {
+      await prepared.cleanup();
     }
   });
 
@@ -508,32 +523,45 @@ function formatAttachmentFailureMessage(failures: FeishuAttachmentFailure[]) {
 
 async function prepareAttachmentFilesForPosts(posts: GeneratedPost[]): Promise<PreparedAttachmentFiles> {
   const attachments: PreparedAttachmentFiles = new Map();
-  const prepared = await mapWithConcurrency(posts, concurrencyConfig.media, async (post) => {
-    const { files, failures } = await resolvePostAttachmentFiles(post);
-    if (failures.length) {
-      throw new Error(
-        `Post ${post.id} has media URLs that could not be prepared for Feishu attachments: ${failures
-          .slice(0, 5)
-          .join("; ")}`,
-      );
+  const completedSets: PreparedAttachmentSet[] = [];
+  try {
+    const prepared = await mapWithConcurrency(posts, concurrencyConfig.media, async (post) => {
+      const attachmentSet = await resolvePostAttachmentFiles(post);
+      completedSets.push(attachmentSet);
+      const { files, failures } = attachmentSet;
+      if (failures.length) {
+        throw new Error(
+          `Post ${post.id} has media URLs that could not be prepared for Feishu attachments: ${failures
+            .slice(0, 5)
+            .join("; ")}`,
+        );
+      }
+      if (!files.length && countPostMedia(post)) {
+        throw new Error(`Post ${post.id} has media URLs but no local files that can be uploaded to Feishu attachments.`);
+      }
+      if (files.length > 50) {
+        throw new Error(`Post ${post.id} has ${files.length} media files; Feishu attachment upload supports at most 50 files per cell.`);
+      }
+      return { postId: post.id, attachmentSet };
+    });
+    for (const item of prepared) {
+      attachments.set(item.postId, item.attachmentSet);
     }
-    if (!files.length && countPostMedia(post)) {
-      throw new Error(`Post ${post.id} has media URLs but no local files that can be uploaded to Feishu attachments.`);
-    }
-    if (files.length > 50) {
-      throw new Error(`Post ${post.id} has ${files.length} media files; Feishu attachment upload supports at most 50 files per cell.`);
-    }
-    return { postId: post.id, files };
-  });
-  for (const item of prepared) {
-    attachments.set(item.postId, item.files);
+    return attachments;
+  } catch (error) {
+    await Promise.all(completedSets.map((item) => item.cleanup()));
+    throw error;
   }
-  return attachments;
+}
+
+async function cleanupPreparedAttachmentFiles(attachments: PreparedAttachmentFiles) {
+  await Promise.all(Array.from(attachments.values(), (item) => item.cleanup()));
 }
 
 async function resolvePostAttachmentFiles(post: GeneratedPost) {
   const files: string[] = [];
   const failures: string[] = [];
+  const cleanups: Array<() => Promise<void>> = [];
 
   for (const [index, imageUrl] of post.imageUrls.entries()) {
     const localFile = resolveLocalMediaFile(imageUrl, "image");
@@ -548,7 +576,9 @@ async function resolvePostAttachmentFiles(post: GeneratedPost) {
     }
 
     try {
-      files.push(await downloadRemoteImageForFeishu(post.id, imageUrl, index));
+      const materialized = await materializeRuntimeMedia(imageUrl, { maxBytes: maxFeishuAttachmentImageBytes, kind: "image" });
+      files.push(toCliRelativePath(materialized.filePath));
+      cleanups.push(materialized.cleanup);
     } catch (error) {
       failures.push(`image ${index + 1} download failed: ${error instanceof Error ? error.message : "unknown error"}`);
     }
@@ -563,55 +593,28 @@ async function resolvePostAttachmentFiles(post: GeneratedPost) {
       continue;
     }
 
-    videoFailures.push(`video ${index + 1} is not a local uploadable file`);
+    if (!isProxyableRemoteMediaUrl(url)) {
+      videoFailures.push(`video ${index + 1} is not a local file or HTTP(S) URL`);
+      continue;
+    }
+    try {
+      const materialized = await materializeRuntimeMedia(url, { maxBytes: 150 * 1024 * 1024, kind: "video" });
+      localVideoFiles.push(toCliRelativePath(materialized.filePath));
+      cleanups.push(materialized.cleanup);
+    } catch (error) {
+      videoFailures.push(`video ${index + 1} download failed: ${error instanceof Error ? error.message : "unknown error"}`);
+    }
   }
   files.push(...localVideoFiles);
   if (!localVideoFiles.length) failures.push(...videoFailures);
 
-  return { files, failures };
-}
-
-async function downloadRemoteImageForFeishu(postId: string, imageUrl: string, index: number) {
-  const response = await fetch(imageUrl, {
-    headers: buildMediaRequestHeaders(imageUrl),
-  });
-  if (!response.ok) {
-    throw new Error(`HTTP ${response.status}`);
-  }
-
-  const contentType = response.headers.get("content-type") || "";
-  const mimeType = contentType.split(";")[0]?.trim().toLowerCase() || "";
-  if (mimeType && !mimeType.startsWith("image/")) {
-    throw new Error(`remote file is not an image (${mimeType})`);
-  }
-
-  const buffer = Buffer.from(await response.arrayBuffer());
-  if (!buffer.length) {
-    throw new Error("remote image is empty");
-  }
-  if (buffer.length > maxFeishuAttachmentImageBytes) {
-    throw new Error(`remote image is too large (${buffer.length} bytes)`);
-  }
-
-  const folder = path.join(process.cwd(), "public", "generated", "feishu-attachments", sanitizePathSegment(postId));
-  await mkdir(folder, { recursive: true });
-  const fileName = `image-${String(index + 1).padStart(3, "0")}-${hashString(imageUrl)}.${resolveImageExtension(imageUrl, mimeType)}`;
-  const absolutePath = path.join(folder, fileName);
-  await writeFile(absolutePath, buffer);
-  return toCliRelativePath(absolutePath);
-}
-
-function resolveImageExtension(imageUrl: string, mimeType: string) {
-  if (mimeType === "image/jpeg" || mimeType === "image/jpg") return "jpg";
-  if (mimeType === "image/png") return "png";
-  if (mimeType === "image/webp") return "webp";
-  if (mimeType === "image/gif") return "gif";
-  const extension = path.extname(new URL(imageUrl).pathname).replace(".", "").toLowerCase();
-  return extension && /^[a-z0-9]{2,5}$/.test(extension) ? extension : "png";
-}
-
-function sanitizePathSegment(value: string) {
-  return value.replace(/[^a-zA-Z0-9_-]/g, "_").slice(0, 120) || "post";
+  return {
+    files,
+    failures,
+    cleanup: async () => {
+      await Promise.all(cleanups.map((cleanup) => cleanup()));
+    },
+  };
 }
 
 function hashString(value: string) {

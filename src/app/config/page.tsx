@@ -5,10 +5,12 @@ import Link from "next/link";
 import {
   ArrowLeft,
   Check,
+  Cloud,
   EyeOff,
   KeyRound,
   Loader2,
   RefreshCw,
+  RotateCcw,
   Save,
   ShieldCheck,
   SlidersHorizontal,
@@ -20,6 +22,7 @@ import type {
   AdvancedConfigPatchValue,
   AdvancedConfigSnapshot,
   ConfigStatus,
+  TosStorageProbeResult,
   WorkspaceAccount,
 } from "@/lib/types";
 
@@ -54,7 +57,7 @@ export default function AdvancedConfigPage() {
   const [draft, setDraft] = useState<Record<string, DraftField>>({});
   const [activeGroupId, setActiveGroupId] = useState("");
   const [message, setMessage] = useState("");
-  const [busy, setBusy] = useState<"load" | "save" | null>("load");
+  const [busy, setBusy] = useState<"load" | "save" | "tos-check" | "tos-reconcile" | null>("load");
 
   const fieldsByKey = useMemo(() => {
     const map = new Map<string, AdvancedConfigField>();
@@ -173,6 +176,36 @@ export default function AdvancedConfigPage() {
     }
   }
 
+  async function testTosStorage() {
+    setBusy("tos-check");
+    setMessage("");
+    try {
+      const res = await fetch("/api/config/tos-check", { method: "POST" });
+      const data = (await res.json()) as Partial<TosStorageProbeResult> & { error?: string };
+      if (!res.ok || !data.ok) throw new Error(data.error || "TOS 连接测试失败");
+      setMessage("TOS 上传、公共读取、视频 Range 和清理检查通过。");
+    } catch (error) {
+      setMessage(error instanceof Error ? error.message : "TOS 连接测试失败");
+    } finally {
+      setBusy(null);
+    }
+  }
+
+  async function reconcileTosStorage() {
+    setBusy("tos-reconcile");
+    setMessage("");
+    try {
+      const res = await fetch("/api/config/tos-reconcile", { method: "POST" });
+      const data = (await res.json()) as { uploaded?: number; failed?: number; error?: string };
+      if (!res.ok) throw new Error(data.error || "TOS 暂存重试失败");
+      setMessage(`TOS 暂存重试完成：上传 ${data.uploaded || 0} 个，失败 ${data.failed || 0} 个。`);
+    } catch (error) {
+      setMessage(error instanceof Error ? error.message : "TOS 暂存重试失败");
+    } finally {
+      setBusy(null);
+    }
+  }
+
   const adminReady = account?.role === "admin" && snapshot;
 
   return (
@@ -219,6 +252,7 @@ export default function AdvancedConfigPage() {
           <StatusTile label={config?.textModel || "文本模型"} ok={Boolean(config?.openaiConfigured)} />
           <StatusTile label={config?.imageModel || "图片模型"} ok={Boolean(config?.openaiImageConfigured)} />
           <StatusTile label="Feishu CLI" ok={Boolean(config?.feishuConfigured)} />
+          <StatusTile label="TOS" ok={Boolean(config?.tosConfigured && config?.tosEnabled)} />
           <StatusTile label="数据库" ok={Boolean(config?.postgresConfigured || config?.databaseBackend === "sqlite")} meta={config?.databaseBackend || "读取中"} />
         </section>
 
@@ -264,6 +298,30 @@ export default function AdvancedConfigPage() {
                   <h2 className="truncate text-2xl font-black text-white">{activeGroup?.title}</h2>
                   <p className="mt-1 text-sm leading-6 text-white/58">{activeGroup?.description}</p>
                 </div>
+                {activeGroup?.id === "tos" ? (
+                  <div className="flex flex-wrap items-center justify-end gap-2">
+                    <button
+                      className="soft-button inline-flex h-11 items-center justify-center gap-2 px-4 text-sm"
+                      type="button"
+                      onClick={reconcileTosStorage}
+                      disabled={Boolean(busy) || dirtyCount > 0 || !config?.tosConfigured}
+                      title="重试上传失败暂存"
+                    >
+                      {busy === "tos-reconcile" ? <Loader2 className="h-4 w-4 animate-spin" /> : <RotateCcw className="h-4 w-4" />}
+                      重试暂存
+                    </button>
+                    <button
+                      className="soft-button inline-flex h-11 items-center justify-center gap-2 px-4 text-sm"
+                      type="button"
+                      onClick={testTosStorage}
+                      disabled={Boolean(busy) || dirtyCount > 0 || !config?.tosConfigured}
+                      title={dirtyCount > 0 ? "请先保存 TOS 配置" : "测试 TOS 连接"}
+                    >
+                      {busy === "tos-check" ? <Loader2 className="h-4 w-4 animate-spin" /> : <Cloud className="h-4 w-4" />}
+                      测试连接
+                    </button>
+                  </div>
+                ) : null}
                 <button className="primary-button inline-flex h-11 items-center justify-center gap-2 px-4 text-sm" type="submit" disabled={busy === "save" || dirtyCount === 0}>
                   {busy === "save" ? <Loader2 className="h-4 w-4 animate-spin" /> : <Save className="h-4 w-4" />}
                   {dirtyCount ? `保存 ${dirtyCount} 项` : "无改动"}

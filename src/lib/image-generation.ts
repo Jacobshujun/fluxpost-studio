@@ -10,6 +10,7 @@ import { buildSingleImageTaskPrompt } from "./creation-controls";
 import { sniffImageFormat } from "./image-format";
 import { defaultImageGenerationSize, normalizeImageGenerationSize } from "./image-size-options";
 import { buildMediaRequestHeaders } from "./media-request";
+import { persistRuntimeMedia } from "./runtime-media-storage";
 import type { ImageGenerationOptions, SourceImageTask } from "./types";
 
 type ResponsesImageResponse = {
@@ -1194,7 +1195,7 @@ async function convertSourceImageToJpeg(inputFile: string, sourceUrl: string, so
     },
   });
 
-  return outputUrl;
+  return persistRuntimeMedia({ filePath: outputFile, publicPath: outputUrl, contentType: "image/jpeg" });
 }
 
 async function normalizeReferenceImageFile(filePath: string, requestedSize: ImageGenerationOptions["size"]) {
@@ -1432,7 +1433,13 @@ async function saveBase64Images(base64Images: string[]) {
         fileName,
       },
     });
-    imageUrls.push(`/generated/${fileName}`);
+    imageUrls.push(
+      await persistRuntimeMedia({
+        filePath,
+        publicPath: `/generated/${fileName}`,
+        contentType: "image/png",
+      }),
+    );
   }
 
   return imageUrls;
@@ -1481,7 +1488,11 @@ async function downloadGeneratedImageUrl(remoteUrl: string, index: number) {
       fileName,
     },
   });
-  return `/generated/${fileName}`;
+  return persistRuntimeMedia({
+    filePath,
+    publicPath: `/generated/${fileName}`,
+    contentType: mimeType,
+  });
 }
 
 function parseRequestedPixelSize(requestedSize: ImageGenerationOptions["size"]) {

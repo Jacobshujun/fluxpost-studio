@@ -6,6 +6,7 @@ import path from "node:path";
 import { promisify } from "node:util";
 import { compactError, recordExecutionLog } from "./activity-log";
 import { appConfig } from "./config";
+import { persistRuntimeMedia } from "./runtime-media-storage";
 import { runWithConcurrencyPool } from "./concurrency";
 import { ensureConfiguredFeishuCliIdentity, resolveFeishuCliInvocation } from "./feishu-cli";
 import { cacheCrawledMedia } from "./media-cache";
@@ -509,8 +510,9 @@ async function listDownloadedMaterialUrls(root: string, publicRoot: string) {
         : undefined;
     if (!kind) continue;
     const relativePath = path.relative(root, filePath);
+    const publicPath = `${publicRoot}/${relativePath.split(path.sep).map(encodeURIComponent).join("/")}`;
     materials.push({
-      url: `${publicRoot}/${relativePath.split(path.sep).map(encodeURIComponent).join("/")}`,
+      url: await persistRuntimeMedia({ filePath, publicPath }),
       kind,
     });
   }

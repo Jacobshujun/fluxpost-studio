@@ -276,6 +276,24 @@
         "Detailed historical evidence archived at .trellis/spec/fluxpost/archive/feature-list-history-2026-06-17.json"
       ],
       "notes": "External TikHub/OpenAI/image-generation/Feishu calls are not part of default baseline verification. A real small-count simple run and a larger two-keyword queue validation are still needed before marking done."
+    },
+    {
+      "id": "tos-runtime-media-storage",
+      "title": "Volcengine TOS runtime media storage",
+      "status": "ready_for_review",
+      "definition_of_done": [
+        "New crawl images, source videos, selected frames, generated images, review uploads, and Feishu-imported media can persist to TOS behind a default-off switch",
+        "Uploads use object-level public-read and are accepted only after HEAD length and ETag verification",
+        "Failed uploads retain recoverable bytes under data/tos-pending and can be reconciled idempotently without writing unverified business URLs",
+        "Historical local media URLs remain valid and file-only consumers safely materialize and clean HTTP media",
+        "Advanced configuration masks TOS credentials and admin-only checks validate public GET, video Range, and cleanup",
+        "The 82.158.226.10 deployment passes a real application media workflow while unrelated VPS services remain healthy"
+      ],
+      "evidence": [
+        "2026-07-20 offline TOS runtime-media check, lint, type-check, build, full baseline, local restart, public config secrecy checks, route authorization checks, and responsive config-page screenshots passed",
+        "2026-07-20 isolated live TOS probe passed PUT, HEAD, anonymous GET, video Range 206, and DELETE without persisting or exposing operator credentials"
+      ],
+      "notes": "Implementation and isolated provider validation are complete. Keep ready_for_review until deployment to 82.158.226.10 and a real FluxPost image/video workflow prove URL persistence, local staging cleanup, historical media compatibility, and service health. The older VPS remains out of scope."
     }
   ]
 }

@@ -824,7 +824,7 @@ export default function ContentDeskPage() {
       const data = (await res.json()) as { updatedCount?: number; localImages?: number; localVideos?: number; videoFrames?: number; error?: string };
       if (!res.ok) throw new Error(data.error || "素材补全失败");
       await loadContentPool(query);
-      setMessage(`素材补全完成：${data.updatedCount || 0} 条，本地图片 ${data.localImages || 0} 张，本地视频 ${data.localVideos || 0} 个，关键帧 ${data.videoFrames || 0} 张。`);
+      setMessage(`素材补全完成：${data.updatedCount || 0} 条，已缓存图片 ${data.localImages || 0} 张，已缓存视频 ${data.localVideos || 0} 个，关键帧 ${data.videoFrames || 0} 张。`);
     } catch (error) {
       setMessage(error instanceof Error ? error.message : "素材补全失败");
     } finally {
@@ -1390,7 +1390,7 @@ export default function ContentDeskPage() {
                     {getDisplayVideoUrl(selectedSource) ? (
                       <a className="soft-button inline-flex h-9 items-center gap-2 px-3 text-xs" href={getDisplayVideoUrl(selectedSource)} target="_blank" rel="noreferrer">
                         <Play className="h-3.5 w-3.5" />
-                        {selectedSource.downloadedVideoUrl ? "本地视频" : "视频链接"}
+                        {selectedSource.downloadedVideoUrl ? "缓存视频" : "视频链接"}
                       </a>
                     ) : null}
                   </div>
@@ -1401,7 +1401,7 @@ export default function ContentDeskPage() {
                           <Video className="h-3.5 w-3.5 text-[var(--cyan)]" />
                           视频预览
                         </span>
-                        <span className="text-[11px] text-white/42">{selectedSource.downloadedVideoUrl ? "本地缓存" : "远程链接"}</span>
+                        <span className="text-[11px] text-white/42">{selectedSource.downloadedVideoUrl ? "已缓存" : "远程链接"}</span>
                       </div>
                       <video className="aspect-video w-full bg-black object-contain" controls preload="metadata" src={getDisplayVideoUrl(selectedSource)} />
                     </div>
@@ -1724,7 +1724,7 @@ function MediaCacheMiniBadge({ item }: { item: NormalizedSourceItem }) {
   return (
     <div className="mt-2 flex flex-wrap gap-1.5">
       <span className={`status-badge text-[10px] ${getMediaCacheStatusClass(status.status)}`}>{formatMediaCacheState(status.status)}</span>
-      <span className="status-badge text-[10px] text-white/45">本地 {status.localImages}/{status.imageTotal} 图</span>
+      <span className="status-badge text-[10px] text-white/45">缓存 {status.localImages}/{status.imageTotal} 图</span>
       {status.frameCount ? <span className="status-badge text-[10px] text-white/45">帧 {status.frameCount}</span> : null}
     </div>
   );
@@ -1751,9 +1751,9 @@ function MediaCacheStatusCard({
         <span className={`status-badge text-[11px] ${getMediaCacheStatusClass(status.status)}`}>{formatMediaCacheState(status.status)}</span>
       </div>
       <div className="mt-3 grid grid-cols-2 gap-2 sm:grid-cols-4">
-        <PoolMetric label="本地图片" value={`${status.localImages}/${status.imageTotal}`} />
+        <PoolMetric label="缓存图片" value={`${status.localImages}/${status.imageTotal}`} />
         <PoolMetric label="远程兜底" value={status.remoteImages} />
-        <PoolMetric label="本地视频" value={status.localVideo ? "已缓存" : status.videoPresent ? "未缓存" : "无视频"} />
+        <PoolMetric label="缓存视频" value={status.localVideo ? "已缓存" : status.videoPresent ? "未缓存" : "无视频"} />
         <PoolMetric label="关键帧" value={status.frameCount} />
       </div>
       <div className="mt-3 h-2 overflow-hidden rounded-full bg-white/10">

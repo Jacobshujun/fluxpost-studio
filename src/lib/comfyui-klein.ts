@@ -4,6 +4,7 @@ import { mkdir, readFile, rm, writeFile } from "node:fs/promises";
 import path from "node:path";
 import { compactError, recordExecutionLog } from "./activity-log";
 import { appConfig } from "./config";
+import { persistRuntimeMedia } from "./runtime-media-storage";
 import { runWithConcurrencyPool } from "./concurrency";
 import { saveImageGenerationQueueJobToDb } from "./database";
 import { buildMediaRequestHeaders } from "./media-request";
@@ -483,7 +484,13 @@ async function saveComfyOutputImages(images: ComfyOutputImage[]) {
     try {
       await writeFile(tempInput, Buffer.from(await response.arrayBuffer()));
       await stripComfyOutputMetadataWithFfmpeg(tempInput, outputFile);
-      urls.push(`/generated/source-edits/${fileName}`);
+      urls.push(
+        await persistRuntimeMedia({
+          filePath: outputFile,
+          publicPath: `/generated/source-edits/${fileName}`,
+          contentType: "image/png",
+        }),
+      );
     } catch (error) {
       await rm(outputFile, { force: true }).catch(() => undefined);
       throw error;

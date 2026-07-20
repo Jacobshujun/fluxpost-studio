@@ -1,6 +1,6 @@
 # Trellis Status
 
-Last updated: 2026-07-15
+Last updated: 2026-07-20
 
 ## One-Line Status
 
@@ -8,6 +8,7 @@ FluxPost Studio uses Trellis as the active project context system. A Docker depl
 
 ## Current Focus
 
+- Task `.trellis/tasks/07-20-tos-runtime-media-storage` implements default-off Volcengine TOS storage for new runtime images, videos, and selected frames. Offline verification and an isolated live provider probe passed; deployment to `82.158.226.10` and a real application media workflow remain before the feature can move beyond `ready_for_review`.
 - Trellis CLI 0.6.5 is installed; `.trellis/spec/fluxpost` and `.trellis/verification` are the active context and baseline locations.
 - `docs/harness.disabled/` and `scripts/harness.disabled/` are migration archives only.
 - Trellis spec discovery sees `fluxpost` and `frontend` via `python ./.trellis/scripts/get_context.py --mode packages`.
@@ -19,15 +20,17 @@ FluxPost Studio uses Trellis as the active project context system. A Docker depl
 
 ## Next Entry
 
-1. For a new task, start with `AGENTS.md`, this file, `.trellis/spec/fluxpost/feature_list.json`, and `.trellis/spec/fluxpost/rules.md`.
-2. For config/admin work, inspect `src/lib/config.ts`, `src/app/api/config/route.ts`, `src/app/config/page.tsx`, and `.trellis/verification/advanced_config_check.mjs` first.
-3. For Feishu publish issues, inspect `src/lib/feishu-cli.ts`, `src/lib/feishu-publish-queue.ts`, `src/lib/feishu-field-options.ts`, and `src/app/api/publish/feishu/route.ts` first.
-4. For VPS deployment follow-up, use `ssh root@104.243.21.233 -p 29891`, then run `/opt/fluxpost-studio/bin/deploy.sh` to deploy from GitHub, or `cd /opt/fluxpost-studio/current` and `COMPOSE_PROJECT_NAME=fluxpost docker compose ps/logs`. Do not stop or restart `x-ui`, `xray`, or `frps`.
-5. For a fresh VPS, follow `docs/deployment/ubuntu-docker.md`; do not copy old VPS secrets or volumes into GitHub.
-6. Before completion, read `.trellis/spec/fluxpost/verification.md` and run `powershell -ExecutionPolicy Bypass -File .trellis/verification/check.ps1`, or explain why it could not run.
+1. Continue `.trellis/tasks/07-20-tos-runtime-media-storage` by committing only task-related changes, deploying through `/opt/fluxpost-studio/bin/deploy.sh` on `82.158.226.10` with `TOS_ENABLED=false`, securely mapping the operator-provided TOS config, confirming `NODE_TLS_REJECT_UNAUTHORIZED` is unset, passing the admin probe, then enabling TOS and validating a real image/video workflow. Do not touch `104.243.21.233`.
+2. For a new task, start with `AGENTS.md`, this file, `.trellis/spec/fluxpost/feature_list.json`, and `.trellis/spec/fluxpost/rules.md`.
+3. For config/admin work, inspect `src/lib/config.ts`, `src/app/api/config/route.ts`, `src/app/config/page.tsx`, and `.trellis/verification/advanced_config_check.mjs` first.
+4. For Feishu publish issues, inspect `src/lib/feishu-cli.ts`, `src/lib/feishu-publish-queue.ts`, `src/lib/feishu-field-options.ts`, and `src/app/api/publish/feishu/route.ts` first.
+5. For VPS deployment follow-up, use `ssh root@104.243.21.233 -p 29891`, then run `/opt/fluxpost-studio/bin/deploy.sh` to deploy from GitHub, or `cd /opt/fluxpost-studio/current` and `COMPOSE_PROJECT_NAME=fluxpost docker compose ps/logs`. Do not stop or restart `x-ui`, `xray`, or `frps`.
+6. For a fresh VPS, follow `docs/deployment/ubuntu-docker.md`; do not copy old VPS secrets or volumes into GitHub.
+7. Before completion, read `.trellis/spec/fluxpost/verification.md` and run `powershell -ExecutionPolicy Bypass -File .trellis/verification/check.ps1`, or explain why it could not run.
 
 ## Recent Verification
 
+- 2026-07-20: TOS focused checks, lint, type-check, build, full baseline on port 45678, local production restart, public-config secrecy, unauthenticated route boundaries, and desktop/mobile config UI checks passed. An isolated provider probe passed upload, HEAD, anonymous GET, video Range `206`, and delete; no credential value was recorded. VPS deployment and a real FluxPost media workflow remain pending.
 - 2026-07-15: Added a fresh Ubuntu 24.04 one-command bootstrap, private pre-domain SSH-tunnel mode, later one-command Caddy/HTTPS enablement, configurable loopback port/domain, and non-mutating `deploy.sh --check`. Deterministic tests parse Compose, run Bash syntax, execute private/HTTPS/legacy plans, guard all named volumes, and reject SSH/firewall/destructive-volume commands. Focused checks and the full Trellis baseline passed; build retains 15 Turbopack path-tracing warnings. No live second-VPS install, DNS change, Docker operation, or external provider call was performed.
 - 2026-07-14: Migrated Xiaohongshu source-link and keyword-enrichment details from removed TikHub Web/Web V3 endpoints to App V2 image/video details. Added request-boundary business-envelope validation and offline regression coverage for image/video normalization, image-to-video fallback, HTTP-200 `status=461` failure, and old-endpoint absence. Focused checks, type-check, lint, build, and the full Trellis baseline passed without live external calls; existing 15 Turbopack warnings remain.
 - 2026-07-14: Fixed advanced configuration loss across Docker app-container replacement. Production now mounts `fluxpost-config` at `/app/config`, sets `FLUXPOST_CONFIG_FILE=/app/config/.env.local`, loads persisted values over the base Compose environment before `appConfig` initialization, and retains empty tombstones so cleared base values do not return after restart. Focused checks, an isolated fresh-process precedence/clear smoke, type-check, lint, build, and the full Trellis baseline passed; the existing 15 Turbopack broad-path warnings remain.
@@ -44,6 +47,8 @@ FluxPost Studio uses Trellis as the active project context system. A Docker depl
 
 ## Current Risks
 
+- TOS secrets from the operator-provided `TOS.txt` must never appear in commands, logs, Git, Trellis, or responses. The target container must not inherit `NODE_TLS_REJECT_UNAUTHORIZED=0`; keep TOS disabled if the admin public-read/Range/delete probe fails.
+- `@volcengine/tos-sdk@2.9.1` currently depends on Axios versions with published high-severity advisories and no upstream SDK fix. Keep endpoint configuration admin-only, HTTPS verification enabled, SDK proxy/retry behavior constrained, and revisit the dependency when a fixed release exists.
 - Do not read or expose `.env.local`, `.env*`, database credentials, Feishu/Lark tokens, API keys, local account passwords, or real chat/user identifiers.
 - Do not mutate `data/`, `public/generated/`, `public/media/`, debug artifacts, or runtime databases during Trellis-only work.
 - Do not trigger live TikHub, OpenAI-compatible text/image providers, ComfyUI, Feishu writes, Lark replies, or simple-run production as default verification.

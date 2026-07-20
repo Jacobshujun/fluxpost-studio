@@ -1,6 +1,6 @@
 # Verification
 
-Last updated: 2026-07-15
+Last updated: 2026-07-20
 
 ## Baseline Command
 
@@ -24,7 +24,7 @@ npm run trellis:check
 - Trellis context budgets and `TRELLIS-LATEST` marker sizes.
 - Handoff validity through `.trellis/verification/handoff.ps1`.
 - JSON parse checks for project JSON, `.trellis/spec/fluxpost/feature_list.json`, and existing legacy `data/*.json`.
-- Static/domain checks for PostgreSQL schema, workspace accounts, advanced config admin boundaries, Ubuntu VPS deployment/Compose/shell contracts, execution logs, platform request mapping, media handling, video download fallback, video-frame policy, source-video final material references and default-off opt-in, video transcription wiring, concurrency, Feishu publish/resume/queue/vehicle-option paths, simple-run policies, content desk and pool-mode secondary creation, viral/original modes, review preview/workflow/desktop scroll layout behavior, source safety, source import retirement, Feishu content import, durable distribution audit queue/progress, Lark task launch, crawl strategy sync, source-link importers, simple queue/persistence, title/image prompt guards, image-generation toggle behavior, GPT-Image-2 request shape, ComfyUI Klein wiring, source tagging image preprocessing, and row-level runtime mutations.
+- Static/domain checks for PostgreSQL schema, workspace accounts, advanced config admin boundaries, TOS runtime media storage/consumption and secret masking, Ubuntu VPS deployment/Compose/shell contracts, execution logs, platform request mapping, media handling, video download fallback, video-frame policy, source-video final material references and default-off opt-in, video transcription wiring, concurrency, Feishu publish/resume/queue/vehicle-option paths, simple-run policies, content desk and pool-mode secondary creation, viral/original modes, review preview/workflow/desktop scroll layout behavior, source safety, source import retirement, Feishu content import, durable distribution audit queue/progress, Lark task launch, crawl strategy sync, source-link importers, simple queue/persistence, title/image prompt guards, image-generation toggle behavior, GPT-Image-2 request shape, ComfyUI Klein wiring, source tagging image preprocessing, and row-level runtime mutations.
 - `npm run lint`.
 - `npx --no-install tsc --noEmit`.
 - `npm run build`.
@@ -49,6 +49,7 @@ node .trellis/verification/http_smoke.js http://127.0.0.1:3001
 
 ## Recent Verification
 
+- 2026-07-20: `.trellis/verification/tos_runtime_media_check.mjs`, `npm run lint`, `npx --no-install tsc --noEmit`, `npm run build`, the full baseline with `TRELLIS_SMOKE_PORT=45678`, and `npm run local:restart` passed. Offline coverage verifies disabled-local behavior, key/public-URL mapping, managed-cache reuse and overwrite, bounded retry, HEAD mismatch, pending retention/cleanup, no ordinary historical-frame migration, producer and consumer wiring, admin routes, boolean-only probe responses, and secret masking. An isolated live probe using the operator-provided TOS config passed upload, HEAD, anonymous GET, video Range `206`, and delete without persisting credentials; a real application media workflow and VPS rollout remain outstanding.
 - 2026-07-15: Full baseline passed with `TRELLIS_SMOKE_PORT=45678 powershell -ExecutionPolicy Bypass -File .trellis/verification/check.ps1` after adding the one-command Ubuntu 24.04 deployment path. `.trellis/verification/vps_deployment_check.mjs` parses Compose YAML, runs `bash -n`, executes private/HTTPS/legacy `vps-deploy.sh --check` plans, verifies random-secret/mode-0600 wiring, persistent named volumes, loopback-only pre-domain access, domain validation, and absence of SSH/firewall/`down -v` mutations. Focused checks, `npx --no-install tsc --noEmit`, `npm run lint`, and `npm run build` passed; 15 Turbopack path-tracing warnings remain. No live VPS, Docker, DNS, certificate, GitHub, or provider operation was triggered by verification.
 
 - 2026-07-14: Full baseline passed with `TRELLIS_SMOKE_PORT=45678 powershell -ExecutionPolicy Bypass -File .trellis/verification/check.ps1` after migrating Xiaohongshu exact-link and keyword-enrichment detail requests from removed TikHub Web/Web V3 APIs to App V2 image/video detail endpoints. Offline coverage verifies image and video response normalization, image-to-video fallback order, rejection of HTTP-200 `data.ok=false`/`data.status=461` business failures, and absence of removed endpoint strings. `npx --no-install tsc --noEmit`, `npm run lint`, and `npm run build` passed; the existing 15 Turbopack broad-path warnings remain. No live TikHub/OpenAI/image-provider/Feishu call was made.

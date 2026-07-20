@@ -1,6 +1,6 @@
 # Decisions
 
-Last updated: 2026-07-15
+Last updated: 2026-07-20
 
 ## Stable Decisions
 
@@ -119,6 +119,7 @@ Last updated: 2026-07-15
 - Feishu IM publish notifications describe the publish job/batch, not an individual generated post. Batch messages must not label the first post title as the notification title; they show task/source/job context, record/material counts, and a short `内容示例` list instead. Single-post notifications may show the one title as `内容`. Attachment-upload failures may send a `写入飞书部分完成` warning notification when IM recipients are configured.
 - Default baseline verification must avoid production external service calls.
 - Local production refresh on port `3001` uses `npm run local:restart`, which rebuilds, stops the old port-3001 process, starts `next start`, and runs local HTTP smoke.
+- New runtime media on `82.158.226.10` may use Volcengine TOS behind the default-off `TOS_ENABLED` switch. FluxPost stores verified public absolute URLs with ETag version parameters, sets object-level `public-read`, retains failed uploads under `data/tos-pending`, and keeps historical local URLs and external material directories unchanged. Rollback disables TOS instead of reverting code or rewriting existing URLs; the older VPS at `104.243.21.233` is not part of this rollout.
 
 ## Pending Decisions
 

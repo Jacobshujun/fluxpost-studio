@@ -54,6 +54,7 @@ vm.runInNewContext(
     exports: mediaCacheStatusModule.exports,
     require: (name) => {
       if (name === "./media-url-filter") return cjsModule.exports;
+      if (name === "./runtime-media-storage") return { isManagedRuntimeMediaUrl: (url) => /bucket\.example\.com/.test(url || "") };
       throw new Error(`Unexpected import in media cache status check: ${name}`);
     },
   },

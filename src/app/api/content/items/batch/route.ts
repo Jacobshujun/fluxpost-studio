@@ -50,7 +50,7 @@ export async function POST(request: Request) {
         scope: "content/items",
         action: "批量补全本地素材",
         status: result.errorCount ? "info" : "success",
-        message: `已处理 ${result.updatedCount} 条内容，本地图片 ${result.localImages} 张，本地视频 ${result.localVideos} 个，关键帧 ${result.videoFrames} 张`,
+        message: `已处理 ${result.updatedCount} 条内容，已缓存图片 ${result.localImages} 张，已缓存视频 ${result.localVideos} 个，关键帧 ${result.videoFrames} 张`,
         durationMs: Date.now() - startedAt,
         details: {
           requestedCount: ids.length,

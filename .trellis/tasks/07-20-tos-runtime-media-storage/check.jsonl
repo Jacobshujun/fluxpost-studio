@@ -1,0 +1,4 @@
+{"file":".trellis/spec/fluxpost/rules.md","reason":"Quality gates, secret boundaries, and evidence requirements."}
+{"file":".trellis/spec/fluxpost/architecture_rules.md","reason":"Executable TOS storage and consumer contracts to review against."}
+{"file":".trellis/spec/fluxpost/verification.md","reason":"Authoritative baseline commands and external-service test boundaries."}
+{"file":".trellis/spec/fluxpost/pitfalls.md","reason":"Regression risks for TOS SDK, TLS, pending uploads, and public ACL checks."}

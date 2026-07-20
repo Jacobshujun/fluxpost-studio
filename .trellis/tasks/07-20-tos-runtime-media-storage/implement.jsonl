@@ -1,0 +1,4 @@
+{"file":".trellis/spec/fluxpost/rules.md","reason":"FluxPost security, scope, context-budget, and completion rules."}
+{"file":".trellis/spec/fluxpost/architecture_rules.md","reason":"Runtime media, configuration, deployment, and cross-layer ownership contracts."}
+{"file":".trellis/spec/fluxpost/project_brief.md","reason":"Confirmed runtime media flows, deployment targets, and technical stack."}
+{"file":".trellis/spec/fluxpost/pitfalls.md","reason":"Known media, provider, TLS, secret-handling, and verification hazards."}

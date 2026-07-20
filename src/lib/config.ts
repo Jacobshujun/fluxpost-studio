@@ -107,6 +107,14 @@ function readAppConfig() {
     process.env.ARK_VIDEO_TRANSCRIPTION_MAX_AUDIO_BYTES || process.env.VOLCENGINE_ASR_MAX_AUDIO_BYTES,
     120 * 1024 * 1024,
   ),
+  tosEnabled: booleanOrDefault(process.env.TOS_ENABLED, false),
+  tosAccessKeyId: process.env.TOS_ACCESS_KEY_ID || "",
+  tosAccessKeySecret: process.env.TOS_ACCESS_KEY_SECRET || "",
+  tosBucket: process.env.TOS_BUCKET || "",
+  tosEndpoint: process.env.TOS_ENDPOINT || "",
+  tosRegion: process.env.TOS_REGION || "cn-guangzhou",
+  tosPublicBaseUrl: process.env.TOS_PUBLIC_BASE_URL || "",
+  tosObjectPrefix: process.env.TOS_OBJECT_PREFIX || "fluxpost/flux-lightmoment",
   };
 }
 
@@ -164,6 +172,15 @@ export function getConfigStatus(): ConfigStatus {
     feishuCliBin: appConfig.feishuCliBin || undefined,
     feishuNotifyConfigured: Boolean(appConfig.feishuNotifyChatId || appConfig.feishuNotifyUserId),
     volcengineAsrConfigured: Boolean(appConfig.arkApiKey),
+    tosConfigured: Boolean(
+      appConfig.tosAccessKeyId &&
+        appConfig.tosAccessKeySecret &&
+        appConfig.tosBucket &&
+        appConfig.tosEndpoint &&
+        appConfig.tosRegion &&
+        appConfig.tosPublicBaseUrl,
+    ),
+    tosEnabled: appConfig.tosEnabled,
   };
 }
 
@@ -323,6 +340,37 @@ const advancedConfigGroups: ConfigDefinitionGroup[] = [
       configField("SIMPLE_RUN_WORKER_CONCURRENCY", "简单任务 worker 并发", "后台简单任务队列并发。", "number", "runtime"),
       configField("FEISHU_PUBLISH_WORKER_CONCURRENCY", "飞书发布队列并发", "飞书记录写入 worker 并发。", "number", "runtime"),
       configField("WORKER_FEISHU_ATTACHMENT_CONCURRENCY", "飞书附件上传并发", "附件上传独立并发上限。", "number", "runtime"),
+    ],
+  },
+  {
+    id: "tos",
+    title: "火山对象存储 TOS",
+    description: "新增运行时图片、视频和视频帧的对象存储；默认关闭。",
+    fields: [
+      configField("TOS_ENABLED", "启用 TOS", "true 时新增运行时媒体上传到 TOS。", "boolean", "tos", {
+        read: () => String(appConfig.tosEnabled),
+      }),
+      configField("TOS_ACCESS_KEY_ID", "TOS Access Key", "对象存储访问凭据，页面不会回显。", "secret", "tos", {
+        configured: () => Boolean(appConfig.tosAccessKeyId),
+      }),
+      configField("TOS_ACCESS_KEY_SECRET", "TOS Secret Key", "对象存储秘密凭据，页面不会回显。", "secret", "tos", {
+        configured: () => Boolean(appConfig.tosAccessKeySecret),
+      }),
+      configField("TOS_BUCKET", "Bucket", "FluxPost 运行时媒体目标 Bucket。", "text", "tos", {
+        read: () => appConfig.tosBucket,
+      }),
+      configField("TOS_ENDPOINT", "Endpoint", "TOS 区域 Endpoint，可省略 https://。", "text", "tos", {
+        read: () => appConfig.tosEndpoint,
+      }),
+      configField("TOS_REGION", "Region", "TOS 区域，当前部署使用 cn-guangzhou。", "text", "tos", {
+        read: () => appConfig.tosRegion,
+      }),
+      configField("TOS_PUBLIC_BASE_URL", "Bucket 公共域名", "公共读对象使用的 HTTPS Bucket 域名。", "text", "tos", {
+        read: () => appConfig.tosPublicBaseUrl,
+      }),
+      configField("TOS_OBJECT_PREFIX", "对象前缀", "当前部署固定为 fluxpost/flux-lightmoment。", "text", "tos", {
+        read: () => appConfig.tosObjectPrefix,
+      }),
     ],
   },
   {

@@ -924,6 +924,17 @@ export type ConfigStatus = {
   feishuCliBin?: string;
   feishuNotifyConfigured: boolean;
   volcengineAsrConfigured: boolean;
+  tosConfigured: boolean;
+  tosEnabled: boolean;
+};
+
+export type TosStorageProbeResult = {
+  ok: boolean;
+  uploadVerified: boolean;
+  headVerified: boolean;
+  publicReadVerified: boolean;
+  rangeVerified: boolean;
+  cleanupVerified: boolean;
 };
 
 export type AdvancedConfigFieldKind = "text" | "secret" | "number" | "boolean" | "select" | "textarea";
