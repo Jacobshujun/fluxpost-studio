@@ -15,12 +15,12 @@
   "branch": null,
   "base_branch": "main",
   "worktree_path": null,
-  "commit": null,
+  "commit": "0039408",
   "pr_url": null,
   "subtasks": [],
   "children": [],
   "parent": null,
   "relatedFiles": [],
-  "notes": "",
+  "notes": "Deployed to 82.158.226.10 with TOS enabled after a deployed-config provider probe passed. Normal authenticated admin-route and real FluxPost media-production evidence remain before archive.",
   "meta": {}
 }
