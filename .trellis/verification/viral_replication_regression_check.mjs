@@ -159,7 +159,7 @@ assertNotIncludes(viral, "Use reference image 2 only as a background scene, aest
 assertNotIncludes(viral, "Use reference image 2 for composition, camera distance, subject placement", "Viral image prompt must not let reference image 2 control target vehicle framing.");
 assertNotIncludes(viral, "viewpoint to the target vehicle", "Viral image prompt must not adapt the target vehicle viewpoint from reference image 2.");
 assertIncludes(viral, "recordViralImageTaskPlan", "Viral replication must log safe per-slot image task planning summaries.");
-assertIncludes(viral, "images/edits", "Viral replication observability should identify image edit/reference-image request shape.");
+assertIncludes(viral, "ordered_references", "Viral replication observability should describe ordered references without assuming one provider path.");
 assertIncludes(scoreFunction, "return Math.max(score, 0)", "Viral material score should be clamped after penalties.");
 assertIncludes(imageGeneration, "function resolveLocalReferenceFilePath(", "Image references must support local filesystem paths.");
 assertIncludes(imageGeneration, "path.isAbsolute(value)", "Local absolute paths should be accepted as image edit references.");
@@ -169,8 +169,8 @@ assertIncludes(imageGeneration, "isStrictDualReferenceTask", "Image generation m
 assertIncludes(imageGeneration, "Strict viral image imitation requires exactly 2 prepared reference images", "Strict viral image tasks must fail closed when both references are not prepared.");
 assertIncludes(imageGeneration, "recordStrictTaskNeedsReview", "Strict viral image task fallback should produce needs-review diagnostics instead of source-image fallback.");
 assertIncludes(imageGeneration, "referenceImages.slice(0, 4)", "Images API edit requests must upload multiple ordered reference images, including viral source style references.");
-assertIncludes(imageGeneration, 'const endpointPath = preparedReferences.files.length ? "images/edits" : "images/generations"', "Images API request logging must resolve the actual endpoint path before recording.");
-assertIncludes(imageGeneration, "Preparing to generate images through ${endpointPath}", "Images API request log message must name images/edits when references are uploaded.");
+assertIncludes(imageGeneration, 'const endpointPath = initialDialect === "toapis" ? "images/generations" : preparedReferences.files.length ? "images/edits" : "images/generations"', "Images API request logging must resolve the provider-specific endpoint path before recording.");
+assertIncludes(imageGeneration, "Preparing to generate images through ${endpointPath}", "Images API request log message must name the actual provider endpoint.");
 assertIncludes(imageGeneration, "endpointPath,", "Images API request log details must include endpointPath for diagnosis.");
 const simpleRuns = read("src/lib/simple-runs.ts");
 assertIncludes(simpleRuns, "buildViralPairingNotice", "Simple viral runs must record explicit source/material pairing coverage.");
@@ -284,8 +284,8 @@ await viralModule.recordViralImageTaskPlan({
 });
 const taskPlanLog = viralModule.__executionLogs.find((entry) => entry.action === "Plan viral image tasks");
 if (!taskPlanLog) throw new Error("Viral image task planning should write an execution log entry.");
-if (taskPlanLog.details.referenceShape !== "images/edits" || taskPlanLog.details.referencePolicy !== "strict_dual_reference" || taskPlanLog.details.taskCount !== generated.imageTasks.length) {
-  throw new Error("Viral image task planning log should summarize Images API edit request shape and task count.");
+if (taskPlanLog.details.referenceShape !== "ordered_references" || taskPlanLog.details.referencePolicy !== "strict_dual_reference" || taskPlanLog.details.taskCount !== generated.imageTasks.length) {
+  throw new Error("Viral image task planning log should summarize ordered reference shape and task count.");
 }
 if (JSON.stringify(taskPlanLog.details).includes("C:/private/materials")) {
   throw new Error("Viral image task planning log must not expose full private material paths.");

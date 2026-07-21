@@ -4,13 +4,21 @@ import { randomUUID } from "node:crypto";
 import path from "node:path";
 import { compactError, recordExecutionLog } from "./activity-log";
 import { isComfyUiKleinConfigured, runComfyUiKleinImageTask } from "./comfyui-klein";
-import { appConfig, openaiImageApiKey, openaiImageUrl, type OpenaiImageApiRoute } from "./config";
+import { appConfig, openaiImageApiDialect, openaiImageApiKey, openaiImageUrl, type OpenaiImageApiRoute } from "./config";
 import { concurrencyConfig, mapWithConcurrency, runWithConcurrencyPool } from "./concurrency";
 import { buildSingleImageTaskPrompt } from "./creation-controls";
 import { sniffImageFormat } from "./image-format";
 import { defaultImageGenerationSize, normalizeImageGenerationSize } from "./image-size-options";
 import { buildMediaRequestHeaders } from "./media-request";
 import { persistRuntimeMedia } from "./runtime-media-storage";
+import {
+  buildToApisGenerationBody,
+  formatToApisTaskError,
+  getToApisCompletedImageUrls,
+  parseRetryAfterMs,
+  requireToApisTaskId,
+  type ToApisImageTask,
+} from "./toapis-image-api";
 import type { ImageGenerationOptions, SourceImageTask } from "./types";
 
 type ResponsesImageResponse = {
@@ -34,6 +42,11 @@ type PreparedReferenceImage = {
   bytes: number;
 };
 
+type PreparedReferenceEntry = {
+  source: string;
+  file?: PreparedReferenceImage;
+};
+
 export type ImageTaskGenerationResult = {
   taskId: string;
   taskLabel: string;
@@ -51,6 +64,8 @@ const remoteReferenceTimeoutMs = 30_000;
 const maxGeneratedImageUrlBytes = 30 * 1024 * 1024;
 const referenceImageMaxSidePx = 2400;
 const referenceImageNormalizeTimeoutMs = 60_000;
+const toApisPollIntervalMs = 5_000;
+const toApisPollJitterMaxMs = 750;
 const retryableImageStatuses = new Set([408, 409, 425, 429, 500, 502, 503, 504]);
 const defaultImageOptions: ImageGenerationOptions = {
   size: defaultImageGenerationSize,
@@ -62,6 +77,8 @@ type PreparedReferenceImages = {
   values: string[];
   fallbackValues: string[];
   files: PreparedReferenceImage[];
+  entries: PreparedReferenceEntry[];
+  toApisUrlsByRoute: Partial<Record<OpenaiImageApiRoute, string[]>>;
   localCount: number;
   remoteCount: number;
   encodedCount: number;
@@ -488,7 +505,8 @@ function makeTaskGenerationResult(
 
 function resolveTaskEndpointPath(task: SourceImageTask): ImageTaskGenerationResult["endpointPath"] {
   if (task.provider === "comfyui_klein" && isComfyUiKleinConfigured()) return "comfyui_klein";
-  return appConfig.openaiImageEndpoint === "images" ? "images/edits" : "responses";
+  if (appConfig.openaiImageEndpoint !== "images") return "responses";
+  return openaiImageApiDialect(resolveActiveStandardImagesApiRoute()) === "toapis" ? "images/generations" : "images/edits";
 }
 
 async function recordStrictTaskNeedsReview(task: SourceImageTask, message: string, action: string) {
@@ -602,14 +620,17 @@ async function callImagesApi(prompt: string, count: number, options: ImageGenera
 async function callImagesApiInPool(prompt: string, count: number, options: ImageGenerationOptions, referenceImages: string[] = [], task?: SourceImageTask) {
   const startedAt = Date.now();
   const preparedReferences = await prepareReferenceImages(referenceImages, options.size);
-  const endpointPath = preparedReferences.files.length ? "images/edits" : "images/generations";
-  if (task && isStrictDualReferenceTask(task) && (endpointPath !== "images/edits" || preparedReferences.files.length !== 2 || referenceImages.length !== 2)) {
+  const initialRoute = resolveActiveStandardImagesApiRoute();
+  const initialDialect = openaiImageApiDialect(initialRoute);
+  const endpointPath = initialDialect === "toapis" ? "images/generations" : preparedReferences.files.length ? "images/edits" : "images/generations";
+  const strictReferencesInvalid =
+    referenceImages.length !== 2 || preparedReferences.entries.length !== 2 || (initialDialect === "openai" && preparedReferences.files.length !== 2);
+  if (task && isStrictDualReferenceTask(task) && strictReferencesInvalid) {
     await cleanupPreparedReferenceImages(preparedReferences);
     throw new Error(
-      `Strict viral image imitation requires exactly 2 prepared reference images through /images/edits; prepared ${preparedReferences.files.length}/${referenceImages.length}.`,
+      `Strict viral image imitation requires exactly 2 prepared reference images; prepared ${preparedReferences.entries.length}/${referenceImages.length}.`,
     );
   }
-  const sizeConstrainedPrompt = buildImageSizeConstrainedPrompt(prompt, options.size);
   await recordExecutionLog({
     scope: "openai/image",
     action: "Request Images API",
@@ -618,8 +639,9 @@ async function callImagesApiInPool(prompt: string, count: number, options: Image
     details: {
       model: appConfig.openaiImageModel,
       count,
-      promptLength: sizeConstrainedPrompt.length,
+      promptLength: prompt.length,
       endpointPath,
+      dialect: initialDialect,
       taskId: task?.id || null,
       taskLabel: task?.label || null,
       referencePolicy: task?.referencePolicy || "best_effort",
@@ -635,7 +657,7 @@ async function callImagesApiInPool(prompt: string, count: number, options: Image
     },
   });
 
-  const data = await requestImagesApiWithRetry(sizeConstrainedPrompt, count, startedAt, options, preparedReferences);
+  const data = await requestImagesApiWithRetry(prompt, count, startedAt, options, preparedReferences);
   const base64Images = (data.data || []).map((item) => item.b64_json).filter((item): item is string => Boolean(item));
   const remoteUrls = (data.data || []).map((item) => item.url).filter((item): item is string => Boolean(item));
   const imageUrls = [...(await saveBase64Images(base64Images)), ...(await materializeGeneratedImageUrls(remoteUrls))].slice(0, count);
@@ -731,6 +753,11 @@ async function requestSingleStandardImagesApiWithRetryForRoute(
   referenceImages: PreparedReferenceImages,
   endpointPath: "images/edits" | "images/generations",
 ): Promise<ImagesApiResponse> {
+  if (openaiImageApiDialect(route) === "toapis") {
+    return requestSingleToApisImagesApiForRoute(route, prompt, startedAt, options, referenceImages);
+  }
+
+  const sizeConstrainedPrompt = buildImageSizeConstrainedPrompt(prompt, options.size);
   let lastError = "";
   let sendQuality = Boolean(options.quality);
   let sendInputFidelity = endpointPath === "images/edits";
@@ -741,7 +768,7 @@ async function requestSingleStandardImagesApiWithRetryForRoute(
     try {
       response = await fetchWithTimeout(
         openaiImageUrl(endpointPath, route),
-        await buildStandardImagesApiRequest(route, prompt, options, referenceImages.files, sendQuality, sendInputFidelity),
+        await buildStandardImagesApiRequest(route, sizeConstrainedPrompt, options, referenceImages.files, sendQuality, sendInputFidelity),
         getRemainingTimeoutMs(deadline),
       );
     } catch (error) {
@@ -825,6 +852,190 @@ async function requestSingleStandardImagesApiWithRetryForRoute(
   throw new Error(lastError || "OpenAI image request failed");
 }
 
+async function requestSingleToApisImagesApiForRoute(
+  route: OpenaiImageApiRoute,
+  prompt: string,
+  startedAt: number,
+  options: ImageGenerationOptions,
+  referenceImages: PreparedReferenceImages,
+): Promise<ImagesApiResponse> {
+  const deadline = startedAt + imageRequestTimeoutMs;
+  const referenceUrls = await prepareToApisReferenceUrls(route, referenceImages, deadline);
+  const requestBody = buildToApisGenerationBody({
+    model: appConfig.openaiImageModel,
+    prompt,
+    requestedSize: options.size,
+    referenceImages: referenceUrls,
+  });
+  let task: ToApisImageTask | undefined;
+  let lastError = "";
+
+  for (let attempt = 1; attempt <= maxImageAttempts; attempt += 1) {
+    let response: Response;
+    try {
+      response = await fetchWithTimeout(
+        openaiImageUrl("images/generations", route),
+        {
+          method: "POST",
+          headers: openaiImageHeaders(true, route),
+          body: JSON.stringify(requestBody),
+        },
+        getRemainingTimeoutMs(deadline),
+      );
+    } catch (error) {
+      lastError = `ToAPIs image submission failed: ${compactError(error)}`;
+      const shouldRetry = attempt < maxImageAttempts && hasRetryWindow(deadline);
+      if (!shouldRetry) throw new Error(lastError);
+      await sleepWithinDeadline(getImageRetryDelayMs(attempt), deadline);
+      continue;
+    }
+    const body = await response.text();
+    if (response.ok) {
+      task = parseJsonResponse<ToApisImageTask>(body, response, "ToAPIs image submission");
+      break;
+    }
+
+    lastError = `ToAPIs image submission failed: HTTP ${response.status} ${body.slice(0, 260)}`;
+    const shouldRetry = attempt < maxImageAttempts && hasRetryWindow(deadline) && isRetryableImageError(response.status, body);
+    await recordExecutionLog({
+      scope: "openai/image",
+      action: shouldRetry ? "ToAPIs image submission retry queued" : "ToAPIs image submission failed",
+      status: shouldRetry ? "info" : "error",
+      message: shouldRetry ? compactError(`${lastError}; retrying ${attempt + 1}/${maxImageAttempts}.`) : compactError(lastError),
+      durationMs: Date.now() - startedAt,
+      details: {
+        status: response.status,
+        model: appConfig.openaiImageModel,
+        route,
+        attempt,
+        size: requestBody.size,
+        resolution: requestBody.resolution,
+        referenceImageCount: referenceUrls.length,
+      },
+    });
+    if (!shouldRetry) throw new Error(lastError);
+    const retryDelayMs = parseRetryAfterMs(response.headers.get("retry-after")) || getImageRetryDelayMs(attempt);
+    await sleepWithinDeadline(retryDelayMs, deadline);
+  }
+
+  if (!task) throw new Error(lastError || "ToAPIs image submission failed without a response.");
+  const taskId = requireToApisTaskId(task);
+  await recordExecutionLog({
+    scope: "openai/image",
+    action: "ToAPIs image task submitted",
+    status: "running",
+    message: "ToAPIs accepted an asynchronous image task.",
+    durationMs: Date.now() - startedAt,
+    details: {
+      taskId,
+      route,
+      model: appConfig.openaiImageModel,
+      size: requestBody.size,
+      resolution: requestBody.resolution,
+      referenceImageCount: referenceUrls.length,
+    },
+  });
+
+  for (let pollAttempt = 0; ; pollAttempt += 1) {
+    if (task.status === "completed") {
+      const urls = getToApisCompletedImageUrls(task);
+      if (!urls.length) throw new Error("ToAPIs image task completed without a result URL.");
+      return { data: urls.map((url) => ({ url })) };
+    }
+    if (task.status === "failed") throw new Error(`ToAPIs image task failed: ${formatToApisTaskError(task)}`);
+    if (task.status && task.status !== "queued" && task.status !== "in_progress") {
+      throw new Error(`ToAPIs image task returned unsupported status: ${task.status}`);
+    }
+    if (!hasRetryWindow(deadline)) throw new Error(`ToAPIs image task timed out after ${Math.round(imageRequestTimeoutMs / 1000)}s.`);
+
+    await sleepWithinDeadline(getToApisPollDelayMs(taskId, pollAttempt), deadline);
+    let response: Response;
+    try {
+      response = await fetchWithTimeout(
+        openaiImageUrl(`images/generations/${encodeURIComponent(taskId)}`, route),
+        { headers: openaiImageHeaders(false, route) },
+        getRemainingTimeoutMs(deadline),
+      );
+    } catch (error) {
+      await recordExecutionLog({
+        scope: "openai/image",
+        action: "ToAPIs image status request retry queued",
+        status: "info",
+        message: compactError(error),
+        durationMs: Date.now() - startedAt,
+        details: { taskId, route },
+      });
+      continue;
+    }
+    const body = await response.text();
+
+    if (response.status === 429 || (response.status >= 500 && response.status <= 504)) {
+      const retryDelayMs = parseRetryAfterMs(response.headers.get("retry-after")) || Math.min(toApisPollIntervalMs * 2 ** Math.min(pollAttempt, 3), 60_000);
+      await recordExecutionLog({
+        scope: "openai/image",
+        action: "ToAPIs image status retry queued",
+        status: "info",
+        message: `ToAPIs status query returned HTTP ${response.status}; respecting provider retry guidance.`,
+        durationMs: Date.now() - startedAt,
+        details: { taskId, route, status: response.status, retryDelayMs },
+      });
+      await sleepWithinDeadline(retryDelayMs, deadline);
+      continue;
+    }
+    if (!response.ok) throw new Error(`ToAPIs image status failed: HTTP ${response.status} ${body.slice(0, 260)}`);
+    task = parseJsonResponse<ToApisImageTask>(body, response, "ToAPIs image status");
+  }
+}
+
+async function prepareToApisReferenceUrls(route: OpenaiImageApiRoute, referenceImages: PreparedReferenceImages, deadline: number) {
+  const cached = referenceImages.toApisUrlsByRoute[route];
+  if (cached) return cached;
+
+  const urls: string[] = [];
+  for (const entry of referenceImages.entries) {
+    if (/^https?:\/\//i.test(entry.source)) {
+      urls.push(entry.source);
+      continue;
+    }
+    if (!entry.file) throw new Error("ToAPIs reference images must be public HTTP URLs or readable local image files.");
+    urls.push(await uploadToApisReferenceImage(route, entry.file, deadline));
+  }
+  referenceImages.toApisUrlsByRoute[route] = urls;
+  return urls;
+}
+
+async function uploadToApisReferenceImage(route: OpenaiImageApiRoute, image: PreparedReferenceImage, deadline: number) {
+  if (image.bytes > 10 * 1024 * 1024) throw new Error(`ToAPIs reference upload exceeds the documented 10MB limit (${image.bytes} bytes).`);
+  const form = new FormData();
+  const file = await readFile(image.filePath);
+  form.append("file", new Blob([new Uint8Array(file)], { type: image.mimeType }), image.fileName);
+  form.append("purpose", "generation");
+  const response = await fetchWithTimeout(
+    openaiImageUrl("uploads/images", route),
+    { method: "POST", headers: openaiImageHeaders(false, route), body: form },
+    getRemainingTimeoutMs(deadline),
+  );
+  const body = await response.text();
+  const payload = parseJsonResponse<{ success?: boolean; message?: string; data?: { url?: string } }>(body, response, "ToAPIs image upload");
+  if (!response.ok || payload.success !== true || !payload.data?.url) {
+    throw new Error(`ToAPIs image upload failed: HTTP ${response.status} ${payload.message || "response did not include a public URL"}`);
+  }
+  await recordExecutionLog({
+    scope: "openai/image",
+    action: "ToAPIs reference image uploaded",
+    status: "success",
+    message: "A local reference image was uploaded for ToAPIs generation.",
+    details: { route, fileName: image.fileName, bytes: image.bytes },
+  });
+  return payload.data.url;
+}
+
+function getToApisPollDelayMs(taskId: string, pollAttempt: number) {
+  let hash = pollAttempt + 1;
+  for (const char of taskId) hash = (hash * 31 + char.charCodeAt(0)) >>> 0;
+  return toApisPollIntervalMs + (hash % (toApisPollJitterMaxMs + 1));
+}
+
 async function buildStandardImagesApiRequest(
   route: OpenaiImageApiRoute,
   prompt: string,
@@ -905,6 +1116,7 @@ function parseJsonResponse<T>(body: string, response: Response, label: string, c
 
 function isRetryableImageError(status: number, body: string) {
   if (/cannot fulfill this request/i.test(body)) return false;
+  if (isImageProviderCapabilityError(body)) return false;
   if (retryableImageStatuses.has(status)) return true;
   return /upstream_error|excessive system load|overloaded|temporarily unavailable|timeout|rate limit/i.test(body);
 }
@@ -952,14 +1164,16 @@ function isStandardImagesApiRouteConfigured(route: OpenaiImageApiRoute) {
 
 function isStandardImagesApiFailoverError(error: unknown) {
   const message = compactError(error);
+  if (/ToAPIs image (?:task|status)/i.test(message)) return false;
   if (/cannot fulfill this request|content policy|safety|moderation|image upload failed|check the image|invalid image|failed to download|download image/i.test(message)) {
     return false;
   }
   return (
-    /OpenAI image request failed:\s*(?:401|403|404|408|409|425|429|50[0234])\b/i.test(message) ||
+    /(?:OpenAI image request failed:\s*|ToAPIs image submission failed:\s*HTTP\s*)(?:401|403|404|408|409|425|429|50[0234])\b/i.test(message) ||
     /Images API returned (?:non-JSON|invalid JSON)/i.test(message) ||
     /request timed out|timed out after|time-?out|timeout|abort|fetch failed|ECONNRESET|ENOTFOUND|ETIMEDOUT|ECONNREFUSED/i.test(message) ||
-    /upstream_error|excessive system load|overloaded|temporarily unavailable|rate limit|Gateway Time-?out|Bad Gateway|Service Unavailable/i.test(message)
+    /upstream_error|excessive system load|overloaded|temporarily unavailable|rate limit|Gateway Time-?out|Bad Gateway|Service Unavailable/i.test(message) ||
+    isImageProviderCapabilityError(message)
   );
 }
 
@@ -981,6 +1195,7 @@ async function prepareReferenceImages(referenceImages: string[], requestedSize: 
   const values: string[] = [];
   const fallbackValues: string[] = [];
   const files: PreparedReferenceImage[] = [];
+  const entries: PreparedReferenceEntry[] = [];
   let localCount = 0;
   let remoteCount = 0;
   let encodedCount = 0;
@@ -991,14 +1206,16 @@ async function prepareReferenceImages(referenceImages: string[], requestedSize: 
       const normalizedFile = await normalizeReferenceImageFile(localFile, requestedSize);
       const file = await readFile(normalizedFile);
       const base64 = file.toString("base64");
-      values.push(base64);
-      fallbackValues.push(`data:${getImageMimeType(normalizedFile)};base64,${base64}`);
-      files.push({
+      const preparedFile = {
         filePath: normalizedFile,
         fileName: path.basename(normalizedFile),
         mimeType: getImageMimeType(normalizedFile),
         bytes: file.length,
-      });
+      };
+      values.push(base64);
+      fallbackValues.push(`data:${getImageMimeType(normalizedFile)};base64,${base64}`);
+      files.push(preparedFile);
+      entries.push({ source: referenceImage, file: preparedFile });
       localCount += 1;
       encodedCount += 1;
       continue;
@@ -1020,14 +1237,16 @@ async function prepareReferenceImages(referenceImages: string[], requestedSize: 
       if (remoteFile) {
         const file = await readFile(remoteFile);
         const base64 = file.toString("base64");
-        values.push(base64);
-        fallbackValues.push(`data:${getImageMimeType(remoteFile)};base64,${base64}`);
-        files.push({
+        const preparedFile = {
           filePath: remoteFile,
           fileName: path.basename(remoteFile),
           mimeType: getImageMimeType(remoteFile),
           bytes: file.length,
-        });
+        };
+        values.push(base64);
+        fallbackValues.push(`data:${getImageMimeType(remoteFile)};base64,${base64}`);
+        files.push(preparedFile);
+        entries.push({ source: referenceImage, file: preparedFile });
         remoteCount += 1;
         encodedCount += 1;
         continue;
@@ -1035,6 +1254,7 @@ async function prepareReferenceImages(referenceImages: string[], requestedSize: 
     }
 
     values.push(referenceImage);
+    entries.push({ source: referenceImage });
     remoteCount += /^https?:\/\//i.test(referenceImage) ? 1 : 0;
   }
 
@@ -1042,6 +1262,8 @@ async function prepareReferenceImages(referenceImages: string[], requestedSize: 
     values,
     fallbackValues,
     files,
+    entries,
+    toApisUrlsByRoute: {},
     localCount,
     remoteCount,
     encodedCount,
@@ -1367,6 +1589,8 @@ function isImageTaskTimeoutError(error: unknown) {
 }
 
 function isImageTaskSourceFallbackError(error: unknown) {
+  if (/ToAPIs image/i.test(compactError(error))) return false;
+  if (isImageProviderCapabilityError(error)) return false;
   if (isImageTaskTimeoutError(error)) return true;
   const message = compactError(error);
   return /\b(?:408|409|425|429|50[0234])\b|Gateway Time-?out|Bad Gateway|Service Unavailable|upstream_error|excessive system load|overloaded|temporarily unavailable|rate limit/i.test(message);
@@ -1443,6 +1667,10 @@ async function saveBase64Images(base64Images: string[]) {
   }
 
   return imageUrls;
+}
+
+function isImageProviderCapabilityError(error: unknown) {
+  return /model_not_found|no available channel/i.test(compactError(error));
 }
 
 async function materializeGeneratedImageUrls(remoteUrls: string[]) {

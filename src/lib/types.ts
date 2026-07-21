@@ -914,6 +914,7 @@ export type ConfigStatus = {
   openaiTextEndpoint: string;
   imageModel: string;
   imageProvider: string;
+  openaiImageApiDialect: string;
   openaiImageRequestTimeoutMs: number;
   openaiBaseUrl: string;
   openaiTextBaseUrl: string;

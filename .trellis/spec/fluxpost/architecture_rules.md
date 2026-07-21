@@ -29,6 +29,7 @@ Last updated: 2026-07-20
 - Text generation belongs in `src/lib/openai.ts`.
 - Image generation belongs in `src/lib/image-generation.ts`.
 - OpenAI-compatible Images API support belongs in `src/lib/image-generation.ts`, including local/remote reference-image normalization, multipart `/images/edits` upload, JSON `/images/generations` requests, and image-provider retry/fallback behavior.
+- ToAPIs GPT-Image-2 payload/response mapping belongs in `src/lib/toapis-image-api.ts`; asynchronous submission, upload, polling, failover, and final runtime-media persistence orchestration remains in `src/lib/image-generation.ts`.
 - Review-desk manual image replacement/addition belongs in `src/lib/review-image-upload.ts` plus the thin authenticated route `src/app/api/review/images/route.ts`: the route must require workspace auth, validate `postId` and `imageIndex` against an owner-accessible generated post, accept `mode=append` only for the current end-of-list image index, delegate file byte sniffing/persistence to the helper, and return a `/generated/review-uploads/...` URL for later persistence through `/api/review`.
 - Local ComfyUI Klein workflow integration belongs in `src/lib/comfyui-klein.ts`; `src/lib/image-generation.ts` should only dispatch provider-marked selected image tasks to it and keep generic image-provider logic separate.
 - The ComfyUI Klein routing decision belongs at task construction time through an explicit option derived from `COMFYUI_KLEIN_ENABLED` plus workflow configuration. Client code may use `/api/config` non-sensitive status, but shared frontend-safe task builders must not read server env directly.
@@ -274,6 +275,62 @@ try {
 const url = await persistRuntimeMedia({ filePath, publicPath, contentType });
 // The helper returns a verified URL or throws after retaining the staged file.
 return url;
+```
+
+## Scenario: ToAPIs GPT-Image-2 Async Generation
+
+### 1. Scope / Trigger
+
+- Applies when `OPENAI_IMAGE_API_DIALECT=toapis`, or `auto` resolves a primary/backup route host under `toapis.com`.
+
+### 2. Signatures
+
+- Submit: `POST /v1/images/generations` for text and reference generation.
+- Upload local reference: `POST /v1/uploads/images` multipart field `file` plus `purpose=generation`.
+- Query accepted task: `GET /v1/images/generations/{task_id}`.
+- Env: `OPENAI_IMAGE_API_DIALECT=auto|openai|toapis`.
+
+### 3. Contracts
+
+- Submit JSON uses `model`, `prompt`, `n: 1`, documented ratio `size`, `resolution: 1k|2k|4k`, `response_format: url`, and optional URL-only `reference_images`.
+- Pixel presets map in `src/lib/toapis-image-api.ts`; unknown custom sizes fail before submission. Historical `1200x1600` maps to `3:4`/`1k`.
+- Public TOS/HTTP references pass directly. Local references upload first; generation endpoints never receive base64.
+- Submission returns a task id. Polling waits at least five seconds with jitter, respects `Retry-After`, and downloads `result.data[].url` into `persistRuntimeMedia` before the 24-hour provider URL expires.
+
+### 4. Validation & Error Matrix
+
+- Missing task id, unknown status, completed task without URL, unsupported size, or invalid upload envelope -> hard error.
+- `model_not_found` or `no available channel` -> may fail over before task acceptance, but must never return a source image as completed generation.
+- Accepted task query `429`/`500`-`504`/network error -> retry the same task; do not create a duplicate paid task on the backup route.
+- Terminal `failed` or overall timeout after task acceptance -> surface provider error without resubmission.
+
+### 5. Good/Base/Bad Cases
+
+- Good: ToAPIs completes, FluxPost downloads the temporary URL, TOS verifies the object, and the post stores the durable TOS URL.
+- Base: a non-ToAPIs relay under `auto` keeps the existing OpenAI JSON generations and multipart edits contract.
+- Bad: ToAPIs returns `queued`, code reads `data[].url` immediately, or a status-query timeout submits a second paid task.
+
+### 6. Tests Required
+
+- `.trellis/verification/toapis_image_api_check.mjs` executes size/body/task/error helpers and asserts upload, submit, query, retry, persistence, and hard-error wiring without live calls.
+- Existing `image_task_fallback_check.mjs`, `gpt_image_size_request_check.mjs`, and `viral_replication_regression_check.mjs` must continue to pass.
+- Live paid probes are manual: verify one text image and one public-TOS reference image become distinct durable TOS objects.
+
+### 7. Wrong vs Correct
+
+#### Wrong
+
+```typescript
+await fetch("/images/edits", { body: multipartReference });
+```
+
+#### Correct
+
+```typescript
+await fetch("/images/generations", {
+  method: "POST",
+  body: JSON.stringify({ size: "3:4", resolution: "1k", reference_images: [publicUrl] }),
+});
 ```
 
 ## Trellis Rules

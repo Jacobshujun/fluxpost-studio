@@ -113,6 +113,7 @@ OPENAI_IMAGE_BACKUP_API_KEY=
 OPENAI_TEXT_ENDPOINT=responses
 OPENAI_TEXT_MODEL=gpt-5.5
 OPENAI_IMAGE_ENDPOINT=images
+OPENAI_IMAGE_API_DIALECT=auto
 OPENAI_IMAGE_MODEL=gpt-image-2
 OPENAI_IMAGE_REQUEST_TIMEOUT_MS=180000
 VIRAL_IMAGE_IMITATION_PROMPT=参考图2的场景风格和美学，构图和角度可以变，同时使用图2的汽车漆面质感，为图1的车生成一张汽车美图，保持图1的汽车细节不要变，车牌黑底无字。
@@ -174,16 +175,17 @@ OPENAI_IMAGE_BACKUP_API_KEY=sk-backup-image-xxx
 OPENAI_TEXT_ENDPOINT=chat
 OPENAI_TEXT_MODEL=gpt-5.5
 OPENAI_IMAGE_ENDPOINT=images
+OPENAI_IMAGE_API_DIALECT=auto
 OPENAI_IMAGE_MODEL=gpt-image-2
 ```
 
-`OPENAI_TEXT_ENDPOINT` 可选 `responses` 或 `chat`。`OPENAI_IMAGE_ENDPOINT` 可选 `responses` 或 `images`。
+`OPENAI_TEXT_ENDPOINT` 可选 `responses` 或 `chat`。`OPENAI_IMAGE_ENDPOINT` 可选 `responses` 或 `images`。`OPENAI_IMAGE_API_DIALECT` 可选 `auto`、`openai` 或 `toapis`；`auto` 会对 `toapis.com` 使用异步 JSON 任务协议，其他图片地址继续使用标准 OpenAI Images API。
 
 飞书 CLI 未配置时，发布接口会把待写入内容保存到 `data/feishu-outbox/*.json`。
 
-`OPENAI_IMAGE_API_KEY` can be configured separately for the image provider; when it is empty the app uses `OPENAI_API_KEY`. `OPENAI_IMAGE_BASE_URL` is the primary image API base URL. Optional `OPENAI_IMAGE_BACKUP_BASE_URL` and `OPENAI_IMAGE_BACKUP_API_KEY` configure a backup Images API route: primary route failures switch image generation to the backup route, and backup route failures switch it back to primary. Text-to-image calls use `/images/generations`, and reference-image editing/image-to-image calls use `/images/edits`.
+`OPENAI_IMAGE_API_KEY` can be configured separately for the image provider; when it is empty the app uses `OPENAI_API_KEY`. `OPENAI_IMAGE_BASE_URL` is the primary image API base URL. Optional `OPENAI_IMAGE_BACKUP_BASE_URL` and `OPENAI_IMAGE_BACKUP_API_KEY` configure a backup Images API route: primary route failures switch image generation to the backup route, and backup route failures switch it back to primary. With the `openai` dialect, text-to-image calls use JSON `/images/generations` and reference-image editing uses multipart `/images/edits`. With the `toapis` dialect, both modes submit asynchronous JSON tasks to `/images/generations`, local references first use `/uploads/images`, and completed temporary result URLs are downloaded into FluxPost storage.
 
-`VIRAL_IMAGE_IMITATION_PROMPT` controls the full prompt used when simple-mode viral replication imitates source images, including any image 1/image 2 role constraints you want the model to follow. The code still sends the ordered local vehicle material image as reference image 1 and the viral source image as reference image 2 through `/images/edits`, but it does not add a separate hard-constraint prompt. Restart the local app after changing this environment variable.
+`VIRAL_IMAGE_IMITATION_PROMPT` controls the full prompt used when simple-mode viral replication imitates source images, including any image 1/image 2 role constraints you want the model to follow. The code keeps the ordered local vehicle material as reference image 1 and the viral source image as reference image 2. The `openai` dialect sends them through `/images/edits`; the `toapis` dialect sends their public/uploaded URLs through `reference_images` on `/images/generations`. Restart the local app after changing this environment variable.
 
 Local ComfyUI Klein processing is disabled by default. Keep `COMFYUI_KLEIN_ENABLED=false` to use the OpenAI-compatible `gpt-image-2` Images API path for car-exterior and people-with-car selected source-image tasks. Set `COMFYUI_KLEIN_ENABLED=true` plus either `COMFYUI_KLEIN_WORKFLOW_API_JSON` or `COMFYUI_KLEIN_WORKFLOW_PATH` to route those tasks to the local ComfyUI workflow. Inline API JSON takes precedence over the file path; the file path is read for each task, so edits in that workflow file do not require code changes. The `COMFYUI_KLEIN_KSAMPLER_*` values optionally override seed, steps, cfg, sampler, scheduler, and denoise from environment configuration; changing those env values requires restarting the app. The local workflow is serialized through `WORKER_LOCAL_IMAGE_CONCURRENCY=1`; `COMFYUI_KLEIN_FAILURE_POLICY=fallback_source` keeps a failed Klein image from failing the whole generated post.
 

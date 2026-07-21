@@ -49,6 +49,7 @@ function readAppConfig() {
   openaiTextEndpoint: process.env.OPENAI_TEXT_ENDPOINT || "responses",
   openaiTextModel: process.env.OPENAI_TEXT_MODEL || "gpt-5.5",
   openaiImageEndpoint: normalizeImageEndpoint(process.env.OPENAI_IMAGE_ENDPOINT || "images"),
+  openaiImageApiDialect: normalizeImageApiDialect(process.env.OPENAI_IMAGE_API_DIALECT || "auto"),
   openaiImageModel: process.env.OPENAI_IMAGE_MODEL || "gpt-image-2",
   openaiImageRequestTimeoutMs: numberOrDefault(process.env.OPENAI_IMAGE_REQUEST_TIMEOUT_MS, 180_000),
   viralImageImitationPrompt: stringOrDefault(process.env.VIRAL_IMAGE_IMITATION_PROMPT, defaultViralImageImitationPrompt),
@@ -158,6 +159,7 @@ export function getConfigStatus(): ConfigStatus {
     openaiTextEndpoint: appConfig.openaiTextEndpoint,
     imageModel: appConfig.openaiImageModel,
     imageProvider: appConfig.openaiImageEndpoint,
+    openaiImageApiDialect: appConfig.openaiImageApiDialect,
     openaiImageRequestTimeoutMs: appConfig.openaiImageRequestTimeoutMs,
     openaiBaseUrl: appConfig.openaiBaseUrl,
     openaiTextBaseUrl: appConfig.openaiTextBaseUrl,
@@ -230,6 +232,7 @@ export function openaiTextUrl(path: string) {
 }
 
 export type OpenaiImageApiRoute = "primary" | "backup";
+export type OpenaiImageApiDialect = "openai" | "toapis";
 
 export function openaiImageUrl(path: string, route: OpenaiImageApiRoute = "primary") {
   const cleanPath = path.startsWith("/") ? path.slice(1) : path;
@@ -238,6 +241,12 @@ export function openaiImageUrl(path: string, route: OpenaiImageApiRoute = "prima
 
 export function openaiImageApiKey(route: OpenaiImageApiRoute = "primary") {
   return route === "backup" ? appConfig.openaiImageBackupApiKey : appConfig.openaiImageApiKey;
+}
+
+export function openaiImageApiDialect(route: OpenaiImageApiRoute = "primary"): OpenaiImageApiDialect {
+  if (appConfig.openaiImageApiDialect !== "auto") return appConfig.openaiImageApiDialect;
+  const hostname = new URL(openaiImageBaseUrlForRoute(route)).hostname.toLowerCase();
+  return hostname === "toapis.com" || hostname.endsWith(".toapis.com") ? "toapis" : "openai";
 }
 
 function normalizeBaseUrl(value: string) {
@@ -258,6 +267,12 @@ function normalizeImageEndpoint(value: string) {
   const endpoint = value.trim().toLowerCase();
   if (endpoint === "responses" || endpoint === "images") return endpoint;
   return "images";
+}
+
+function normalizeImageApiDialect(value: string): OpenaiImageApiDialect | "auto" {
+  const dialect = value.trim().toLowerCase();
+  if (dialect === "openai" || dialect === "toapis") return dialect;
+  return "auto";
 }
 
 function normalizeKleinFailurePolicy(value: string) {
@@ -434,6 +449,10 @@ const advancedConfigGroups: ConfigDefinitionGroup[] = [
       configField("OPENAI_IMAGE_ENDPOINT", "图片接口形态", "images 为 Images API；responses 为兼容旧通道。", "select", "openai-image", {
         options: ["images", "responses"],
         read: () => appConfig.openaiImageEndpoint,
+      }),
+      configField("OPENAI_IMAGE_API_DIALECT", "图片接口协议", "auto 自动识别 ToAPIs；openai 使用标准 Images API；toapis 使用异步任务协议。", "select", "openai-image", {
+        options: ["auto", "openai", "toapis"],
+        read: () => appConfig.openaiImageApiDialect,
       }),
       configField("OPENAI_IMAGE_REQUEST_TIMEOUT_MS", "图片请求超时毫秒", "单次图片请求超时。", "number", "openai-image", {
         read: () => String(appConfig.openaiImageRequestTimeoutMs),

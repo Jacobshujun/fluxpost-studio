@@ -259,6 +259,7 @@ Invoke-NativeStep "Review preview layout check" $nodePath @(".trellis/verificati
 Invoke-NativeStep "Review desk workflow check" $nodePath @(".trellis/verification/review_desk_workflow_check.mjs")
 Invoke-NativeStep "Review desk scroll layout check" $nodePath @(".trellis/verification/review_desk_scroll_layout_check.mjs")
 Invoke-NativeStep "Image task fallback check" $nodePath @(".trellis/verification/image_task_fallback_check.mjs")
+Invoke-NativeStep "ToAPIs GPT-Image-2 adapter check" $nodePath @(".trellis/verification/toapis_image_api_check.mjs")
 Invoke-NativeStep "GPT image size request check" $nodePath @(".trellis/verification/gpt_image_size_request_check.mjs")
 Invoke-NativeStep "ComfyUI Klein integration check" $nodePath @(".trellis/verification/comfyui_klein_check.mjs")
 Invoke-NativeStep "Source tagging image check" $nodePath @(".trellis/verification/source_tagging_image_check.mjs")
