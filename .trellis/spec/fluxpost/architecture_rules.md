@@ -301,7 +301,7 @@ return url;
 
 - Missing task id, unknown status, completed task without URL, unsupported size, or invalid upload envelope -> hard error.
 - `model_not_found` or `no available channel` -> may fail over before task acceptance, but must never return a source image as completed generation.
-- Accepted task query `429`/`500`-`504`/network error -> retry the same task; do not create a duplicate paid task on the backup route.
+- Accepted task status `pending`/`queued`/`in_progress` is non-terminal; query `429`/`500`-`504`/network error retries the same task. Do not create a duplicate paid task on the backup route.
 - Terminal `failed` or overall timeout after task acceptance -> surface provider error without resubmission.
 
 ### 5. Good/Base/Bad Cases

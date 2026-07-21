@@ -70,6 +70,7 @@ assertContains(imageGeneration, /openaiImageUrl\("images\/generations", route\)[
 assertContains(imageGeneration, /openaiImageUrl\(`images\/generations\/\$\{encodeURIComponent\(taskId\)\}`, route\)/, "ToAPIs status polling must encode the task id in the documented endpoint.");
 assertContains(imageGeneration, /form\.append\("file"[\s\S]*openaiImageUrl\("uploads\/images", route\)/, "Local references must use the documented ToAPIs upload endpoint.");
 assertContains(imageGeneration, /const toApisPollIntervalMs = 5_000;[\s\S]*parseRetryAfterMs\(response\.headers\.get\("retry-after"\)\)/, "Polling must wait at least five seconds and honor Retry-After.");
+assertContains(imageGeneration, /\["pending",\s*"queued",\s*"in_progress"\]\.includes\(task\.status\)/, "Observed ToAPIs pending status must remain a non-terminal polling state.");
 assertContains(imageGeneration, /response\.status === 429 \|\| \(response\.status >= 500 && response\.status <= 504\)/, "Transient ToAPIs status-query failures must retry the accepted task instead of resubmitting it.");
 assertContains(imageGeneration, /function isStandardImagesApiFailoverError[\s\S]*ToAPIs image \(\?:task\|status\)/, "Accepted ToAPIs tasks must not fail over into duplicate paid submissions.");
 assertContains(imageGeneration, /getToApisCompletedImageUrls[\s\S]*urls\.map\(\(url\) => \(\{ url \}\)\)[\s\S]*materializeGeneratedImageUrls/, "Temporary ToAPIs result URLs must continue through generated-image persistence.");

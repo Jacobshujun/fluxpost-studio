@@ -943,7 +943,7 @@ async function requestSingleToApisImagesApiForRoute(
       return { data: urls.map((url) => ({ url })) };
     }
     if (task.status === "failed") throw new Error(`ToAPIs image task failed: ${formatToApisTaskError(task)}`);
-    if (task.status && task.status !== "queued" && task.status !== "in_progress") {
+    if (task.status && !["pending", "queued", "in_progress"].includes(task.status)) {
       throw new Error(`ToAPIs image task returned unsupported status: ${task.status}`);
     }
     if (!hasRetryWindow(deadline)) throw new Error(`ToAPIs image task timed out after ${Math.round(imageRequestTimeoutMs / 1000)}s.`);
