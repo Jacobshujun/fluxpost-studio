@@ -1,4 +1,7 @@
 import { existsSync, readFileSync } from "node:fs";
+import { mkdtemp, readFile, rm } from "node:fs/promises";
+import { createServer } from "node:http";
+import { tmpdir } from "node:os";
 import path from "node:path";
 import vm from "node:vm";
 import { createRequire } from "node:module";
@@ -32,6 +35,7 @@ for (const relativePath of Object.values(files)) {
 
 const core = loadTypescriptCommonJs(files.core);
 const storage = read(files.storage);
+const materializer = read(files.materializer);
 const config = read(files.config);
 const types = read(files.types);
 const mediaCache = read(files.mediaCache);
@@ -75,6 +79,11 @@ assertEqual(
 );
 
 await verifyUploadCore(core);
+await verifyMaterializerRoot(
+  loadTypescriptCommonJs(files.materializer, {
+    "./media-request": { buildMediaRequestHeaders: () => ({}) },
+  }),
+);
 
 for (const key of [
   "TOS_ENABLED",
@@ -102,6 +111,31 @@ for (const [name, source] of Object.entries({ mediaCache, imageGeneration, comfy
   assertContains(source, /persistRuntimeMedia/, `${name} must persist final runtime media through the shared storage boundary.`);
 }
 assertContains(feishuCli, /materializeRuntimeMedia/, "Feishu publish must materialize remote TOS attachments through the shared helper.");
+assertContains(
+  materializer,
+  /temporaryRoot\?:\s*string/,
+  "Runtime media materialization must let CLI consumers choose a safe temporary root.",
+);
+assertContains(
+  materializer,
+  /temporaryRoot\s*=\s*path\.resolve\(options\.temporaryRoot\s*\|\|\s*tmpdir\(\)\)[\s\S]*mkdtemp\(path\.join\(temporaryRoot,\s*["']fluxpost-runtime-media-["']\)\)/,
+  "Runtime media materialization must create temporary files under the requested root.",
+);
+assertContains(
+  feishuCli,
+  /feishuAttachmentStagingRoot\s*=\s*path\.join\(process\.cwd\(\),\s*["']data["'],\s*["']feishu-outbox["']\)/,
+  "Feishu attachment staging must stay inside the CLI working directory.",
+);
+assertContains(
+  feishuCli,
+  /materializeRuntimeMedia\(imageUrl,\s*\{[^}]*temporaryRoot:\s*feishuAttachmentStagingRoot[^}]*\}\)/s,
+  "Feishu image materialization must use the CLI-safe staging root.",
+);
+assertContains(
+  feishuCli,
+  /materializeRuntimeMedia\(url,\s*\{[^}]*temporaryRoot:\s*feishuAttachmentStagingRoot[^}]*\}\)/s,
+  "Feishu video materialization must use the CLI-safe staging root.",
+);
 assertContains(modelImageInput, /materializeRuntimeMedia|readRuntimeMedia/, "Model image input must support shared runtime-media reads.");
 assertContains(mediaCache, /isManagedRuntimeMediaUrl/, "Media cache status wiring must recognize managed TOS URLs.");
 assertContains(
@@ -202,7 +236,38 @@ async function verifyUploadCore(module) {
   );
 }
 
-function loadTypescriptCommonJs(relativePath) {
+async function verifyMaterializerRoot(module) {
+  const payload = Buffer.from("feishu-attachment-check");
+  const server = createServer((_request, response) => {
+    response.writeHead(200, { "content-length": payload.length, "content-type": "image/jpeg" });
+    response.end(payload);
+  });
+  await new Promise((resolve, reject) => {
+    server.once("error", reject);
+    server.listen(0, "127.0.0.1", resolve);
+  });
+
+  const address = server.address();
+  const temporaryRoot = await mkdtemp(path.join(tmpdir(), "fluxpost-materializer-check-"));
+  try {
+    if (!address || typeof address === "string") throw new Error("Materializer check server did not bind a TCP port.");
+    const materialized = await module.materializeRuntimeMedia(`http://127.0.0.1:${address.port}/asset.jpg`, {
+      maxBytes: 1024,
+      kind: "image",
+      temporaryRoot,
+    });
+    const relativePath = path.relative(temporaryRoot, materialized.filePath);
+    assertEqual(relativePath.startsWith("..") || path.isAbsolute(relativePath), false, "Materialized media must stay inside the requested root.");
+    assertEqual((await readFile(materialized.filePath)).equals(payload), true, "Materialized media must preserve the downloaded bytes.");
+    await materialized.cleanup();
+    assertEqual(existsSync(path.dirname(materialized.filePath)), false, "Materialized media cleanup must remove its temporary directory.");
+  } finally {
+    await new Promise((resolve) => server.close(resolve));
+    await rm(temporaryRoot, { recursive: true, force: true });
+  }
+}
+
+function loadTypescriptCommonJs(relativePath, dependencyOverrides = {}) {
   const source = read(relativePath);
   const output = ts.transpileModule(source, {
     compilerOptions: {
@@ -214,7 +279,7 @@ function loadTypescriptCommonJs(relativePath) {
   }).outputText;
   const loadedModule = { exports: {} };
   const wrapper = vm.runInThisContext(`(function(require,module,exports,Buffer){${output}\n})`, { filename: relativePath });
-  wrapper(require, loadedModule, loadedModule.exports, Buffer);
+  wrapper((id) => dependencyOverrides[id] || require(id), loadedModule, loadedModule.exports, Buffer);
   return loadedModule.exports;
 }
 

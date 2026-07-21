@@ -1,5 +1,5 @@
 import { createWriteStream, existsSync } from "node:fs";
-import { mkdtemp, readFile, rm } from "node:fs/promises";
+import { mkdir, mkdtemp, readFile, rm } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import path from "node:path";
 import { Readable, Transform } from "node:stream";
@@ -12,7 +12,10 @@ export type MaterializedRuntimeMedia = {
   cleanup: () => Promise<void>;
 };
 
-export async function materializeRuntimeMedia(url: string, options: { maxBytes: number; kind: "image" | "video" }): Promise<MaterializedRuntimeMedia> {
+export async function materializeRuntimeMedia(
+  url: string,
+  options: { maxBytes: number; kind: "image" | "video"; temporaryRoot?: string },
+): Promise<MaterializedRuntimeMedia> {
   const localPath = resolveExistingLocalMediaPath(url);
   if (localPath) return { filePath: localPath, temporary: false, cleanup: async () => undefined };
   if (!/^https?:\/\//i.test(url)) throw new Error("Runtime media URL is not a local file or HTTP(S) URL.");
@@ -22,7 +25,9 @@ export async function materializeRuntimeMedia(url: string, options: { maxBytes: 
   const contentLength = Number(response.headers.get("content-length") || 0);
   if (contentLength > options.maxBytes) throw new Error(`Runtime media exceeds the ${options.maxBytes} byte limit.`);
 
-  const folder = await mkdtemp(path.join(tmpdir(), "fluxpost-runtime-media-"));
+  const temporaryRoot = path.resolve(options.temporaryRoot || tmpdir());
+  await mkdir(temporaryRoot, { recursive: true });
+  const folder = await mkdtemp(path.join(temporaryRoot, "fluxpost-runtime-media-"));
   const filePath = path.join(folder, `asset${resolveExtension(url, response.headers.get("content-type"), options.kind)}`);
   let bytes = 0;
   const limiter = new Transform({

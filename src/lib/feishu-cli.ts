@@ -91,6 +91,7 @@ type PublishPostsToFeishuOptions = {
 };
 
 const maxFeishuAttachmentImageBytes = 30 * 1024 * 1024;
+const feishuAttachmentStagingRoot = path.join(process.cwd(), "data", "feishu-outbox");
 
 export async function publishPostsToFeishu(posts: GeneratedPost[], options: PublishPostsToFeishuOptions = {}) {
   const outboxDir = path.join(process.cwd(), "data", "feishu-outbox");
@@ -576,7 +577,11 @@ async function resolvePostAttachmentFiles(post: GeneratedPost) {
     }
 
     try {
-      const materialized = await materializeRuntimeMedia(imageUrl, { maxBytes: maxFeishuAttachmentImageBytes, kind: "image" });
+      const materialized = await materializeRuntimeMedia(imageUrl, {
+        maxBytes: maxFeishuAttachmentImageBytes,
+        kind: "image",
+        temporaryRoot: feishuAttachmentStagingRoot,
+      });
       files.push(toCliRelativePath(materialized.filePath));
       cleanups.push(materialized.cleanup);
     } catch (error) {
@@ -598,7 +603,11 @@ async function resolvePostAttachmentFiles(post: GeneratedPost) {
       continue;
     }
     try {
-      const materialized = await materializeRuntimeMedia(url, { maxBytes: 150 * 1024 * 1024, kind: "video" });
+      const materialized = await materializeRuntimeMedia(url, {
+        maxBytes: 150 * 1024 * 1024,
+        kind: "video",
+        temporaryRoot: feishuAttachmentStagingRoot,
+      });
       localVideoFiles.push(toCliRelativePath(materialized.filePath));
       cleanups.push(materialized.cleanup);
     } catch (error) {
