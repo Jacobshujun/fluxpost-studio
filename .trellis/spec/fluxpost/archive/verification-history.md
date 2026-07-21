@@ -10,6 +10,10 @@ Run from project root:
 powershell -ExecutionPolicy Bypass -File .trellis/verification/check.ps1
 ```
 
+## Archived Recent Verification
+
+- 2026-07-15: Full baseline passed with `TRELLIS_SMOKE_PORT=45678 powershell -ExecutionPolicy Bypass -File .trellis/verification/check.ps1` after adding the one-command Ubuntu 24.04 deployment path. `.trellis/verification/vps_deployment_check.mjs` parses Compose YAML, runs `bash -n`, executes private/HTTPS/legacy `vps-deploy.sh --check` plans, verifies random-secret/mode-0600 wiring, persistent named volumes, loopback-only pre-domain access, domain validation, and absence of SSH/firewall/`down -v` mutations. Focused checks, `npx --no-install tsc --noEmit`, `npm run lint`, and `npm run build` passed; 15 Turbopack path-tracing warnings remain. No live VPS, Docker, DNS, certificate, GitHub, or provider operation was triggered by verification.
+
 ## Current Automated Checks
 
 `.trellis/verification/check.ps1` performs:

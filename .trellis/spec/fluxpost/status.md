@@ -8,7 +8,7 @@ FluxPost Studio uses Trellis as the active project context system. A Docker depl
 
 ## Current Focus
 
-- The ToAPIs GPT-Image-2 adapter is deployed at `4a9bd8e` on `82.158.226.10`; live text/reference probes produced distinct TOS objects without fallback and confirmed `pending` is non-terminal.
+- Image provider profiles are deployed at `8ee3498` on `82.158.226.10`; primary/backup remain on the existing `auto` ToAPIs configuration, and the new paid admin probe remains intentionally unrun.
 - Task `.trellis/tasks/07-20-tos-runtime-media-storage` is deployed at commit `0039408` on `82.158.226.10`. TOS is configured and enabled after a deployment-environment probe passed upload, HEAD, anonymous GET, Range `206`, and cleanup; the feature remains `ready_for_review` until a normally authenticated admin runs the UI check and a real FluxPost media workflow persists TOS URLs.
 - Trellis CLI 0.6.5 is installed; `.trellis/spec/fluxpost` and `.trellis/verification` are the active context and baseline locations.
 - `docs/harness.disabled/` and `scripts/harness.disabled/` are migration archives only.

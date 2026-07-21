@@ -27,15 +27,15 @@ Make FluxPost image-provider switching predictable by routing a stable internal 
 
 ## Acceptance Criteria
 
-- [ ] Deterministic checks prove all three request/response profiles, independent main/backup resolution, legacy dialect mapping, unsupported-size behavior, structured failover rules, and accepted-task non-resubmission.
-- [ ] `openai_json` sends no `stream`, `response_format`, or `input_fidelity`, accepts JSON `data[].b64_json` and `data[].url`, and uses generation/edit endpoints according to reference presence.
-- [ ] Existing SSE and ToAPIs regression checks remain green.
-- [ ] `GET /api/config` exposes non-secret resolved profile/model status; advanced configuration exposes allow-listed primary/backup profile and backup model fields without revealing keys.
-- [ ] `POST /api/config/image-provider-check` is admin-only, validates `route`, runs exactly the two fixed probe modes, and reports sanitized per-mode verification/cleanup results.
-- [ ] Config saving remains free of external calls; the UI requires an explicit confirmation before the paid probe.
-- [ ] Lint, TypeScript, build, focused checks, the full Trellis baseline, and local production restart pass.
-- [ ] Task changes are committed and pushed without including unrelated dirty files.
-- [ ] GitHub `main` is deployed only to `82.158.226.10`; app/PostgreSQL, Nginx/public HTTPS, and existing Open WebUI remain healthy, with FluxPost Caddy/proxy still disabled.
+- [x] Deterministic checks prove all three request/response profiles, independent main/backup resolution, legacy dialect mapping, unsupported-size behavior, structured failover rules, and accepted-task non-resubmission.
+- [x] `openai_json` sends no `stream`, `response_format`, or `input_fidelity`, accepts JSON `data[].b64_json` and `data[].url`, and uses generation/edit endpoints according to reference presence.
+- [x] Existing SSE and ToAPIs regression checks remain green.
+- [x] `GET /api/config` exposes non-secret resolved profile/model status; advanced configuration exposes allow-listed primary/backup profile and backup model fields without revealing keys.
+- [x] `POST /api/config/image-provider-check` is admin-only, validates `route`, runs exactly the two fixed probe modes, and reports sanitized per-mode verification/cleanup results.
+- [x] Config saving remains free of external calls; the UI requires an explicit confirmation before the paid probe.
+- [x] Lint, TypeScript, build, focused checks, the full Trellis baseline, and local production restart pass.
+- [x] Task changes are committed and pushed without including unrelated dirty files.
+- [x] GitHub `main` is deployed only to `82.158.226.10`; app/PostgreSQL, Nginx/public HTTPS, and existing Open WebUI remain healthy, with FluxPost Caddy/proxy still disabled.
 
 ## Out Of Scope
 
