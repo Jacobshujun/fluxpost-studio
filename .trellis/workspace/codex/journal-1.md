@@ -105,3 +105,38 @@ Fixed admin advanced config loss by adding a persistent Docker config volume, lo
 ### Next Steps
 
 - None - task complete
+
+
+## Session 4: Deploy ToAPIs GPT-Image-2 adapter
+
+**Date**: 2026-07-21
+**Task**: Deploy ToAPIs GPT-Image-2 adapter
+**Branch**: `main`
+
+### Summary
+
+Implemented and deployed the documented asynchronous ToAPIs GPT-Image-2 dialect, accepted observed pending tasks, verified text and public-TOS reference generation without fallback, and confirmed durable distinct TOS outputs on 82.158.226.10.
+
+### Main Changes
+
+(Add details)
+
+### Git Commits
+
+| Hash | Message |
+|------|---------|
+| `d9095ea` | (see git log) |
+| `4a9bd8e` | (see git log) |
+| `91261c2` | (see git log) |
+
+### Testing
+
+- [OK] (Add test results)
+
+### Status
+
+[OK] **Completed**
+
+### Next Steps
+
+- None - task complete
