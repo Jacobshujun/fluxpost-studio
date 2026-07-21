@@ -162,7 +162,7 @@ type PublishStatusSnapshot = {
 };
 
 type FeishuPublishResponse = {
-  status?: "queued" | "running" | "published" | "attachment_failed" | "needs_config" | "skipped" | "failed" | string;
+  status?: "queued" | "running" | "published" | "record_failed" | "attachment_failed" | "needs_config" | "skipped" | "failed" | string;
   jobId?: string;
   queueStatus?: FeishuPublishJob["status"];
   job?: FeishuPublishJob;
@@ -6473,6 +6473,7 @@ function getSimpleStageStatusClass(value: SimpleRun["stages"][number]["status"])
 }
 
 function formatSimplePublishStatus(value?: NonNullable<SimpleRun["publish"]>["status"]) {
+  if (value === "record_failed") return "记录未完成";
   if (value === "queued") return "排队中";
   if (value === "running") return "写入中";
   if (value === "attachment_failed") return "附件未完成";
@@ -6486,7 +6487,7 @@ function formatSimplePublishStatus(value?: NonNullable<SimpleRun["publish"]>["st
 function getSimplePublishStatusClass(value?: NonNullable<SimpleRun["publish"]>["status"]) {
   if (value === "published") return "text-[var(--mint)]";
   if (value === "queued" || value === "running") return "text-[var(--cyan)]";
-  if (value === "attachment_failed" || value === "needs_config" || value === "skipped") return "text-[var(--amber)]";
+  if (value === "record_failed" || value === "attachment_failed" || value === "needs_config" || value === "skipped") return "text-[var(--amber)]";
   if (value === "failed") return "text-[var(--rose)]";
   return "text-white/45";
 }

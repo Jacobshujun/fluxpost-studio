@@ -368,6 +368,7 @@ function buildJobResult(publishResult: Awaited<ReturnType<typeof publishPostsToF
     payloadPath: publishResult.payloadPath,
     message: publishResult.message,
     notificationStatus: publishResult.notification?.status,
+    recordFailureCount: publishResult.recordFailures?.length || 0,
     attachmentFailureCount: publishResult.attachmentFailures?.length || 0,
     recordCount: publishResult.recordMappings?.length || 0,
   };
@@ -375,6 +376,7 @@ function buildJobResult(publishResult: Awaited<ReturnType<typeof publishPostsToF
 
 function queueStatusFromPublishResult(status: FeishuPublishJobResult["status"]): FeishuPublishQueueStatus {
   if (status === "published") return "completed";
+  if (status === "record_failed") return "partial";
   if (status === "attachment_failed") return "partial";
   if (status === "needs_config") return "needs_config";
   return status === "skipped" ? "cancelled" : "failed";
@@ -407,7 +409,7 @@ async function syncSimpleRunPublishJob(job: FeishuPublishJob) {
   const publishStage = buildSimpleRunPublishStage(run, job, now);
   const message = job.result?.message || job.error || `Feishu publish job ${job.id} returned ${job.status}.`;
   const nextErrors =
-    publishStatus === "attachment_failed" || publishStatus === "failed"
+    publishStatus === "record_failed" || publishStatus === "attachment_failed" || publishStatus === "failed"
       ? appendUnique(run.errors, message)
       : run.errors;
 
@@ -474,6 +476,18 @@ function buildSimpleRunPublishStage(run: SimpleRun, job: FeishuPublishJob, now: 
       total: job.postIds.length,
       completed: job.result?.recordCount || job.postIds.length,
       failed: job.result?.attachmentFailureCount || 1,
+      message,
+      updatedAt: now,
+    };
+  }
+
+  if (publishStatus === "record_failed") {
+    return {
+      ...base,
+      status: "warning",
+      total: job.postIds.length,
+      completed: Math.max(0, (job.result?.recordCount || job.postIds.length) - (job.result?.recordFailureCount || 1)),
+      failed: job.result?.recordFailureCount || 1,
       message,
       updatedAt: now,
     };

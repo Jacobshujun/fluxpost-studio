@@ -311,6 +311,9 @@ export type FeishuAttachmentStatus = "pending" | "uploaded" | "failed" | "skippe
 export type FeishuPostPublishState = {
   recordId?: string;
   recordCreatedAt?: string;
+  recordStatus?: "verified" | "failed";
+  recordVerifiedAt?: string;
+  recordError?: string;
   payloadPath?: string;
   attachmentStatus?: FeishuAttachmentStatus;
   attachmentFileCount?: number;
@@ -665,7 +668,7 @@ export type SimpleRunPostResult = {
 };
 
 export type SimpleRunPublishResult = {
-  status: "queued" | "running" | "published" | "attachment_failed" | "needs_config" | "skipped" | "failed";
+  status: "queued" | "running" | "published" | "record_failed" | "attachment_failed" | "needs_config" | "skipped" | "failed";
   postCount: number;
   jobId?: string;
   payloadPath?: string;
@@ -798,10 +801,11 @@ export type DistributionCheckJob = DistributionCheckResponse & {
 };
 
 export type FeishuPublishJobResult = {
-  status: "published" | "attachment_failed" | "needs_config" | "skipped" | "failed";
+  status: "published" | "record_failed" | "attachment_failed" | "needs_config" | "skipped" | "failed";
   payloadPath?: string;
   message?: string;
   notificationStatus?: string;
+  recordFailureCount?: number;
   attachmentFailureCount?: number;
   recordCount?: number;
 };

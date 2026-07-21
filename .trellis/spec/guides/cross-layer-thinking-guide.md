@@ -65,6 +65,13 @@ An external API version change is a change-propagation task, not a one-call-site
 
 **Real-world example**: Xiaohongshu keyword search moved to TikHub App V2, but source-link import, search-result detail enrichment, and regression expectations still referenced removed Web/Web V3 endpoints. The old fallback returned HTTP 200 with `data.ok=false` and `data.status=461`, which the HTTP-only success check normalized as zero items. The durable fix migrated every detail consumer, validated the business envelope once in the TikHub request boundary, and added offline image/video/failure fixtures plus a request-order regression.
 
+### External CLI Business Success
+
+- A zero exit code and returned entity IDs prove only that the CLI/API accepted the operation; they do not prove required business fields were persisted.
+- For writes where empty or partial entities are harmful, read the created entities back and compare the critical fields before reporting success.
+- Persist returned IDs before surfacing a partial failure so retries repair the same entities instead of creating duplicates.
+- Regression coverage must include a technically successful response whose read-back fields are blank.
+
 ### Mistake 1: Implicit Format Assumptions
 
 **Bad**: Assuming date format without checking

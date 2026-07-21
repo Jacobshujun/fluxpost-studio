@@ -65,7 +65,7 @@ assertContains(feishu, /case "contentCreationSource":[\s\S]*return formatContent
 assertContains(feishu, /case "vehicle":[\s\S]*return formatVehicleFieldValue\(post\)/, "Feishu publish must map vehicle from the task keyword.");
 assertContains(feishu, /function formatVehicleFieldValue\(post: GeneratedPost\)[\s\S]*post\.taskKeyword\?\.trim\(\)\s*\|\|\s*null/, "Feishu vehicle field must use a single-select string value or null.");
 assertContains(feishu, /function formatContentCreationSource\(post: GeneratedPost\)[\s\S]*post\.ownerDisplayName\?\.trim\(\)[\s\S]*post\.ownerUserId\?\.trim\(\)/, "Feishu content creation source must prefer owner display name and fall back to owner id.");
-assertContains(feishu, /type FeishuPublishNotificationSummary[\s\S]*status:\s*"published"\s*\|\s*"attachment_failed"/, "Feishu notification must distinguish success from partial attachment failure.");
+assertContains(feishu, /type FeishuPublishNotificationSummary[\s\S]*status:\s*"published"\s*\|\s*"record_failed"\s*\|\s*"attachment_failed"/, "Feishu notification must distinguish success from record and attachment failures.");
 assertContains(feishu, /function buildPublishNotificationText[\s\S]*formatNotificationTask\(posts,\s*context\)[\s\S]*formatNotificationContentLines\(posts\)/, "Feishu notification text must be a publish batch summary.");
 assertContains(feishu, /内容示例：/, "Batch Feishu notifications should label post titles as content examples.");
 assertNotContains(feishu, /const firstPost = posts\[0\]/, "Feishu notifications must not use the first post as the batch title.");
