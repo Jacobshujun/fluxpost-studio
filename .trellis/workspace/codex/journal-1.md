@@ -140,3 +140,37 @@ Implemented and deployed the documented asynchronous ToAPIs GPT-Image-2 dialect,
 ### Next Steps
 
 - None - task complete
+
+
+## Session 5: Image provider profiles deployment
+
+**Date**: 2026-07-21
+**Task**: Image provider profiles deployment
+**Branch**: `main`
+
+### Summary
+
+Implemented fixed image provider profiles, verified offline and locally, deployed release 20260721-100637 to 82.158.226.10, and left the paid admin probe unrun.
+
+### Main Changes
+
+(Add details)
+
+### Git Commits
+
+| Hash | Message |
+|------|---------|
+| `8ee3498` | (see git log) |
+| `e138c38` | (see git log) |
+
+### Testing
+
+- [OK] (Add test results)
+
+### Status
+
+[OK] **Completed**
+
+### Next Steps
+
+- None - task complete
