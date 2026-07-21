@@ -24,7 +24,7 @@ npm run trellis:check
 - Trellis context budgets and `TRELLIS-LATEST` marker sizes.
 - Handoff validity through `.trellis/verification/handoff.ps1`.
 - JSON parse checks for project JSON, `.trellis/spec/fluxpost/feature_list.json`, and existing legacy `data/*.json`.
-- Static/domain checks for PostgreSQL schema, workspace accounts, advanced config admin boundaries, TOS runtime media storage/consumption and secret masking, Ubuntu VPS deployment/Compose/shell contracts, execution logs, platform request mapping, media handling, video download fallback, video-frame policy, source-video final material references and default-off opt-in, video transcription wiring, concurrency, Feishu publish/resume/queue/vehicle-option paths, simple-run policies, content desk and pool-mode secondary creation, viral/original modes, review preview/workflow/desktop scroll layout behavior, source safety, source import retirement, Feishu content import, durable distribution audit queue/progress, Lark task launch, crawl strategy sync, source-link importers, simple queue/persistence, title/image prompt guards, image-generation toggle behavior, GPT-Image-2 request shape, ComfyUI Klein wiring, source tagging image preprocessing, and row-level runtime mutations.
+- Static/domain checks for PostgreSQL schema, workspace accounts, advanced config admin boundaries, TOS runtime media storage/consumption and secret masking, Ubuntu VPS deployment/Compose/shell contracts, execution logs, platform request mapping, media handling, video download fallback, video-frame policy, source-video final material references and default-off opt-in, video transcription wiring, concurrency, Feishu publish/resume/queue/vehicle-option paths, simple-run policies, content desk and pool-mode secondary creation, viral/original modes, review preview/workflow/desktop scroll layout behavior, source safety, source import retirement, Feishu content import, durable distribution audit queue/progress, Lark task launch, crawl strategy sync, source-link importers, simple queue/persistence, title/image prompt guards, image-generation toggle behavior, GPT-Image-2/ToAPIs async request shape, ComfyUI Klein wiring, source tagging image preprocessing, and row-level runtime mutations.
 - `npm run lint`.
 - `npx --no-install tsc --noEmit`.
 - `npm run build`.
@@ -49,6 +49,8 @@ node .trellis/verification/http_smoke.js http://127.0.0.1:3001
 
 ## Recent Verification
 
+- 2026-07-21: ToAPIs focused checks, TypeScript, lint, build, local restart, and full baseline passed. Commits `d9095ea`/`4a9bd8e` deployed healthy to `82.158.226.10`; paid text/reference probes returned distinct durable TOS images without fallback. A complex reference exceeded 180 seconds, later completed provider-side, and was recovered through the same persistence boundary.
+
 - 2026-07-20: `.trellis/verification/tos_runtime_media_check.mjs`, lint, type-check, build, the full baseline on port 45678, and `npm run local:restart` passed. Commits `303e597` and Linux-lock fix `0039408` deployed to `82.158.226.10`; Linux `npm ci`, app/PostgreSQL/Open WebUI health, Nginx, loopback/public `/api/config`, `tosConfigured=true`, `tosEnabled=true`, absence of FluxPost proxy, unset `NODE_TLS_REJECT_UNAUTHORIZED`, chat/sd/run/aitool HTTPS, and sampled historical media Range `206` passed. Before enabling, a temporary dependency-stage container using the deployed persistent config verified object-level upload, HEAD length/ETag, anonymous GET, video Range `206`, and DELETE, then its image was removed. The admin route still returns boolean-only HTTP 401 without authentication; a normal authenticated admin button run and real FluxPost media production remain outstanding.
 - 2026-07-15: Full baseline passed with `TRELLIS_SMOKE_PORT=45678 powershell -ExecutionPolicy Bypass -File .trellis/verification/check.ps1` after adding the one-command Ubuntu 24.04 deployment path. `.trellis/verification/vps_deployment_check.mjs` parses Compose YAML, runs `bash -n`, executes private/HTTPS/legacy `vps-deploy.sh --check` plans, verifies random-secret/mode-0600 wiring, persistent named volumes, loopback-only pre-domain access, domain validation, and absence of SSH/firewall/`down -v` mutations. Focused checks, `npx --no-install tsc --noEmit`, `npm run lint`, and `npm run build` passed; 15 Turbopack path-tracing warnings remain. No live VPS, Docker, DNS, certificate, GitHub, or provider operation was triggered by verification.
 
@@ -62,7 +64,7 @@ node .trellis/verification/http_smoke.js http://127.0.0.1:3001
 
 ## Missing Coverage
 
-- TOS has provider-level deployed evidence, but no normally authenticated `/config` button run or real application image/video production evidence yet. Keep `tos-runtime-media-storage` at `ready_for_review` until saved business URLs and public-volume cleanup are observed.
+- TOS has real application image evidence; authenticated `/config` and real video checks remain.
 
 - No unit test script is defined in `package.json`.
 - No isolated live TikHub, OpenAI-compatible, image-provider, ComfyUI, Feishu, or Lark integration test is part of the default baseline.

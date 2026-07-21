@@ -10,6 +10,7 @@ Restore real GPT-Image-2 generation after the image relay changed to ToAPIs, whi
 - ToAPIs documents `POST /v1/images/generations` as an asynchronous JSON API for both text-to-image and reference-image generation.
 - ToAPIs accepts `size` as an aspect ratio, `resolution` as `1k|2k|4k`, URL-only `reference_images`, and returns a task id that must be queried through `GET /v1/images/generations/{task_id}`.
 - Completed result URLs expire after 24 hours, so FluxPost must download and persist them through its existing runtime-media boundary before returning generated posts.
+- The deployed route can return undocumented non-terminal `pending`; FluxPost must continue polling it like `queued`/`in_progress`.
 - Existing code sends pixel dimensions and OpenAI-specific fields; reference-image work uses multipart `POST /images/edits`. A ToAPIs `503 model_not_found` is currently classified as recoverable and silently replaced with the source image.
 
 ## Requirements
@@ -30,9 +31,9 @@ Restore real GPT-Image-2 generation after the image relay changed to ToAPIs, whi
 - [x] Deterministic verification proves ToAPIs request path, JSON fields, preset mapping, URL references, local upload boundary, asynchronous result parsing, polling cadence, and hard model-channel errors without live provider calls.
 - [x] Existing OpenAI-compatible request-shape verification continues to pass.
 - [x] TypeScript, lint, build, full Trellis baseline, and local production restart pass.
-- [ ] The deployment runs the new commit on `82.158.226.10` with healthy app/PostgreSQL and unchanged unrelated services.
-- [ ] One explicit paid text-to-image probe completes through ToAPIs, and its final image is persisted as a TOS URL rather than a temporary ToAPIs URL or source-image fallback.
-- [ ] One explicit paid reference-image probe uses a public TOS reference and produces a distinct generated TOS object.
+- [x] The deployment runs the new commit on `82.158.226.10` with healthy app/PostgreSQL and unchanged unrelated services.
+- [x] One explicit paid text-to-image probe completes through ToAPIs, and its final image is persisted as a TOS URL rather than a temporary ToAPIs URL or source-image fallback.
+- [x] One explicit paid reference-image probe uses a public TOS reference and produces a distinct generated TOS object.
 
 ## Out Of Scope
 

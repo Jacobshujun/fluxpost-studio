@@ -8,6 +8,7 @@ FluxPost Studio uses Trellis as the active project context system. A Docker depl
 
 ## Current Focus
 
+- The ToAPIs GPT-Image-2 adapter is deployed at `4a9bd8e` on `82.158.226.10`; live text/reference probes produced distinct TOS objects without fallback and confirmed `pending` is non-terminal.
 - Task `.trellis/tasks/07-20-tos-runtime-media-storage` is deployed at commit `0039408` on `82.158.226.10`. TOS is configured and enabled after a deployment-environment probe passed upload, HEAD, anonymous GET, Range `206`, and cleanup; the feature remains `ready_for_review` until a normally authenticated admin runs the UI check and a real FluxPost media workflow persists TOS URLs.
 - Trellis CLI 0.6.5 is installed; `.trellis/spec/fluxpost` and `.trellis/verification` are the active context and baseline locations.
 - `docs/harness.disabled/` and `scripts/harness.disabled/` are migration archives only.
@@ -29,6 +30,8 @@ FluxPost Studio uses Trellis as the active project context system. A Docker depl
 7. Before completion, read `.trellis/spec/fluxpost/verification.md` and run `powershell -ExecutionPolicy Bypass -File .trellis/verification/check.ps1`, or explain why it could not run.
 
 ## Recent Verification
+
+- 2026-07-21: ToAPIs commits `d9095ea`/`4a9bd8e` deployed to release `20260721-061557`. Service health passed; paid text/reference probes produced distinct durable TOS images without fallback.
 
 - 2026-07-20: Commits `303e597` and `0039408` were pushed and deployed only to `82.158.226.10`. The first build exposed a Windows-generated optional-dependency lock gap; a Linux-generated lock then passed container `npm ci` and deployment. TOS values were written to the persistent config volume through stdin without output, the app was enabled only after the deployed-config direct probe passed upload/HEAD/anonymous GET/Range `206`/delete, and app/PostgreSQL/Open WebUI, Nginx, public HTTPS, chat/sd/run/aitool, no FluxPost proxy, TLS verification, and sampled historical local media all remained healthy. A normal authenticated admin check and real application media write remain pending.
 - 2026-07-15: Added a fresh Ubuntu 24.04 one-command bootstrap, private pre-domain SSH-tunnel mode, later one-command Caddy/HTTPS enablement, configurable loopback port/domain, and non-mutating `deploy.sh --check`. Deterministic tests parse Compose, run Bash syntax, execute private/HTTPS/legacy plans, guard all named volumes, and reject SSH/firewall/destructive-volume commands. Focused checks and the full Trellis baseline passed; build retains 15 Turbopack path-tracing warnings. No live second-VPS install, DNS change, Docker operation, or external provider call was performed.
