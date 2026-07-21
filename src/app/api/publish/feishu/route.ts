@@ -21,7 +21,7 @@ export async function GET(request: Request) {
     if (jobId) {
       const job = await getFeishuPublishJob(jobId, account);
       if (!job) return NextResponse.json({ error: "Feishu publish job not found" }, { status: 404 });
-      return NextResponse.json(buildFeishuPublishJobResponse(job));
+      return NextResponse.json(await buildFeishuPublishJobResponse(job));
     }
 
     const jobs = await listFeishuPublishJobs(50, account);
@@ -83,7 +83,7 @@ export async function POST(request: Request) {
 
     return NextResponse.json(
       {
-        ...buildFeishuPublishJobResponse(job),
+        ...(await buildFeishuPublishJobResponse(job)),
         message: `Feishu publish job ${job.id} has been queued. Feishu CLI writes will run in the per-user queue.`,
         postStates: [],
       },

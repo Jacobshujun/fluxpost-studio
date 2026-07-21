@@ -808,6 +808,14 @@ export type FeishuPublishJobResult = {
   recordFailureCount?: number;
   attachmentFailureCount?: number;
   recordCount?: number;
+  mediaRepairCount?: number;
+  mediaFailureCount?: number;
+  mediaFailures?: Array<{
+    postId: string;
+    kind: "image" | "video";
+    index: number;
+    error: string;
+  }>;
 };
 
 export type FeishuPublishJob = {

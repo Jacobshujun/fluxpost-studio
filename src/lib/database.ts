@@ -962,6 +962,74 @@ export async function getFeishuPublishJobFromDb(jobId: string) {
   return row ? fromFeishuPublishQueueRow(row) : undefined;
 }
 
+export async function getFeishuPublishQueueContextFromDb(jobId: string) {
+  await ensureDatabaseReady();
+  const nowIso = new Date().toISOString();
+
+  if (getDatabaseBackend() === "postgres") {
+    const result = await getPostgresPool().query<{ queue_ahead: number; active_job_id: string | null }>(
+      `
+        WITH target AS (
+          SELECT owner_user_id, status, priority, created_at
+          FROM feishu_publish_queue
+          WHERE id = $1
+        )
+        SELECT
+          count(*) FILTER (
+            WHERE queue_item.id <> $1
+              AND (
+                (
+                  queue_item.status = 'running'
+                  AND (queue_item.locked_until IS NULL OR queue_item.locked_until > $2)
+                )
+                OR (
+                  target.status = 'queued'
+                  AND queue_item.status = 'queued'
+                  AND (
+                    queue_item.priority > target.priority
+                    OR (queue_item.priority = target.priority AND queue_item.created_at < target.created_at)
+                  )
+                )
+              )
+          )::int AS queue_ahead,
+          min(queue_item.id) FILTER (
+            WHERE queue_item.status = 'running'
+              AND (queue_item.locked_until IS NULL OR queue_item.locked_until > $2)
+          ) AS active_job_id
+        FROM target
+        LEFT JOIN feishu_publish_queue queue_item ON queue_item.owner_user_id = target.owner_user_id
+        GROUP BY target.status, target.priority, target.created_at
+      `,
+      [jobId, nowIso],
+    );
+    return {
+      queueAhead: Number(result.rows[0]?.queue_ahead || 0),
+      activeJobId: result.rows[0]?.active_job_id || undefined,
+    };
+  }
+
+  const db = getSqliteDatabase();
+  const target = db.prepare("SELECT * FROM feishu_publish_queue WHERE id = ?").get(jobId) as FeishuPublishQueueRow | undefined;
+  if (!target) return { queueAhead: 0, activeJobId: undefined };
+  const rows = db.prepare("SELECT * FROM feishu_publish_queue WHERE owner_user_id = ?").all(target.owner_user_id) as FeishuPublishQueueRow[];
+  const activeJob = rows
+    .filter((row) => row.status === "running" && (!row.locked_until || row.locked_until > nowIso))
+    .sort((left, right) => left.created_at.localeCompare(right.created_at))[0];
+  const queuedAhead =
+    target.status === "queued"
+      ? rows.filter(
+          (row) =>
+            row.id !== jobId &&
+            row.status === "queued" &&
+            (row.priority > target.priority || (row.priority === target.priority && row.created_at < target.created_at)),
+        ).length
+      : 0;
+  return {
+    queueAhead: queuedAhead + (activeJob && activeJob.id !== jobId ? 1 : 0),
+    activeJobId: activeJob?.id,
+  };
+}
+
 export async function claimNextFeishuPublishQueueItem(workerId: string, lockMs = 10 * 60_000) {
   await ensureDatabaseReady();
   const now = new Date();

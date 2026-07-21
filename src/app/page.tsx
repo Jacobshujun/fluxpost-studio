@@ -165,6 +165,8 @@ type FeishuPublishResponse = {
   status?: "queued" | "running" | "published" | "record_failed" | "attachment_failed" | "needs_config" | "skipped" | "failed" | string;
   jobId?: string;
   queueStatus?: FeishuPublishJob["status"];
+  queueAhead?: number;
+  activeJobId?: string;
   job?: FeishuPublishJob;
   payloadPath?: string;
   message?: string;
@@ -6506,7 +6508,11 @@ function buildPublishStatus(posts: GeneratedPost[], data: FeishuPublishResponse,
       postId,
       status: "warning",
       title: "已进入 Feishu 写入队列",
-      detail: data.message || `Feishu job ${jobId || ""} 正在等待同用户写入队列。`,
+      detail:
+        data.message ||
+        (data.queueAhead
+          ? `前方还有 ${data.queueAhead} 个同用户任务${data.activeJobId ? `，当前任务 ${data.activeJobId}` : ""}。`
+          : `Feishu job ${jobId || ""} 已进入写入队列。`),
       progress: 55,
       notification,
       jobId,

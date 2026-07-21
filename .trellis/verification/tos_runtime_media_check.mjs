@@ -1,5 +1,5 @@
 import { existsSync, readFileSync } from "node:fs";
-import { mkdtemp, readFile, rm } from "node:fs/promises";
+import { mkdtemp, readFile, readdir, rm } from "node:fs/promises";
 import { createServer } from "node:http";
 import { tmpdir } from "node:os";
 import path from "node:path";
@@ -82,8 +82,10 @@ await verifyUploadCore(core);
 await verifyMaterializerRoot(
   loadTypescriptCommonJs(files.materializer, {
     "./media-request": { buildMediaRequestHeaders: () => ({}) },
+    "./runtime-media-storage": { findExistingRuntimeMedia: async () => undefined },
   }),
 );
+await verifyHistoricalTosRecovery();
 
 for (const key of [
   "TOS_ENABLED",
@@ -104,6 +106,7 @@ assertContains(types, /tosEnabled:\s*boolean/, "Public config status must expose
 
 assertContains(storage, /ACLType\.ACLPublicRead/, "TOS uploads must use object-level public-read ACL.");
 assertContains(storage, /headObject/, "TOS uploads must verify stored object metadata.");
+assertContains(storage, /metadata\.size\s*>\s*0/, "Existing runtime media recovery must reject empty TOS objects.");
 assertContains(storage, /data[\"']?,\s*[\"']tos-pending|tos-pending/, "Failed uploads must retain files under data/tos-pending.");
 assertContains(storage, /rm\([^)]*filePath/, "Verified uploads must remove their local staging file.");
 
@@ -262,6 +265,76 @@ async function verifyMaterializerRoot(module) {
     await materialized.cleanup();
     assertEqual(existsSync(path.dirname(materialized.filePath)), false, "Materialized media cleanup must remove its temporary directory.");
   } finally {
+    await new Promise((resolve) => server.close(resolve));
+    await rm(temporaryRoot, { recursive: true, force: true });
+  }
+}
+
+async function verifyHistoricalTosRecovery() {
+  const payload = Buffer.from("historical-tos-recovery");
+  const server = createServer((request, response) => {
+    if (request.url === "/hang.jpg") return;
+    response.writeHead(200, { "content-length": payload.length, "content-type": "image/jpeg" });
+    response.end(payload);
+  });
+  await new Promise((resolve, reject) => {
+    server.once("error", reject);
+    server.listen(0, "127.0.0.1", resolve);
+  });
+
+  const address = server.address();
+  const temporaryRoot = await mkdtemp(path.join(tmpdir(), "fluxpost-tos-recovery-check-"));
+  try {
+    if (!address || typeof address === "string") throw new Error("Historical recovery server did not bind a TCP port.");
+    const recoveredUrl = `http://127.0.0.1:${address.port}/asset.jpg`;
+    const lookups = [];
+    const materializerModule = loadTypescriptCommonJs(files.materializer, {
+      "./media-request": { buildMediaRequestHeaders: () => ({}) },
+      "./runtime-media-storage": {
+        findExistingRuntimeMedia: async (publicPath) => {
+          lookups.push(publicPath);
+          return publicPath === "/media/crawl/feishu/AI7379/11.jpg" ? recoveredUrl : undefined;
+        },
+      },
+    });
+
+    const resolved = await materializerModule.resolveRuntimeMediaReference("/media/crawl/feishu/AI7379/11.jpg");
+    assertEqual(resolved.url, recoveredUrl, "Missing historical local media must resolve to its exact TOS mirror.");
+    assertEqual(resolved.recoveredFromTos, true, "Historical TOS recovery must be observable to persistence callers.");
+
+    const materialized = await materializerModule.materializeRuntimeMedia("/media/crawl/feishu/AI7379/11.jpg", {
+      maxBytes: 1024,
+      kind: "image",
+      temporaryRoot,
+    });
+    assertEqual(materialized.resolvedUrl, recoveredUrl, "Materialization must return the canonical recovered URL.");
+    assertEqual((await readFile(materialized.filePath)).equals(payload), true, "Recovered TOS media bytes must be preserved.");
+    await materialized.cleanup();
+
+    const direct = await materializerModule.resolveRuntimeMediaReference(recoveredUrl);
+    assertEqual(direct.url, recoveredUrl, "Existing HTTP media must remain unchanged.");
+    assertEqual(lookups.length, 2, "Existing HTTP media must not trigger a TOS logical-path lookup.");
+
+    await assertRejects(
+      () => materializerModule.resolveRuntimeMediaReference("/generated/missing.jpg"),
+      /local file is missing and no matching TOS object was found/i,
+      "A missing local path without a TOS mirror must fail explicitly.",
+    );
+
+    await assertRejects(
+      () =>
+        materializerModule.materializeRuntimeMedia(`http://127.0.0.1:${address.port}/hang.jpg`, {
+          maxBytes: 1024,
+          kind: "image",
+          temporaryRoot,
+          timeoutMs: 20,
+        }),
+      /download timed out after 1s/i,
+      "Remote runtime media downloads must honor the configured timeout.",
+    );
+    assertEqual((await readdir(temporaryRoot)).length, 0, "Timed-out materialization must not retain temporary directories.");
+  } finally {
+    server.closeAllConnections?.();
     await new Promise((resolve) => server.close(resolve));
     await rm(temporaryRoot, { recursive: true, force: true });
   }

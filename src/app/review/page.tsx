@@ -41,6 +41,8 @@ type FeishuPublishResponse = {
   status?: "queued" | "running" | "published" | "attachment_failed" | "needs_config" | "skipped" | "failed" | string;
   jobId?: string;
   queueStatus?: FeishuPublishJob["status"];
+  queueAhead?: number;
+  activeJobId?: string;
   job?: FeishuPublishJob;
   payloadPath?: string;
   message?: string;
@@ -1325,7 +1327,11 @@ function buildPublishSnapshot(posts: GeneratedPost[], data: FeishuPublishRespons
       postIds: posts.map((post) => post.id),
       status: "warning",
       title: "已进入飞书写入队列",
-      detail: data.message || `等待同用户写入队列处理，共 ${posts.length} 条内容。`,
+      detail:
+        data.message ||
+        (data.queueAhead
+          ? `前方还有 ${data.queueAhead} 个同用户任务${data.activeJobId ? `，当前任务 ${data.activeJobId}` : ""}。`
+          : `已进入飞书写入队列，共 ${posts.length} 条内容。`),
       progress: 55,
       notification,
     };

@@ -14,7 +14,6 @@ import {
   type FeishuRecordFieldFailure,
   type FeishuRecordFieldExpectation,
 } from "./feishu-record-verification";
-import { isProxyableRemoteMediaUrl } from "./media-request";
 import { materializeRuntimeMedia } from "./runtime-media-materializer";
 import type { FeishuPostPublishState, FeishuPublishJobSource, GeneratedPost } from "./types";
 
@@ -47,6 +46,13 @@ type PreparedAttachmentSet = {
 };
 
 type PreparedAttachmentFiles = Map<string, PreparedAttachmentSet>;
+
+type FeishuMediaFailure = {
+  postId: string;
+  kind: "image" | "video";
+  index: number;
+  error: string;
+};
 
 type FeishuAttachmentUpload = {
   postId: string;
@@ -150,6 +156,7 @@ export async function publishPostsToFeishu(posts: GeneratedPost[], options: Publ
       recordFailures: [] as FeishuRecordFailure[],
       attachmentUploads: [] as FeishuAttachmentUpload[],
       attachmentFailures: [] as FeishuAttachmentFailure[],
+      mediaFailures: [] as FeishuMediaFailure[],
     };
   }
 
@@ -163,6 +170,7 @@ export async function publishPostsToFeishu(posts: GeneratedPost[], options: Publ
       recordFailures: [] as FeishuRecordFailure[],
       attachmentUploads: [] as FeishuAttachmentUpload[],
       attachmentFailures: [] as FeishuAttachmentFailure[],
+      mediaFailures: [] as FeishuMediaFailure[],
     };
   }
 
@@ -176,13 +184,20 @@ export async function publishPostsToFeishu(posts: GeneratedPost[], options: Publ
       recordFailures: [] as FeishuRecordFailure[],
       attachmentUploads: [] as FeishuAttachmentUpload[],
       attachmentFailures: [] as FeishuAttachmentFailure[],
+      mediaFailures: [] as FeishuMediaFailure[],
     };
   }
 
   const fieldMap = getBitableFieldMap();
   const useDefaultBaseCreate = !appConfig.feishuCliArgs.trim();
-  const attachmentFiles =
-    useDefaultBaseCreate && fieldMap.imageUrls ? await prepareAttachmentFilesForPosts(posts) : new Map<string, PreparedAttachmentSet>();
+  const attachmentPreparation =
+    useDefaultBaseCreate && fieldMap.imageUrls
+      ? await prepareAttachmentFilesForPosts(posts)
+      : { files: new Map<string, PreparedAttachmentSet>(), failures: [] as FeishuMediaFailure[] };
+  const attachmentFiles = attachmentPreparation.files;
+  const mediaFailures = attachmentPreparation.failures;
+  const preflightFailedPostIds = new Set(mediaFailures.map((failure) => failure.postId));
+  const publishablePosts = posts.filter((post) => !preflightFailedPostIds.has(post.id));
 
   try {
   const recordPayloadPaths: string[] = [];
@@ -190,9 +205,14 @@ export async function publishPostsToFeishu(posts: GeneratedPost[], options: Publ
   const stderrParts: string[] = [];
   const recordFailures: FeishuRecordFailure[] = [];
   const attachmentUploads: FeishuAttachmentUpload[] = [];
-  const attachmentFailures: FeishuAttachmentFailure[] = [];
+  const attachmentFailures: FeishuAttachmentFailure[] = mediaFailures.map((failure) => ({
+    postId: failure.postId,
+    recordId: "",
+    fileCount: 0,
+    error: `${failure.kind} ${failure.index + 1}: ${failure.error}`,
+  }));
   const recordMappings: FeishuRecordMapping[] = [];
-  const chunks = chunkPosts(posts, feishuRecordBatchSize);
+  const chunks = chunkPosts(publishablePosts, feishuRecordBatchSize);
 
   for (const [chunkIndex, chunk] of chunks.entries()) {
     const existingMappings = useDefaultBaseCreate
@@ -273,13 +293,18 @@ export async function publishPostsToFeishu(posts: GeneratedPost[], options: Publ
     attachmentFailures,
     payloadPath,
   );
-  const notification = await sendFeishuPublishNotification(posts, attachmentUploads, {
-    ...options.notificationContext,
-    status: publishStatus,
-    recordMappings,
-    recordFailureCount: recordFailures.length,
-    attachmentFailureCount: attachmentFailures.length,
-  });
+  const notification = publishablePosts.length
+    ? await sendFeishuPublishNotification(posts, attachmentUploads, {
+        ...options.notificationContext,
+        status: publishStatus,
+        recordMappings,
+        recordFailureCount: recordFailures.length,
+        attachmentFailureCount: attachmentFailures.length,
+      })
+    : {
+        status: "skipped" as const,
+        message: "Feishu notification was skipped because every post failed media preflight.",
+      };
 
   if (recordFailures.length) {
     await recordExecutionLog({
@@ -310,7 +335,9 @@ export async function publishPostsToFeishu(posts: GeneratedPost[], options: Publ
   }
 
   return {
-    status: recordFailures.length
+    status: !publishablePosts.length
+      ? ("failed" as const)
+      : recordFailures.length
       ? ("record_failed" as const)
       : attachmentFailures.length
         ? ("attachment_failed" as const)
@@ -320,16 +347,19 @@ export async function publishPostsToFeishu(posts: GeneratedPost[], options: Publ
     recordPayloadPaths,
     batchSize: feishuRecordBatchSize,
     chunkCount: chunks.length,
-    message: recordFailures.length
+    message: !publishablePosts.length
+      ? `Feishu publish stopped before record creation because all ${posts.length} post(s) failed media preflight.${formatFirstMediaFailure(mediaFailures)}`
+      : recordFailures.length
       ? `Feishu Base records were created or reused for ${recordMappings.length} posts, but ${recordFailures.length} record field write(s) failed verification. Retry will reuse existing record IDs and repair unfinished records.`
       : attachmentFailures.length
-        ? `Feishu Base records were created or reused for ${recordMappings.length} posts, but ${attachmentFailures.length} attachment upload(s) failed. Retry will reuse existing record IDs and upload only unfinished attachments.`
+        ? `Feishu Base records were created or reused for ${recordMappings.length} posts, but ${attachmentFailures.length} attachment upload(s) failed.${formatFirstMediaFailure(mediaFailures)} Retry will reuse existing record IDs and upload only unfinished attachments.`
         : `Feishu Base write completed and verified for ${posts.length} posts in ${chunks.length} chunk(s) of up to ${feishuRecordBatchSize}.`,
     recordMappings,
     postStates,
     recordFailures,
     attachmentUploads,
     attachmentFailures,
+    mediaFailures,
     notification,
     stdout: stdoutParts.filter(Boolean).join("\n"),
     stderr: stderrParts.filter(Boolean).join("\n"),
@@ -892,43 +922,49 @@ function formatAttachmentFailureMessage(failures: FeishuAttachmentFailure[]) {
   return `Feishu attachment upload failed for ${failures.length} post(s). First failure: ${first.postId}: ${first.error}`;
 }
 
+function formatFirstMediaFailure(failures: FeishuMediaFailure[]) {
+  const first = failures[0];
+  return first ? ` First media failure: ${first.postId} ${first.kind} ${first.index + 1}: ${first.error}` : "";
+}
+
 function formatRecordFailureMessage(failures: FeishuRecordFailure[]) {
   const first = failures[0];
   if (!first) return "Feishu record field write failed.";
   return `Feishu record field write failed for ${failures.length} post(s). First failure: ${first.postId}: ${first.error}`;
 }
 
-async function prepareAttachmentFilesForPosts(posts: GeneratedPost[]): Promise<PreparedAttachmentFiles> {
+async function prepareAttachmentFilesForPosts(posts: GeneratedPost[]) {
   const attachments: PreparedAttachmentFiles = new Map();
-  const completedSets: PreparedAttachmentSet[] = [];
-  try {
-    const prepared = await mapWithConcurrency(posts, concurrencyConfig.media, async (post) => {
-      const attachmentSet = await resolvePostAttachmentFiles(post);
-      completedSets.push(attachmentSet);
-      const { files, failures } = attachmentSet;
-      if (failures.length) {
-        throw new Error(
-          `Post ${post.id} has media URLs that could not be prepared for Feishu attachments: ${failures
-            .slice(0, 5)
-            .join("; ")}`,
-        );
-      }
-      if (!files.length && countPostMedia(post)) {
-        throw new Error(`Post ${post.id} has media URLs but no local files that can be uploaded to Feishu attachments.`);
-      }
-      if (files.length > 50) {
-        throw new Error(`Post ${post.id} has ${files.length} media files; Feishu attachment upload supports at most 50 files per cell.`);
-      }
-      return { postId: post.id, attachmentSet };
-    });
-    for (const item of prepared) {
+  const failures: FeishuMediaFailure[] = [];
+  const prepared = await mapWithConcurrency(posts, concurrencyConfig.media, async (post) => {
+    const attachmentSet = await resolvePostAttachmentFiles(post);
+    if (!attachmentSet.failures.length && !attachmentSet.files.length && countPostMedia(post)) {
+      attachmentSet.failures.push({
+        postId: post.id,
+        kind: post.imageUrls.length ? "image" : "video",
+        index: 0,
+        error: `Post ${post.id} has media URLs but no local files that can be uploaded to Feishu attachments.`,
+      });
+    }
+    if (attachmentSet.files.length > 50) {
+      attachmentSet.failures.push({
+        postId: post.id,
+        kind: "image",
+        index: 0,
+        error: `Post has ${attachmentSet.files.length} media files; Feishu supports at most 50 files per attachment cell.`,
+      });
+    }
+    return { postId: post.id, attachmentSet };
+  });
+  for (const item of prepared) {
+    if (item.attachmentSet.failures.length) {
+      failures.push(...item.attachmentSet.failures);
+      await item.attachmentSet.cleanup();
+    } else {
       attachments.set(item.postId, item.attachmentSet);
     }
-    return attachments;
-  } catch (error) {
-    await Promise.all(completedSets.map((item) => item.cleanup()));
-    throw error;
   }
+  return { files: attachments, failures };
 }
 
 async function cleanupPreparedAttachmentFiles(attachments: PreparedAttachmentFiles) {
@@ -937,18 +973,13 @@ async function cleanupPreparedAttachmentFiles(attachments: PreparedAttachmentFil
 
 async function resolvePostAttachmentFiles(post: GeneratedPost) {
   const files: string[] = [];
-  const failures: string[] = [];
+  const failures: FeishuMediaFailure[] = [];
   const cleanups: Array<() => Promise<void>> = [];
 
   for (const [index, imageUrl] of post.imageUrls.entries()) {
     const localFile = resolveLocalMediaFile(imageUrl, "image");
     if (localFile) {
       files.push(localFile);
-      continue;
-    }
-
-    if (!isProxyableRemoteMediaUrl(imageUrl)) {
-      failures.push(`image ${index + 1} is not a local file or HTTP(S) URL`);
       continue;
     }
 
@@ -961,12 +992,17 @@ async function resolvePostAttachmentFiles(post: GeneratedPost) {
       files.push(toCliRelativePath(materialized.filePath));
       cleanups.push(materialized.cleanup);
     } catch (error) {
-      failures.push(`image ${index + 1} download failed: ${error instanceof Error ? error.message : "unknown error"}`);
+      failures.push({
+        postId: post.id,
+        kind: "image",
+        index,
+        error: error instanceof Error ? error.message : "Image preparation failed.",
+      });
     }
   }
 
   const localVideoFiles: string[] = [];
-  const videoFailures: string[] = [];
+  const videoFailures: FeishuMediaFailure[] = [];
   for (const [index, url] of postVideoUrls(post).entries()) {
     const localFile = resolveLocalMediaFile(url, "video");
     if (localFile) {
@@ -974,10 +1010,6 @@ async function resolvePostAttachmentFiles(post: GeneratedPost) {
       continue;
     }
 
-    if (!isProxyableRemoteMediaUrl(url)) {
-      videoFailures.push(`video ${index + 1} is not a local file or HTTP(S) URL`);
-      continue;
-    }
     try {
       const materialized = await materializeRuntimeMedia(url, {
         maxBytes: 150 * 1024 * 1024,
@@ -987,7 +1019,12 @@ async function resolvePostAttachmentFiles(post: GeneratedPost) {
       localVideoFiles.push(toCliRelativePath(materialized.filePath));
       cleanups.push(materialized.cleanup);
     } catch (error) {
-      videoFailures.push(`video ${index + 1} download failed: ${error instanceof Error ? error.message : "unknown error"}`);
+      videoFailures.push({
+        postId: post.id,
+        kind: "video",
+        index,
+        error: error instanceof Error ? error.message : "Video preparation failed.",
+      });
     }
   }
   files.push(...localVideoFiles);

@@ -231,6 +231,7 @@ Invoke-NativeStep "Source video reference check" $nodePath @(".trellis/verificat
 Invoke-NativeStep "Concurrency integration check" $nodePath @(".trellis/verification/concurrency_check.mjs")
 Invoke-NativeStep "Feishu publish resume check" $nodePath @(".trellis/verification/feishu_publish_resume_check.mjs")
 Invoke-NativeStep "Feishu publish queue check" $nodePath @(".trellis/verification/feishu_publish_queue_check.mjs")
+Invoke-NativeStep "Feishu publish media recovery check" $nodePath @(".trellis/verification/feishu_publish_media_recovery_check.mjs")
 Invoke-NativeStep "Feishu vehicle options check" $nodePath @(".trellis/verification/feishu_vehicle_options_check.mjs")
 Invoke-NativeStep "Simple crawl top-up and media policy check" $nodePath @(".trellis/verification/simple_crawl_media_policy_check.mjs")
 Invoke-NativeStep "Source safety filter check" $nodePath @(".trellis/verification/source_safety_filter_check.mjs")

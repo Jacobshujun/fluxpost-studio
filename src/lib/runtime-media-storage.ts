@@ -53,7 +53,9 @@ export async function findExistingRuntimeMedia(publicPath: string) {
   const objectKey = buildTosObjectKey(publicPath, config.objectPrefix);
   try {
     const metadata = await findTosObjectMetadata(getVerifiedTosClient(config), config.bucket, objectKey);
-    return metadata ? buildTosPublicUrl({ publicBaseUrl: config.publicBaseUrl, objectKey, etag: metadata.etag }) : undefined;
+    return metadata && metadata.size > 0
+      ? buildTosPublicUrl({ publicBaseUrl: config.publicBaseUrl, objectKey, etag: metadata.etag })
+      : undefined;
   } catch (error) {
     throw new Error(sanitizeTosError(error));
   }
