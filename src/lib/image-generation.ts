@@ -10,6 +10,7 @@ import { buildSingleImageTaskPrompt } from "./creation-controls";
 import { sniffImageFormat } from "./image-format";
 import { defaultImageGenerationSize, normalizeImageGenerationSize } from "./image-size-options";
 import { buildMediaRequestHeaders } from "./media-request";
+import { fetchOpenAiImageSse } from "./openai-image-sse";
 import { persistRuntimeMedia } from "./runtime-media-storage";
 import {
   buildToApisGenerationBody,
@@ -642,6 +643,7 @@ async function callImagesApiInPool(prompt: string, count: number, options: Image
       promptLength: prompt.length,
       endpointPath,
       dialect: initialDialect,
+      transport: initialDialect === "openai" ? "sse" : "task_polling",
       taskId: task?.id || null,
       taskLabel: task?.label || null,
       referencePolicy: task?.referencePolicy || "best_effort",
@@ -764,40 +766,61 @@ async function requestSingleStandardImagesApiWithRetryForRoute(
   const deadline = startedAt + imageRequestTimeoutMs;
 
   for (let attempt = 1; attempt <= maxImageAttempts; attempt += 1) {
-    let response: Response;
+    let responseResult: Awaited<ReturnType<typeof fetchOpenAiImageSse>>;
     try {
-      response = await fetchWithTimeout(
+      responseResult = await fetchOpenAiImageSse(
         openaiImageUrl(endpointPath, route),
         await buildStandardImagesApiRequest(route, sizeConstrainedPrompt, options, referenceImages.files, sendQuality, sendInputFidelity),
         getRemainingTimeoutMs(deadline),
       );
     } catch (error) {
       lastError = compactError(error);
-      const shouldRetryTimeout = attempt < maxImageAttempts && hasRetryWindow(deadline);
+      const isTimeout = /request timed out|timed out after|time-?out|timeout|abort/i.test(lastError);
+      const shouldRetryTransport = attempt < maxImageAttempts && hasRetryWindow(deadline) && isStandardImagesApiFailoverError(error);
       await recordExecutionLog({
         scope: "openai/image",
-        action: shouldRetryTimeout ? "Images API request timeout retry" : "Images API request timed out",
-        status: shouldRetryTimeout ? "info" : "error",
-        message: shouldRetryTimeout ? `${lastError}; retrying ${attempt + 1}/${maxImageAttempts}.` : lastError,
+        action: shouldRetryTransport ? (isTimeout ? "Images API request timeout retry" : "Images API SSE retry queued") : isTimeout ? "Images API request timed out" : "Images API SSE failed",
+        status: shouldRetryTransport ? "info" : "error",
+        message: shouldRetryTransport ? `${lastError}; retrying ${attempt + 1}/${maxImageAttempts}.` : lastError,
         durationMs: Date.now() - startedAt,
         details: {
           status: 0,
           model: appConfig.openaiImageModel,
           route,
           endpointPath,
+          transport: "sse",
           attempt,
           size: options.size,
           quality: sendQuality ? options.quality : "omitted",
           referenceMode: referenceImages.mode,
         },
       });
-      if (!shouldRetryTimeout) throw new Error(lastError);
+      if (!shouldRetryTransport) throw new Error(lastError);
       await sleepWithinDeadline(getImageRetryDelayMs(attempt), deadline);
       continue;
     }
 
-    const body = await response.text();
-    if (response.ok) return parseJsonResponse<ImagesApiResponse>(body, response, "Images API");
+    const { response } = responseResult;
+    if (response.ok && responseResult.stream) {
+      await recordExecutionLog({
+        scope: "openai/image",
+        action: "Images API SSE completed",
+        status: "success",
+        message: "OpenAI-compatible image SSE completed with a final image.",
+        durationMs: Date.now() - startedAt,
+        details: {
+          model: appConfig.openaiImageModel,
+          route,
+          endpointPath,
+          transport: "sse",
+          attempt,
+          ...responseResult.stream.stats,
+        },
+      });
+      return responseResult.stream.response;
+    }
+
+    const body = responseResult.body || "";
 
     lastError = `OpenAI image request failed: ${response.status} ${body.slice(0, 260)}`;
     const qualityRejected = sendQuality && isUnsupportedQualityError(response.status, body);
@@ -1047,7 +1070,7 @@ async function buildStandardImagesApiRequest(
   if (!referenceImages.length) {
     return {
       method: "POST",
-      headers: openaiImageHeaders(true, route),
+      headers: openaiImageHeaders(true, route, true),
       body: JSON.stringify(buildStandardImagesGenerationBody(prompt, options, sendQuality)),
     };
   }
@@ -1059,6 +1082,7 @@ async function buildStandardImagesApiRequest(
   form.append("size", options.size);
   form.append("output_format", "png");
   form.append("response_format", "b64_json");
+  form.append("stream", "true");
   if (sendQuality) form.append("quality", options.quality);
   if (sendInputFidelity) form.append("input_fidelity", "high");
 
@@ -1069,7 +1093,7 @@ async function buildStandardImagesApiRequest(
 
   return {
     method: "POST",
-    headers: openaiImageHeaders(false, route),
+    headers: openaiImageHeaders(false, route, true),
     body: form,
   };
 }
@@ -1083,6 +1107,7 @@ function buildStandardImagesGenerationBody(prompt: string, options: ImageGenerat
     ...(sendQuality ? { quality: options.quality } : {}),
     output_format: "png",
     response_format: "b64_json",
+    stream: true,
   };
 }
 
@@ -1122,7 +1147,7 @@ function isRetryableImageError(status: number, body: string) {
 }
 
 function isUnsupportedQualityError(status: number, body: string) {
-  return status === 400 && /quality|unknown parameter|unsupported|invalid.*parameter|unrecognized/i.test(body);
+  return status === 400 && /quality/i.test(body) && /unknown parameter|unsupported|invalid.*parameter|unrecognized/i.test(body);
 }
 
 function isUnsupportedInputFidelityError(status: number, body: string) {
@@ -1170,17 +1195,18 @@ function isStandardImagesApiFailoverError(error: unknown) {
   }
   return (
     /(?:OpenAI image request failed:\s*|ToAPIs image submission failed:\s*HTTP\s*)(?:401|403|404|408|409|425|429|50[0234])\b/i.test(message) ||
-    /Images API returned (?:non-JSON|invalid JSON)/i.test(message) ||
+    /Images API (?:returned non-SSE|SSE|stream)/i.test(message) ||
     /request timed out|timed out after|time-?out|timeout|abort|fetch failed|ECONNRESET|ENOTFOUND|ETIMEDOUT|ECONNREFUSED/i.test(message) ||
     /upstream_error|excessive system load|overloaded|temporarily unavailable|rate limit|Gateway Time-?out|Bad Gateway|Service Unavailable/i.test(message) ||
     isImageProviderCapabilityError(message)
   );
 }
 
-function openaiImageHeaders(json = true, route: OpenaiImageApiRoute = "primary") {
+function openaiImageHeaders(json = true, route: OpenaiImageApiRoute = "primary", stream = false) {
   return {
     Authorization: `Bearer ${openaiImageApiKey(route)}`,
     ...(json ? { "Content-Type": "application/json" } : {}),
+    ...(stream ? { Accept: "text/event-stream" } : {}),
   };
 }
 

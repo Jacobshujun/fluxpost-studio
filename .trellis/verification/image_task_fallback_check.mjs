@@ -200,7 +200,7 @@ assertNotContains(
 
 assertContains(
   imageGeneration,
-  /new FormData\(\)[\s\S]*form\.append\("image"[\s\S]*openaiImageHeaders\(false,\s*route\)/,
+  /new FormData\(\)[\s\S]*form\.append\("image"[\s\S]*openaiImageHeaders\(false,\s*route,\s*true\)/,
   "Image edits should use multipart/form-data with binary image upload and the active route key.",
 );
 
@@ -208,6 +208,30 @@ assertContains(
   imageGeneration,
   /function buildStandardImagesGenerationBody[\s\S]*n:\s*1[\s\S]*output_format:\s*"png"[\s\S]*response_format:\s*"b64_json"/,
   "Text-to-image requests should use the standard gpt-image-2 Images API body with n fixed to 1.",
+);
+
+assertContains(
+  imageGeneration,
+  /function buildStandardImagesGenerationBody[\s\S]*response_format:\s*"b64_json"[\s\S]*stream:\s*true/,
+  "Text-to-image requests should enable standard OpenAI SSE streaming.",
+);
+
+assertContains(
+  imageGeneration,
+  /form\.append\("stream",\s*"true"\)/,
+  "Image edits should enable standard OpenAI SSE streaming in multipart form data.",
+);
+
+assertContains(
+  imageGeneration,
+  /openaiImageHeaders\((?:true|false),\s*route,\s*true\)/,
+  "Standard Images API requests should advertise text/event-stream.",
+);
+
+assertContains(
+  imageGeneration,
+  /fetchOpenAiImageSse\([\s\S]*getRemainingTimeoutMs\(deadline\)/,
+  "Standard Images API requests should keep the deadline active while consuming SSE.",
 );
 
 assertContains(
@@ -308,7 +332,7 @@ assertContains(
 
 assertContains(
   imageGeneration,
-  /function openaiImageHeaders\(json = true,\s*route: OpenaiImageApiRoute = "primary"\)[\s\S]*openaiImageApiKey\(route\)/,
+  /function openaiImageHeaders\(json = true,\s*route: OpenaiImageApiRoute = "primary",\s*stream = false\)[\s\S]*openaiImageApiKey\(route\)/,
   "Image request headers should use the active route API key.",
 );
 
