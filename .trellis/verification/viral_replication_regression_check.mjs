@@ -169,7 +169,7 @@ assertIncludes(imageGeneration, "isStrictDualReferenceTask", "Image generation m
 assertIncludes(imageGeneration, "Strict viral image imitation requires exactly 2 prepared reference images", "Strict viral image tasks must fail closed when both references are not prepared.");
 assertIncludes(imageGeneration, "recordStrictTaskNeedsReview", "Strict viral image task fallback should produce needs-review diagnostics instead of source-image fallback.");
 assertIncludes(imageGeneration, "referenceImages.slice(0, 4)", "Images API edit requests must upload multiple ordered reference images, including viral source style references.");
-assertIncludes(imageGeneration, 'const endpointPath = initialDialect === "toapis" ? "images/generations" : preparedReferences.files.length ? "images/edits" : "images/generations"', "Images API request logging must resolve the provider-specific endpoint path before recording.");
+assertIncludes(imageGeneration, 'const endpointPath = initialProfile === "toapis_async" ? "images/generations" : preparedReferences.files.length ? "images/edits" : "images/generations"', "Images API request logging must resolve the provider-specific endpoint path before recording.");
 assertIncludes(imageGeneration, "Preparing to generate images through ${endpointPath}", "Images API request log message must name the actual provider endpoint.");
 assertIncludes(imageGeneration, "endpointPath,", "Images API request log details must include endpointPath for diagnosis.");
 const simpleRuns = read("src/lib/simple-runs.ts");

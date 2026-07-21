@@ -14,6 +14,7 @@ import {
   Save,
   ShieldCheck,
   SlidersHorizontal,
+  TestTube2,
   X,
 } from "lucide-react";
 import { getStoredTheme, setStoredTheme, subscribeTheme, type ThemeMode } from "@/lib/theme";
@@ -22,6 +23,7 @@ import type {
   AdvancedConfigPatchValue,
   AdvancedConfigSnapshot,
   ConfigStatus,
+  ImageProviderProbeResult,
   TosStorageProbeResult,
   WorkspaceAccount,
 } from "@/lib/types";
@@ -57,7 +59,7 @@ export default function AdvancedConfigPage() {
   const [draft, setDraft] = useState<Record<string, DraftField>>({});
   const [activeGroupId, setActiveGroupId] = useState("");
   const [message, setMessage] = useState("");
-  const [busy, setBusy] = useState<"load" | "save" | "tos-check" | "tos-reconcile" | null>("load");
+  const [busy, setBusy] = useState<"load" | "save" | "tos-check" | "tos-reconcile" | "image-primary-check" | "image-backup-check" | null>("load");
 
   const fieldsByKey = useMemo(() => {
     const map = new Map<string, AdvancedConfigField>();
@@ -206,6 +208,28 @@ export default function AdvancedConfigPage() {
     }
   }
 
+  async function testImageProvider(route: "primary" | "backup") {
+    if (!window.confirm(`将对${route === "primary" ? "主" : "备用"}图片通道执行两次付费生图（文生图和参考图），是否继续？`)) return;
+    setBusy(route === "primary" ? "image-primary-check" : "image-backup-check");
+    setMessage("");
+    try {
+      const res = await fetch("/api/config/image-provider-check", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ route }),
+      });
+      const data = (await res.json()) as Partial<ImageProviderProbeResult> & { error?: string };
+      if (!res.ok || !data.ok || !data.generation?.ok || !data.edit?.ok) {
+        throw new Error(data.error || data.generation?.error || data.edit?.error || "图片通道测试失败");
+      }
+      setMessage(`${route === "primary" ? "主" : "备用"}图片通道测试通过：文生图 ${data.generation.durationMs}ms，参考图 ${data.edit.durationMs}ms。`);
+    } catch (error) {
+      setMessage(error instanceof Error ? error.message : "图片通道测试失败");
+    } finally {
+      setBusy(null);
+    }
+  }
+
   const adminReady = account?.role === "admin" && snapshot;
 
   return (
@@ -319,6 +343,30 @@ export default function AdvancedConfigPage() {
                     >
                       {busy === "tos-check" ? <Loader2 className="h-4 w-4 animate-spin" /> : <Cloud className="h-4 w-4" />}
                       测试连接
+                    </button>
+                  </div>
+                ) : null}
+                {activeGroup?.id === "openai-image" ? (
+                  <div className="flex flex-wrap items-center justify-end gap-2">
+                    <button
+                      className="soft-button inline-flex h-11 items-center justify-center gap-2 px-4 text-sm"
+                      type="button"
+                      onClick={() => testImageProvider("primary")}
+                      disabled={Boolean(busy) || dirtyCount > 0 || !config?.openaiImageConfigured}
+                      title={dirtyCount > 0 ? "请先保存图片通道配置" : "测试主图片通道"}
+                    >
+                      {busy === "image-primary-check" ? <Loader2 className="h-4 w-4 animate-spin" /> : <TestTube2 className="h-4 w-4" />}
+                      测试主通道
+                    </button>
+                    <button
+                      className="soft-button inline-flex h-11 items-center justify-center gap-2 px-4 text-sm"
+                      type="button"
+                      onClick={() => testImageProvider("backup")}
+                      disabled={Boolean(busy) || dirtyCount > 0 || !config?.openaiImageBackupConfigured}
+                      title={dirtyCount > 0 ? "请先保存图片通道配置" : "测试备用图片通道"}
+                    >
+                      {busy === "image-backup-check" ? <Loader2 className="h-4 w-4 animate-spin" /> : <TestTube2 className="h-4 w-4" />}
+                      测试备用通道
                     </button>
                   </div>
                 ) : null}

@@ -333,6 +333,63 @@ await fetch("/images/generations", {
 });
 ```
 
+## Scenario: Image Provider Profiles And Admin Probe
+
+### 1. Scope / Trigger
+
+- Applies when changing image-provider request/response shapes, main/backup routing, image profile configuration, or the paid administrator probe.
+
+### 2. Signatures
+
+- Profiles: `openai_json | openai_sse | toapis_async`.
+- Route config: `{ route, baseUrl, apiKey, model, profile }` for `primary | backup`.
+- Admin probe: `POST /api/config/image-provider-check` with `{ route: "primary" | "backup" }`.
+
+### 3. Contracts
+
+- `OPENAI_IMAGE_API_PROFILE` and `OPENAI_IMAGE_BACKUP_API_PROFILE` independently select each route; `OPENAI_IMAGE_BACKUP_MODEL` falls back to `OPENAI_IMAGE_MODEL`.
+- Without a new profile, legacy `OPENAI_IMAGE_API_DIALECT` maps `openai -> openai_sse`, `toapis -> toapis_async`, and `auto` resolves each route hostname independently.
+- `openai_json` uses non-stream `/images/generations` JSON or `/images/edits` multipart and omits `stream`, `response_format`, and `input_fidelity`. `openai_sse` preserves deployed SSE behavior. `toapis_async` preserves its task/upload/status contract.
+- Normal generation persists base64/temporary URL outputs through runtime media. The manual probe verifies bytes, uses only a fixed generated fixture, and removes local/TOS health artifacts.
+
+### 4. Validation & Error Matrix
+
+- Unknown profile or route -> explicit config/API error before provider submission.
+- Content safety, invalid image/input, or unsupported official JSON size -> hard error without route failover.
+- Auth, route, network, gateway, or capability failure before task acceptance -> route failover allowed.
+- Asynchronous task id accepted -> polling retries the same id; terminal/timeout/protocol failure must not fail over or resubmit.
+- Missing sign-in/admin role on probe -> `401`/`403`; saving config never runs a probe.
+
+### 5. Good/Base/Bad Cases
+
+- Good: primary `toapis_async` fails before acceptance and backup `openai_json` uses its own model/profile.
+- Base: old `OPENAI_IMAGE_API_DIALECT=toapis` continues unchanged with no new profile values.
+- Bad: provider returns a task id, polling times out, and FluxPost submits a second paid task to backup.
+
+### 6. Tests Required
+
+- `.trellis/verification/image_provider_profiles_check.mjs` asserts profile resolution, capabilities, official JSON fields, output parsing, route/model wiring, probe authorization/cleanup, and no probe-on-save wiring.
+- Existing SSE, ToAPIs, size, fallback, viral, config, lint, type-check, build, and full baseline checks remain required; paid probes remain manual.
+
+### 7. Wrong vs Correct
+
+#### Wrong
+
+```typescript
+await submitToBackupAfterAcceptedTaskTimeout();
+```
+
+#### Correct
+
+```typescript
+throw new ImageProviderError("accepted task timed out", {
+  category: "timeout",
+  retryable: false,
+  failoverAllowed: false,
+  taskAccepted: true,
+});
+```
+
 ## Trellis Rules
 
 - `.trellis/` is the only active persistent AI collaboration system. `.trellis/spec/fluxpost/` is the FluxPost project-memory layer inside that system.

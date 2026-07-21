@@ -325,8 +325,8 @@ assertContains(
 );
 
 assertContains(
-  imageGeneration,
-  /isStandardImagesApiRouteConfigured\(route: OpenaiImageApiRoute\)[\s\S]*route === "backup"[\s\S]*openaiImageBackupBaseUrl[\s\S]*openaiImageBackupApiKey/,
+  config,
+  /isOpenaiImageRouteConfigured\(route: OpenaiImageApiRoute\)[\s\S]*route === "backup"[\s\S]*openaiImageBackupBaseUrl[\s\S]*openaiImageBackupApiKey/,
   "Backup image API route should require both backup base URL and backup API key.",
 );
 

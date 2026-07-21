@@ -3,6 +3,12 @@ import path from "node:path";
 import type { ConfigStatus } from "./types";
 import { getDatabaseRuntimeStatus } from "./database";
 import type { AdvancedConfigPatch, AdvancedConfigPatchValue, AdvancedConfigSnapshot } from "./types";
+import {
+  normalizeImageProviderProfile,
+  resolveImageProviderProfile,
+  type ImageProviderRoute,
+  type ImageProviderRouteConfig,
+} from "./image-providers/contracts";
 
 export const defaultViralImageImitationPrompt =
   "参考图2的场景风格和美学，构图和角度可以变，同时使用图2的汽车漆面质感，为图1的车生成一张汽车美图，保持图1的汽车细节不要变，车牌黑底无字。";
@@ -50,7 +56,10 @@ function readAppConfig() {
   openaiTextModel: process.env.OPENAI_TEXT_MODEL || "gpt-5.5",
   openaiImageEndpoint: normalizeImageEndpoint(process.env.OPENAI_IMAGE_ENDPOINT || "images"),
   openaiImageApiDialect: normalizeImageApiDialect(process.env.OPENAI_IMAGE_API_DIALECT || "auto"),
+  openaiImageApiProfile: parseOptionalImageProviderProfile("OPENAI_IMAGE_API_PROFILE", process.env.OPENAI_IMAGE_API_PROFILE),
+  openaiImageBackupApiProfile: parseOptionalImageProviderProfile("OPENAI_IMAGE_BACKUP_API_PROFILE", process.env.OPENAI_IMAGE_BACKUP_API_PROFILE),
   openaiImageModel: process.env.OPENAI_IMAGE_MODEL || "gpt-image-2",
+  openaiImageBackupModel: process.env.OPENAI_IMAGE_BACKUP_MODEL || process.env.OPENAI_IMAGE_MODEL || "gpt-image-2",
   openaiImageRequestTimeoutMs: numberOrDefault(process.env.OPENAI_IMAGE_REQUEST_TIMEOUT_MS, 180_000),
   viralImageImitationPrompt: stringOrDefault(process.env.VIRAL_IMAGE_IMITATION_PROMPT, defaultViralImageImitationPrompt),
   comfyUiKleinEnabled: booleanOrDefault(process.env.COMFYUI_KLEIN_ENABLED, false),
@@ -160,6 +169,9 @@ export function getConfigStatus(): ConfigStatus {
     imageModel: appConfig.openaiImageModel,
     imageProvider: appConfig.openaiImageEndpoint,
     openaiImageApiDialect: appConfig.openaiImageApiDialect,
+    openaiImagePrimaryProfile: openaiImageRouteConfig("primary").profile,
+    openaiImageBackupProfile: openaiImageRouteConfig("backup").profile,
+    openaiImageBackupModel: appConfig.openaiImageBackupModel,
     openaiImageRequestTimeoutMs: appConfig.openaiImageRequestTimeoutMs,
     openaiBaseUrl: appConfig.openaiBaseUrl,
     openaiTextBaseUrl: appConfig.openaiTextBaseUrl,
@@ -231,22 +243,41 @@ export function openaiTextUrl(path: string) {
   return `${appConfig.openaiTextBaseUrl}/${cleanPath}`;
 }
 
-export type OpenaiImageApiRoute = "primary" | "backup";
+export type OpenaiImageApiRoute = ImageProviderRoute;
 export type OpenaiImageApiDialect = "openai" | "toapis";
 
 export function openaiImageUrl(path: string, route: OpenaiImageApiRoute = "primary") {
   const cleanPath = path.startsWith("/") ? path.slice(1) : path;
-  return `${openaiImageBaseUrlForRoute(route)}/${cleanPath}`;
+  return `${openaiImageRouteConfig(route).baseUrl}/${cleanPath}`;
 }
 
 export function openaiImageApiKey(route: OpenaiImageApiRoute = "primary") {
-  return route === "backup" ? appConfig.openaiImageBackupApiKey : appConfig.openaiImageApiKey;
+  return openaiImageRouteConfig(route).apiKey;
 }
 
 export function openaiImageApiDialect(route: OpenaiImageApiRoute = "primary"): OpenaiImageApiDialect {
-  if (appConfig.openaiImageApiDialect !== "auto") return appConfig.openaiImageApiDialect;
-  const hostname = new URL(openaiImageBaseUrlForRoute(route)).hostname.toLowerCase();
-  return hostname === "toapis.com" || hostname.endsWith(".toapis.com") ? "toapis" : "openai";
+  return openaiImageRouteConfig(route).profile === "toapis_async" ? "toapis" : "openai";
+}
+
+export function isOpenaiImageRouteConfigured(route: OpenaiImageApiRoute) {
+  if (route === "backup") return Boolean(appConfig.openaiImageBackupBaseUrl && appConfig.openaiImageBackupApiKey);
+  return Boolean(appConfig.openaiImageBaseUrl && appConfig.openaiImageApiKey);
+}
+
+export function openaiImageRouteConfig(route: OpenaiImageApiRoute = "primary"): ImageProviderRouteConfig {
+  const baseUrl = openaiImageBaseUrlForRoute(route);
+  const explicitProfile = route === "backup" ? appConfig.openaiImageBackupApiProfile : appConfig.openaiImageApiProfile;
+  return {
+    route,
+    baseUrl,
+    apiKey: route === "backup" ? appConfig.openaiImageBackupApiKey : appConfig.openaiImageApiKey,
+    model: route === "backup" ? appConfig.openaiImageBackupModel : appConfig.openaiImageModel,
+    profile: resolveImageProviderProfile({
+      explicitProfile,
+      legacyDialect: appConfig.openaiImageApiDialect,
+      baseUrl,
+    }),
+  };
 }
 
 function normalizeBaseUrl(value: string) {
@@ -273,6 +304,13 @@ function normalizeImageApiDialect(value: string): OpenaiImageApiDialect | "auto"
   const dialect = value.trim().toLowerCase();
   if (dialect === "openai" || dialect === "toapis") return dialect;
   return "auto";
+}
+
+function parseOptionalImageProviderProfile(key: string, value?: string) {
+  if (!value?.trim()) return undefined;
+  const profile = normalizeImageProviderProfile(value);
+  if (!profile) throw new Error(`${key} must be openai_json, openai_sse, or toapis_async.`);
+  return profile;
 }
 
 function normalizeKleinFailurePolicy(value: string) {
@@ -437,14 +475,25 @@ const advancedConfigGroups: ConfigDefinitionGroup[] = [
       configField("OPENAI_IMAGE_API_KEY", "图片 API Key", "图片接口主通道密钥；留空回退 OPENAI_API_KEY。", "secret", "openai-image", {
         configured: () => Boolean(process.env.OPENAI_IMAGE_API_KEY),
       }),
+      configField("OPENAI_IMAGE_API_PROFILE", "主通道协议档案", "明确选择请求与响应协议；留空时兼容旧协议配置。", "select", "openai-image", {
+        options: ["openai_json", "openai_sse", "toapis_async"],
+        read: () => openaiImageRouteConfig("primary").profile,
+      }),
       configField("OPENAI_IMAGE_BACKUP_BASE_URL", "备用图片 Base URL", "主通道失败时使用。", "text", "openai-image", {
         read: () => appConfig.openaiImageBackupBaseUrl,
       }),
       configField("OPENAI_IMAGE_BACKUP_API_KEY", "备用图片 API Key", "备用图片通道密钥。", "secret", "openai-image", {
         configured: () => Boolean(appConfig.openaiImageBackupApiKey),
       }),
+      configField("OPENAI_IMAGE_BACKUP_API_PROFILE", "备用通道协议档案", "备用通道独立选择协议；留空时兼容旧协议配置。", "select", "openai-image", {
+        options: ["openai_json", "openai_sse", "toapis_async"],
+        read: () => openaiImageRouteConfig("backup").profile,
+      }),
       configField("OPENAI_IMAGE_MODEL", "图片模型", "默认 gpt-image-2。", "text", "openai-image", {
         read: () => appConfig.openaiImageModel,
+      }),
+      configField("OPENAI_IMAGE_BACKUP_MODEL", "备用图片模型", "留空时使用主通道图片模型。", "text", "openai-image", {
+        read: () => appConfig.openaiImageBackupModel,
       }),
       configField("OPENAI_IMAGE_ENDPOINT", "图片接口形态", "images 为 Images API；responses 为兼容旧通道。", "select", "openai-image", {
         options: ["images", "responses"],

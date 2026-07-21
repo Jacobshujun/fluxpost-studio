@@ -1,3 +1,5 @@
+import type { ImageProviderProfile, ImageProviderRoute } from "./image-providers/contracts";
+
 export type CrawlPlatform = "wechat_channels" | "xiaohongshu" | "douyin" | "weibo";
 
 export type SourceLinkPlatform = CrawlPlatform | "xiaopeng_bbs" | "dongchedi";
@@ -923,6 +925,9 @@ export type ConfigStatus = {
   imageModel: string;
   imageProvider: string;
   openaiImageApiDialect: string;
+  openaiImagePrimaryProfile: ImageProviderProfile;
+  openaiImageBackupProfile: ImageProviderProfile;
+  openaiImageBackupModel: string;
   openaiImageRequestTimeoutMs: number;
   openaiBaseUrl: string;
   openaiTextBaseUrl: string;
@@ -939,6 +944,23 @@ export type ConfigStatus = {
   volcengineAsrConfigured: boolean;
   tosConfigured: boolean;
   tosEnabled: boolean;
+};
+
+export type ImageProviderProbeStepResult = {
+  ok: boolean;
+  durationMs: number;
+  outputVerified: boolean;
+  cleanupVerified: boolean;
+  error?: string;
+};
+
+export type ImageProviderProbeResult = {
+  ok: boolean;
+  route: ImageProviderRoute;
+  profile: ImageProviderProfile;
+  model: string;
+  generation: ImageProviderProbeStepResult;
+  edit: ImageProviderProbeStepResult;
 };
 
 export type TosStorageProbeResult = {

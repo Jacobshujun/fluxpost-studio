@@ -9,6 +9,7 @@ const projectRoot = process.cwd();
 const contract = loadTypescriptCommonJs("src/lib/toapis-image-api.ts", { "./types": {} });
 const imageGeneration = read("src/lib/image-generation.ts");
 const config = read("src/lib/config.ts");
+const providerContracts = read("src/lib/image-providers/contracts.ts");
 
 for (const [input, size, resolution] of [
   ["auto", "1:1", "1k"],
@@ -63,16 +64,16 @@ assertEqual(contract.parseRetryAfterMs("7", 1_000), 7_000, "Retry-After seconds 
 assertEqual(contract.parseRetryAfterMs("Thu, 01 Jan 1970 00:00:11 GMT", 1_000), 10_000, "Retry-After dates must be honored.");
 
 assertContains(config, /OPENAI_IMAGE_API_DIALECT[\s\S]*options:\s*\["auto",\s*"openai",\s*"toapis"\]/, "Advanced config must expose the image API dialect.");
-assertContains(config, /hostname === "toapis\.com" \|\| hostname\.endsWith\("\.toapis\.com"\)/, "Auto dialect must recognize ToAPIs hosts.");
-assertContains(imageGeneration, /openaiImageApiDialect\(route\) === "toapis"[\s\S]*requestSingleToApisImagesApiForRoute/, "Route dispatch must select the ToAPIs adapter before the standard request body.");
-assertContains(imageGeneration, /openaiImageApiDialect\(route\) === "toapis"[\s\S]*return requestSingleToApisImagesApiForRoute[\s\S]*const sizeConstrainedPrompt = buildImageSizeConstrainedPrompt/, "ToAPIs must use structured size fields without inheriting contradictory OpenAI pixel instructions.");
+assertContains(providerContracts, /hostname === "toapis\.com" \|\| hostname\.endsWith\("\.toapis\.com"\)/, "Auto profile resolution must recognize ToAPIs hosts.");
+assertContains(imageGeneration, /profile === "toapis_async"[\s\S]*requestSingleToApisImagesApiForRoute/, "Route dispatch must select the ToAPIs adapter before OpenAI profiles.");
+assertContains(imageGeneration, /profile === "toapis_async"[\s\S]*return requestSingleToApisImagesApiForRoute[\s\S]*profile === "openai_json"/, "ToAPIs must use structured size fields without inheriting OpenAI request fields.");
 assertContains(imageGeneration, /openaiImageUrl\("images\/generations", route\)[\s\S]*JSON\.stringify\(requestBody\)/, "ToAPIs submission must use JSON POST /images/generations.");
 assertContains(imageGeneration, /openaiImageUrl\(`images\/generations\/\$\{encodeURIComponent\(taskId\)\}`, route\)/, "ToAPIs status polling must encode the task id in the documented endpoint.");
 assertContains(imageGeneration, /form\.append\("file"[\s\S]*openaiImageUrl\("uploads\/images", route\)/, "Local references must use the documented ToAPIs upload endpoint.");
 assertContains(imageGeneration, /const toApisPollIntervalMs = 5_000;[\s\S]*parseRetryAfterMs\(response\.headers\.get\("retry-after"\)\)/, "Polling must wait at least five seconds and honor Retry-After.");
 assertContains(imageGeneration, /\["pending",\s*"queued",\s*"in_progress"\]\.includes\(task\.status\)/, "Observed ToAPIs pending status must remain a non-terminal polling state.");
 assertContains(imageGeneration, /response\.status === 429 \|\| \(response\.status >= 500 && response\.status <= 504\)/, "Transient ToAPIs status-query failures must retry the accepted task instead of resubmitting it.");
-assertContains(imageGeneration, /function isStandardImagesApiFailoverError[\s\S]*ToAPIs image \(\?:task\|status\)/, "Accepted ToAPIs tasks must not fail over into duplicate paid submissions.");
+assertContains(imageGeneration, /function toAcceptedImageProviderError[\s\S]*taskAccepted:\s*true[\s\S]*function isStandardImagesApiFailoverError[\s\S]*!error\.taskAccepted/, "Accepted ToAPIs tasks must not fail over into duplicate paid submissions.");
 assertContains(imageGeneration, /getToApisCompletedImageUrls[\s\S]*urls\.map\(\(url\) => \(\{ url \}\)\)[\s\S]*materializeGeneratedImageUrls/, "Temporary ToAPIs result URLs must continue through generated-image persistence.");
 assertContains(imageGeneration, /function isImageProviderCapabilityError[\s\S]*model_not_found\|no available channel/, "Model channel failures must have an explicit hard-error classifier.");
 assertContains(imageGeneration, /function isImageTaskSourceFallbackError[\s\S]*isImageProviderCapabilityError\(error\)\) return false/, "Model channel failures must not silently fall back to source images.");
