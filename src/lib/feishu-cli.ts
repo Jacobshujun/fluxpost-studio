@@ -11,6 +11,7 @@ import { concurrencyConfig, mapWithConcurrency, runWithConcurrencyPool } from ".
 import { ensureFeishuCliIdentity } from "./feishu-cli-identity";
 import {
   verifyFeishuRecordFields,
+  type FeishuRecordFieldFailure,
   type FeishuRecordFieldExpectation,
 } from "./feishu-record-verification";
 import { isProxyableRemoteMediaUrl } from "./media-request";
@@ -77,6 +78,33 @@ type FeishuRecordMapping = {
   postId: string;
   recordId: string;
   created: boolean;
+};
+
+type FeishuRecordWriteSuccess = {
+  post: GeneratedPost;
+  mapping: FeishuRecordMapping;
+  recordId: string;
+  fields: Record<string, unknown>;
+  patchPath: string;
+  stdout: string;
+  stderr: string;
+  failure: null;
+};
+
+type FeishuRecordWriteResult =
+  | FeishuRecordWriteSuccess
+  | {
+      post: GeneratedPost;
+      recordId: string;
+      fields: Record<string, unknown>;
+      stdout: string;
+      stderr: string;
+      failure: FeishuRecordFailure;
+    };
+
+type FeishuRecordReadBackFailure = {
+  write: FeishuRecordWriteSuccess;
+  failure: FeishuRecordFieldFailure;
 };
 
 type FeishuPostStateUpdate = {
@@ -365,118 +393,192 @@ async function writeAndVerifyGeneratedFieldsToFeishu(
   outboxDir: string,
   chunkIndex: number,
 ) {
-  const recordIdByPostId = new Map(recordMappings.map((item) => [item.postId, item.recordId]));
-  const writeResults = await mapWithConcurrency(posts, concurrencyConfig.feishuAttachment, async (post, postIndex) => {
-    const recordId = recordIdByPostId.get(post.id) || "";
-    if (!recordId) {
-      return {
-        post,
-        recordId,
-        fields: buildBitableRecordPatch(post, fieldMap),
-        stdout: "",
-        stderr: "",
-        failure: {
-          postId: post.id,
+  const mappingByPostId = new Map(recordMappings.map((item) => [item.postId, item]));
+  const writeResults: FeishuRecordWriteResult[] = await mapWithConcurrency(
+    posts,
+    concurrencyConfig.feishuAttachment,
+    async (post, postIndex) => {
+      const mapping = mappingByPostId.get(post.id);
+      const recordId = mapping?.recordId || "";
+      if (!mapping || !recordId) {
+        return {
+          post,
           recordId,
-          error: "Feishu record ID is missing for record field write.",
-        } satisfies FeishuRecordFailure,
-      };
-    }
+          fields: buildBitableRecordPatch(post, fieldMap),
+          stdout: "",
+          stderr: "",
+          failure: {
+            postId: post.id,
+            recordId,
+            error: "Feishu record ID is missing for record field write.",
+          } satisfies FeishuRecordFailure,
+        } satisfies FeishuRecordWriteResult;
+      }
 
-    const fields = buildBitableRecordPatch(post, fieldMap);
-    const patchPath = path.join(
-      outboxDir,
-      `base-record-patch-${Date.now()}-${chunkIndex + 1}-${postIndex + 1}.json`,
-    );
-    try {
-      await writeFile(patchPath, JSON.stringify(fields, null, 2), "utf8");
-      const result = await runFeishuCli(
-        [
-          "base",
-          "+record-upsert",
-          "--as",
-          "bot",
-          "--base-token",
-          appConfig.feishuBitableAppToken,
-          "--table-id",
-          appConfig.feishuBitableTableId,
-          "--record-id",
-          recordId,
-          "--json",
-          `@${toCliRelativePath(patchPath)}`,
-          "--format",
-          "json",
-        ],
-        {
-          timeout: 120_000,
-          maxBuffer: 1024 * 1024 * 8,
-          env: buildCliEnv(process.env),
-        },
+      const fields = buildBitableRecordPatch(post, fieldMap);
+      const patchPath = path.join(
+        outboxDir,
+        `base-record-patch-${Date.now()}-${chunkIndex + 1}-${postIndex + 1}.json`,
       );
-      return { post, recordId, fields, stdout: result.stdout, stderr: result.stderr, failure: null };
-    } catch (error) {
-      return {
-        post,
-        recordId,
-        fields,
-        stdout: getCliOutput(error, "stdout"),
-        stderr: getCliOutput(error, "stderr"),
-        failure: {
-          postId: post.id,
+      try {
+        await writeFile(patchPath, JSON.stringify(fields, null, 2), "utf8");
+        const result = await runFeishuCli(
+          [
+            "base",
+            "+record-upsert",
+            "--as",
+            "bot",
+            "--base-token",
+            appConfig.feishuBitableAppToken,
+            "--table-id",
+            appConfig.feishuBitableTableId,
+            "--record-id",
+            recordId,
+            "--json",
+            `@${toCliRelativePath(patchPath)}`,
+            "--format",
+            "json",
+          ],
+          {
+            timeout: 120_000,
+            maxBuffer: 1024 * 1024 * 8,
+            env: buildCliEnv(process.env),
+          },
+        );
+        return {
+          post,
+          mapping,
           recordId,
-          error: compactCliError(error),
-          stdout: getCliOutput(error, "stdout"),
-          stderr: getCliOutput(error, "stderr"),
-        } satisfies FeishuRecordFailure,
-      };
-    }
-  });
+          fields,
+          patchPath,
+          stdout: result.stdout,
+          stderr: result.stderr,
+          failure: null,
+        } satisfies FeishuRecordWriteResult;
+      } catch (error) {
+        return {
+          post,
+          recordId,
+          fields,
+          stdout: getCliOutput(error, "stdout") || "",
+          stderr: getCliOutput(error, "stderr") || "",
+          failure: {
+            postId: post.id,
+            recordId,
+            error: compactCliError(error),
+            stdout: getCliOutput(error, "stdout"),
+            stderr: getCliOutput(error, "stderr"),
+          } satisfies FeishuRecordFailure,
+        } satisfies FeishuRecordWriteResult;
+      }
+    },
+  );
 
   const failures = writeResults
     .map((item) => item.failure)
     .filter((item): item is FeishuRecordFailure => Boolean(item));
-  const successfulWrites = writeResults.filter((item) => !item.failure);
+  const successfulWrites = writeResults.filter((item): item is FeishuRecordWriteSuccess => !item.failure);
   const stdout = writeResults.map((item) => item.stdout).filter((value): value is string => Boolean(value));
   const stderr = writeResults.map((item) => item.stderr).filter((value): value is string => Boolean(value));
   if (!successfulWrites.length) return { failures, stdout, stderr };
 
-  const expectations: FeishuRecordFieldExpectation[] = successfulWrites.map((item) => ({
-    recordId: item.recordId,
-    fields: item.fields,
-  }));
-  const postIdByRecordId = new Map(successfulWrites.map((item) => [item.recordId, item.post.id]));
-  const fieldNames = Array.from(new Set(expectations.flatMap((item) => Object.keys(item.fields))));
   try {
-    const readResult = await runFeishuCli(
-      [
-        "base",
-        "+record-get",
-        "--as",
-        "bot",
-        "--base-token",
-        appConfig.feishuBitableAppToken,
-        "--table-id",
-        appConfig.feishuBitableTableId,
-        ...expectations.flatMap((item) => ["--record-id", item.recordId]),
-        ...fieldNames.flatMap((fieldName) => ["--field-id", fieldName]),
-        "--format",
-        "json",
-      ],
-      {
-        timeout: 120_000,
-        maxBuffer: 1024 * 1024 * 8,
-        env: buildCliEnv(process.env),
-      },
-    );
+    const readResult = await readBackGeneratedFieldsFromFeishu(successfulWrites);
     stdout.push(readResult.stdout);
     stderr.push(readResult.stderr);
+    const missingRecords = readResult.failures.filter((item) => item.failure.reason === "not_found");
     failures.push(
-      ...verifyFeishuRecordFields(readResult.stdout, expectations).map((failure) => ({
-        postId: postIdByRecordId.get(failure.recordId) || "",
-        recordId: failure.recordId,
-        error: failure.error,
-      })),
+      ...readResult.failures
+        .filter((item) => item.failure.reason !== "not_found")
+        .map(({ write, failure }) => ({
+          postId: write.post.id,
+          recordId: failure.recordId,
+          error: failure.error,
+        })),
     );
+
+    if (missingRecords.length) {
+      const replacementResults = await mapWithConcurrency(
+        missingRecords,
+        concurrencyConfig.feishuAttachment,
+        async ({ write }) => {
+          try {
+            const replacementResult = await runFeishuCli(
+              [
+                "base",
+                "+record-upsert",
+                "--as",
+                "bot",
+                "--base-token",
+                appConfig.feishuBitableAppToken,
+                "--table-id",
+                appConfig.feishuBitableTableId,
+                "--json",
+                `@${toCliRelativePath(write.patchPath)}`,
+                "--format",
+                "json",
+              ],
+              {
+                timeout: 120_000,
+                maxBuffer: 1024 * 1024 * 8,
+                env: buildCliEnv(process.env),
+              },
+            );
+            const createdRecordIds = parseCreatedRecordIds(replacementResult.stdout);
+            if (!createdRecordIds[0]) {
+              throw new Error("Feishu replacement record creation did not return a record ID.");
+            }
+            const mapping = write.mapping;
+            mapping.recordId = createdRecordIds[0];
+            mapping.created = true;
+            return {
+              write: {
+                ...write,
+                recordId: mapping.recordId,
+                stdout: replacementResult.stdout,
+                stderr: replacementResult.stderr,
+              } satisfies FeishuRecordWriteSuccess,
+              failure: null,
+            };
+          } catch (error) {
+            return {
+              write,
+              failure: {
+                postId: write.post.id,
+                recordId: write.recordId,
+                error: compactCliError(error),
+                stdout: getCliOutput(error, "stdout"),
+                stderr: getCliOutput(error, "stderr"),
+              } satisfies FeishuRecordFailure,
+            };
+          }
+        },
+      );
+      for (const item of replacementResults) {
+        if (item.failure) {
+          failures.push(item.failure);
+        } else {
+          stdout.push(item.write.stdout);
+          stderr.push(item.write.stderr);
+        }
+      }
+
+      const replacementWrites = replacementResults
+        .filter((item) => !item.failure)
+        .map((item) => item.write);
+      if (replacementWrites.length) {
+        const replacementReadResult = await readBackGeneratedFieldsFromFeishu(replacementWrites);
+        stdout.push(replacementReadResult.stdout);
+        stderr.push(replacementReadResult.stderr);
+        failures.push(
+          ...replacementReadResult.failures.map(({ write, failure }) => ({
+            postId: write.post.id,
+            recordId: failure.recordId,
+            error: failure.error,
+          })),
+        );
+      }
+    }
   } catch (error) {
     const message = compactCliError(error);
     failures.push(
@@ -490,6 +592,43 @@ async function writeAndVerifyGeneratedFieldsToFeishu(
     );
   }
   return { failures, stdout, stderr };
+}
+
+async function readBackGeneratedFieldsFromFeishu(writes: FeishuRecordWriteSuccess[]) {
+  const expectations: FeishuRecordFieldExpectation[] = writes.map((item) => ({
+    recordId: item.recordId,
+    fields: item.fields,
+  }));
+  const fieldNames = Array.from(new Set(expectations.flatMap((item) => Object.keys(item.fields))));
+  const result = await runFeishuCli(
+    [
+      "base",
+      "+record-get",
+      "--as",
+      "bot",
+      "--base-token",
+      appConfig.feishuBitableAppToken,
+      "--table-id",
+      appConfig.feishuBitableTableId,
+      ...expectations.flatMap((item) => ["--record-id", item.recordId]),
+      ...fieldNames.flatMap((fieldName) => ["--field-id", fieldName]),
+      "--format",
+      "json",
+    ],
+    {
+      timeout: 120_000,
+      maxBuffer: 1024 * 1024 * 8,
+      env: buildCliEnv(process.env),
+    },
+  );
+  const writeByRecordId = new Map(writes.map((item) => [item.recordId, item]));
+  const failures = verifyFeishuRecordFields(result.stdout, expectations)
+    .map((failure) => {
+      const write = writeByRecordId.get(failure.recordId);
+      return write ? ({ write, failure } satisfies FeishuRecordReadBackFailure) : null;
+    })
+    .filter((item): item is FeishuRecordReadBackFailure => Boolean(item));
+  return { stdout: result.stdout, stderr: result.stderr, failures };
 }
 
 function buildBitableRecordPatch(post: GeneratedPost, fieldMap: Record<string, string>) {

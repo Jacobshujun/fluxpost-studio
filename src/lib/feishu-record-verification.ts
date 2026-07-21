@@ -5,6 +5,7 @@ export type FeishuRecordFieldExpectation = {
 
 export type FeishuRecordFieldFailure = {
   recordId: string;
+  reason: "invalid_json" | "invalid_response" | "not_found" | "missing_record" | "field_mismatch";
   error: string;
 };
 
@@ -16,24 +17,40 @@ export function verifyFeishuRecordFields(
   try {
     parsed = JSON.parse(stdout);
   } catch {
-    return expectations.map((item) => ({ recordId: item.recordId, error: "Feishu record read-back returned invalid JSON." }));
+    return expectations.map((item) => ({
+      recordId: item.recordId,
+      reason: "invalid_json" as const,
+      error: "Feishu record read-back returned invalid JSON.",
+    }));
   }
 
   const result = findRecordReadResult(parsed);
   if (!result) {
-    return expectations.map((item) => ({ recordId: item.recordId, error: "Feishu record read-back did not include record data." }));
+    return expectations.map((item) => ({
+      recordId: item.recordId,
+      reason: "invalid_response" as const,
+      error: "Feishu record read-back did not include record data.",
+    }));
   }
 
   const missing = new Set(result.record_not_found || []);
-  return expectations.flatMap((expectation) => {
+  return expectations.flatMap<FeishuRecordFieldFailure>((expectation) => {
     if (missing.has(expectation.recordId)) {
-      return [{ recordId: expectation.recordId, error: "Feishu record was not found during read-back verification." }];
+      return [{
+        recordId: expectation.recordId,
+        reason: "not_found" as const,
+        error: "Feishu record was not found during read-back verification.",
+      }];
     }
 
     const rowIndex = result.record_id_list.indexOf(expectation.recordId);
     const row = rowIndex >= 0 ? result.data[rowIndex] : undefined;
     if (!Array.isArray(row)) {
-      return [{ recordId: expectation.recordId, error: "Feishu record read-back omitted the expected record." }];
+      return [{
+        recordId: expectation.recordId,
+        reason: "missing_record" as const,
+        error: "Feishu record read-back omitted the expected record.",
+      }];
     }
 
     const mismatchedFields = Object.entries(expectation.fields)
@@ -43,7 +60,11 @@ export function verifyFeishuRecordFields(
       })
       .map(([fieldName]) => fieldName);
     return mismatchedFields.length
-      ? [{ recordId: expectation.recordId, error: `Feishu record read-back mismatch for field(s): ${mismatchedFields.join(", ")}.` }]
+      ? [{
+          recordId: expectation.recordId,
+          reason: "field_mismatch" as const,
+          error: `Feishu record read-back mismatch for field(s): ${mismatchedFields.join(", ")}.`,
+        }]
       : [];
   });
 }

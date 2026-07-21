@@ -44,6 +44,10 @@ assertContains(feishu, /mapWithConcurrency\(posts,\s*concurrencyConfig\.feishuAt
 assertContains(feishu, /"\+record-upsert"/, "Feishu publish must repair created and reused record fields with record-upsert.");
 assertContains(feishu, /"\+record-get"/, "Feishu publish must read records back after field writes.");
 assertContains(feishu, /verifyFeishuRecordFields/, "Feishu publish must verify read-back fields before reporting success.");
+assertContains(feishu, /failure\.reason === "not_found"/, "Missing persisted record IDs must be replaced instead of retried forever.");
+assertContains(feishu, /createdRecordIds[\s\S]*mapping\.recordId\s*=\s*createdRecordIds\[0\]/, "Replacement creation must update the persisted post mapping.");
+assertContains(feishu, /mapping\.recordId\s*=\s*createdRecordIds\[0\][\s\S]*mapping\.created\s*=\s*true/, "Replacement mappings must be persisted as newly created records.");
+assertReplacementCreateOmitsPersistedRecordId(feishu);
 assertContains(feishu, /recordFailures\.length\s*\?\s*\("record_failed" as const\)/, "Record field failures must return record_failed instead of published.");
 assertContains(feishu, /recordFailures\.length[\s\S]*attachmentFailures\.length\s*\?\s*\("attachment_failed" as const\)/, "Record failures must take priority while attachment failures still return attachment_failed.");
 assertContains(feishu, /postStates/, "Feishu publish must return postStates for persistence.");
@@ -65,6 +69,15 @@ assertContains(recordVerification, /export function verifyFeishuRecordFields/, "
 verifyRecordReadBack(loadTypescriptCommonJs("src/lib/feishu-record-verification.ts"));
 
 console.log("Feishu publish resume check passed.");
+
+function assertReplacementCreateOmitsPersistedRecordId(source) {
+  const start = source.indexOf("const replacementResult = await runFeishuCli");
+  const end = source.indexOf("const createdRecordIds = parseCreatedRecordIds", start);
+  if (start < 0 || end < 0) throw new Error("Missing-record recovery must invoke a dedicated replacement create command.");
+  if (source.slice(start, end).includes('"--record-id"')) {
+    throw new Error("Replacement creation must not send the missing persisted record ID.");
+  }
+}
 
 function verifyRecordReadBack(module) {
   const expectations = [
@@ -99,7 +112,9 @@ function verifyRecordReadBack(module) {
     ok: true,
     data: { fields: ["Title"], record_id_list: ["rec_alpha"], data: [[null]], record_not_found: ["rec_alpha"] },
   });
-  assertEqual(module.verifyFeishuRecordFields(missing, expectations).length, 1, "Missing records must fail verification.");
+  const missingFailures = module.verifyFeishuRecordFields(missing, expectations);
+  assertEqual(missingFailures.length, 1, "Missing records must fail verification.");
+  assertEqual(missingFailures[0].reason, "not_found", "Missing records must expose a recoverable not_found reason.");
 }
 
 function loadTypescriptCommonJs(relativePath) {
