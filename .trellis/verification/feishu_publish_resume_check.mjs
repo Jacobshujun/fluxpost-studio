@@ -96,6 +96,40 @@ function verifyRecordReadBack(module) {
   });
   assertEqual(module.verifyFeishuRecordFields(matching, expectations).length, 0, "Matching read-back fields must verify.");
 
+  const wrappedSingleSelect = JSON.stringify({
+    ok: true,
+    data: {
+      fields: ["Vehicle"],
+      record_id_list: ["rec_alpha"],
+      data: [[["G6"]]],
+    },
+  });
+  assertEqual(
+    module.verifyFeishuRecordFields(wrappedSingleSelect, [{ recordId: "rec_alpha", fields: { Vehicle: "G6" } }]).length,
+    0,
+    "A Feishu single-select read back as a one-item array must match the scalar write value.",
+  );
+
+  for (const [label, actualVehicle] of [
+    ["wrong value", ["X9"]],
+    ["empty array", []],
+    ["multiple values", ["G6", "X9"]],
+  ]) {
+    const invalidSingleSelect = JSON.stringify({
+      ok: true,
+      data: {
+        fields: ["Vehicle"],
+        record_id_list: ["rec_alpha"],
+        data: [[actualVehicle]],
+      },
+    });
+    assertEqual(
+      module.verifyFeishuRecordFields(invalidSingleSelect, [{ recordId: "rec_alpha", fields: { Vehicle: "G6" } }]).length,
+      1,
+      `A scalar expectation must reject a single-select ${label}.`,
+    );
+  }
+
   const blank = JSON.stringify({
     ok: true,
     data: {

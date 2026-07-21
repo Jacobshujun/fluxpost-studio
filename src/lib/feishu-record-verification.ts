@@ -95,7 +95,10 @@ function findRecordReadResult(value: unknown): RecordReadResult | undefined {
   return undefined;
 }
 
-function cellValuesEqual(actual: unknown, expected: unknown) {
+function cellValuesEqual(actual: unknown, expected: unknown): boolean {
+  if (!Array.isArray(expected) && Array.isArray(actual)) {
+    return actual.length === 1 && cellValuesEqual(actual[0], expected);
+  }
   if (expected === "") return actual === null || actual === undefined || actual === "";
   if (Array.isArray(expected)) {
     const expectedValues = expected.map(String).sort();
