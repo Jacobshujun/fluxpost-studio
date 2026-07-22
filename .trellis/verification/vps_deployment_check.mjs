@@ -1,4 +1,4 @@
-import { existsSync, mkdtempSync, mkdirSync, readFileSync, rmSync, writeFileSync } from "node:fs";
+import { chmodSync, existsSync, mkdtempSync, mkdirSync, readFileSync, readdirSync, rmSync, writeFileSync } from "node:fs";
 import { spawnSync } from "node:child_process";
 import { createRequire } from "node:module";
 import os from "node:os";
@@ -53,17 +53,34 @@ for (const volume of [
 assertContains(files.deploy, /PROXY_ENABLED="\$\(normalize_bool "\$\{PROXY_VALUE:-true\}"\)"/, "Existing installations must default HTTPS proxy mode on.");
 assertContains(files.deploy, /PUBLIC_HOST="\$\{PUBLIC_HOST:-bbs\.vollov1\.xyz\}"/, "Existing installations must retain the current public host default.");
 assertContains(files.deploy, /APP_PORT="\$\{APP_PORT:-3101\}"/, "Existing installations must retain app port 3101.");
+assertContains(files.deploy, /DEPLOY_SCRIPT_VERSION="2"/, "Deploy must expose a versioned wrapper contract.");
+assertContains(files.deploy, /--ref\)\s*\[ "\$#" -ge 2 \][\s\S]*REQUESTED_REF="\$2"/, "Deploy must accept an explicit Git ref.");
+assertContains(files.deploy, /git -C "\$REPO_DIR" rev-parse --verify "FETCH_HEAD\^\{commit\}"/, "Deploy must resolve the fetched ref to a full commit.");
+assertContains(files.deploy, /git -C "\$REPO_DIR" archive "\$COMMIT"/, "Release archives must use the resolved commit, not a moving branch.");
+assertContains(files.deploy, /IMMUTABLE_IMAGE=.*\$\{COMMIT\}/, "Deploy must tag each app image with its full commit.");
+assertContains(files.deploy, /docker image inspect --format '\{\{\.Id\}\}' "\$COMPOSE_APP_IMAGE"/, "Deploy must resolve the freshly built canonical image instead of the current container image.");
+assertContains(files.deploy, /release\.manifest/, "Deploy must persist a non-secret release manifest.");
+assertContains(files.deploy, /--rollback\)\s*\[ "\$#" -ge 2 \][\s\S]*ROLLBACK_RELEASE="\$2"/, "Deploy must accept an explicit release rollback.");
+assertContains(files.deploy, /if ! activate_release[\s\S]*rollback_release/, "A failed activation must restore the previous release.");
+assertContains(files.deploy, /else[\s\S]*compose stop app postgres proxy[\s\S]*new release failed health checks/, "A first-release health failure must stop the incomplete services without deleting volumes.");
+assertContains(files.deploy, /docker image tag "\$immutable_image" "\$COMPOSE_APP_IMAGE"/, "Activation must retag the recorded immutable image for legacy Compose releases.");
 assertContains(files.deploy, /docker compose --env-file "\$ENV_FILE"/, "Compose interpolation must use the persistent production env file.");
 assertContains(files.deploy, /if \[ "\$CHECK_ONLY" = "true" \][\s\S]*mode=%s[\s\S]*services=%s/, "Deploy must expose a non-mutating mode check.");
-assertContains(files.deploy, /if \[ "\$PROXY_ENABLED" = "true" \][\s\S]*compose up -d[\s\S]*else[\s\S]*compose stop proxy[\s\S]*compose up -d postgres app/, "Deploy must distinguish HTTPS and private service startup.");
-assertContains(files.deploy, /if \[ "\$PROXY_ENABLED" = "true" \][\s\S]*curl -fsS "\$PUBLIC_HEALTH_URL"/, "Public health must run only when proxy mode is enabled.");
+assertContains(files.deploy, /if \[ "\$PROXY_ENABLED" = "true" \][\s\S]*compose up -d --no-build proxy[\s\S]*else[\s\S]*compose stop proxy[\s\S]*compose up -d --no-build --force-recreate app/, "Deploy must distinguish HTTPS and private service startup.");
+assertContains(files.deploy, /if \[ "\$PROXY_ENABLED" = "false" \][\s\S]*return 0[\s\S]*curl -fsS "\$PUBLIC_HEALTH_URL"/, "Public health must run only when proxy mode is enabled.");
 assertContains(files.deploy, /install -m 0755 .*vps-deploy\.sh.*"\$BIN_DIR\/deploy\.sh"/, "Deploy must refresh its installed wrapper for future updates.");
 assertContains(files.deploy, /install -m 0755 .*vps-enable-domain\.sh.*"\$BIN_DIR\/enable-domain\.sh"/, "Deploy must refresh the domain wrapper.");
 assertNotContains(files.deploy, /(?:source|\.)\s+"?\$ENV_FILE/, "Deploy must not execute the application environment file as shell code.");
 
-assertContains(files.bootstrap, /this installer supports Ubuntu 24\.04 only/, "Bootstrap must enforce the supported Ubuntu release.");
+assertContains(files.bootstrap, /APP_ONLY.*!= "true"[\s\S]*this installer supports Ubuntu 24\.04 only/, "Full bootstrap must enforce the supported Ubuntu release while app-only mode reuses an existing Linux host.");
 assertContains(files.bootstrap, /\[ "\$\(id -u\)" -eq 0 \]/, "Bootstrap must require root.");
 assertContains(files.bootstrap, /--admin-user/, "Bootstrap must require the first administrator username.");
+assertContains(files.bootstrap, /--ref\)\s*\[ "\$#" -ge 2 \][\s\S]*REQUESTED_REF="\$2"/, "Bootstrap must accept an explicit Git ref.");
+assertContains(files.bootstrap, /--app-only\)\s*APP_ONLY="true"/, "Bootstrap must provide a host-preserving app-only mode.");
+assertContains(files.bootstrap, /if \[ "\$APP_ONLY" = "true" \][\s\S]*require_cmd docker[\s\S]*else[\s\S]*apt-get update/, "App-only bootstrap must verify existing tools instead of installing packages.");
+assertContains(files.bootstrap, /LOCAL_DEPLOY_SCRIPT=.*vps-deploy\.sh/, "Bootstrap must support an adjacent versioned deploy wrapper for older target commits.");
+assertContains(files.bootstrap, /--credentials-file\)\s*\[ "\$#" -ge 2 \][\s\S]*CREDENTIALS_FILE="\$2"/, "Bootstrap must support root-only credential output without logging the setup key.");
+assertContains(files.bootstrap, /chmod 0600 "\$CREDENTIALS_FILE"/, "Bootstrap credential files must be root-only.");
 assertContains(files.bootstrap, /https:\/\/download\.docker\.com\/linux\/ubuntu/, "Bootstrap must install Docker from the official Ubuntu repository.");
 assertContains(files.bootstrap, /openssl rand -hex 32/, "Bootstrap must generate a strong PostgreSQL password.");
 assertContains(files.bootstrap, /openssl rand -hex 24/, "Bootstrap must generate a strong first-admin setup key.");
@@ -81,6 +98,8 @@ assertContains(files.domain, /APP_ROOT="\$APP_ROOT" "\$DEPLOY_SCRIPT"/, "Domain 
 
 for (const [name, source] of Object.entries({ deploy: files.deploy, bootstrap: files.bootstrap, domain: files.domain })) {
   assertNotContains(source, /docker(?:\s+compose| compose)[^\n]*(?:down\s+-v|down\s+--volumes)/, `${name} script must never remove Docker volumes.`);
+  assertNotContains(source, /docker\s+(?:system|volume|image|container)\s+prune/, `${name} script must never run a global Docker prune.`);
+  assertNotContains(source, /systemctl\s+(?:restart|stop)\s+docker/, `${name} script must not interrupt unrelated Docker workloads.`);
   assertNotContains(source, /\b(?:ufw|iptables|nft|firewall-cmd)\b/, `${name} script must not modify firewall rules.`);
   assertNotContains(source, /sshd_config|systemctl\s+(?:restart|reload)\s+ssh/, `${name} script must not modify SSH.`);
 }
@@ -102,6 +121,7 @@ checkBashSyntax([
   "scripts/deploy/vps-enable-domain.sh",
 ]);
 checkDeployModes();
+checkPinnedReleaseAndAutomaticRollback();
 
 console.log("Ubuntu VPS deployment contract check passed.");
 
@@ -138,12 +158,13 @@ function checkDeployModes() {
       "FLUXPOST_PROXY_ENABLED=false",
       "FLUXPOST_PUBLIC_HOST=",
       "FLUXPOST_APP_PORT=3123",
-    ]);
+    ], ["--check", "--ref", "0123456789abcdef0123456789abcdef01234567"]);
     assertPlan(privatePlan, {
       mode: "private",
       services: "postgres app",
       app_port: "3123",
       local_health_url: "http://127.0.0.1:3123/api/config",
+      requested_ref: "0123456789abcdef0123456789abcdef01234567",
     });
     if ("public_health_url" in privatePlan) throw new Error("Private deploy plan must not expose a public health target.");
 
@@ -171,7 +192,7 @@ function checkDeployModes() {
     rmSync(tempRoot, { recursive: true, force: true });
   }
 
-  function runPlan(lines) {
+  function runPlan(lines, args = ["--check"]) {
     writeFileSync(path.join(sharedDir, "env.production"), `${lines.join("\n")}\n`, { mode: 0o600 });
     const appRoot = process.platform === "win32" ? toGitBashPath(tempRoot) : tempRoot;
     const env = {
@@ -183,11 +204,142 @@ function checkDeployModes() {
       LOCAL_HEALTH_URL: "",
       PUBLIC_HEALTH_URL: "",
     };
-    const result = spawnSync(bash, ["scripts/deploy/vps-deploy.sh", "--check"], { cwd: projectRoot, env, encoding: "utf8" });
+    const result = spawnSync(bash, ["scripts/deploy/vps-deploy.sh", ...args], { cwd: projectRoot, env, encoding: "utf8" });
     if (result.error) throw result.error;
     if (result.status !== 0) throw new Error(`Deploy --check failed: ${(result.stderr || result.stdout).trim()}`);
     return Object.fromEntries(result.stdout.trim().split(/\r?\n/).map((line) => line.split(/=(.*)/s).slice(0, 2)));
   }
+}
+
+function checkPinnedReleaseAndAutomaticRollback() {
+  const bash = findBash();
+  if (!bash) throw new Error("Bash is required for deployment execution verification.");
+  const tempRoot = mkdtempSync(path.join(os.tmpdir(), "fluxpost-deploy-execution-"));
+  const appRoot = path.join(tempRoot, "app");
+  const sharedDir = path.join(appRoot, "shared");
+  const fakeBin = path.join(tempRoot, "fake-bin");
+  const fakeState = path.join(tempRoot, "fake-state");
+  mkdirSync(sharedDir, { recursive: true });
+  mkdirSync(fakeBin, { recursive: true });
+  mkdirSync(fakeState, { recursive: true });
+
+  writeFileSync(path.join(sharedDir, "env.production"), [
+    "FLUXPOST_PROXY_ENABLED=false",
+    "FLUXPOST_PUBLIC_HOST=",
+    "FLUXPOST_APP_PORT=3124",
+    "POSTGRES_DB=fluxpost_studio",
+  ].join("\n") + "\n", { mode: 0o600 });
+
+  writeExecutable(path.join(fakeBin, "docker"), `#!/usr/bin/env bash
+set -euo pipefail
+printf '%s\\n' "$*" >> "$FAKE_DOCKER_STATE/docker.log"
+if [ "\${1:-}" = ps ]; then
+  [ -f "$FAKE_DOCKER_STATE/running" ] && printf 'fake-app-container\\n'
+  exit 0
+fi
+if [ "\${1:-}" = inspect ]; then
+  cat "$FAKE_DOCKER_STATE/current-image"
+  exit 0
+fi
+if [ "\${1:-}" = image ] && [ "\${2:-}" = inspect ]; then
+  if [ "\${3:-}" = --format ]; then
+    printf 'sha256:fake-built-image\\n'
+  fi
+  exit 0
+fi
+if [ "\${1:-}" = image ] && [ "\${2:-}" = tag ]; then
+  if [[ "\${4:-}" == *:latest ]]; then
+    printf '%s\\n' "\${3:-}" > "$FAKE_DOCKER_STATE/current-image"
+  fi
+  exit 0
+fi
+if [ "\${1:-}" = compose ]; then
+  case " $* " in
+    *" images -q app "*) printf 'sha256:fake-built-image\\n' ;;
+    *" up "*" app "*) touch "$FAKE_DOCKER_STATE/running" ;;
+  esac
+  exit 0
+fi
+exit 0
+`);
+  writeExecutable(path.join(fakeBin, "curl"), `#!/usr/bin/env bash
+set -euo pipefail
+current="$(cat "$FAKE_DOCKER_STATE/current-image" 2>/dev/null || true)"
+if [ -n "\${FAKE_FAIL_COMMIT:-}" ] && [[ "$current" == *"$FAKE_FAIL_COMMIT"* ]]; then
+  exit 22
+fi
+exit 0
+`);
+  writeExecutable(path.join(fakeBin, "sleep"), "#!/usr/bin/env bash\nexit 0\n");
+
+  const runner = path.join(tempRoot, "run-deploy.sh");
+  writeExecutable(runner, `#!/usr/bin/env bash
+set -euo pipefail
+export PATH="$FAKE_BIN:$PATH"
+exec "$DEPLOY_SCRIPT" "$@"
+`);
+
+  const head = gitOutput(["rev-parse", "HEAD"]);
+  const parent = gitOutput(["rev-parse", "HEAD^"]);
+  const baseEnv = {
+    ...process.env,
+    APP_ROOT: toGitBashPath(appRoot),
+    REPO_URL: toGitBashPath(projectRoot),
+    COMPOSE_PROJECT_NAME: "fluxpost",
+    FAKE_BIN: toGitBashPath(fakeBin),
+    FAKE_DOCKER_STATE: toGitBashPath(fakeState),
+    DEPLOY_SCRIPT: toGitBashPath(path.join(projectRoot, "scripts/deploy/vps-deploy.sh")),
+  };
+
+  try {
+    const first = spawnSync(bash, [toGitBashPath(runner), "--ref", head], { cwd: projectRoot, env: baseEnv, encoding: "utf8" });
+    if (first.error) throw first.error;
+    if (first.status !== 0) throw new Error(`Pinned deploy execution failed: ${(first.stderr || first.stdout).trim()}`);
+
+    const releasesDir = path.join(appRoot, "releases");
+    const firstRelease = readdirSync(releasesDir).find((name) => name.endsWith(head.slice(0, 12)));
+    if (!firstRelease) throw new Error("Pinned deploy did not create a commit-addressed release.");
+    const manifest = readFileSync(path.join(releasesDir, firstRelease, "release.manifest"), "utf8");
+    if (!manifest.includes(`commit=${head}\n`) || !manifest.includes(`image=fluxpost-app:${head}\n`)) {
+      throw new Error("Pinned deploy release manifest does not bind the commit and immutable image.");
+    }
+
+    // Git Bash on Windows cannot reliably expose its emulated symlink to Node;
+    // the full activation/rollback path is exercised on the Linux staging host.
+    if (process.platform === "win32") return;
+
+    Atomics.wait(new Int32Array(new SharedArrayBuffer(4)), 0, 0, 1100);
+    const second = spawnSync(bash, [toGitBashPath(runner), "--ref", parent], {
+      cwd: projectRoot,
+      env: { ...baseEnv, FAKE_FAIL_COMMIT: parent },
+      encoding: "utf8",
+    });
+    if (second.status === 0) throw new Error("A release with failing health unexpectedly succeeded.");
+    const currentResult = spawnSync(bash, ["-c", 'readlink -f "$1"', "_", toGitBashPath(path.join(appRoot, "current"))], { encoding: "utf8" });
+    if (currentResult.status !== 0) throw new Error(`Cannot resolve current release: ${currentResult.stderr.trim()}`);
+    const currentTarget = path.posix.basename(currentResult.stdout.trim());
+    if (currentTarget !== firstRelease) {
+      throw new Error(`Failed activation changed current from ${firstRelease} to ${currentTarget}.`);
+    }
+    const dockerLog = readFileSync(path.join(fakeState, "docker.log"), "utf8");
+    if (!dockerLog.includes(`image tag fluxpost-app:${head} fluxpost-app:latest`) || !dockerLog.includes("rescue-")) {
+      throw new Error("Automatic rollback did not reactivate the previous immutable image.");
+    }
+  } finally {
+    rmSync(tempRoot, { recursive: true, force: true });
+  }
+}
+
+function writeExecutable(filePath, contents) {
+  writeFileSync(filePath, contents.replaceAll("\r\n", "\n"), "utf8");
+  chmodSync(filePath, 0o755);
+}
+
+function gitOutput(args) {
+  const result = spawnSync("git", args, { cwd: projectRoot, encoding: "utf8" });
+  if (result.error) throw result.error;
+  if (result.status !== 0) throw new Error(`git ${args.join(" ")} failed: ${result.stderr.trim()}`);
+  return result.stdout.trim();
 }
 
 function assertPlan(actual, expected) {

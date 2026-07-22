@@ -83,6 +83,42 @@ The deploy wrapper fetches `main`, creates a clean release, builds the app image
 
 Do not edit source code under `current`. Make changes locally, verify them, push GitHub, and deploy from GitHub.
 
+### Deploy An Approved Commit
+
+Staging and production promotion should use the same complete Git commit instead of a moving branch:
+
+```bash
+sudo /opt/fluxpost-studio/bin/deploy.sh --check --ref FULL_40_CHARACTER_COMMIT
+sudo /opt/fluxpost-studio/bin/deploy.sh --ref FULL_40_CHARACTER_COMMIT
+```
+
+The deploy wrapper fetches the requested ref, resolves it to a full commit, archives that commit, tags the built app image with the commit, and writes `release.manifest` inside the release directory. A failed health check restores the previously running release and image. Omitting `--ref` retains the existing `main` branch behavior.
+
+Do not promote by copying `current`, `env.production`, Docker volumes, or runtime media between servers. The release contains a symlink to the server-local environment file, and each server must retain its own secrets and runtime state.
+
+### Rebuild An Existing Host As Private Staging
+
+Before removing an old FluxPost deployment from a host that runs other services:
+
+1. Record the protected processes/containers, listeners, and health state.
+2. Identify FluxPost containers, networks, and volumes through exact Compose project labels.
+3. Stop and remove only the confirmed FluxPost resources and the verified `/opt/fluxpost-studio` application root.
+4. Never run a global Docker prune, restart Docker, modify firewall rules, or stop a process merely because it owns a port.
+5. Abort if any FluxPost-labelled resource overlaps a protected service.
+
+Place the current `vps-bootstrap.sh` and `vps-deploy.sh` together in a temporary directory when the target application commit predates the fixed-ref deploy wrapper. Then rebuild without changing system packages or Docker. Full installation remains Ubuntu 24.04-only; `--app-only` may reuse an existing Linux host after verifying all required tools:
+
+```bash
+sudo bash /tmp/fluxpost-deploy/vps-bootstrap.sh \
+  --admin-user stagingadmin \
+  --ref FULL_40_CHARACTER_COMMIT \
+  --app-only \
+  --staging \
+  --credentials-file /root/fluxpost-staging-credentials
+```
+
+`--staging` forces private mode, disables TOS initially, sets `TOS_OBJECT_PREFIX=fluxpost/staging`, and clears Feishu notification recipients. The generated administrator credentials are written with mode `0600` instead of being printed. Configure a test Feishu Base and other isolated provider credentials only after the private deployment passes its baseline checks.
+
 ## Status And Logs
 
 Preview the deployment mode without building, restarting, or contacting external services:
@@ -149,3 +185,11 @@ sudo COMPOSE_PROJECT_NAME=fluxpost docker compose --env-file deploy/env.producti
 ```
 
 Rollback reuses the same persistent named volumes. Do not add `-v` to any Compose command.
+
+For releases created by deploy wrapper version 2, prefer the manifest-aware rollback command:
+
+```bash
+sudo /opt/fluxpost-studio/bin/deploy.sh --rollback RELEASE_ID
+```
+
+The release id has the form `YYYYMMDD-HHMMSS-<12-character-commit>`. The wrapper validates the manifest, activates its commit-tagged image, checks health, and restores the previously running release if rollback activation itself fails.
