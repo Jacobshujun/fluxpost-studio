@@ -84,9 +84,9 @@ const modelImageInput = read("src/lib/model-image-input.ts");
 assertContains(sourceTagging, /toModelImageUrl/, "Source tagging should use the shared model image input helper.");
 assertContains(modelImageInput, /sniffModelSupportedImageMime/, "Shared model image input should use the model-supported image sniffing helper.");
 
-const page = read("src/app/page.tsx");
-assertContains(page, /localMediaPreviewVersion/, "Frontend image previews should carry a local media cache-bust version.");
-assertContains(page, /url\.startsWith\("\/media\/"\) \|\| url\.startsWith\("\/generated\/"\)/, "Frontend image previews should cache-bust local media URLs.");
-assertContains(page, /appendQueryParam\(url,\s*"v",\s*localMediaPreviewVersion\)/, "Local media preview URLs should append the cache-bust version.");
+const contentPage = read("src/app/content/page.tsx");
+assertContains(contentPage, /localMediaPreviewVersion/, "Frontend image previews should carry a local media cache-bust version.");
+assertContains(contentPage, /url\.startsWith\("\/media\/"\) \|\| url\.startsWith\("\/generated\/"\)/, "Frontend image previews should cache-bust local media URLs.");
+assertContains(contentPage, /appendQueryParam\(url,\s*"v",\s*localMediaPreviewVersion\)/, "Local media preview URLs should append the cache-bust version.");
 
 console.log("Media cache image format check passed.");

@@ -12,8 +12,10 @@ import {
   ExternalLink,
   FileText,
   Filter,
+  FolderOpen,
   Image as ImageIcon,
   Layers3,
+  Lightbulb,
   Loader2,
   Maximize2,
   Moon,
@@ -22,6 +24,7 @@ import {
   RefreshCw,
   Search,
   Send,
+  Settings,
   ShieldCheck,
   Sparkles,
   Sun,
@@ -45,6 +48,10 @@ import {
   type CrawlJob,
   type CrawlPlatform,
   type ExecutionLogEntry,
+  type MaterialAsset,
+  type MaterialFolder,
+  type MaterialLibraryAsset,
+  type MaterialLibrarySnapshot,
   type NormalizedSourceItem,
   type Platform,
   type PlatformCrawlSetting,
@@ -62,8 +69,14 @@ type PoolStatusFilter = SourceUsageStatus | "all";
 type PoolPlatformFilter = Platform | "all";
 type PoolSortMode = "hot_desc" | "published_desc" | "published_asc" | "crawled_desc" | "crawled_asc" | "engagement_desc";
 type CrawlInputMode = "keyword" | "links";
+type ContentDeskView = "content" | "materials";
 type LinkImportPlatform = SourceLinkPlatform | "auto";
-type BusyState = "load" | "crawl" | "source" | "batch" | "secondary" | "settings" | null;
+type BusyState = "load" | "crawl" | "source" | "batch" | "secondary" | "settings" | "materials" | "materialLibrary" | null;
+
+type MaterialAssetDraft = {
+  name: string;
+  tags: string;
+};
 
 type LinkImportResultStatus = "imported" | "filtered" | "duplicate" | "unsupported" | "failed";
 
@@ -264,6 +277,7 @@ const poolSortOptions: Array<{ label: string; value: PoolSortMode }> = [
 
 export default function ContentDeskPage() {
   const theme = useSyncExternalStore(subscribeTheme, getStoredTheme, () => "professional" as ThemeMode);
+  const [deskView, setDeskView] = useState<ContentDeskView>("content");
   const [config, setConfig] = useState<ConfigStatus | null>(null);
   const [projects, setProjects] = useState<ContentProject[]>([]);
   const [activeProject, setActiveProject] = useState<ContentProject | null>(null);
@@ -313,6 +327,15 @@ export default function ContentDeskPage() {
   const [message, setMessage] = useState("");
   const [busy, setBusy] = useState<BusyState>("load");
   const [preview, setPreview] = useState<PreviewState>(null);
+  const [materialPath, setMaterialPath] = useState("");
+  const [materials, setMaterials] = useState<MaterialAsset[]>([]);
+  const [materialLibrary, setMaterialLibrary] = useState<MaterialLibrarySnapshot>({ folders: [], assets: [] });
+  const [activeMaterialFolderId, setActiveMaterialFolderId] = useState("root");
+  const [newMaterialFolderName, setNewMaterialFolderName] = useState("");
+  const [materialAssetPath, setMaterialAssetPath] = useState("");
+  const [materialAssetName, setMaterialAssetName] = useState("");
+  const [materialAssetTags, setMaterialAssetTags] = useState("");
+  const [activeFolderNameDraftState, setActiveFolderNameDraftState] = useState({ folderId: "", name: "" });
 
   const visibleSources = useMemo(() => {
     const filtered = sources.filter((item) => {
@@ -359,6 +382,18 @@ export default function ContentDeskPage() {
   );
   const projectStats = useMemo(() => buildProjectStats(activeProject), [activeProject]);
   const latestPoolRun = useMemo(() => simpleRuns.find((run) => run.input.sourceMode === "pool") || null, [simpleRuns]);
+  const activeMaterialFolder = useMemo(
+    () => materialLibrary.folders.find((folder) => folder.id === activeMaterialFolderId) || materialLibrary.folders[0],
+    [activeMaterialFolderId, materialLibrary.folders],
+  );
+  const activeFolderNameDraft =
+    activeMaterialFolder && activeFolderNameDraftState.folderId === activeMaterialFolder.id
+      ? activeFolderNameDraftState.name
+      : activeMaterialFolder?.name || "";
+  const materialFolderAssets = useMemo(
+    () => materialLibrary.assets.filter((asset) => asset.folderId === activeMaterialFolder?.id),
+    [activeMaterialFolder?.id, materialLibrary.assets],
+  );
 
   useEffect(() => {
     document.documentElement.dataset.theme = theme;
@@ -382,6 +417,11 @@ export default function ContentDeskPage() {
     window.addEventListener("keydown", handleKeyDown);
     return () => window.removeEventListener("keydown", handleKeyDown);
   }, [preview]);
+
+  useEffect(() => {
+    if (deskView !== "materials") return;
+    void loadMaterialLibrary();
+  }, [deskView]);
 
   async function loadInitialData() {
     setBusy("load");
@@ -449,6 +489,206 @@ export default function ContentDeskPage() {
       if (res.ok) setSimpleRuns(data.runs || []);
     } catch {
       // Progress is auxiliary on this desk.
+    }
+  }
+
+  async function loadMaterialLibrary() {
+    try {
+      const res = await fetch("/api/materials/library");
+      const data = (await res.json()) as MaterialLibrarySnapshot & { error?: string };
+      if (!res.ok) throw new Error(data.error || "素材库读取失败");
+      const folders = data.folders || [];
+      setMaterialLibrary({ folders, assets: data.assets || [] });
+      setActiveMaterialFolderId((current) => (folders.some((folder) => folder.id === current) ? current : folders[0]?.id || "root"));
+    } catch (error) {
+      setMessage(error instanceof Error ? error.message : "素材库读取失败");
+    }
+  }
+
+  async function scanMaterials() {
+    if (!materialPath.trim()) {
+      setMessage("请填写本地素材文件夹路径");
+      return;
+    }
+    setBusy("materials");
+    setMessage("");
+    try {
+      const res = await fetch("/api/materials/scan", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ path: materialPath }),
+      });
+      const data = (await res.json()) as { assets?: MaterialAsset[]; error?: string };
+      if (!res.ok) throw new Error(data.error || "素材扫描失败");
+      setMaterials(data.assets || []);
+      setMessage(`已扫描素材：${data.assets?.length || 0} 个文件`);
+    } catch (error) {
+      setMessage(error instanceof Error ? error.message : "素材扫描失败");
+    } finally {
+      setBusy(null);
+    }
+  }
+
+  async function createMaterialFolderFromForm() {
+    if (!newMaterialFolderName.trim()) {
+      setMessage("请填写素材文件夹名称");
+      return;
+    }
+    setBusy("materialLibrary");
+    setMessage("");
+    try {
+      const res = await fetch("/api/materials/library", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ type: "folder", name: newMaterialFolderName.trim(), parentId: activeMaterialFolder?.id || "root" }),
+      });
+      const data = (await res.json()) as { folder?: MaterialFolder; error?: string };
+      if (!res.ok || !data.folder) throw new Error(data.error || "素材文件夹创建失败");
+      setNewMaterialFolderName("");
+      setActiveMaterialFolderId(data.folder.id);
+      await loadMaterialLibrary();
+      setMessage("已创建素材文件夹");
+    } catch (error) {
+      setMessage(error instanceof Error ? error.message : "素材文件夹创建失败");
+    } finally {
+      setBusy(null);
+    }
+  }
+
+  async function saveActiveMaterialFolder() {
+    if (!activeMaterialFolder || activeMaterialFolder.id === "root") return;
+    setBusy("materialLibrary");
+    setMessage("");
+    try {
+      const res = await fetch("/api/materials/library", {
+        method: "PATCH",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ type: "folder", id: activeMaterialFolder.id, patch: { name: activeFolderNameDraft.trim() } }),
+      });
+      const data = (await res.json()) as { folder?: MaterialFolder; error?: string };
+      if (!res.ok || !data.folder) throw new Error(data.error || "素材文件夹保存失败");
+      await loadMaterialLibrary();
+      setMessage("已保存素材文件夹");
+    } catch (error) {
+      setMessage(error instanceof Error ? error.message : "素材文件夹保存失败");
+    } finally {
+      setBusy(null);
+    }
+  }
+
+  async function deleteActiveMaterialFolder() {
+    if (!activeMaterialFolder || activeMaterialFolder.id === "root") return;
+    if (!window.confirm("确认删除当前素材文件夹？子文件夹和资产索引会一起删除，原始本地文件不会被删除。")) return;
+    setBusy("materialLibrary");
+    setMessage("");
+    try {
+      const res = await fetch(`/api/materials/library?type=folder&id=${encodeURIComponent(activeMaterialFolder.id)}`, { method: "DELETE" });
+      const data = (await res.json()) as { error?: string };
+      if (!res.ok) throw new Error(data.error || "素材文件夹删除失败");
+      setActiveMaterialFolderId("root");
+      await loadMaterialLibrary();
+      setMessage("已删除素材文件夹");
+    } catch (error) {
+      setMessage(error instanceof Error ? error.message : "素材文件夹删除失败");
+    } finally {
+      setBusy(null);
+    }
+  }
+
+  async function createMaterialAssetFromPath() {
+    if (!activeMaterialFolder) {
+      setMessage("请先选择素材文件夹");
+      return;
+    }
+    if (!materialAssetPath.trim()) {
+      setMessage("请填写本地素材文件路径");
+      return;
+    }
+    setBusy("materialLibrary");
+    setMessage("");
+    try {
+      const res = await fetch("/api/materials/library", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          type: "asset",
+          folderId: activeMaterialFolder.id,
+          path: materialAssetPath.trim(),
+          name: materialAssetName.trim(),
+          tags: splitTags(materialAssetTags),
+        }),
+      });
+      const data = (await res.json()) as { asset?: MaterialLibraryAsset; error?: string };
+      if (!res.ok || !data.asset) throw new Error(data.error || "素材资产创建失败");
+      setMaterialAssetPath("");
+      setMaterialAssetName("");
+      setMaterialAssetTags("");
+      await loadMaterialLibrary();
+      setMessage("已新增素材资产");
+    } catch (error) {
+      setMessage(error instanceof Error ? error.message : "素材资产创建失败");
+    } finally {
+      setBusy(null);
+    }
+  }
+
+  async function updateMaterialAssetFromDraft(asset: MaterialLibraryAsset, draft: MaterialAssetDraft) {
+    setBusy("materialLibrary");
+    setMessage("");
+    try {
+      const res = await fetch("/api/materials/library", {
+        method: "PATCH",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ type: "asset", id: asset.id, patch: { name: draft.name.trim(), tags: splitTags(draft.tags) } }),
+      });
+      const data = (await res.json()) as { asset?: MaterialLibraryAsset; error?: string };
+      if (!res.ok || !data.asset) throw new Error(data.error || "素材资产保存失败");
+      await loadMaterialLibrary();
+      setMessage("已保存素材资产");
+    } catch (error) {
+      setMessage(error instanceof Error ? error.message : "素材资产保存失败");
+    } finally {
+      setBusy(null);
+    }
+  }
+
+  async function deleteMaterialAssetFromLibrary(asset: MaterialLibraryAsset) {
+    if (!window.confirm(`确认删除素材索引“${asset.name}”？原始本地文件不会被删除。`)) return;
+    setBusy("materialLibrary");
+    setMessage("");
+    try {
+      const res = await fetch(`/api/materials/library?type=asset&id=${encodeURIComponent(asset.id)}`, { method: "DELETE" });
+      const data = (await res.json()) as { error?: string };
+      if (!res.ok) throw new Error(data.error || "素材资产删除失败");
+      await loadMaterialLibrary();
+      setMessage("已删除素材资产");
+    } catch (error) {
+      setMessage(error instanceof Error ? error.message : "素材资产删除失败");
+    } finally {
+      setBusy(null);
+    }
+  }
+
+  async function importScannedMaterialsToLibrary() {
+    if (!activeMaterialFolder || !materials.length) return;
+    setBusy("materialLibrary");
+    setMessage("");
+    try {
+      for (const asset of materials) {
+        const res = await fetch("/api/materials/library", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ type: "asset", folderId: activeMaterialFolder.id, path: asset.path, name: asset.name }),
+        });
+        const data = (await res.json()) as { error?: string };
+        if (!res.ok) throw new Error(data.error || `导入失败：${asset.name}`);
+      }
+      await loadMaterialLibrary();
+      setMessage(`已导入扫描素材：${materials.length} 个`);
+    } catch (error) {
+      setMessage(error instanceof Error ? error.message : "扫描素材导入失败");
+    } finally {
+      setBusy(null);
     }
   }
 
@@ -932,6 +1172,28 @@ export default function ContentDeskPage() {
             </div>
           </div>
           <div className="content-desk-header-actions">
+            <div className="theme-switcher review-theme-switcher" role="tablist" aria-label="内容工作区">
+              <button
+                className={`theme-option ${deskView === "content" ? "theme-option-active" : ""}`}
+                type="button"
+                role="tab"
+                aria-selected={deskView === "content"}
+                onClick={() => setDeskView("content")}
+              >
+                <Database className="h-3.5 w-3.5" />
+                <span>内容池</span>
+              </button>
+              <button
+                className={`theme-option ${deskView === "materials" ? "theme-option-active" : ""}`}
+                type="button"
+                role="tab"
+                aria-selected={deskView === "materials"}
+                onClick={() => setDeskView("materials")}
+              >
+                <FolderOpen className="h-3.5 w-3.5" />
+                <span>素材库</span>
+              </button>
+            </div>
             <div className="theme-switcher review-theme-switcher" role="group" aria-label="主题切换">
               {themeOptions.map((option) => (
                 <button
@@ -954,13 +1216,20 @@ export default function ContentDeskPage() {
               <ClipboardCheck className="h-4 w-4" />
               内容审查台
             </Link>
-            <button className="soft-button inline-flex h-10 items-center justify-center gap-2 px-3 text-xs font-black" type="button" onClick={() => loadContentPool(query)} disabled={Boolean(busy)}>
+            <button
+              className="soft-button inline-flex h-10 items-center justify-center gap-2 px-3 text-xs font-black"
+              type="button"
+              onClick={() => (deskView === "materials" ? loadMaterialLibrary() : loadContentPool(query))}
+              disabled={Boolean(busy)}
+            >
               {busy === "load" ? <Loader2 className="h-4 w-4 animate-spin" /> : <RefreshCw className="h-4 w-4" />}
               刷新
             </button>
           </div>
         </header>
 
+        {deskView === "content" ? (
+          <>
         <section className="content-desk-metrics">
           <Metric label="内容样本" value={projectStats.total} />
           <Metric label="当前筛选" value={visibleSources.length} />
@@ -1504,9 +1773,45 @@ export default function ContentDeskPage() {
             )}
           </aside>
         </section>
+          </>
+        ) : (
+          <section className="content-desk-material-workspace">
+            <MaterialLibraryWorkspace
+              materialPath={materialPath}
+              materials={materials}
+              materialLibrary={materialLibrary}
+              activeFolder={activeMaterialFolder}
+              activeFolderAssets={materialFolderAssets}
+              activeFolderNameDraft={activeFolderNameDraft}
+              newFolderName={newMaterialFolderName}
+              assetPath={materialAssetPath}
+              assetName={materialAssetName}
+              assetTags={materialAssetTags}
+              busy={busy === "materials" || busy === "materialLibrary"}
+              onMaterialPathChange={setMaterialPath}
+              onScanMaterials={scanMaterials}
+              onSelectFolder={setActiveMaterialFolderId}
+              onNewFolderNameChange={setNewMaterialFolderName}
+              onCreateFolder={createMaterialFolderFromForm}
+              onFolderNameDraftChange={(name) =>
+                activeMaterialFolder ? setActiveFolderNameDraftState({ folderId: activeMaterialFolder.id, name }) : undefined
+              }
+              onSaveFolder={saveActiveMaterialFolder}
+              onDeleteFolder={deleteActiveMaterialFolder}
+              onAssetPathChange={setMaterialAssetPath}
+              onAssetNameChange={setMaterialAssetName}
+              onAssetTagsChange={setMaterialAssetTags}
+              onCreateAsset={createMaterialAssetFromPath}
+              onUpdateAsset={updateMaterialAssetFromDraft}
+              onDeleteAsset={deleteMaterialAssetFromLibrary}
+              onImportScanned={importScannedMaterialsToLibrary}
+              onPreviewAsset={(asset) => openImageGallery([asset.path], 0, asset.name, asset.path)}
+            />
+          </section>
+        )}
 
         <footer className="flex min-h-10 flex-wrap items-center justify-between gap-3 text-xs text-white/45">
-          <span>{message || "内容池二次创作会生成待审草稿，不自动写飞书。"}</span>
+          <span>{message || (deskView === "materials" ? "素材库索引不会删除电脑上的原始文件。" : "内容池二次创作会生成待审草稿，不自动写飞书。")}</span>
           <span>{config ? `TikHub ${config.tikhubConfigured ? "已配置" : "未配置"} · GPT ${config.openaiConfigured ? "已配置" : "未配置"}` : "配置读取中"}</span>
         </footer>
       </div>
@@ -1572,6 +1877,191 @@ function PoolMetric({ label, value }: { label: string; value: number | string })
       <p className="text-[10px] text-white/42">{label}</p>
       <p className="mt-1 text-sm font-black text-white">{value}</p>
     </div>
+  );
+}
+
+function MaterialLibraryWorkspace({
+  materialPath,
+  materials,
+  materialLibrary,
+  activeFolder,
+  activeFolderAssets,
+  activeFolderNameDraft,
+  newFolderName,
+  assetPath,
+  assetName,
+  assetTags,
+  busy,
+  onMaterialPathChange,
+  onScanMaterials,
+  onSelectFolder,
+  onNewFolderNameChange,
+  onCreateFolder,
+  onFolderNameDraftChange,
+  onSaveFolder,
+  onDeleteFolder,
+  onAssetPathChange,
+  onAssetNameChange,
+  onAssetTagsChange,
+  onCreateAsset,
+  onUpdateAsset,
+  onDeleteAsset,
+  onImportScanned,
+  onPreviewAsset,
+}: {
+  materialPath: string;
+  materials: MaterialAsset[];
+  materialLibrary: MaterialLibrarySnapshot;
+  activeFolder?: MaterialFolder;
+  activeFolderAssets: MaterialLibraryAsset[];
+  activeFolderNameDraft: string;
+  newFolderName: string;
+  assetPath: string;
+  assetName: string;
+  assetTags: string;
+  busy: boolean;
+  onMaterialPathChange: (value: string) => void;
+  onScanMaterials: () => void;
+  onSelectFolder: (folderId: string) => void;
+  onNewFolderNameChange: (value: string) => void;
+  onCreateFolder: () => void;
+  onFolderNameDraftChange: (value: string) => void;
+  onSaveFolder: () => void;
+  onDeleteFolder: () => void;
+  onAssetPathChange: (value: string) => void;
+  onAssetNameChange: (value: string) => void;
+  onAssetTagsChange: (value: string) => void;
+  onCreateAsset: () => void;
+  onUpdateAsset: (asset: MaterialLibraryAsset, draft: MaterialAssetDraft) => void;
+  onDeleteAsset: (asset: MaterialLibraryAsset) => void;
+  onImportScanned: () => void;
+  onPreviewAsset: (asset: MaterialLibraryAsset) => void;
+}) {
+  return (
+    <>
+      <aside className="glass ops-panel content-desk-pane thin-scrollbar rounded-[8px] p-4">
+        <PanelTitle icon={<FolderOpen className="h-4 w-4" />} title="素材文件夹" />
+        <div className="mt-4 grid grid-cols-2 gap-2">
+          <PoolMetric label="文件夹" value={materialLibrary.folders.length} />
+          <PoolMetric label="资产" value={materialLibrary.assets.length} />
+        </div>
+        <div className="mt-4 flex gap-2">
+          <input className="field h-10" placeholder="新建文件夹" value={newFolderName} onChange={(event) => onNewFolderNameChange(event.target.value)} />
+          <button className="soft-button grid h-10 w-10 shrink-0 place-items-center" type="button" onClick={onCreateFolder} disabled={busy} aria-label="新建素材文件夹">
+            {busy ? <Loader2 className="h-4 w-4 animate-spin" /> : <FolderOpen className="h-4 w-4" />}
+          </button>
+        </div>
+        <div className="thin-scrollbar mt-4 space-y-2 overflow-y-auto">
+          {materialLibrary.folders.map((folder) => (
+            <button
+              key={folder.id}
+              className={`source-card w-full rounded-[8px] border p-3 text-left ${
+                activeFolder?.id === folder.id ? "source-card-selected border-[var(--mint)]/70 bg-white/12" : "border-white/10 bg-white/[0.045]"
+              }`}
+              type="button"
+              onClick={() => onSelectFolder(folder.id)}
+            >
+              <p className="truncate text-sm font-black text-white">{folder.name}</p>
+              <p className="mt-1 text-[11px] text-white/42">{materialLibrary.assets.filter((asset) => asset.folderId === folder.id).length} 个资产</p>
+            </button>
+          ))}
+        </div>
+      </aside>
+
+      <section className="glass-strong ops-panel content-desk-pane thin-scrollbar rounded-[8px] p-4">
+        <div className="flex flex-wrap items-center justify-between gap-3">
+          <PanelTitle icon={<Database className="h-4 w-4" />} title={activeFolder?.name || "素材库"} />
+          <span className="status-badge text-[11px] text-white/55">{activeFolderAssets.length} 个资产</span>
+        </div>
+
+        <div className="mt-4 grid gap-3 xl:grid-cols-2">
+          <div className="content-cluster">
+            <PanelTitle icon={<Settings className="h-4 w-4" />} title="当前文件夹" />
+            <div className="mt-3">
+              <FieldLabel label="文件夹名称" />
+              <input className="field" value={activeFolderNameDraft} onChange={(event) => onFolderNameDraftChange(event.target.value)} disabled={!activeFolder || activeFolder.id === "root"} />
+            </div>
+            <div className="mt-3 grid gap-2 sm:grid-cols-2">
+              <button className="soft-button h-10" type="button" onClick={onSaveFolder} disabled={busy || !activeFolder || activeFolder.id === "root"}>保存</button>
+              <button className="soft-button h-10 text-[var(--rose)]" type="button" onClick={onDeleteFolder} disabled={busy || !activeFolder || activeFolder.id === "root"}>删除</button>
+            </div>
+          </div>
+
+          <div className="content-cluster">
+            <PanelTitle icon={<UploadCloud className="h-4 w-4" />} title="新增素材" />
+            <div className="mt-3">
+              <FieldLabel label="本地文件路径" />
+              <input className="field" placeholder="C:\\素材\\车型资料.pdf" value={assetPath} onChange={(event) => onAssetPathChange(event.target.value)} />
+            </div>
+            <div className="mt-3 grid gap-3 sm:grid-cols-2">
+              <label><FieldLabel label="显示名称" /><input className="field" value={assetName} onChange={(event) => onAssetNameChange(event.target.value)} /></label>
+              <label><FieldLabel label="标签" /><input className="field" value={assetTags} onChange={(event) => onAssetTagsChange(event.target.value)} /></label>
+            </div>
+            <button className="primary-button mt-3 flex h-10 w-full items-center justify-center gap-2" type="button" onClick={onCreateAsset} disabled={busy || !activeFolder}>
+              {busy ? <Loader2 className="h-4 w-4 animate-spin" /> : <UploadCloud className="h-4 w-4" />}
+              加入素材库
+            </button>
+          </div>
+        </div>
+
+        <div className="content-cluster mt-4">
+          <div className="flex flex-col gap-3 sm:flex-row sm:items-end">
+            <label className="min-w-0 flex-1"><FieldLabel label="扫描本地图片文件夹" /><input className="field" placeholder="C:\\素材\\产品图" value={materialPath} onChange={(event) => onMaterialPathChange(event.target.value)} /></label>
+            <button className="soft-button h-10 px-3 text-xs" type="button" onClick={onScanMaterials} disabled={busy}>扫描</button>
+            <button className="soft-button h-10 px-3 text-xs" type="button" onClick={onImportScanned} disabled={busy || !materials.length || !activeFolder}>导入 {materials.length || ""}</button>
+          </div>
+          {materials.length ? (
+            <div className="mt-3 grid gap-2 sm:grid-cols-2 xl:grid-cols-4">
+              {materials.slice(0, 8).map((asset) => (
+                <div key={asset.id} className="asset-pill"><p className="truncate text-xs font-black text-white">{asset.name}</p><p className="mt-1 truncate text-[10px] text-white/42">{asset.path}</p></div>
+              ))}
+            </div>
+          ) : null}
+        </div>
+
+        <div className="mt-4 grid gap-3 xl:grid-cols-2">
+          {activeFolderAssets.length ? (
+            activeFolderAssets.map((asset) => <MaterialAssetEditor key={asset.id} asset={asset} busy={busy} onUpdate={onUpdateAsset} onDelete={onDeleteAsset} onPreview={onPreviewAsset} />)
+          ) : (
+            <EmptyState title="当前文件夹暂无素材" icon={<Lightbulb className="h-5 w-5" />} />
+          )}
+        </div>
+      </section>
+    </>
+  );
+}
+
+function MaterialAssetEditor({
+  asset,
+  busy,
+  onUpdate,
+  onDelete,
+  onPreview,
+}: {
+  asset: MaterialLibraryAsset;
+  busy: boolean;
+  onUpdate: (asset: MaterialLibraryAsset, draft: MaterialAssetDraft) => void;
+  onDelete: (asset: MaterialLibraryAsset) => void;
+  onPreview: (asset: MaterialLibraryAsset) => void;
+}) {
+  const [draft, setDraft] = useState<MaterialAssetDraft>({ name: asset.name, tags: asset.tags.join(", ") });
+  const canPreview = asset.kind === "image" && isPreviewableImageAssetPath(asset.path);
+
+  return (
+    <article className="rounded-[8px] border border-white/10 bg-white/[0.04] p-3">
+      <div className="flex items-start justify-between gap-2">
+        <div className="min-w-0"><p className="text-[10px] font-black uppercase text-[var(--cyan)]">{formatMaterialKind(asset.kind)} · {asset.extension || "file"}</p><p className="mt-1 truncate text-xs text-white/42">{asset.path}</p></div>
+        <button className="soft-button grid h-8 w-8 shrink-0 place-items-center" type="button" onClick={() => onDelete(asset)} disabled={busy} aria-label="删除素材资产"><Trash2 className="h-3.5 w-3.5 text-[var(--rose)]" /></button>
+      </div>
+      <div className="mt-3 grid gap-2">
+        <input className="field h-10 text-xs" value={draft.name} onChange={(event) => setDraft((current) => ({ ...current, name: event.target.value }))} />
+        <input className="field h-10 text-xs" value={draft.tags} onChange={(event) => setDraft((current) => ({ ...current, tags: event.target.value }))} />
+      </div>
+      <div className="mt-3 grid gap-2 sm:grid-cols-2">
+        <button className="soft-button h-9 text-xs" type="button" onClick={() => onUpdate(asset, draft)} disabled={busy}>保存</button>
+        <button className="soft-button h-9 text-xs" type="button" onClick={() => onPreview(asset)} disabled={!canPreview}>预览</button>
+      </div>
+    </article>
   );
 }
 
@@ -2310,6 +2800,14 @@ function splitLines(value: string) {
   return value.split(/\r?\n/).map((item) => item.trim()).filter(Boolean);
 }
 
+function splitTags(value: string) {
+  return value
+    .split(/[,，\n]/)
+    .map((item) => item.trim())
+    .filter(Boolean)
+    .slice(0, 20);
+}
+
 function buildProjectStats(project: ContentProject | null) {
   return {
     total: project?.totalItems || 0,
@@ -2397,7 +2895,25 @@ function toDisplayImageSrc(url?: string) {
   if (!url) return "";
   if (url.startsWith("/media/") || url.startsWith("/generated/")) return appendQueryParam(url, "v", localMediaPreviewVersion);
   if (/^https?:\/\//i.test(url)) return `/api/media/proxy?url=${encodeURIComponent(url)}`;
+  if (isAbsoluteLocalPath(url)) return `/api/materials/preview?path=${encodeURIComponent(url)}`;
   return url;
+}
+
+function isAbsoluteLocalPath(url: string) {
+  return /^[A-Za-z]:[\\/]/.test(url) || url.startsWith("\\\\") || url.startsWith("/");
+}
+
+function isPreviewableImageAssetPath(url: string) {
+  return /\.(?:png|jpe?g|webp|gif|bmp|avif)$/i.test(url) || isAbsoluteLocalPath(url);
+}
+
+function formatMaterialKind(value: MaterialLibraryAsset["kind"]) {
+  const labels: Record<MaterialLibraryAsset["kind"], string> = {
+    image: "图片",
+    document: "文档",
+    other: "其他",
+  };
+  return labels[value];
 }
 
 function appendQueryParam(url: string, key: string, value: string) {

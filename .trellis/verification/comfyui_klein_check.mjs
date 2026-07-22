@@ -92,11 +92,7 @@ assertContains(
   /buildViralGeneratedPost\(\{[\s\S]*useComfyUiKlein:\s*normalizedInput\.useComfyUiKlein === true && isComfyUiKleinConfigured\(\)/,
   "Viral imitation tasks must route to ComfyUI only when the user switch is enabled and the local workflow is configured.",
 );
-assertContains(page, /const comfyUiKleinAvailable = Boolean\(config\?\.comfyUiKleinConfigured\)/, "Frontend task previews must use non-sensitive config status for Klein availability.");
-assertContains(page, /const imageUseComfyUiKlein = imageUseComfyUiKleinOverride \?\? comfyUiKleinAvailable/, "Advanced Klein switch must be clickable while defaulting from config availability.");
 assertContains(page, /const \[simpleUseComfyUiKlein,\s*setSimpleUseComfyUiKlein\] = useState\(defaultSimpleRunMediaSettings\.useComfyUiKlein\)/, "Simple Klein switch must initialize from the shared default-off setting.");
-assertContains(page, /const useComfyUiKleinTasks = comfyUiKleinAvailable && imageUseComfyUiKlein/, "Frontend Klein routing must require both config availability and the user switch.");
-assertContains(page, /buildDefaultImageTasks\(selectedSource,\s*workspaceSettings\.imageStrategyPrompts,\s*\{[\s\S]*useComfyUiKlein:\s*useComfyUiKleinTasks[\s\S]*directOriginalReference:\s*imageDirectOriginalReference/, "Frontend default image tasks must follow the user image policy switches.");
 assertContains(page, /启用本地 Klein 模型/, "Frontend must expose a Klein routing switch.");
 assertContains(page, /直接引用原图/, "Frontend must expose a direct-original switch.");
 

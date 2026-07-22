@@ -31,10 +31,7 @@ const types = read("src/lib/types.ts");
 const sourceVideoReference = read("src/lib/source-video-reference.ts");
 const openai = read("src/lib/openai.ts");
 const simpleRuns = read("src/lib/simple-runs.ts");
-const generateRoute = read("src/app/api/generate/route.ts");
 const simpleRunRoute = read("src/app/api/simple/runs/route.ts");
-const batchRoute = read("src/app/api/production/batches/route.ts");
-const batchProduction = read("src/lib/batch-production.ts");
 const reviewRoute = read("src/app/api/review/route.ts");
 const reviewPage = read("src/app/review/page.tsx");
 const page = read("src/app/page.tsx");
@@ -43,7 +40,6 @@ const baseline = read(".trellis/verification/check.ps1");
 
 assertContains(types, /GeneratedPost[\s\S]*videoUrls\?:\s*string\[\]/, "GeneratedPost must carry optional final source video URLs.");
 assertContains(types, /SimpleRunInput[\s\S]*includeSourceVideo\?:\s*boolean/, "SimpleRunInput must carry the source-video opt-in switch.");
-assertContains(types, /BatchProductionJob[\s\S]*includeSourceVideo\?:\s*boolean/, "BatchProductionJob must persist the source-video opt-in switch.");
 
 assertContains(sourceVideoReference, /export function resolveSourceVideoUrls/, "A shared source-video resolver must be exported.");
 assertContains(sourceVideoReference, /source\.downloadedVideoUrl[\s\S]*source\.videoUrl/, "Source-video resolver must prefer cached local video before remote source video.");
@@ -70,15 +66,8 @@ assertContains(openai, /includeSourceVideo\?:\s*boolean/, "generatePost input mu
 assertContains(openai, /input\.includeSourceVideo === true \? resolveSourceVideoUrls\(input\.source\) : \[\]/, "generatePost must attach source videos only when explicitly enabled.");
 assertContains(openai, /input\.includeSourceVideo === true \? resolveSourceVideoUrls\(source\) : \[\]/, "Demo generated posts must also respect the source-video opt-in switch.");
 
-assertContains(generateRoute, /includeSourceVideo\?:\s*boolean/, "Advanced single-generate API should accept the source-video switch.");
-assertContains(generateRoute, /includeSourceVideo:\s*body\.includeSourceVideo === true/, "Advanced single-generate API must default source-video attachment off.");
 assertContains(simpleRunRoute, /includeSourceVideo\?:\s*boolean/, "Simple run API should accept the source-video switch.");
 assertContains(simpleRunRoute, /includeSourceVideo:\s*body\.includeSourceVideo === true/, "Simple run API must default source-video attachment off.");
-assertContains(batchRoute, /includeSourceVideo\?:\s*boolean/, "Batch production API should accept the source-video switch.");
-assertContains(batchRoute, /includeSourceVideo:\s*body\.includeSourceVideo === true/, "Batch production API must default source-video attachment off.");
-assertContains(batchProduction, /includeSourceVideo\?:\s*boolean/, "Batch production domain input/job must carry the source-video switch.");
-assertContains(batchProduction, /includeSourceVideo:\s*input\.includeSourceVideo === true/, "Batch production jobs must persist source-video opt-in only when explicitly enabled.");
-assertContains(batchProduction, /includeSourceVideo:\s*job\.includeSourceVideo === true/, "Batch production generatePost calls must use the persisted source-video opt-in.");
 
 assertContains(simpleRuns, /hasSimpleProductionVideoReference\(source\)/, "Simple production must check for direct source video references.");
 assertContains(simpleRuns, /isSimpleProductionVideoLikeSource\(source\)[\s\S]*hasSimpleProductionVideoReference\(source\)[\s\S]*source\.videoFrames\?\.length/, "Video-like simple production sources must allow source-video references when no frames exist.");
@@ -93,14 +82,10 @@ assertContains(reviewPage, /removeDraftVideo/, "Review desk must support removin
 assertContains(reviewPage, /<video[\s\S]*controls/, "Review desk must render video materials with playable controls.");
 assertContains(reviewPage, /countPostMedia/, "Review desk media counts must include videos, not only imageUrls.");
 
-assertContains(page, /videoUrls:\s*post\.videoUrls/, "Main workspace review patch save must preserve video URLs.");
-assertContains(page, /countPostMedia/, "Main workspace media counts must include videos.");
 assertContains(types, /export const defaultSimpleRunMediaSettings:[\s\S]*includeSourceVideo:\s*false/, "Shared simple media defaults must keep source-video attachment off.");
 assertContains(page, /const \[simpleIncludeSourceVideo,\s*setSimpleIncludeSourceVideo\] = useState\(defaultSimpleRunMediaSettings\.includeSourceVideo\)/, "Simple UI must initialize source-video attachment from shared defaults.");
-assertContains(page, /const \[includeSourceVideo,\s*setIncludeSourceVideo\] = useState\(false\)/, "Advanced UI must default source-video attachment off.");
 assertContains(page, /引用源视频素材/, "UI should expose the source-video material switch label.");
 assertContains(page, /includeSourceVideo:\s*simpleIncludeSourceVideo/, "Simple start request must send the source-video switch.");
-assertContains(page, /includeSourceVideo:\s*includeSourceVideo/, "Advanced generate/batch requests must send the source-video switch.");
 
 assertContains(feishuCli, /resolvePostAttachmentFiles/, "Feishu publish must resolve image and video attachments through a shared helper.");
 assertContains(feishuCli, /post\.videoUrls/, "Feishu publish must include post.videoUrls in attachment handling.");

@@ -21,7 +21,6 @@ const tikhub = read("src/lib/tikhub.ts");
 const mediaCache = read("src/lib/media-cache.ts");
 const feishu = read("src/lib/feishu-cli.ts");
 const simpleRuns = read("src/lib/simple-runs.ts");
-const batchProduction = read("src/lib/batch-production.ts");
 
 assertContains(concurrency, /crawl:\s*readConcurrencyEnv\("WORKER_CRAWL_CONCURRENCY",\s*12,\s*50\)/, "Crawl pool must default to 12 and cap at 50.");
 assertContains(concurrency, /media:\s*readConcurrencyEnv\("WORKER_MEDIA_CONCURRENCY",\s*30,\s*100\)/, "Media pool must default to 30 and cap at 100.");
@@ -82,8 +81,5 @@ assertContains(simpleRuns, /mapWithConcurrency\(productionItems,\s*concurrencyCo
 assertContains(simpleRuns, /runWithConcurrencyPool\("production"/, "Simple-mode post production must use the production pool.");
 assertContains(simpleRuns, /taskConcurrency:\s*concurrencyConfig\.image/, "Simple-mode image tasks must use the global image concurrency cap.");
 assertContains(simpleRuns, /createRunUpdateQueue/, "Simple-mode concurrent progress writes must use a serialized run update queue.");
-
-assertContains(batchProduction, /mapWithConcurrency\(runningJob\.tasks,\s*concurrencyConfig\.production/, "Advanced batch production must be concurrent and bounded.");
-assertContains(batchProduction, /createBatchJobUpdateQueue/, "Advanced batch progress writes must use a serialized job update queue.");
 
 console.log("Concurrency pool integration check passed.");

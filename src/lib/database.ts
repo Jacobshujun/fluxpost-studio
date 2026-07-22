@@ -2,7 +2,6 @@ import { existsSync, mkdirSync, readFileSync } from "node:fs";
 import path from "node:path";
 import { Pool, type PoolClient } from "pg";
 import type {
-  BatchProductionJob,
   ContentProject,
   CrawlJob,
   DistributionCheckJob,
@@ -338,20 +337,6 @@ export async function deleteGeneratedPostsFromDb(postIds: string[]) {
     const statement = db.prepare("DELETE FROM generated_posts WHERE id = ?");
     ids.forEach((id) => statement.run(id));
   });
-}
-
-export async function readBatchJobsFromDb(): Promise<BatchProductionJob[]> {
-  return readJsonRows<BatchProductionJob>("batch_jobs", "created_at DESC");
-}
-
-export async function writeBatchJobsToDb(jobs: BatchProductionJob[]) {
-  await replaceJsonRows("batch_jobs", jobs, (job) => [
-    job.id,
-    job.status,
-    job.createdAt,
-    job.updatedAt,
-    toJson(job),
-  ]);
 }
 
 export async function readMaterialLibraryFromDb(): Promise<MaterialLibrarySnapshot> {
@@ -2501,15 +2486,6 @@ async function migrateLegacyJsonToPostgres() {
       }
     }
 
-    if ((await postgresTableCount(client, "batch_jobs")) === 0) {
-      const store = readLegacyJson<{ jobs?: BatchProductionJob[] }>("batch-production.json");
-      if (Array.isArray(store?.jobs)) {
-        for (const job of store.jobs) {
-          await client.query(resolvePostgresInsertSql("batch_jobs"), [job.id, job.status, job.createdAt, job.updatedAt, toJson(job)]);
-        }
-      }
-    }
-
     if ((await postgresTableCount(client, "material_folders")) === 0 && (await postgresTableCount(client, "material_assets")) === 0) {
       const store = readLegacyJson<MaterialLibrarySnapshot>("material-library.json");
       if (store && (Array.isArray(store.folders) || Array.isArray(store.assets))) {
@@ -2592,11 +2568,6 @@ function migrateLegacyJsonToSqlite(db: SqliteDatabase) {
       if (Array.isArray(store?.posts)) writeGeneratedPostsRowsSqlite(db, store.posts);
     }
 
-    if (sqliteTableCount(db, "batch_jobs") === 0) {
-      const store = readLegacyJson<{ jobs?: BatchProductionJob[] }>("batch-production.json");
-      if (Array.isArray(store?.jobs)) writeBatchRowsSqlite(db, store.jobs);
-    }
-
     if (sqliteTableCount(db, "material_folders") === 0 && sqliteTableCount(db, "material_assets") === 0) {
       const store = readLegacyJson<MaterialLibrarySnapshot>("material-library.json");
       if (store && (Array.isArray(store.folders) || Array.isArray(store.assets))) {
@@ -2671,13 +2642,6 @@ function writeGeneratedPostsRowsSqlite(db: SqliteDatabase, posts: GeneratedPost[
   const insert = db.prepare(resolveSqliteInsertSql("generated_posts"));
   for (const post of posts) {
     insert.run(post.id, post.sourceItemId, post.platform, post.status, post.createdAt || post.updatedAt, post.updatedAt, toJson(post));
-  }
-}
-
-function writeBatchRowsSqlite(db: SqliteDatabase, jobs: BatchProductionJob[]) {
-  const insert = db.prepare(resolveSqliteInsertSql("batch_jobs"));
-  for (const job of jobs) {
-    insert.run(job.id, job.status, job.createdAt, job.updatedAt, toJson(job));
   }
 }
 

@@ -15,13 +15,15 @@ async function main() {
   });
   await expectStatus("/api/content-pool", undefined, 401);
   await expectStatus("/api/activity?limit=1", undefined, 401);
-  await expectStatus("/api/production/batches", undefined, 401);
+  await expectStatus("/api/generate", undefined, 404);
+  await expectStatus("/api/production/batches", undefined, 404);
+  await expectStatus("/api/production/posts/regenerate", undefined, 404);
   await expectStatus("/api/crawl/jobs", undefined, 401);
   await expectStatus("/api/production/posts", {
     method: "POST",
     headers: { "content-type": "application/json" },
     body: "{}",
-  }, 401);
+  }, 405);
   console.log(`HTTP smoke passed for ${baseUrl}`);
 }
 

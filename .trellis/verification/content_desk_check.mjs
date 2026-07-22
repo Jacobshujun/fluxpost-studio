@@ -58,16 +58,13 @@ assertContains(simpleRuns, /makePoolStageTitles/, "Pool mode should use pool-spe
 assertContains(simpleRuns, /message:\s*`内容池取样/, "Pool progress should not describe pool mode as keyword crawling.");
 
 assertContains(mainPage, /href="\/content"/, "Main workspace should expose a /content entry.");
-assertContains(mainPage, /type ActiveModule = "production" \| "materials"/, "Main advanced module state should only include production and materials.");
-assertNotContains(mainPage, /value:\s*"content"/, "Main advanced module switcher should not include the full content module.");
-assertNotContains(mainPage, /activeModule === "content"/, "Main workspace should not render the old inline content branch.");
-assertContains(mainPage, /const \[activeModule,\s*setActiveModule\] = useState<ActiveModule>\("production"\)/, "Advanced mode should default to production after content-pool split.");
-assertContains(mainPage, /function isSimplePoolRun\(run: SimpleRun\)[\s\S]*sourceMode === "pool"/, "Main simple-run display should recognize pool runs.");
-assertContains(mainPage, /内容池 \$\{run\.input\.sourceItemIds\?\.length \|\| run\.input\.targetCount\} 条/, "Main simple-run source labels should display content-pool counts.");
-assertContains(mainPage, /formatSimpleRunCollectionAction\(run\)/, "Main progress fallback should avoid describing pool runs as keyword crawling.");
+assertNotContains(mainPage, /ActiveModule|ProductionWorkspace|WorkspaceModeSwitcher/, "Main workspace should not retain removed mode or production modules.");
+assertContains(contentPage, /type ContentDeskView = "content" \| "materials"/, "/content should own the content/material view switch.");
+assertContains(contentPage, /function MaterialLibraryWorkspace\(/, "/content should own material-library management.");
 
 assertContains(globals, /\.content-desk-shell\s*\{/, "Global CSS should define the /content shell.");
 assertContains(globals, /\.content-desk-workspace\s*\{[\s\S]*display:\s*grid/, "Global CSS should define the /content workbench grid.");
+assertContains(globals, /\.content-desk-material-workspace\s*\{[\s\S]*display:\s*grid/, "Global CSS should define the /content material workbench grid.");
 assertContains(globals, /\.content-desk-source-card-active\s*\{/, "Global CSS should define selected content-pool card styling.");
 
 assertContains(checkPs1, /Content desk check/, "Trellis baseline should include the content desk check.");

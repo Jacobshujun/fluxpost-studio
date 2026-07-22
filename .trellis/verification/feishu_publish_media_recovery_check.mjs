@@ -10,7 +10,6 @@ const files = {
   database: "src/lib/database.ts",
   types: "src/lib/types.ts",
   route: "src/app/api/publish/feishu/route.ts",
-  page: "src/app/page.tsx",
   review: "src/app/review/page.tsx",
   baseline: ".trellis/verification/check.ps1",
 };
@@ -58,7 +57,6 @@ assertNotContains(
 assertContains(source.database, /getFeishuPublishQueueContextFromDb/, "Queue polling must expose same-owner queue context.");
 assertContains(source.database, /queue_ahead/, "PostgreSQL queue context must count jobs ahead.");
 assertContains(source.route, /await buildFeishuPublishJobResponse\(job\)/, "Publish polling must await queue context.");
-assertContains(source.page, /queueAhead\?:\s*number/, "Main publish UI must type queue position.");
 assertContains(source.review, /queueAhead\?:\s*number/, "Review publish UI must type queue position.");
 assertContains(source.types, /mediaRepairCount\?:\s*number/, "Durable jobs must report recovered media count.");
 assertContains(source.types, /mediaFailures\?:\s*Array/, "Durable jobs must report structured per-post media failures.");

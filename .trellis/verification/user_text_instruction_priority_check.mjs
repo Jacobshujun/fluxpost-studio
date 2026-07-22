@@ -17,7 +17,6 @@ function assertNotContains(source, pattern, message) {
 
 const openai = read("src/lib/openai.ts");
 const productionPlan = read("src/lib/production-plan.ts");
-const batchProduction = read("src/lib/batch-production.ts");
 
 assertContains(
   productionPlan,
@@ -59,12 +58,6 @@ assertNotContains(
   openai,
   /竞品图文只分析创意并用小鹏素材重构|formatProductionPlanForPrompt\(productionPlan\)|`额外要求: \$\{input\.instruction/,
   "generatePost prompt must not reintroduce hard-coded competitor-to-Xpeng text strategy or duplicate user instruction as a weak extra requirement.",
-);
-
-assertNotContains(
-  batchProduction,
-  /当前策略原因：\$\{plan\.reason\}/,
-  "Batch production must not inject automatic production-plan reasons into the user text instruction.",
 );
 
 console.log("User text instruction priority check passed.");

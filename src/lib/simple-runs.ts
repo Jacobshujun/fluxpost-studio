@@ -197,7 +197,7 @@ async function prepareSimpleRun(input: CreateSimpleRunInput) {
 
   await recordExecutionLog({
     scope: "simple/run",
-    action: "开始简单版全自动流程",
+    action: "开始精简版全自动流程",
     status: "running",
     message: isSimpleRunLinkMode(normalizedInput)
       ? `关键词 ${normalizedInput.keyword}，导入链接 ${normalizedInput.links?.length || 0} 条，目标 ${normalizedInput.targetCount} 条`
@@ -578,7 +578,7 @@ async function runSimpleRunWorkflow(
             : !canRunImageTasks
               ? "Only text was generated; no image task was selected for this simple run."
             : imageResult.status === "completed"
-            ? `简单版自动生成 ${imageResult.imageUrls.length} 张配图。`
+            ? `精简版自动生成 ${imageResult.imageUrls.length} 张配图。`
             : imageResult.message || "图片模型未返回配图。",
         ],
         status: "draft",
@@ -603,7 +603,7 @@ async function runSimpleRunWorkflow(
       });
       await recordExecutionLog({
         scope: "simple/run",
-        action: "简单版单条生产失败",
+        action: "精简版单条生产失败",
         status: "error",
         message,
         details: {
@@ -1407,7 +1407,7 @@ async function collectSimpleKeywordItems(
       });
       await recordExecutionLog({
         scope: "simple/run",
-        action: "简单版单平台采集失败",
+        action: "精简版单平台采集失败",
         status: "error",
         message,
         details: {
@@ -2340,7 +2340,7 @@ async function finishSimpleRun(run: SimpleRun, startedAt: number) {
   });
   await recordExecutionLog({
     scope: "simple/run",
-    action: "简单版全自动流程结束",
+    action: "精简版全自动流程结束",
     status: status === "completed" ? "success" : status === "failed" ? "error" : "info",
     message: `生成 ${finalRun.posts.length} 条，发布状态 ${finalRun.publish?.status || "skipped"}`,
     durationMs: Date.now() - startedAt,

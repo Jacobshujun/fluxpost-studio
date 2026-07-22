@@ -77,11 +77,9 @@ assertContains(route, /feishuTaskNumbers:\s*body\.feishuTaskNumbers/, "Simple ru
 assertContains(page, /type SimpleSourceMode = "keyword" \| "links" \| "feishu"/, "Simple UI must define Feishu source mode.");
 assertContains(page, /simpleFeishuTaskText/, "Simple UI must keep controlled Feishu task-number state.");
 assertContains(page, /function splitFeishuTaskNumbers/, "Simple UI must split pasted Feishu task numbers.");
-assertContains(page, /<FieldLabel label="飞书任务编号" \/>/, "Simple UI must render a Feishu task-number input.");
+assertContains(page, /<FieldLabel label=\{`飞书任务编号 · \$\{feishuTaskCount\} 条`\} \/>/, "Compact workspace must render the Feishu task-number input and count.");
 assertContains(page, /feishuTaskNumbers:\s*sourceMode === "feishu" \? feishuTaskNumbers : undefined/, "Simple start request must send Feishu task numbers.");
-assertContains(page, /writeFeishu \? "导入飞书并一键生产写入" : "导入飞书并生成待审查内容"/, "Simple start button must describe both Feishu auto-write and review-only flows.");
-assertContains(page, /飞书导入结果/, "Simple run summary must show Feishu import results.");
-assertContains(page, /formatSimpleFeishuStatus/, "Simple UI must format Feishu import result statuses.");
+assertContains(page, /writeFeishu \? "开始生产并写入飞书" : "开始生产待审查内容"/, "Compact start button must describe both Feishu auto-write and review-only flows.");
 assertContains(page, /crawlPlatforms\.map/, "Keyword and link platform controls must use crawl platforms, not include Feishu as a TikHub platform.");
 
 assertContains(checkPs1, /Feishu content import check/, "Trellis baseline must include the Feishu content import check.");

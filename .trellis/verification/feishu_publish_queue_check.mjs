@@ -25,7 +25,7 @@ const queue = read("src/lib/feishu-publish-queue.ts");
 const feishu = read("src/lib/feishu-cli.ts");
 const route = read("src/app/api/publish/feishu/route.ts");
 const simpleRuns = read("src/lib/simple-runs.ts");
-const page = read("src/app/page.tsx");
+const reviewPage = read("src/app/review/page.tsx");
 const check = read(".trellis/verification/check.ps1");
 
 assertContains(types, /export type FeishuPublishQueueStatus/, "Feishu publish queue status type is missing.");
@@ -79,9 +79,9 @@ assertContains(simpleRuns, /enqueueFeishuPublishJob\(approvedPosts/, "Simple-run
 assertContains(simpleRuns, /taskKeyword:\s*resolveSimplePostTaskKeyword\(normalizedInput,\s*source\)/, "Simple-run generated posts must carry the task keyword for Feishu vehicle writes.");
 assertNotContains(simpleRuns, /publishPostsToFeishu/, "Simple-run publish stage must not call Feishu CLI directly.");
 
-assertContains(page, /\/api\/publish\/feishu\?jobId=/, "Frontend must poll queued Feishu publish jobs.");
-assertContains(page, /queueStatus\?:\s*FeishuPublishJob\["status"\]/, "Frontend publish status must track Feishu queue status.");
-assertContains(page, /isFeishuPublishQueueLive/, "Frontend must stop polling after Feishu queue terminal status.");
+assertContains(reviewPage, /\/api\/publish\/feishu\?jobId=/, "Review must poll queued Feishu publish jobs.");
+assertContains(reviewPage, /queueStatus\?:\s*FeishuPublishJob\["status"\]/, "Review publish status must track Feishu queue status.");
+assertContains(reviewPage, /isFeishuPublishQueueLive/, "Review must stop polling after Feishu queue terminal status.");
 assertContains(check, /feishu_publish_queue_check\.mjs/, "Trellis baseline must include the Feishu publish queue check.");
 
 console.log("Feishu publish queue check passed.");

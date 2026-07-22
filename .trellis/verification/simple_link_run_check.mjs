@@ -85,8 +85,8 @@ assertContains(page, /enableVideoTranscription:\s*simpleEnableVideoTranscription
 assertContains(page, /cookie:\s*sourceMode === "links" && simpleLinkPlatform === "dongchedi" \? cookie : undefined/, "Simple start request must send Cookie only for Dongchedi link mode.");
 assertContains(contentPage, /linkImportPlatform === "douyin" \|\| linkImportPlatform === "dongchedi"/, "Content desk source-link import should expose Cookie for Douyin and Dongchedi.");
 assertContains(contentPage, /cookie:\s*linkImportPlatform === "douyin" \|\| linkImportPlatform === "dongchedi" \? cookie : undefined/, "Content desk source-link import must send Cookie for Douyin and Dongchedi.");
-assertContains(page, /linkPlatform === "dongchedi"[\s\S]*<FieldLabel label="Cookie" \/>/, "Simple and compact link-mode UI should expose Cookie for Dongchedi.");
-assertContains(page, /variant=\{workspaceMode === "compact" \? "compact" : "standard"\}[\s\S]*sourceMode=\{simpleSourceMode\}[\s\S]*linkText=\{simpleLinkText\}/, "Compact and simple variants must share the link-mode props.");
+assertContains(page, /linkPlatform === "dongchedi"[\s\S]*placeholder="Cookie"/, "Compact link-mode UI should expose Cookie for Dongchedi.");
+assertContains(page, /<CompactWorkspace[\s\S]*sourceMode=\{simpleSourceMode\}[\s\S]*linkText=\{simpleLinkText\}/, "Compact workspace must receive link-mode props.");
 
 assertContains(checkPs1, /Simple link run check/, "Trellis baseline must include the simple link run check.");
 

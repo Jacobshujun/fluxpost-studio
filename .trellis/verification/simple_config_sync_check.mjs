@@ -20,14 +20,14 @@ const types = read("src/lib/types.ts");
 
 assertContains(
   page,
-  /body:\s*JSON\.stringify\(\{[\s\S]*materialPaths:\s*productionMaterialPaths[\s\S]*settings:\s*settingsForRun/,
-  "Simple-mode start request must include the current advanced production material paths.",
+  /body:\s*JSON\.stringify\(\{[\s\S]*materialPaths:\s*materialLibraryAssetPaths[\s\S]*settings:\s*settingsForRun/,
+  "Compact start request must include the current material-library paths.",
 );
 
 assertContains(
   page,
-  /<ImageSizeInput[\s\S]*value=\{settings\.imageSize\}[\s\S]*onChange=\{\(value\) => onSettingsChange\(\{\s*imageSize:\s*value\s*\}\)\}[\s\S]*ariaLabel="[^"]+"[\s\S]*listId="compact-image-size-presets"/,
-  "Simple and compact mode should expose a manual GPT image-size input and write into workspace settings.",
+  /<ImageSizeInput[\s\S]*value=\{settings\.imageSize\}[\s\S]*onChange=\{\(value\) => props\.onSettingsChange\(\{\s*imageSize:\s*value\s*\}\)\}[\s\S]*ariaLabel="[^"]+"[\s\S]*listId="compact-image-size-presets"/,
+  "Compact mode should expose a manual GPT image-size input and write into workspace settings.",
 );
 
 assertContains(
@@ -101,7 +101,7 @@ assertContains(
 );
 assertContains(
   page,
-  /function updateSimpleRunMediaSettingsDraft\(patch: Partial<SimpleRunMediaSettings>\)[\s\S]*setWorkspaceSettings\(\(current\) => \(\{[\s\S]*simpleRunMediaSettings:\s*\{[\s\S]*\.\.\.defaultSimpleRunMediaSettings[\s\S]*\.\.\.current\.simpleRunMediaSettings[\s\S]*\.\.\.patch/,
+  /function updateSimpleRunMediaSettingsDraft\(patch: Partial<SimpleRunMediaSettings>\)[\s\S]*const simpleRunMediaSettings = \{ \.\.\.defaultSimpleRunMediaSettings, \.\.\.workspaceSettings\.simpleRunMediaSettings, \.\.\.patch \}[\s\S]*setWorkspaceSettings\(\(current\) => \(\{ \.\.\.current, simpleRunMediaSettings \}\)\)/,
   "Main simple workspace media toggles should update the shared workspace settings draft.",
 );
 assertContains(

@@ -68,7 +68,7 @@ assertContains(files.accountsRoute, /isWorkspaceAdmin\(actor\)/, "Account manage
 assertContains(files.sessionRoute, /authenticateWorkspaceAccount/, "Session route must authenticate accounts.");
 assertContains(files.sessionRoute, /httpOnly:\s*true/, "Session cookie must be HttpOnly.");
 
-for (const typeName of ["ContentProject", "NormalizedSourceItem", "GeneratedPost", "BatchProductionJob", "MaterialFolder", "MaterialLibraryAsset", "ExecutionLogEntry", "CrawlJob", "SimpleRun"]) {
+for (const typeName of ["ContentProject", "NormalizedSourceItem", "GeneratedPost", "MaterialFolder", "MaterialLibraryAsset", "ExecutionLogEntry", "CrawlJob", "SimpleRun"]) {
   assertContains(files.types, new RegExp(`export type ${typeName} = \\{[\\s\\S]*ownerUserId\\?:\\s*string`), `${typeName} must carry ownerUserId.`);
 }
 
@@ -105,7 +105,6 @@ for (const route of [
   "src/app/api/content/items/route.ts",
   "src/app/api/crawl/jobs/route.ts",
   "src/app/api/materials/library/route.ts",
-  "src/app/api/production/batches/route.ts",
   "src/app/api/production/posts/route.ts",
   "src/app/api/activity/route.ts",
   "src/app/api/simple/runs/route.ts",
@@ -114,8 +113,8 @@ for (const route of [
   assertContains(read(route), /const account = await requireWorkspaceAccount\(request\)/, `${route} must require account before reading workspace content.`);
 }
 
-assertContains(files.page, /AccountAccessPanelV2/, "Frontend must render the account access panel.");
-assertContains(files.page, /AccountMenuV2/, "Frontend must render the admin-capable account menu.");
+assertContains(files.page, /AccountAccessPanel/, "Frontend must render the account access panel.");
+assertContains(files.page, /AccountMenu/, "Frontend must render the admin-capable account menu.");
 assertContains(
   files.globals,
   /\.studio-topbar\s*>\s*\.design-header\s*\{[\s\S]*overflow:\s*visible;[\s\S]*z-index:\s*(?:[4-9]|\d{2,})\s*;/,
@@ -126,7 +125,7 @@ assertContains(files.page, /保存账号/, "Frontend admin menu must expose acco
 assertNotContains(
   files.globals,
   /@media \(min-width:\s*1180px\)\s*\{\s*\.studio-frame\s*\{[\s\S]*?overflow:\s*hidden;/,
-  "Desktop studio-frame viewport lock must be scoped to advanced mode so compact/simple pages can scroll naturally.",
+  "Desktop studio-frame viewport lock must not prevent the compact page from scrolling naturally.",
 );
 assertContains(files.httpSmoke, /expectStatus\("\/api\/content-pool",\s*undefined,\s*401\)/, "HTTP smoke must verify private content GETs reject unauthenticated access.");
 

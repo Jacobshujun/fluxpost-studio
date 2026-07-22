@@ -178,7 +178,6 @@ assertIncludes(simpleRuns, "useComfyUiKlein: normalizedInput.useComfyUiKlein ===
 assertNotIncludes(simpleRuns, "useComfyUiKlein: isComfyUiKleinConfigured()", "Simple viral runs must not auto-enable Klein for viral image imitation.");
 assertIncludes(simpleRuns, "爆款风格图生成待复核", "Simple viral runs must save strict-reference image failures as review notes.");
 assertIncludes(simpleRuns, "postNeedsManualReview", "Simple viral runs must skip automatic Feishu publishing for strict-reference image review cases.");
-assertIncludes(read("src/app/page.tsx"), "runForSummary.viralResult?.pairingNotice", "Simple run UI must show viral pairing coverage notice.");
 assertIncludes(check, "Viral replication regression check", "Trellis baseline must include this regression check.");
 
 const viralModule = loadViralModule();

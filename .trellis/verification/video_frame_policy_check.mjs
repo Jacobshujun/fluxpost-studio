@@ -164,7 +164,7 @@ const contentPool = read("src/lib/content-pool.ts");
 const mediaBackfill = read("src/lib/media-backfill.ts");
 const creationControls = read("src/lib/creation-controls.ts");
 const sourceTagging = read("src/lib/source-tagging.ts");
-const page = read("src/app/page.tsx");
+const contentPage = read("src/app/content/page.tsx");
 const baseline = read(".trellis/verification/check.ps1");
 
 assertContains(mediaCache, /selectBestVideoHighlightFrames/, "Media cache must select best video highlight frames before storing.");
@@ -201,7 +201,7 @@ assertContains(creationControls, /maxVideoHighlightFrames/, "Default production 
 assertNotContains(creationControls, /frameTasks\.slice\(0,\s*12\)/, "Default production image tasks must not keep the old 12 video-frame cap.");
 
 assertContains(sourceTagging, /selectBestVideoHighlightFrames/, "Source visual tagging must use the global video-frame selector for stale records.");
-assertContains(page, /selectBestVideoHighlightFrames/, "Frontend preview and visual-tag editing must use the global video-frame selector for stale records.");
+assertContains(contentPage, /selectBestVideoHighlightFrames/, "Frontend preview and visual-tag editing must use the global video-frame selector for stale records.");
 
 assertContains(baseline, /video_frame_policy_check\.mjs/, "Trellis baseline must include the video frame policy check.");
 

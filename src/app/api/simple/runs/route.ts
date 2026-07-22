@@ -83,7 +83,7 @@ export async function POST(request: Request) {
     const message = error instanceof Error ? error.message : "Simple run failed";
     await recordExecutionLog({
       scope: "simple/run",
-      action: "简单版全自动请求失败",
+      action: "精简版全自动请求失败",
       status: "error",
       message: compactError(error),
       durationMs: Date.now() - startedAt,
@@ -116,7 +116,7 @@ export async function DELETE(request: Request) {
     const message = error instanceof Error ? error.message : "Simple run termination failed";
     await recordExecutionLog({
       scope: "simple/run",
-      action: "简单版任务强制终止失败",
+      action: "精简版任务强制终止失败",
       status: "error",
       message: compactError(error),
       durationMs: Date.now() - startedAt,

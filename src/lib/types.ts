@@ -10,10 +10,6 @@ export type CrawlStatus = "queued" | "running" | "completed" | "failed" | "needs
 
 export type ReviewStatus = "draft" | "editing" | "approved" | "published";
 
-export type BatchProductionStatus = "queued" | "running" | "completed" | "partial" | "failed";
-
-export type ProductionTaskStatus = "queued" | "running" | "completed" | "failed" | "skipped";
-
 export type SourceUsageStatus = "new" | "analyzed" | "rewritten" | "approved" | "published";
 
 export type ExecutionLogStatus = "running" | "success" | "error" | "info";
@@ -522,43 +518,6 @@ export type GeneratedPost = {
   status: ReviewStatus;
   aiNotes: string[];
   updatedAt: string;
-};
-
-export type ProductionTask = {
-  id: string;
-  sourceItemId: string;
-  sourceTitle?: string;
-  platform: Platform;
-  status: ProductionTaskStatus;
-  contentDirection: ContentDirection;
-  decision: ProductionDecision;
-  reason: string;
-  postId?: string;
-  post?: GeneratedPost;
-  error?: string;
-  startedAt?: string;
-  completedAt?: string;
-  updatedAt: string;
-};
-
-export type BatchProductionJob = {
-  id: string;
-  ownerUserId?: string;
-  ownerDisplayName?: string;
-  title: string;
-  status: BatchProductionStatus;
-  instruction: string;
-  materialPaths: string[];
-  includeSourceVideo?: boolean;
-  sourceItemIds: string[];
-  createdAt: string;
-  updatedAt: string;
-  completedAt?: string;
-  totalTasks: number;
-  completedTasks: number;
-  failedTasks: number;
-  skippedTasks: number;
-  tasks: ProductionTask[];
 };
 
 export type SimpleRunInput = {

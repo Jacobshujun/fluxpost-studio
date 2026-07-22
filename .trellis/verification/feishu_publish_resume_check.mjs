@@ -28,7 +28,7 @@ const recordVerification = read("src/lib/feishu-record-verification.ts");
 const route = read("src/app/api/publish/feishu/route.ts");
 const queue = read("src/lib/feishu-publish-queue.ts");
 const simpleRuns = read("src/lib/simple-runs.ts");
-const page = read("src/app/page.tsx");
+const reviewPage = read("src/app/review/page.tsx");
 
 assertContains(types, /export type FeishuPostPublishState = \{[\s\S]*recordId\?:\s*string[\s\S]*attachmentStatus\?:\s*FeishuAttachmentStatus/, "Generated posts must have a Feishu publish state shape.");
 assertContains(types, /feishu\?:\s*FeishuPostPublishState/, "GeneratedPost must persist Feishu publish state.");
@@ -62,8 +62,7 @@ assertContains(simpleRuns, /enqueueFeishuPublishJob\(approvedPosts/, "Simple-run
 assertContains(queue, /feishuStateByPostId/, "Feishu queue worker must persist returned Feishu post states.");
 assertContains(queue, /publishStatus === "attachment_failed"/, "Feishu queue worker must reflect attachment_failed in simple-run publish state.");
 assertContains(queue, /publishStatus === "record_failed"/, "Feishu queue worker must reflect record_failed in simple-run publish state.");
-assertContains(page, /postStates\?:\s*Array<\{ postId: string; feishu: FeishuPostPublishState \}>/, "Frontend publish response type must include postStates.");
-assertContains(page, /value === "record_failed" \|\| value === "attachment_failed" \|\| value === "needs_config"/, "Simple publish status badge must treat record and attachment failures as warnings.");
+assertContains(reviewPage, /postStates\?:\s*Array<\{ postId: string; feishu: FeishuPostPublishState \}>/, "Review publish response type must include postStates.");
 
 assertContains(recordVerification, /export function verifyFeishuRecordFields/, "Record verification must expose a pure read-back validator.");
 verifyRecordReadBack(loadTypescriptCommonJs("src/lib/feishu-record-verification.ts"));

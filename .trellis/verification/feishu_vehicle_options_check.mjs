@@ -51,7 +51,6 @@ const feishu = read("src/lib/feishu-cli.ts");
 const reviewRoute = read("src/app/api/review/route.ts");
 const publishRoute = read("src/app/api/publish/feishu/route.ts");
 const reviewPage = read("src/app/review/page.tsx");
-const mainPage = read("src/app/page.tsx");
 const check = read(".trellis/verification/check.ps1");
 
 if (!existsSync(path.join(projectRoot, helperPath))) throw new Error("Feishu field-options helper is missing.");
@@ -82,8 +81,6 @@ assertContains(reviewRoute, /manualPatch\?: Partial<Pick<GeneratedPost,[\s\S]*"f
 assertContains(reviewRoute, /if \("feishuVehicle" in body\.manualPatch\) allowedPatch\.feishuVehicle = body\.manualPatch\.feishuVehicle/, "Review API must preserve feishuVehicle in manual patches.");
 assertContains(reviewPage, /\/api\/publish\/feishu\/vehicle-options/, "Standalone review page must load Feishu vehicle options.");
 assertContains(reviewPage, /feishuVehicle/, "Standalone review page must render or persist feishuVehicle.");
-assertContains(mainPage, /\/api\/publish\/feishu\/vehicle-options/, "Main workspace must load Feishu vehicle options.");
-assertContains(mainPage, /feishuVehicle/, "Main workspace review panel must render or persist feishuVehicle.");
 assertContains(check, /feishu_vehicle_options_check\.mjs/, "Trellis baseline must include the Feishu vehicle options check.");
 
 const helperModule = loadTsModule(helperPath, {

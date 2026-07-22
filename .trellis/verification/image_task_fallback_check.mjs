@@ -21,7 +21,6 @@ const imageSizeOptions = read("src/lib/image-size-options.ts");
 const page = read("src/app/page.tsx");
 const workspaceSettings = read("src/lib/workspace-settings.ts");
 const config = read("src/lib/config.ts");
-const generateRoute = read("src/app/api/generate/route.ts");
 const imagesRoute = read("src/app/api/images/route.ts");
 
 assertContains(
@@ -97,19 +96,13 @@ assertContains(
 );
 
 assertContains(
-  generateRoute,
-  /const imageSize = normalizeImageGenerationSize\(body\.imageSize\)[\s\S]*size:\s*imageSize/,
-  "The generate API should normalize the requested GPT image size before dispatch.",
-);
-
-assertContains(
   imagesRoute,
   /const imageSize = normalizeImageGenerationSize\(body\.size\)[\s\S]*size:\s*imageSize/,
   "The manual images API should normalize the requested GPT image size before dispatch.",
 );
 
 assertNotContains(
-  `${generateRoute}\n${imagesRoute}`,
+  imagesRoute,
   /1200x1600/,
   "Image API routes should not keep the old 1200x1600 fallback size.",
 );

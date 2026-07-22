@@ -25,7 +25,7 @@ export async function PATCH(request: Request) {
       scope: "workspace/settings",
       action: "保存默认生产策略",
       status: "success",
-      message: "高级版默认文案和图片提示词已更新",
+      message: "精简版默认文案和图片提示词已更新",
       durationMs: Date.now() - startedAt,
       details: {
         textLength: settings.textInstruction.length,

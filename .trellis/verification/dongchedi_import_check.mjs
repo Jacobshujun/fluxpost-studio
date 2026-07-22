@@ -70,7 +70,7 @@ assertContains(simpleRoute, /SourceLinkPlatform \| "auto"/, "Simple run route mu
 assertContains(feishuCli, /dongchedi:\s*"\\u61c2\\u8f66\\u5e1d"/, "Generated-post Feishu publish should label Dongchedi records.");
 assertContains(reviewPage, /dongchedi:\s*"\\u61c2\\u8f66\\u5e1d"/, "Review page should label Dongchedi posts.");
 assertContains(mockData, /dongchedi:\s*"\\u61c2\\u8f66\\u5e1d"/, "Mock data should label Dongchedi posts.");
-assertContains(page, /dongchedi", label: "\\u61c2\\u8f66\\u5e1d"/, "Frontend link import should expose Dongchedi.");
+assertContains(page, /value: "dongchedi", label: "懂车帝"/, "Compact link import should expose Dongchedi.");
 assertContains(page, /value: "dongchedi"/, "Content-pool platform filters should expose Dongchedi.");
 assertContains(launcher, /isDongchediAlias/, "Lark task launcher should support Dongchedi link aliases.");
 assertContains(checkPs1, /Dongchedi import check/, "Trellis baseline must include the Dongchedi import check.");
