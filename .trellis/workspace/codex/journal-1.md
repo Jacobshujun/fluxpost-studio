@@ -174,3 +174,37 @@ Implemented fixed image provider profiles, verified offline and locally, deploye
 ### Next Steps
 
 - None - task complete
+
+
+## Session 6: Repair review HEIC and TOS delivery
+
+**Date**: 2026-07-23
+**Task**: Repair review HEIC and TOS delivery
+**Branch**: `main`
+
+### Summary
+
+Deployed HEIC normalization and direct TOS previews to production 38, backed up generated_posts, repaired 33 of 37 exact historical image references, and verified the known nine-image post as direct HTTP 200 JPEG media with non-zero dimensions.
+
+### Main Changes
+
+(Add details)
+
+### Git Commits
+
+| Hash | Message |
+|------|---------|
+| `2fef2e5` | (see git log) |
+| `7e5f972` | (see git log) |
+
+### Testing
+
+- [OK] (Add test results)
+
+### Status
+
+[OK] **Completed**
+
+### Next Steps
+
+- None - task complete
