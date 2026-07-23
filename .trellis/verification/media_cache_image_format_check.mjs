@@ -72,7 +72,7 @@ assert(imageFormat.normalizeModelSupportedImageMime("image/jpg; charset=binary")
 
 const mediaCache = read("src/lib/media-cache.ts");
 assertContains(mediaCache, /ensureBrowserReadableCachedImage/, "Media cache should validate downloaded image bytes before using the local URL.");
-assertContains(mediaCache, /format\?\.mimeType === "image\/heic"[\s\S]*transcodeImageToJpeg/, "Media cache should transcode HEIC images to JPEG.");
+assertContains(mediaCache, /format\?\.mimeType === "image\/heic"[\s\S]*normalizeHeicFileToJpeg/, "Media cache should normalize HEIC images to JPEG.");
 assertContains(mediaCache, /await rm\(filePath,\s*\{ force: true \}\)/, "Unsupported cached images should be removed instead of kept as broken previews.");
 
 const localMediaRoute = read("src/app/api/media/local/[...path]/route.ts");
