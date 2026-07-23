@@ -5,8 +5,9 @@
 3. Run focused deployment checks, lint, type-check, build, and the full Trellis baseline.
 4. Read production and 104 state without exposing secrets; require matching production release/container/GitHub SHA evidence.
 5. Record the 104 unrelated-service baseline, delete only verified FluxPost resources, and rebuild private staging at the production SHA.
-6. Verify staging health/isolation and compare `x-ui`, `xray`, and `frps` identities/listeners against the baseline.
-7. Update Trellis status/verification evidence with confirmed results and unresolved manual integration steps.
+6. Verify private staging health/isolation and compare `x-ui`, `xray`, and `frps` identities/listeners against the baseline.
+7. After explicit DNS confirmation, enable Caddy at the same manifest SHA and recheck HTTPS plus protected services.
+8. Update Trellis status/verification evidence with confirmed results and unresolved manual integration steps.
 
 ## Rollback Points
 

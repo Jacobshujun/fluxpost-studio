@@ -17,6 +17,7 @@
 - Inventory 104 and identify FluxPost resources by exact Compose labels/names. Abort on overlap with `x-ui`, `xray`, or `frps`.
 - Remove only confirmed FluxPost containers, network, named volumes, and the verified app root. Never run global prune or restart Docker.
 - Recreate FluxPost in private mode with new secrets and volumes. Production runtime/config files are never read or copied.
+- Enable Caddy only after the private baseline and explicit DNS confirmation; keep app port 3101 on loopback and pin domain activation to the active manifest SHA.
 
 ## Compatibility
 

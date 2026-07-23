@@ -11,7 +11,7 @@ Rebuild the FluxPost deployment on `104.243.21.233` as an isolated staging envir
 - Tag application images per commit, persist a release manifest, and support accurate automatic/manual rollback.
 - Delete only the old FluxPost Compose project, its explicitly verified volumes/network, and `/opt/fluxpost-studio` on 104. Do not use global prune, restart Docker, modify firewall/DNS, or stop unrelated processes.
 - Rebuild 104 with new PostgreSQL, config, account, media, and node-home state. Do not copy production secrets, runtime data, media, or volumes.
-- Keep staging private on `127.0.0.1:3101` with Caddy disabled and SSH-tunnel access.
+- Establish the private `127.0.0.1:3101` baseline first; after explicit user confirmation, serve `bbs.vollov1.xyz` through Caddy while keeping the app port loopback-only.
 - Keep Feishu, TOS, notifications, and paid providers isolated from production targets.
 - Promote future releases by the complete commit SHA approved on staging.
 
@@ -21,12 +21,15 @@ Rebuild the FluxPost deployment on `104.243.21.233` as an isolated staging envir
 - [x] Each release records its image tag and commit, and failed deployment restores the prior release/image.
 - [x] Deterministic checks cover fixed refs, private staging, rollback, shell syntax, and destructive-command guards.
 - [x] Local lint, type-check, build, and full Trellis baseline pass.
-- [ ] Production release, running container, and GitHub resolve to the same SHA before 104 is changed.
-- [ ] 104 contains a fresh private FluxPost deployment at the production SHA with new isolated volumes.
-- [ ] `x-ui`, `xray`, and `frps` process/container identity, listeners, and health remain unchanged across the rebuild.
-- [ ] Staging does not contain or target production Feishu, TOS, database, account, or media state.
+- [x] Production release, deployed container, and GitHub resolve to the same SHA before 104 is changed.
+- [x] 104 contains a fresh private FluxPost deployment at the production SHA with new isolated volumes.
+- [x] `x-ui`, `xray`, and `frps` process/container identity, listeners, and health remain unchanged across the rebuild.
+- [x] Staging does not contain or target production Feishu, TOS, database, account, or media state.
+- [x] `https://bbs.vollov1.xyz` serves the fixed staging SHA with valid TLS while protected services remain unchanged.
 
 ## Notes
 
 - The user explicitly authorized permanent deletion of the existing FluxPost data/config/media/account state on 104.
 - Production remains `82.158.226.10`; 104 is staging only.
+- The user later confirmed DNS and requested public domain access, superseding the initial Caddy-disabled constraint.
+- Superseded on 2026-07-23: the user permanently retired the 104 FluxPost environment and made local Windows plus production 38 the direct fix path. This task is historical evidence only.
