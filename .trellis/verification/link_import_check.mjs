@@ -48,12 +48,43 @@ const linkRouteSource = read("src/app/api/crawl/links/route.ts");
 const contentPageSource = read("src/app/content/page.tsx");
 const checkPs1 = read(".trellis/verification/check.ps1");
 const requestedTikHubPaths = [];
+const requestedTikHubUrls = [];
+let failWeiboAppDetail = false;
 
 function mockTikHubRequest(url, _options, callback) {
   requestedTikHubPaths.push(url.pathname);
-  const body = url.pathname.endsWith("get_image_note_detail")
-    ? JSON.stringify({ code: 200, data: { ok: false, status: 461, message: "fixture type mismatch" } })
-    : JSON.stringify({
+  requestedTikHubUrls.push(url.toString());
+  let statusCode = 200;
+  let body;
+  if (url.pathname.endsWith("fetch_status_detail")) {
+    statusCode = failWeiboAppDetail ? 400 : 200;
+    body = failWeiboAppDetail
+      ? JSON.stringify({ code: 400, message: "fixture app detail failure" })
+      : JSON.stringify({
+          code: 200,
+          data: {
+            id: url.searchParams.get("status_id"),
+            mid: url.searchParams.get("status_id"),
+            text_raw: "Weibo App detail fixture",
+            created_at: "Wed Jul 23 09:50:00 +0800 2026",
+            attitudes_count: 1,
+          },
+        });
+  } else if (url.pathname.endsWith("weibo/web_v2/fetch_post_detail")) {
+    body = JSON.stringify({
+      code: 200,
+      data: {
+        id: url.searchParams.get("id"),
+        mid: url.searchParams.get("id"),
+        text_raw: "Weibo Web V2 detail fixture",
+        created_at: "Wed Jul 23 09:50:00 +0800 2026",
+        attitudes_count: 1,
+      },
+    });
+  } else if (url.pathname.endsWith("get_image_note_detail")) {
+    body = JSON.stringify({ code: 200, data: { ok: false, status: 461, message: "fixture type mismatch" } });
+  } else {
+    body = JSON.stringify({
         code: 200,
         data: {
           ok: true,
@@ -66,11 +97,12 @@ function mockTikHubRequest(url, _options, callback) {
           },
         },
       });
+  }
   return {
     on: () => undefined,
     write: () => undefined,
     end: () => callback({
-      statusCode: 200,
+      statusCode,
       on: (event, handler) => {
         if (event === "data") handler(Buffer.from(body));
         if (event === "end") handler();
@@ -82,7 +114,8 @@ function mockTikHubRequest(url, _options, callback) {
 assertContains(tikhubSource, /fetchTikHubItemBySourceLink/, "TikHub link import should be owned by src/lib/tikhub.ts.");
 assertContains(tikhubSource, /fetch_one_video_by_share_url/, "Douyin link import must use the share-url detail endpoint.");
 assertContains(tikhubSource, /fetch_one_video_v3/, "Douyin direct aweme-id links should use the single-video detail endpoint.");
-assertContains(tikhubSource, /fetch_post_detail/, "Weibo link import must use the post detail endpoint.");
+assertContains(tikhubSource, /weibo\/app\/fetch_status_detail/, "Weibo link import must use the App post detail endpoint first.");
+assertContains(tikhubSource, /weibo\/web_v2\/fetch_post_detail/, "Weibo link import must retain Web V2 as an explicit fallback.");
 assertContains(tikhubSource, /fetch_video_by_share_url/, "WeChat Channels link import must use the share-url detail endpoint.");
 assertContains(tikhubSource, /app_v2\/get_image_note_detail/, "Xiaohongshu image-note links must use App V2 detail.");
 assertContains(tikhubSource, /app_v2\/get_video_note_detail/, "Xiaohongshu video-note links must use App V2 detail.");
@@ -161,9 +194,11 @@ const {
   buildDouyinShareVideoPath,
   buildDouyinSingleVideoPath,
   buildDouyinSourceLinkPath,
+  buildWeiboAppPostDetailPath,
   buildWeiboPostDetailPath,
   buildWechatChannelsShareVideoPath,
   getTikHubBusinessError,
+  normalizeWeiboStatusId,
   normalizeTikHubResponse,
 } = tikhub;
 
@@ -334,9 +369,55 @@ if (dyTitledItems[0]?.title !== "Real Douyin title" || dyTitledItems[0]?.content
   throw new Error("Douyin source-link normalization should keep explicit title fields separate from desc body text.");
 }
 
-const weiboUrl = new URL(buildWeiboPostDetailPath("5300929016633658"), "https://example.invalid");
-if (weiboUrl.pathname !== "/api/v1/weibo/web_v2/fetch_post_detail" || weiboUrl.searchParams.get("id") !== "5300929016633658" || weiboUrl.searchParams.get("is_get_long_text") !== "true") {
-  throw new Error("Weibo detail path should carry id and long-text flag.");
+if (normalizeWeiboStatusId("R9IbHiG1a") !== "5323148134451424") {
+  throw new Error("Weibo base62 status ids should convert to the documented numeric id format.");
+}
+if (normalizeWeiboStatusId("5300929016633658") !== "5300929016633658") {
+  throw new Error("Numeric Weibo status ids should remain unchanged.");
+}
+
+const weiboAppUrl = new URL(buildWeiboAppPostDetailPath("5300929016633658"), "https://example.invalid");
+if (weiboAppUrl.pathname !== "/api/v1/weibo/app/fetch_status_detail" || weiboAppUrl.searchParams.get("status_id") !== "5300929016633658") {
+  throw new Error("Weibo App detail path should carry the numeric status_id.");
+}
+
+const weiboWebV2Url = new URL(buildWeiboPostDetailPath("5300929016633658"), "https://example.invalid");
+if (weiboWebV2Url.pathname !== "/api/v1/weibo/web_v2/fetch_post_detail" || weiboWebV2Url.searchParams.get("id") !== "5300929016633658" || weiboWebV2Url.searchParams.get("is_get_long_text") !== "true") {
+  throw new Error("Weibo Web V2 fallback path should carry id and long-text flag.");
+}
+
+requestedTikHubPaths.length = 0;
+requestedTikHubUrls.length = 0;
+failWeiboAppDetail = false;
+const weiboAppItems = await fetchTikHubItemBySourceLink({
+  url: "https://weibo.com/1192966660/R9IbHiG1a",
+  platform: "weibo",
+});
+if (requestedTikHubPaths.join(",") !== "/api/v1/weibo/app/fetch_status_detail") {
+  throw new Error(`Weibo link import should use App detail first, got ${requestedTikHubPaths.join(",")}`);
+}
+if (new URL(requestedTikHubUrls[0]).searchParams.get("status_id") !== "5323148134451424") {
+  throw new Error("Weibo App detail should receive the numeric id converted from the URL short id.");
+}
+if (weiboAppItems[0]?.sourceId !== "5323148134451424") {
+  throw new Error("Weibo App detail response should normalize the numeric source id.");
+}
+
+requestedTikHubPaths.length = 0;
+requestedTikHubUrls.length = 0;
+failWeiboAppDetail = true;
+const weiboFallbackItems = await fetchTikHubItemBySourceLink({
+  url: "https://weibo.com/1192966660/R9IbHiG1a",
+  platform: "weibo",
+});
+if (requestedTikHubPaths.join(",") !== "/api/v1/weibo/app/fetch_status_detail,/api/v1/weibo/web_v2/fetch_post_detail") {
+  throw new Error(`Weibo detail fallback should try App then Web V2, got ${requestedTikHubPaths.join(",")}`);
+}
+if (new URL(requestedTikHubUrls[1]).searchParams.get("id") !== "5323148134451424") {
+  throw new Error("Weibo Web V2 fallback should receive the numeric id converted from the URL short id.");
+}
+if (weiboFallbackItems[0]?.sourceId !== "5323148134451424") {
+  throw new Error("Weibo Web V2 fallback response should normalize the numeric source id.");
 }
 
 const channelsUrl = new URL(buildWechatChannelsShareVideoPath("https://channels.weixin.qq.com/share/video?id=test"), "https://example.invalid");

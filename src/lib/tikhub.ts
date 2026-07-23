@@ -27,10 +27,12 @@ const xiaohongshuImageNoteDetailEndpoint = "/api/v1/xiaohongshu/app_v2/get_image
 const xiaohongshuVideoNoteDetailEndpoint = "/api/v1/xiaohongshu/app_v2/get_video_note_detail";
 const douyinShareVideoEndpoint = "/api/v1/douyin/web/fetch_one_video_by_share_url";
 const douyinSingleVideoEndpoint = "/api/v1/douyin/web/fetch_one_video_v3";
+const weiboAppPostDetailEndpoint = "/api/v1/weibo/app/fetch_status_detail";
 const weiboPostDetailEndpoint = "/api/v1/weibo/web_v2/fetch_post_detail";
 const wechatChannelsShareVideoEndpoint = "/api/v1/wechat_channels/fetch_video_by_share_url";
 const maxContentImages = 18;
 const maxDouyinContentImages = 36;
+const weiboBase62Alphabet = "0123456789abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ";
 
 export type TikHubSourceLinkInput = {
   url: string;
@@ -157,6 +159,11 @@ export function buildWeiboPostDetailPath(sourceId: string) {
   return `${weiboPostDetailEndpoint}?${params.toString()}`;
 }
 
+export function buildWeiboAppPostDetailPath(statusId: string) {
+  const params = new URLSearchParams({ status_id: statusId });
+  return `${weiboAppPostDetailEndpoint}?${params.toString()}`;
+}
+
 export function buildWechatChannelsShareVideoPath(shareUrl: string) {
   const params = new URLSearchParams({ share_url: shareUrl });
   return `${wechatChannelsShareVideoEndpoint}?${params.toString()}`;
@@ -233,8 +240,32 @@ async function fetchDouyinBySourceLink(sourceUrl: string, cookie?: string) {
 async function fetchWeiboBySourceLink(sourceUrl: string) {
   const sourceId = extractWeiboStatusId(sourceUrl);
   if (!sourceId) throw new Error("Unsupported Weibo link shape");
-  const raw = await tikhubRequest(buildWeiboPostDetailPath(sourceId));
-  return normalizeTikHubResponse(raw, "weibo");
+  let appFailure = "empty response";
+
+  try {
+    const raw = await tikhubRequest(buildWeiboAppPostDetailPath(sourceId));
+    const items = normalizeTikHubResponse(raw, "weibo");
+    if (items.length) return items;
+  } catch (error) {
+    appFailure = compactError(error);
+  }
+
+  await recordExecutionLog({
+    scope: "tikhub",
+    action: "Weibo App post detail fallback",
+    status: "info",
+    message: "Weibo App post detail failed; retrying with the Web V2 endpoint.",
+    details: { sourceId, appFailure },
+  });
+
+  try {
+    const raw = await tikhubRequest(buildWeiboPostDetailPath(sourceId));
+    const items = normalizeTikHubResponse(raw, "weibo");
+    if (items.length) return items;
+    throw new Error("empty response");
+  } catch (error) {
+    throw new Error(`Weibo post detail failed | app: ${appFailure} | web_v2: ${compactError(error)}`);
+  }
 }
 
 async function fetchWechatChannelsBySourceLink(sourceUrl: string) {
@@ -1814,18 +1845,40 @@ function extractWeiboStatusId(value: string) {
   try {
     const parsed = new URL(url);
     const paramCandidate = parsed.searchParams.get("id") || parsed.searchParams.get("mid") || parsed.searchParams.get("mblogid");
-    if (paramCandidate) return paramCandidate;
+    if (paramCandidate) return normalizeWeiboStatusId(paramCandidate);
     const pathParts = parsed.pathname.split("/").map((part) => part.trim()).filter(Boolean);
     const statusIndex = pathParts.findIndex((part) => /^(status|detail)$/i.test(part));
     const afterStatus = statusIndex >= 0 ? pathParts[statusIndex + 1] : "";
-    if (afterStatus) return afterStatus;
-    return pathParts
+    if (afterStatus) return normalizeWeiboStatusId(afterStatus);
+    const pathCandidate = pathParts
       .slice()
       .reverse()
       .find((part) => /^[0-9A-Za-z]{6,32}$/.test(part) && !/^(u|p|profile|status|detail)$/i.test(part)) || "";
+    return normalizeWeiboStatusId(pathCandidate);
   } catch {
     return "";
   }
+}
+
+export function normalizeWeiboStatusId(value: string) {
+  const candidate = value.trim();
+  if (/^\d{6,32}$/.test(candidate)) return candidate;
+  if (!/^[0-9A-Za-z]{6,16}$/.test(candidate)) return "";
+
+  let decimalId = "";
+  for (let end = candidate.length; end > 0; end -= 4) {
+    const start = Math.max(0, end - 4);
+    const chunk = candidate.slice(start, end);
+    let chunkValue = 0;
+    for (const character of chunk) {
+      const digit = weiboBase62Alphabet.indexOf(character);
+      if (digit < 0) return "";
+      chunkValue = chunkValue * 62 + digit;
+    }
+    const decimalChunk = chunkValue.toString();
+    decimalId = `${start > 0 ? decimalChunk.padStart(7, "0") : decimalChunk}${decimalId}`;
+  }
+  return decimalId.replace(/^0+(?=\d)/, "");
 }
 
 function normalizeUrl(value?: string) {
