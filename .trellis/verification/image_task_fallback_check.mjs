@@ -361,8 +361,8 @@ assertContains(
 
 assertContains(
   imageGeneration,
-  /if \(isImageTaskSourceFallbackError\(error\)\) \{[\s\S]*const fallbackUrl = await resolveDirectSourceImageUrl\(task\.url\)[\s\S]*Image task failed; using source image[\s\S]*fallbackUrl: task\.url[\s\S]*outputUrl: fallbackUrl[\s\S]*imageUrls: \[fallbackUrl\]/,
-  "Recoverable selected image task failures should return the direct source image URL after WebP-to-JPG normalization.",
+  /if \(isImageTaskSourceFallbackError\(error\)\) \{[\s\S]*const fallback = await resolveSourceFallback\(task, message\)[\s\S]*Image task failed; using source image[\s\S]*fallbackUrl: task\.url[\s\S]*outputUrl: fallbackUrl[\s\S]*imageUrls: \[fallbackUrl\]/,
+  "Recoverable selected image task failures should use the verified durable source-image fallback.",
 );
 
 assertContains(
@@ -374,13 +374,13 @@ assertContains(
 assertContains(
   imageGeneration,
   /if \(task\.mode === "keep"\) \{[\s\S]*const sourceImageUrl = await resolveDirectSourceImageUrl\(task\.url\)[\s\S]*imageUrls: \[sourceImageUrl\]/,
-  "Keep-mode image tasks should route direct source images through WebP-to-JPG normalization.",
+  "Keep-mode image tasks should route direct source images through browser-readable normalization and persistence.",
 );
 
 assertContains(
   imageGeneration,
-  /function isWebpImageReference\(value: string\)[\s\S]*\.webp[\s\S]*format[\s\S]*webp/,
-  "Direct source-image normalization should detect WebP URLs before returning keep/fallback images.",
+  /async function materializeRemoteSourceImage\(url: string\)[\s\S]*sniffImageFormat\(buffer\)[\s\S]*convertHeicBufferToJpeg[\s\S]*persistRemoteSourceImage/,
+  "Direct source-image normalization should sniff remote bytes and persist only browser-readable media.",
 );
 
 assertContains(
