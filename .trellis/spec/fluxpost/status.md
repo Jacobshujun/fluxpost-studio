@@ -1,13 +1,14 @@
 # Trellis Status
 
-Last updated: 2026-07-20
+Last updated: 2026-07-23
 
 ## One-Line Status
 
-FluxPost Studio uses Trellis as the active project context system. A Docker deployment is running on the VPS at `104.243.21.233` without disturbing the existing 3x-ui service.
+Production 38 runs HEIC/TOS review fix `2fef2e5`; the exact-match repair updated 33 of 37 candidates, and the known nine-image post now serves nine direct TOS JPEGs with non-zero dimensions.
 
 ## Current Focus
 
+- Task `.trellis/tasks/07-23-repair-review-heic-tos-delivery` deployed `2fef2e5` to production 38. A root-only backup preceded the admin scan/apply; 33 of 37 exact candidates were repaired, while three over-12-MB images and one invalid HEIF remained unchanged with explicit errors. The known nine-image post passes direct-TOS HTTP/JPEG/dimension checks.
 - Image provider profiles are deployed at `8ee3498` on `82.158.226.10`; primary/backup remain on the existing `auto` ToAPIs configuration, and the new paid admin probe remains intentionally unrun.
 - Task `.trellis/tasks/07-20-tos-runtime-media-storage` is deployed at commit `0039408` on `82.158.226.10`. TOS is configured and enabled after a deployment-environment probe passed upload, HEAD, anonymous GET, Range `206`, and cleanup; the feature remains `ready_for_review` until a normally authenticated admin runs the UI check and a real FluxPost media workflow persists TOS URLs.
 - Trellis CLI 0.6.5 is installed; `.trellis/spec/fluxpost` and `.trellis/verification` are the active context and baseline locations.
@@ -31,6 +32,8 @@ FluxPost Studio uses Trellis as the active project context system. A Docker depl
 
 ## Recent Verification
 
+- 2026-07-23: HEIC/TOS fix `2fef2e5` deployed healthy to production 38 after full local verification. Root-only backup, admin scan/apply (37 candidates, 33 repaired, 4 safely unchanged), and known-post 9/9 direct TOS HTTP 200 JPEG/non-zero-dimension checks passed without paid service calls.
+
 - 2026-07-21: ToAPIs commits `d9095ea`/`4a9bd8e` deployed to release `20260721-061557`. Service health passed; paid text/reference probes produced distinct durable TOS images without fallback.
 
 - 2026-07-20: Commits `303e597` and `0039408` were pushed and deployed only to `82.158.226.10`. The first build exposed a Windows-generated optional-dependency lock gap; a Linux-generated lock then passed container `npm ci` and deployment. TOS values were written to the persistent config volume through stdin without output, the app was enabled only after the deployed-config direct probe passed upload/HEAD/anonymous GET/Range `206`/delete, and app/PostgreSQL/Open WebUI, Nginx, public HTTPS, chat/sd/run/aitool, no FluxPost proxy, TLS verification, and sampled historical local media all remained healthy. A normal authenticated admin check and real application media write remain pending.
@@ -50,6 +53,7 @@ FluxPost Studio uses Trellis as the active project context system. A Docker depl
 
 ## Current Risks
 
+- Four historical exact matches remain intentionally unchanged: three source images exceed the 12 MB cache limit and one source returns `HEIF image not found`; address them only through a separately scoped ingestion-policy decision.
 - TOS secrets from the operator-provided `TOS.txt` must never appear in commands, logs, Git, Trellis, or responses. The target container must not inherit `NODE_TLS_REJECT_UNAUTHORIZED=0`; keep TOS disabled if the admin public-read/Range/delete probe fails.
 - `@volcengine/tos-sdk@2.9.1` currently depends on Axios versions with published high-severity advisories and no upstream SDK fix. Keep endpoint configuration admin-only, HTTPS verification enabled, SDK proxy/retry behavior constrained, and revisit the dependency when a fixed release exists.
 - Do not read or expose `.env.local`, `.env*`, database credentials, Feishu/Lark tokens, API keys, local account passwords, or real chat/user identifiers.

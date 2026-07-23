@@ -17,13 +17,13 @@ Make review-desk images browser-readable and fast by converting HEIC source medi
 
 ## Acceptance Criteria
 
-- [ ] A real HEIC fixture saved with a `.jpg` suffix converts to a valid JPEG.
-- [ ] A source with one JPEG and eight HEIC images caches all nine as managed browser-readable media when TOS is enabled.
-- [ ] Keep-mode generation returns durable browser-readable URLs and marks failed unsupported images for review instead of saving broken URLs.
-- [ ] Native Volcengine TOS previews bypass `/api/media/proxy`; custom managed TOS URLs receive a cacheable redirect; source CDN images retain proxy behavior.
-- [ ] The repair scan performs no external writes and apply mode is admin-only, paginated, exact-match, idempotent, and auditable.
-- [ ] The known production post has nine `200 image/jpeg` images with non-zero natural dimensions after repair.
-- [ ] Focused checks and the full Trellis baseline pass before deployment.
+- [x] A real HEIC fixture saved with a `.jpg` suffix converts to a valid JPEG.
+- [x] A source with one JPEG and eight HEIC images caches all nine as managed browser-readable media when TOS is enabled.
+- [x] Keep-mode generation returns durable browser-readable URLs and marks failed unsupported images for review instead of saving broken URLs.
+- [x] Native Volcengine TOS previews bypass `/api/media/proxy`; custom managed TOS URLs receive a cacheable redirect; source CDN images retain proxy behavior.
+- [x] The repair scan performs no external writes and apply mode is admin-only, paginated, exact-match, idempotent, and auditable.
+- [x] The known production post has nine `200 image/jpeg` images with non-zero natural dimensions after repair.
+- [x] Focused checks and the full Trellis baseline pass before deployment.
 
 ## Notes
 
