@@ -23,8 +23,10 @@ $requiredFiles = @(
   ".trellis/verification/init.ps1",
   ".trellis/verification/handoff.ps1",
   ".trellis/verification/check.ps1",
+  ".trellis/verification/check.mjs",
   ".trellis/verification/json_check.mjs",
-  ".trellis/verification/http_smoke.js"
+  ".trellis/verification/http_smoke.js",
+  "scripts/deploy/vps-verify-candidate.sh"
 )
 
 foreach ($file in $requiredFiles) {

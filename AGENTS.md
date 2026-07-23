@@ -43,17 +43,20 @@ At the start of a new session:
 - Work on one clearly defined task at a time.
 - For substantial or multi-step work, use Trellis task artifacts under `.trellis/tasks/` according to `.trellis/workflow.md`.
 - Before edits, state the affected files, behavior impact, and verification method.
+- For code fixes, use a clean worktree for editing and Git operations only. Do not run the application, build, tests, or browser validation on the local Windows workspace.
+- Push the final candidate commit, run `/opt/fluxpost-studio/bin/verify-candidate.sh --ref <ref>` on staging 104, deploy the resolved full SHA to 104, and pass the task-specific staging scenario before production promotion.
+- Production 38 may receive only the unchanged full SHA that passed 104. A rebase, merge commit, amendment, or follow-up patch invalidates prior evidence and must restart the 104 gate.
 - Do not do unrelated refactors, formatting churn, or metadata cleanup.
 - Do not invent checks or commands. Use commands that exist in this project.
 - For code or deployment changes, use `.trellis/spec/fluxpost/rules.md` first, then read targeted sections of `.trellis/spec/fluxpost/pitfalls.md`, `.trellis/spec/fluxpost/architecture_rules.md`, or `.trellis/spec/fluxpost/decisions.md` only when the task touches those boundaries.
-- If frontend or API code changes must be visible on the local production server at `http://127.0.0.1:3001/`, run `npm run local:restart`; `npm run build` alone does not refresh an already-running `next start` process.
+- Do not use the local production server as code-fix evidence. Validate frontend/API changes on staging 104 after candidate verification and deployment.
 - Record only facts that can be confirmed from the repository or from an explicit user instruction. Mark unknowns as `pending confirmation`.
 
 ## Completion Protocol
 
 After development, debugging, deployment work, or important analysis:
 
-1. Run the baseline verification from `.trellis/spec/fluxpost/verification.md`.
+1. Run the full candidate baseline and task-specific acceptance checks on staging 104 as defined in `.trellis/spec/fluxpost/verification.md`.
 2. Update `.trellis/spec/fluxpost/status.md` with the current lightweight state when the task outcome changes.
 3. If feature state changed, update `.trellis/spec/fluxpost/feature_list.json`.
 4. Update `.trellis/spec/fluxpost/handoff.md`, `.trellis/spec/fluxpost/progress.md`, or `.trellis/workspace/` only when the task is unfinished across sessions, reusable troubleshooting/deployment evidence was discovered, or the user explicitly asks.
@@ -63,7 +66,8 @@ After development, debugging, deployment work, or important analysis:
 
 - Do not commit or expose secrets, production config, `.env.local`, `.env*`, API keys, local user data, uploaded materials, generated outputs, cached media, or auth logs.
 - Runtime data and generated media live under `data/`, `public/generated/`, `public/media/`, and local debug artifacts such as `.tmp-*.json` or `test-artifacts/`; treat them as local state, not Trellis context.
-- Deployment must use the confirmed project entry points until a dedicated deployment document is added: `npm run dev`, `npm run dev:lan`, `npm run build`, `npm run start`, `npm run start:lan`, and `npm run local:restart`.
+- Deployment must use the confirmed VPS entry points: `verify-candidate.sh --ref`, `deploy.sh --check --ref`, `deploy.sh --ref`, and `deploy.sh --rollback`. Never edit an active `current` release.
+- Staging 104 must retain isolated accounts, data, media, TOS prefixes, Feishu targets, and provider credentials. Never copy production secrets or runtime volumes to staging.
 - Do not create another memory, TODO, planning, handoff, or agent-context system outside `.trellis/`.
 
 ## Quality Rules

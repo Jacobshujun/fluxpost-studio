@@ -135,12 +135,15 @@ Last updated: 2026-06-25
 - Confirmed local dev entry: `npm run dev`.
 - Confirmed production entry: `npm run build` followed by `npm run start`.
 - Confirmed local LAN production refresh entry: `npm run local:restart`.
+- Code-fix promotion no longer uses local application/build/test/browser evidence. Local clean worktrees are limited to editing, diff review, and Git operations.
 - `next.config.ts` sets Turbopack root to `process.cwd()`.
-- GitHub-driven Ubuntu 24.04 deployment is owned by `scripts/deploy/vps-bootstrap.sh`, `scripts/deploy/vps-deploy.sh`, `scripts/deploy/vps-enable-domain.sh`, `compose.yaml`, and `docs/deployment/ubuntu-docker.md`.
+- GitHub-driven Ubuntu deployment is owned by `scripts/deploy/vps-bootstrap.sh`, `scripts/deploy/vps-verify-candidate.sh`, `scripts/deploy/vps-deploy.sh`, `scripts/deploy/vps-enable-domain.sh`, `compose.yaml`, and `docs/deployment/ubuntu-docker.md`.
 - A fresh bootstrap requires at least 2 GB RAM, installs Docker Engine/Compose from Docker's official Ubuntu repository, generates PostgreSQL and first-admin setup secrets, writes `/opt/fluxpost-studio/shared/env.production` with mode `0600`, and creates the standard repo/releases/current/bin layout.
 - Pre-domain mode sets `FLUXPOST_PROXY_ENABLED=false`, starts only PostgreSQL and app, and binds the app to `127.0.0.1:${FLUXPOST_APP_PORT:-3101}` for SSH-tunnel access. `enable-domain.sh` requires resolvable DNS, persists `FLUXPOST_PUBLIC_HOST`, enables Caddy, and verifies public HTTPS.
 - Existing deployments without the new deployment keys retain compatibility defaults: proxy enabled, public host `bbs.vollov1.xyz`, and loopback app port `3101`.
-- The confirmed production VPS at `104.243.21.233` uses Docker Compose project `fluxpost`, Caddy HTTPS, PostgreSQL without a public host port, and GitHub release directories under `/opt/fluxpost-studio`.
+- Staging `104.243.21.233:29891` uses Docker Compose project `fluxpost`, Caddy for `bbs.vollov1.xyz`, isolated PostgreSQL/config/media volumes, and protected `x-ui`/`xray`/`frps` services. It is the mandatory complete candidate and bug-scenario gate.
+- Production `38.76.210.136` uses Nginx for `flux.lightmoment.net`, loopback app port 3101, persistent FluxPost volumes, and co-located Open WebUI. It accepts only the unchanged full SHA that passed 104.
+- Candidate verification writes a non-secret manifest under `/opt/fluxpost-studio/verifications/` and never reads environment files, mounts runtime volumes, invokes Compose, or changes the active release.
 
 ## Not Covered Or Pending Confirmation
 

@@ -1,5 +1,67 @@
 # Architecture Rules
 
+## Scenario: 104-first candidate verification and production promotion
+
+### 1. Scope / Trigger
+
+- Applies to every code fix or application/deployment change intended for production `38.76.210.136`.
+- Emergency restoration may roll production back first; the corrective release still follows the complete 104 gate.
+
+### 2. Signatures
+
+- Candidate gate: `sudo /opt/fluxpost-studio/bin/verify-candidate.sh [--check] --ref <branch|tag|commit>`.
+- Staging activation: `sudo /opt/fluxpost-studio/bin/deploy.sh --ref <full-sha>` on `104.243.21.233`.
+- Production preview/activation: `deploy.sh --check --ref <full-sha>` then `deploy.sh --ref <full-sha>` on 38.
+- Rollback: `sudo /opt/fluxpost-studio/bin/deploy.sh --rollback <release-id>`.
+
+### 3. Contracts
+
+- Local Windows is an editing, diff-review, and Git workspace only. It does not supply application, build, test, or browser promotion evidence.
+- Candidate verification resolves an immutable full SHA, uses a clean Git archive, runs Docker target `verification`, and writes `/opt/fluxpost-studio/verifications/<sha>.manifest` only after the complete offline baseline succeeds.
+- Verification never reads `shared/env.production`, mounts named volumes, invokes Compose, changes `current`, or calls live providers.
+- The candidate must then run on 104 and pass app/PostgreSQL/Caddy health, public HTTPS, the task-specific bug scenario, staging isolation, and protected-service comparison.
+- Production receives exactly the SHA verified and activated on 104. Any content-changing Git operation creates a new candidate.
+- 104 and 38 serialize verifier/deployer access to the shared repository through `/opt/fluxpost-studio/.operation.lock`.
+
+### 4. Validation & Error Matrix
+
+- Invalid or missing ref -> fail before Git fetch or Docker work.
+- Baseline or Docker build failure -> no passing manifest, no service activation, no `current` change.
+- Concurrent deploy/verification -> fail immediately on the shared operation lock.
+- Staging health or bug-scenario failure -> block production promotion and roll staging back when activation succeeded but behavior failed.
+- SHA differs after rebase/amend/merge -> invalidate evidence and restart candidate verification.
+- Production health failure -> deployment wrapper restores the previous release/image; business failure -> explicit manifest-aware rollback.
+- Production-only integration dependency -> use isolated staging credentials first; require separate operator approval for a minimum reversible production probe.
+
+### 5. Good/Base/Bad Cases
+
+- Good: candidate SHA passes the offline Docker gate, runs successfully on 104, enters `main` unchanged, and the same SHA passes production checks.
+- Base: a documentation-only local draft is reviewed but not promoted; no local build or server is required.
+- Bad: an engineer edits `/opt/fluxpost-studio/current`, copies production secrets to 104, deploys a moving `main`, or promotes a commit different from the staging manifest.
+
+### 6. Tests Required
+
+- `.trellis/verification/check.mjs` must run the complete deterministic suite on Linux and remain callable through the Windows PowerShell wrapper.
+- `.trellis/verification/vps_deployment_check.mjs` must cover script syntax, check mode, unsafe refs, clean archive use, Docker target isolation, failure-without-manifest, success manifest identity, shared locking, and forbidden service/volume operations.
+- Live staging evidence must bind verification manifest, release manifest, image, and running container to one SHA and compare `x-ui`, `xray`, and `frps` before/after.
+- Live production evidence must bind release/image/container to the staging-approved SHA and cover Nginx/public HTTPS, app/PostgreSQL, named volumes, database write, and Open WebUI.
+
+### 7. Wrong vs Correct
+
+#### Wrong
+
+```bash
+ssh production
+vim /opt/fluxpost-studio/current/src/app/page.tsx
+```
+
+#### Correct
+
+```bash
+sudo /opt/fluxpost-studio/bin/verify-candidate.sh --ref candidate-ref
+sudo /opt/fluxpost-studio/bin/deploy.sh --ref FULL_40_CHARACTER_COMMIT
+```
+
 Last updated: 2026-07-20
 
 ## Module Boundaries

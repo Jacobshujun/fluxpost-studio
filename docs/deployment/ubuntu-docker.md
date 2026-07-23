@@ -71,21 +71,29 @@ https://flux.example.com/api/config
 
 Do not include `https://`, a path, or a port in the hostname argument.
 
-## Update To The Latest GitHub Version
+## Verify On 104 Before Production
 
-After new code is pushed to GitHub `main`, run on the VPS:
+Write code in a clean local worktree and push the final candidate ref without using local application, build, test, or browser results as release evidence. On staging `104.243.21.233`, run:
 
 ```bash
-sudo /opt/fluxpost-studio/bin/deploy.sh
+sudo /opt/fluxpost-studio/bin/verify-candidate.sh --check --ref CANDIDATE_REF
+sudo /opt/fluxpost-studio/bin/verify-candidate.sh --ref CANDIDATE_REF
 ```
 
-The deploy wrapper fetches `main`, creates a clean release, builds the app image, starts the configured private or HTTPS service set, performs health checks, switches `/opt/fluxpost-studio/current`, and keeps the newest three releases.
+The verifier resolves a full commit SHA, archives only that commit, runs the complete offline baseline in Docker target `verification`, and writes a non-secret manifest under `/opt/fluxpost-studio/verifications/`. It does not read `shared/env.production`, mount runtime volumes, start or stop services, or change `current`.
 
-Do not edit source code under `current`. Make changes locally, verify them, push GitHub, and deploy from GitHub.
+Deploy the returned SHA to 104 and validate Caddy/public HTTPS, app/PostgreSQL health, the bug-specific scenario, isolated staging state, and unchanged `x-ui`, `xray`, and `frps`:
 
-### Deploy An Approved Commit
+```bash
+sudo /opt/fluxpost-studio/bin/deploy.sh --check --ref FULL_40_CHARACTER_COMMIT
+sudo /opt/fluxpost-studio/bin/deploy.sh --ref FULL_40_CHARACTER_COMMIT
+```
 
-Staging and production promotion should use the same complete Git commit instead of a moving branch:
+If the commit is rebased, amended, merged into a new commit, or otherwise changes, repeat candidate verification and staging deployment for the new SHA.
+
+### Promote The Approved Commit To Production
+
+Advance `main` without changing the verified commit SHA. Then run the following commands only on production `38.76.210.136`:
 
 ```bash
 sudo /opt/fluxpost-studio/bin/deploy.sh --check --ref FULL_40_CHARACTER_COMMIT
@@ -93,6 +101,8 @@ sudo /opt/fluxpost-studio/bin/deploy.sh --ref FULL_40_CHARACTER_COMMIT
 ```
 
 The deploy wrapper fetches the requested ref, resolves it to a full commit, archives that commit, tags the built app image with the commit, and writes `release.manifest` inside the release directory. A failed health check restores the previously running release and image. Omitting `--ref` retains the existing `main` branch behavior.
+
+After activation, verify release/image/manifest identity, app and PostgreSQL health, Nginx/public `https://flux.lightmoment.net/`, the fixed scenario, all named volumes, and unchanged Open WebUI. A business-check failure requires `deploy.sh --rollback <release-id>`.
 
 Do not promote by copying `current`, `env.production`, Docker volumes, or runtime media between servers. The release contains a symlink to the server-local environment file, and each server must retain its own secrets and runtime state.
 
@@ -106,7 +116,7 @@ Before removing an old FluxPost deployment from a host that runs other services:
 4. Never run a global Docker prune, restart Docker, modify firewall rules, or stop a process merely because it owns a port.
 5. Abort if any FluxPost-labelled resource overlaps a protected service.
 
-Place the current `vps-bootstrap.sh` and `vps-deploy.sh` together in a temporary directory when the target application commit predates the fixed-ref deploy wrapper. Then rebuild without changing system packages or Docker. Full installation remains Ubuntu 24.04-only; `--app-only` may reuse an existing Linux host after verifying all required tools:
+Place the current `vps-bootstrap.sh`, `vps-deploy.sh`, and `vps-verify-candidate.sh` together in a temporary directory when the target application commit predates the current wrappers. Then rebuild without changing system packages or Docker. Full installation remains Ubuntu 24.04-only; `--app-only` may reuse an existing Linux host after verifying all required tools:
 
 ```bash
 sudo bash /tmp/fluxpost-deploy/vps-bootstrap.sh \
@@ -150,6 +160,7 @@ Server layout:
 - `/opt/fluxpost-studio/current`: active release symlink;
 - `/opt/fluxpost-studio/shared/env.production`: root-only base environment;
 - `/opt/fluxpost-studio/bin/deploy.sh`: update command;
+- `/opt/fluxpost-studio/bin/verify-candidate.sh`: isolated offline candidate gate;
 - `/opt/fluxpost-studio/bin/enable-domain.sh`: domain/HTTPS command.
 
 Runtime state remains in Docker named volumes, including PostgreSQL, advanced configuration, runtime files, generated/crawled media, node home, and Caddy certificate data.

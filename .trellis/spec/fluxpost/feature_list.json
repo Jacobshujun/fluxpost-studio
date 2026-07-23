@@ -164,7 +164,8 @@
         "Pre-domain deployment starts only app and PostgreSQL on a loopback port for SSH-tunnel access",
         "A validated DNS hostname can enable Caddy HTTPS through one command",
         "Routine updates preserve PostgreSQL, advanced configuration, runtime data, media, and Caddy named volumes",
-        "Default verification covers Compose parsing, Bash syntax, destructive-command absence, and private/HTTPS/legacy deployment plans without live infrastructure changes"
+        "Default verification covers Compose parsing, Bash syntax, destructive-command absence, and private/HTTPS/legacy deployment plans without live infrastructure changes",
+        "Every production code fix passes the isolated full candidate gate and task scenario on staging 104 before the unchanged full SHA is promoted to production 38"
       ],
       "evidence": [
         "2026-07-15 repository implementation includes parameterized compose.yaml, vps-bootstrap.sh, vps-deploy.sh --check, vps-enable-domain.sh, beginner deployment documentation, and .trellis/verification/vps_deployment_check.mjs. Private/HTTPS/legacy plan execution, Bash syntax, YAML parsing, focused checks, type-check, lint, build, and full baseline passed without a live VPS install."

@@ -26,7 +26,7 @@ This layer is the project-specific operating memory migrated from the previous H
 
 ## Quality Check
 
-- Run `powershell -ExecutionPolicy Bypass -File .trellis/verification/check.ps1` before claiming completion unless you explicitly explain why it could not run.
+- For code fixes, run the complete candidate verifier and task-specific checks on staging 104 before production promotion; `.trellis/verification/check.mjs` is the shared baseline source of truth.
 - Keep default startup context under 45 KB and typical code-task context under 70 KB.
 - Keep history in lightweight current files plus targeted archives; do not create another memory or handoff system outside `.trellis/`.
 - Do not call live TikHub, OpenAI-compatible providers, ComfyUI, Feishu writes, Lark replies, or simple-run production in default checks.

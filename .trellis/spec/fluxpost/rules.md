@@ -1,6 +1,6 @@
 # Trellis Rules
 
-Last updated: 2026-07-01
+Last updated: 2026-07-23
 
 ## Context Budgets
 
@@ -34,7 +34,7 @@ Last updated: 2026-07-01
 
 ## Trellis Self-Check Upgrade
 
-- `.trellis/verification/check.ps1` must enforce context budgets and latest-marker size gates before expensive checks.
+- `.trellis/verification/check.mjs` is the cross-platform baseline source of truth and must enforce context budgets and latest-marker size gates before expensive checks. `check.ps1` is a compatibility wrapper only.
 - If a Trellis file grows past budget, first archive or compress the historical content, then update lightweight entries.
 - Do not weaken a failing Trellis check to make the baseline pass. Fix the real file size, marker, JSON, or documented command issue.
 
@@ -43,4 +43,6 @@ Last updated: 2026-07-01
 - Do not add meaningless fallback code, broad try/catch blocks, silent error swallowing, polling, compatibility branches, or unsupported default values.
 - When behavior is uncertain, identify the cause, document unknowns as `待确认`, and verify the explicit fix.
 - Default verification must not call external production services or mutate runtime/user data unless the user explicitly asks.
+- Code-fix completion evidence must come from the isolated candidate gate plus the deployed bug scenario on staging 104. Do not substitute local application/build/test/browser runs.
+- Production 38 may receive only the unchanged full SHA recorded by the successful 104 candidate and release manifests.
 - Do not create a memory, TODO, planning, or handoff system outside `.trellis/`.

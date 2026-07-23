@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
 set -euo pipefail
 
-DEPLOY_SCRIPT_VERSION="2"
+DEPLOY_SCRIPT_VERSION="3"
 APP_ROOT="${APP_ROOT:-/opt/fluxpost-studio}"
 REPO_URL="${REPO_URL:-https://github.com/Jacobshujun/fluxpost-studio.git}"
 BRANCH="${BRANCH:-main}"
@@ -158,9 +158,12 @@ fi
 require_cmd git
 require_cmd docker
 require_cmd curl
+require_cmd flock
 require_cmd tar
 
 mkdir -p "$APP_ROOT" "$RELEASES_DIR" "$SHARED_DIR" "$BIN_DIR"
+exec 9>"$APP_ROOT/.operation.lock"
+flock -n 9 || fail "another FluxPost deployment or verification operation is active"
 
 COMPOSE_APP_IMAGE="${PROJECT_NAME}-app:latest"
 
@@ -354,6 +357,17 @@ else
   log "keeping deploy wrapper version $DEPLOY_SCRIPT_VERSION for older target commit"
 fi
 install -m 0755 "$REPO_DIR/scripts/deploy/vps-enable-domain.sh" "$BIN_DIR/enable-domain.sh"
+
+installed_verifier_version="$(awk -F'"' '/^VERIFIER_SCRIPT_VERSION="[0-9]+"$/ { print $2; exit }' "$BIN_DIR/verify-candidate.sh" 2>/dev/null || true)"
+candidate_verifier_version="$(awk -F'"' '/^VERIFIER_SCRIPT_VERSION="[0-9]+"$/ { print $2; exit }' "$REPO_DIR/scripts/deploy/vps-verify-candidate.sh" 2>/dev/null || true)"
+if [[ "$candidate_verifier_version" =~ ^[0-9]+$ ]] && \
+  { [[ ! "$installed_verifier_version" =~ ^[0-9]+$ ]] || [ "$candidate_verifier_version" -ge "$installed_verifier_version" ]; }; then
+  install -m 0755 "$REPO_DIR/scripts/deploy/vps-verify-candidate.sh" "$BIN_DIR/verify-candidate.sh"
+elif [[ "$installed_verifier_version" =~ ^[0-9]+$ ]]; then
+  log "keeping candidate verifier version $installed_verifier_version for older target commit"
+else
+  log "candidate verifier is unavailable in target commit"
+fi
 
 log "service status"
 compose ps

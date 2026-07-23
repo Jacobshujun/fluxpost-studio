@@ -3,11 +3,13 @@
 ## Trellis
 
 New AI sessions should recover context from `AGENTS.md` and `.trellis/`.
-Run the baseline check from the project root:
+The cross-platform offline baseline entry is:
 
-```powershell
-powershell -ExecutionPolicy Bypass -File .trellis/verification/check.ps1
+```bash
+npm run trellis:check
 ```
+
+Code fixes use 104-first promotion: edit and commit in a clean worktree, run the complete candidate verifier and bug scenario on staging `104.243.21.233`, then deploy the unchanged full SHA to production `38.76.210.136`. Local application/build/test/browser runs are not promotion evidence.
 
 `.trellis/` is the active persistent project context and task/spec system. The old `docs/harness.disabled/` and `scripts/harness.disabled/` directories are disabled migration archives; do not use them for normal work.
 
@@ -21,7 +23,7 @@ powershell -ExecutionPolicy Bypass -File .trellis/verification/check.ps1
 
 ## Latest Updates (2026-07-02)
 
-- Migrated AI collaboration context from the old Harness files to `.trellis/`, with `npm run trellis:check` as the local baseline entry. The old `docs/harness.disabled/` and `scripts/harness.disabled/` paths are migration archives only.
+- Migrated AI collaboration context from the old Harness files to `.trellis/`, with `npm run trellis:check` as the cross-platform offline baseline entry. The old `docs/harness.disabled/` and `scripts/harness.disabled/` paths are migration archives only.
 - Improved the review desk with theme sync, desktop internal scrolling, per-image Prompt generation, single-image regeneration, paste/upload replacement and append flows, plus approve-and-advance review behavior.
 - Expanded simple mode with original creation and viral imitation flows. ComfyUI Klein, direct original references, video transcription, and automatic Feishu publishing now default off so generated drafts land in review first.
 - Strengthened video and image handling: video quality selection, download fallback candidates, highlight-frame selection/review, opt-in Ark transcription, GPT-Image-2 sizing, and reference-image edit request checks.

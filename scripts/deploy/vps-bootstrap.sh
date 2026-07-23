@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
 set -euo pipefail
 
-BOOTSTRAP_SCRIPT_VERSION="2"
+BOOTSTRAP_SCRIPT_VERSION="3"
 APP_ROOT="/opt/fluxpost-studio"
 REPO_URL="https://github.com/Jacobshujun/fluxpost-studio.git"
 BRANCH="main"
@@ -16,6 +16,7 @@ SETUP_KEY=""
 CREDENTIALS_FILE=""
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 LOCAL_DEPLOY_SCRIPT="$SCRIPT_DIR/vps-deploy.sh"
+LOCAL_VERIFY_SCRIPT="$SCRIPT_DIR/vps-verify-candidate.sh"
 
 log() {
   printf '[bootstrap] %s\n' "$*"
@@ -185,13 +186,19 @@ COMMIT="$(git -C "$REPO_DIR" rev-parse --verify "FETCH_HEAD^{commit}")"
 [[ "$COMMIT" =~ ^[0-9a-f]{40}$ ]] || fail "resolved deployment commit is invalid"
 git -C "$REPO_DIR" checkout --detach --force "$COMMIT"
 
-if [ -f "$LOCAL_DEPLOY_SCRIPT" ] && grep -q '^DEPLOY_SCRIPT_VERSION="2"$' "$LOCAL_DEPLOY_SCRIPT"; then
-  log "installing adjacent deploy wrapper version 2"
+if [ -f "$LOCAL_DEPLOY_SCRIPT" ] && grep -q '^DEPLOY_SCRIPT_VERSION="3"$' "$LOCAL_DEPLOY_SCRIPT"; then
+  log "installing adjacent deploy wrapper version 3"
   install -m 0755 "$LOCAL_DEPLOY_SCRIPT" "$BIN_DIR/deploy.sh"
 else
   install -m 0755 "$REPO_DIR/scripts/deploy/vps-deploy.sh" "$BIN_DIR/deploy.sh"
 fi
 install -m 0755 "$REPO_DIR/scripts/deploy/vps-enable-domain.sh" "$BIN_DIR/enable-domain.sh"
+if [ -f "$LOCAL_VERIFY_SCRIPT" ] && grep -q '^VERIFIER_SCRIPT_VERSION="1"$' "$LOCAL_VERIFY_SCRIPT"; then
+  log "installing adjacent candidate verifier version 1"
+  install -m 0755 "$LOCAL_VERIFY_SCRIPT" "$BIN_DIR/verify-candidate.sh"
+else
+  install -m 0755 "$REPO_DIR/scripts/deploy/vps-verify-candidate.sh" "$BIN_DIR/verify-candidate.sh"
+fi
 
 if [ ! -f "$ENV_FILE" ]; then
   log "creating persistent deployment configuration"
