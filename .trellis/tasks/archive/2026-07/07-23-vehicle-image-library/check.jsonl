@@ -1,4 +1,4 @@
 {"file":".trellis/spec/fluxpost/verification.md","reason":"Authoritative focused and baseline verification commands."}
 {"file":".trellis/spec/frontend/quality-guidelines.md","reason":"Responsive UI, API error and regression review requirements."}
 {"file":".trellis/spec/fluxpost/pitfalls.md","reason":"Known integration and verification risks for queues, external services and local production refresh."}
-{"file":".trellis/tasks/07-23-vehicle-image-library/prd.md","reason":"Testable acceptance criteria for vehicle-only manual tagging and reference regressions."}
+{"file":".trellis/tasks/archive/2026-07/07-23-vehicle-image-library/prd.md","reason":"Testable acceptance criteria for vehicle-only manual tagging and reference regressions."}

@@ -2,4 +2,4 @@
 {"file":".trellis/spec/fluxpost/architecture_rules.md","reason":"API/domain/database ownership and non-destructive runtime-data boundaries."}
 {"file":".trellis/spec/frontend/index.md","reason":"Frontend pre-development checklist and operational workspace conventions."}
 {"file":".trellis/spec/guides/cross-layer-thinking-guide.md","reason":"Role-specific tag contracts cross UI, API, domain and persistence boundaries."}
-{"file":".trellis/tasks/07-23-vehicle-image-library/design.md","reason":"Approved vehicle-library architecture, data flow, contracts and rollback shape."}
+{"file":".trellis/tasks/archive/2026-07/07-23-vehicle-image-library/design.md","reason":"Approved vehicle-library architecture, data flow, contracts and rollback shape."}

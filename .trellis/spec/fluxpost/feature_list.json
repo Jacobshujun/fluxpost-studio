@@ -281,7 +281,7 @@
     {
       "id": "reference-image-library",
       "title": "Reference and vehicle image library",
-      "status": "in_progress",
+      "status": "done",
       "definition_of_done": [
         "Signed-in users can import clipboard, file, drag-drop, and folder images into TOS-backed reference or vehicle views with shareable role URLs",
         "Reference assets support structured AI tags, manual overrides, and durable retagging while vehicle assets use only user-maintained free-form tags and never enqueue AI by themselves",
@@ -290,9 +290,10 @@
         "Default verification covers both schemas and critical contracts without calling live TOS or GPT"
       ],
       "evidence": [
-        "Candidate implementation includes library assets/tagging APIs, authenticated role views, manual-only vehicle tags, no-AI vehicle imports, TOS persistence, and deterministic reference/vehicle checks"
+        "Candidate 542cbb5e passed the 104 full Docker verifier and immutable release checks; the operator confirmed isolated live TOS/GPT/delete plus reference/vehicle functional scenarios passed on 104.",
+        "The unchanged SHA deployed to production release 20260723-113938-542cbb5e2d1f; manifest/image/container identity, library schema creation, rollback-write smoke, idle queues, HTTPS /library, persistent volumes, Nginx, and unchanged healthy Open WebUI passed."
       ],
-      "notes": "Keep in_progress until the immutable candidate passes the 104 offline gate and real isolated TOS/GPT library scenarios before production promotion."
+      "notes": "Completed through the mandatory immutable 104-to-38 promotion path. Vehicle imports remain manual-tag-only and must not enqueue AI work."
     },
     {
       "id": "tos-runtime-media-storage",

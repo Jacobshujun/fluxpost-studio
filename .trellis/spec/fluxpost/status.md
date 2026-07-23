@@ -4,42 +4,32 @@ Last updated: 2026-07-23
 
 ## One-Line Status
 
-Task `.trellis/tasks/07-23-remote-first-vps-validation` is implementing the mandatory 104-first release gate. Production 38 remains on `323df48`, staging 104 remains on `211aa65`, and GitHub `main` is `2fef2e5`; the new candidate has not passed remote verification yet.
+Reference and vehicle libraries are live on production 38 at verified application SHA `542cbb5e2d1f49539393a7d51a798b7e9e0ff18f`; GitHub `main` and staging 104 use the same application commit.
 
 ## Current Focus
 
-- `/library` reference and vehicle views are being prepared as an immutable candidate from clean `origin/main`; production promotion remains blocked until the same SHA passes the 104 candidate gate and isolated live library scenarios.
-- Local Windows is now limited to clean-worktree editing, diff review, and Git operations. It no longer supplies application, build, test, or browser promotion evidence.
-- Every candidate must pass the complete offline Docker gate and task-specific scenario on `104.243.21.233`, then production `38.76.210.136` may receive only the unchanged full SHA.
-- The active task adds `.trellis/verification/check.mjs`, Docker target `verification`, `vps-verify-candidate.sh`, shared deploy/verify locking, deterministic contract checks, and operator documentation.
-- Production 38 uses Nginx for `flux.lightmoment.net`, loopback app port 3101, persistent FluxPost volumes, and co-located Open WebUI. Ubuntu is 22.04, so use the installed wrapper rather than fresh bootstrap.
-- Staging 104 uses Caddy for `bbs.vollov1.xyz`, isolated PostgreSQL/config/media state, and protected `x-ui`, `xray`, and `frps` services.
-- GitHub `main` includes the HEIC/TOS review fix at `2fef2e5`; it has historical local evidence but has not passed the new 104 gate or deployed to production.
+- Candidate `542cbb5e2d1f49539393a7d51a798b7e9e0ff18f` passed the 104 Docker verifier with a full-SHA manifest, then ran as release `20260723-035052-542cbb5e2d1f`; the operator confirmed the isolated library functional scenarios passed.
+- GitHub `main` was fast-forwarded without merge, rebase, amend, or application-SHA change.
+- Production 38 runs release `20260723-113938-542cbb5e2d1f`. Manifest, immutable image, running container image, app/PostgreSQL health, Nginx, loopback/public HTTPS, `/library`, six FluxPost volumes, database rollback-write smoke, and library schema checks pass.
+- Production queue checks found no queued or running simple, image, Feishu, distribution, or library-tagging work before or after activation.
+- Co-located Open WebUI retained container id `8b4001fa8181d9a94646eac07b502444abf06369d1687d484794ecfebfbf638e` and remained healthy. TLS verification remains enabled; production TOS and OpenAI status checks remain configured without exposing credentials.
+- Production 38 uses Nginx for `flux.lightmoment.net`, loopback app port 3101, persistent FluxPost volumes, and Ubuntu 22.04. Use the installed deploy wrapper rather than fresh bootstrap.
 - `/config` remains admin-only. Operator base secrets stay in `shared/env.production`; admin overrides stay in the persistent `fluxpost-config` volume.
-- `.trellis/` is the only active AI collaboration system. Disabled Harness directories are migration archives only.
 
 ## Next Entry
 
-1. Finish and push the remote-first candidate commit without local application/build/test/browser validation.
-2. On 104, run the temporary candidate verifier, require a passing full-SHA manifest, then deploy that SHA.
-3. Verify staging release/image/container identity, app/PostgreSQL/Caddy, public HTTPS, the workflow scenario, isolation, and unchanged `x-ui`/`xray`/`frps`.
-4. Fast-forward `main` without changing the verified SHA. Any changed SHA must restart the 104 gate.
-5. On production 38, preview and deploy the same SHA; verify release/image/container, app/PostgreSQL, Nginx/public HTTPS, named volumes, database write, and Open WebUI.
-6. Record durable remote evidence and archive the Trellis task. Do not promote documentation-only evidence commits unless application behavior changes.
-7. For future bugs, start from a clean `origin/main` worktree, push the final candidate, and repeat the same 104-to-38 sequence.
+1. Use the production `/library?role=reference` and `/library?role=vehicle` views for normal operator work; investigate only concrete failures rather than repeating paid live probes by default.
+2. Keep documentation-only evidence commits out of the deployed application SHA; a later code change must restart the full 104 gate.
+3. For future fixes, start from a clean `origin/main` worktree, push the final candidate, and repeat the same immutable 104-to-38 promotion sequence.
 
 ## Recent Verification
 
-- 2026-07-23: HEIC/TOS delivery fixtures, focused checks, lint, TypeScript, build, full Windows baseline, local smoke, and restart passed before the remote-first policy changed. Commit `2fef2e5` is not remotely approved or deployed.
-- 2026-07-23: Production 38 deployed `323df48998092ccf3a3d8ff9b3728f2cb60f4a15`; release/image identity, app/PostgreSQL, loopback/public HTTP, Nginx, and unchanged Open WebUI passed.
-- 2026-07-22: Production 38 deployed `211aa65`; release/image, HTTPS, volumes, database write, Nginx, and Open WebUI passed. Retired 82 was stopped without deleting data.
-- 2026-07-22: Staging 104 deployed `211aa65`; app/PostgreSQL/Caddy, TLS, isolated account/volumes, database read/write, and protected `frps`/`x-ui`/`xray` passed.
+- 2026-07-23: Candidate `542cbb5e` passed the 104 full Docker verifier and immutable release checks; the operator confirmed isolated TOS/GPT/delete and reference/vehicle functional scenarios passed. The unchanged SHA then deployed to production release `20260723-113938-542cbb5e2d1f` with all identity, health, persistence, schema, queue, HTTPS, Nginx, and Open WebUI checks passing.
 - Older verification evidence is preserved in `.trellis/spec/fluxpost/verification.md` and `.trellis/spec/fluxpost/archive/verification-history.md`.
 
 ## Current Risks
 
-- `main` is ahead of production and staging. Never deploy a moving branch; bind verification and deployment to the exact resolved SHA.
-- The verifier is not installed on 104 until the first remote-first candidate deploys. Run it from a temporary root-owned path once, then confirm the installed wrapper exists.
+- Documentation evidence may make GitHub `main` newer than the deployed application SHA. Do not deploy a documentation-only commit; the next code candidate must pass the 104 gate as a new full SHA.
 - Candidate verification must not read environment files, mount named volumes, invoke Compose, change `current`, or call paid/live providers.
 - Never copy production accounts, database data, media, TOS prefixes, Feishu targets, provider credentials, or Docker volumes to 104.
 - Production-only integration probes require separate operator approval and must be minimal, observable, and reversible.
