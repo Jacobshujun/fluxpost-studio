@@ -140,6 +140,7 @@ Last updated: 2026-07-20
 - If the smoke port is occupied, set `TRELLIS_SMOKE_PORT` to a free local port and rerun the same baseline script.
 - Do not replace a failing check with a softer fallback. Fix the real failing command, data parse issue, build issue, or smoke assertion.
 - `.trellis/verification/check.mjs` is the baseline orchestration source of truth. Domain self-checks that assert baseline inclusion must inspect `check.mjs`, not the thin `check.ps1` compatibility wrapper.
+- Candidate verification runs from a clean Git archive. Baseline checks must not depend on ignored local files such as `.env.example`; assert deployment defaults against tracked templates such as `deploy/env.production.example`.
 - In the current workspace sandbox, `npm run build` can pass directly while `Next build` inside `.trellis/verification/check.ps1` fails with `spawn EPERM`; rerun the same baseline with approved elevated permissions before changing checks.
 - Playwright browser subprocess startup can fail in the sandbox with `WinError 5`; use approved elevated permissions for local browser UI self-checks.
 - If Chrome/Edge CDP checks need a custom `--user-data-dir`, do not leave the browser profile directory under the project tree before running baseline. ESLint can scan extension JavaScript from those profiles. Screenshots under `test-artifacts/` are fine, but temporary browser profile folders should be outside the project or removed before `npm run lint` / `.trellis/verification/check.ps1`.
