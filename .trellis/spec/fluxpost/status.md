@@ -8,6 +8,7 @@ Task `.trellis/tasks/07-23-remote-first-vps-validation` is implementing the mand
 
 ## Current Focus
 
+- `/library` reference and vehicle views are being prepared as an immutable candidate from clean `origin/main`; production promotion remains blocked until the same SHA passes the 104 candidate gate and isolated live library scenarios.
 - Local Windows is now limited to clean-worktree editing, diff review, and Git operations. It no longer supplies application, build, test, or browser promotion evidence.
 - Every candidate must pass the complete offline Docker gate and task-specific scenario on `104.243.21.233`, then production `38.76.210.136` may receive only the unchanged full SHA.
 - The active task adds `.trellis/verification/check.mjs`, Docker target `verification`, `vps-verify-candidate.sh`, shared deploy/verify locking, deterministic contract checks, and operator documentation.

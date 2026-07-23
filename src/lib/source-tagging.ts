@@ -41,7 +41,7 @@ type TaggingJson = {
   visualTags?: unknown;
 };
 
-type ModelImageInput = {
+export type ModelImageInput = {
   id: string;
   imageUrl: string;
 };
@@ -470,15 +470,15 @@ function buildVisualTaggingPrompt(item: NormalizedSourceItem, visualAssets: Arra
   ].join("\n");
 }
 
-async function callTaggingModel(prompt: string, images: ModelImageInput[]): Promise<TaggingJson> {
+export async function callTaggingModel(prompt: string, images: ModelImageInput[], model = appConfig.openaiTextModel): Promise<TaggingJson> {
   const text =
     appConfig.openaiTextEndpoint === "chat"
-      ? await callChatCompletions(prompt, images)
-      : await callResponsesApi(prompt, images);
+      ? await callChatCompletions(prompt, images, model)
+      : await callResponsesApi(prompt, images, model);
   return parseJsonObject(text) as TaggingJson;
 }
 
-async function callResponsesApi(prompt: string, images: ModelImageInput[]) {
+async function callResponsesApi(prompt: string, images: ModelImageInput[], model: string) {
   const content = images.length
     ? [
         { type: "input_text", text: prompt },
@@ -493,7 +493,7 @@ async function callResponsesApi(prompt: string, images: ModelImageInput[]) {
       method: "POST",
       headers: openaiHeaders(),
       body: JSON.stringify({
-        model: appConfig.openaiTextModel,
+        model,
         input: images.length
           ? [
               {
@@ -524,7 +524,7 @@ async function callResponsesApi(prompt: string, images: ModelImageInput[]) {
   );
 }
 
-async function callChatCompletions(prompt: string, images: ModelImageInput[]) {
+async function callChatCompletions(prompt: string, images: ModelImageInput[], model: string) {
   const content = images.length
     ? [
         { type: "text", text: prompt },
@@ -541,7 +541,7 @@ async function callChatCompletions(prompt: string, images: ModelImageInput[]) {
       method: "POST",
       headers: openaiHeaders(),
       body: JSON.stringify({
-        model: appConfig.openaiTextModel,
+        model,
         messages: [
         {
           role: "system",

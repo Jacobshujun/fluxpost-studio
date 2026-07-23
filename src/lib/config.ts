@@ -54,6 +54,7 @@ function readAppConfig() {
   openaiImageBackupApiKey: process.env.OPENAI_IMAGE_BACKUP_API_KEY || "",
   openaiTextEndpoint: process.env.OPENAI_TEXT_ENDPOINT || "responses",
   openaiTextModel: process.env.OPENAI_TEXT_MODEL || "gpt-5.5",
+  openaiLibraryTaggingModel: process.env.OPENAI_LIBRARY_TAGGING_MODEL || process.env.OPENAI_TEXT_MODEL || "gpt-5.5",
   openaiImageEndpoint: normalizeImageEndpoint(process.env.OPENAI_IMAGE_ENDPOINT || "images"),
   openaiImageApiDialect: normalizeImageApiDialect(process.env.OPENAI_IMAGE_API_DIALECT || "auto"),
   openaiImageApiProfile: parseOptionalImageProviderProfile("OPENAI_IMAGE_API_PROFILE", process.env.OPENAI_IMAGE_API_PROFILE),
@@ -165,6 +166,7 @@ export function getConfigStatus(): ConfigStatus {
     databaseBackend: database.backend,
     postgresConfigured: database.postgresConfigured,
     textModel: appConfig.openaiTextModel,
+    libraryTaggingModel: appConfig.openaiLibraryTaggingModel,
     openaiTextEndpoint: appConfig.openaiTextEndpoint,
     imageModel: appConfig.openaiImageModel,
     imageProvider: appConfig.openaiImageEndpoint,
@@ -457,6 +459,9 @@ const advancedConfigGroups: ConfigDefinitionGroup[] = [
       }),
       configField("OPENAI_TEXT_MODEL", "文本模型", "用于内容生成、标签和审核。", "text", "openai-text", {
         read: () => appConfig.openaiTextModel,
+      }),
+      configField("OPENAI_LIBRARY_TAGGING_MODEL", "参考图库打标模型", "仅用于参考图库的后台视觉打标；留空时使用文本模型。", "text", "openai-text", {
+        read: () => appConfig.openaiLibraryTaggingModel,
       }),
       configField("OPENAI_TEXT_ENDPOINT", "文本接口形态", "responses 支持原创联网搜索；chat 使用 chat completions。", "select", "openai-text", {
         options: ["responses", "chat"],

@@ -12,6 +12,8 @@ const npxCommand = process.platform === "win32" ? "npx.cmd" : "npx";
 const nodeChecks = [
   ["PostgreSQL schema check", "postgres_schema_check.mjs"],
   ["Workspace accounts check", "workspace_accounts_check.mjs"],
+  ["Reference library assets check", "library_assets_check.mjs"],
+  ["Vehicle library check", "vehicle_library_check.mjs"],
   ["Compact-only workspace check", "compact_only_workspace_check.mjs"],
   ["Advanced config admin boundary check", "advanced_config_check.mjs"],
   ["TOS runtime media storage check", "tos_runtime_media_check.mjs"],

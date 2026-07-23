@@ -869,6 +869,138 @@ export type MaterialLibrarySnapshot = {
   assets: MaterialLibraryAsset[];
 };
 
+export type LibraryAssetRole = "reference" | "vehicle";
+
+export type LibraryVisibility = "private" | "team";
+
+export type LibraryPeoplePresence = "yes" | "no" | "unknown";
+
+export type LibraryTaggingStatus = "queued" | "running" | "completed" | "failed";
+
+export type LibraryObjectCleanupStatus = "ready" | "pending" | "failed";
+
+export type LibraryImageType =
+  | "exterior"
+  | "interior"
+  | "detail"
+  | "people_vehicle"
+  | "lifestyle"
+  | "event"
+  | "poster_info"
+  | "screenshot"
+  | "comparison"
+  | "other";
+
+export type LibraryTagProfile = {
+  imageType?: LibraryImageType;
+  scenes: string[];
+  vehicleModels: string[];
+  vehicleColors: string[];
+  angles: string[];
+  people: LibraryPeoplePresence;
+  customTags: string[];
+  confidence?: number;
+  model?: string;
+  taggedAt?: string;
+};
+
+export type LibraryManualTagOverrides = Partial<{
+  imageType: LibraryImageType | null;
+  scenes: string[];
+  vehicleModels: string[];
+  vehicleColors: string[];
+  angles: string[];
+  people: LibraryPeoplePresence | null;
+  customTags: string[];
+}>;
+
+export type LibraryAsset = {
+  id: string;
+  ownerUserId: string;
+  ownerDisplayName: string;
+  name: string;
+  originalName: string;
+  relativePath?: string;
+  objectKey: string;
+  publicUrl: string;
+  mimeType: string;
+  extension: string;
+  byteSize: number;
+  width?: number;
+  height?: number;
+  sha256: string;
+  roles: LibraryAssetRole[];
+  collectionIds: string[];
+  visibility: LibraryVisibility;
+  aiTags: LibraryTagProfile;
+  manualOverrides: LibraryManualTagOverrides;
+  effectiveTags: LibraryTagProfile;
+  taggingStatus: LibraryTaggingStatus;
+  taggingError?: string;
+  cleanupStatus: LibraryObjectCleanupStatus;
+  cleanupError?: string;
+  legacyMaterialAssetId?: string;
+  canEdit?: boolean;
+  createdAt: string;
+  updatedAt: string;
+  deletedAt?: string;
+};
+
+export type LibraryCollection = {
+  id: string;
+  ownerUserId: string;
+  ownerDisplayName: string;
+  role: LibraryAssetRole;
+  name: string;
+  parentId?: string;
+  relativePath?: string;
+  createdAt: string;
+  updatedAt: string;
+};
+
+export type LibraryTaggingJob = {
+  id: string;
+  assetId: string;
+  ownerUserId: string;
+  status: LibraryTaggingStatus;
+  attempts: number;
+  maxAttempts: number;
+  runAfter: string;
+  lockedBy?: string;
+  lockedUntil?: string;
+  createdAt: string;
+  updatedAt: string;
+  startedAt?: string;
+  completedAt?: string;
+  error?: string;
+};
+
+export type LibraryAssetPage = {
+  assets: LibraryAsset[];
+  collections: LibraryCollection[];
+  nextCursor?: string;
+  total: number;
+};
+
+export type LibraryTagSuggestion = {
+  label: string;
+  count: number;
+};
+
+export type LibraryTagBatchFailure = {
+  assetId: string;
+  error: string;
+};
+
+export type LibraryTagBatchResult = {
+  assets: LibraryAsset[];
+  failures: LibraryTagBatchFailure[];
+};
+
+export type ReferenceAssetSelection = {
+  assetIds: string[];
+};
+
 export type ConfigStatus = {
   tikhubConfigured: boolean;
   openaiConfigured: boolean;
@@ -880,6 +1012,7 @@ export type ConfigStatus = {
   databaseBackend: "sqlite" | "postgres";
   postgresConfigured: boolean;
   textModel: string;
+  libraryTaggingModel: string;
   openaiTextEndpoint: string;
   imageModel: string;
   imageProvider: string;

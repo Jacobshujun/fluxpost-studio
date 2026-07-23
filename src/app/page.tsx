@@ -11,6 +11,7 @@ import {
   FileText,
   FolderOpen,
   Image as ImageIcon,
+  Images,
   KeyRound,
   Lightbulb,
   Loader2,
@@ -613,6 +614,8 @@ export default function Home() {
               </div>
               <AccountMenu account={currentAccount} accounts={workspaceAccounts} open={accountPanelOpen} busy={accountBusy} message={accountMessage} onToggleOpen={() => setAccountPanelOpen((value) => !value)} onRefresh={loadWorkspaceAccounts} onAccountsChanged={loadWorkspaceAccounts} onLogout={logoutWorkspaceAccount} />
               <HeaderLink href="/content" icon={<Database className="h-4 w-4" />} label="采集与内容池" />
+              <HeaderLink href="/library?role=reference" icon={<ImageIcon className="h-4 w-4" />} label="参考图库" />
+              <HeaderLink href="/library?role=vehicle" icon={<Images className="h-4 w-4" />} label="车型图库" />
               <HeaderLink href="/review" icon={<ExternalLink className="h-4 w-4" />} label="内容审查台" />
               <HeaderLink href="/distribution-check" icon={<ShieldCheck className="h-4 w-4" />} label="是否分发" />
               {currentAccount.role === "admin" ? <HeaderLink href="/config" icon={<Settings className="h-4 w-4" />} label="高级配置" /> : null}

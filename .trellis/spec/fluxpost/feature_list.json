@@ -279,6 +279,22 @@
       "notes": "External TikHub/OpenAI/image-generation/Feishu calls are not part of default baseline verification. A real small-count simple run and a larger two-keyword queue validation are still needed before marking done."
     },
     {
+      "id": "reference-image-library",
+      "title": "Reference and vehicle image library",
+      "status": "in_progress",
+      "definition_of_done": [
+        "Signed-in users can import clipboard, file, drag-drop, and folder images into TOS-backed reference or vehicle views with shareable role URLs",
+        "Reference assets support structured AI tags, manual overrides, and durable retagging while vehicle assets use only user-maintained free-form tags and never enqueue AI by themselves",
+        "Fullscreen preview supports bounded navigation, zoom, pan, touch, focus management, keyboard controls, editing, and two-level deletion",
+        "Legacy vehicle images can be migrated idempotently without changing existing material or generation paths",
+        "Default verification covers both schemas and critical contracts without calling live TOS or GPT"
+      ],
+      "evidence": [
+        "Candidate implementation includes library assets/tagging APIs, authenticated role views, manual-only vehicle tags, no-AI vehicle imports, TOS persistence, and deterministic reference/vehicle checks"
+      ],
+      "notes": "Keep in_progress until the immutable candidate passes the 104 offline gate and real isolated TOS/GPT library scenarios before production promotion."
+    },
+    {
       "id": "tos-runtime-media-storage",
       "title": "Volcengine TOS runtime media storage",
       "status": "ready_for_review",

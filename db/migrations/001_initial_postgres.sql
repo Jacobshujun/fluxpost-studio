@@ -225,3 +225,83 @@ CREATE TABLE IF NOT EXISTS lark_task_launches (
 CREATE INDEX IF NOT EXISTS idx_lark_task_launches_message_id ON lark_task_launches(message_id);
 CREATE INDEX IF NOT EXISTS idx_lark_task_launches_run_id ON lark_task_launches(run_id);
 CREATE INDEX IF NOT EXISTS idx_lark_task_launches_created_at ON lark_task_launches(created_at DESC);
+
+CREATE TABLE IF NOT EXISTS library_assets (
+  id TEXT PRIMARY KEY,
+  owner_user_id TEXT NOT NULL,
+  visibility TEXT NOT NULL,
+  sha256 TEXT NOT NULL,
+  object_key TEXT NOT NULL UNIQUE,
+  public_url TEXT NOT NULL,
+  tagging_status TEXT NOT NULL,
+  cleanup_status TEXT NOT NULL,
+  legacy_material_asset_id TEXT,
+  created_at TIMESTAMPTZ NOT NULL,
+  updated_at TIMESTAMPTZ NOT NULL,
+  deleted_at TIMESTAMPTZ,
+  data_json JSONB NOT NULL,
+  UNIQUE(owner_user_id, sha256)
+);
+CREATE INDEX IF NOT EXISTS idx_library_assets_owner_created ON library_assets(owner_user_id, created_at DESC, id DESC);
+CREATE INDEX IF NOT EXISTS idx_library_assets_visibility_created ON library_assets(visibility, created_at DESC, id DESC);
+CREATE INDEX IF NOT EXISTS idx_library_assets_tagging_status ON library_assets(tagging_status, updated_at DESC);
+CREATE UNIQUE INDEX IF NOT EXISTS idx_library_assets_legacy_material ON library_assets(legacy_material_asset_id) WHERE legacy_material_asset_id IS NOT NULL;
+
+CREATE TABLE IF NOT EXISTS library_asset_roles (
+  asset_id TEXT NOT NULL REFERENCES library_assets(id) ON DELETE CASCADE,
+  role TEXT NOT NULL,
+  PRIMARY KEY(asset_id, role)
+);
+CREATE INDEX IF NOT EXISTS idx_library_asset_roles_role ON library_asset_roles(role, asset_id);
+
+CREATE TABLE IF NOT EXISTS library_collections (
+  id TEXT PRIMARY KEY,
+  owner_user_id TEXT NOT NULL,
+  role TEXT NOT NULL,
+  parent_id TEXT,
+  name TEXT NOT NULL,
+  relative_path TEXT,
+  created_at TIMESTAMPTZ NOT NULL,
+  updated_at TIMESTAMPTZ NOT NULL,
+  data_json JSONB NOT NULL
+);
+CREATE INDEX IF NOT EXISTS idx_library_collections_owner_role ON library_collections(owner_user_id, role, parent_id, name);
+
+CREATE TABLE IF NOT EXISTS library_collection_assets (
+  collection_id TEXT NOT NULL REFERENCES library_collections(id) ON DELETE CASCADE,
+  asset_id TEXT NOT NULL REFERENCES library_assets(id) ON DELETE CASCADE,
+  created_at TIMESTAMPTZ NOT NULL,
+  PRIMARY KEY(collection_id, asset_id)
+);
+CREATE INDEX IF NOT EXISTS idx_library_collection_assets_asset ON library_collection_assets(asset_id, collection_id);
+
+CREATE TABLE IF NOT EXISTS library_asset_labels (
+  asset_id TEXT NOT NULL REFERENCES library_assets(id) ON DELETE CASCADE,
+  dimension TEXT NOT NULL,
+  value TEXT NOT NULL,
+  source TEXT NOT NULL,
+  confidence DOUBLE PRECISION,
+  updated_at TIMESTAMPTZ NOT NULL,
+  PRIMARY KEY(asset_id, dimension, value)
+);
+CREATE INDEX IF NOT EXISTS idx_library_asset_labels_filter ON library_asset_labels(dimension, value, asset_id);
+
+CREATE TABLE IF NOT EXISTS library_tagging_jobs (
+  id TEXT PRIMARY KEY,
+  asset_id TEXT NOT NULL REFERENCES library_assets(id) ON DELETE CASCADE,
+  owner_user_id TEXT NOT NULL,
+  status TEXT NOT NULL,
+  attempts INTEGER NOT NULL DEFAULT 0,
+  max_attempts INTEGER NOT NULL DEFAULT 3,
+  run_after TIMESTAMPTZ NOT NULL,
+  locked_by TEXT,
+  locked_until TIMESTAMPTZ,
+  created_at TIMESTAMPTZ NOT NULL,
+  updated_at TIMESTAMPTZ NOT NULL,
+  started_at TIMESTAMPTZ,
+  completed_at TIMESTAMPTZ,
+  error TEXT,
+  data_json JSONB NOT NULL
+);
+CREATE INDEX IF NOT EXISTS idx_library_tagging_jobs_ready ON library_tagging_jobs(status, run_after, created_at ASC);
+CREATE INDEX IF NOT EXISTS idx_library_tagging_jobs_asset ON library_tagging_jobs(asset_id, created_at DESC);
