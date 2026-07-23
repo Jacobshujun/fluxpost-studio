@@ -12,9 +12,11 @@ import {
   RefreshCw,
   RotateCcw,
   Save,
+  ScanSearch,
   ShieldCheck,
   SlidersHorizontal,
   TestTube2,
+  Wrench,
   X,
 } from "lucide-react";
 import { getStoredTheme, setStoredTheme, subscribeTheme, type ThemeMode } from "@/lib/theme";
@@ -23,6 +25,7 @@ import type {
   AdvancedConfigPatchValue,
   AdvancedConfigSnapshot,
   ConfigStatus,
+  GeneratedMediaRepairBatchResult,
   ImageProviderProbeResult,
   TosStorageProbeResult,
   WorkspaceAccount,
@@ -59,7 +62,7 @@ export default function AdvancedConfigPage() {
   const [draft, setDraft] = useState<Record<string, DraftField>>({});
   const [activeGroupId, setActiveGroupId] = useState("");
   const [message, setMessage] = useState("");
-  const [busy, setBusy] = useState<"load" | "save" | "tos-check" | "tos-reconcile" | "image-primary-check" | "image-backup-check" | null>("load");
+  const [busy, setBusy] = useState<"load" | "save" | "tos-check" | "tos-reconcile" | "media-scan" | "media-repair" | "image-primary-check" | "image-backup-check" | null>("load");
 
   const fieldsByKey = useMemo(() => {
     const map = new Map<string, AdvancedConfigField>();
@@ -208,6 +211,49 @@ export default function AdvancedConfigPage() {
     }
   }
 
+  async function runHistoricalMediaRepair(mode: "scan" | "apply") {
+    if (mode === "apply" && !window.confirm("确认分批修复全部可精确匹配的历史草稿图片？无法确认映射的图片不会被修改。")) return;
+    setBusy(mode === "scan" ? "media-scan" : "media-repair");
+    setMessage("");
+    try {
+      let cursor: string | undefined;
+      let scannedCount = 0;
+      let candidatePostCount = 0;
+      let candidateImageCount = 0;
+      let repairedPostCount = 0;
+      let repairedImageCount = 0;
+      let failureCount = 0;
+      do {
+        const previousCursor = cursor;
+        const res = await fetch("/api/config/media-repair", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ mode, cursor, limit: 25 }),
+        });
+        const data = (await res.json()) as GeneratedMediaRepairBatchResult & { error?: string };
+        if (!res.ok) throw new Error(data.error || "历史媒体处理失败");
+        scannedCount += data.scannedCount;
+        candidatePostCount += data.candidatePostCount;
+        candidateImageCount += data.candidateImageCount;
+        repairedPostCount += data.repairedPostCount;
+        repairedImageCount += data.repairedImageCount;
+        failureCount += data.failures.length;
+        cursor = data.nextCursor;
+        if (cursor && cursor === previousCursor) throw new Error("历史媒体处理游标未推进");
+      } while (cursor);
+
+      setMessage(
+        mode === "scan"
+          ? `历史媒体扫描完成：检查 ${scannedCount} 条草稿，发现 ${candidatePostCount} 条草稿共 ${candidateImageCount} 张可安全修复图片。`
+          : `历史媒体修复完成：更新 ${repairedPostCount} 条草稿、${repairedImageCount} 张图片，保留 ${failureCount} 个未确认项。`,
+      );
+    } catch (error) {
+      setMessage(error instanceof Error ? error.message : "历史媒体处理失败");
+    } finally {
+      setBusy(null);
+    }
+  }
+
   async function testImageProvider(route: "primary" | "backup") {
     if (!window.confirm(`将对${route === "primary" ? "主" : "备用"}图片通道执行两次付费生图（文生图和参考图），是否继续？`)) return;
     setBusy(route === "primary" ? "image-primary-check" : "image-backup-check");
@@ -324,6 +370,26 @@ export default function AdvancedConfigPage() {
                 </div>
                 {activeGroup?.id === "tos" ? (
                   <div className="flex flex-wrap items-center justify-end gap-2">
+                    <button
+                      className="soft-button inline-flex h-11 items-center justify-center gap-2 px-4 text-sm"
+                      type="button"
+                      onClick={() => runHistoricalMediaRepair("scan")}
+                      disabled={Boolean(busy) || dirtyCount > 0}
+                      title="扫描历史草稿媒体"
+                    >
+                      {busy === "media-scan" ? <Loader2 className="h-4 w-4 animate-spin" /> : <ScanSearch className="h-4 w-4" />}
+                      扫描历史媒体
+                    </button>
+                    <button
+                      className="soft-button inline-flex h-11 items-center justify-center gap-2 px-4 text-sm"
+                      type="button"
+                      onClick={() => runHistoricalMediaRepair("apply")}
+                      disabled={Boolean(busy) || dirtyCount > 0 || !config?.tosConfigured || !config?.tosEnabled}
+                      title="修复可精确匹配的历史草稿媒体"
+                    >
+                      {busy === "media-repair" ? <Loader2 className="h-4 w-4 animate-spin" /> : <Wrench className="h-4 w-4" />}
+                      修复历史媒体
+                    </button>
                     <button
                       className="soft-button inline-flex h-11 items-center justify-center gap-2 px-4 text-sm"
                       type="button"

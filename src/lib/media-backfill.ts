@@ -6,7 +6,9 @@ import { canAccessWorkspaceOwner, type WorkspaceAccessActor } from "./workspace-
 import type { NormalizedSourceItem } from "./types";
 
 export type BackfillSourceItemMediaOptions = {
+  forceImageRefresh?: boolean;
   forceVideoRefresh?: boolean;
+  skipVideoProcessing?: boolean;
 };
 
 export async function backfillSourceItemMedia(
@@ -33,6 +35,7 @@ export async function backfillSourceItemMedia(
   if (!itemsToCache.length) {
     return {
       items: [] as NormalizedSourceItem[],
+      cachedItems: [] as NormalizedSourceItem[],
       requestedCount: ids.length,
       updatedCount: 0,
       notFoundIds: ids,
@@ -44,7 +47,11 @@ export async function backfillSourceItemMedia(
     };
   }
 
-  const cachedItems = await cacheCrawledMedia(itemsToCache, { forceVideoRefresh: options.forceVideoRefresh === true });
+  const cachedItems = await cacheCrawledMedia(itemsToCache, {
+    forceImageRefresh: options.forceImageRefresh === true,
+    forceVideoRefresh: options.forceVideoRefresh === true,
+    skipVideoProcessing: options.skipVideoProcessing === true,
+  });
   const cachedById = new Map(cachedItems.map((item) => [item.id, item]));
   const updatedItems = new Map<string, NormalizedSourceItem>();
 
@@ -96,6 +103,7 @@ export async function backfillSourceItemMedia(
   const updated = Array.from(updatedItems.values());
   return {
     items: updated,
+    cachedItems,
     requestedCount: ids.length,
     updatedCount: updated.length,
     notFoundIds: ids.filter((id) => !foundIds.has(id)),

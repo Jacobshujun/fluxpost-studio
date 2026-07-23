@@ -30,6 +30,7 @@ import {
   Wand2,
   X,
 } from "lucide-react";
+import { toRemoteImagePreviewSrc } from "@/lib/media-preview";
 import { getStoredTheme, setStoredTheme, subscribeTheme, type ThemeMode } from "@/lib/theme";
 import type { FeishuPostPublishState, FeishuPublishJob, GeneratedPost, Platform } from "@/lib/types";
 
@@ -1504,7 +1505,7 @@ function getDataTransferImageFile(data: DataTransfer) {
 function toDisplayImageSrc(url?: string) {
   if (!url) return "";
   if (url.startsWith("/media/") || url.startsWith("/generated/")) return appendQueryParam(url, "v", localMediaPreviewVersion);
-  if (/^https?:\/\//i.test(url)) return `/api/media/proxy?url=${encodeURIComponent(url)}`;
+  if (/^https?:\/\//i.test(url)) return toRemoteImagePreviewSrc(url);
   return url;
 }
 

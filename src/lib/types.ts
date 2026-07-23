@@ -931,6 +931,27 @@ export type TosStorageProbeResult = {
   cleanupVerified: boolean;
 };
 
+export type GeneratedMediaRepairMode = "scan" | "apply";
+
+export type GeneratedMediaRepairFailure = {
+  postId: string;
+  imageIndex: number;
+  sourceImageIndex: number | null;
+  message: string;
+};
+
+export type GeneratedMediaRepairBatchResult = {
+  mode: GeneratedMediaRepairMode;
+  cursor?: string;
+  nextCursor?: string;
+  scannedCount: number;
+  candidatePostCount: number;
+  candidateImageCount: number;
+  repairedPostCount: number;
+  repairedImageCount: number;
+  failures: GeneratedMediaRepairFailure[];
+};
+
 export type AdvancedConfigFieldKind = "text" | "secret" | "number" | "boolean" | "select" | "textarea";
 
 export type AdvancedConfigField = {

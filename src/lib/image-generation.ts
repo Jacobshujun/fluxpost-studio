@@ -8,6 +8,7 @@ import { appConfig, isOpenaiImageRouteConfigured, openaiImageApiKey, openaiImage
 import { concurrencyConfig, mapWithConcurrency, runWithConcurrencyPool } from "./concurrency";
 import { buildSingleImageTaskPrompt } from "./creation-controls";
 import { sniffImageFormat } from "./image-format";
+import { convertHeicBufferToJpeg, normalizeHeicFileToJpeg } from "./image-normalization";
 import { defaultImageGenerationSize, normalizeImageGenerationSize } from "./image-size-options";
 import { buildMediaRequestHeaders } from "./media-request";
 import { fetchOpenAiImageSse } from "./openai-image-sse";
@@ -155,25 +156,29 @@ export async function generateImagesFromPrompt(
         },
       });
       if (task.mode === "keep") {
-        const sourceImageUrl = await resolveDirectSourceImageUrl(task.url);
-        imageUrls.push(sourceImageUrl);
-        taskResultsSummary.push(makeTaskGenerationResult(task, "skipped", {
-          referenceImageCount: 1,
-          fallbackUsed: false,
-          message: "Keep-mode task used the source image without calling the image model.",
-        }));
-        await recordExecutionLog({
-          scope: "openai/image",
-          action: "Keep source image",
-          status: "info",
-          message: `${task.label} used the original source image without calling the image model.`,
-          details: {
-            label: task.label,
-            kind: task.kind,
-            sourceUrl: task.url,
-            outputUrl: sourceImageUrl,
-          },
-        });
+        try {
+          const sourceImageUrl = await resolveDirectSourceImageUrl(task.url);
+          imageUrls.push(sourceImageUrl);
+          taskResultsSummary.push(makeTaskGenerationResult(task, "skipped", {
+            referenceImageCount: 1,
+            fallbackUsed: false,
+            message: "Keep-mode task used the source image without calling the image model.",
+          }));
+          await recordExecutionLog({
+            scope: "openai/image",
+            action: "Keep source image",
+            status: "info",
+            message: `${task.label} used the original source image without calling the image model.`,
+            details: {
+              label: task.label,
+              kind: task.kind,
+              sourceUrl: task.url,
+              outputUrl: sourceImageUrl,
+            },
+          });
+        } catch (error) {
+          taskResultsSummary.push(await recordKeepTaskNeedsReview(task, compactError(error)));
+        }
         continue;
       }
 
@@ -193,7 +198,12 @@ export async function generateImagesFromPrompt(
           continue;
         }
         if (isImageTaskSourceFallbackError(error)) {
-          const fallbackUrl = await resolveDirectSourceImageUrl(task.url);
+          const fallback = await resolveSourceFallback(task, message);
+          if (!fallback.ok) {
+            taskResultsSummary.push(fallback.taskResult);
+            continue;
+          }
+          const fallbackUrl = fallback.url;
           imageUrls.push(fallbackUrl);
           taskResultsSummary.push(makeTaskGenerationResult(task, "completed", {
             endpointPath: appConfig.openaiImageEndpoint === "images" ? "images/edits" : "responses",
@@ -480,27 +490,34 @@ async function runSelectedImageTask(
   });
 
   if (task.mode === "keep") {
-    const sourceImageUrl = await resolveDirectSourceImageUrl(task.url);
-    await recordExecutionLog({
-      scope: "openai/image",
-      action: "Keep source image",
-      status: "info",
-      message: `${task.label} uses the original source image without calling the image model.`,
-      details: {
-        label: task.label,
-        kind: task.kind,
-        sourceUrl: task.url,
-        outputUrl: sourceImageUrl,
-      },
-    });
-    return {
-      imageUrls: [sourceImageUrl],
-      taskResult: makeTaskGenerationResult(task, "skipped", {
-        referenceImageCount: 1,
-        fallbackUsed: false,
-        message: "Keep-mode task used the source image without calling the image model.",
-      }),
-    };
+    try {
+      const sourceImageUrl = await resolveDirectSourceImageUrl(task.url);
+      await recordExecutionLog({
+        scope: "openai/image",
+        action: "Keep source image",
+        status: "info",
+        message: `${task.label} uses the original source image without calling the image model.`,
+        details: {
+          label: task.label,
+          kind: task.kind,
+          sourceUrl: task.url,
+          outputUrl: sourceImageUrl,
+        },
+      });
+      return {
+        imageUrls: [sourceImageUrl],
+        taskResult: makeTaskGenerationResult(task, "skipped", {
+          referenceImageCount: 1,
+          fallbackUsed: false,
+          message: "Keep-mode task used the source image without calling the image model.",
+        }),
+      };
+    } catch (error) {
+      return {
+        imageUrls: [],
+        taskResult: await recordKeepTaskNeedsReview(task, compactError(error)),
+      };
+    }
   }
 
   const taskPrompt = buildSingleImageTaskPrompt(prompt, task);
@@ -523,7 +540,11 @@ async function runSelectedImageTask(
       };
     }
     if (shouldFallbackComfyUiKleinTask(task)) {
-      const fallbackUrl = await resolveDirectSourceImageUrl(task.url);
+      const fallback = await resolveSourceFallback(task, message);
+      if (!fallback.ok) {
+        return { imageUrls: [], taskResult: fallback.taskResult };
+      }
+      const fallbackUrl = fallback.url;
       await recordExecutionLog({
         scope: "comfyui/klein",
         action: "ComfyUI Klein failed; using source image",
@@ -553,7 +574,11 @@ async function runSelectedImageTask(
     if (isImageTaskSourceFallbackError(error)) {
       const fallbackTimeoutMs = resolveImageTaskFallbackTimeoutMs();
       const isTimeout = isImageTaskTimeoutError(error);
-      const fallbackUrl = await resolveDirectSourceImageUrl(task.url);
+      const fallback = await resolveSourceFallback(task, message);
+      if (!fallback.ok) {
+        return { imageUrls: [], taskResult: fallback.taskResult };
+      }
+      const fallbackUrl = fallback.url;
       await recordExecutionLog({
         scope: "openai/image",
         action: isTimeout ? "Image task timed out; using source image" : "Image task failed; using source image",
@@ -678,6 +703,43 @@ async function recordStrictTaskNeedsReview(task: SourceImageTask, message: strin
     },
   });
   return result;
+}
+
+async function recordKeepTaskNeedsReview(task: SourceImageTask, message: string) {
+  const result = makeTaskGenerationResult(task, "needs_review", {
+    referenceImageCount: 1,
+    fallbackUsed: false,
+    message,
+  });
+  await recordExecutionLog({
+    scope: "openai/image",
+    action: "Keep source image needs review",
+    status: "error",
+    message: `${task.label} was not saved because the source image could not be normalized into browser-readable media: ${message}`,
+    details: {
+      taskId: task.id,
+      taskLabel: task.label,
+      sourceUrl: task.url,
+      sourceKind: task.kind,
+      fallbackUsed: false,
+    },
+  });
+  return result;
+}
+
+async function resolveSourceFallback(task: SourceImageTask, providerMessage: string) {
+  try {
+    return { ok: true, url: await resolveDirectSourceImageUrl(task.url) } as const;
+  } catch (error) {
+    const sourceMessage = compactError(error);
+    return {
+      ok: false,
+      taskResult: await recordKeepTaskNeedsReview(
+        task,
+        `Image provider fallback was required (${providerMessage}), but the source image was also unusable (${sourceMessage}).`,
+      ),
+    } as const;
+  }
 }
 
 function shouldFallbackComfyUiKleinTask(task: SourceImageTask) {
@@ -1750,25 +1812,23 @@ async function materializeRemoteReferenceImage(url: string, requestedSize: Image
 async function resolveDirectSourceImageUrl(sourceUrl: string) {
   const localFile = resolvePublicFilePath(sourceUrl);
   if (localFile) {
-    const hasWebpUrl = isWebpImageReference(sourceUrl);
-    const format = await readFile(localFile)
-      .then((buffer) => sniffImageFormat(buffer))
-      .catch((error) => {
-        if (hasWebpUrl) {
-          throw new Error(`source WebP image inspection failed: ${compactError(error)}`);
-        }
-        return undefined;
-      });
-
-    if (format?.mimeType !== "image/webp") return sourceUrl;
-    return convertSourceImageToJpeg(localFile, sourceUrl, "local");
+    const format = await readFile(localFile).then((buffer) => sniffImageFormat(buffer));
+    if (format?.mimeType === "image/heic") {
+      await normalizeHeicFileToJpeg(localFile);
+      return sourceUrl;
+    }
+    if (!format?.browserSupported) {
+      throw new Error(`source image is not browser-readable (${format?.mimeType || "unknown format"})`);
+    }
+    if (format.mimeType === "image/webp") return convertSourceImageToJpeg(localFile, sourceUrl, "local");
+    return sourceUrl;
   }
 
-  if (!/^https?:\/\//i.test(sourceUrl) || !isWebpImageReference(sourceUrl)) return sourceUrl;
-  return materializeRemoteSourceImageAsJpeg(sourceUrl);
+  if (!/^https?:\/\//i.test(sourceUrl)) throw new Error("source image URL is not supported");
+  return materializeRemoteSourceImage(sourceUrl);
 }
 
-async function materializeRemoteSourceImageAsJpeg(url: string) {
+async function materializeRemoteSourceImage(url: string) {
   const response = await fetchWithTimeout(
     url,
     {
@@ -1777,24 +1837,35 @@ async function materializeRemoteSourceImageAsJpeg(url: string) {
     remoteReferenceTimeoutMs,
   );
   if (!response.ok) {
-    throw new Error(`source WebP image download failed: HTTP ${response.status}`);
+    throw new Error(`source image download failed: HTTP ${response.status}`);
   }
 
   const mimeType = normalizeMimeType(response.headers.get("content-type"), url);
-  if (!mimeType.startsWith("image/")) {
-    throw new Error(`source WebP URL did not return an image (${mimeType})`);
+  const contentLength = Number(response.headers.get("content-length") || 0);
+  if (contentLength > 12 * 1024 * 1024) {
+    throw new Error(`source image is too large (${contentLength} bytes)`);
   }
-
   const buffer = Buffer.from(await response.arrayBuffer());
   if (!buffer.length) {
-    throw new Error("source WebP image is empty");
+    throw new Error("source image is empty");
   }
   if (buffer.length > 12 * 1024 * 1024) {
-    throw new Error(`source WebP image is too large (${buffer.length} bytes)`);
+    throw new Error(`source image is too large (${buffer.length} bytes)`);
   }
 
   const format = sniffImageFormat(buffer);
-  if (format?.mimeType !== "image/webp" && mimeType !== "image/webp") return url;
+  if (!format && !mimeType.startsWith("image/")) {
+    throw new Error(`source image URL did not return recognizable image bytes (${mimeType})`);
+  }
+  if (format?.mimeType === "image/heic") {
+    return persistConvertedSourceJpeg(await convertHeicBufferToJpeg(buffer), url, "HEIC");
+  }
+  if (!format?.browserSupported) {
+    throw new Error(`source image is not browser-readable (${format?.mimeType || mimeType || "unknown format"})`);
+  }
+  if (format.mimeType !== "image/webp" && mimeType !== "image/webp") {
+    return persistRemoteSourceImage(buffer, url, format.mimeType, format.extension);
+  }
 
   const rawFile = await writeReferenceInputBuffer(buffer, format?.mimeType || mimeType);
   try {
@@ -1802,6 +1873,51 @@ async function materializeRemoteSourceImageAsJpeg(url: string) {
   } finally {
     await rm(rawFile, { force: true }).catch(() => undefined);
   }
+}
+
+async function persistConvertedSourceJpeg(buffer: Buffer, sourceUrl: string, sourceFormat: string) {
+  const startedAt = Date.now();
+  const outputDir = path.join(process.cwd(), "public", "generated", "source-images");
+  await mkdir(outputDir, { recursive: true });
+  const outputFile = path.join(outputDir, `source-${Date.now()}-${randomUUID()}.jpg`);
+  const outputUrl = `/generated/source-images/${path.basename(outputFile)}`;
+  await writeFile(outputFile, buffer);
+
+  await recordExecutionLog({
+    scope: "openai/image",
+    action: "Source image converted to JPG",
+    status: "info",
+    message: `Direct source-image use was converted from ${sourceFormat} to JPG before being returned.`,
+    durationMs: Date.now() - startedAt,
+    details: {
+      sourceFormat,
+      sourceName: path.basename(sourceUrl.split(/[?#]/)[0] || sourceUrl),
+      outputFile: path.basename(outputFile),
+    },
+  });
+
+  return persistRuntimeMedia({ filePath: outputFile, publicPath: outputUrl, contentType: "image/jpeg" });
+}
+
+async function persistRemoteSourceImage(buffer: Buffer, sourceUrl: string, contentType: string, extension: string) {
+  const outputDir = path.join(process.cwd(), "public", "generated", "source-images");
+  await mkdir(outputDir, { recursive: true });
+  const safeExtension = extension.startsWith(".") ? extension : `.${extension}`;
+  const outputFile = path.join(outputDir, `source-${Date.now()}-${randomUUID()}${safeExtension}`);
+  const outputUrl = `/generated/source-images/${path.basename(outputFile)}`;
+  await writeFile(outputFile, buffer);
+  await recordExecutionLog({
+    scope: "openai/image",
+    action: "Remote source image persisted",
+    status: "info",
+    message: "Direct remote source-image use was persisted before being returned.",
+    details: {
+      contentType,
+      sourceName: path.basename(sourceUrl.split(/[?#]/)[0] || sourceUrl),
+      outputFile: path.basename(outputFile),
+    },
+  });
+  return persistRuntimeMedia({ filePath: outputFile, publicPath: outputUrl, contentType });
 }
 
 async function convertSourceImageToJpeg(inputFile: string, sourceUrl: string, sourceKind: "local" | "remote") {
@@ -1928,11 +2044,6 @@ function runImageResize(inputFile: string, outputFile: string, target?: { width:
     );
     child.on("error", reject);
   });
-}
-
-function isWebpImageReference(value: string) {
-  const cleanValue = value.split(/[?#]/)[0] || "";
-  return /\.webp$/i.test(cleanValue) || /(?:format|fmt|imageMogr2\/format)[=/]webp/i.test(value) || /_webp(?:_|$)/i.test(value);
 }
 
 function extensionFromMimeType(mimeType: string) {

@@ -223,6 +223,7 @@ Invoke-NativeStep "Douyin carousel image check" $nodePath @(".trellis/verificati
 Invoke-NativeStep "Media request headers check" $nodePath @(".trellis/verification/media_request_headers_check.mjs")
 Invoke-NativeStep "Media URL filter check" $nodePath @(".trellis/verification/media_url_filter_check.mjs")
 Invoke-NativeStep "Media cache image format check" $nodePath @(".trellis/verification/media_cache_image_format_check.mjs")
+Invoke-NativeStep "HEIC review delivery check" $nodePath @(".trellis/verification/heic_review_delivery_check.mjs")
 Invoke-NativeStep "Video download fallback check" $nodePath @(".trellis/verification/video_download_fallback_check.mjs")
 Invoke-NativeStep "Video frame policy check" $nodePath @(".trellis/verification/video_frame_policy_check.mjs")
 Invoke-NativeStep "Video quality selection check" $nodePath @(".trellis/verification/video_quality_selection_check.mjs")

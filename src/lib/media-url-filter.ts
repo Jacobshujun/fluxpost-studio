@@ -224,7 +224,7 @@ function scoreWeiboImageUrl(decodedUrl: string) {
   return 0;
 }
 
-function getCachedImageIndex(url: string) {
+export function getCachedImageIndex(url: string) {
   const match = safeDecode(url).match(/(?:^|\/)image-(\d+)(?:[.-]|$)/i);
   if (!match) return undefined;
   const index = Number(match[1]) - 1;

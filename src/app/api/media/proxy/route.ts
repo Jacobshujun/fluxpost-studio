@@ -1,5 +1,7 @@
 import { NextResponse } from "next/server";
+import { normalizeImageMime, sniffImageFormat } from "@/lib/image-format";
 import { buildMediaRequestHeaders, isProxyableRemoteMediaUrl } from "@/lib/media-request";
+import { isManagedRuntimeMediaUrl } from "@/lib/runtime-media-storage";
 
 export const runtime = "nodejs";
 
@@ -11,6 +13,14 @@ export async function GET(request: Request) {
     const target = url.searchParams.get("url") || "";
     if (!isProxyableRemoteMediaUrl(target)) {
       return NextResponse.json({ error: "Invalid media URL" }, { status: 400 });
+    }
+    if (isManagedRuntimeMediaUrl(target)) {
+      return NextResponse.redirect(target, {
+        status: 307,
+        headers: {
+          "Cache-Control": "public, max-age=86400, stale-while-revalidate=604800",
+        },
+      });
     }
 
     const response = await fetch(target, {
@@ -32,14 +42,18 @@ export async function GET(request: Request) {
       return NextResponse.json({ error: "Remote image is too large" }, { status: 413 });
     }
 
-    const image = await response.arrayBuffer();
+    const image = Buffer.from(await response.arrayBuffer());
     if (image.byteLength > maxProxyImageBytes) {
       return NextResponse.json({ error: "Remote image is too large" }, { status: 413 });
+    }
+    const detectedFormat = sniffImageFormat(image);
+    if (normalizeImageMime(contentType) === "image/heic" || detectedFormat?.mimeType === "image/heic") {
+      return NextResponse.json({ error: "Remote HEIC images must be normalized before browser preview" }, { status: 415 });
     }
 
     return new NextResponse(image, {
       headers: {
-        "Content-Type": contentType || "image/jpeg",
+        "Content-Type": detectedFormat?.mimeType || contentType || "image/jpeg",
         "Cache-Control": "public, max-age=86400, stale-while-revalidate=604800",
       },
     });

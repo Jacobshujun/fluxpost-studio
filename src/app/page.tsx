@@ -39,6 +39,7 @@ import {
 } from "@/lib/creation-controls";
 import { defaultDistributionCheckPrompt } from "@/lib/distribution-check-prompt";
 import { defaultImageGenerationSize, imageGenerationSizeOptions, isImageGenerationSize, normalizeImageGenerationSize } from "@/lib/image-size-options";
+import { toRemoteImagePreviewSrc } from "@/lib/media-preview";
 import { getStoredTheme, setStoredTheme, subscribeTheme, type ThemeMode } from "@/lib/theme";
 import {
   defaultSimpleRunMediaSettings,
@@ -890,4 +891,4 @@ function buildSimpleRunMessage(run: SimpleRun) { const crawled = run.platformRes
 function formatSimpleRunStatus(value: SimpleRun["status"]) { return { queued: "排队中", running: "执行中", completed: "已完成", partial: "部分完成", failed: "失败" }[value]; }
 function getSimpleRunStatusClass(value: SimpleRun["status"]) { return value === "completed" ? "text-[var(--mint)]" : value === "failed" ? "text-[var(--rose)]" : value === "running" ? "text-[var(--cyan)]" : "text-[var(--amber)]"; }
 function isAbsoluteLocalPath(url: string) { return /^[A-Za-z]:[\\/]/.test(url) || url.startsWith("\\\\") || url.startsWith("/"); }
-function toDisplayImageSrc(url: string) { if (/^https?:\/\//i.test(url)) return `/api/media/proxy?url=${encodeURIComponent(url)}`; if (isAbsoluteLocalPath(url) && !url.startsWith("/media/") && !url.startsWith("/generated/")) return `/api/materials/preview?path=${encodeURIComponent(url)}`; return url; }
+function toDisplayImageSrc(url: string) { if (/^https?:\/\//i.test(url)) return toRemoteImagePreviewSrc(url); if (isAbsoluteLocalPath(url) && !url.startsWith("/media/") && !url.startsWith("/generated/")) return `/api/materials/preview?path=${encodeURIComponent(url)}`; return url; }

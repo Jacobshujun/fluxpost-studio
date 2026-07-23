@@ -41,8 +41,10 @@ Last updated: 2026-07-20
 - Crawled media local/remote coverage summaries belong in `src/lib/media-cache-status.ts`; frontend display may derive the same shape as a fallback for older records.
 - Crawled image URL filtering and downloaded/remote image alignment belong in `src/lib/media-url-filter.ts`.
 - Image byte-format sniffing belongs in `src/lib/image-format.ts`; media cache, local media serving, and source visual tagging should share it instead of duplicating file-header checks.
+- HEIC-to-JPEG decoding and atomic staged-file replacement belong in `src/lib/image-normalization.ts`; media cache and direct keep-mode generation must share it.
 - Lightweight Douyin image/text carousel URL extraction belongs in `src/lib/douyin-media.ts`; use it from TikHub normalization and content-pool raw repair instead of broad recursive URL fallback for Douyin image posts.
 - Shared remote media request headers belong in `src/lib/media-request.ts`; browser preview proxying belongs in `src/app/api/media/proxy/route.ts`.
+- Browser preview URL selection belongs in client-safe `src/lib/media-preview.ts`. Historical generated-media scan/apply logic belongs in `src/lib/generated-media-repair.ts`; `src/app/api/config/media-repair/route.ts` must stay admin-only and thin.
 - Runtime local media serving belongs in `src/app/api/media/local/[...path]/route.ts`, with browser-stable rewrites configured in `next.config.ts` for `/media/crawl/:path*` and `/generated/:path*`.
 - Review-desk per-image prompt regeneration should reuse `POST /api/images` with a single-image request, update only the selected `imageUrls[index]` in the local draft, and persist through the existing generated-post review save path.
 - Crawl-stage content safety filtering belongs in `src/lib/source-safety.ts`; API routes and simple-run workflow should call it before source tagging and content-pool ingest instead of embedding safety prompts or local rule lists inline.
@@ -77,6 +79,34 @@ Last updated: 2026-07-20
 - Source visual tagging must preflight remote HTTP(S) image assets and sniff local app-served image bytes before model calls: use shared media request headers, validate supported JPEG/PNG/GIF/WebP content, convert valid images to inline data URLs, and record per-asset skips for invalid/unsupported assets.
 - Crawled image cache paths must be browser-readable before they are exposed as `downloadedImages`; HEIC bytes should be converted to JPEG in place, and unsupported cached image bytes should be surfaced as download errors instead of silent broken previews.
 - Do not use production external services in default verification.
+
+## Scenario: HEIC Review Delivery And Historical Repair
+
+### 1. Scope / Trigger
+- Trigger: source-image bytes are HEIC despite a `.jpg` URL, or an admin repairs exact historical source-image references.
+
+### 2. Signatures
+- `POST /api/config/media-repair` accepts `{ mode: "scan" | "apply", cursor?: string, limit?: number }`; default limit is 10 and maximum is 25.
+
+### 3. Contracts
+- Final generated images are verified browser-readable local/TOS URLs. Native Volcengine TOS previews bypass body proxying; custom managed TOS URLs redirect with `307`.
+- `scan` performs no media/provider calls. `apply` may read public source images and perform verified TOS PUT/HEAD only; it passes `forceImageRefresh=true` and `skipVideoProcessing=true`.
+
+### 4. Validation & Error Matrix
+- Non-admin -> `403`; missing session -> `401`; invalid mode/limit -> `400`.
+- Invalid HEIC, TOS verification failure, ambiguous source index, changed post/source ordering, or missing replacement -> failure detail and no unsafe image write.
+
+### 5. Good/Base/Bad Cases
+- Good: exact source URL/index produces managed JPEG and updates matching final/keep/reference URLs.
+- Base: already managed or generated-model images are unchanged; a repeated apply is idempotent.
+- Bad: duplicate source URLs or a stale post/source index remain unchanged for manual review.
+
+### 6. Tests Required
+- Real HEIC bytes under `.jpg`, invalid HEIC, 1 JPEG + 8 HEIC, proxy/direct preview policy, admin boundary, cursor ordering, wrong index, race, TOS failure, and repeated apply.
+
+### 7. Wrong vs Correct
+- Wrong: trust `.jpg`, return the HEIC source URL, proxy TOS bodies through the VPS, or let image repair download video.
+- Correct: sniff bytes, convert/validate/atomically replace, persist verified media, return `needs_review` on failure, load native TOS directly, and keep repair image-only.
 
 ## Scenario: Admin Advanced Environment Configuration
 

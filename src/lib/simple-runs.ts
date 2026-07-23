@@ -509,6 +509,7 @@ async function runSimpleRunWorkflow(
   });
 
   const completedPosts: GeneratedPost[] = [];
+  const publishReadyPosts: GeneratedPost[] = [];
   const produceRunUpdates = createRunUpdateQueue(run);
   for (const source of noMediaItems) {
     const message = describeSimpleProductionMediaSkip(source);
@@ -591,6 +592,7 @@ async function runSimpleRunWorkflow(
         return incrementStage(withPost, "produce", { completed: 1 });
       });
       completedPosts.push(post);
+      if (imageResult.status !== "needs_review") publishReadyPosts.push(post);
       const sourceStatusWarning = await syncSimpleSourceStatus(post, access, run.id, "draft");
       if (sourceStatusWarning) {
         await produceRunUpdates.update((latestRun) => updatePostResultWarning(latestRun, post.id, sourceStatusWarning));
@@ -650,15 +652,34 @@ async function runSimpleRunWorkflow(
     return finishSimpleRun(run, startedAt);
   }
 
+  if (!publishReadyPosts.length) {
+    run = {
+      ...run,
+      publish: {
+        status: "skipped",
+        postCount: 0,
+        message: "All generated drafts require manual image review, so automatic approval and Feishu publishing were skipped.",
+      },
+    };
+    run = await setStage(run, "publish", {
+      status: "skipped",
+      total: completedPosts.length,
+      skipped: completedPosts.length,
+      message: "Generated drafts were kept for manual image review and were not submitted to Feishu.",
+    });
+    return finishSimpleRun(run, startedAt);
+  }
+
   await assertSimpleRunNotForceTerminated(run.id);
   run = await setStage(run, "publish", {
     status: "running",
-    total: completedPosts.length,
+    total: publishReadyPosts.length,
     message: "正在自动审核通过并提交飞书",
   });
 
+  const publishReadyPostIds = new Set(publishReadyPosts.map((post) => post.id));
   try {
-    const approvedPosts = completedPosts.map((post) => ({
+    const approvedPosts = publishReadyPosts.map((post) => ({
       ...post,
       status: "approved" as const,
       updatedAt: new Date().toISOString(),
@@ -676,11 +697,15 @@ async function runSimpleRunWorkflow(
     await assertSimpleRunNotForceTerminated(run.id);
     run = {
       ...run,
-      posts: run.posts.map((post) => ({
-        ...post,
-        status: "approved",
-        error: sourceStatusWarnings.get(post.postId) || post.error,
-      })),
+      posts: run.posts.map((post) =>
+        publishReadyPostIds.has(post.postId)
+          ? {
+              ...post,
+              status: "approved",
+              error: sourceStatusWarnings.get(post.postId) || post.error,
+            }
+          : post,
+      ),
       publish: {
         status: "queued",
         postCount: approvedPosts.length,
@@ -700,13 +725,13 @@ async function runSimpleRunWorkflow(
       ...run,
       publish: {
         status: "failed",
-        postCount: completedPosts.length,
+        postCount: publishReadyPosts.length,
         error: message,
       },
     };
     run = await setStage(run, "publish", {
       status: "error",
-      failed: completedPosts.length,
+      failed: publishReadyPosts.length,
       message,
     });
     run = await addRunError(run, message);
