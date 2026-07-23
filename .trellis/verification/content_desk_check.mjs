@@ -26,7 +26,7 @@ const globals = read("src/app/globals.css");
 const types = read("src/lib/types.ts");
 const simpleRoute = read("src/app/api/simple/runs/route.ts");
 const simpleRuns = read("src/lib/simple-runs.ts");
-const checkPs1 = read(".trellis/verification/check.ps1");
+const checkPs1 = read(".trellis/verification/check.mjs");
 
 assertContains(contentPage, /fetch\(`?\/api\/content-pool/, "/content should read the owner-scoped content pool API.");
 assertContains(contentPage, /fetch\("\/api\/crawl\/jobs"/, "/content should keep keyword crawl entry.");

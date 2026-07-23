@@ -16,7 +16,7 @@ const route = read("src/app/api/simple/runs/route.ts");
 const simpleRuns = read("src/lib/simple-runs.ts");
 const page = read("src/app/page.tsx");
 const creationControls = read("src/lib/creation-controls.ts");
-const checkPs1 = read(".trellis/verification/check.ps1");
+const checkPs1 = read(".trellis/verification/check.mjs");
 
 assertContains(types, /generateImages\?:\s*boolean/, "SimpleRunInput must persist the image-generation switch.");
 

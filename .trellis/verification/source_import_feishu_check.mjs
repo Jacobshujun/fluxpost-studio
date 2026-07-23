@@ -19,7 +19,7 @@ const sourceLinkImport = read("src/lib/source-link-import.ts");
 const simpleRuns = read("src/lib/simple-runs.ts");
 const config = read("src/lib/config.ts");
 const readme = read("README.md");
-const checkPs1 = read(".trellis/verification/check.ps1");
+const checkPs1 = read(".trellis/verification/check.mjs");
 
 if (existsSync(path.join(projectRoot, "src/lib/source-import-feishu.ts"))) {
   throw new Error("Source-link import must not keep the retired Feishu source-import sync module.");

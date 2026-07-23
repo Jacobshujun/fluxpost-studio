@@ -17,7 +17,7 @@ function assertNotContains(source, pattern, message) {
 
 const activityLog = read("src/lib/activity-log.ts");
 const database = read("src/lib/database.ts");
-const check = read(".trellis/verification/check.ps1");
+const check = read(".trellis/verification/check.mjs");
 
 assertContains(
   activityLog,

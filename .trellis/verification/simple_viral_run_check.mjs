@@ -2,7 +2,7 @@ import { readFileSync } from 'node:fs';
 import path from 'node:path';
 const r=(p)=>readFileSync(path.join(process.cwd(),p),'utf8');
 const has=(s,p,m)=>{if(!p.test(s))throw new Error(m)};
-const types=r('src/lib/types.ts'), route=r('src/app/api/simple/runs/route.ts'), simple=r('src/lib/simple-runs.ts'), page=r('src/app/page.tsx'), check=r('.trellis/verification/check.ps1'), viral=r('src/lib/viral-replication.ts'), config=r('src/lib/config.ts'), imageGeneration=r('src/lib/image-generation.ts'), materialPreview=r('src/app/api/materials/preview/route.ts');
+const types=r('src/lib/types.ts'), route=r('src/app/api/simple/runs/route.ts'), simple=r('src/lib/simple-runs.ts'), page=r('src/app/page.tsx'), check=r('.trellis/verification/check.mjs'), viral=r('src/lib/viral-replication.ts'), config=r('src/lib/config.ts'), imageGeneration=r('src/lib/image-generation.ts'), materialPreview=r('src/app/api/materials/preview/route.ts');
 has(types,/viralUrl\?:\s*string/,'viralUrl missing');
 has(types,/viralImitateImages\?:\s*boolean/,'viralImitateImages missing');
 has(types,/viralMaterialPaths\?:\s*string\[\]/,'viralMaterialPaths missing from SimpleRunInput');

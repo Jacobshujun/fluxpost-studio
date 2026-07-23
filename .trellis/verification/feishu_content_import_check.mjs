@@ -24,7 +24,7 @@ const route = read("src/app/api/simple/runs/route.ts");
 const page = read("src/app/page.tsx");
 const types = read("src/lib/types.ts");
 const config = read("src/lib/config.ts");
-const checkPs1 = read(".trellis/verification/check.ps1");
+const checkPs1 = read(".trellis/verification/check.mjs");
 
 assertContains(config, /feishuContentImportBaseToken:\s*process\.env\.FEISHU_CONTENT_IMPORT_BASE_TOKEN\s*\|\|\s*process\.env\.FEISHU_BITABLE_APP_TOKEN/, "Feishu content import should default to the publish Base token.");
 assertContains(config, /feishuContentImportTableId:\s*process\.env\.FEISHU_CONTENT_IMPORT_TABLE_ID\s*\|\|\s*process\.env\.FEISHU_BITABLE_TABLE_ID/, "Feishu content import should default to the publish table.");

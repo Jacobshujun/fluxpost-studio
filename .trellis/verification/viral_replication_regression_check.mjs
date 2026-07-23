@@ -118,7 +118,7 @@ const cjsModule = { exports: {} };
 const tikhub = read("src/lib/tikhub.ts");
 const viral = read("src/lib/viral-replication.ts");
 const imageGeneration = read("src/lib/image-generation.ts");
-const check = read(".trellis/verification/check.ps1");
+const check = read(".trellis/verification/check.mjs");
 const types = read("src/lib/types.ts");
 
 const titleExtractor = tikhub.slice(tikhub.indexOf("function extractSourceTitle"), tikhub.indexOf("function extractContentText"));

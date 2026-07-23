@@ -49,7 +49,7 @@ const route = read("src/app/api/crawl/links/route.ts");
 const simpleRoute = read("src/app/api/simple/runs/route.ts");
 const simpleRuns = read("src/lib/simple-runs.ts");
 const contentPage = read("src/app/content/page.tsx");
-const checkPs1 = read(".trellis/verification/check.ps1");
+const checkPs1 = read(".trellis/verification/check.mjs");
 
 assertContains(types, /export type SourceLinkPlatform = CrawlPlatform \| "xiaopeng_bbs" \| "dongchedi"/, "Xiaopeng BBS should be a source-link platform, not a keyword crawl platform.");
 assertContains(types, /export type Platform = SourceLinkPlatform \| "feishu" \| "original"/, "Platform union must include Xiaopeng BBS through SourceLinkPlatform.");

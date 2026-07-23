@@ -51,7 +51,7 @@ const feishu = read("src/lib/feishu-cli.ts");
 const reviewRoute = read("src/app/api/review/route.ts");
 const publishRoute = read("src/app/api/publish/feishu/route.ts");
 const reviewPage = read("src/app/review/page.tsx");
-const check = read(".trellis/verification/check.ps1");
+const check = read(".trellis/verification/check.mjs");
 
 if (!existsSync(path.join(projectRoot, helperPath))) throw new Error("Feishu field-options helper is missing.");
 if (!existsSync(path.join(projectRoot, routePath))) throw new Error("Feishu vehicle options API route is missing.");

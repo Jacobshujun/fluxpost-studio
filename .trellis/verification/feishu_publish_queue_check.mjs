@@ -26,7 +26,7 @@ const feishu = read("src/lib/feishu-cli.ts");
 const route = read("src/app/api/publish/feishu/route.ts");
 const simpleRuns = read("src/lib/simple-runs.ts");
 const reviewPage = read("src/app/review/page.tsx");
-const check = read(".trellis/verification/check.ps1");
+const check = read(".trellis/verification/check.mjs");
 
 assertContains(types, /export type FeishuPublishQueueStatus/, "Feishu publish queue status type is missing.");
 assertContains(types, /export type FeishuPublishJob = \{[\s\S]*ownerUserId:\s*string[\s\S]*posts:\s*GeneratedPost\[\]/, "Feishu publish job must carry owner and posts.");

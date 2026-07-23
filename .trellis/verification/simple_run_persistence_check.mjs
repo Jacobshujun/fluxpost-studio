@@ -13,7 +13,7 @@ function assertContains(source, pattern, message) {
 
 const simpleRuns = read("src/lib/simple-runs.ts");
 const contentPool = read("src/lib/content-pool.ts");
-const check = read(".trellis/verification/check.ps1");
+const check = read(".trellis/verification/check.mjs");
 
 assertContains(
   simpleRuns,

@@ -165,7 +165,7 @@ const mediaBackfill = read("src/lib/media-backfill.ts");
 const creationControls = read("src/lib/creation-controls.ts");
 const sourceTagging = read("src/lib/source-tagging.ts");
 const contentPage = read("src/app/content/page.tsx");
-const baseline = read(".trellis/verification/check.ps1");
+const baseline = read(".trellis/verification/check.mjs");
 
 assertContains(mediaCache, /selectBestVideoHighlightFrames/, "Media cache must select best video highlight frames before storing.");
 assertContains(mediaCache, /replaceVideoFrameUrlsInMediaUrls/, "Media cache must remove stale unselected frame URLs from mediaUrls.");

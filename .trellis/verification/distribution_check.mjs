@@ -32,7 +32,7 @@ const concurrency = read("src/lib/concurrency.ts");
 const schema = read("db/migrations/001_initial_postgres.sql");
 const settings = read("src/lib/workspace-settings.ts");
 const home = read("src/app/page.tsx");
-const checkPs1 = read(".trellis/verification/check.ps1");
+const checkPs1 = read(".trellis/verification/check.mjs");
 const settingsRoute = read("src/app/api/workspace/settings/route.ts");
 const promptDefaults = read("src/lib/distribution-check-prompt.ts");
 

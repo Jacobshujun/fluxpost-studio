@@ -16,7 +16,7 @@ const sourceLinkImport = read("src/lib/source-link-import.ts");
 const creationControls = read("src/lib/creation-controls.ts");
 const crawlLinksRoute = read("src/app/api/crawl/links/route.ts");
 const contentPage = read("src/app/content/page.tsx");
-const checkPs1 = read(".trellis/verification/check.ps1");
+const checkPs1 = read(".trellis/verification/check.mjs");
 
 assertContains(types, /NormalizedSourceItem[\s\S]*videoFrameOriginalReference\?:\s*boolean/, "NormalizedSourceItem must persist the video-frame original-reference import preference.");
 assertContains(sourceLinkImport, /videoFrameOriginalReference\?:\s*boolean/, "Source-link import inputs must accept the video-frame original-reference switch.");
