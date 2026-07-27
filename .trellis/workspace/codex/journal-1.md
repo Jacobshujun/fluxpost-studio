@@ -208,3 +208,36 @@ Deployed HEIC normalization and direct TOS previews to production 38, backed up 
 ### Next Steps
 
 - None - task complete
+
+
+## Session 7: Infinite canvas workflows and common nodes
+
+**Date**: 2026-07-27
+**Task**: Infinite canvas workflows and common nodes
+**Branch**: `main`
+
+### Summary
+
+Implemented and verified the infinite canvas workflow stack, eight common content-production nodes, GPT vision and bounded media tools, ComfyUI-style quick add, durable previews, execution controls, and local deterministic/browser coverage without live external calls.
+
+### Main Changes
+
+(Add details)
+
+### Git Commits
+
+| Hash | Message |
+|------|---------|
+| `164cb9e` | (see git log) |
+
+### Testing
+
+- [OK] (Add test results)
+
+### Status
+
+[OK] **Completed**
+
+### Next Steps
+
+- None - task complete
