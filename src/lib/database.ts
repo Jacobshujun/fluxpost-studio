@@ -1,8 +1,10 @@
 import { existsSync, mkdirSync, readFileSync } from "node:fs";
 import path from "node:path";
 import { Pool, type PoolClient } from "pg";
+import type { CanvasNodeRun, CanvasRun, CanvasRunQueueItem, CanvasSchedule, CanvasWorkflow } from "./canvas/types";
 import type {
   ContentProject,
+  CopyLibraryEntry,
   CrawlJob,
   DistributionCheckJob,
   ExecutionLogEntry,
@@ -171,6 +173,24 @@ type LibraryTaggingJobRow = {
   data_json: unknown;
 };
 
+type CanvasRunQueueRow = {
+  id: string;
+  run_id: string;
+  status: CanvasRunQueueItem["status"];
+  priority: number;
+  attempts: number;
+  max_attempts: number;
+  run_after: string;
+  locked_by?: string | null;
+  locked_until?: string | null;
+  created_at: string;
+  updated_at: string;
+  started_at?: string | null;
+  completed_at?: string | null;
+  error?: string | null;
+  data_json: unknown;
+};
+
 type StoreTable =
   | "workspace_accounts"
   | "workspace_sessions"
@@ -316,6 +336,57 @@ export async function deleteLibraryAssetFromDb(assetId: string) {
     return;
   }
   getSqliteDatabase().prepare("DELETE FROM library_assets WHERE id = ?").run(assetId);
+}
+
+export async function listCopyLibraryEntriesFromDb(): Promise<CopyLibraryEntry[]> {
+  await ensureDatabaseReady();
+  if (getDatabaseBackend() === "postgres") {
+    const result = await getPostgresPool().query<JsonRow>("SELECT data_json FROM copy_library_entries ORDER BY updated_at DESC, id DESC");
+    return result.rows.map((row) => fromJson<CopyLibraryEntry>(row.data_json));
+  }
+  const rows = getSqliteDatabase().prepare("SELECT data_json FROM copy_library_entries ORDER BY updated_at DESC, id DESC").all() as JsonRow[];
+  return rows.map((row) => fromJson<CopyLibraryEntry>(row.data_json));
+}
+
+export async function getCopyLibraryEntryFromDb(entryId: string) {
+  await ensureDatabaseReady();
+  if (getDatabaseBackend() === "postgres") {
+    const result = await getPostgresPool().query<JsonRow>("SELECT data_json FROM copy_library_entries WHERE id = $1", [entryId]);
+    return result.rows[0] ? fromJson<CopyLibraryEntry>(result.rows[0].data_json) : undefined;
+  }
+  const row = getSqliteDatabase().prepare("SELECT data_json FROM copy_library_entries WHERE id = ?").get(entryId) as JsonRow | undefined;
+  return row ? fromJson<CopyLibraryEntry>(row.data_json) : undefined;
+}
+
+export async function saveCopyLibraryEntryToDb(entry: CopyLibraryEntry) {
+  await ensureDatabaseReady();
+  const values = [entry.id, entry.ownerUserId, entry.visibility, entry.title, entry.createdAt, entry.updatedAt, toJson(entry)];
+  if (getDatabaseBackend() === "postgres") {
+    await getPostgresPool().query(
+      `INSERT INTO copy_library_entries (id, owner_user_id, visibility, title, created_at, updated_at, data_json)
+       VALUES ($1,$2,$3,$4,$5,$6,$7::jsonb)
+       ON CONFLICT(id) DO UPDATE SET owner_user_id=excluded.owner_user_id, visibility=excluded.visibility,
+         title=excluded.title, updated_at=excluded.updated_at, data_json=excluded.data_json`,
+      values,
+    );
+    return entry;
+  }
+  getSqliteDatabase().prepare(
+    `INSERT INTO copy_library_entries (id, owner_user_id, visibility, title, created_at, updated_at, data_json)
+     VALUES (?,?,?,?,?,?,?)
+     ON CONFLICT(id) DO UPDATE SET owner_user_id=excluded.owner_user_id, visibility=excluded.visibility,
+       title=excluded.title, updated_at=excluded.updated_at, data_json=excluded.data_json`,
+  ).run(...values);
+  return entry;
+}
+
+export async function deleteCopyLibraryEntryFromDb(entryId: string) {
+  await ensureDatabaseReady();
+  if (getDatabaseBackend() === "postgres") {
+    await getPostgresPool().query("DELETE FROM copy_library_entries WHERE id = $1", [entryId]);
+    return;
+  }
+  getSqliteDatabase().prepare("DELETE FROM copy_library_entries WHERE id = ?").run(entryId);
 }
 
 export async function listLibraryCollectionsFromDb(): Promise<LibraryCollection[]> {
@@ -2017,6 +2088,465 @@ export async function listRuntimePostsFromDb() {
   return readJsonRows<GeneratedPost>("runtime_posts", "updated_at DESC");
 }
 
+export async function listCanvasWorkflowsFromDb() {
+  await ensureDatabaseReady();
+  if (getDatabaseBackend() === "postgres") {
+    const result = await getPostgresPool().query<JsonRow>("SELECT data_json FROM canvas_workflows ORDER BY updated_at DESC");
+    return result.rows.map((row) => fromJson<CanvasWorkflow>(row.data_json));
+  }
+  const rows = getSqliteDatabase().prepare("SELECT data_json FROM canvas_workflows ORDER BY updated_at DESC").all() as JsonRow[];
+  return rows.map((row) => fromJson<CanvasWorkflow>(row.data_json));
+}
+
+export async function getCanvasWorkflowFromDb(workflowId: string) {
+  await ensureDatabaseReady();
+  if (getDatabaseBackend() === "postgres") {
+    const result = await getPostgresPool().query<JsonRow>("SELECT data_json FROM canvas_workflows WHERE id = $1", [workflowId]);
+    return result.rows[0] ? fromJson<CanvasWorkflow>(result.rows[0].data_json) : undefined;
+  }
+  const row = getSqliteDatabase().prepare("SELECT data_json FROM canvas_workflows WHERE id = ?").get(workflowId) as JsonRow | undefined;
+  return row ? fromJson<CanvasWorkflow>(row.data_json) : undefined;
+}
+
+export async function createCanvasWorkflowInDb(workflow: CanvasWorkflow) {
+  await ensureDatabaseReady();
+  if (getDatabaseBackend() === "postgres") {
+    await getPostgresPool().query(
+      `INSERT INTO canvas_workflows (id, owner_user_id, name, revision, is_template, created_at, updated_at, data_json)
+       VALUES ($1, $2, $3, $4, $5, $6, $7, $8::jsonb)`,
+      [workflow.id, workflow.ownerUserId, workflow.name, workflow.revision, workflow.isTemplate, workflow.createdAt, workflow.updatedAt, toJson(workflow)],
+    );
+    return workflow;
+  }
+  getSqliteDatabase().prepare(`
+    INSERT INTO canvas_workflows (id, owner_user_id, name, revision, is_template, created_at, updated_at, data_json)
+    VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+  `).run(workflow.id, workflow.ownerUserId, workflow.name, workflow.revision, workflow.isTemplate ? 1 : 0, workflow.createdAt, workflow.updatedAt, toJson(workflow));
+  return workflow;
+}
+
+export async function updateCanvasWorkflowInDb(workflow: CanvasWorkflow, expectedRevision: number) {
+  await ensureDatabaseReady();
+  if (getDatabaseBackend() === "postgres") {
+    const result = await getPostgresPool().query(
+      `UPDATE canvas_workflows
+       SET name = $1, revision = $2, is_template = $3, updated_at = $4, data_json = $5::jsonb
+       WHERE id = $6 AND owner_user_id = $7 AND revision = $8`,
+      [workflow.name, workflow.revision, workflow.isTemplate, workflow.updatedAt, toJson(workflow), workflow.id, workflow.ownerUserId, expectedRevision],
+    );
+    return Number(result.rowCount || 0) === 1;
+  }
+  const result = getSqliteDatabase().prepare(`
+    UPDATE canvas_workflows
+    SET name = ?, revision = ?, is_template = ?, updated_at = ?, data_json = ?
+    WHERE id = ? AND owner_user_id = ? AND revision = ?
+  `).run(workflow.name, workflow.revision, workflow.isTemplate ? 1 : 0, workflow.updatedAt, toJson(workflow), workflow.id, workflow.ownerUserId, expectedRevision) as { changes?: number };
+  return Number(result.changes || 0) === 1;
+}
+
+export async function deleteCanvasWorkflowFromDb(workflowId: string, ownerUserId: string) {
+  await ensureDatabaseReady();
+  if (getDatabaseBackend() === "postgres") {
+    const result = await getPostgresPool().query("DELETE FROM canvas_workflows WHERE id = $1 AND owner_user_id = $2", [workflowId, ownerUserId]);
+    return Number(result.rowCount || 0) === 1;
+  }
+  const result = getSqliteDatabase().prepare("DELETE FROM canvas_workflows WHERE id = ? AND owner_user_id = ?").run(workflowId, ownerUserId) as { changes?: number };
+  return Number(result.changes || 0) === 1;
+}
+
+export async function listCanvasSchedulesFromDb(limit = 100) {
+  await ensureDatabaseReady();
+  if (getDatabaseBackend() === "postgres") {
+    const result = await getPostgresPool().query<JsonRow>("SELECT data_json FROM canvas_schedules ORDER BY updated_at DESC LIMIT $1", [limit]);
+    return result.rows.map((row) => fromJson<CanvasSchedule>(row.data_json));
+  }
+  const rows = getSqliteDatabase().prepare("SELECT data_json FROM canvas_schedules ORDER BY updated_at DESC LIMIT ?").all(limit) as JsonRow[];
+  return rows.map((row) => fromJson<CanvasSchedule>(row.data_json));
+}
+
+export async function getCanvasScheduleFromDb(scheduleId: string) {
+  await ensureDatabaseReady();
+  if (getDatabaseBackend() === "postgres") {
+    const result = await getPostgresPool().query<JsonRow>("SELECT data_json FROM canvas_schedules WHERE id = $1", [scheduleId]);
+    return result.rows[0] ? fromJson<CanvasSchedule>(result.rows[0].data_json) : undefined;
+  }
+  const row = getSqliteDatabase().prepare("SELECT data_json FROM canvas_schedules WHERE id = ?").get(scheduleId) as JsonRow | undefined;
+  return row ? fromJson<CanvasSchedule>(row.data_json) : undefined;
+}
+
+export async function createCanvasScheduleInDb(schedule: CanvasSchedule) {
+  await ensureDatabaseReady();
+  if (getDatabaseBackend() === "postgres") {
+    await getPostgresPool().query(
+      `INSERT INTO canvas_schedules (id, owner_user_id, workflow_id, status, revision, created_at, updated_at, data_json)
+       VALUES ($1, $2, $3, $4, $5, $6, $7, $8::jsonb)`,
+      [schedule.id, schedule.ownerUserId, schedule.workflowId, schedule.status, schedule.revision, schedule.createdAt, schedule.updatedAt, toJson(schedule)],
+    );
+    return schedule;
+  }
+  getSqliteDatabase().prepare(`
+    INSERT INTO canvas_schedules (id, owner_user_id, workflow_id, status, revision, created_at, updated_at, data_json)
+    VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+  `).run(schedule.id, schedule.ownerUserId, schedule.workflowId, schedule.status, schedule.revision, schedule.createdAt, schedule.updatedAt, toJson(schedule));
+  return schedule;
+}
+
+export async function updateCanvasScheduleInDb(schedule: CanvasSchedule, expectedRevision: number) {
+  await ensureDatabaseReady();
+  if (getDatabaseBackend() === "postgres") {
+    const result = await getPostgresPool().query(
+      `UPDATE canvas_schedules SET status = $1, revision = $2, updated_at = $3, data_json = $4::jsonb
+       WHERE id = $5 AND owner_user_id = $6 AND revision = $7`,
+      [schedule.status, schedule.revision, schedule.updatedAt, toJson(schedule), schedule.id, schedule.ownerUserId, expectedRevision],
+    );
+    return Number(result.rowCount || 0) === 1;
+  }
+  const result = getSqliteDatabase().prepare(`
+    UPDATE canvas_schedules SET status = ?, revision = ?, updated_at = ?, data_json = ?
+    WHERE id = ? AND owner_user_id = ? AND revision = ?
+  `).run(schedule.status, schedule.revision, schedule.updatedAt, toJson(schedule), schedule.id, schedule.ownerUserId, expectedRevision) as { changes?: number };
+  return Number(result.changes || 0) === 1;
+}
+
+export async function launchCanvasScheduleInDb(schedule: CanvasSchedule, expectedRevision: number, runs: CanvasRun[]) {
+  await ensureDatabaseReady();
+  if (getDatabaseBackend() === "postgres") {
+    const client = await getPostgresPool().connect();
+    try {
+      await client.query("BEGIN");
+      const updated = await client.query(
+        `UPDATE canvas_schedules SET status = $1, revision = $2, updated_at = $3, data_json = $4::jsonb
+         WHERE id = $5 AND owner_user_id = $6 AND revision = $7`,
+        [schedule.status, schedule.revision, schedule.updatedAt, toJson(schedule), schedule.id, schedule.ownerUserId, expectedRevision],
+      );
+      if (Number(updated.rowCount || 0) !== 1) throw new Error("Canvas schedule revision conflict");
+      for (const run of runs) {
+        const item = canvasRunQueueItem(run);
+        await client.query(
+          `INSERT INTO canvas_runs (id, workflow_id, owner_user_id, status, created_at, updated_at, data_json)
+           VALUES ($1,$2,$3,$4,$5,$6,$7::jsonb)`,
+          [run.id, run.workflowId, run.ownerUserId, run.status, run.createdAt, run.updatedAt, toJson(run)],
+        );
+        await client.query(
+          `INSERT INTO canvas_run_queue (id, run_id, status, priority, attempts, max_attempts, run_after, created_at, updated_at, data_json)
+           VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10::jsonb)`,
+          [item.id, item.runId, item.status, item.priority, item.attempts, item.maxAttempts, item.runAfter, item.createdAt, item.updatedAt, toJson(item)],
+        );
+      }
+      await client.query("COMMIT");
+      return schedule;
+    } catch (error) {
+      await client.query("ROLLBACK");
+      throw error;
+    } finally {
+      client.release();
+    }
+  }
+  const db = getSqliteDatabase();
+  runSqliteTransaction(db, () => {
+    const updated = db.prepare(`
+      UPDATE canvas_schedules SET status = ?, revision = ?, updated_at = ?, data_json = ?
+      WHERE id = ? AND owner_user_id = ? AND revision = ?
+    `).run(schedule.status, schedule.revision, schedule.updatedAt, toJson(schedule), schedule.id, schedule.ownerUserId, expectedRevision) as { changes?: number };
+    if (Number(updated.changes || 0) !== 1) throw new Error("Canvas schedule revision conflict");
+    const insertRun = db.prepare(`
+      INSERT INTO canvas_runs (id, workflow_id, owner_user_id, status, created_at, updated_at, data_json)
+      VALUES (?, ?, ?, ?, ?, ?, ?)
+    `);
+    const insertQueue = db.prepare(`
+      INSERT INTO canvas_run_queue (id, run_id, status, priority, attempts, max_attempts, run_after, created_at, updated_at, data_json)
+      VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+    `);
+    for (const run of runs) {
+      const item = canvasRunQueueItem(run);
+      insertRun.run(run.id, run.workflowId, run.ownerUserId, run.status, run.createdAt, run.updatedAt, toJson(run));
+      insertQueue.run(item.id, item.runId, item.status, item.priority, item.attempts, item.maxAttempts, item.runAfter, item.createdAt, item.updatedAt, toJson(item));
+    }
+  });
+  return schedule;
+}
+
+export async function deferCanvasRunQueueItems(runIds: string[], deferred: boolean) {
+  await ensureDatabaseReady();
+  const ids = Array.from(new Set(runIds.filter(Boolean)));
+  if (!ids.length) return 0;
+  const runAfter = deferred ? "9999-12-31T23:59:59.999Z" : new Date().toISOString();
+  if (getDatabaseBackend() === "postgres") {
+    const result = await getPostgresPool().query(
+      `UPDATE canvas_run_queue SET run_after = $1, updated_at = $2
+       WHERE run_id = ANY($3::text[]) AND status = 'queued'`,
+      [runAfter, new Date().toISOString(), ids],
+    );
+    return Number(result.rowCount || 0);
+  }
+  const placeholders = ids.map(() => "?").join(",");
+  const result = getSqliteDatabase().prepare(
+    `UPDATE canvas_run_queue SET run_after = ?, updated_at = ? WHERE run_id IN (${placeholders}) AND status = 'queued'`,
+  ).run(runAfter, new Date().toISOString(), ...ids) as { changes?: number };
+  return Number(result.changes || 0);
+}
+
+export async function deleteCanvasScheduleFromDb(scheduleId: string, ownerUserId: string) {
+  await ensureDatabaseReady();
+  if (getDatabaseBackend() === "postgres") {
+    const result = await getPostgresPool().query("DELETE FROM canvas_schedules WHERE id = $1 AND owner_user_id = $2", [scheduleId, ownerUserId]);
+    return Number(result.rowCount || 0) === 1;
+  }
+  const result = getSqliteDatabase().prepare("DELETE FROM canvas_schedules WHERE id = ? AND owner_user_id = ?").run(scheduleId, ownerUserId) as { changes?: number };
+  return Number(result.changes || 0) === 1;
+}
+
+export async function listCanvasRunsFromDb(limit = 40) {
+  await ensureDatabaseReady();
+  if (getDatabaseBackend() === "postgres") {
+    const result = await getPostgresPool().query<JsonRow>("SELECT data_json FROM canvas_runs ORDER BY created_at DESC LIMIT $1", [limit]);
+    return result.rows.map((row) => fromJson<CanvasRun>(row.data_json));
+  }
+  const rows = getSqliteDatabase().prepare("SELECT data_json FROM canvas_runs ORDER BY created_at DESC LIMIT ?").all(limit) as JsonRow[];
+  return rows.map((row) => fromJson<CanvasRun>(row.data_json));
+}
+
+export async function listCanvasSuccessfulNodeRunsForWorkflowFromDb(workflowId: string) {
+  await ensureDatabaseReady();
+  type SuccessfulNodeRunRow = { node_run_json: unknown; run_json: unknown };
+  if (getDatabaseBackend() === "postgres") {
+    const result = await getPostgresPool().query<SuccessfulNodeRunRow>(
+      `SELECT node_runs.data_json AS node_run_json, canvas_runs.data_json AS run_json
+       FROM canvas_node_runs AS node_runs
+       JOIN canvas_runs ON canvas_runs.id = node_runs.run_id
+       WHERE canvas_runs.workflow_id = $1
+         AND node_runs.status IN ('completed', 'reused', 'bypassed')
+       ORDER BY canvas_runs.created_at DESC, node_runs.attempt DESC`,
+      [workflowId],
+    );
+    return result.rows.map((row) => ({
+      run: fromJson<CanvasRun>(row.run_json),
+      nodeRun: fromJson<CanvasNodeRun>(row.node_run_json),
+    }));
+  }
+  const rows = getSqliteDatabase().prepare(
+    `SELECT node_runs.data_json AS node_run_json, canvas_runs.data_json AS run_json
+     FROM canvas_node_runs AS node_runs
+     JOIN canvas_runs ON canvas_runs.id = node_runs.run_id
+     WHERE canvas_runs.workflow_id = ?
+       AND node_runs.status IN ('completed', 'reused', 'bypassed')
+     ORDER BY canvas_runs.created_at DESC, node_runs.attempt DESC`,
+  ).all(workflowId) as SuccessfulNodeRunRow[];
+  return rows.map((row) => ({
+    run: fromJson<CanvasRun>(row.run_json),
+    nodeRun: fromJson<CanvasNodeRun>(row.node_run_json),
+  }));
+}
+
+export async function getCanvasRunFromDb(runId: string) {
+  await ensureDatabaseReady();
+  if (getDatabaseBackend() === "postgres") {
+    const result = await getPostgresPool().query<JsonRow>("SELECT data_json FROM canvas_runs WHERE id = $1", [runId]);
+    return result.rows[0] ? fromJson<CanvasRun>(result.rows[0].data_json) : undefined;
+  }
+  const row = getSqliteDatabase().prepare("SELECT data_json FROM canvas_runs WHERE id = ?").get(runId) as JsonRow | undefined;
+  return row ? fromJson<CanvasRun>(row.data_json) : undefined;
+}
+
+export async function saveCanvasRunToDb(run: CanvasRun) {
+  await ensureDatabaseReady();
+  if (getDatabaseBackend() === "postgres") {
+    await getPostgresPool().query(
+      `INSERT INTO canvas_runs (id, workflow_id, owner_user_id, status, created_at, updated_at, data_json)
+       VALUES ($1, $2, $3, $4, $5, $6, $7::jsonb)
+       ON CONFLICT(id) DO UPDATE SET status = excluded.status, updated_at = excluded.updated_at, data_json = excluded.data_json`,
+      [run.id, run.workflowId, run.ownerUserId, run.status, run.createdAt, run.updatedAt, toJson(run)],
+    );
+    return run;
+  }
+  getSqliteDatabase().prepare(`
+    INSERT INTO canvas_runs (id, workflow_id, owner_user_id, status, created_at, updated_at, data_json)
+    VALUES (?, ?, ?, ?, ?, ?, ?)
+    ON CONFLICT(id) DO UPDATE SET status = excluded.status, updated_at = excluded.updated_at, data_json = excluded.data_json
+  `).run(run.id, run.workflowId, run.ownerUserId, run.status, run.createdAt, run.updatedAt, toJson(run));
+  return run;
+}
+
+export async function listCanvasNodeRunsFromDb(runId: string) {
+  await ensureDatabaseReady();
+  if (getDatabaseBackend() === "postgres") {
+    const result = await getPostgresPool().query<JsonRow>("SELECT data_json FROM canvas_node_runs WHERE run_id = $1 ORDER BY node_id ASC, attempt ASC", [runId]);
+    return result.rows.map((row) => fromJson<CanvasNodeRun>(row.data_json));
+  }
+  const rows = getSqliteDatabase().prepare("SELECT data_json FROM canvas_node_runs WHERE run_id = ? ORDER BY node_id ASC, attempt ASC").all(runId) as JsonRow[];
+  return rows.map((row) => fromJson<CanvasNodeRun>(row.data_json));
+}
+
+export async function getCanvasNodeRunFromDb(nodeRunId: string) {
+  await ensureDatabaseReady();
+  if (getDatabaseBackend() === "postgres") {
+    const result = await getPostgresPool().query<JsonRow>("SELECT data_json FROM canvas_node_runs WHERE id = $1", [nodeRunId]);
+    return result.rows[0] ? fromJson<CanvasNodeRun>(result.rows[0].data_json) : undefined;
+  }
+  const row = getSqliteDatabase().prepare("SELECT data_json FROM canvas_node_runs WHERE id = ?").get(nodeRunId) as JsonRow | undefined;
+  return row ? fromJson<CanvasNodeRun>(row.data_json) : undefined;
+}
+
+export async function saveCanvasNodeRunToDb(nodeRun: CanvasNodeRun) {
+  await ensureDatabaseReady();
+  if (getDatabaseBackend() === "postgres") {
+    await getPostgresPool().query(
+      `INSERT INTO canvas_node_runs (id, run_id, node_id, node_type, attempt, status, created_at, updated_at, data_json)
+       VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9::jsonb)
+       ON CONFLICT(id) DO UPDATE SET status = excluded.status, updated_at = excluded.updated_at, data_json = excluded.data_json`,
+      [nodeRun.id, nodeRun.runId, nodeRun.nodeId, nodeRun.nodeType, nodeRun.attempt, nodeRun.status, nodeRun.createdAt, nodeRun.updatedAt, toJson(nodeRun)],
+    );
+    return nodeRun;
+  }
+  getSqliteDatabase().prepare(`
+    INSERT INTO canvas_node_runs (id, run_id, node_id, node_type, attempt, status, created_at, updated_at, data_json)
+    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
+    ON CONFLICT(id) DO UPDATE SET status = excluded.status, updated_at = excluded.updated_at, data_json = excluded.data_json
+  `).run(nodeRun.id, nodeRun.runId, nodeRun.nodeId, nodeRun.nodeType, nodeRun.attempt, nodeRun.status, nodeRun.createdAt, nodeRun.updatedAt, toJson(nodeRun));
+  return nodeRun;
+}
+
+export async function enqueueCanvasRunQueueItem(run: CanvasRun) {
+  const item = canvasRunQueueItem(run);
+  await ensureDatabaseReady();
+  if (getDatabaseBackend() === "postgres") {
+    await getPostgresPool().query(
+      `INSERT INTO canvas_run_queue (id, run_id, status, priority, attempts, max_attempts, run_after, created_at, updated_at, data_json)
+       VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10::jsonb)
+       ON CONFLICT(run_id) DO NOTHING`,
+      [item.id, item.runId, item.status, item.priority, item.attempts, item.maxAttempts, item.runAfter, item.createdAt, item.updatedAt, toJson(item)],
+    );
+    return item;
+  }
+  getSqliteDatabase().prepare(`
+    INSERT OR IGNORE INTO canvas_run_queue (id, run_id, status, priority, attempts, max_attempts, run_after, created_at, updated_at, data_json)
+    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+  `).run(item.id, item.runId, item.status, item.priority, item.attempts, item.maxAttempts, item.runAfter, item.createdAt, item.updatedAt, toJson(item));
+  return item;
+}
+
+function canvasRunQueueItem(run: CanvasRun): CanvasRunQueueItem {
+  return {
+    id: `canvas-queue-${run.id}`,
+    runId: run.id,
+    status: "queued",
+    priority: 0,
+    attempts: 0,
+    maxAttempts: 1,
+    runAfter: run.createdAt,
+    createdAt: run.createdAt,
+    updatedAt: run.createdAt,
+  };
+}
+
+export async function requeueExpiredCanvasRunQueueItemsWithProviderTasks() {
+  await ensureDatabaseReady();
+  const now = new Date().toISOString();
+  if (getDatabaseBackend() === "postgres") {
+    const result = await getPostgresPool().query(
+      `UPDATE canvas_run_queue queue
+       SET status = 'queued', attempts = 0, run_after = $1, locked_by = NULL, locked_until = NULL,
+           completed_at = NULL, error = NULL, updated_at = $1
+       WHERE queue.status = 'running' AND queue.locked_until <= $1
+         AND EXISTS (
+           SELECT 1 FROM canvas_node_runs node_run
+           WHERE node_run.run_id = queue.run_id AND node_run.status = 'running'
+             AND COALESCE(node_run.data_json->>'providerTaskId', '') <> ''
+         )`,
+      [now],
+    );
+    return Number(result.rowCount || 0);
+  }
+  const result = getSqliteDatabase().prepare(
+    `UPDATE canvas_run_queue
+     SET status = 'queued', attempts = 0, run_after = ?, locked_by = NULL, locked_until = NULL,
+         completed_at = NULL, error = NULL, updated_at = ?
+     WHERE status = 'running' AND locked_until <= ?
+       AND EXISTS (
+         SELECT 1 FROM canvas_node_runs node_run
+         WHERE node_run.run_id = canvas_run_queue.run_id AND node_run.status = 'running'
+           AND COALESCE(json_extract(node_run.data_json, '$.providerTaskId'), '') <> ''
+       )`,
+  ).run(now, now, now) as { changes?: number };
+  return Number(result.changes || 0);
+}
+
+export async function claimNextCanvasRunQueueItem(workerId: string, lockMs = 10 * 60_000) {
+  await ensureDatabaseReady();
+  const now = new Date();
+  const nowIso = now.toISOString();
+  const lockedUntil = new Date(now.getTime() + lockMs).toISOString();
+  if (getDatabaseBackend() === "postgres") {
+    const result = await getPostgresPool().query<CanvasRunQueueRow>(
+      `WITH next_item AS (
+         SELECT id FROM canvas_run_queue
+         WHERE status = 'queued' AND run_after <= $1 AND attempts < max_attempts
+         ORDER BY priority DESC, created_at ASC LIMIT 1 FOR UPDATE SKIP LOCKED
+       )
+       UPDATE canvas_run_queue queue
+       SET status = 'running', attempts = queue.attempts + 1, locked_by = $2, locked_until = $3,
+           started_at = COALESCE(queue.started_at, $1), updated_at = $1
+       FROM next_item WHERE queue.id = next_item.id RETURNING queue.*`,
+      [nowIso, workerId, lockedUntil],
+    );
+    return result.rows[0] ? fromCanvasRunQueueRow(result.rows[0]) : undefined;
+  }
+  const db = getSqliteDatabase();
+  let claimed: CanvasRunQueueItem | undefined;
+  runSqliteTransaction(db, () => {
+    const row = db.prepare(`SELECT * FROM canvas_run_queue WHERE status = 'queued' AND run_after <= ? AND attempts < max_attempts ORDER BY priority DESC, created_at ASC LIMIT 1`).get(nowIso) as CanvasRunQueueRow | undefined;
+    if (!row) return;
+    db.prepare(`UPDATE canvas_run_queue SET status = 'running', attempts = attempts + 1, locked_by = ?, locked_until = ?, started_at = COALESCE(started_at, ?), updated_at = ? WHERE id = ?`).run(workerId, lockedUntil, nowIso, nowIso, row.id);
+    claimed = fromCanvasRunQueueRow(db.prepare("SELECT * FROM canvas_run_queue WHERE id = ?").get(row.id) as CanvasRunQueueRow);
+  });
+  return claimed;
+}
+
+export async function heartbeatCanvasRunQueueItem(queueId: string, workerId: string, lockMs = 10 * 60_000) {
+  await ensureDatabaseReady();
+  const now = new Date();
+  const nowIso = now.toISOString();
+  const lockedUntil = new Date(now.getTime() + lockMs).toISOString();
+  if (getDatabaseBackend() === "postgres") {
+    await getPostgresPool().query("UPDATE canvas_run_queue SET locked_until = $1, updated_at = $2 WHERE id = $3 AND locked_by = $4 AND status = 'running'", [lockedUntil, nowIso, queueId, workerId]);
+    return;
+  }
+  getSqliteDatabase().prepare("UPDATE canvas_run_queue SET locked_until = ?, updated_at = ? WHERE id = ? AND locked_by = ? AND status = 'running'").run(lockedUntil, nowIso, queueId, workerId);
+}
+
+export async function finishCanvasRunQueueItem(queueId: string, workerId: string, status: "completed" | "failed" | "cancelled", error?: string) {
+  await ensureDatabaseReady();
+  const now = new Date().toISOString();
+  if (getDatabaseBackend() === "postgres") {
+    await getPostgresPool().query(
+      "UPDATE canvas_run_queue SET status = $1, locked_by = NULL, locked_until = NULL, completed_at = $2, updated_at = $2, error = $3 WHERE id = $4 AND locked_by = $5",
+      [status, now, error || null, queueId, workerId],
+    );
+    return;
+  }
+  getSqliteDatabase().prepare("UPDATE canvas_run_queue SET status = ?, locked_by = NULL, locked_until = NULL, completed_at = ?, updated_at = ?, error = ? WHERE id = ? AND locked_by = ?").run(status, now, now, error || null, queueId, workerId);
+}
+
+export async function requeueCanvasRunQueueItem(runId: string, delayMs = 0) {
+  await ensureDatabaseReady();
+  const nowDate = new Date();
+  const now = nowDate.toISOString();
+  const runAfter = new Date(nowDate.getTime() + Math.max(0, delayMs)).toISOString();
+  if (getDatabaseBackend() === "postgres") {
+    const result = await getPostgresPool().query(
+      `UPDATE canvas_run_queue SET status = 'queued', attempts = 0, run_after = $1, locked_by = NULL,
+       locked_until = NULL, completed_at = NULL, error = NULL, updated_at = $1 WHERE run_id = $2`,
+      [runAfter, runId],
+    );
+    return Number(result.rowCount || 0) === 1;
+  }
+  const result = getSqliteDatabase().prepare(
+    `UPDATE canvas_run_queue SET status = 'queued', attempts = 0, run_after = ?, locked_by = NULL,
+       locked_until = NULL, completed_at = NULL, error = NULL, updated_at = ? WHERE run_id = ?`,
+  ).run(runAfter, now, runId) as { changes?: number };
+  return Number(result.changes || 0) === 1;
+}
+
 async function ensureDatabaseReady() {
   const backend = getDatabaseBackend();
   if (initializationBackend === backend && initializationPromise) return initializationPromise;
@@ -2447,6 +2977,76 @@ function createSqliteSchema(db: SqliteDatabase) {
     CREATE INDEX IF NOT EXISTS idx_lark_task_launches_run_id ON lark_task_launches(run_id);
     CREATE INDEX IF NOT EXISTS idx_lark_task_launches_created_at ON lark_task_launches(created_at DESC);
 
+    CREATE TABLE IF NOT EXISTS canvas_workflows (
+      id TEXT PRIMARY KEY,
+      owner_user_id TEXT NOT NULL,
+      name TEXT NOT NULL,
+      revision INTEGER NOT NULL,
+      is_template INTEGER NOT NULL DEFAULT 0,
+      created_at TEXT NOT NULL,
+      updated_at TEXT NOT NULL,
+      data_json TEXT NOT NULL
+    );
+    CREATE INDEX IF NOT EXISTS idx_canvas_workflows_owner_updated ON canvas_workflows(owner_user_id, updated_at DESC);
+
+    CREATE TABLE IF NOT EXISTS canvas_schedules (
+      id TEXT PRIMARY KEY,
+      owner_user_id TEXT NOT NULL,
+      workflow_id TEXT NOT NULL,
+      status TEXT NOT NULL,
+      revision INTEGER NOT NULL,
+      created_at TEXT NOT NULL,
+      updated_at TEXT NOT NULL,
+      data_json TEXT NOT NULL
+    );
+    CREATE INDEX IF NOT EXISTS idx_canvas_schedules_owner_updated ON canvas_schedules(owner_user_id, updated_at DESC);
+    CREATE INDEX IF NOT EXISTS idx_canvas_schedules_status_updated ON canvas_schedules(status, updated_at ASC);
+
+    CREATE TABLE IF NOT EXISTS canvas_runs (
+      id TEXT PRIMARY KEY,
+      workflow_id TEXT NOT NULL,
+      owner_user_id TEXT NOT NULL,
+      status TEXT NOT NULL,
+      created_at TEXT NOT NULL,
+      updated_at TEXT NOT NULL,
+      data_json TEXT NOT NULL
+    );
+    CREATE INDEX IF NOT EXISTS idx_canvas_runs_owner_created ON canvas_runs(owner_user_id, created_at DESC);
+    CREATE INDEX IF NOT EXISTS idx_canvas_runs_workflow_created ON canvas_runs(workflow_id, created_at DESC);
+
+    CREATE TABLE IF NOT EXISTS canvas_node_runs (
+      id TEXT PRIMARY KEY,
+      run_id TEXT NOT NULL,
+      node_id TEXT NOT NULL,
+      node_type TEXT NOT NULL,
+      attempt INTEGER NOT NULL,
+      status TEXT NOT NULL,
+      created_at TEXT NOT NULL,
+      updated_at TEXT NOT NULL,
+      data_json TEXT NOT NULL,
+      UNIQUE(run_id, node_id, attempt)
+    );
+    CREATE INDEX IF NOT EXISTS idx_canvas_node_runs_run_node ON canvas_node_runs(run_id, node_id, attempt ASC);
+
+    CREATE TABLE IF NOT EXISTS canvas_run_queue (
+      id TEXT PRIMARY KEY,
+      run_id TEXT NOT NULL UNIQUE,
+      status TEXT NOT NULL,
+      priority INTEGER NOT NULL DEFAULT 0,
+      attempts INTEGER NOT NULL DEFAULT 0,
+      max_attempts INTEGER NOT NULL DEFAULT 1,
+      run_after TEXT NOT NULL,
+      locked_by TEXT,
+      locked_until TEXT,
+      created_at TEXT NOT NULL,
+      updated_at TEXT NOT NULL,
+      started_at TEXT,
+      completed_at TEXT,
+      error TEXT,
+      data_json TEXT NOT NULL
+    );
+    CREATE INDEX IF NOT EXISTS idx_canvas_run_queue_ready ON canvas_run_queue(status, run_after, priority DESC, created_at ASC);
+
     CREATE TABLE IF NOT EXISTS library_assets (
       id TEXT PRIMARY KEY,
       owner_user_id TEXT NOT NULL,
@@ -2531,6 +3131,18 @@ function createSqliteSchema(db: SqliteDatabase) {
     );
     CREATE INDEX IF NOT EXISTS idx_library_tagging_jobs_ready ON library_tagging_jobs(status, run_after, created_at ASC);
     CREATE INDEX IF NOT EXISTS idx_library_tagging_jobs_asset ON library_tagging_jobs(asset_id, created_at DESC);
+
+    CREATE TABLE IF NOT EXISTS copy_library_entries (
+      id TEXT PRIMARY KEY,
+      owner_user_id TEXT NOT NULL,
+      visibility TEXT NOT NULL,
+      title TEXT NOT NULL,
+      created_at TEXT NOT NULL,
+      updated_at TEXT NOT NULL,
+      data_json TEXT NOT NULL
+    );
+    CREATE INDEX IF NOT EXISTS idx_copy_library_entries_owner_updated ON copy_library_entries(owner_user_id, updated_at DESC, id DESC);
+    CREATE INDEX IF NOT EXISTS idx_copy_library_entries_visibility_updated ON copy_library_entries(visibility, updated_at DESC, id DESC);
   `);
 }
 
@@ -2763,6 +3375,76 @@ const postgresSchemaSql = `
   CREATE INDEX IF NOT EXISTS idx_lark_task_launches_run_id ON lark_task_launches(run_id);
   CREATE INDEX IF NOT EXISTS idx_lark_task_launches_created_at ON lark_task_launches(created_at DESC);
 
+  CREATE TABLE IF NOT EXISTS canvas_workflows (
+    id TEXT PRIMARY KEY,
+    owner_user_id TEXT NOT NULL,
+    name TEXT NOT NULL,
+    revision INTEGER NOT NULL,
+    is_template BOOLEAN NOT NULL DEFAULT FALSE,
+    created_at TIMESTAMPTZ NOT NULL,
+    updated_at TIMESTAMPTZ NOT NULL,
+    data_json JSONB NOT NULL
+  );
+  CREATE INDEX IF NOT EXISTS idx_canvas_workflows_owner_updated ON canvas_workflows(owner_user_id, updated_at DESC);
+
+  CREATE TABLE IF NOT EXISTS canvas_schedules (
+    id TEXT PRIMARY KEY,
+    owner_user_id TEXT NOT NULL,
+    workflow_id TEXT NOT NULL,
+    status TEXT NOT NULL,
+    revision INTEGER NOT NULL,
+    created_at TIMESTAMPTZ NOT NULL,
+    updated_at TIMESTAMPTZ NOT NULL,
+    data_json JSONB NOT NULL
+  );
+  CREATE INDEX IF NOT EXISTS idx_canvas_schedules_owner_updated ON canvas_schedules(owner_user_id, updated_at DESC);
+  CREATE INDEX IF NOT EXISTS idx_canvas_schedules_status_updated ON canvas_schedules(status, updated_at ASC);
+
+  CREATE TABLE IF NOT EXISTS canvas_runs (
+    id TEXT PRIMARY KEY,
+    workflow_id TEXT NOT NULL,
+    owner_user_id TEXT NOT NULL,
+    status TEXT NOT NULL,
+    created_at TIMESTAMPTZ NOT NULL,
+    updated_at TIMESTAMPTZ NOT NULL,
+    data_json JSONB NOT NULL
+  );
+  CREATE INDEX IF NOT EXISTS idx_canvas_runs_owner_created ON canvas_runs(owner_user_id, created_at DESC);
+  CREATE INDEX IF NOT EXISTS idx_canvas_runs_workflow_created ON canvas_runs(workflow_id, created_at DESC);
+
+  CREATE TABLE IF NOT EXISTS canvas_node_runs (
+    id TEXT PRIMARY KEY,
+    run_id TEXT NOT NULL,
+    node_id TEXT NOT NULL,
+    node_type TEXT NOT NULL,
+    attempt INTEGER NOT NULL,
+    status TEXT NOT NULL,
+    created_at TIMESTAMPTZ NOT NULL,
+    updated_at TIMESTAMPTZ NOT NULL,
+    data_json JSONB NOT NULL,
+    UNIQUE(run_id, node_id, attempt)
+  );
+  CREATE INDEX IF NOT EXISTS idx_canvas_node_runs_run_node ON canvas_node_runs(run_id, node_id, attempt ASC);
+
+  CREATE TABLE IF NOT EXISTS canvas_run_queue (
+    id TEXT PRIMARY KEY,
+    run_id TEXT NOT NULL UNIQUE,
+    status TEXT NOT NULL,
+    priority INTEGER NOT NULL DEFAULT 0,
+    attempts INTEGER NOT NULL DEFAULT 0,
+    max_attempts INTEGER NOT NULL DEFAULT 1,
+    run_after TIMESTAMPTZ NOT NULL,
+    locked_by TEXT,
+    locked_until TIMESTAMPTZ,
+    created_at TIMESTAMPTZ NOT NULL,
+    updated_at TIMESTAMPTZ NOT NULL,
+    started_at TIMESTAMPTZ,
+    completed_at TIMESTAMPTZ,
+    error TEXT,
+    data_json JSONB NOT NULL
+  );
+  CREATE INDEX IF NOT EXISTS idx_canvas_run_queue_ready ON canvas_run_queue(status, run_after, priority DESC, created_at ASC);
+
   CREATE TABLE IF NOT EXISTS library_assets (
     id TEXT PRIMARY KEY,
     owner_user_id TEXT NOT NULL,
@@ -2842,6 +3524,18 @@ const postgresSchemaSql = `
   );
   CREATE INDEX IF NOT EXISTS idx_library_tagging_jobs_ready ON library_tagging_jobs(status, run_after, created_at ASC);
   CREATE INDEX IF NOT EXISTS idx_library_tagging_jobs_asset ON library_tagging_jobs(asset_id, created_at DESC);
+
+  CREATE TABLE IF NOT EXISTS copy_library_entries (
+    id TEXT PRIMARY KEY,
+    owner_user_id TEXT NOT NULL,
+    visibility TEXT NOT NULL,
+    title TEXT NOT NULL,
+    created_at TIMESTAMPTZ NOT NULL,
+    updated_at TIMESTAMPTZ NOT NULL,
+    data_json JSONB NOT NULL
+  );
+  CREATE INDEX IF NOT EXISTS idx_copy_library_entries_owner_updated ON copy_library_entries(owner_user_id, updated_at DESC, id DESC);
+  CREATE INDEX IF NOT EXISTS idx_copy_library_entries_visibility_updated ON copy_library_entries(visibility, updated_at DESC, id DESC);
 `;
 
 async function migrateLegacyJsonToPostgres() {
@@ -3101,6 +3795,25 @@ function setSqliteMeta(db: SqliteDatabase, key: string, value: string) {
 }
 
 function fromSimpleRunQueueRow(row: SimpleRunQueueRow): SimpleRunQueueItem {
+  return {
+    id: row.id,
+    runId: row.run_id,
+    status: row.status,
+    priority: Number(row.priority || 0),
+    attempts: Number(row.attempts || 0),
+    maxAttempts: Number(row.max_attempts || 1),
+    runAfter: normalizeDateValue(row.run_after),
+    lockedBy: row.locked_by || undefined,
+    lockedUntil: row.locked_until ? normalizeDateValue(row.locked_until) : undefined,
+    createdAt: normalizeDateValue(row.created_at),
+    updatedAt: normalizeDateValue(row.updated_at),
+    startedAt: row.started_at ? normalizeDateValue(row.started_at) : undefined,
+    completedAt: row.completed_at ? normalizeDateValue(row.completed_at) : undefined,
+    error: row.error || undefined,
+  };
+}
+
+function fromCanvasRunQueueRow(row: CanvasRunQueueRow): CanvasRunQueueItem {
   return {
     id: row.id,
     runId: row.run_id,

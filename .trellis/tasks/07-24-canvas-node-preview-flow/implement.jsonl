@@ -1,0 +1,4 @@
+{"file":".trellis/spec/frontend/component-guidelines.md","reason":"Route-local component, semantic control, and interaction conventions for the canvas UI."}
+{"file":".trellis/spec/frontend/state-management.md","reason":"Local preview state and server-owned active-run projection boundaries."}
+{"file":".trellis/spec/frontend/quality-guidelines.md","reason":"Responsive UI and required verification expectations."}
+{"file":".trellis/spec/fluxpost/architecture_rules.md","reason":"Existing canvas graph, run artifact, and media-reference boundaries."}

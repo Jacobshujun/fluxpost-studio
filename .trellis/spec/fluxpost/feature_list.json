@@ -312,6 +312,26 @@
         "2026-07-20 isolated live TOS probe passed PUT, HEAD, anonymous GET, video Range 206, and DELETE without persisting or exposing operator credentials"
       ],
       "notes": "Implementation and isolated provider validation are complete. Keep ready_for_review until deployment to 82.158.226.10 and a real FluxPost image/video workflow prove URL persistence, local staging cleanup, historical media compatibility, and service health. The older VPS remains out of scope."
+    },
+    {
+      "id": "infinite-canvas-workflows",
+      "title": "Infinite canvas workflow V1",
+      "status": "ready_for_review",
+      "definition_of_done": [
+        "Signed-in operators can manage owner-scoped workflows and copy, cut, paste, duplicate, or delete selected desktop nodes",
+        "The canvas supports typed nodes with acyclic validation plus authenticated file/clipboard image import that stores media references only",
+        "Runs persist immutable graph snapshots and execute ready DAG branches in parallel with node-level status, failure blocking, cancellation, retry, and upstream reuse",
+        "Billable model and external-write nodes require explicit confirmation, and Feishu nodes expose only the existing publish queue rather than arbitrary CLI commands",
+        "Seedance validates inputs and credit, persists submit_id/gen_status, and resumes accepted tasks by querying the original submit_id",
+        "Default deterministic verification covers graph, persistence, API, desktop, and mobile contracts without paid provider or Feishu writes"
+      ],
+      "evidence": [
+        "2026-07-24 added @xyflow/react, typed owner-scoped canvas/API/database/Dreamina modules and mobile inspect/run; pending Seedance runs requeue and query persisted submit_id, while real Seedance/Feishu/PostgreSQL concurrency remain unverified",
+        "2026-07-24 deterministic checks, TypeScript, lint, build, full baseline, local restart, and mocked 1440x960/390x844 checks passed for clipboard/image import, inline editing, declared-output GPT previews, natural-aspect galleries/zoom, aligned single-beam edges, themes, and reduced motion without external calls",
+        "2026-07-27 GPT-Image-2 v2 plus durable image-preview capture, isolated compatible ancestor reuse, enabled/bypass/disabled modes, branch-aware confirmation, review links, focused checks, full baseline, local restart, and mocked 1440x1000/390x844 browser checks passed without paid or Feishu calls",
+        "2026-07-27 eight common content/image/video nodes, frozen content/library snapshots, mocked Responses/Chat vision, bounded ffmpeg transforms/frames, ComfyUI-style quick insertion, focused checks, full baseline, local restart, and mocked 1440x960/390x844 browser checks passed without live external calls"
+      ],
+      "notes": "Keep ready_for_review until an operator approves one real Seedance smoke and one real Feishu write, and PostgreSQL migration/multi-user concurrency is live-verified. Dreamina CLI is not installed in the default local environment, so needs_config is the expected deterministic state."
     }
   ]
 }

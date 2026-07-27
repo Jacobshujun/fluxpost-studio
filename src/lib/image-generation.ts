@@ -294,6 +294,34 @@ export async function generateImagesFromPrompt(
   };
 }
 
+export async function generateCanvasGptImages(
+  prompt: string,
+  count: number,
+  referenceImages: string[],
+  options?: Partial<ImageGenerationOptions>,
+) {
+  if (!Number.isInteger(count) || count < 1 || count > 10) throw new Error("GPT-Image-2 output count must be an integer from 1 to 10.");
+  const orderedReferences = Array.from(new Set(referenceImages.map((item) => item.trim()).filter(Boolean)));
+  if (orderedReferences.length > 16) throw new Error(`GPT-Image-2 accepts at most 16 reference images; received ${orderedReferences.length}.`);
+  if (appConfig.openaiImageEndpoint !== "images") {
+    throw new Error("Canvas GPT-Image-2 requires OPENAI_IMAGE_ENDPOINT=images for generation and multi-image editing.");
+  }
+  if (!isImageProviderConfigured()) {
+    return {
+      status: "needs_config" as const,
+      imageUrls: [] as string[],
+      message: "OPENAI_IMAGE_API_KEY or OPENAI_API_KEY is not configured.",
+    };
+  }
+
+  const imageOptions = normalizeImageOptions({ ...options, strictReferencePreparation: true });
+  const imageUrls = await callImagesApi(normalizeProviderPrompt(prompt), count, imageOptions, orderedReferences);
+  if (imageUrls.length !== count) {
+    throw new Error(`GPT-Image-2 returned ${imageUrls.length} of ${count} requested images.`);
+  }
+  return { status: "completed" as const, imageUrls };
+}
+
 export async function runImageProviderProbe(route: OpenaiImageApiRoute): Promise<ImageProviderProbeResult> {
   if (!isOpenaiImageRouteConfigured(route)) throw new Error(`${route === "primary" ? "Primary" : "Backup"} image provider is not configured.`);
   const routeConfig = openaiImageRouteConfig(route);
@@ -336,10 +364,10 @@ async function requestSingleProviderImageForProbe(
   const startedAt = Date.now();
   const profile = openaiImageRouteConfig(route).profile;
   const preparedReferences = makeProbePreparedReferences(referenceImages || []);
-  if (profile === "toapis_async") return requestSingleToApisImagesApiForRoute(route, prompt, startedAt, options, preparedReferences);
+  if (profile === "toapis_async") return requestSingleToApisImagesApiForRoute(route, prompt, 1, startedAt, options, preparedReferences);
   const endpointPath = referenceImages?.length ? "images/edits" : "images/generations";
-  if (profile === "openai_json") return requestSingleOpenAiJsonImageForRoute(route, prompt, startedAt, options, preparedReferences, endpointPath);
-  return requestSingleStandardImagesApiWithRetryForRoute(route, prompt, startedAt, options, preparedReferences, endpointPath);
+  if (profile === "openai_json") return requestSingleOpenAiJsonImageForRoute(route, prompt, 1, startedAt, options, preparedReferences, endpointPath);
+  return requestSingleStandardImagesApiWithRetryForRoute(route, prompt, 1, startedAt, options, preparedReferences, endpointPath);
 }
 
 function makeProbePreparedReferences(files: PreparedReferenceImage[]): PreparedReferenceImages {
@@ -825,18 +853,25 @@ async function callImagesApi(prompt: string, count: number, options: ImageGenera
 }
 
 async function callImagesApiInPool(prompt: string, count: number, options: ImageGenerationOptions, referenceImages: string[] = [], task?: SourceImageTask) {
+  if (referenceImages.length > 16) throw new Error(`Images API accepts at most 16 reference images; received ${referenceImages.length}.`);
   const startedAt = Date.now();
-  const preparedReferences = await prepareReferenceImages(referenceImages, options.size);
+  const preparedReferences = await prepareReferenceImages(referenceImages, options.size, options.strictReferencePreparation === true);
   const initialRoute = resolveActiveStandardImagesApiRoute();
   const initialProfile = openaiImageRouteConfig(initialRoute).profile;
   const endpointPath = initialProfile === "toapis_async" ? "images/generations" : preparedReferences.files.length ? "images/edits" : "images/generations";
   const strictReferencesInvalid =
     referenceImages.length !== 2 || preparedReferences.entries.length !== 2 || (initialProfile !== "toapis_async" && preparedReferences.files.length !== 2);
+  const strictMultiReferencesInvalid = options.strictReferencePreparation === true
+    && (preparedReferences.entries.length !== referenceImages.length || (initialProfile !== "toapis_async" && preparedReferences.files.length !== referenceImages.length));
   if (task && isStrictDualReferenceTask(task) && strictReferencesInvalid) {
     await cleanupPreparedReferenceImages(preparedReferences);
     throw new Error(
       `Strict viral image imitation requires exactly 2 prepared reference images; prepared ${preparedReferences.entries.length}/${referenceImages.length}.`,
     );
+  }
+  if (strictMultiReferencesInvalid) {
+    await cleanupPreparedReferenceImages(preparedReferences);
+    throw new Error(`GPT-Image-2 prepared ${preparedReferences.entries.length}/${referenceImages.length} reference images.`);
   }
   await recordExecutionLog({
     scope: "openai/image",
@@ -893,15 +928,8 @@ async function requestStandardImagesApiWithRetry(
   referenceImages: PreparedReferenceImages,
 ): Promise<ImagesApiResponse> {
   const endpointPath = referenceImages.files.length ? "images/edits" : "images/generations";
-  const data: NonNullable<ImagesApiResponse["data"]> = [];
-
   try {
-    for (let index = 0; index < Math.max(1, Math.floor(count)); index += 1) {
-      const response = await requestSingleStandardImagesApiWithRetry(prompt, startedAt, options, referenceImages, endpointPath);
-      data.push(...(response.data || []).slice(0, 1));
-    }
-
-    return { data };
+    return await requestSingleStandardImagesApiWithRetry(prompt, count, startedAt, options, referenceImages, endpointPath);
   } finally {
     await cleanupPreparedReferenceImages(referenceImages);
   }
@@ -909,6 +937,7 @@ async function requestStandardImagesApiWithRetry(
 
 async function requestSingleStandardImagesApiWithRetry(
   prompt: string,
+  count: number,
   startedAt: number,
   options: ImageGenerationOptions,
   referenceImages: PreparedReferenceImages,
@@ -919,7 +948,7 @@ async function requestSingleStandardImagesApiWithRetry(
 
   while (true) {
     try {
-      const response = await requestSingleStandardImagesApiWithRetryForRoute(route, prompt, Date.now(), options, referenceImages, endpointPath);
+      const response = await requestSingleStandardImagesApiWithRetryForRoute(route, prompt, count, Date.now(), options, referenceImages, endpointPath);
       activeStandardImagesApiRoute = route;
       return response;
     } catch (error) {
@@ -956,6 +985,7 @@ async function requestSingleStandardImagesApiWithRetry(
 async function requestSingleStandardImagesApiWithRetryForRoute(
   route: OpenaiImageApiRoute,
   prompt: string,
+  count: number,
   startedAt: number,
   options: ImageGenerationOptions,
   referenceImages: PreparedReferenceImages,
@@ -964,10 +994,10 @@ async function requestSingleStandardImagesApiWithRetryForRoute(
   const routeConfig = openaiImageRouteConfig(route);
   const profile = routeConfig.profile;
   if (profile === "toapis_async") {
-    return requestSingleToApisImagesApiForRoute(route, prompt, startedAt, options, referenceImages);
+    return requestSingleToApisImagesApiForRoute(route, prompt, count, startedAt, options, referenceImages);
   }
   if (profile === "openai_json") {
-    return requestSingleOpenAiJsonImageForRoute(route, prompt, startedAt, options, referenceImages, endpointPath);
+    return requestSingleOpenAiJsonImageForRoute(route, prompt, count, startedAt, options, referenceImages, endpointPath);
   }
 
   const sizeConstrainedPrompt = buildImageSizeConstrainedPrompt(prompt, options.size);
@@ -982,7 +1012,7 @@ async function requestSingleStandardImagesApiWithRetryForRoute(
     try {
       responseResult = await fetchOpenAiImageSse(
         openaiImageUrl(endpointPath, route),
-        await buildStandardImagesApiRequest(route, sizeConstrainedPrompt, options, referenceImages.files, sendQuality, sendInputFidelity),
+        await buildStandardImagesApiRequest(route, sizeConstrainedPrompt, count, options, referenceImages.files, sendQuality, sendInputFidelity),
         getRemainingTimeoutMs(deadline),
       );
     } catch (error) {
@@ -1096,6 +1126,7 @@ async function requestSingleStandardImagesApiWithRetryForRoute(
 async function requestSingleOpenAiJsonImageForRoute(
   route: OpenaiImageApiRoute,
   prompt: string,
+  count: number,
   startedAt: number,
   options: ImageGenerationOptions,
   referenceImages: PreparedReferenceImages,
@@ -1111,7 +1142,7 @@ async function requestSingleOpenAiJsonImageForRoute(
     try {
       response = await fetchWithTimeout(
         openaiImageUrl(endpointPath, route),
-        await buildOpenAiJsonRequest(route, prompt, options, referenceImages.files, sendQuality),
+        await buildOpenAiJsonRequest(route, prompt, count, options, referenceImages.files, sendQuality),
         getRemainingTimeoutMs(deadline),
       );
     } catch (error) {
@@ -1188,6 +1219,7 @@ async function requestSingleOpenAiJsonImageForRoute(
 async function buildOpenAiJsonRequest(
   route: OpenaiImageApiRoute,
   prompt: string,
+  count: number,
   options: ImageGenerationOptions,
   referenceImages: PreparedReferenceImage[],
   sendQuality: boolean,
@@ -1198,6 +1230,7 @@ async function buildOpenAiJsonRequest(
     prompt,
     size: options.size,
     quality: sendQuality ? options.quality : undefined,
+    count,
   });
   if (!referenceImages.length) {
     return {
@@ -1213,7 +1246,7 @@ async function buildOpenAiJsonRequest(
   form.append("n", String(fields.n));
   form.append("size", fields.size);
   if (fields.quality) form.append("quality", fields.quality);
-  for (const referenceImage of referenceImages.slice(0, 4)) {
+  for (const referenceImage of referenceImages) {
     const file = await readFile(referenceImage.filePath);
     form.append("image[]", new Blob([new Uint8Array(file)], { type: referenceImage.mimeType }), referenceImage.fileName);
   }
@@ -1227,6 +1260,7 @@ async function buildOpenAiJsonRequest(
 async function requestSingleToApisImagesApiForRoute(
   route: OpenaiImageApiRoute,
   prompt: string,
+  count: number,
   startedAt: number,
   options: ImageGenerationOptions,
   referenceImages: PreparedReferenceImages,
@@ -1238,6 +1272,12 @@ async function requestSingleToApisImagesApiForRoute(
     model: routeConfig.model,
     prompt,
     requestedSize: options.size,
+    ratio: options.ratio,
+    resolution: options.resolution,
+    quality: options.quality,
+    count,
+    outputFormat: options.outputFormat,
+    outputCompression: options.outputCompression,
     referenceImages: referenceUrls,
   });
   let task: ToApisImageTask | undefined;
@@ -1404,19 +1444,20 @@ async function prepareToApisReferenceUrls(route: OpenaiImageApiRoute, referenceI
 
   const urls: string[] = [];
   for (const entry of referenceImages.entries) {
-    if (/^https?:\/\//i.test(entry.source)) {
+    if (entry.file) {
+      urls.push(await uploadToApisReferenceImage(route, entry.file, deadline));
+    } else if (/^https?:\/\//i.test(entry.source)) {
       urls.push(entry.source);
-      continue;
+    } else {
+      throw new Error("ToAPIs reference images must be public HTTP URLs or readable local image files.");
     }
-    if (!entry.file) throw new Error("ToAPIs reference images must be public HTTP URLs or readable local image files.");
-    urls.push(await uploadToApisReferenceImage(route, entry.file, deadline));
   }
   referenceImages.toApisUrlsByRoute[route] = urls;
   return urls;
 }
 
 async function uploadToApisReferenceImage(route: OpenaiImageApiRoute, image: PreparedReferenceImage, deadline: number) {
-  if (image.bytes > 10 * 1024 * 1024) throw new Error(`ToAPIs reference upload exceeds the documented 10MB limit (${image.bytes} bytes).`);
+  if (image.bytes > 50 * 1024 * 1024) throw new Error(`ToAPIs reference upload exceeds the documented 50MB limit (${image.bytes} bytes).`);
   const form = new FormData();
   const file = await readFile(image.filePath);
   form.append("file", new Blob([new Uint8Array(file)], { type: image.mimeType }), image.fileName);
@@ -1457,6 +1498,7 @@ function getToApisPollDelayMs(taskId: string, pollAttempt: number) {
 async function buildStandardImagesApiRequest(
   route: OpenaiImageApiRoute,
   prompt: string,
+  count: number,
   options: ImageGenerationOptions,
   referenceImages: PreparedReferenceImage[],
   sendQuality: boolean,
@@ -1466,24 +1508,25 @@ async function buildStandardImagesApiRequest(
     return {
       method: "POST",
       headers: openaiImageHeaders(true, route, true),
-      body: JSON.stringify(buildStandardImagesGenerationBody(openaiImageRouteConfig(route).model, prompt, options, sendQuality)),
+      body: JSON.stringify(buildStandardImagesGenerationBody(openaiImageRouteConfig(route).model, prompt, count, options, sendQuality)),
     };
   }
 
   const form = new FormData();
   form.append("model", openaiImageRouteConfig(route).model);
   form.append("prompt", prompt);
-  form.append("n", "1");
+  form.append("n", String(count));
   form.append("size", options.size);
-  form.append("output_format", "png");
+  form.append("output_format", options.outputFormat || "png");
+  if ((options.outputFormat || "png") === "jpeg") form.append("output_compression", String(options.outputCompression ?? 100));
   form.append("response_format", "b64_json");
   form.append("stream", "true");
   if (sendQuality) form.append("quality", options.quality);
   if (sendInputFidelity) form.append("input_fidelity", "high");
 
-  for (const referenceImage of referenceImages.slice(0, 4)) {
+  for (const referenceImage of referenceImages) {
     const file = await readFile(referenceImage.filePath);
-    form.append("image", new Blob([new Uint8Array(file)], { type: referenceImage.mimeType }), referenceImage.fileName);
+    form.append("image[]", new Blob([new Uint8Array(file)], { type: referenceImage.mimeType }), referenceImage.fileName);
   }
 
   return {
@@ -1493,14 +1536,15 @@ async function buildStandardImagesApiRequest(
   };
 }
 
-function buildStandardImagesGenerationBody(model: string, prompt: string, options: ImageGenerationOptions, sendQuality: boolean) {
+function buildStandardImagesGenerationBody(model: string, prompt: string, count: number, options: ImageGenerationOptions, sendQuality: boolean) {
   return {
     model,
     prompt,
-    n: 1,
+    n: count,
     size: options.size,
     ...(sendQuality ? { quality: options.quality } : {}),
-    output_format: "png",
+    output_format: options.outputFormat || "png",
+    ...((options.outputFormat || "png") === "jpeg" ? { output_compression: options.outputCompression ?? 100 } : {}),
     response_format: "b64_json",
     stream: true,
   };
@@ -1667,7 +1711,11 @@ function isImageProviderConfigured() {
   return Boolean(appConfig.openaiImageApiKey);
 }
 
-async function prepareReferenceImages(referenceImages: string[], requestedSize: ImageGenerationOptions["size"]): Promise<PreparedReferenceImages> {
+async function prepareReferenceImages(
+  referenceImages: string[],
+  requestedSize: ImageGenerationOptions["size"],
+  strict = false,
+): Promise<PreparedReferenceImages> {
   const values: string[] = [];
   const fallbackValues: string[] = [];
   const files: PreparedReferenceImage[] = [];
@@ -1676,62 +1724,76 @@ async function prepareReferenceImages(referenceImages: string[], requestedSize: 
   let remoteCount = 0;
   let encodedCount = 0;
 
-  for (const referenceImage of referenceImages.filter(Boolean)) {
-    const localFile = await resolveLocalReferenceFilePath(referenceImage);
-    if (localFile) {
-      const normalizedFile = await normalizeReferenceImageFile(localFile, requestedSize);
-      const file = await readFile(normalizedFile);
-      const base64 = file.toString("base64");
-      const preparedFile = {
-        filePath: normalizedFile,
-        fileName: path.basename(normalizedFile),
-        mimeType: getImageMimeType(normalizedFile),
-        bytes: file.length,
-      };
-      values.push(base64);
-      fallbackValues.push(`data:${getImageMimeType(normalizedFile)};base64,${base64}`);
-      files.push(preparedFile);
-      entries.push({ source: referenceImage, file: preparedFile });
-      localCount += 1;
-      encodedCount += 1;
-      continue;
-    }
-
-    if (/^https?:\/\//i.test(referenceImage)) {
-      const remoteFile = await materializeRemoteReferenceImage(referenceImage, requestedSize).catch(async (error) => {
-        await recordExecutionLog({
-          scope: "openai/image",
-          action: "Remote reference image resize skipped",
-          status: "info",
-          message: `Could not resize remote reference image before image-model request: ${compactError(error)}`,
-          details: {
-            referenceImage,
-          },
-        });
-        return null;
-      });
-      if (remoteFile) {
-        const file = await readFile(remoteFile);
+  const orderedReferences = referenceImages.filter(Boolean);
+  try {
+    for (const [index, referenceImage] of orderedReferences.entries()) {
+      try {
+      const localFile = await resolveLocalReferenceFilePath(referenceImage);
+      if (localFile) {
+        const normalizedFile = await normalizeReferenceImageFile(localFile, requestedSize);
+        const file = await readFile(normalizedFile);
         const base64 = file.toString("base64");
         const preparedFile = {
-          filePath: remoteFile,
-          fileName: path.basename(remoteFile),
-          mimeType: getImageMimeType(remoteFile),
+          filePath: normalizedFile,
+          fileName: path.basename(normalizedFile),
+          mimeType: getImageMimeType(normalizedFile),
           bytes: file.length,
         };
         values.push(base64);
-        fallbackValues.push(`data:${getImageMimeType(remoteFile)};base64,${base64}`);
+        fallbackValues.push(`data:${getImageMimeType(normalizedFile)};base64,${base64}`);
         files.push(preparedFile);
         entries.push({ source: referenceImage, file: preparedFile });
-        remoteCount += 1;
+        localCount += 1;
         encodedCount += 1;
         continue;
       }
-    }
 
-    values.push(referenceImage);
-    entries.push({ source: referenceImage });
-    remoteCount += /^https?:\/\//i.test(referenceImage) ? 1 : 0;
+      if (/^https?:\/\//i.test(referenceImage)) {
+        const remoteFile = await materializeRemoteReferenceImage(referenceImage, requestedSize).catch(async (error) => {
+          if (strict) throw new Error(`Reference image ${index + 1} could not be prepared: ${compactError(error)}`);
+          await recordExecutionLog({
+            scope: "openai/image",
+            action: "Remote reference image resize skipped",
+            status: "info",
+            message: `Could not resize remote reference image before image-model request: ${compactError(error)}`,
+            details: { referenceImage },
+          });
+          return null;
+        });
+        if (remoteFile) {
+          const file = await readFile(remoteFile);
+          const base64 = file.toString("base64");
+          const preparedFile = {
+            filePath: remoteFile,
+            fileName: path.basename(remoteFile),
+            mimeType: getImageMimeType(remoteFile),
+            bytes: file.length,
+          };
+          values.push(base64);
+          fallbackValues.push(`data:${getImageMimeType(remoteFile)};base64,${base64}`);
+          files.push(preparedFile);
+          entries.push({ source: referenceImage, file: preparedFile });
+          remoteCount += 1;
+          encodedCount += 1;
+          continue;
+        }
+      }
+
+      if (strict) throw new Error(`Reference image ${index + 1} is not a supported local path or HTTP URL.`);
+      values.push(referenceImage);
+      entries.push({ source: referenceImage });
+      remoteCount += /^https?:\/\//i.test(referenceImage) ? 1 : 0;
+      } catch (error) {
+        const message = compactError(error);
+        if (strict && !message.startsWith(`Reference image ${index + 1} `)) {
+          throw new Error(`Reference image ${index + 1} could not be prepared: ${message}`);
+        }
+        throw error;
+      }
+    }
+  } catch (error) {
+    await Promise.all(files.map((file) => rm(file.filePath, { force: true }).catch(() => undefined)));
+    throw error;
   }
 
   return {
@@ -1789,19 +1851,19 @@ async function materializeRemoteReferenceImage(url: string, requestedSize: Image
   }
 
   const mimeType = normalizeMimeType(response.headers.get("content-type"), url);
-  if (!mimeType.startsWith("image/")) {
-    throw new Error(`remote file is not an image (${mimeType})`);
-  }
-
   const buffer = Buffer.from(await response.arrayBuffer());
   if (!buffer.length) {
     throw new Error("remote image is empty");
   }
-  if (buffer.length > 12 * 1024 * 1024) {
+  if (buffer.length > 50 * 1024 * 1024) {
     throw new Error(`remote image is too large (${buffer.length} bytes)`);
   }
+  const format = sniffImageFormat(buffer);
+  if (!mimeType.startsWith("image/") && !format) {
+    throw new Error(`remote file is not an image (${mimeType})`);
+  }
 
-  const rawFile = await writeReferenceInputBuffer(buffer, mimeType);
+  const rawFile = await writeReferenceInputBuffer(buffer, format?.mimeType || mimeType);
   try {
     return await normalizeReferenceImageFile(rawFile, requestedSize);
   } finally {
@@ -1849,7 +1911,7 @@ async function materializeRemoteSourceImage(url: string) {
   if (!buffer.length) {
     throw new Error("source image is empty");
   }
-  if (buffer.length > 12 * 1024 * 1024) {
+  if (buffer.length > 50 * 1024 * 1024) {
     throw new Error(`source image is too large (${buffer.length} bytes)`);
   }
 
@@ -2075,7 +2137,16 @@ function normalizeImageOptions(options?: Partial<ImageGenerationOptions>): Image
     size: normalizeImageGenerationSize(options?.size),
     quality: normalizeImageQuality(options?.quality),
     taskConcurrency: normalizeTaskConcurrency(options?.taskConcurrency),
+    ratio: options?.ratio,
+    resolution: options?.resolution,
+    outputFormat: options?.outputFormat === "jpeg" ? "jpeg" : "png",
+    outputCompression: normalizeOutputCompression(options?.outputCompression),
+    strictReferencePreparation: options?.strictReferencePreparation === true,
   };
+}
+
+function normalizeOutputCompression(value?: number) {
+  return Number.isInteger(value) && Number(value) >= 0 && Number(value) <= 100 ? Number(value) : 100;
 }
 
 function normalizeProviderPrompt(prompt: string) {

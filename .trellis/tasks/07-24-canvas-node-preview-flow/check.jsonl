@@ -1,0 +1,3 @@
+{"file":".trellis/spec/frontend/quality-guidelines.md","reason":"Frontend review criteria and baseline verification gate."}
+{"file":".trellis/spec/fluxpost/verification.md","reason":"Authoritative deterministic baseline and no-live-provider restrictions."}
+{"file":".trellis/spec/fluxpost/rules.md","reason":"Quality, evidence, and persistent-context rules for completion."}

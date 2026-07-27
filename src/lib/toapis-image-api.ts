@@ -5,6 +5,15 @@ export type ToApisImageSize = {
   resolution: "1k" | "2k" | "4k";
 };
 
+export const toApisImageRatios = ["1:1", "3:2", "2:3", "4:3", "3:4", "5:4", "4:5", "16:9", "9:16", "2:1", "1:2", "21:9", "9:21"] as const;
+export const toApis4kImageRatios = ["16:9", "9:16", "2:1", "1:2", "21:9", "9:21"] as const;
+export const maxToApisReferenceImages = 16;
+export const maxToApisImageOutputs = 10;
+
+export type ToApisImageRatio = (typeof toApisImageRatios)[number];
+export type ToApisImageResolution = ToApisImageSize["resolution"];
+export type ToApisImageOutputFormat = "png" | "jpeg";
+
 export type ToApisImageTask = {
   id?: string;
   task_id?: string;
@@ -45,20 +54,59 @@ export function resolveToApisImageSize(requestedSize: ImageGenerationOptions["si
 export function buildToApisGenerationBody(input: {
   model: string;
   prompt: string;
-  requestedSize: ImageGenerationOptions["size"];
+  requestedSize?: ImageGenerationOptions["size"];
+  ratio?: string;
+  resolution?: string;
+  quality?: string;
+  count?: number;
+  outputFormat?: string;
+  outputCompression?: number;
   referenceImages?: string[];
 }) {
-  const dimensions = resolveToApisImageSize(input.requestedSize);
+  const dimensions = input.ratio || input.resolution
+    ? validateToApisDimensions(input.ratio, input.resolution)
+    : resolveToApisImageSize(input.requestedSize || "auto");
   const referenceImages = (input.referenceImages || []).filter(Boolean);
+  if (referenceImages.length > maxToApisReferenceImages) {
+    throw new Error(`ToAPIs accepts at most ${maxToApisReferenceImages} reference images; received ${referenceImages.length}.`);
+  }
+  const count = validateIntegerRange(input.count ?? 1, 1, maxToApisImageOutputs, "ToAPIs image count");
+  const quality = validateChoice(input.quality || "medium", ["low", "medium", "high"], "ToAPIs image quality");
+  const outputFormat = validateChoice(input.outputFormat || "png", ["png", "jpeg"], "ToAPIs output format") as ToApisImageOutputFormat;
+  const outputCompression = validateIntegerRange(input.outputCompression ?? 100, 0, 100, "ToAPIs JPEG compression");
   return {
     model: input.model,
     prompt: input.prompt,
-    n: 1,
+    n: count,
     size: dimensions.size,
     resolution: dimensions.resolution,
+    quality,
+    output_format: outputFormat,
+    ...(outputFormat === "jpeg" ? { output_compression: outputCompression } : {}),
     response_format: "url" as const,
-    ...(referenceImages.length ? { reference_images: referenceImages } : {}),
+    ...(referenceImages.length ? { image_urls: referenceImages } : {}),
   };
+}
+
+export function validateToApisDimensions(ratio?: string, resolution?: string): ToApisImageSize {
+  if (!toApisImageRatios.includes(ratio as ToApisImageRatio)) throw new Error(`ToAPIs image ratio is invalid: ${ratio || "(empty)"}.`);
+  if (resolution !== "1k" && resolution !== "2k" && resolution !== "4k") {
+    throw new Error(`ToAPIs image resolution is invalid: ${resolution || "(empty)"}.`);
+  }
+  if (resolution === "4k" && !toApis4kImageRatios.includes(ratio as (typeof toApis4kImageRatios)[number])) {
+    throw new Error(`ToAPIs 4K does not support image ratio ${ratio}.`);
+  }
+  return { size: ratio as ToApisImageRatio, resolution };
+}
+
+function validateIntegerRange(value: number, min: number, max: number, label: string) {
+  if (!Number.isInteger(value) || value < min || value > max) throw new Error(`${label} must be an integer from ${min} to ${max}.`);
+  return value;
+}
+
+function validateChoice(value: string, choices: readonly string[], label: string) {
+  if (!choices.includes(value)) throw new Error(`${label} is invalid: ${value}.`);
+  return value;
 }
 
 export function requireToApisTaskId(task: ToApisImageTask) {
