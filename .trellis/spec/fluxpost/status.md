@@ -1,12 +1,14 @@
 # Trellis Status
 
-Last updated: 2026-07-23
+Last updated: 2026-07-27
 
 ## One-Line Status
 
 Production 38 runs HEIC/TOS review fix `2fef2e5`; the exact-match repair updated 33 of 37 candidates, and the known nine-image post now serves nine direct TOS JPEGs with non-zero dimensions.
 
 ## Current Focus
+
+- Canvas is locally implemented and verified: owner-scoped immutable DAG runs include durable previews, reuse/modes, content/library snapshots, prompt/split/vision/image/frame tools, ComfyUI-style desktop insertion, confirmations, and Dreamina resumption. Keep `infinite-canvas-workflows` at `ready_for_review` until operator-approved live Seedance/Feishu and PostgreSQL checks pass.
 
 - Task `.trellis/tasks/07-23-repair-review-heic-tos-delivery` deployed `2fef2e5` to production 38. A root-only backup preceded the admin scan/apply; 33 of 37 exact candidates were repaired, while three over-12-MB images and one invalid HEIF remained unchanged with explicit errors. The known nine-image post passes direct-TOS HTTP/JPEG/dimension checks.
 - Image provider profiles are deployed at `8ee3498` on `82.158.226.10`; primary/backup remain on the existing `auto` ToAPIs configuration, and the new paid admin probe remains intentionally unrun.
@@ -29,8 +31,11 @@ Production 38 runs HEIC/TOS review fix `2fef2e5`; the exact-match repair updated
 5. For VPS deployment follow-up, use `ssh root@104.243.21.233 -p 29891`, then run `/opt/fluxpost-studio/bin/deploy.sh` to deploy from GitHub, or `cd /opt/fluxpost-studio/current` and `COMPOSE_PROJECT_NAME=fluxpost docker compose ps/logs`. Do not stop or restart `x-ui`, `xray`, or `frps`.
 6. For a fresh VPS, follow `docs/deployment/ubuntu-docker.md`; do not copy old VPS secrets or volumes into GitHub.
 7. Before completion, read `.trellis/spec/fluxpost/verification.md` and run `powershell -ExecutionPolicy Bypass -File .trellis/verification/check.ps1`, or explain why it could not run.
+8. For canvas work, inspect `src/lib/canvas/`, the `/api/canvas` routes, and `.trellis/tasks/07-24-infinite-canvas-workflows`; do not run paid Seedance/Feishu actions as baseline checks.
 
 ## Recent Verification
+
+- 2026-07-27: Eight canvas common nodes, explicit snapshots, mocked Responses/Chat vision, bounded ffmpeg media tools, desktop quick-add/dangling-edge insertion, focused checks, TypeScript, lint, build, full baseline, local restart, and mocked 1440x960/390x844 browser checks passed without live external calls.
 
 - 2026-07-23: HEIC/TOS fix `2fef2e5` deployed healthy to production 38 after full local verification. Root-only backup, admin scan/apply (37 candidates, 33 repaired, 4 safely unchanged), and known-post 9/9 direct TOS HTTP 200 JPEG/non-zero-dimension checks passed without paid service calls.
 

@@ -420,6 +420,78 @@ throw new ImageProviderError("accepted task timed out", {
 });
 ```
 
+## Scenario: Infinite Canvas Workflow V1
+
+### 1. Scope / Trigger
+
+- Trigger: changing the owner-scoped `/canvas` editor, typed DAG scheduling, result reuse/preview, persistence, or model/publish nodes.
+- Applies to `src/lib/canvas/*`, `src/app/api/canvas/**`, `src/app/canvas/page.tsx`, the canvas database tables, and `.trellis/verification/canvas_workflows_check.mjs`.
+
+### 2. Signatures
+
+- `GET|POST /api/canvas/workflows`; `GET|PATCH|DELETE /api/canvas/workflows/:id`.
+- `POST /api/canvas/runs` accepts `{ workflowId, targetNodeIds?, runMode?: "with-upstream" | "isolated", confirmed?, confirmationNodeIds? }`; omission keeps `with-upstream`. `GET /api/canvas/runs?workflowId=...` returns recent runs plus durable latest-success projections; `GET|PATCH /api/canvas/runs/:id` reads/cancels/retries.
+- `POST /api/canvas/media` accepts authenticated multipart `files` and returns `{ images: [{ imageUrl, bytes, mimeType }] }`.
+- `PATCH /api/canvas/workflows/:id` updates with `{ revision }`; a stale revision raises HTTP `409`.
+- PostgreSQL/SQLite tables: `canvas_workflows`, `canvas_runs`, `canvas_node_runs`, and `canvas_run_queue`.
+
+### 3. Contracts
+
+- `CanvasGraph` stores typed nodes, typed edges, and viewport. Only registered `CanvasNodeDefinition` versions may be saved; edges must connect equal artifact kinds and the graph must be acyclic.
+- `CanvasArtifact` is a discriminated union of `text`, `images`, `videos`, `socialPost`, and `publishJobRef`; media values are object references/metadata, never embedded binary.
+- `CanvasNode.executionMode` defaults to `enabled`; `bypass` requires an explicit registry input/output mapping, while `disabled` produces no output. Snapshots and the `fluxpost.canvas.nodes` clipboard envelope preserve the mode.
+- Version-1 common nodes are `input.content-pool`, `input.library-images`, `utility.prompt-template`, `utility.text-split`, `model.gpt-vision`, `utility.image-select`, `utility.image-transform`, and `utility.video-frames`. Their config remains flat scalars/string arrays, and they reuse existing artifact kinds without schema migration.
+- Content-pool/library inputs execute only stored selection-time snapshots. Explicit inspector refresh replaces the flat snapshot; ordinary runs never read live content/library services. Prompt and selection nodes preserve incoming edge/item order.
+- GPT vision accepts 1-8 prepared images, uses the configured Responses/Chat text endpoint plus the `gpt` pool, declares `text_model`, and maps missing text configuration to `needs_config`. Image transformation accepts 20 images at 30 MB each; video frames accept 4 videos/20 total frames and persist content-addressed URL/dimension metadata through runtime media.
+- `utility.image-preview` copies URL/metadata-only image artifacts into node runs. Direct sinks run passively after an included image producer; failed, cancelled, blocked, or empty attempts never replace the last output-bearing success. Durable lookup joins all workflow runs rather than scanning the recent-run limit.
+- `isolated` requires one target: literal inputs execute from current config, other ancestors reuse compatible success, and missing reuse blocks before enqueue. Ordinary compatibility covers node id/type/version/config/mode plus normalized resolved inputs; preview compatibility uses incoming-edge identity. It never silently reruns a model/write ancestor.
+- Planning propagates output-port availability. Missing required input blocks only that branch; optional input does not. Confirmation includes only `execute` steps, excluding reuse/bypass/disabled/blocked. With-upstream branch blockers are non-fatal so independent branches run; isolated blockers are fatal preflight errors.
+- Runs keep immutable snapshots and node attempts with `reusedFrom`; statuses include `reused`, `bypassed`, and `disabled`. Seedance persists `submit_id`/`gen_status`, requeues pending work, and queries the original id.
+- Handles stay row-relative; image import uses authenticated `persistRuntimeMedia` and stores references only. Previews use `contain` and natural/artifact dimensions. Theme variables, aligned source-colored edge beams, reduced-motion disabling, and native editing/clipboard behavior remain required.
+- Editable desktop canvas supports blank-pane right-click/Tab search and dangling-edge insertion. Search matches label/description/type/category; connection context filters equal artifact kinds, exposes ambiguous port labels, rejects occupied single inputs, and creates the selected typed edge. Mobile keeps structural quick-add disabled.
+
+### 4. Validation & Error Matrix
+
+- Missing/invalid node type, node config, port, owner, or graph cycle -> domain error/HTTP `400`.
+- Member access to another owner's workflow/run -> not found behavior; admins follow existing owner access rules.
+- Stale workflow revision -> HTTP `409`.
+- Isolated mode without exactly one target or compatible required reuse -> HTTP `400` before enqueue, identifying the blocked node.
+- Missing required artifact in with-upstream -> node `blocked`; independent branches continue and the run may become `partial`. Missing optional artifacts are omitted.
+- Unsupported/empty bypass input -> validation/blocked node; disabled nodes skip execution config validation but still receive graph/port validation.
+- Unconfirmed actual billable/external-write execution -> HTTP `409` with a confirmation plan; stale confirmation ids -> HTTP `400`.
+- Missing Dreamina CLI/login, low credit, unsupported media/model/ratio/resolution, or high compliance risk -> `needs_config`/blocked state; never fake success or retry an accepted task with a new submission.
+- Missing/too many/oversized/unsupported upload files -> HTTP `400`; unsigned upload -> `401`; storage failure -> surfaced `500` with no URL added to the graph; malformed clipboard envelopes are ignored.
+- Missing content/library snapshot, unresolved template placeholder, unsplittable text, invalid/out-of-range image index, invalid transform dimensions/format/quality, or invalid/excess frame plan -> node validation/execution error with no partial artifact.
+- Missing `ffmpeg`/`ffprobe` -> `needs_config`; media command failure -> explicit node failure. Image/video helpers use allow-listed `execFile` argument arrays and never accept shell text from node config.
+
+### 5. Good/Base/Bad Cases
+
+- Good: isolated content assembly executes current text, reuses compatible GPT image/preview output with provenance, creates a fresh draft, and makes zero image-model calls.
+- Good: a frozen content snapshot feeds a template/vision/image-selection chain, a dangling text edge creates `compose.social-post` on its selected body port, and local transforms persist bounded URL/dimension artifacts.
+- Base: omitted modes preserve legacy enabled/with-upstream behavior; disabled optional media does not block composition; SQLite/PostgreSQL share JSON contracts.
+- Bad: rerunning a paid isolated ancestor, refreshing snapshots implicitly during a run, connecting an occupied single input, embedding Base64, passing shell strings to ffmpeg, replacing preview history with an empty failure, or resubmitting Seedance after timeout.
+
+### 6. Tests Required
+
+- `canvas_workflows_check.mjs`: registration, typed graph/clipboard/snapshot modes, all common-node ports/validators, template/split/index/time helpers, mocked Responses/Chat vision requests, snapshot-only literal projection, allow-listed media commands/limits/persistence/missing binaries, branch planning, confirmation exclusion, reuse, preview, isolated execution, result UI, and quick-add contracts.
+- TypeScript, lint, build, full Trellis baseline, and local production restart must pass without paid provider calls.
+- Mocked desktop/mobile browser coverage must exercise preview/fullscreen, modes, both run commands, review links, statuses, snapshot pickers, right-click/Tab search, keyboard navigation, compatible/ambiguous ports, automatic edges, mobile structural lockout, and overflow. Real model/Seedance/Feishu/PostgreSQL concurrency remain operator-approved.
+
+### 7. Wrong vs Correct
+
+#### Wrong
+
+```typescript
+await executeCanvasNode(ancestor); // isolated run silently spends again
+```
+
+#### Correct
+
+```typescript
+const step = compatible ? { action: "reuse", sourceNodeRunId } : { action: "blocked" };
+// Persist preview URLs/metadata only; accepted Seedance tasks query the saved submit_id.
+```
+
 ## Trellis Rules
 
 - `.trellis/` is the only active persistent AI collaboration system. `.trellis/spec/fluxpost/` is the FluxPost project-memory layer inside that system.

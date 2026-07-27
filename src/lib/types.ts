@@ -302,6 +302,11 @@ export type ImageGenerationOptions = {
   size: string;
   quality: ImageGenerationQuality;
   taskConcurrency?: number;
+  ratio?: string;
+  resolution?: "1k" | "2k" | "4k";
+  outputFormat?: "png" | "jpeg";
+  outputCompression?: number;
+  strictReferencePreparation?: boolean;
 };
 
 export type FeishuAttachmentStatus = "pending" | "uploaded" | "failed" | "skipped";
@@ -897,6 +902,7 @@ export type ConfigStatus = {
   comfyUiKleinWorkflowConfigured: boolean;
   comfyUiKleinWorkflowJsonConfigured: boolean;
   comfyUiBaseUrl?: string;
+  dreaminaCliBin?: string;
   tikhubBaseUrl: string;
   feishuCliBin?: string;
   feishuNotifyConfigured: boolean;

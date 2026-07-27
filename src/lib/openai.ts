@@ -3,6 +3,7 @@ import { appConfig, openaiTextUrl } from "./config";
 import { runWithConcurrencyPool } from "./concurrency";
 import { formatImageTasksForPrompt, mergeProductionPlan } from "./creation-controls";
 import { makeDemoPost } from "./mock-data";
+import { toModelImageUrl } from "./model-image-input";
 import { buildProductionPlan, formatNonTextProductionConstraintsForPrompt } from "./production-plan";
 import { resolveSourceVideoUrls } from "./source-video-reference";
 import {
@@ -161,6 +162,76 @@ export async function callOpenAIForJson(prompt: string, options: JsonModelOption
       : await callResponsesApi(prompt, options);
 
   return parseJsonObject(text);
+}
+
+export async function callOpenAIForText(prompt: string, options: JsonModelOptions = {}) {
+  if (!appConfig.openaiApiKey) throw new Error("OPENAI_API_KEY is not configured.");
+  const result = await callOpenAIForJson(
+    `${prompt}\n\nReturn a JSON object with one string field named text. Do not omit the field.`,
+    options,
+  );
+  const text = typeof result.text === "string" ? result.text.trim() : "";
+  if (!text) throw new Error("The text model returned an empty response.");
+  return text;
+}
+
+export async function callOpenAIForVisionText(prompt: string, imageUrls: string[], options: JsonModelOptions = {}) {
+  if (!appConfig.openaiApiKey) throw new Error("OPENAI_API_KEY is not configured.");
+  if (!prompt.trim()) throw new Error("Vision prompt cannot be empty.");
+  if (!imageUrls.length || imageUrls.length > 8) throw new Error("Vision requests require 1 to 8 images.");
+  const prepared = await Promise.all(imageUrls.map(async (url) => {
+    const imageUrl = await toModelImageUrl(url);
+    if (!imageUrl) throw new Error(`Unsupported vision image URL: ${url}`);
+    return imageUrl;
+  }));
+  const startedAt = Date.now();
+  await recordExecutionLog({
+    scope: "openai/vision",
+    action: "Request vision text model",
+    status: "running",
+    message: options.logLabel || "Preparing canvas vision request",
+    details: { model: appConfig.openaiTextModel, imageCount: prepared.length, promptLength: prompt.length },
+  });
+  const endpoint = appConfig.openaiTextEndpoint === "chat" ? "chat/completions" : "responses";
+  const response = await runWithConcurrencyPool("gpt", () => fetch(openaiTextUrl(endpoint), {
+    method: "POST",
+    headers: openaiHeaders(),
+    body: JSON.stringify(appConfig.openaiTextEndpoint === "chat"
+      ? {
+          model: appConfig.openaiTextModel,
+          messages: [{ role: "user", content: [
+            { type: "text", text: prompt },
+            ...prepared.map((imageUrl) => ({ type: "image_url", image_url: { url: imageUrl } })),
+          ] }],
+        }
+      : {
+          model: appConfig.openaiTextModel,
+          input: [{ role: "user", content: [
+            { type: "input_text", text: prompt },
+            ...prepared.map((imageUrl) => ({ type: "input_image", image_url: imageUrl })),
+          ] }],
+        }),
+  }));
+  if (!response.ok) {
+    const body = await response.text();
+    const message = compactError(`OpenAI vision request failed: ${response.status} ${body.slice(0, 260)}`);
+    await recordExecutionLog({ scope: "openai/vision", action: "Vision text model failed", status: "error", message, durationMs: Date.now() - startedAt });
+    throw new Error(message);
+  }
+  const data = (await response.json()) as ResponsesApiTextResponse & ChatCompletionResponse;
+  const text = appConfig.openaiTextEndpoint === "chat"
+    ? data.choices?.[0]?.message?.content?.trim()
+    : (data.output_text || data.output?.flatMap((item) => item.content || []).find((content) => typeof content.text === "string")?.text)?.trim();
+  if (!text) throw new Error("The vision model returned an empty response.");
+  await recordExecutionLog({
+    scope: "openai/vision",
+    action: "Vision text model completed",
+    status: "success",
+    message: "Canvas vision analysis completed",
+    durationMs: Date.now() - startedAt,
+    details: { model: appConfig.openaiTextModel, imageCount: prepared.length },
+  });
+  return text;
 }
 
 async function callResponsesApi(prompt: string, options: JsonModelOptions = {}) {

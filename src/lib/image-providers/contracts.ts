@@ -85,12 +85,13 @@ export function buildOpenAiJsonGenerationBody(input: {
   prompt: string;
   size: string;
   quality?: string;
+  count?: number;
 }) {
   assertOpenAiJsonSize(input.size);
   return {
     model: input.model,
     prompt: input.prompt,
-    n: 1,
+    n: input.count || 1,
     size: input.size,
     ...(input.quality ? { quality: input.quality } : {}),
   };

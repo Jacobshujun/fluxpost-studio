@@ -83,6 +83,8 @@ function readAppConfig() {
   comfyUiKleinScheduler: process.env.COMFYUI_KLEIN_KSAMPLER_SCHEDULER || "",
   comfyUiKleinDenoise: optionalNumber(process.env.COMFYUI_KLEIN_KSAMPLER_DENOISE),
   comfyUiKleinFailurePolicy: normalizeKleinFailurePolicy(process.env.COMFYUI_KLEIN_FAILURE_POLICY || "fallback_source"),
+  dreaminaCliBin: process.env.DREAMINA_CLI_BIN || "dreamina",
+  dreaminaCliTimeoutMs: numberOrDefault(process.env.DREAMINA_CLI_TIMEOUT_MS, 180_000),
   feishuAppId: process.env.FEISHU_APP_ID || "",
   feishuAppSecret: process.env.FEISHU_APP_SECRET || "",
   feishuBrand: normalizeFeishuBrand(process.env.FEISHU_BRAND || "feishu"),
@@ -182,6 +184,7 @@ export function getConfigStatus(): ConfigStatus {
     comfyUiKleinWorkflowConfigured,
     comfyUiKleinWorkflowJsonConfigured: Boolean(appConfig.comfyUiKleinWorkflowJson.trim()),
     comfyUiBaseUrl: appConfig.comfyUiBaseUrl,
+    dreaminaCliBin: appConfig.dreaminaCliBin,
     tikhubBaseUrl: appConfig.tikhubBaseUrl,
     feishuCliBin: appConfig.feishuCliBin || undefined,
     feishuNotifyConfigured: Boolean(appConfig.feishuNotifyChatId || appConfig.feishuNotifyUserId),
@@ -508,6 +511,19 @@ const advancedConfigGroups: ConfigDefinitionGroup[] = [
       }),
       configField("VIRAL_IMAGE_IMITATION_PROMPT", "爆款仿图系统提示词", "控制爆款图片模仿的全局提示词。", "textarea", "openai-image", {
         read: () => appConfig.viralImageImitationPrompt,
+      }),
+    ],
+  },
+  {
+    id: "seedance",
+    title: "Seedance 视频",
+    description: "Dreamina CLI 的安装路径和单次前台等待上限。登录身份由部署环境维护。",
+    fields: [
+      configField("DREAMINA_CLI_BIN", "Dreamina CLI", "dreamina 可执行文件路径或命令名。", "text", "seedance", {
+        read: () => appConfig.dreaminaCliBin,
+      }),
+      configField("DREAMINA_CLI_TIMEOUT_MS", "CLI 超时毫秒", "前台命令等待上限；已获得 submit_id 后只查询原任务。", "number", "seedance", {
+        read: () => String(appConfig.dreaminaCliTimeoutMs),
       }),
     ],
   },

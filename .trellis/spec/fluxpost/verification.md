@@ -1,6 +1,6 @@
 # Verification
 
-Last updated: 2026-07-23
+Last updated: 2026-07-27
 
 ## Baseline Command
 
@@ -24,7 +24,7 @@ npm run trellis:check
 - Trellis context budgets and `TRELLIS-LATEST` marker sizes.
 - Handoff validity through `.trellis/verification/handoff.ps1`.
 - JSON parse checks for project JSON, `.trellis/spec/fluxpost/feature_list.json`, and existing legacy `data/*.json`.
-- Static/domain checks for PostgreSQL schema, workspace accounts, advanced config admin boundaries, TOS runtime media storage/consumption and secret masking, Ubuntu VPS deployment/Compose/shell contracts, execution logs, platform request mapping, HEIC normalization/preview/historical repair, media handling, video download fallback, video-frame policy, source-video final material references and default-off opt-in, video transcription wiring, concurrency, Feishu publish/resume/queue/vehicle-option paths, simple-run policies, content desk and pool-mode secondary creation, viral/original modes, review preview/workflow/desktop scroll layout behavior, source safety, source import retirement, Feishu content import, durable distribution audit queue/progress, Lark task launch, crawl strategy sync, source-link importers, simple queue/persistence, title/image prompt guards, image-generation toggle behavior, GPT-Image-2/ToAPIs async request shape, ComfyUI Klein wiring, source tagging image preprocessing, and row-level runtime mutations.
+- Static/domain checks for PostgreSQL schema, workspace accounts, advanced config admin boundaries, TOS runtime media storage/consumption and secret masking, Ubuntu VPS deployment/Compose/shell contracts, execution logs, platform request mapping, HEIC normalization/preview/historical repair, media handling, video download fallback, video-frame policy, source-video final material references and default-off opt-in, video transcription wiring, concurrency, Feishu publish/resume/queue/vehicle-option paths, simple-run policies, content desk and pool-mode secondary creation, viral/original modes, review preview/workflow/desktop scroll layout behavior, source safety, source import retirement, Feishu content import, durable distribution audit queue/progress, Lark task launch, crawl strategy sync, source-link importers, simple queue/persistence, title/image prompt guards, image-generation toggle behavior, GPT-Image-2/ToAPIs async request shape, ComfyUI Klein wiring, source tagging image preprocessing, infinite-canvas common-node/vision/media/quick-add contracts, and row-level runtime mutations.
 - `npm run lint`.
 - `npx --no-install tsc --noEmit`.
 - `npm run build`.
@@ -49,6 +49,8 @@ node .trellis/verification/http_smoke.js http://127.0.0.1:3001
 
 ## Recent Verification
 
+- 2026-07-27: Eight canvas common nodes passed registry/config/clipboard/snapshot/helper checks, mocked Responses/Chat vision requests, mocked ffmpeg/ffprobe limits/persistence/errors, full baseline on port 45678, local restart, and mocked Chromium at 1440x960/390x844. Right-click/Tab search, keyboard creation, compatible ambiguous ports, automatic edges, explicit snapshot refresh, mobile structural lockout, and zero horizontal overflow passed without live external calls.
+
 - 2026-07-23: HEIC/TOS local checks covered real HEIC-as-`.jpg`, atomic replacement, 1 JPEG + 8 HEIC TOS persistence, invalid keep `needs_review`, no-video repair, exact/idempotent repair, lint, TypeScript, build, full baseline on port 45678, local restart, and browser smoke. Commit `2fef2e5` then deployed healthy to production 38; root-only backup, admin scan/apply (37 candidates, 33 repaired, 4 safely unchanged), and known-post 9/9 direct TOS HTTP 200 JPEG/non-zero-dimension checks passed without paid service calls.
 
 - 2026-07-21: Image provider profiles `8ee3498` passed focused JSON/SSE/ToAPIs/failover/config checks, type-check, lint, full baseline on port 45678, and local restart. Release `20260721-100637` deployed only to `82.158.226.10`; app/PostgreSQL/Open WebUI, Nginx, loopback/public HTTPS, target commit, and proxy absence passed. Existing production config remained unchanged and resolved both routes to `toapis_async`; the paid admin probe was not run.
@@ -66,6 +68,8 @@ node .trellis/verification/http_smoke.js http://127.0.0.1:3001
 - 2026-07-07: Full baseline passed with `TRELLIS_SMOKE_PORT=45678 powershell -ExecutionPolicy Bypass -File .trellis/verification/check.ps1` after making viral imitation default to GPT-Image-2 `/images/edits` dual-reference generation unless the user explicitly enables Klein, and keeping strict reference role wording under `VIRAL_IMAGE_IMITATION_PROMPT` instead of a separate hard-constraint environment variable. Focused coverage in `.trellis/verification/image_task_fallback_check.mjs`, `.trellis/verification/viral_replication_regression_check.mjs`, `.trellis/verification/simple_viral_run_check.mjs`, and `.trellis/verification/comfyui_klein_check.mjs` verifies exactly two `/images/edits` references and viral Klein routing respects the simple-run switch. Build still has existing Turbopack broad public-path warnings.
 
 ## Missing Coverage
+
+- Infinite canvas has deterministic graph/API/DAG and mocked desktop/mobile coverage, but no live Seedance submission/query, real Feishu write, PostgreSQL migration execution, or multi-user concurrency test. Keep those as operator-approved/manual gates.
 
 - TOS has real application image evidence; authenticated `/config` and real video checks remain.
 

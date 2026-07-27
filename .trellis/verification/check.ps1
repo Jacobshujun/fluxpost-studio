@@ -267,6 +267,7 @@ Invoke-NativeStep "ToAPIs GPT-Image-2 adapter check" $nodePath @(".trellis/verif
 Invoke-NativeStep "Image provider profiles check" $nodePath @(".trellis/verification/image_provider_profiles_check.mjs")
 Invoke-NativeStep "GPT image size request check" $nodePath @(".trellis/verification/gpt_image_size_request_check.mjs")
 Invoke-NativeStep "ComfyUI Klein integration check" $nodePath @(".trellis/verification/comfyui_klein_check.mjs")
+Invoke-NativeStep "Infinite canvas workflows check" $nodePath @(".trellis/verification/canvas_workflows_check.mjs")
 Invoke-NativeStep "Source tagging image check" $nodePath @(".trellis/verification/source_tagging_image_check.mjs")
 Invoke-NativeStep "Content projects row-level mutation check" $nodePath @(".trellis/verification/content_projects_upsert_check.mjs")
 Invoke-NativeStep "Generated posts row-level mutation check" $nodePath @(".trellis/verification/generated_posts_upsert_check.mjs")

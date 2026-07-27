@@ -18,6 +18,7 @@ import {
   LogOut,
   Maximize2,
   Moon,
+  Network,
   RefreshCw,
   Search,
   Send,
@@ -615,6 +616,7 @@ export default function Home() {
               <HeaderLink href="/content" icon={<Database className="h-4 w-4" />} label="采集与内容池" />
               <HeaderLink href="/review" icon={<ExternalLink className="h-4 w-4" />} label="内容审查台" />
               <HeaderLink href="/distribution-check" icon={<ShieldCheck className="h-4 w-4" />} label="是否分发" />
+              <HeaderLink href="/canvas" icon={<Network className="h-4 w-4" />} label="无限画布" />
               {currentAccount.role === "admin" ? <HeaderLink href="/config" icon={<Settings className="h-4 w-4" />} label="高级配置" /> : null}
               <ConfigChip label="TikHub" ok={Boolean(config?.tikhubConfigured)} />
               <ConfigChip label={config?.textModel || "GPT"} ok={Boolean(config?.openaiConfigured)} />
