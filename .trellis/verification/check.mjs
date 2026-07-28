@@ -73,6 +73,8 @@ const nodeChecks = [
   ["GPT image size request check", "gpt_image_size_request_check.mjs"],
   ["ComfyUI Klein integration check", "comfyui_klein_check.mjs"],
   ["Infinite canvas workflows check", "canvas_workflows_check.mjs"],
+  ["Canvas batch scheduler check", "canvas_scheduler_check.mjs"],
+  ["Copy library check", "copy_library_check.mjs"],
   ["Source tagging image check", "source_tagging_image_check.mjs"],
   ["Content projects row-level mutation check", "content_projects_upsert_check.mjs"],
   ["Generated posts row-level mutation check", "generated_posts_upsert_check.mjs"],

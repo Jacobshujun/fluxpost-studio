@@ -1,4 +1,5 @@
 import { getCanvasNodeDefinition } from "./registry";
+import { areCanvasPortKindsCompatible, isCanvasNodeSize } from "./types";
 import type { CanvasEdge, CanvasNode, CanvasPosition } from "./types";
 
 export const CANVAS_CLIPBOARD_MIME = "application/x-fluxpost-canvas-nodes";
@@ -52,6 +53,7 @@ export function parseCanvasClipboardPayload(value: string): CanvasClipboardPaylo
     if (!definition || valueNode.version !== definition.version || !isPosition(valueNode.position) || !isCanvasNodeConfig(valueNode.config)) return undefined;
     if (valueNode.label !== undefined && (typeof valueNode.label !== "string" || valueNode.label.length > 120)) return undefined;
     if (valueNode.executionMode !== undefined && !["enabled", "bypass", "disabled"].includes(String(valueNode.executionMode))) return undefined;
+    if (valueNode.size !== undefined && !isCanvasNodeSize(valueNode.size)) return undefined;
     nodeIds.add(valueNode.id);
     nodes.push({
       id: valueNode.id,
@@ -59,6 +61,7 @@ export function parseCanvasClipboardPayload(value: string): CanvasClipboardPaylo
       version: definition.version,
       position: { x: valueNode.position.x, y: valueNode.position.y },
       config: structuredClone(valueNode.config),
+      ...(isCanvasNodeSize(valueNode.size) ? { size: structuredClone(valueNode.size) } : {}),
       ...(typeof valueNode.label === "string" ? { label: valueNode.label } : {}),
       ...(typeof valueNode.executionMode === "string" ? { executionMode: valueNode.executionMode as CanvasNode["executionMode"] } : {}),
     });
@@ -74,7 +77,7 @@ export function parseCanvasClipboardPayload(value: string): CanvasClipboardPaylo
     const target = nodes.find((node) => node.id === valueEdge.target);
     const output = source && getCanvasNodeDefinition(source.type, source.version)?.outputs.find((port) => port.id === valueEdge.sourcePort);
     const input = target && getCanvasNodeDefinition(target.type, target.version)?.inputs.find((port) => port.id === valueEdge.targetPort);
-    if (!output || !input || output.kind !== input.kind) return undefined;
+    if (!output || !input || !areCanvasPortKindsCompatible(output.kind, input.kind)) return undefined;
     edgeIds.add(valueEdge.id);
     edges.push({
       id: valueEdge.id,

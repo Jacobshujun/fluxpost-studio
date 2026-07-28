@@ -1,6 +1,11 @@
 import type { GeneratedPost } from "../types";
 
 export type CanvasArtifactKind = "text" | "images" | "videos" | "socialPost" | "publishJobRef";
+export type CanvasPortKind = CanvasArtifactKind | "any";
+
+export function areCanvasPortKindsCompatible(outputKind: CanvasPortKind, inputKind: CanvasPortKind) {
+  return outputKind !== "any" && (inputKind === "any" || outputKind === inputKind);
+}
 
 export type CanvasMediaReference = {
   url: string;
@@ -24,12 +29,15 @@ export type CanvasNodeType =
   | "input.videos"
   | "input.content-pool"
   | "input.library-images"
+  | "input.copy-library"
   | "model.gpt-text"
   | "model.gpt-image"
   | "model.gpt-vision"
   | "model.seedance"
   | "utility.image-preview"
+  | "utility.display-any"
   | "utility.prompt-template"
+  | "utility.prompt-switch"
   | "utility.text-split"
   | "utility.image-select"
   | "utility.image-transform"
@@ -39,12 +47,48 @@ export type CanvasNodeType =
 
 export type CanvasNodeExecutionMode = "enabled" | "bypass" | "disabled";
 export type CanvasRunMode = "with-upstream" | "isolated";
+export type CanvasPromptStrategy = "input-1" | "input-2" | "input-3";
+export type CanvasRequiredSchedulerRole = "scene-input" | "vehicle-input" | "prompt-switch" | "image-target" | "content-target";
+export type CanvasSchedulerRole = CanvasRequiredSchedulerRole | "copy-input";
+
+export const CANVAS_REQUIRED_SCHEDULER_ROLES = ["scene-input", "vehicle-input", "prompt-switch", "image-target", "content-target"] as const satisfies readonly CanvasRequiredSchedulerRole[];
+export const CANVAS_SCHEDULER_ROLES = [...CANVAS_REQUIRED_SCHEDULER_ROLES, "copy-input"] as const satisfies readonly CanvasSchedulerRole[];
+
+export const CANVAS_SCHEDULER_ROLE_LABELS: Record<CanvasSchedulerRole, string> = {
+  "scene-input": "场景素材输入",
+  "vehicle-input": "车型素材输入",
+  "prompt-switch": "提示词 Switch",
+  "image-target": "图片生成目标",
+  "content-target": "最终内容目标",
+  "copy-input": "文案库输入",
+};
 
 export type CanvasConfigValue = string | number | boolean | string[] | null | undefined;
 export type CanvasNodeConfig = Record<string, CanvasConfigValue>;
 
 export type CanvasPosition = { x: number; y: number };
 export type CanvasViewport = { x: number; y: number; zoom: number };
+export type CanvasNodeSize = { width: number; height: number };
+
+export const CANVAS_NODE_SIZE_LIMITS = {
+  minWidth: 190,
+  minHeight: 120,
+  maxWidth: 720,
+  maxHeight: 900,
+} as const;
+
+export function isCanvasNodeSize(value: unknown): value is CanvasNodeSize {
+  if (!value || typeof value !== "object" || Array.isArray(value)) return false;
+  const size = value as Partial<CanvasNodeSize>;
+  return typeof size.width === "number"
+    && Number.isFinite(size.width)
+    && size.width >= CANVAS_NODE_SIZE_LIMITS.minWidth
+    && size.width <= CANVAS_NODE_SIZE_LIMITS.maxWidth
+    && typeof size.height === "number"
+    && Number.isFinite(size.height)
+    && size.height >= CANVAS_NODE_SIZE_LIMITS.minHeight
+    && size.height <= CANVAS_NODE_SIZE_LIMITS.maxHeight;
+}
 
 export type CanvasNode = {
   id: string;
@@ -52,8 +96,10 @@ export type CanvasNode = {
   version: 1 | 2;
   position: CanvasPosition;
   config: CanvasNodeConfig;
+  size?: CanvasNodeSize;
   label?: string;
   executionMode?: CanvasNodeExecutionMode;
+  schedulerRole?: CanvasSchedulerRole;
 };
 
 export type CanvasEdge = {
@@ -114,6 +160,13 @@ export type CanvasRun = {
   steps?: CanvasRunPlanStep[];
   targetNodeIds?: string[];
   retryNodeIds?: string[];
+  batchContext?: {
+    scheduleId: string;
+    batchId: string;
+    contentTaskId: string;
+    imageTaskId?: string;
+    phase: "image" | "finalize";
+  };
   confirmation: CanvasRunConfirmation;
   cancelRequestedAt?: string;
   error?: string;
@@ -133,6 +186,7 @@ export type CanvasNodeRun = {
   inputs: Record<string, CanvasArtifact[]>;
   outputs: Record<string, CanvasArtifact>;
   providerTaskId?: string;
+  providerTaskRoute?: "primary" | "backup";
   providerStatus?: string;
   inputFingerprint?: string;
   reusedFrom?: {
@@ -167,7 +221,7 @@ export type CanvasRunQueueItem = {
 export type CanvasPortDefinition = {
   id: string;
   label: string;
-  kind: CanvasArtifactKind;
+  kind: CanvasPortKind;
   required?: boolean;
   multiple?: boolean;
 };
@@ -175,7 +229,7 @@ export type CanvasPortDefinition = {
 export type CanvasConfigFieldDefinition = {
   key: string;
   label: string;
-  kind: "text" | "textarea" | "number" | "select" | "url-list" | "content-pool-picker" | "library-image-picker";
+  kind: "text" | "textarea" | "number" | "select" | "url-list" | "content-pool-picker" | "library-image-picker" | "copy-library-picker";
   placeholder?: string;
   min?: number;
   max?: number;
@@ -198,6 +252,7 @@ export type CanvasNodeDefinition = {
   defaultConfig: CanvasNodeConfig;
   capability?: CanvasNodeCapability;
   bypass?: { inputPort: string; outputPort: string };
+  passiveSink?: boolean;
 };
 
 export type CanvasGraphValidation = {
@@ -238,4 +293,104 @@ export type CanvasLatestSuccessfulNodeRun = {
   nodeVersion: 1 | 2;
   nodeConfig: CanvasNodeConfig;
   nodeRun: CanvasNodeRun;
+};
+
+export type CanvasScheduleStatus = "draft" | "ready" | "queued" | "running" | "paused" | "completed" | "partial" | "failed" | "cancelled";
+export type CanvasScheduleTaskStatus = "pending" | "queued" | "running" | "completed" | "partial" | "failed" | "cancelled";
+
+export type CanvasScheduleAssetFilter = {
+  mode: "manual" | "random";
+  assetIds: string[];
+  search: string;
+  collectionId?: string;
+  tags: string[];
+};
+
+export type CanvasScheduleAssetSnapshot = CanvasMediaReference & {
+  id: string;
+};
+
+export type CanvasScheduleCopyFilter = {
+  mode: "manual" | "tags";
+  entryIds: string[];
+  search: string;
+  tags: string[];
+};
+
+export type CanvasScheduleCopySnapshot = {
+  id: string;
+  title: string;
+  body: string;
+  tags: string[];
+  updatedAt: string;
+};
+
+export type CanvasScheduleImageTask = {
+  id: string;
+  vehicle: CanvasScheduleAssetSnapshot;
+  status: CanvasScheduleTaskStatus;
+  runId?: string;
+  imageUrls: string[];
+  error?: string;
+  createdAt: string;
+  updatedAt: string;
+};
+
+export type CanvasScheduleContentTask = {
+  id: string;
+  scene: CanvasScheduleAssetSnapshot;
+  vehicles: CanvasScheduleAssetSnapshot[];
+  imageTasks: CanvasScheduleImageTask[];
+  copy?: CanvasScheduleCopySnapshot;
+  status: CanvasScheduleTaskStatus;
+  finalRunId?: string;
+  generatedPostId?: string;
+  generatedPostUpdatedAt?: string;
+  candidateImageUrls: string[];
+  assemblyFingerprint?: string;
+  pendingCandidateSync?: boolean;
+  error?: string;
+  createdAt: string;
+  updatedAt: string;
+};
+
+export type CanvasScheduleBatch = {
+  id: string;
+  name: string;
+  strategy: CanvasPromptStrategy;
+  sceneFilter: CanvasScheduleAssetFilter;
+  sceneCount: number;
+  vehicleFilter: CanvasScheduleAssetFilter;
+  vehicleCountMin: number;
+  vehicleCountMax: number;
+  copyFilter?: CanvasScheduleCopyFilter;
+  status: CanvasScheduleStatus;
+  contentTasks: CanvasScheduleContentTask[];
+  error?: string;
+  createdAt: string;
+  updatedAt: string;
+};
+
+export type CanvasScheduleBindings = Record<CanvasRequiredSchedulerRole, string> & Partial<Record<"copy-input", string>>;
+
+export type CanvasSchedule = {
+  id: string;
+  ownerUserId: string;
+  ownerDisplayName: string;
+  name: string;
+  revision: number;
+  workflowId: string;
+  workflowRevision: number;
+  workflowSnapshot?: CanvasGraph;
+  status: CanvasScheduleStatus;
+  batches: CanvasScheduleBatch[];
+  bindings?: CanvasScheduleBindings;
+  previewRevision?: string;
+  totalContentTasks: number;
+  totalImageTasks: number;
+  error?: string;
+  createdAt: string;
+  updatedAt: string;
+  launchedAt?: string;
+  completedAt?: string;
 };

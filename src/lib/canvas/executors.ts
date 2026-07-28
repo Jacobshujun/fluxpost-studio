@@ -24,12 +24,18 @@ export type CanvasNodeExecutionContext = {
   inputs: Record<string, CanvasArtifact[]>;
   account: WorkspaceAccessActor;
   previousNodeRun?: CanvasNodeRun;
+  onProviderTaskUpdate?: (state: {
+    taskId: string;
+    route: "primary" | "backup";
+    status: string;
+  }) => Promise<void>;
 };
 
 export type CanvasNodeExecutionResult = {
   outputs: Record<string, CanvasArtifact>;
   resolvedInputs?: Record<string, CanvasArtifact[]>;
   providerTaskId?: string;
+  providerTaskRoute?: "primary" | "backup";
   providerStatus?: string;
   pending?: boolean;
 };
@@ -42,12 +48,15 @@ const executors: Record<CanvasNode["type"], CanvasNodeExecutor> = {
   "input.videos": executeLiteralNode,
   "input.content-pool": executeLiteralNode,
   "input.library-images": executeLiteralNode,
+  "input.copy-library": executeLiteralNode,
   "model.gpt-text": executeGptText,
   "model.gpt-image": executeGptImage,
   "model.gpt-vision": executeGptVision,
   "model.seedance": executeSeedance,
   "utility.image-preview": executeImagePreview,
+  "utility.display-any": executeDisplayAny,
   "utility.prompt-template": executePromptTemplate,
+  "utility.prompt-switch": executePromptSwitch,
   "utility.text-split": executeTextSplit,
   "utility.image-select": executeImageSelect,
   "utility.image-transform": executeImageTransform,
@@ -88,6 +97,12 @@ export function resolveCanvasLiteralOutputs(node: CanvasNode): Record<string, Ca
     if (videos.length) outputs.videos = videoArtifact(videos);
     return outputs;
   }
+  if (node.type === "input.copy-library") {
+    return {
+      title: { kind: "text", value: String(node.config.snapshotTitle || "").trim() },
+      body: { kind: "text", value: String(node.config.snapshotBody || "").trim() },
+    };
+  }
   return undefined;
 }
 
@@ -97,14 +112,31 @@ async function executeImagePreview({ inputs }: CanvasNodeExecutionContext) {
   return { outputs: { images: { kind: "images" as const, items: structuredClone(items) } } };
 }
 
+async function executeDisplayAny({ inputs }: CanvasNodeExecutionContext) {
+  const artifacts = inputs.value || [];
+  if (artifacts.length !== 1) throw new Error("展示任何需要且仅允许一个上游结果。");
+  return { outputs: { preview: structuredClone(artifacts[0]) } };
+}
+
 async function executePromptTemplate({ node, inputs }: CanvasNodeExecutionContext) {
   const value = renderCanvasPromptTemplate(node.config, textValues(inputs.values));
   return { outputs: { text: { kind: "text" as const, value } } };
 }
 
+async function executePromptSwitch({ node, inputs }: CanvasNodeExecutionContext) {
+  const port = node.version === 1
+    ? node.config.strategy === "scene-modification" ? "sceneModification" : node.config.strategy === "scene-person" ? "scenePerson" : "scene"
+    : `input${String(node.config.selectedInput || "1")}`;
+  const values = textValues(inputs[port]);
+  if (values.length !== 1 || !values[0].trim()) throw new Error("提示词 Switch 所选输入需要且仅允许一个非空文字输入。");
+  return { outputs: { text: { kind: "text" as const, value: values[0].trim() } } };
+}
+
 async function executeTextSplit({ node, inputs }: CanvasNodeExecutionContext) {
-  const value = splitCanvasText(node.config, textValues(inputs.text).join("\n\n"));
-  return { outputs: { head: { kind: "text" as const, value: value.head }, tail: { kind: "text" as const, value: value.tail } } };
+  const value = splitCanvasText(node.config, textValues(inputs.text).join("\n\n"), { fallbackToBody: node.version >= 2 });
+  const outputs: Record<string, CanvasArtifact> = { tail: { kind: "text", value: value.tail } };
+  if (value.head !== undefined) outputs.head = { kind: "text", value: value.head };
+  return { outputs };
 }
 
 async function executeImageSelect({ node, inputs }: CanvasNodeExecutionContext) {
@@ -146,9 +178,7 @@ async function executeGptVision({ node, inputs }: CanvasNodeExecutionContext) {
   const items = imageItems(inputs.images);
   const maxImages = Number(node.config.maxImages || 8);
   if (!items.length || items.length > maxImages || items.length > 8) throw new Error(`Vision analysis accepts 1 to ${Math.min(maxImages, 8)} images.`);
-  const preset = String(node.config.preset || "describe") as keyof typeof canvasVisionPresets;
-  const instruction = [canvasVisionPresets[preset], String(node.config.instruction || "").trim(), textValues(inputs.instruction).join("\n\n")]
-    .filter(Boolean).join("\n\n");
+  const instruction = resolveCanvasVisionInstruction(node, inputs.instruction);
   try {
     const value = await callOpenAIForVisionText(instruction, items.map((item) => item.url), { logLabel: `Canvas GPT vision node ${node.id}` });
     return { outputs: { text: { kind: "text" as const, value } } };
@@ -158,12 +188,22 @@ async function executeGptVision({ node, inputs }: CanvasNodeExecutionContext) {
   }
 }
 
-async function executeGptImage(context: CanvasNodeExecutionContext) {
+function resolveCanvasVisionInstruction(node: CanvasNode, artifacts: CanvasArtifact[] | undefined) {
+  const userInstruction = textValues(artifacts).map((value) => value.trim()).filter(Boolean).join("\n\n");
+  if (userInstruction) return userInstruction;
+  const preset = String(node.config.preset || "describe") as keyof typeof canvasVisionPresets;
+  return [canvasVisionPresets[preset], String(node.config.instruction || "").trim()].filter(Boolean).join("\n\n");
+}
+
+async function executeGptImage(context: CanvasNodeExecutionContext): Promise<CanvasNodeExecutionResult> {
   if (context.node.version === 1) return executeLegacyGptImage(context);
-  const { node, inputs } = context;
+  const { node, inputs, previousNodeRun, onProviderTaskUpdate } = context;
   const prompt = textValues(inputs.prompt).join("\n\n").trim();
   const directReferences = normalizeUrlList(node.config.referenceUrls);
   const references = resolveCanvasGptImageReferences(directReferences, inputs.references || []);
+  const resumableTask = previousNodeRun?.providerTaskId && previousNodeRun.providerStatus !== "failed"
+    ? previousNodeRun
+    : undefined;
   const ratio = String(node.config.ratio || "1:1");
   const resolution = String(node.config.resolution || "1k") as "1k" | "2k" | "4k";
   const result = await generateCanvasGptImages(prompt, Number(node.config.count || 1), references, {
@@ -173,8 +213,26 @@ async function executeGptImage(context: CanvasNodeExecutionContext) {
     quality: String(node.config.quality || "medium") as "low" | "medium" | "high",
     outputFormat: node.config.outputFormat === "jpeg" ? "jpeg" : "png",
     outputCompression: Number(node.config.outputCompression ?? 100),
+  }, {
+    resumeTaskId: resumableTask?.providerTaskId,
+    resumeTaskRoute: resumableTask?.providerTaskRoute,
+    resumeStatus: resumableTask?.providerStatus,
+    onTaskUpdate: onProviderTaskUpdate,
   });
   if (result.status === "needs_config") throw new CanvasNeedsConfigError(result.message || "GPT-Image-2 is not configured.");
+  if (result.status === "pending") {
+    return {
+      resolvedInputs: {
+        ...inputs,
+        references: [{ kind: "images" as const, items: references.map((url, index) => ({ url, name: `reference ${index + 1}` })) }],
+      },
+      outputs: {},
+      providerTaskId: result.providerTaskId,
+      providerTaskRoute: result.providerTaskRoute,
+      providerStatus: result.providerStatus,
+      pending: true,
+    };
+  }
   return {
     resolvedInputs: {
       ...inputs,
@@ -272,7 +330,7 @@ async function executeComposition({ node, inputs, runId, account }: CanvasNodeEx
     title: titles.join(" ").trim() || String(node.config.fallbackTitle || "画布生成内容"),
     body: bodies.join("\n\n").trim(),
     taskKeyword: "无限画布",
-    feishuVehicle: String(node.config.vehicle || "").trim() || undefined,
+    feishuVehicle: resolveCanvasCompositionVehicle(node, inputs.vehicle),
     platform: "original",
     imagePrompt: "",
     imageUrls,
@@ -284,6 +342,10 @@ async function executeComposition({ node, inputs, runId, account }: CanvasNodeEx
   };
   const saved = await saveGeneratedPost(post, account);
   return { outputs: { post: { kind: "socialPost" as const, postId: saved.id, post: saved } } };
+}
+
+function resolveCanvasCompositionVehicle(node: CanvasNode, artifacts: CanvasArtifact[] | undefined) {
+  return textValues(artifacts).join(" ").trim() || String(node.config.vehicle || "").trim() || undefined;
 }
 
 async function executeFeishuPublish({ inputs, runId, account }: CanvasNodeExecutionContext) {

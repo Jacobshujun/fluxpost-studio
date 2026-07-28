@@ -617,6 +617,7 @@ export default function Home() {
               <HeaderLink href="/content" icon={<Database className="h-4 w-4" />} label="采集与内容池" />
               <HeaderLink href="/library?role=reference" icon={<ImageIcon className="h-4 w-4" />} label="参考图库" />
               <HeaderLink href="/library?role=vehicle" icon={<Images className="h-4 w-4" />} label="车型图库" />
+              <HeaderLink href="/copy-library" icon={<FileText className="h-4 w-4" />} label="文案库" />
               <HeaderLink href="/review" icon={<ExternalLink className="h-4 w-4" />} label="内容审查台" />
               <HeaderLink href="/distribution-check" icon={<ShieldCheck className="h-4 w-4" />} label="是否分发" />
               <HeaderLink href="/canvas" icon={<Network className="h-4 w-4" />} label="无限画布" />

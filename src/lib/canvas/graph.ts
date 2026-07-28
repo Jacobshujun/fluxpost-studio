@@ -1,8 +1,10 @@
 import { getCanvasNodeDefinition, getCanvasNodeExecutionMode, validateCanvasNodeConfig } from "./registry";
-import type { CanvasEdge, CanvasGraph, CanvasGraphValidation, CanvasNodeCapability, CanvasRunPlan } from "./types";
+import { areCanvasPortKindsCompatible, CANVAS_NODE_SIZE_LIMITS, CANVAS_SCHEDULER_ROLES, isCanvasNodeSize } from "./types";
+import type { CanvasEdge, CanvasGraph, CanvasGraphValidation, CanvasNodeCapability, CanvasRunPlan, CanvasSchedulerRole } from "./types";
 
 const maxGraphNodes = 200;
 const maxGraphEdges = 600;
+const schedulerRoles = new Set<CanvasSchedulerRole>(CANVAS_SCHEDULER_ROLES);
 
 export function validateCanvasGraph(graph: CanvasGraph): CanvasGraphValidation {
   const errors: string[] = [];
@@ -13,6 +15,7 @@ export function validateCanvasGraph(graph: CanvasGraph): CanvasGraphValidation {
   if (graph.edges.length > maxGraphEdges) errors.push(`Canvas supports at most ${maxGraphEdges} edges.`);
 
   const nodes = new Map<string, (typeof graph.nodes)[number]>();
+  const schedulerRoleNodes = new Map<CanvasSchedulerRole, string>();
   for (const node of graph.nodes) {
     if (!node.id?.trim()) {
       errors.push("Canvas node id is required.");
@@ -27,9 +30,24 @@ export function validateCanvasGraph(graph: CanvasGraph): CanvasGraphValidation {
     }
     if (node.version !== definition.version) errors.push(`${definition.label} node ${node.id} uses unsupported version ${node.version}.`);
     const executionMode = getCanvasNodeExecutionMode(node);
-    if (executionMode === "enabled") errors.push(...validateCanvasNodeConfig(node.type, node.config || {}, node.version));
+    const schedulerBoundImageInput = (node.schedulerRole === "scene-input" || node.schedulerRole === "vehicle-input")
+      && (node.type === "input.images" || node.type === "input.library-images");
+    const schedulerBoundCopyInput = node.schedulerRole === "copy-input" && node.type === "input.copy-library";
+    if (executionMode === "enabled" && !schedulerBoundImageInput && !schedulerBoundCopyInput) errors.push(...validateCanvasNodeConfig(node.type, node.config || {}, node.version));
     if (executionMode === "bypass" && !definition.bypass) errors.push(`${definition.label} does not support bypass mode.`);
     if (!Number.isFinite(node.position?.x) || !Number.isFinite(node.position?.y)) errors.push(`Node ${node.id} has an invalid position.`);
+    if (node.size !== undefined && !isCanvasNodeSize(node.size)) {
+      errors.push(`Node ${node.id} size must be between ${CANVAS_NODE_SIZE_LIMITS.minWidth}x${CANVAS_NODE_SIZE_LIMITS.minHeight} and ${CANVAS_NODE_SIZE_LIMITS.maxWidth}x${CANVAS_NODE_SIZE_LIMITS.maxHeight}.`);
+    }
+    if (node.schedulerRole !== undefined) {
+      if (!schedulerRoles.has(node.schedulerRole)) {
+        errors.push(`Node ${node.id} has an invalid scheduler role.`);
+      } else if (schedulerRoleNodes.has(node.schedulerRole)) {
+        errors.push(`Scheduler role ${node.schedulerRole} is already assigned to node ${schedulerRoleNodes.get(node.schedulerRole)}.`);
+      } else {
+        schedulerRoleNodes.set(node.schedulerRole, node.id);
+      }
+    }
   }
 
   const edgeIds = new Set<string>();
@@ -50,7 +68,7 @@ export function validateCanvasGraph(graph: CanvasGraph): CanvasGraphValidation {
     const input = targetDefinition?.inputs.find((port) => port.id === edge.targetPort);
     if (!output) errors.push(`Edge ${edge.id} uses missing output port ${edge.sourcePort}.`);
     if (!input) errors.push(`Edge ${edge.id} uses missing input port ${edge.targetPort}.`);
-    if (output && input && output.kind !== input.kind) errors.push(`Edge ${edge.id} connects ${output.kind} to incompatible ${input.kind}.`);
+    if (output && input && !areCanvasPortKindsCompatible(output.kind, input.kind)) errors.push(`Edge ${edge.id} connects ${output.kind} to incompatible ${input.kind}.`);
     const inputKey = `${edge.target}:${edge.targetPort}`;
     const existing = incoming.get(inputKey) || [];
     existing.push(edge);
@@ -164,7 +182,8 @@ function includePassivePreviewSinks(graph: CanvasGraph, included: Set<string>) {
     changed = false;
     for (const edge of graph.edges) {
       const target = graph.nodes.find((node) => node.id === edge.target);
-      if (included.has(edge.source) && target?.type === "utility.image-preview" && !included.has(edge.target)) {
+      const targetDefinition = target && getCanvasNodeDefinition(target.type, target.version);
+      if (included.has(edge.source) && targetDefinition?.passiveSink && !included.has(edge.target)) {
         included.add(edge.target);
         changed = true;
       }

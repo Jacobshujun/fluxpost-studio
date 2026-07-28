@@ -878,6 +878,22 @@ export type LibraryAssetRole = "reference" | "vehicle";
 
 export type LibraryVisibility = "private" | "team";
 
+export type CopyLibraryEntry = {
+  id: string;
+  ownerUserId: string;
+  ownerDisplayName: string;
+  visibility: LibraryVisibility;
+  title: string;
+  body: string;
+  tags: string[];
+  createdAt: string;
+  updatedAt: string;
+};
+
+export type CopyLibraryEntryView = CopyLibraryEntry & {
+  canEdit: boolean;
+};
+
 export type LibraryPeoplePresence = "yes" | "no" | "unknown";
 
 export type LibraryTaggingStatus = "queued" | "running" | "completed" | "failed";

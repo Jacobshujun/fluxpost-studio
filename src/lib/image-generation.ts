@@ -26,6 +26,7 @@ import {
   getToApisCompletedImageUrls,
   parseRetryAfterMs,
   requireToApisTaskId,
+  shouldReturnPendingAfterToApisAcceptance,
   type ToApisImageTask,
 } from "./toapis-image-api";
 import type { ImageGenerationOptions, ImageProviderProbeResult, ImageProviderProbeStepResult, SourceImageTask } from "./types";
@@ -94,6 +95,31 @@ type SelectedImageTaskResult = {
   failedTask?: string;
   taskResult: ImageTaskGenerationResult;
 };
+
+type AsyncImageTaskState = {
+  taskId: string;
+  route: OpenaiImageApiRoute;
+  status: string;
+};
+
+type AsyncImageTaskControl = {
+  resumeTaskId?: string;
+  resumeTaskRoute?: OpenaiImageApiRoute;
+  resumeStatus?: string;
+  onTaskUpdate?: (state: AsyncImageTaskState) => Promise<void>;
+  returnPendingOnTimeout?: boolean;
+  returnPendingAfterAcceptance?: boolean;
+};
+
+class ImageProviderTaskPendingError extends Error {
+  constructor(
+    public readonly state: AsyncImageTaskState,
+    message: string,
+  ) {
+    super(message);
+    this.name = "ImageProviderTaskPendingError";
+  }
+}
 
 export async function generateImagesFromPrompt(
   prompt: string,
@@ -299,6 +325,7 @@ export async function generateCanvasGptImages(
   count: number,
   referenceImages: string[],
   options?: Partial<ImageGenerationOptions>,
+  asyncTask?: Omit<AsyncImageTaskControl, "returnPendingOnTimeout" | "returnPendingAfterAcceptance">,
 ) {
   if (!Number.isInteger(count) || count < 1 || count > 10) throw new Error("GPT-Image-2 output count must be an integer from 1 to 10.");
   const orderedReferences = Array.from(new Set(referenceImages.map((item) => item.trim()).filter(Boolean)));
@@ -315,7 +342,26 @@ export async function generateCanvasGptImages(
   }
 
   const imageOptions = normalizeImageOptions({ ...options, strictReferencePreparation: true });
-  const imageUrls = await callImagesApi(normalizeProviderPrompt(prompt), count, imageOptions, orderedReferences);
+  let imageUrls: string[];
+  try {
+    imageUrls = await callImagesApi(normalizeProviderPrompt(prompt), count, imageOptions, orderedReferences, undefined, {
+      ...asyncTask,
+      returnPendingOnTimeout: true,
+      returnPendingAfterAcceptance: true,
+    });
+  } catch (error) {
+    if (error instanceof ImageProviderTaskPendingError) {
+      return {
+        status: "pending" as const,
+        imageUrls: [] as string[],
+        providerTaskId: error.state.taskId,
+        providerTaskRoute: error.state.route,
+        providerStatus: error.state.status,
+        message: error.message,
+      };
+    }
+    throw error;
+  }
   if (imageUrls.length !== count) {
     throw new Error(`GPT-Image-2 returned ${imageUrls.length} of ${count} requested images.`);
   }
@@ -381,6 +427,20 @@ function makeProbePreparedReferences(files: PreparedReferenceImage[]): PreparedR
     remoteCount: 0,
     encodedCount: files.length,
     mode: files.length ? "file" : "none",
+  };
+}
+
+function makeResumedTaskReferences(referenceImages: string[]): PreparedReferenceImages {
+  return {
+    values: [...referenceImages],
+    fallbackValues: [],
+    files: [],
+    entries: referenceImages.map((source) => ({ source })),
+    toApisUrlsByRoute: {},
+    localCount: 0,
+    remoteCount: referenceImages.length,
+    encodedCount: 0,
+    mode: referenceImages.length ? "url" : "none",
   };
 }
 
@@ -848,20 +908,39 @@ async function callResponsesImageToolInPool(prompt: string, count: number, optio
   return imageUrls;
 }
 
-async function callImagesApi(prompt: string, count: number, options: ImageGenerationOptions, referenceImages: string[] = [], task?: SourceImageTask) {
-  return runWithConcurrencyPool("image", () => callImagesApiInPool(prompt, count, options, referenceImages, task));
+async function callImagesApi(
+  prompt: string,
+  count: number,
+  options: ImageGenerationOptions,
+  referenceImages: string[] = [],
+  task?: SourceImageTask,
+  asyncTask?: AsyncImageTaskControl,
+) {
+  return runWithConcurrencyPool("image", () => callImagesApiInPool(prompt, count, options, referenceImages, task, asyncTask));
 }
 
-async function callImagesApiInPool(prompt: string, count: number, options: ImageGenerationOptions, referenceImages: string[] = [], task?: SourceImageTask) {
+async function callImagesApiInPool(
+  prompt: string,
+  count: number,
+  options: ImageGenerationOptions,
+  referenceImages: string[] = [],
+  task?: SourceImageTask,
+  asyncTask?: AsyncImageTaskControl,
+) {
   if (referenceImages.length > 16) throw new Error(`Images API accepts at most 16 reference images; received ${referenceImages.length}.`);
   const startedAt = Date.now();
-  const preparedReferences = await prepareReferenceImages(referenceImages, options.size, options.strictReferencePreparation === true);
-  const initialRoute = resolveActiveStandardImagesApiRoute();
+  const initialRoute = asyncTask?.resumeTaskRoute || resolveActiveStandardImagesApiRoute();
   const initialProfile = openaiImageRouteConfig(initialRoute).profile;
+  if (asyncTask?.resumeTaskId && initialProfile !== "toapis_async") {
+    throw toAcceptedImageProviderError(`Accepted image task ${asyncTask.resumeTaskId} cannot resume because route ${initialRoute} is no longer configured for ToAPIs.`);
+  }
+  const preparedReferences = asyncTask?.resumeTaskId
+    ? makeResumedTaskReferences(referenceImages)
+    : await prepareReferenceImages(referenceImages, options.size, options.strictReferencePreparation === true);
   const endpointPath = initialProfile === "toapis_async" ? "images/generations" : preparedReferences.files.length ? "images/edits" : "images/generations";
   const strictReferencesInvalid =
     referenceImages.length !== 2 || preparedReferences.entries.length !== 2 || (initialProfile !== "toapis_async" && preparedReferences.files.length !== 2);
-  const strictMultiReferencesInvalid = options.strictReferencePreparation === true
+  const strictMultiReferencesInvalid = !asyncTask?.resumeTaskId && options.strictReferencePreparation === true
     && (preparedReferences.entries.length !== referenceImages.length || (initialProfile !== "toapis_async" && preparedReferences.files.length !== referenceImages.length));
   if (task && isStrictDualReferenceTask(task) && strictReferencesInvalid) {
     await cleanupPreparedReferenceImages(preparedReferences);
@@ -900,7 +979,7 @@ async function callImagesApiInPool(prompt: string, count: number, options: Image
     },
   });
 
-  const data = await requestImagesApiWithRetry(prompt, count, startedAt, options, preparedReferences);
+  const data = await requestImagesApiWithRetry(prompt, count, startedAt, options, preparedReferences, asyncTask);
   const base64Images = (data.data || []).map((item) => item.b64_json).filter((item): item is string => Boolean(item));
   const remoteUrls = (data.data || []).map((item) => item.url).filter((item): item is string => Boolean(item));
   const imageUrls = [...(await saveBase64Images(base64Images)), ...(await materializeGeneratedImageUrls(remoteUrls))].slice(0, count);
@@ -926,10 +1005,11 @@ async function requestStandardImagesApiWithRetry(
   startedAt: number,
   options: ImageGenerationOptions,
   referenceImages: PreparedReferenceImages,
+  asyncTask?: AsyncImageTaskControl,
 ): Promise<ImagesApiResponse> {
   const endpointPath = referenceImages.files.length ? "images/edits" : "images/generations";
   try {
-    return await requestSingleStandardImagesApiWithRetry(prompt, count, startedAt, options, referenceImages, endpointPath);
+    return await requestSingleStandardImagesApiWithRetry(prompt, count, startedAt, options, referenceImages, endpointPath, asyncTask);
   } finally {
     await cleanupPreparedReferenceImages(referenceImages);
   }
@@ -942,13 +1022,14 @@ async function requestSingleStandardImagesApiWithRetry(
   options: ImageGenerationOptions,
   referenceImages: PreparedReferenceImages,
   endpointPath: "images/edits" | "images/generations",
+  asyncTask?: AsyncImageTaskControl,
 ): Promise<ImagesApiResponse> {
   const triedRoutes = new Set<OpenaiImageApiRoute>();
-  let route = resolveActiveStandardImagesApiRoute();
+  let route = asyncTask?.resumeTaskRoute || resolveActiveStandardImagesApiRoute();
 
   while (true) {
     try {
-      const response = await requestSingleStandardImagesApiWithRetryForRoute(route, prompt, count, Date.now(), options, referenceImages, endpointPath);
+      const response = await requestSingleStandardImagesApiWithRetryForRoute(route, prompt, count, Date.now(), options, referenceImages, endpointPath, asyncTask);
       activeStandardImagesApiRoute = route;
       return response;
     } catch (error) {
@@ -990,11 +1071,12 @@ async function requestSingleStandardImagesApiWithRetryForRoute(
   options: ImageGenerationOptions,
   referenceImages: PreparedReferenceImages,
   endpointPath: "images/edits" | "images/generations",
+  asyncTask?: AsyncImageTaskControl,
 ): Promise<ImagesApiResponse> {
   const routeConfig = openaiImageRouteConfig(route);
   const profile = routeConfig.profile;
   if (profile === "toapis_async") {
-    return requestSingleToApisImagesApiForRoute(route, prompt, count, startedAt, options, referenceImages);
+    return requestSingleToApisImagesApiForRoute(route, prompt, count, startedAt, options, referenceImages, asyncTask);
   }
   if (profile === "openai_json") {
     return requestSingleOpenAiJsonImageForRoute(route, prompt, count, startedAt, options, referenceImages, endpointPath);
@@ -1264,9 +1346,24 @@ async function requestSingleToApisImagesApiForRoute(
   startedAt: number,
   options: ImageGenerationOptions,
   referenceImages: PreparedReferenceImages,
+  asyncTask?: AsyncImageTaskControl,
 ): Promise<ImagesApiResponse> {
   const routeConfig = openaiImageRouteConfig(route);
   const deadline = startedAt + imageRequestTimeoutMs;
+  if (asyncTask?.resumeTaskId) {
+    const taskId = asyncTask.resumeTaskId;
+    const status = normalizeToApisResumeStatus(asyncTask.resumeStatus);
+    await recordExecutionLog({
+      scope: "openai/image",
+      action: "ToAPIs image task resumed",
+      status: "running",
+      message: "Resuming an accepted ToAPIs image task without submitting a new generation.",
+      durationMs: Date.now() - startedAt,
+      details: { taskId, route, status },
+    });
+    await asyncTask.onTaskUpdate?.({ taskId, route, status });
+    return pollToApisImageTask(route, taskId, { id: taskId, status }, startedAt, asyncTask, true);
+  }
   const referenceUrls = await prepareToApisReferenceUrls(route, referenceImages, deadline);
   const requestBody = buildToApisGenerationBody({
     model: routeConfig.model,
@@ -1376,7 +1473,24 @@ async function requestSingleToApisImagesApiForRoute(
       referenceImageCount: referenceUrls.length,
     },
   });
+  const status = normalizeToApisPendingStatus(task.status);
+  await asyncTask?.onTaskUpdate?.({ taskId, route, status });
+  if (shouldReturnPendingAfterToApisAcceptance(status, asyncTask?.returnPendingAfterAcceptance === true)) {
+    return throwOrPreservePendingToApisTask(taskId, route, status, asyncTask);
+  }
+  return pollToApisImageTask(route, taskId, { ...task, status }, startedAt, asyncTask, false);
+}
 
+async function pollToApisImageTask(
+  route: OpenaiImageApiRoute,
+  taskId: string,
+  initialTask: ToApisImageTask,
+  startedAt: number,
+  asyncTask: AsyncImageTaskControl | undefined,
+  resumed: boolean,
+): Promise<ImagesApiResponse> {
+  const deadline = startedAt + imageRequestTimeoutMs;
+  let task = initialTask;
   for (let pollAttempt = 0; ; pollAttempt += 1) {
     if (task.status === "completed") {
       const urls = getToApisCompletedImageUrls(task);
@@ -1387,9 +1501,14 @@ async function requestSingleToApisImagesApiForRoute(
     if (task.status && !["pending", "queued", "in_progress"].includes(task.status)) {
       throw toAcceptedImageProviderError(`ToAPIs image task returned unsupported status: ${task.status}`);
     }
-    if (!hasRetryWindow(deadline)) throw toAcceptedImageProviderError(`ToAPIs image task timed out after ${Math.round(imageRequestTimeoutMs / 1000)}s.`, "timeout");
+    if (!hasRetryWindow(deadline)) {
+      return throwOrPreservePendingToApisTask(taskId, route, task.status, asyncTask);
+    }
 
-    await sleepWithinDeadline(getToApisPollDelayMs(taskId, pollAttempt), deadline);
+    if (!resumed) await sleepWithinDeadline(getToApisPollDelayMs(taskId, pollAttempt), deadline);
+    if (!hasRetryWindow(deadline)) {
+      return throwOrPreservePendingToApisTask(taskId, route, task.status, asyncTask);
+    }
     let response: Response;
     try {
       response = await fetchWithTimeout(
@@ -1406,6 +1525,7 @@ async function requestSingleToApisImagesApiForRoute(
         durationMs: Date.now() - startedAt,
         details: { taskId, route },
       });
+      if (resumed) return throwOrPreservePendingToApisTask(taskId, route, task.status, asyncTask);
       continue;
     }
     const body = await response.text();
@@ -1420,6 +1540,7 @@ async function requestSingleToApisImagesApiForRoute(
         durationMs: Date.now() - startedAt,
         details: { taskId, route, status: response.status, retryDelayMs },
       });
+      if (resumed) return throwOrPreservePendingToApisTask(taskId, route, task.status, asyncTask);
       await sleepWithinDeadline(retryDelayMs, deadline);
       continue;
     }
@@ -1435,7 +1556,37 @@ async function requestSingleToApisImagesApiForRoute(
         cause: error,
       });
     }
+    const status = normalizeToApisPendingStatus(task.status);
+    task = { ...task, status };
+    await asyncTask?.onTaskUpdate?.({ taskId, route, status });
+    if (resumed && ["pending", "queued", "in_progress"].includes(status)) {
+      return throwOrPreservePendingToApisTask(taskId, route, status, asyncTask);
+    }
   }
+}
+
+function throwOrPreservePendingToApisTask(
+  taskId: string,
+  route: OpenaiImageApiRoute,
+  status: string | undefined,
+  asyncTask?: AsyncImageTaskControl,
+): never {
+  const normalizedStatus = normalizeToApisPendingStatus(status);
+  if (asyncTask?.returnPendingOnTimeout) {
+    throw new ImageProviderTaskPendingError(
+      { taskId, route, status: normalizedStatus },
+      `ToAPIs image task remains ${normalizedStatus}; polling will resume without resubmission.`,
+    );
+  }
+  throw toAcceptedImageProviderError(`ToAPIs image task is still ${normalizedStatus} after the ${Math.round(imageRequestTimeoutMs / 1000)}s polling window.`, "timeout");
+}
+
+function normalizeToApisPendingStatus(status?: string) {
+  return status && ["pending", "queued", "in_progress", "completed", "failed"].includes(status) ? status : "pending";
+}
+
+function normalizeToApisResumeStatus(status?: string) {
+  return status && ["pending", "queued", "in_progress"].includes(status) ? status : "pending";
 }
 
 async function prepareToApisReferenceUrls(route: OpenaiImageApiRoute, referenceImages: PreparedReferenceImages, deadline: number) {
@@ -1556,8 +1707,9 @@ async function requestImagesApiWithRetry(
   startedAt: number,
   options: ImageGenerationOptions,
   referenceImages: PreparedReferenceImages,
+  asyncTask?: AsyncImageTaskControl,
 ): Promise<ImagesApiResponse> {
-  return requestStandardImagesApiWithRetry(prompt, count, startedAt, options, referenceImages);
+  return requestStandardImagesApiWithRetry(prompt, count, startedAt, options, referenceImages, asyncTask);
 }
 
 async function readJsonResponse<T>(response: Response, label: string): Promise<T> {

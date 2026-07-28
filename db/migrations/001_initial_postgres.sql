@@ -305,3 +305,15 @@ CREATE TABLE IF NOT EXISTS library_tagging_jobs (
 );
 CREATE INDEX IF NOT EXISTS idx_library_tagging_jobs_ready ON library_tagging_jobs(status, run_after, created_at ASC);
 CREATE INDEX IF NOT EXISTS idx_library_tagging_jobs_asset ON library_tagging_jobs(asset_id, created_at DESC);
+
+CREATE TABLE IF NOT EXISTS copy_library_entries (
+  id TEXT PRIMARY KEY,
+  owner_user_id TEXT NOT NULL,
+  visibility TEXT NOT NULL,
+  title TEXT NOT NULL,
+  created_at TIMESTAMPTZ NOT NULL,
+  updated_at TIMESTAMPTZ NOT NULL,
+  data_json JSONB NOT NULL
+);
+CREATE INDEX IF NOT EXISTS idx_copy_library_entries_owner_updated ON copy_library_entries(owner_user_id, updated_at DESC, id DESC);
+CREATE INDEX IF NOT EXISTS idx_copy_library_entries_visibility_updated ON copy_library_entries(visibility, updated_at DESC, id DESC);
