@@ -1,4 +1,4 @@
-import type { CanvasNode, CanvasNodeConfig, CanvasNodeDefinition, CanvasNodeExecutionMode, CanvasNodeType } from "./types";
+import type { CanvasGraph, CanvasNode, CanvasNodeConfig, CanvasNodeDefinition, CanvasNodeExecutionMode, CanvasNodeType } from "./types";
 import { toApis4kImageRatios, toApisImageRatios } from "../toapis-image-api";
 import { canvasPromptPresets, canvasVisionPresets, parseCanvasImageSelection, parseCanvasVideoTimestamps, resolveCanvasImageDimensions } from "./node-utils";
 
@@ -75,6 +75,22 @@ const canvasNodeDefinitionVersions: CanvasNodeDefinition[] = [
     defaultConfig: { assetIds: [], assetNames: [], urls: [], snapshotAt: "" },
   },
   {
+    type: "input.copy-library",
+    version: 1,
+    label: "文案库",
+    description: "选择文案并冻结标题、正文和标签快照。",
+    category: "input",
+    icon: "BookOpenText",
+    color: "#b45309",
+    inputs: [],
+    outputs: [
+      { id: "title", label: "标题", kind: "text" },
+      { id: "body", label: "正文", kind: "text" },
+    ],
+    fields: [{ key: "entryId", label: "文案库记录", kind: "copy-library-picker" }],
+    defaultConfig: { entryId: "", entryTitle: "", snapshotTitle: "", snapshotBody: "", snapshotTags: [], snapshotAt: "" },
+  },
+  {
     type: "model.gpt-text",
     version: 1,
     label: "GPT 文本",
@@ -139,12 +155,12 @@ const canvasNodeDefinitionVersions: CanvasNodeDefinition[] = [
     color: "#9333ea",
     inputs: [
       { id: "images", label: "图片", kind: "images", required: true, multiple: true },
-      { id: "instruction", label: "补充指令", kind: "text", multiple: true },
+      { id: "instruction", label: "用户提示词", kind: "text", multiple: true },
     ],
     outputs: [{ id: "text", label: "分析结果", kind: "text" }],
     fields: [
       { key: "preset", label: "分析预设", kind: "select", options: Object.keys(canvasVisionPresets).map((value) => ({ value, label: visionPresetLabel(value) })) },
-      { key: "instruction", label: "节点指令", kind: "textarea", placeholder: "可选，追加到预设指令" },
+      { key: "instruction", label: "默认节点指令", kind: "textarea", placeholder: "未连接用户提示词时，追加到分析预设" },
       { key: "maxImages", label: "最大图片数", kind: "number", min: 1, max: 8 },
     ],
     defaultConfig: { preset: "describe", instruction: "", maxImages: 8 },
@@ -219,6 +235,21 @@ const canvasNodeDefinitionVersions: CanvasNodeDefinition[] = [
     fields: [],
     defaultConfig: {},
     bypass: { inputPort: "images", outputPort: "images" },
+    passiveSink: true,
+  },
+  {
+    type: "utility.display-any",
+    version: 1,
+    label: "展示任何",
+    description: "展示任意上游节点的输出内容。",
+    category: "utility",
+    icon: "Eye",
+    color: "#7c3aed",
+    inputs: [{ id: "value", label: "任意", kind: "any", required: true }],
+    outputs: [],
+    fields: [],
+    defaultConfig: {},
+    passiveSink: true,
   },
   {
     type: "utility.prompt-template",
@@ -236,6 +267,32 @@ const canvasNodeDefinitionVersions: CanvasNodeDefinition[] = [
     ],
     defaultConfig: { preset: "custom", template: "{{input}}" },
     bypass: { inputPort: "values", outputPort: "text" },
+  },
+  {
+    type: "utility.prompt-switch",
+    version: 1,
+    label: "提示词 Switch",
+    description: "按批次策略选择一条生图提示词。",
+    category: "utility",
+    icon: "GitBranch",
+    color: "#0891b2",
+    inputs: [
+      { id: "scene", label: "场景参考", kind: "text", required: true },
+      { id: "sceneModification", label: "场景+改装参考", kind: "text", required: true },
+      { id: "scenePerson", label: "场景+人物参考", kind: "text", required: true },
+    ],
+    outputs: [{ id: "text", label: "提示词", kind: "text" }],
+    fields: [{
+      key: "strategy",
+      label: "当前策略",
+      kind: "select",
+      options: [
+        { value: "scene", label: "场景参考" },
+        { value: "scene-modification", label: "场景+改装参考" },
+        { value: "scene-person", label: "场景+人物参考" },
+      ],
+    }],
+    defaultConfig: { strategy: "scene" },
   },
   {
     type: "utility.text-split",
@@ -319,15 +376,13 @@ const canvasNodeDefinitionVersions: CanvasNodeDefinition[] = [
     inputs: [
       { id: "title", label: "标题", kind: "text" },
       { id: "body", label: "正文", kind: "text", required: true },
+      { id: "vehicle", label: "车型", kind: "text" },
       { id: "images", label: "图片", kind: "images", multiple: true },
       { id: "videos", label: "视频", kind: "videos", multiple: true },
     ],
     outputs: [{ id: "post", label: "内容", kind: "socialPost" }],
-    fields: [
-      { key: "fallbackTitle", label: "默认标题", kind: "text", placeholder: "上游未连接标题时使用" },
-      { key: "vehicle", label: "车型", kind: "text", placeholder: "可选，发布飞书时使用" },
-    ],
-    defaultConfig: { fallbackTitle: "画布生成内容", vehicle: "" },
+    fields: [{ key: "fallbackTitle", label: "默认标题", kind: "text", placeholder: "上游未连接标题时使用" }],
+    defaultConfig: { fallbackTitle: "画布生成内容" },
   },
   {
     type: "publish.feishu",
@@ -379,13 +434,64 @@ const gptImageV2Definition: CanvasNodeDefinition = {
   bypass: { inputPort: "references", outputPort: "images" },
 };
 
+const promptSwitchV2Definition: CanvasNodeDefinition = {
+  type: "utility.prompt-switch",
+  version: 2,
+  label: "提示词 Switch",
+  description: "从三路文字节点中选择一路生图提示词。",
+  category: "utility",
+  icon: "GitBranch",
+  color: "#0891b2",
+  inputs: [
+    { id: "input1", label: "输入 1", kind: "text", required: true },
+    { id: "input2", label: "输入 2", kind: "text", required: true },
+    { id: "input3", label: "输入 3", kind: "text", required: true },
+  ],
+  outputs: [{ id: "text", label: "提示词", kind: "text" }],
+  fields: [{
+    key: "selectedInput",
+    label: "选择输入",
+    kind: "select",
+    options: [
+      { value: "1", label: "输入 1" },
+      { value: "2", label: "输入 2" },
+      { value: "3", label: "输入 3" },
+    ],
+  }],
+  defaultConfig: { selectedInput: "1" },
+};
+
+const textSplitV2Definition: CanvasNodeDefinition = {
+  type: "utility.text-split",
+  version: 2,
+  label: "文本分割",
+  description: "按第一行或指定的第 N 个分隔符拆出标题和正文。",
+  category: "utility",
+  icon: "Split",
+  color: "#64748b",
+  inputs: [{ id: "text", label: "文字", kind: "text", required: true }],
+  outputs: [{ id: "head", label: "标题", kind: "text" }, { id: "tail", label: "正文", kind: "text" }],
+  fields: [
+    { key: "mode", label: "分割方式", kind: "select", options: [{ value: "first-line", label: "第一行" }, { value: "delimiter", label: "自定义分隔符" }] },
+    { key: "delimiter", label: "分隔符", kind: "text", placeholder: "例如：---" },
+    { key: "delimiterIndex", label: "第几个分隔符", kind: "number", min: 1 },
+  ],
+  defaultConfig: { mode: "first-line", delimiter: "---", delimiterIndex: 1 },
+};
+
 export const canvasNodeDefinitions = canvasNodeDefinitionVersions.map((definition) =>
-  definition.type === "model.gpt-image" ? gptImageV2Definition : definition,
+  definition.type === "model.gpt-image"
+    ? gptImageV2Definition
+    : definition.type === "utility.prompt-switch"
+      ? promptSwitchV2Definition
+    : definition.type === "utility.text-split"
+      ? textSplitV2Definition
+      : definition,
 );
 
 const definitionMap = new Map(canvasNodeDefinitions.map((definition) => [definition.type, definition]));
 const definitionVersionMap = new Map(
-  [...canvasNodeDefinitionVersions, gptImageV2Definition].map((definition) => [`${definition.type}@${definition.version}`, definition]),
+  [...canvasNodeDefinitionVersions, gptImageV2Definition, promptSwitchV2Definition, textSplitV2Definition].map((definition) => [`${definition.type}@${definition.version}`, definition]),
 );
 
 export function getCanvasNodeDefinition(type: CanvasNodeType, version?: number) {
@@ -414,6 +520,7 @@ export function validateCanvasNodeConfig(type: CanvasNodeType, config: CanvasNod
   if (!definition) return [`Unknown canvas node type: ${type}`];
   const errors: string[] = [];
   for (const field of definition.fields) {
+    if (type === "utility.text-split" && field.key === "delimiterIndex" && config.mode !== "delimiter") continue;
     const value = config[field.key];
     if (field.kind === "number") {
       const number = Number(value);
@@ -445,11 +552,27 @@ export function validateCanvasNodeConfig(type: CanvasNodeType, config: CanvasNod
     if (!urls.length) errors.push("Library image input requires at least one selected image.");
     if (urls.length > 30) errors.push("Library image input accepts at most 30 images.");
   }
+  if (type === "input.copy-library") {
+    if (!String(config.entryId || "").trim()) errors.push("Copy-library input requires a selected entry.");
+    if (!String(config.snapshotTitle || "").trim()) errors.push("Copy-library input title snapshot is empty.");
+    if (!String(config.snapshotBody || "").trim()) errors.push("Copy-library input body snapshot is empty.");
+    if (!String(config.snapshotAt || "").trim()) errors.push("Copy-library input snapshot time is missing.");
+  }
   if (type === "utility.prompt-template" && config.preset === "custom" && !String(config.template || "").trim()) {
     errors.push("Custom prompt template cannot be empty.");
   }
+  if (type === "utility.prompt-switch" && version === 1 && !["scene", "scene-modification", "scene-person"].includes(String(config.strategy || ""))) {
+    errors.push("Prompt Switch strategy is invalid.");
+  }
+  if (type === "utility.prompt-switch" && version !== 1 && !["1", "2", "3"].includes(String(config.selectedInput || ""))) {
+    errors.push("Prompt Switch selected input is invalid.");
+  }
   if (type === "utility.text-split" && config.mode === "delimiter" && !String(config.delimiter || "")) {
     errors.push("Text split delimiter cannot be empty.");
+  }
+  if (type === "utility.text-split" && version === 2 && config.mode === "delimiter") {
+    const delimiterIndex = Number(config.delimiterIndex);
+    if (!Number.isInteger(delimiterIndex) || delimiterIndex < 1) errors.push("Text split delimiter index must be a positive integer.");
   }
   if (type === "utility.image-select") {
     try { parseCanvasImageSelection(config.indices); } catch (error) { errors.push(error instanceof Error ? error.message : "Image selection is invalid."); }
@@ -481,6 +604,27 @@ export function validateCanvasNodeConfig(type: CanvasNodeType, config: CanvasNod
 }
 
 export function upgradeCanvasNode(node: CanvasNode): CanvasNode {
+  if (node.type === "utility.prompt-switch" && node.version === 1) {
+    const selectedInput = node.config.strategy === "scene-modification" ? "2" : node.config.strategy === "scene-person" ? "3" : "1";
+    return {
+      ...structuredClone(node),
+      version: 2,
+      executionMode: getCanvasNodeExecutionMode(node),
+      config: { ...promptSwitchV2Definition.defaultConfig, selectedInput },
+    };
+  }
+  if (node.type === "utility.text-split" && node.version === 1) {
+    return {
+      ...structuredClone(node),
+      version: 2,
+      executionMode: getCanvasNodeExecutionMode(node),
+      config: {
+        ...textSplitV2Definition.defaultConfig,
+        ...structuredClone(node.config),
+        delimiterIndex: 1,
+      },
+    };
+  }
   if (node.type !== "model.gpt-image" || node.version !== 1) {
     return { ...structuredClone(node), executionMode: getCanvasNodeExecutionMode(node) };
   }
@@ -496,6 +640,25 @@ export function upgradeCanvasNode(node: CanvasNode): CanvasNode {
       ratio: dimensions.ratio,
       resolution: dimensions.resolution,
     },
+  };
+}
+
+export function upgradeCanvasGraph(graph: CanvasGraph): CanvasGraph {
+  const cloned = structuredClone(graph);
+  const legacySwitchIds = new Set(cloned.nodes
+    .filter((node) => node.type === "utility.prompt-switch" && node.version === 1)
+    .map((node) => node.id));
+  const legacyPorts: Record<string, string> = {
+    scene: "input1",
+    sceneModification: "input2",
+    scenePerson: "input3",
+  };
+  return {
+    ...cloned,
+    nodes: cloned.nodes.map(upgradeCanvasNode),
+    edges: cloned.edges.map((edge) => legacySwitchIds.has(edge.target)
+      ? { ...edge, targetPort: legacyPorts[edge.targetPort] || edge.targetPort }
+      : edge),
   };
 }
 

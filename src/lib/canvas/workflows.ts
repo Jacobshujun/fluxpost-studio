@@ -14,7 +14,7 @@ import {
   type WorkspaceAccessActor,
 } from "../workspace-ownership";
 import { validateCanvasGraph } from "./graph";
-import { upgradeCanvasNode } from "./registry";
+import { upgradeCanvasGraph } from "./registry";
 import type { CanvasGraph, CanvasWorkflow } from "./types";
 
 export class CanvasRevisionConflictError extends Error {
@@ -25,19 +25,22 @@ export class CanvasRevisionConflictError extends Error {
 }
 
 export async function listCanvasWorkflows(account: WorkspaceAccessActor) {
-  return filterWorkspaceOwnedRecords(await listCanvasWorkflowsFromDb(), account);
+  return filterWorkspaceOwnedRecords(await listCanvasWorkflowsFromDb(), account)
+    .map((workflow) => ({ ...workflow, graph: upgradeCanvasGraph(workflow.graph) }));
 }
 
 export async function getCanvasWorkflow(workflowId: string, account: WorkspaceAccessActor) {
   const workflow = await getCanvasWorkflowFromDb(workflowId);
-  return workflow && canAccessWorkspaceOwner(account, workflow.ownerUserId) ? workflow : undefined;
+  return workflow && canAccessWorkspaceOwner(account, workflow.ownerUserId)
+    ? { ...workflow, graph: upgradeCanvasGraph(workflow.graph) }
+    : undefined;
 }
 
 export async function createCanvasWorkflow(
   account: WorkspaceAccessActor,
   input: { name?: string; graph?: CanvasGraph; isTemplate?: boolean; sourceWorkflowId?: string } = {},
 ) {
-  const graph = input.graph ? upgradeEditableGraph(input.graph) : emptyCanvasGraph();
+  const graph = input.graph ? upgradeCanvasGraph(input.graph) : emptyCanvasGraph();
   assertValidGraph(graph);
   const now = new Date().toISOString();
   const workflow: CanvasWorkflow = {
@@ -63,7 +66,7 @@ export async function updateCanvasWorkflow(
   if (!current) throw new Error("Canvas workflow not found");
   assertCanAccessWorkspaceRecord(account, current, "Canvas workflow not found");
   if (!Number.isInteger(input.revision) || input.revision !== current.revision) throw new CanvasRevisionConflictError();
-  const graph = input.graph ? upgradeEditableGraph(input.graph) : current.graph;
+  const graph = input.graph ? upgradeCanvasGraph(input.graph) : upgradeCanvasGraph(current.graph);
   assertValidGraph(graph);
   const workflow: CanvasWorkflow = {
     ...current,
@@ -75,10 +78,6 @@ export async function updateCanvasWorkflow(
   };
   if (!(await updateCanvasWorkflowInDb(workflow, current.revision))) throw new CanvasRevisionConflictError();
   return workflow;
-}
-
-function upgradeEditableGraph(graph: CanvasGraph): CanvasGraph {
-  return { ...structuredClone(graph), nodes: graph.nodes.map(upgradeCanvasNode) };
 }
 
 export async function duplicateCanvasWorkflow(

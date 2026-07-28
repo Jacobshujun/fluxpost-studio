@@ -29,17 +29,41 @@ export function renderCanvasPromptTemplate(config: CanvasNodeConfig, values: str
     .trim();
 }
 
-export function splitCanvasText(config: CanvasNodeConfig, value: string) {
+export function splitCanvasText(
+  config: CanvasNodeConfig,
+  value: string,
+  options: { fallbackToBody?: boolean } = {},
+): { head?: string; tail: string } {
   const normalized = value.trim();
+  if (!normalized) throw new Error("Text split input cannot be empty.");
   const mode = String(config.mode || "first-line");
   const delimiter = mode === "delimiter" ? String(config.delimiter || "") : "\n";
   if (!delimiter) throw new Error("Text split delimiter cannot be empty.");
-  const index = normalized.indexOf(delimiter);
-  if (index < 0) throw new Error(mode === "delimiter" ? "Text does not contain the configured delimiter." : "Text split requires a title line and body.");
+  const delimiterIndex = mode === "delimiter" ? Number(config.delimiterIndex ?? 1) : 1;
+  if (!Number.isInteger(delimiterIndex) || delimiterIndex < 1) throw new Error("Text split delimiter index must be a positive integer.");
+  const index = findDelimiterIndex(normalized, delimiter, delimiterIndex);
+  if (index < 0) {
+    if (options.fallbackToBody) return { tail: normalized };
+    throw new Error(mode === "delimiter" ? "Text does not contain the configured delimiter." : "Text split requires a title line and body.");
+  }
   const head = normalized.slice(0, index).trim();
   const tail = normalized.slice(index + delimiter.length).trim();
-  if (!head || !tail) throw new Error("Text split must produce both head and tail values.");
+  if (!head || !tail) {
+    if (options.fallbackToBody) return { tail: normalized };
+    throw new Error("Text split must produce both head and tail values.");
+  }
   return { head, tail };
+}
+
+function findDelimiterIndex(value: string, delimiter: string, occurrence: number) {
+  let index = -1;
+  let fromIndex = 0;
+  for (let current = 0; current < occurrence; current += 1) {
+    index = value.indexOf(delimiter, fromIndex);
+    if (index < 0) return -1;
+    fromIndex = index + delimiter.length;
+  }
+  return index;
 }
 
 export function parseCanvasImageSelection(value: CanvasNodeConfig[string]) {

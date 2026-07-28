@@ -9,6 +9,7 @@ import {
   listCanvasNodeRunsFromDb,
   listCanvasRunsFromDb,
   listCanvasSuccessfulNodeRunsForWorkflowFromDb,
+  requeueExpiredCanvasRunQueueItemsWithProviderTasks,
   requeueCanvasRunQueueItem,
   saveCanvasNodeRunToDb,
   saveCanvasRunToDb,
@@ -150,7 +151,7 @@ async function resolveCanvasRunPlan(
     }
 
     const missingInput = missingRequiredInput(node, inputs);
-    const passivePreviewSink = node.type === "utility.image-preview" && nodeId !== targetId && !canReachNode(graph, nodeId, targetId);
+    const passivePreviewSink = definition.passiveSink && nodeId !== targetId && !canReachNode(graph, nodeId, targetId);
     if (passivePreviewSink) {
       steps.push({ nodeId, action: "execute" });
       continue;
@@ -269,6 +270,56 @@ export async function createCanvasRun(
   return run;
 }
 
+export async function createCanvasRunFromGraph(input: {
+  id: string;
+  workflow: { id: string; revision: number; ownerUserId: string; ownerDisplayName: string };
+  graph: CanvasGraph;
+  targetNodeIds: string[];
+  batchContext: NonNullable<CanvasRun["batchContext"]>;
+}) {
+  const existing = await getCanvasRunFromDb(input.id);
+  if (existing) return existing;
+  const run = prepareCanvasRunFromGraph(input);
+  await saveCanvasRunToDb(run);
+  await enqueueCanvasRunQueueItem(run);
+  ensureCanvasRunWorker();
+  return run;
+}
+
+export function prepareCanvasRunFromGraph(input: {
+  id: string;
+  workflow: { id: string; revision: number; ownerUserId: string; ownerDisplayName: string };
+  graph: CanvasGraph;
+  targetNodeIds: string[];
+  batchContext: NonNullable<CanvasRun["batchContext"]>;
+  createdAt?: string;
+}) {
+  const plan = buildCanvasRunPlan(input.graph, input.targetNodeIds);
+  if (plan.blockers.length) throw new Error(plan.blockers[0].message);
+  const now = input.createdAt || new Date().toISOString();
+  const run: CanvasRun = {
+    id: input.id,
+    workflowId: input.workflow.id,
+    workflowRevision: input.workflow.revision,
+    ownerUserId: input.workflow.ownerUserId,
+    ownerDisplayName: input.workflow.ownerDisplayName,
+    status: "queued",
+    graphSnapshot: structuredClone(input.graph),
+    runMode: "with-upstream",
+    steps: structuredClone(plan.steps),
+    targetNodeIds: Array.from(new Set(input.targetNodeIds)),
+    batchContext: structuredClone(input.batchContext),
+    confirmation: {
+      confirmedAt: now,
+      nodeIds: plan.confirmationNodeIds,
+      capabilities: plan.capabilities,
+    },
+    createdAt: now,
+    updatedAt: now,
+  };
+  return run;
+}
+
 export class CanvasConfirmationRequiredError extends Error {
   constructor(public readonly plan: CanvasRunPlan) {
     super("This run requires explicit confirmation.");
@@ -360,9 +411,12 @@ export function ensureCanvasRunWorker() {
 }
 
 async function drainCanvasRuns(workerId: string) {
+  await requeueExpiredCanvasRunQueueItemsWithProviderTasks();
   while (true) {
     const queueItem = await claimNextCanvasRunQueueItem(workerId, queueLockMs);
     if (!queueItem) return;
+    let batchRun: CanvasRun | undefined;
+    let batchRunTerminal = false;
     const heartbeat = setInterval(() => {
       void heartbeatCanvasRunQueueItem(queueItem.id, workerId, queueLockMs).catch((error) =>
         console.warn(`Canvas queue heartbeat failed for ${queueItem.runId}:`, error),
@@ -371,31 +425,44 @@ async function drainCanvasRuns(workerId: string) {
     try {
       const run = await getCanvasRunFromDb(queueItem.runId);
       if (!run) throw new Error("Canvas run not found");
+      batchRun = run;
       if (run.cancelRequestedAt || run.status === "cancelled") {
         await finishCanvasRunQueueItem(queueItem.id, workerId, "cancelled");
+        batchRunTerminal = true;
         continue;
       }
       const finalRun = await executeCanvasRun(run);
+      batchRun = finalRun;
       if (finalRun.status === "running") {
         // A provider accepted the task but has not produced a terminal result yet.
         // Requeue the same run so the next attempt queries its persisted submit_id.
         await requeueCanvasRunQueueItem(finalRun.id, 30_000);
+        setTimeout(ensureCanvasRunWorker, 30_000);
         continue;
       }
       const queueStatus = finalRun.status === "cancelled" ? "cancelled" : finalRun.status === "completed" ? "completed" : "failed";
       await finishCanvasRunQueueItem(queueItem.id, workerId, queueStatus, finalRun.error);
+      batchRunTerminal = true;
     } catch (error) {
       const message = error instanceof Error ? error.message : "Canvas run failed";
       const run = await getCanvasRunFromDb(queueItem.runId);
       if (run) {
         const now = new Date().toISOString();
-        await saveCanvasRunToDb({ ...run, status: "failed", error: message, updatedAt: now, completedAt: now });
+        batchRun = await saveCanvasRunToDb({ ...run, status: "failed", error: message, updatedAt: now, completedAt: now });
       }
       await finishCanvasRunQueueItem(queueItem.id, workerId, "failed", message);
+      batchRunTerminal = true;
     } finally {
       clearInterval(heartbeat);
+      if (batchRunTerminal && batchRun?.batchContext) notifyCanvasScheduleRunTerminal(batchRun);
     }
   }
+}
+
+function notifyCanvasScheduleRunTerminal(run: CanvasRun) {
+  void import("./scheduler")
+    .then(({ kickCanvasSchedulerWorker }) => kickCanvasSchedulerWorker())
+    .catch((error) => console.error(`Canvas schedule wakeup failed for ${run.id}:`, error));
 }
 
 async function executeCanvasRun(run: CanvasRun) {
@@ -559,9 +626,13 @@ async function runReadyNode(
   latest: Map<string, CanvasNodeRun>,
   inputs: Record<string, CanvasArtifact[]>,
 ) {
-  const attempt = (latest.get(node.id)?.attempt || 0) + 1;
+  const previousNodeRun = latest.get(node.id);
+  const resumableNodeRun = previousNodeRun?.status === "running" && previousNodeRun.providerTaskId
+    ? previousNodeRun
+    : undefined;
+  const attempt = resumableNodeRun?.attempt || (previousNodeRun?.attempt || 0) + 1;
   const startedAt = new Date().toISOString();
-  let nodeRun: CanvasNodeRun = {
+  let nodeRun: CanvasNodeRun = resumableNodeRun || await saveCanvasNodeRunToDb({
     id: `canvas-node-run-${randomUUID()}`,
     runId: run.id,
     nodeId: node.id,
@@ -573,15 +644,25 @@ async function runReadyNode(
     createdAt: startedAt,
     updatedAt: startedAt,
     startedAt,
-  };
-  nodeRun = await saveCanvasNodeRunToDb(nodeRun);
+  });
   try {
     const result = await executeCanvasNode({
       runId: run.id,
       node,
       inputs,
       account: { id: run.ownerUserId, displayName: run.ownerDisplayName, role: "operator" },
-      previousNodeRun: latest.get(node.id),
+      previousNodeRun,
+      onProviderTaskUpdate: async (state) => {
+        const updatedAt = new Date().toISOString();
+        nodeRun = {
+          ...nodeRun,
+          providerTaskId: state.taskId,
+          providerTaskRoute: state.route,
+          providerStatus: state.status,
+          updatedAt,
+        };
+        await saveCanvasNodeRunToDb(nodeRun);
+      },
     });
     const endedAt = new Date().toISOString();
     nodeRun = await saveCanvasNodeRunToDb({
@@ -589,8 +670,9 @@ async function runReadyNode(
       status: result.pending ? "running" : "completed",
       inputs: result.resolvedInputs || inputs,
       outputs: result.outputs,
-      providerTaskId: result.providerTaskId,
-      providerStatus: result.providerStatus,
+      providerTaskId: result.providerTaskId || nodeRun.providerTaskId,
+      providerTaskRoute: result.providerTaskRoute || nodeRun.providerTaskRoute,
+      providerStatus: result.providerStatus || nodeRun.providerStatus,
       inputFingerprint: fingerprintCanvasNodeExecution(node, inputs),
       updatedAt: endedAt,
       ...(result.pending ? {} : { completedAt: endedAt }),

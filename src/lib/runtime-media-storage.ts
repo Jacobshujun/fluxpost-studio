@@ -27,6 +27,12 @@ export type PendingReconcileResult = {
   errors: string[];
 };
 
+export type PersistLibraryObjectInput = {
+  publicPath: string;
+  body: Buffer;
+  contentType: string;
+};
+
 const pendingRoot = path.join(/*turbopackIgnore: true*/ process.cwd(), "data", "tos-pending");
 const uploadMaxAttempts = 3;
 let cachedClient: { fingerprint: string; client: TosClient } | undefined;
@@ -45,6 +51,10 @@ export function isTosRuntimeMediaConfigured() {
 
 export function isManagedRuntimeMediaUrl(url?: string) {
   return isManagedTosUrl(url, appConfig.tosPublicBaseUrl, appConfig.tosObjectPrefix);
+}
+
+export function buildRuntimeMediaObjectKey(publicPath: string) {
+  return buildTosObjectKey(publicPath, appConfig.tosObjectPrefix);
 }
 
 export async function findExistingRuntimeMedia(publicPath: string) {
@@ -151,6 +161,35 @@ export async function persistTosProbeObject(input: { objectKeySuffix: string; bo
     objectKey,
     url: buildTosPublicUrl({ publicBaseUrl: config.publicBaseUrl, objectKey, etag: metadata.etag }),
   };
+}
+
+export async function persistLibraryObject(input: PersistLibraryObjectInput) {
+  if (!appConfig.tosEnabled || !isTosRuntimeMediaConfigured()) {
+    throw new Error("Library imports require fully configured TOS object storage.");
+  }
+  if (!input.body.length) throw new Error("Library image is empty.");
+  const config = requireTosConfig();
+  const objectKey = buildTosObjectKey(input.publicPath, config.objectPrefix);
+  try {
+    const metadata = await ensureVerifiedTosObject({
+      client: getVerifiedTosClient(config),
+      bucket: config.bucket,
+      objectKey,
+      body: input.body,
+      contentLength: input.body.length,
+      contentType: input.contentType,
+      overwrite: false,
+      maxAttempts: uploadMaxAttempts,
+      retryDelayMs: 300,
+    });
+    return {
+      objectKey,
+      etag: metadata.etag,
+      publicUrl: buildTosPublicUrl({ publicBaseUrl: config.publicBaseUrl, objectKey, etag: metadata.etag }),
+    };
+  } catch (error) {
+    throw new Error(`TOS library upload failed for ${objectKey}: ${sanitizeTosError(error)}`);
+  }
 }
 
 export async function deleteRuntimeMediaObject(objectKey: string) {

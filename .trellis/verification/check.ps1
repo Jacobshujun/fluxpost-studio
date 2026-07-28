@@ -164,14 +164,24 @@ function Invoke-HttpSmoke {
   Remove-Item -LiteralPath $outLog, $errLog -Force -ErrorAction SilentlyContinue
 
   Write-Host "== Start local Next production smoke server on $baseUrl"
-  $process = Start-Process `
-    -FilePath $NodePath `
-    -ArgumentList @($nextBin, "start", "-H", "127.0.0.1", "-p", [string]$Port) `
-    -WorkingDirectory $ProjectRoot `
-    -RedirectStandardOutput $outLog `
-    -RedirectStandardError $errLog `
-    -WindowStyle Hidden `
-    -PassThru
+  $previousWorkerDisable = [Environment]::GetEnvironmentVariable("FLUXPOST_DISABLE_BACKGROUND_WORKERS", "Process")
+  try {
+    $env:FLUXPOST_DISABLE_BACKGROUND_WORKERS = "1"
+    $process = Start-Process `
+      -FilePath $NodePath `
+      -ArgumentList @($nextBin, "start", "-H", "127.0.0.1", "-p", [string]$Port) `
+      -WorkingDirectory $ProjectRoot `
+      -RedirectStandardOutput $outLog `
+      -RedirectStandardError $errLog `
+      -WindowStyle Hidden `
+      -PassThru
+  } finally {
+    if ($null -eq $previousWorkerDisable) {
+      Remove-Item Env:FLUXPOST_DISABLE_BACKGROUND_WORKERS -ErrorAction SilentlyContinue
+    } else {
+      $env:FLUXPOST_DISABLE_BACKGROUND_WORKERS = $previousWorkerDisable
+    }
+  }
 
   try {
     Wait-ForHttp -Url "$baseUrl/api/config" -Process $process -ErrorLog $errLog
@@ -208,6 +218,9 @@ Invoke-NativeStep "Parse project JSON" $nodePath @(
 
 Invoke-NativeStep "PostgreSQL schema check" $nodePath @(".trellis/verification/postgres_schema_check.mjs")
 Invoke-NativeStep "Workspace accounts check" $nodePath @(".trellis/verification/workspace_accounts_check.mjs")
+Invoke-NativeStep "Reference library assets check" $nodePath @(".trellis/verification/library_assets_check.mjs")
+Invoke-NativeStep "Copy library check" $nodePath @(".trellis/verification/copy_library_check.mjs")
+Invoke-NativeStep "Vehicle library check" $nodePath @(".trellis/verification/vehicle_library_check.mjs")
 Invoke-NativeStep "Compact-only workspace check" $nodePath @(".trellis/verification/compact_only_workspace_check.mjs")
 Invoke-NativeStep "Advanced config admin boundary check" $nodePath @(".trellis/verification/advanced_config_check.mjs")
 Invoke-NativeStep "TOS runtime media storage check" $nodePath @(".trellis/verification/tos_runtime_media_check.mjs")
@@ -267,10 +280,11 @@ Invoke-NativeStep "ToAPIs GPT-Image-2 adapter check" $nodePath @(".trellis/verif
 Invoke-NativeStep "Image provider profiles check" $nodePath @(".trellis/verification/image_provider_profiles_check.mjs")
 Invoke-NativeStep "GPT image size request check" $nodePath @(".trellis/verification/gpt_image_size_request_check.mjs")
 Invoke-NativeStep "ComfyUI Klein integration check" $nodePath @(".trellis/verification/comfyui_klein_check.mjs")
-Invoke-NativeStep "Infinite canvas workflows check" $nodePath @(".trellis/verification/canvas_workflows_check.mjs")
 Invoke-NativeStep "Source tagging image check" $nodePath @(".trellis/verification/source_tagging_image_check.mjs")
 Invoke-NativeStep "Content projects row-level mutation check" $nodePath @(".trellis/verification/content_projects_upsert_check.mjs")
 Invoke-NativeStep "Generated posts row-level mutation check" $nodePath @(".trellis/verification/generated_posts_upsert_check.mjs")
+Invoke-NativeStep "Infinite canvas workflows check" $nodePath @(".trellis/verification/canvas_workflows_check.mjs")
+Invoke-NativeStep "Canvas batch scheduler check" $nodePath @(".trellis/verification/canvas_scheduler_check.mjs")
 Invoke-NativeStep "Lint" $npmPath @("run", "lint")
 Invoke-NativeStep "TypeScript noEmit" $npxPath @("--no-install", "tsc", "--noEmit")
 Invoke-NativeStep "Next build" $npmPath @("run", "build")

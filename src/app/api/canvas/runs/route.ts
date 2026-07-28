@@ -2,6 +2,7 @@ import { NextResponse } from "next/server";
 import {
   CanvasConfirmationRequiredError,
   createCanvasRun,
+  ensureCanvasRunWorker,
   listCanvasRunHistory,
   planCanvasRunWithMode,
 } from "@/lib/canvas/runs";
@@ -13,6 +14,7 @@ export const runtime = "nodejs";
 export async function GET(request: Request) {
   try {
     const account = await requireWorkspaceAccount(request);
+    ensureCanvasRunWorker();
     const workflowId = new URL(request.url).searchParams.get("workflowId") || undefined;
     return NextResponse.json(await listCanvasRunHistory(account, workflowId));
   } catch (error) {

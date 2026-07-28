@@ -10,6 +10,19 @@ CREATE TABLE IF NOT EXISTS canvas_workflows (
 );
 CREATE INDEX IF NOT EXISTS idx_canvas_workflows_owner_updated ON canvas_workflows(owner_user_id, updated_at DESC);
 
+CREATE TABLE IF NOT EXISTS canvas_schedules (
+  id TEXT PRIMARY KEY,
+  owner_user_id TEXT NOT NULL,
+  workflow_id TEXT NOT NULL,
+  status TEXT NOT NULL,
+  revision INTEGER NOT NULL,
+  created_at TIMESTAMPTZ NOT NULL,
+  updated_at TIMESTAMPTZ NOT NULL,
+  data_json JSONB NOT NULL
+);
+CREATE INDEX IF NOT EXISTS idx_canvas_schedules_owner_updated ON canvas_schedules(owner_user_id, updated_at DESC);
+CREATE INDEX IF NOT EXISTS idx_canvas_schedules_status_updated ON canvas_schedules(status, updated_at ASC);
+
 CREATE TABLE IF NOT EXISTS canvas_runs (
   id TEXT PRIMARY KEY,
   workflow_id TEXT NOT NULL,

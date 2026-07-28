@@ -1,9 +1,10 @@
 import { existsSync, mkdirSync, readFileSync } from "node:fs";
 import path from "node:path";
 import { Pool, type PoolClient } from "pg";
-import type { CanvasNodeRun, CanvasRun, CanvasRunQueueItem, CanvasWorkflow } from "./canvas/types";
+import type { CanvasNodeRun, CanvasRun, CanvasRunQueueItem, CanvasSchedule, CanvasWorkflow } from "./canvas/types";
 import type {
   ContentProject,
+  CopyLibraryEntry,
   CrawlJob,
   DistributionCheckJob,
   ExecutionLogEntry,
@@ -11,6 +12,9 @@ import type {
   GeneratedPost,
   ImageGenerationQueueJob,
   LarkTaskLaunch,
+  LibraryAsset,
+  LibraryCollection,
+  LibraryTaggingJob,
   MaterialLibrarySnapshot,
   SimpleRun,
   SimpleRunQueueItem,
@@ -151,6 +155,24 @@ type WorkspaceSessionRow = {
   data_json: unknown;
 };
 
+type LibraryTaggingJobRow = {
+  id: string;
+  asset_id: string;
+  owner_user_id: string;
+  status: LibraryTaggingJob["status"];
+  attempts: number;
+  max_attempts: number;
+  run_after: string;
+  locked_by?: string | null;
+  locked_until?: string | null;
+  created_at: string;
+  updated_at: string;
+  started_at?: string | null;
+  completed_at?: string | null;
+  error?: string | null;
+  data_json: unknown;
+};
+
 type CanvasRunQueueRow = {
   id: string;
   run_id: string;
@@ -208,6 +230,271 @@ export function getDatabaseRuntimeStatus() {
     sqliteStorePath,
     postgresConfigured: backend === "postgres",
   };
+}
+
+export async function listLibraryAssetsFromDb(): Promise<LibraryAsset[]> {
+  await ensureDatabaseReady();
+  if (getDatabaseBackend() === "postgres") {
+    const result = await getPostgresPool().query<JsonRow>("SELECT data_json FROM library_assets WHERE deleted_at IS NULL ORDER BY created_at DESC, id DESC");
+    return result.rows.map((row) => fromJson<LibraryAsset>(row.data_json));
+  }
+  const rows = getSqliteDatabase().prepare("SELECT data_json FROM library_assets WHERE deleted_at IS NULL ORDER BY created_at DESC, id DESC").all() as JsonRow[];
+  return rows.map((row) => fromJson<LibraryAsset>(row.data_json));
+}
+
+export async function getLibraryAssetFromDb(assetId: string, includeDeleted = false) {
+  await ensureDatabaseReady();
+  const deletedClause = includeDeleted ? "" : " AND deleted_at IS NULL";
+  if (getDatabaseBackend() === "postgres") {
+    const result = await getPostgresPool().query<JsonRow>(`SELECT data_json FROM library_assets WHERE id = $1${deletedClause}`, [assetId]);
+    return result.rows[0] ? fromJson<LibraryAsset>(result.rows[0].data_json) : undefined;
+  }
+  const row = getSqliteDatabase().prepare(`SELECT data_json FROM library_assets WHERE id = ?${deletedClause}`).get(assetId) as JsonRow | undefined;
+  return row ? fromJson<LibraryAsset>(row.data_json) : undefined;
+}
+
+export async function findLibraryAssetByOwnerHashFromDb(ownerUserId: string, sha256: string) {
+  await ensureDatabaseReady();
+  if (getDatabaseBackend() === "postgres") {
+    const result = await getPostgresPool().query<JsonRow>(
+      "SELECT data_json FROM library_assets WHERE owner_user_id = $1 AND sha256 = $2 AND deleted_at IS NULL LIMIT 1",
+      [ownerUserId, sha256],
+    );
+    return result.rows[0] ? fromJson<LibraryAsset>(result.rows[0].data_json) : undefined;
+  }
+  const row = getSqliteDatabase().prepare(
+    "SELECT data_json FROM library_assets WHERE owner_user_id = ? AND sha256 = ? AND deleted_at IS NULL LIMIT 1",
+  ).get(ownerUserId, sha256) as JsonRow | undefined;
+  return row ? fromJson<LibraryAsset>(row.data_json) : undefined;
+}
+
+export async function findLibraryAssetByLegacyMaterialIdFromDb(legacyMaterialAssetId: string) {
+  await ensureDatabaseReady();
+  if (getDatabaseBackend() === "postgres") {
+    const result = await getPostgresPool().query<JsonRow>(
+      "SELECT data_json FROM library_assets WHERE legacy_material_asset_id = $1 AND deleted_at IS NULL LIMIT 1",
+      [legacyMaterialAssetId],
+    );
+    return result.rows[0] ? fromJson<LibraryAsset>(result.rows[0].data_json) : undefined;
+  }
+  const row = getSqliteDatabase().prepare(
+    "SELECT data_json FROM library_assets WHERE legacy_material_asset_id = ? AND deleted_at IS NULL LIMIT 1",
+  ).get(legacyMaterialAssetId) as JsonRow | undefined;
+  return row ? fromJson<LibraryAsset>(row.data_json) : undefined;
+}
+
+export async function saveLibraryAssetToDb(asset: LibraryAsset) {
+  await ensureDatabaseReady();
+  if (getDatabaseBackend() === "postgres") {
+    const client = await getPostgresPool().connect();
+    try {
+      await client.query("BEGIN");
+      await saveLibraryAssetPostgres(client, asset);
+      await client.query("COMMIT");
+    } catch (error) {
+      await client.query("ROLLBACK");
+      throw error;
+    } finally {
+      client.release();
+    }
+    return asset;
+  }
+  const db = getSqliteDatabase();
+  runSqliteTransaction(db, () => saveLibraryAssetSqlite(db, asset));
+  return asset;
+}
+
+export async function saveLibraryAssetAndTaggingJobToDb(asset: LibraryAsset, job: LibraryTaggingJob) {
+  await ensureDatabaseReady();
+  if (getDatabaseBackend() === "postgres") {
+    const client = await getPostgresPool().connect();
+    try {
+      await client.query("BEGIN");
+      await saveLibraryAssetPostgres(client, asset);
+      await saveLibraryTaggingJobPostgres(client, job);
+      await client.query("COMMIT");
+    } catch (error) {
+      await client.query("ROLLBACK");
+      throw error;
+    } finally {
+      client.release();
+    }
+    return { asset, job };
+  }
+  const db = getSqliteDatabase();
+  runSqliteTransaction(db, () => {
+    saveLibraryAssetSqlite(db, asset);
+    saveLibraryTaggingJobSqlite(db, job);
+  });
+  return { asset, job };
+}
+
+export async function deleteLibraryAssetFromDb(assetId: string) {
+  await ensureDatabaseReady();
+  if (getDatabaseBackend() === "postgres") {
+    await getPostgresPool().query("DELETE FROM library_assets WHERE id = $1", [assetId]);
+    return;
+  }
+  getSqliteDatabase().prepare("DELETE FROM library_assets WHERE id = ?").run(assetId);
+}
+
+export async function listCopyLibraryEntriesFromDb(): Promise<CopyLibraryEntry[]> {
+  await ensureDatabaseReady();
+  if (getDatabaseBackend() === "postgres") {
+    const result = await getPostgresPool().query<JsonRow>("SELECT data_json FROM copy_library_entries ORDER BY updated_at DESC, id DESC");
+    return result.rows.map((row) => fromJson<CopyLibraryEntry>(row.data_json));
+  }
+  const rows = getSqliteDatabase().prepare("SELECT data_json FROM copy_library_entries ORDER BY updated_at DESC, id DESC").all() as JsonRow[];
+  return rows.map((row) => fromJson<CopyLibraryEntry>(row.data_json));
+}
+
+export async function getCopyLibraryEntryFromDb(entryId: string) {
+  await ensureDatabaseReady();
+  if (getDatabaseBackend() === "postgres") {
+    const result = await getPostgresPool().query<JsonRow>("SELECT data_json FROM copy_library_entries WHERE id = $1", [entryId]);
+    return result.rows[0] ? fromJson<CopyLibraryEntry>(result.rows[0].data_json) : undefined;
+  }
+  const row = getSqliteDatabase().prepare("SELECT data_json FROM copy_library_entries WHERE id = ?").get(entryId) as JsonRow | undefined;
+  return row ? fromJson<CopyLibraryEntry>(row.data_json) : undefined;
+}
+
+export async function saveCopyLibraryEntryToDb(entry: CopyLibraryEntry) {
+  await ensureDatabaseReady();
+  const values = [entry.id, entry.ownerUserId, entry.visibility, entry.title, entry.createdAt, entry.updatedAt, toJson(entry)];
+  if (getDatabaseBackend() === "postgres") {
+    await getPostgresPool().query(
+      `INSERT INTO copy_library_entries (id, owner_user_id, visibility, title, created_at, updated_at, data_json)
+       VALUES ($1,$2,$3,$4,$5,$6,$7::jsonb)
+       ON CONFLICT(id) DO UPDATE SET owner_user_id=excluded.owner_user_id, visibility=excluded.visibility,
+         title=excluded.title, updated_at=excluded.updated_at, data_json=excluded.data_json`,
+      values,
+    );
+    return entry;
+  }
+  getSqliteDatabase().prepare(
+    `INSERT INTO copy_library_entries (id, owner_user_id, visibility, title, created_at, updated_at, data_json)
+     VALUES (?,?,?,?,?,?,?)
+     ON CONFLICT(id) DO UPDATE SET owner_user_id=excluded.owner_user_id, visibility=excluded.visibility,
+       title=excluded.title, updated_at=excluded.updated_at, data_json=excluded.data_json`,
+  ).run(...values);
+  return entry;
+}
+
+export async function deleteCopyLibraryEntryFromDb(entryId: string) {
+  await ensureDatabaseReady();
+  if (getDatabaseBackend() === "postgres") {
+    await getPostgresPool().query("DELETE FROM copy_library_entries WHERE id = $1", [entryId]);
+    return;
+  }
+  getSqliteDatabase().prepare("DELETE FROM copy_library_entries WHERE id = ?").run(entryId);
+}
+
+export async function listLibraryCollectionsFromDb(): Promise<LibraryCollection[]> {
+  await ensureDatabaseReady();
+  if (getDatabaseBackend() === "postgres") {
+    const result = await getPostgresPool().query<JsonRow>("SELECT data_json FROM library_collections ORDER BY created_at ASC, id ASC");
+    return result.rows.map((row) => fromJson<LibraryCollection>(row.data_json));
+  }
+  const rows = getSqliteDatabase().prepare("SELECT data_json FROM library_collections ORDER BY created_at ASC, id ASC").all() as JsonRow[];
+  return rows.map((row) => fromJson<LibraryCollection>(row.data_json));
+}
+
+export async function saveLibraryCollectionToDb(collection: LibraryCollection) {
+  await ensureDatabaseReady();
+  const values = [collection.id, collection.ownerUserId, collection.role, collection.parentId || null, collection.name, collection.relativePath || null, collection.createdAt, collection.updatedAt, toJson(collection)];
+  if (getDatabaseBackend() === "postgres") {
+    await getPostgresPool().query(
+      `INSERT INTO library_collections (id, owner_user_id, role, parent_id, name, relative_path, created_at, updated_at, data_json)
+       VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9::jsonb)
+       ON CONFLICT(id) DO UPDATE SET owner_user_id=excluded.owner_user_id, role=excluded.role, parent_id=excluded.parent_id,
+       name=excluded.name, relative_path=excluded.relative_path, updated_at=excluded.updated_at, data_json=excluded.data_json`,
+      values,
+    );
+    return collection;
+  }
+  getSqliteDatabase().prepare(
+    `INSERT INTO library_collections (id, owner_user_id, role, parent_id, name, relative_path, created_at, updated_at, data_json)
+     VALUES (?,?,?,?,?,?,?,?,?)
+     ON CONFLICT(id) DO UPDATE SET owner_user_id=excluded.owner_user_id, role=excluded.role, parent_id=excluded.parent_id,
+     name=excluded.name, relative_path=excluded.relative_path, updated_at=excluded.updated_at, data_json=excluded.data_json`,
+  ).run(...values);
+  return collection;
+}
+
+export async function deleteLibraryCollectionFromDb(collectionId: string) {
+  await ensureDatabaseReady();
+  if (getDatabaseBackend() === "postgres") {
+    await getPostgresPool().query("DELETE FROM library_collections WHERE id = $1", [collectionId]);
+    return;
+  }
+  getSqliteDatabase().prepare("DELETE FROM library_collections WHERE id = ?").run(collectionId);
+}
+
+export async function saveLibraryTaggingJobToDb(job: LibraryTaggingJob) {
+  await ensureDatabaseReady();
+  if (getDatabaseBackend() === "postgres") {
+    const client = await getPostgresPool().connect();
+    try {
+      await saveLibraryTaggingJobPostgres(client, job);
+    } finally {
+      client.release();
+    }
+    return job;
+  }
+  saveLibraryTaggingJobSqlite(getSqliteDatabase(), job);
+  return job;
+}
+
+export async function listLibraryTaggingJobsFromDb(ownerUserId?: string, limit = 100): Promise<LibraryTaggingJob[]> {
+  await ensureDatabaseReady();
+  if (getDatabaseBackend() === "postgres") {
+    const result = ownerUserId
+      ? await getPostgresPool().query<LibraryTaggingJobRow>("SELECT * FROM library_tagging_jobs WHERE owner_user_id = $1 ORDER BY created_at DESC LIMIT $2", [ownerUserId, limit])
+      : await getPostgresPool().query<LibraryTaggingJobRow>("SELECT * FROM library_tagging_jobs ORDER BY created_at DESC LIMIT $1", [limit]);
+    return result.rows.map(fromLibraryTaggingJobRow);
+  }
+  const rows = ownerUserId
+    ? getSqliteDatabase().prepare("SELECT * FROM library_tagging_jobs WHERE owner_user_id = ? ORDER BY created_at DESC LIMIT ?").all(ownerUserId, limit)
+    : getSqliteDatabase().prepare("SELECT * FROM library_tagging_jobs ORDER BY created_at DESC LIMIT ?").all(limit);
+  return (rows as LibraryTaggingJobRow[]).map(fromLibraryTaggingJobRow);
+}
+
+export async function claimNextLibraryTaggingJob(workerId: string, lockMs = 5 * 60_000) {
+  await ensureDatabaseReady();
+  const now = new Date();
+  const nowIso = now.toISOString();
+  const lockedUntil = new Date(now.getTime() + lockMs).toISOString();
+  if (getDatabaseBackend() === "postgres") {
+    const result = await getPostgresPool().query<LibraryTaggingJobRow>(
+      `WITH next_item AS (
+         SELECT id FROM library_tagging_jobs
+         WHERE ((status='queued' AND run_after <= $1) OR (status='running' AND locked_until <= $1))
+           AND attempts < max_attempts
+         ORDER BY created_at ASC LIMIT 1 FOR UPDATE SKIP LOCKED
+       )
+       UPDATE library_tagging_jobs queue SET status='running', attempts=queue.attempts+1, locked_by=$2,
+         locked_until=$3, started_at=COALESCE(queue.started_at,$1), updated_at=$1
+       FROM next_item WHERE queue.id=next_item.id RETURNING queue.*`,
+      [nowIso, workerId, lockedUntil],
+    );
+    return result.rows[0] ? fromLibraryTaggingJobRow(result.rows[0]) : undefined;
+  }
+  const db = getSqliteDatabase();
+  let claimed: LibraryTaggingJob | undefined;
+  runSqliteTransaction(db, () => {
+    const row = db.prepare(
+      `SELECT * FROM library_tagging_jobs
+       WHERE ((status='queued' AND run_after <= ?) OR (status='running' AND locked_until <= ?)) AND attempts < max_attempts
+       ORDER BY created_at ASC LIMIT 1`,
+    ).get(nowIso, nowIso) as LibraryTaggingJobRow | undefined;
+    if (!row) return;
+    db.prepare(
+      `UPDATE library_tagging_jobs SET status='running', attempts=attempts+1, locked_by=?, locked_until=?,
+       started_at=COALESCE(started_at,?), updated_at=? WHERE id=?`,
+    ).run(workerId, lockedUntil, nowIso, nowIso, row.id);
+    claimed = fromLibraryTaggingJobRow(db.prepare("SELECT * FROM library_tagging_jobs WHERE id=?").get(row.id) as LibraryTaggingJobRow);
+  });
+  return claimed;
 }
 
 export async function readContentProjectsFromDb(): Promise<ContentProject[]> {
@@ -1867,6 +2154,148 @@ export async function deleteCanvasWorkflowFromDb(workflowId: string, ownerUserId
   return Number(result.changes || 0) === 1;
 }
 
+export async function listCanvasSchedulesFromDb(limit = 100) {
+  await ensureDatabaseReady();
+  if (getDatabaseBackend() === "postgres") {
+    const result = await getPostgresPool().query<JsonRow>("SELECT data_json FROM canvas_schedules ORDER BY updated_at DESC LIMIT $1", [limit]);
+    return result.rows.map((row) => fromJson<CanvasSchedule>(row.data_json));
+  }
+  const rows = getSqliteDatabase().prepare("SELECT data_json FROM canvas_schedules ORDER BY updated_at DESC LIMIT ?").all(limit) as JsonRow[];
+  return rows.map((row) => fromJson<CanvasSchedule>(row.data_json));
+}
+
+export async function getCanvasScheduleFromDb(scheduleId: string) {
+  await ensureDatabaseReady();
+  if (getDatabaseBackend() === "postgres") {
+    const result = await getPostgresPool().query<JsonRow>("SELECT data_json FROM canvas_schedules WHERE id = $1", [scheduleId]);
+    return result.rows[0] ? fromJson<CanvasSchedule>(result.rows[0].data_json) : undefined;
+  }
+  const row = getSqliteDatabase().prepare("SELECT data_json FROM canvas_schedules WHERE id = ?").get(scheduleId) as JsonRow | undefined;
+  return row ? fromJson<CanvasSchedule>(row.data_json) : undefined;
+}
+
+export async function createCanvasScheduleInDb(schedule: CanvasSchedule) {
+  await ensureDatabaseReady();
+  if (getDatabaseBackend() === "postgres") {
+    await getPostgresPool().query(
+      `INSERT INTO canvas_schedules (id, owner_user_id, workflow_id, status, revision, created_at, updated_at, data_json)
+       VALUES ($1, $2, $3, $4, $5, $6, $7, $8::jsonb)`,
+      [schedule.id, schedule.ownerUserId, schedule.workflowId, schedule.status, schedule.revision, schedule.createdAt, schedule.updatedAt, toJson(schedule)],
+    );
+    return schedule;
+  }
+  getSqliteDatabase().prepare(`
+    INSERT INTO canvas_schedules (id, owner_user_id, workflow_id, status, revision, created_at, updated_at, data_json)
+    VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+  `).run(schedule.id, schedule.ownerUserId, schedule.workflowId, schedule.status, schedule.revision, schedule.createdAt, schedule.updatedAt, toJson(schedule));
+  return schedule;
+}
+
+export async function updateCanvasScheduleInDb(schedule: CanvasSchedule, expectedRevision: number) {
+  await ensureDatabaseReady();
+  if (getDatabaseBackend() === "postgres") {
+    const result = await getPostgresPool().query(
+      `UPDATE canvas_schedules SET status = $1, revision = $2, updated_at = $3, data_json = $4::jsonb
+       WHERE id = $5 AND owner_user_id = $6 AND revision = $7`,
+      [schedule.status, schedule.revision, schedule.updatedAt, toJson(schedule), schedule.id, schedule.ownerUserId, expectedRevision],
+    );
+    return Number(result.rowCount || 0) === 1;
+  }
+  const result = getSqliteDatabase().prepare(`
+    UPDATE canvas_schedules SET status = ?, revision = ?, updated_at = ?, data_json = ?
+    WHERE id = ? AND owner_user_id = ? AND revision = ?
+  `).run(schedule.status, schedule.revision, schedule.updatedAt, toJson(schedule), schedule.id, schedule.ownerUserId, expectedRevision) as { changes?: number };
+  return Number(result.changes || 0) === 1;
+}
+
+export async function launchCanvasScheduleInDb(schedule: CanvasSchedule, expectedRevision: number, runs: CanvasRun[]) {
+  await ensureDatabaseReady();
+  if (getDatabaseBackend() === "postgres") {
+    const client = await getPostgresPool().connect();
+    try {
+      await client.query("BEGIN");
+      const updated = await client.query(
+        `UPDATE canvas_schedules SET status = $1, revision = $2, updated_at = $3, data_json = $4::jsonb
+         WHERE id = $5 AND owner_user_id = $6 AND revision = $7`,
+        [schedule.status, schedule.revision, schedule.updatedAt, toJson(schedule), schedule.id, schedule.ownerUserId, expectedRevision],
+      );
+      if (Number(updated.rowCount || 0) !== 1) throw new Error("Canvas schedule revision conflict");
+      for (const run of runs) {
+        const item = canvasRunQueueItem(run);
+        await client.query(
+          `INSERT INTO canvas_runs (id, workflow_id, owner_user_id, status, created_at, updated_at, data_json)
+           VALUES ($1,$2,$3,$4,$5,$6,$7::jsonb)`,
+          [run.id, run.workflowId, run.ownerUserId, run.status, run.createdAt, run.updatedAt, toJson(run)],
+        );
+        await client.query(
+          `INSERT INTO canvas_run_queue (id, run_id, status, priority, attempts, max_attempts, run_after, created_at, updated_at, data_json)
+           VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10::jsonb)`,
+          [item.id, item.runId, item.status, item.priority, item.attempts, item.maxAttempts, item.runAfter, item.createdAt, item.updatedAt, toJson(item)],
+        );
+      }
+      await client.query("COMMIT");
+      return schedule;
+    } catch (error) {
+      await client.query("ROLLBACK");
+      throw error;
+    } finally {
+      client.release();
+    }
+  }
+  const db = getSqliteDatabase();
+  runSqliteTransaction(db, () => {
+    const updated = db.prepare(`
+      UPDATE canvas_schedules SET status = ?, revision = ?, updated_at = ?, data_json = ?
+      WHERE id = ? AND owner_user_id = ? AND revision = ?
+    `).run(schedule.status, schedule.revision, schedule.updatedAt, toJson(schedule), schedule.id, schedule.ownerUserId, expectedRevision) as { changes?: number };
+    if (Number(updated.changes || 0) !== 1) throw new Error("Canvas schedule revision conflict");
+    const insertRun = db.prepare(`
+      INSERT INTO canvas_runs (id, workflow_id, owner_user_id, status, created_at, updated_at, data_json)
+      VALUES (?, ?, ?, ?, ?, ?, ?)
+    `);
+    const insertQueue = db.prepare(`
+      INSERT INTO canvas_run_queue (id, run_id, status, priority, attempts, max_attempts, run_after, created_at, updated_at, data_json)
+      VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+    `);
+    for (const run of runs) {
+      const item = canvasRunQueueItem(run);
+      insertRun.run(run.id, run.workflowId, run.ownerUserId, run.status, run.createdAt, run.updatedAt, toJson(run));
+      insertQueue.run(item.id, item.runId, item.status, item.priority, item.attempts, item.maxAttempts, item.runAfter, item.createdAt, item.updatedAt, toJson(item));
+    }
+  });
+  return schedule;
+}
+
+export async function deferCanvasRunQueueItems(runIds: string[], deferred: boolean) {
+  await ensureDatabaseReady();
+  const ids = Array.from(new Set(runIds.filter(Boolean)));
+  if (!ids.length) return 0;
+  const runAfter = deferred ? "9999-12-31T23:59:59.999Z" : new Date().toISOString();
+  if (getDatabaseBackend() === "postgres") {
+    const result = await getPostgresPool().query(
+      `UPDATE canvas_run_queue SET run_after = $1, updated_at = $2
+       WHERE run_id = ANY($3::text[]) AND status = 'queued'`,
+      [runAfter, new Date().toISOString(), ids],
+    );
+    return Number(result.rowCount || 0);
+  }
+  const placeholders = ids.map(() => "?").join(",");
+  const result = getSqliteDatabase().prepare(
+    `UPDATE canvas_run_queue SET run_after = ?, updated_at = ? WHERE run_id IN (${placeholders}) AND status = 'queued'`,
+  ).run(runAfter, new Date().toISOString(), ...ids) as { changes?: number };
+  return Number(result.changes || 0);
+}
+
+export async function deleteCanvasScheduleFromDb(scheduleId: string, ownerUserId: string) {
+  await ensureDatabaseReady();
+  if (getDatabaseBackend() === "postgres") {
+    const result = await getPostgresPool().query("DELETE FROM canvas_schedules WHERE id = $1 AND owner_user_id = $2", [scheduleId, ownerUserId]);
+    return Number(result.rowCount || 0) === 1;
+  }
+  const result = getSqliteDatabase().prepare("DELETE FROM canvas_schedules WHERE id = ? AND owner_user_id = ?").run(scheduleId, ownerUserId) as { changes?: number };
+  return Number(result.changes || 0) === 1;
+}
+
 export async function listCanvasRunsFromDb(limit = 40) {
   await ensureDatabaseReady();
   if (getDatabaseBackend() === "postgres") {
@@ -1978,18 +2407,7 @@ export async function saveCanvasNodeRunToDb(nodeRun: CanvasNodeRun) {
 }
 
 export async function enqueueCanvasRunQueueItem(run: CanvasRun) {
-  const now = new Date().toISOString();
-  const item: CanvasRunQueueItem = {
-    id: `canvas-queue-${run.id}`,
-    runId: run.id,
-    status: "queued",
-    priority: 0,
-    attempts: 0,
-    maxAttempts: 1,
-    runAfter: now,
-    createdAt: now,
-    updatedAt: now,
-  };
+  const item = canvasRunQueueItem(run);
   await ensureDatabaseReady();
   if (getDatabaseBackend() === "postgres") {
     await getPostgresPool().query(
@@ -2005,6 +2423,52 @@ export async function enqueueCanvasRunQueueItem(run: CanvasRun) {
     VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
   `).run(item.id, item.runId, item.status, item.priority, item.attempts, item.maxAttempts, item.runAfter, item.createdAt, item.updatedAt, toJson(item));
   return item;
+}
+
+function canvasRunQueueItem(run: CanvasRun): CanvasRunQueueItem {
+  return {
+    id: `canvas-queue-${run.id}`,
+    runId: run.id,
+    status: "queued",
+    priority: 0,
+    attempts: 0,
+    maxAttempts: 1,
+    runAfter: run.createdAt,
+    createdAt: run.createdAt,
+    updatedAt: run.createdAt,
+  };
+}
+
+export async function requeueExpiredCanvasRunQueueItemsWithProviderTasks() {
+  await ensureDatabaseReady();
+  const now = new Date().toISOString();
+  if (getDatabaseBackend() === "postgres") {
+    const result = await getPostgresPool().query(
+      `UPDATE canvas_run_queue queue
+       SET status = 'queued', attempts = 0, run_after = $1, locked_by = NULL, locked_until = NULL,
+           completed_at = NULL, error = NULL, updated_at = $1
+       WHERE queue.status = 'running' AND queue.locked_until <= $1
+         AND EXISTS (
+           SELECT 1 FROM canvas_node_runs node_run
+           WHERE node_run.run_id = queue.run_id AND node_run.status = 'running'
+             AND COALESCE(node_run.data_json->>'providerTaskId', '') <> ''
+         )`,
+      [now],
+    );
+    return Number(result.rowCount || 0);
+  }
+  const result = getSqliteDatabase().prepare(
+    `UPDATE canvas_run_queue
+     SET status = 'queued', attempts = 0, run_after = ?, locked_by = NULL, locked_until = NULL,
+         completed_at = NULL, error = NULL, updated_at = ?
+     WHERE status = 'running' AND locked_until <= ?
+       AND EXISTS (
+         SELECT 1 FROM canvas_node_runs node_run
+         WHERE node_run.run_id = canvas_run_queue.run_id AND node_run.status = 'running'
+           AND COALESCE(json_extract(node_run.data_json, '$.providerTaskId'), '') <> ''
+       )`,
+  ).run(now, now, now) as { changes?: number };
+  return Number(result.changes || 0);
 }
 
 export async function claimNextCanvasRunQueueItem(workerId: string, lockMs = 10 * 60_000) {
@@ -2525,6 +2989,19 @@ function createSqliteSchema(db: SqliteDatabase) {
     );
     CREATE INDEX IF NOT EXISTS idx_canvas_workflows_owner_updated ON canvas_workflows(owner_user_id, updated_at DESC);
 
+    CREATE TABLE IF NOT EXISTS canvas_schedules (
+      id TEXT PRIMARY KEY,
+      owner_user_id TEXT NOT NULL,
+      workflow_id TEXT NOT NULL,
+      status TEXT NOT NULL,
+      revision INTEGER NOT NULL,
+      created_at TEXT NOT NULL,
+      updated_at TEXT NOT NULL,
+      data_json TEXT NOT NULL
+    );
+    CREATE INDEX IF NOT EXISTS idx_canvas_schedules_owner_updated ON canvas_schedules(owner_user_id, updated_at DESC);
+    CREATE INDEX IF NOT EXISTS idx_canvas_schedules_status_updated ON canvas_schedules(status, updated_at ASC);
+
     CREATE TABLE IF NOT EXISTS canvas_runs (
       id TEXT PRIMARY KEY,
       workflow_id TEXT NOT NULL,
@@ -2570,6 +3047,102 @@ function createSqliteSchema(db: SqliteDatabase) {
     );
     CREATE INDEX IF NOT EXISTS idx_canvas_run_queue_ready ON canvas_run_queue(status, run_after, priority DESC, created_at ASC);
 
+    CREATE TABLE IF NOT EXISTS library_assets (
+      id TEXT PRIMARY KEY,
+      owner_user_id TEXT NOT NULL,
+      visibility TEXT NOT NULL,
+      sha256 TEXT NOT NULL,
+      object_key TEXT NOT NULL UNIQUE,
+      public_url TEXT NOT NULL,
+      tagging_status TEXT NOT NULL,
+      cleanup_status TEXT NOT NULL,
+      legacy_material_asset_id TEXT,
+      created_at TEXT NOT NULL,
+      updated_at TEXT NOT NULL,
+      deleted_at TEXT,
+      data_json TEXT NOT NULL,
+      UNIQUE(owner_user_id, sha256)
+    );
+    CREATE INDEX IF NOT EXISTS idx_library_assets_owner_created ON library_assets(owner_user_id, created_at DESC, id DESC);
+    CREATE INDEX IF NOT EXISTS idx_library_assets_visibility_created ON library_assets(visibility, created_at DESC, id DESC);
+    CREATE INDEX IF NOT EXISTS idx_library_assets_tagging_status ON library_assets(tagging_status, updated_at DESC);
+    CREATE UNIQUE INDEX IF NOT EXISTS idx_library_assets_legacy_material ON library_assets(legacy_material_asset_id) WHERE legacy_material_asset_id IS NOT NULL;
+
+    CREATE TABLE IF NOT EXISTS library_asset_roles (
+      asset_id TEXT NOT NULL,
+      role TEXT NOT NULL,
+      PRIMARY KEY(asset_id, role),
+      FOREIGN KEY(asset_id) REFERENCES library_assets(id) ON DELETE CASCADE
+    );
+    CREATE INDEX IF NOT EXISTS idx_library_asset_roles_role ON library_asset_roles(role, asset_id);
+
+    CREATE TABLE IF NOT EXISTS library_collections (
+      id TEXT PRIMARY KEY,
+      owner_user_id TEXT NOT NULL,
+      role TEXT NOT NULL,
+      parent_id TEXT,
+      name TEXT NOT NULL,
+      relative_path TEXT,
+      created_at TEXT NOT NULL,
+      updated_at TEXT NOT NULL,
+      data_json TEXT NOT NULL
+    );
+    CREATE INDEX IF NOT EXISTS idx_library_collections_owner_role ON library_collections(owner_user_id, role, parent_id, name);
+
+    CREATE TABLE IF NOT EXISTS library_collection_assets (
+      collection_id TEXT NOT NULL,
+      asset_id TEXT NOT NULL,
+      created_at TEXT NOT NULL,
+      PRIMARY KEY(collection_id, asset_id),
+      FOREIGN KEY(collection_id) REFERENCES library_collections(id) ON DELETE CASCADE,
+      FOREIGN KEY(asset_id) REFERENCES library_assets(id) ON DELETE CASCADE
+    );
+    CREATE INDEX IF NOT EXISTS idx_library_collection_assets_asset ON library_collection_assets(asset_id, collection_id);
+
+    CREATE TABLE IF NOT EXISTS library_asset_labels (
+      asset_id TEXT NOT NULL,
+      dimension TEXT NOT NULL,
+      value TEXT NOT NULL,
+      source TEXT NOT NULL,
+      confidence REAL,
+      updated_at TEXT NOT NULL,
+      PRIMARY KEY(asset_id, dimension, value),
+      FOREIGN KEY(asset_id) REFERENCES library_assets(id) ON DELETE CASCADE
+    );
+    CREATE INDEX IF NOT EXISTS idx_library_asset_labels_filter ON library_asset_labels(dimension, value, asset_id);
+
+    CREATE TABLE IF NOT EXISTS library_tagging_jobs (
+      id TEXT PRIMARY KEY,
+      asset_id TEXT NOT NULL,
+      owner_user_id TEXT NOT NULL,
+      status TEXT NOT NULL,
+      attempts INTEGER NOT NULL DEFAULT 0,
+      max_attempts INTEGER NOT NULL DEFAULT 3,
+      run_after TEXT NOT NULL,
+      locked_by TEXT,
+      locked_until TEXT,
+      created_at TEXT NOT NULL,
+      updated_at TEXT NOT NULL,
+      started_at TEXT,
+      completed_at TEXT,
+      error TEXT,
+      data_json TEXT NOT NULL,
+      FOREIGN KEY(asset_id) REFERENCES library_assets(id) ON DELETE CASCADE
+    );
+    CREATE INDEX IF NOT EXISTS idx_library_tagging_jobs_ready ON library_tagging_jobs(status, run_after, created_at ASC);
+    CREATE INDEX IF NOT EXISTS idx_library_tagging_jobs_asset ON library_tagging_jobs(asset_id, created_at DESC);
+
+    CREATE TABLE IF NOT EXISTS copy_library_entries (
+      id TEXT PRIMARY KEY,
+      owner_user_id TEXT NOT NULL,
+      visibility TEXT NOT NULL,
+      title TEXT NOT NULL,
+      created_at TEXT NOT NULL,
+      updated_at TEXT NOT NULL,
+      data_json TEXT NOT NULL
+    );
+    CREATE INDEX IF NOT EXISTS idx_copy_library_entries_owner_updated ON copy_library_entries(owner_user_id, updated_at DESC, id DESC);
+    CREATE INDEX IF NOT EXISTS idx_copy_library_entries_visibility_updated ON copy_library_entries(visibility, updated_at DESC, id DESC);
   `);
 }
 
@@ -2814,6 +3387,19 @@ const postgresSchemaSql = `
   );
   CREATE INDEX IF NOT EXISTS idx_canvas_workflows_owner_updated ON canvas_workflows(owner_user_id, updated_at DESC);
 
+  CREATE TABLE IF NOT EXISTS canvas_schedules (
+    id TEXT PRIMARY KEY,
+    owner_user_id TEXT NOT NULL,
+    workflow_id TEXT NOT NULL,
+    status TEXT NOT NULL,
+    revision INTEGER NOT NULL,
+    created_at TIMESTAMPTZ NOT NULL,
+    updated_at TIMESTAMPTZ NOT NULL,
+    data_json JSONB NOT NULL
+  );
+  CREATE INDEX IF NOT EXISTS idx_canvas_schedules_owner_updated ON canvas_schedules(owner_user_id, updated_at DESC);
+  CREATE INDEX IF NOT EXISTS idx_canvas_schedules_status_updated ON canvas_schedules(status, updated_at ASC);
+
   CREATE TABLE IF NOT EXISTS canvas_runs (
     id TEXT PRIMARY KEY,
     workflow_id TEXT NOT NULL,
@@ -2859,6 +3445,97 @@ const postgresSchemaSql = `
   );
   CREATE INDEX IF NOT EXISTS idx_canvas_run_queue_ready ON canvas_run_queue(status, run_after, priority DESC, created_at ASC);
 
+  CREATE TABLE IF NOT EXISTS library_assets (
+    id TEXT PRIMARY KEY,
+    owner_user_id TEXT NOT NULL,
+    visibility TEXT NOT NULL,
+    sha256 TEXT NOT NULL,
+    object_key TEXT NOT NULL UNIQUE,
+    public_url TEXT NOT NULL,
+    tagging_status TEXT NOT NULL,
+    cleanup_status TEXT NOT NULL,
+    legacy_material_asset_id TEXT,
+    created_at TIMESTAMPTZ NOT NULL,
+    updated_at TIMESTAMPTZ NOT NULL,
+    deleted_at TIMESTAMPTZ,
+    data_json JSONB NOT NULL,
+    UNIQUE(owner_user_id, sha256)
+  );
+  CREATE INDEX IF NOT EXISTS idx_library_assets_owner_created ON library_assets(owner_user_id, created_at DESC, id DESC);
+  CREATE INDEX IF NOT EXISTS idx_library_assets_visibility_created ON library_assets(visibility, created_at DESC, id DESC);
+  CREATE INDEX IF NOT EXISTS idx_library_assets_tagging_status ON library_assets(tagging_status, updated_at DESC);
+  CREATE UNIQUE INDEX IF NOT EXISTS idx_library_assets_legacy_material ON library_assets(legacy_material_asset_id) WHERE legacy_material_asset_id IS NOT NULL;
+
+  CREATE TABLE IF NOT EXISTS library_asset_roles (
+    asset_id TEXT NOT NULL REFERENCES library_assets(id) ON DELETE CASCADE,
+    role TEXT NOT NULL,
+    PRIMARY KEY(asset_id, role)
+  );
+  CREATE INDEX IF NOT EXISTS idx_library_asset_roles_role ON library_asset_roles(role, asset_id);
+
+  CREATE TABLE IF NOT EXISTS library_collections (
+    id TEXT PRIMARY KEY,
+    owner_user_id TEXT NOT NULL,
+    role TEXT NOT NULL,
+    parent_id TEXT,
+    name TEXT NOT NULL,
+    relative_path TEXT,
+    created_at TIMESTAMPTZ NOT NULL,
+    updated_at TIMESTAMPTZ NOT NULL,
+    data_json JSONB NOT NULL
+  );
+  CREATE INDEX IF NOT EXISTS idx_library_collections_owner_role ON library_collections(owner_user_id, role, parent_id, name);
+
+  CREATE TABLE IF NOT EXISTS library_collection_assets (
+    collection_id TEXT NOT NULL REFERENCES library_collections(id) ON DELETE CASCADE,
+    asset_id TEXT NOT NULL REFERENCES library_assets(id) ON DELETE CASCADE,
+    created_at TIMESTAMPTZ NOT NULL,
+    PRIMARY KEY(collection_id, asset_id)
+  );
+  CREATE INDEX IF NOT EXISTS idx_library_collection_assets_asset ON library_collection_assets(asset_id, collection_id);
+
+  CREATE TABLE IF NOT EXISTS library_asset_labels (
+    asset_id TEXT NOT NULL REFERENCES library_assets(id) ON DELETE CASCADE,
+    dimension TEXT NOT NULL,
+    value TEXT NOT NULL,
+    source TEXT NOT NULL,
+    confidence DOUBLE PRECISION,
+    updated_at TIMESTAMPTZ NOT NULL,
+    PRIMARY KEY(asset_id, dimension, value)
+  );
+  CREATE INDEX IF NOT EXISTS idx_library_asset_labels_filter ON library_asset_labels(dimension, value, asset_id);
+
+  CREATE TABLE IF NOT EXISTS library_tagging_jobs (
+    id TEXT PRIMARY KEY,
+    asset_id TEXT NOT NULL REFERENCES library_assets(id) ON DELETE CASCADE,
+    owner_user_id TEXT NOT NULL,
+    status TEXT NOT NULL,
+    attempts INTEGER NOT NULL DEFAULT 0,
+    max_attempts INTEGER NOT NULL DEFAULT 3,
+    run_after TIMESTAMPTZ NOT NULL,
+    locked_by TEXT,
+    locked_until TIMESTAMPTZ,
+    created_at TIMESTAMPTZ NOT NULL,
+    updated_at TIMESTAMPTZ NOT NULL,
+    started_at TIMESTAMPTZ,
+    completed_at TIMESTAMPTZ,
+    error TEXT,
+    data_json JSONB NOT NULL
+  );
+  CREATE INDEX IF NOT EXISTS idx_library_tagging_jobs_ready ON library_tagging_jobs(status, run_after, created_at ASC);
+  CREATE INDEX IF NOT EXISTS idx_library_tagging_jobs_asset ON library_tagging_jobs(asset_id, created_at DESC);
+
+  CREATE TABLE IF NOT EXISTS copy_library_entries (
+    id TEXT PRIMARY KEY,
+    owner_user_id TEXT NOT NULL,
+    visibility TEXT NOT NULL,
+    title TEXT NOT NULL,
+    created_at TIMESTAMPTZ NOT NULL,
+    updated_at TIMESTAMPTZ NOT NULL,
+    data_json JSONB NOT NULL
+  );
+  CREATE INDEX IF NOT EXISTS idx_copy_library_entries_owner_updated ON copy_library_entries(owner_user_id, updated_at DESC, id DESC);
+  CREATE INDEX IF NOT EXISTS idx_copy_library_entries_visibility_updated ON copy_library_entries(visibility, updated_at DESC, id DESC);
 `;
 
 async function migrateLegacyJsonToPostgres() {
@@ -3265,6 +3942,173 @@ function fromWorkspaceSessionRow(row: WorkspaceSessionRow): WorkspaceSession {
     expiresAt: normalizeDateValue(row.expires_at),
     lastSeenAt: row.last_seen_at ? normalizeDateValue(row.last_seen_at) : undefined,
     revokedAt: row.revoked_at ? normalizeDateValue(row.revoked_at) : undefined,
+  };
+}
+
+async function saveLibraryAssetPostgres(client: PoolClient, asset: LibraryAsset) {
+  await client.query(
+    `INSERT INTO library_assets (
+       id, owner_user_id, visibility, sha256, object_key, public_url, tagging_status, cleanup_status,
+       legacy_material_asset_id, created_at, updated_at, deleted_at, data_json
+     ) VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13::jsonb)
+     ON CONFLICT(id) DO UPDATE SET owner_user_id=excluded.owner_user_id, visibility=excluded.visibility,
+       sha256=excluded.sha256, object_key=excluded.object_key, public_url=excluded.public_url,
+       tagging_status=excluded.tagging_status, cleanup_status=excluded.cleanup_status,
+       legacy_material_asset_id=excluded.legacy_material_asset_id, updated_at=excluded.updated_at,
+       deleted_at=excluded.deleted_at, data_json=excluded.data_json`,
+    libraryAssetValues(asset),
+  );
+  await client.query("DELETE FROM library_asset_roles WHERE asset_id=$1", [asset.id]);
+  for (const role of Array.from(new Set(asset.roles))) {
+    await client.query("INSERT INTO library_asset_roles (asset_id, role) VALUES ($1,$2)", [asset.id, role]);
+  }
+  await client.query("DELETE FROM library_collection_assets WHERE asset_id=$1", [asset.id]);
+  for (const collectionId of Array.from(new Set(asset.collectionIds))) {
+    await client.query(
+      "INSERT INTO library_collection_assets (collection_id, asset_id, created_at) VALUES ($1,$2,$3) ON CONFLICT DO NOTHING",
+      [collectionId, asset.id, asset.updatedAt],
+    );
+  }
+  await client.query("DELETE FROM library_asset_labels WHERE asset_id=$1", [asset.id]);
+  for (const label of flattenLibraryAssetLabels(asset)) {
+    await client.query(
+      "INSERT INTO library_asset_labels (asset_id, dimension, value, source, confidence, updated_at) VALUES ($1,$2,$3,$4,$5,$6)",
+      [asset.id, label.dimension, label.value, label.source, label.confidence ?? null, asset.updatedAt],
+    );
+  }
+}
+
+function saveLibraryAssetSqlite(db: SqliteDatabase, asset: LibraryAsset) {
+  db.prepare(
+    `INSERT INTO library_assets (
+       id, owner_user_id, visibility, sha256, object_key, public_url, tagging_status, cleanup_status,
+       legacy_material_asset_id, created_at, updated_at, deleted_at, data_json
+     ) VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?)
+     ON CONFLICT(id) DO UPDATE SET owner_user_id=excluded.owner_user_id, visibility=excluded.visibility,
+       sha256=excluded.sha256, object_key=excluded.object_key, public_url=excluded.public_url,
+       tagging_status=excluded.tagging_status, cleanup_status=excluded.cleanup_status,
+       legacy_material_asset_id=excluded.legacy_material_asset_id, updated_at=excluded.updated_at,
+       deleted_at=excluded.deleted_at, data_json=excluded.data_json`,
+  ).run(...libraryAssetValues(asset));
+  db.prepare("DELETE FROM library_asset_roles WHERE asset_id=?").run(asset.id);
+  const insertRole = db.prepare("INSERT INTO library_asset_roles (asset_id, role) VALUES (?,?)");
+  Array.from(new Set(asset.roles)).forEach((role) => insertRole.run(asset.id, role));
+  db.prepare("DELETE FROM library_collection_assets WHERE asset_id=?").run(asset.id);
+  const insertCollection = db.prepare(
+    "INSERT INTO library_collection_assets (collection_id, asset_id, created_at) VALUES (?,?,?) ON CONFLICT DO NOTHING",
+  );
+  Array.from(new Set(asset.collectionIds)).forEach((collectionId) => insertCollection.run(collectionId, asset.id, asset.updatedAt));
+  db.prepare("DELETE FROM library_asset_labels WHERE asset_id=?").run(asset.id);
+  const insertLabel = db.prepare(
+    "INSERT INTO library_asset_labels (asset_id, dimension, value, source, confidence, updated_at) VALUES (?,?,?,?,?,?)",
+  );
+  flattenLibraryAssetLabels(asset).forEach((label) =>
+    insertLabel.run(asset.id, label.dimension, label.value, label.source, label.confidence ?? null, asset.updatedAt),
+  );
+}
+
+function libraryAssetValues(asset: LibraryAsset) {
+  return [
+    asset.id,
+    asset.ownerUserId,
+    asset.visibility,
+    asset.sha256,
+    asset.objectKey,
+    asset.publicUrl,
+    asset.taggingStatus,
+    asset.cleanupStatus,
+    asset.legacyMaterialAssetId || null,
+    asset.createdAt,
+    asset.updatedAt,
+    asset.deletedAt || null,
+    toJson(asset),
+  ];
+}
+
+function flattenLibraryAssetLabels(asset: LibraryAsset) {
+  const labels: Array<{ dimension: string; value: string; source: "ai" | "user"; confidence?: number }> = [];
+  const profile = asset.effectiveTags;
+  const add = (dimension: string, values: string[]) => {
+    const source = Object.prototype.hasOwnProperty.call(asset.manualOverrides, dimension) ? "user" : "ai";
+    for (const value of Array.from(new Set(values.map((item) => item.trim()).filter(Boolean)))) {
+      labels.push({ dimension, value, source, confidence: source === "ai" ? profile.confidence : undefined });
+    }
+  };
+  add("imageType", profile.imageType ? [profile.imageType] : []);
+  add("scenes", profile.scenes);
+  add("vehicleModels", profile.vehicleModels);
+  add("vehicleColors", profile.vehicleColors);
+  add("angles", profile.angles);
+  add("people", [profile.people]);
+  add("customTags", profile.customTags);
+  return labels;
+}
+
+async function saveLibraryTaggingJobPostgres(client: PoolClient, job: LibraryTaggingJob) {
+  await client.query(
+    `INSERT INTO library_tagging_jobs (
+       id, asset_id, owner_user_id, status, attempts, max_attempts, run_after, locked_by, locked_until,
+       created_at, updated_at, started_at, completed_at, error, data_json
+     ) VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15::jsonb)
+     ON CONFLICT(id) DO UPDATE SET status=excluded.status, attempts=excluded.attempts, max_attempts=excluded.max_attempts,
+       run_after=excluded.run_after, locked_by=excluded.locked_by, locked_until=excluded.locked_until,
+       updated_at=excluded.updated_at, started_at=excluded.started_at, completed_at=excluded.completed_at,
+       error=excluded.error, data_json=excluded.data_json`,
+    libraryTaggingJobValues(job),
+  );
+}
+
+function saveLibraryTaggingJobSqlite(db: SqliteDatabase, job: LibraryTaggingJob) {
+  db.prepare(
+    `INSERT INTO library_tagging_jobs (
+       id, asset_id, owner_user_id, status, attempts, max_attempts, run_after, locked_by, locked_until,
+       created_at, updated_at, started_at, completed_at, error, data_json
+     ) VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)
+     ON CONFLICT(id) DO UPDATE SET status=excluded.status, attempts=excluded.attempts, max_attempts=excluded.max_attempts,
+       run_after=excluded.run_after, locked_by=excluded.locked_by, locked_until=excluded.locked_until,
+       updated_at=excluded.updated_at, started_at=excluded.started_at, completed_at=excluded.completed_at,
+       error=excluded.error, data_json=excluded.data_json`,
+  ).run(...libraryTaggingJobValues(job));
+}
+
+function libraryTaggingJobValues(job: LibraryTaggingJob) {
+  return [
+    job.id,
+    job.assetId,
+    job.ownerUserId,
+    job.status,
+    job.attempts,
+    job.maxAttempts,
+    job.runAfter,
+    job.lockedBy || null,
+    job.lockedUntil || null,
+    job.createdAt,
+    job.updatedAt,
+    job.startedAt || null,
+    job.completedAt || null,
+    job.error || null,
+    toJson(job),
+  ];
+}
+
+function fromLibraryTaggingJobRow(row: LibraryTaggingJobRow): LibraryTaggingJob {
+  const data = fromJson<Partial<LibraryTaggingJob>>(row.data_json);
+  return {
+    ...data,
+    id: row.id,
+    assetId: row.asset_id,
+    ownerUserId: row.owner_user_id,
+    status: row.status,
+    attempts: Number(row.attempts),
+    maxAttempts: Number(row.max_attempts),
+    runAfter: normalizeDateValue(row.run_after),
+    createdAt: normalizeDateValue(row.created_at),
+    updatedAt: normalizeDateValue(row.updated_at),
+    lockedBy: row.locked_by || undefined,
+    lockedUntil: row.locked_until ? normalizeDateValue(row.locked_until) : undefined,
+    startedAt: row.started_at ? normalizeDateValue(row.started_at) : undefined,
+    completedAt: row.completed_at ? normalizeDateValue(row.completed_at) : undefined,
+    error: row.error || undefined,
   };
 }
 

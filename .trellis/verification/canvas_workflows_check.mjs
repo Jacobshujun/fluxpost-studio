@@ -56,11 +56,15 @@ const loadTsModule = (relativePath, requireMap = {}, sandboxExtras = {}) => {
 
 const packageJson = JSON.parse(read("package.json"));
 assert.equal(packageJson.dependencies["@xyflow/react"], "^12.11.2");
+const canvasTypes = read("src/lib/canvas/types.ts");
+assert.ok(canvasTypes.includes('export type CanvasArtifactKind = "text" | "images" | "videos" | "socialPost" | "publishJobRef";'), "display-any must not add a wildcard artifact kind");
+assert.ok(canvasTypes.includes('export type CanvasPortKind = CanvasArtifactKind | "any";'), "wildcard compatibility must stay isolated to port definitions");
+const areCanvasPortKindsCompatibleForUi = compileFunction(canvasTypes, "areCanvasPortKindsCompatible");
 
 const temp = mkdtempSync(path.join(tmpdir(), "fluxpost-canvas-check-"));
 try {
   writeFileSync(path.join(temp, "toapis-image-api.js"), `exports.toApisImageRatios = ${JSON.stringify(["1:1", "3:2", "2:3", "4:3", "3:4", "5:4", "4:5", "16:9", "9:16", "2:1", "1:2", "21:9", "9:21"])}; exports.toApis4kImageRatios = ${JSON.stringify(["16:9", "9:16", "2:1", "1:2", "21:9", "9:21"])};`, "utf8");
-  for (const name of ["node-utils", "registry", "graph", "clipboard"]) {
+  for (const name of ["types", "node-utils", "registry", "graph", "clipboard"]) {
     const source = read(`src/lib/canvas/${name}.ts`).replace('"../toapis-image-api"', '"./toapis-image-api"');
     const output = ts.transpileModule(source, {
       compilerOptions: { module: ts.ModuleKind.CommonJS, target: ts.ScriptTarget.ES2022 },
@@ -69,14 +73,48 @@ try {
     writeFileSync(path.join(temp, `${name}.js`), output, "utf8");
   }
   const require = createRequire(import.meta.url);
-  const { getCanvasNodeDefinition, getCanvasNodeExecutionMode, upgradeCanvasNode, validateCanvasNodeConfig, normalizeUrlList } = require(path.join(temp, "registry.js"));
+  const { getCanvasNodeDefinition, getCanvasNodeExecutionMode, upgradeCanvasGraph, upgradeCanvasNode, validateCanvasNodeConfig, normalizeUrlList } = require(path.join(temp, "registry.js"));
   const { validateCanvasGraph, buildCanvasRunPlan } = require(path.join(temp, "graph.js"));
   const { createCanvasClipboardPayload, instantiateCanvasClipboardPayload, parseCanvasClipboardPayload } = require(path.join(temp, "clipboard.js"));
+  const { areCanvasPortKindsCompatible, CANVAS_NODE_SIZE_LIMITS } = require(path.join(temp, "types.js"));
   const nodeUtils = require(path.join(temp, "node-utils.js"));
   assert.equal(getCanvasNodeDefinition("input.images")?.label, "图片", "image input node should use the concise label");
   assert.equal(getCanvasNodeDefinition("model.gpt-image")?.version, 2, "new GPT image nodes must use v2");
   assert.equal(getCanvasNodeDefinition("model.gpt-image", 1)?.version, 1, "legacy GPT image snapshots must remain resolvable");
+  assert.equal(getCanvasNodeDefinition("model.gpt-vision")?.inputs.find((port) => port.id === "instruction")?.label, "用户提示词", "vision prompt input must be presented as authoritative user text");
+  assert.deepEqual(getCanvasNodeDefinition("compose.social-post")?.inputs.map((port) => `${port.id}:${port.kind}`), ["title:text", "body:text", "vehicle:text", "images:images", "videos:videos"], "content composition must accept vehicle text from an upstream node");
+  assert.ok(!getCanvasNodeDefinition("compose.social-post")?.fields.some((field) => field.key === "vehicle"), "new content composition nodes must not edit vehicle text in node config");
+  assert.deepEqual(getCanvasNodeDefinition("compose.social-post")?.defaultConfig, { fallbackTitle: "画布生成内容" });
+  assert.equal(getCanvasNodeDefinition("utility.text-split")?.version, 2, "new text split nodes must use v2");
+  assert.equal(getCanvasNodeDefinition("utility.text-split")?.label, "文本分割", "text split must use the confirmed node name");
+  assert.deepEqual(getCanvasNodeDefinition("utility.text-split")?.outputs.map((port) => port.label), ["标题", "正文"]);
+  assert.equal(getCanvasNodeDefinition("utility.text-split", 1)?.label, "文本拆分", "legacy text split snapshots must retain the v1 definition");
   assert.deepEqual(getCanvasNodeDefinition("utility.image-preview")?.bypass, { inputPort: "images", outputPort: "images" }, "image preview must declare explicit image passthrough");
+  assert.equal(getCanvasNodeDefinition("utility.image-preview")?.passiveSink, true, "image preview must retain passive sink behavior");
+  assert.deepEqual(getCanvasNodeDefinition("utility.prompt-switch")?.inputs.map((port) => port.id), ["input1", "input2", "input3"], "prompt switch must expose three ordinal inputs");
+  assert.deepEqual(getCanvasNodeDefinition("utility.prompt-switch")?.inputs.map((port) => port.label), ["输入 1", "输入 2", "输入 3"]);
+  assert.deepEqual(getCanvasNodeDefinition("utility.prompt-switch")?.defaultConfig, { selectedInput: "1" });
+  assert.deepEqual(getCanvasNodeDefinition("utility.prompt-switch", 1)?.inputs.map((port) => port.id), ["scene", "sceneModification", "scenePerson"], "legacy prompt switch snapshots must remain resolvable");
+  assert.deepEqual(getCanvasNodeDefinition("utility.display-any"), {
+    type: "utility.display-any",
+    version: 1,
+    label: "展示任何",
+    description: "展示任意上游节点的输出内容。",
+    category: "utility",
+    icon: "Eye",
+    color: "#7c3aed",
+    inputs: [{ id: "value", label: "任意", kind: "any", required: true }],
+    outputs: [],
+    fields: [],
+    defaultConfig: {},
+    passiveSink: true,
+  }, "display-any must be a passive, outputless wildcard sink");
+  for (const kind of ["text", "images", "videos", "socialPost", "publishJobRef"]) {
+    assert.equal(areCanvasPortKindsCompatible(kind, "any"), true, `${kind} output must connect to an any input`);
+    assert.equal(areCanvasPortKindsCompatible(kind, kind), true, `${kind} must retain exact compatibility`);
+  }
+  assert.equal(areCanvasPortKindsCompatible("any", "text"), false, "wildcard outputs must not connect to typed inputs");
+  assert.equal(areCanvasPortKindsCompatible("text", "images"), false, "existing mismatched types must stay incompatible");
   const commonNodeContracts = {
     "input.content-pool": { inputs: [], outputs: ["title:text", "body:text", "source:text", "images:images", "videos:videos"] },
     "input.library-images": { inputs: [], outputs: ["images:images"] },
@@ -86,11 +124,12 @@ try {
     "utility.image-select": { inputs: ["images:images"], outputs: ["images:images"] },
     "utility.image-transform": { inputs: ["images:images"], outputs: ["images:images"] },
     "utility.video-frames": { inputs: ["videos:videos"], outputs: ["images:images"] },
+    "utility.display-any": { inputs: ["value:any"], outputs: [] },
   };
   for (const [type, contract] of Object.entries(commonNodeContracts)) {
     const definition = getCanvasNodeDefinition(type);
     assert.ok(definition, `${type} must be registered`);
-    assert.equal(definition.version, 1, `${type} must start at version 1`);
+    assert.equal(definition.version, type === "utility.text-split" ? 2 : 1, `${type} latest version changed unexpectedly`);
     assert.deepEqual(definition.inputs.map((port) => `${port.id}:${port.kind}`), contract.inputs, `${type} inputs changed`);
     assert.deepEqual(definition.outputs.map((port) => `${port.id}:${port.kind}`), contract.outputs, `${type} outputs changed`);
   }
@@ -106,12 +145,23 @@ try {
   assert.match(validateCanvasNodeConfig("utility.image-transform", { preset: "custom", width: 10, height: 1080, fit: "cover", format: "jpeg", quality: 90 }, 1).join(" "), /64 to 4096/i);
   assert.match(validateCanvasNodeConfig("utility.video-frames", { mode: "timestamps", timestamps: "bad", maxEdge: 1920, quality: 90 }, 1).join(" "), /comma-separated seconds/i);
   assert.equal(validateCanvasNodeConfig("utility.image-select", { indices: "1,3,2" }, 1).length, 0);
+  assert.match(validateCanvasNodeConfig("utility.text-split", { mode: "delimiter", delimiter: "---", delimiterIndex: 0 }, 2).join(" "), /positive integer/i);
+  assert.match(validateCanvasNodeConfig("utility.text-split", { mode: "delimiter", delimiter: "---", delimiterIndex: 1.5 }, 2).join(" "), /positive integer/i);
+  assert.equal(validateCanvasNodeConfig("utility.text-split", { mode: "first-line", delimiter: "", delimiterIndex: 0 }, 2).length, 0, "first-line mode must ignore delimiter settings");
 
   assert.equal(nodeUtils.renderCanvasPromptTemplate({ preset: "custom", template: "二={{input2}}\n一={{input1}}\n全部={{input}}" }, ["A", "B"]), "二=B\n一=A\n全部=A\n\nB");
   assert.throws(() => nodeUtils.renderCanvasPromptTemplate({ preset: "custom", template: "{{input3}}" }, ["A", "B"]), /missing input3/i);
   assert.deepEqual(nodeUtils.splitCanvasText({ mode: "first-line" }, "标题\n正文第一行\n正文第二行"), { head: "标题", tail: "正文第一行\n正文第二行" });
   assert.deepEqual(nodeUtils.splitCanvasText({ mode: "delimiter", delimiter: "---" }, "标题---正文"), { head: "标题", tail: "正文" });
   assert.throws(() => nodeUtils.splitCanvasText({ mode: "delimiter", delimiter: "---" }, "没有分隔符"), /does not contain/i);
+  assert.deepEqual(nodeUtils.splitCanvasText({ mode: "delimiter", delimiter: "---", delimiterIndex: 2 }, "A---B---C"), { head: "A---B", tail: "C" });
+  assert.deepEqual(nodeUtils.splitCanvasText({ mode: "delimiter", delimiter: "---", delimiterIndex: 2 }, "A---B---C---D"), { head: "A---B", tail: "C---D" }, "later delimiters must remain in the body");
+  assert.deepEqual(nodeUtils.splitCanvasText({ mode: "delimiter", delimiter: "---", delimiterIndex: 2 }, "A---B", { fallbackToBody: true }), { tail: "A---B" });
+  assert.deepEqual(nodeUtils.splitCanvasText({ mode: "delimiter", delimiter: "---", delimiterIndex: 1 }, "---正文", { fallbackToBody: true }), { tail: "---正文" });
+  assert.deepEqual(nodeUtils.splitCanvasText({ mode: "delimiter", delimiter: "---", delimiterIndex: 1 }, "标题---", { fallbackToBody: true }), { tail: "标题---" });
+  assert.deepEqual(nodeUtils.splitCanvasText({ mode: "first-line" }, " 标题\r\n正文第一段\n\n正文第二段 ", { fallbackToBody: true }), { head: "标题", tail: "正文第一段\n\n正文第二段" });
+  assert.throws(() => nodeUtils.splitCanvasText({ mode: "delimiter", delimiter: "---" }, "   ", { fallbackToBody: true }), /cannot be empty/i);
+  assert.throws(() => nodeUtils.splitCanvasText({ mode: "delimiter", delimiter: "---", delimiterIndex: 0 }, "标题---正文", { fallbackToBody: true }), /positive integer/i);
   assert.deepEqual(nodeUtils.parseCanvasImageSelection("1,3,2,3"), [1, 3, 2], "image indices must keep first-position order and dedupe repeats");
   assert.throws(() => nodeUtils.parseCanvasImageSelection("1,0"), /between 1 and 100/i);
   assert.deepEqual(nodeUtils.resolveCanvasImageDimensions({ preset: "xiaohongshu" }), { width: 1080, height: 1440 });
@@ -123,6 +173,20 @@ try {
   assert.equal(upgradedImageNode.version, 2, "editable legacy GPT image nodes must upgrade to v2");
   assert.equal(upgradedImageNode.config.ratio, "2:3", "legacy portrait size must map to a v2 ratio");
   assert.equal(upgradedImageNode.config.resolution, "1k", "legacy portrait size must map to a v2 resolution");
+  const upgradedTextSplitNode = upgradeCanvasNode({ id: "legacy-split", type: "utility.text-split", version: 1, position: { x: 0, y: 0 }, config: { mode: "delimiter", delimiter: "###" } });
+  assert.equal(upgradedTextSplitNode.version, 2, "editable legacy text split nodes must upgrade to v2");
+  assert.deepEqual(upgradedTextSplitNode.config, { mode: "delimiter", delimiter: "###", delimiterIndex: 1 });
+  const upgradedPromptGraph = upgradeCanvasGraph({
+    nodes: [
+      { id: "legacy-prompt", type: "input.text", version: 1, position: { x: 0, y: 0 }, config: { text: "提示词" } },
+      { id: "legacy-switch", type: "utility.prompt-switch", version: 1, position: { x: 200, y: 0 }, config: { strategy: "scene-person" } },
+    ],
+    edges: [{ id: "legacy-edge", source: "legacy-prompt", sourcePort: "text", target: "legacy-switch", targetPort: "scenePerson" }],
+    viewport: { x: 0, y: 0, zoom: 1 },
+  });
+  assert.equal(upgradedPromptGraph.nodes.find((node) => node.id === "legacy-switch")?.version, 2);
+  assert.deepEqual(upgradedPromptGraph.nodes.find((node) => node.id === "legacy-switch")?.config, { selectedInput: "3" });
+  assert.equal(upgradedPromptGraph.edges[0].targetPort, "input3", "editable prompt-switch edges must migrate with the node");
 
   const textNode = { id: "text", type: "input.text", version: 1, position: { x: 0, y: 0 }, config: { text: "source" } };
   assert.equal(getCanvasNodeExecutionMode(textNode), "enabled", "legacy nodes without a mode must remain enabled");
@@ -132,7 +196,14 @@ try {
     edges: [{ id: "e1", source: "text", sourcePort: "text", target: "gpt", targetPort: "prompt" }],
     viewport: { x: 0, y: 0, zoom: 1 },
   };
+  assert.deepEqual(CANVAS_NODE_SIZE_LIMITS, { minWidth: 190, minHeight: 120, maxWidth: 720, maxHeight: 900 }, "node resizing bounds must stay shared across persistence and UI");
   assert.equal(validateCanvasGraph(validGraph).valid, true, "valid typed graph should pass");
+  const resizedGraph = structuredClone(validGraph);
+  resizedGraph.nodes[0].size = { width: 360, height: 280 };
+  assert.equal(validateCanvasGraph(resizedGraph).valid, true, "valid custom node dimensions should pass graph validation");
+  const oversizedGraph = structuredClone(resizedGraph);
+  oversizedGraph.nodes[0].size.width = 721;
+  assert.match(validateCanvasGraph(oversizedGraph).errors.join(" "), /190x120.*720x900/i, "out-of-range node dimensions must fail graph validation");
   assert.deepEqual(buildCanvasRunPlan(validGraph, ["gpt"]).includedNodeIds, ["text", "gpt"], "selected-node plan should include ancestors");
   assert.deepEqual(buildCanvasRunPlan(validGraph, ["gpt"]).capabilities, ["text_model"]);
   const bypassGraph = structuredClone(validGraph);
@@ -169,6 +240,33 @@ try {
     viewport: { x: 0, y: 0, zoom: 1 },
   };
   assert.deepEqual(buildCanvasRunPlan(previewGraph, ["image"]).includedNodeIds, ["image", "preview"], "selected image producers must include passive preview sinks");
+  const displayNodes = ["text", "images", "videos", "post", "job"].map((suffix, index) => ({ id: `display-${suffix}`, type: "utility.display-any", version: 1, position: { x: 600, y: index * 120 }, config: {} }));
+  const displayAnyGraph = {
+    nodes: [
+      textNode,
+      { id: "images", type: "input.images", version: 1, position: { x: 0, y: 120 }, config: { urls: ["https://example.test/a.jpg"] } },
+      { id: "videos", type: "input.videos", version: 1, position: { x: 0, y: 240 }, config: { urls: ["https://example.test/a.mp4"] } },
+      { id: "compose", type: "compose.social-post", version: 1, position: { x: 220, y: 360 }, config: {} },
+      { id: "publish", type: "publish.feishu", version: 1, position: { x: 420, y: 480 }, config: {} },
+      ...displayNodes,
+    ],
+    edges: [
+      { id: "compose-body", source: "text", sourcePort: "text", target: "compose", targetPort: "body" },
+      { id: "publish-post", source: "compose", sourcePort: "post", target: "publish", targetPort: "post" },
+      { id: "display-text-edge", source: "text", sourcePort: "text", target: "display-text", targetPort: "value" },
+      { id: "display-images-edge", source: "images", sourcePort: "images", target: "display-images", targetPort: "value" },
+      { id: "display-videos-edge", source: "videos", sourcePort: "videos", target: "display-videos", targetPort: "value" },
+      { id: "display-post-edge", source: "compose", sourcePort: "post", target: "display-post", targetPort: "value" },
+      { id: "display-job-edge", source: "publish", sourcePort: "job", target: "display-job", targetPort: "value" },
+    ],
+    viewport: { x: 0, y: 0, zoom: 1 },
+  };
+  assert.equal(validateCanvasGraph(displayAnyGraph).valid, true, "all five artifact kinds must connect to display-any");
+  assert.deepEqual(buildCanvasRunPlan(displayAnyGraph, ["text"]).includedNodeIds, ["text", "display-text"], "selected producers must automatically include direct display-any sinks");
+  assert.deepEqual(buildCanvasRunPlan(displayAnyGraph, ["text"]).capabilities, [], "display-any must not add paid confirmation");
+  const occupiedDisplayGraph = structuredClone(displayAnyGraph);
+  occupiedDisplayGraph.edges.push({ id: "second-display-input", source: "images", sourcePort: "images", target: "display-text", targetPort: "value" });
+  assert.match(validateCanvasGraph(occupiedDisplayGraph).errors.join(" "), /accepts one connection/i, "display-any must reject a second upstream edge");
   const unsupportedBypass = structuredClone(previewGraph);
   unsupportedBypass.nodes[0].executionMode = "bypass";
   assert.match(validateCanvasGraph(unsupportedBypass).errors.join(" "), /does not support bypass/i, "nodes without explicit mappings must reject bypass");
@@ -200,6 +298,12 @@ try {
   const modeClipboard = structuredClone(clipboardPayload);
   modeClipboard.nodes[1].executionMode = "bypass";
   assert.equal(parseCanvasClipboardPayload(JSON.stringify(modeClipboard))?.nodes[1].executionMode, "bypass", "clipboard must preserve execution mode");
+  const sizedClipboard = structuredClone(clipboardPayload);
+  sizedClipboard.nodes[0].size = { width: 420, height: 300 };
+  assert.deepEqual(parseCanvasClipboardPayload(JSON.stringify(sizedClipboard))?.nodes[0].size, { width: 420, height: 300 }, "clipboard must preserve custom node dimensions");
+  const invalidSizeClipboard = structuredClone(sizedClipboard);
+  invalidSizeClipboard.nodes[0].size.height = 901;
+  assert.equal(parseCanvasClipboardPayload(JSON.stringify(invalidSizeClipboard)), undefined, "clipboard must reject out-of-range node dimensions");
   const invalidClipboard = structuredClone(clipboardPayload);
   invalidClipboard.edges[0].targetPort = "missing";
   assert.equal(parseCanvasClipboardPayload(JSON.stringify(invalidClipboard)), undefined, "invalid clipboard ports must be rejected");
@@ -217,8 +321,47 @@ try {
     config: { assetIds: ["asset-1", "asset-2"], assetNames: ["封面", "内页"], urls: ["https://example.test/1.jpg", "https://example.test/2.jpg"], snapshotAt: "2026-07-27T00:00:00.000Z" },
   }], [], ["library"]);
   assert.deepEqual(parseCanvasClipboardPayload(JSON.stringify(commonClipboard))?.nodes[0].config.urls, ["https://example.test/1.jpg", "https://example.test/2.jpg"], "new flat snapshot arrays must round-trip through clipboard validation");
+  const displayClipboard = createCanvasClipboardPayload(displayAnyGraph.nodes, displayAnyGraph.edges, ["text", "display-text"]);
+  const parsedDisplayClipboard = parseCanvasClipboardPayload(JSON.stringify(displayClipboard));
+  assert.equal(parsedDisplayClipboard?.nodes.find((node) => node.type === "utility.display-any")?.id, "display-text", "display-any must round-trip through the version-1 clipboard envelope");
+  assert.equal(parsedDisplayClipboard?.edges[0].targetPort, "value", "wildcard input edges must survive clipboard validation");
 
   const executorSource = read("src/lib/canvas/executors.ts");
+  const executeDisplayAny = compileFunction(executorSource, "executeDisplayAny", { structuredClone });
+  const displayArtifact = { kind: "socialPost", postId: "post-1", post: { title: "展示标题", imageUrls: [], videoUrls: [], platform: "xiaohongshu" } };
+  const displayResult = await executeDisplayAny({ inputs: { value: [displayArtifact] } });
+  assert.deepEqual(displayResult.outputs.preview, displayArtifact, "display-any must persist the exact upstream artifact shape");
+  assert.notEqual(displayResult.outputs.preview, displayArtifact, "display-any must clone the upstream artifact");
+  await assert.rejects(() => executeDisplayAny({ inputs: {} }), /一个上游结果/, "display-any must reject a missing upstream artifact");
+  await assert.rejects(() => executeDisplayAny({ inputs: { value: [{ kind: "text", value: "A" }, { kind: "text", value: "B" }] } }), /一个上游结果/, "display-any must reject multiple upstream artifacts");
+  const executePromptSwitch = compileFunctions(
+    executorSource,
+    ["executePromptSwitch", "textValues"],
+    "executePromptSwitch",
+  );
+  const promptInputs = {
+    input1: [{ kind: "text", value: "提示词一" }],
+    input2: [{ kind: "text", value: "提示词二" }],
+    input3: [{ kind: "text", value: "提示词三" }],
+  };
+  assert.deepEqual((await executePromptSwitch({ node: { version: 2, config: { selectedInput: "2" } }, inputs: promptInputs })).outputs, { text: { kind: "text", value: "提示词二" } });
+  assert.deepEqual((await executePromptSwitch({ node: { version: 2, config: { selectedInput: "3" } }, inputs: promptInputs })).outputs, { text: { kind: "text", value: "提示词三" } });
+  await assert.rejects(() => executePromptSwitch({ node: { version: 2, config: { selectedInput: "1" } }, inputs: { ...promptInputs, input1: [] } }), /非空文字输入/);
+  assert.deepEqual((await executePromptSwitch({ node: { version: 1, config: { strategy: "scene-person" } }, inputs: { scenePerson: [{ kind: "text", value: "旧提示词" }] } })).outputs, { text: { kind: "text", value: "旧提示词" } });
+  const executeTextSplit = compileFunctions(
+    executorSource,
+    ["executeTextSplit", "textValues"],
+    "executeTextSplit",
+    { splitCanvasText: nodeUtils.splitCanvasText },
+  );
+  assert.deepEqual((await executeTextSplit({
+    node: { type: "utility.text-split", version: 2, config: { mode: "delimiter", delimiter: "---", delimiterIndex: 2 } },
+    inputs: { text: [{ kind: "text", value: "A---B" }] },
+  })).outputs, { tail: { kind: "text", value: "A---B" } }, "v2 fallback must omit the empty title artifact");
+  await assert.rejects(() => executeTextSplit({
+    node: { type: "utility.text-split", version: 1, config: { mode: "delimiter", delimiter: "---" } },
+    inputs: { text: [{ kind: "text", value: "A" }] },
+  }), /does not contain/i, "v1 executor must preserve strict snapshot behavior");
   const resolveCanvasLiteralOutputs = compileFunctions(
     executorSource,
     ["resolveCanvasLiteralOutputs", "imageArtifact", "videoArtifact", "stringList"],
@@ -253,23 +396,35 @@ try {
 }
 
 const schema = `${read("db/migrations/002_canvas_workflows.sql")}\n${read("src/lib/database.ts")}`;
-for (const table of ["canvas_workflows", "canvas_runs", "canvas_node_runs", "canvas_run_queue"]) {
+for (const table of ["canvas_workflows", "canvas_schedules", "canvas_runs", "canvas_node_runs", "canvas_run_queue"]) {
   assert.ok(schema.includes(`CREATE TABLE IF NOT EXISTS ${table}`), `missing ${table} schema`);
 }
-requireText(schema, ["revision = $8", "FOR UPDATE SKIP LOCKED", "requeueCanvasRunQueueItem", "listCanvasSuccessfulNodeRunsForWorkflowFromDb", "JOIN canvas_runs"], "canvas persistence");
+requireText(schema, ["revision = $8", "FOR UPDATE SKIP LOCKED", "requeueCanvasRunQueueItem", "requeueExpiredCanvasRunQueueItemsWithProviderTasks", "providerTaskId", "json_extract", "listCanvasSuccessfulNodeRunsForWorkflowFromDb", "JOIN canvas_runs"], "canvas persistence");
 
 const workflows = read("src/lib/canvas/workflows.ts");
 requireText(workflows, ["filterWorkspaceOwnedRecords", "assertCanAccessWorkspaceRecord", "CanvasRevisionConflictError", "structuredClone(graph)"], "workflow service");
 
 const runs = read("src/lib/canvas/runs.ts");
-requireText(runs, ["structuredClone(workflow.graph)", "runMode", "isolated", "inputFingerprint", "reusedFrom", "bypassed", "disabled", "Missing required input", "cancelRequestedAt", "collectDescendants", "previousNodeRun: latest.get(node.id)", "finalRun.status === \"running\"", "requeueCanvasRunQueueItem(finalRun.id, 30_000)", "listCanvasRunHistory", "listCanvasSuccessfulNodeRunsForWorkflowFromDb", "latestSuccessfulNodeRuns", "workflowRevision", "nodeConfig"], "DAG scheduler and latest-success projection");
+requireText(runs, ["structuredClone(workflow.graph)", "runMode", "isolated", "inputFingerprint", "reusedFrom", "bypassed", "disabled", "Missing required input", "cancelRequestedAt", "collectDescendants", "previousNodeRun", "resumableNodeRun", "onProviderTaskUpdate", "providerTaskRoute", "result.providerTaskId || nodeRun.providerTaskId", "finalRun.status === \"running\"", "requeueCanvasRunQueueItem(finalRun.id, 30_000)", "setTimeout(ensureCanvasRunWorker, 30_000)", "requeueExpiredCanvasRunQueueItemsWithProviderTasks", "listCanvasRunHistory", "listCanvasSuccessfulNodeRunsForWorkflowFromDb", "latestSuccessfulNodeRuns", "workflowRevision", "nodeConfig"], "DAG scheduler and latest-success projection");
+requireText(runs, ["Promise.all(ready.map((nodeId) => runPlannedNode"], "ready DAG branch concurrency");
+requireText(read("src/lib/concurrency.ts"), ["image: readConcurrencyEnv(\"WORKER_IMAGE_CONCURRENCY\", 100, 100)"], "confirmed ToAPIs 100-task submission concurrency");
+requireText(read("src/app/api/canvas/runs/route.ts"), ["ensureCanvasRunWorker", "export async function GET"], "canvas status reads must wake durable recovery after a local restart");
 
 const dreamina = read("src/lib/canvas/dreamina.ts");
 requireText(dreamina, ["user_credit", "totalCredit < 100", "query_result", "--submit_id=", "if (!singleImage) args.push", "Dreamina did not return submit_id", "execFileAsync"], "Dreamina adapter");
 assert.ok(!dreamina.includes("exec("), "Dreamina adapter must not use a shell command string");
 
 const executors = read("src/lib/canvas/executors.ts");
-requireText(executors, ["callOpenAIForText", "callOpenAIForVisionText", "generateCanvasGptImages", "directReferences", "resolveCanvasGptImageReferences", "references.length > 16", "resolvedInputs", "utility.image-preview", "executeImagePreview", "executePromptTemplate", "executeTextSplit", "executeGptVision", "executeImageSelect", "executeImageTransform", "executeVideoFrames", "CanvasMediaNeedsConfigError", "generateImagesFromPrompt", "saveGeneratedPost", "enqueueFeishuPublishJob", "queryDreaminaVideo(previousSubmitId)"], "node executors");
+requireText(executors, ["callOpenAIForText", "callOpenAIForVisionText", "generateCanvasGptImages", "directReferences", "resolveCanvasGptImageReferences", "references.length > 16", "resolvedInputs", "resumeTaskId", "resumeTaskRoute", "onTaskUpdate", "result.status === \"pending\"", "providerTaskRoute", "utility.image-preview", "executeImagePreview", "utility.display-any", "executeDisplayAny", "executePromptTemplate", "executeTextSplit", "executeGptVision", "executeImageSelect", "executeImageTransform", "executeVideoFrames", "CanvasMediaNeedsConfigError", "generateImagesFromPrompt", "saveGeneratedPost", "enqueueFeishuPublishJob", "queryDreaminaVideo(previousSubmitId)"], "node executors");
+const resolveCanvasVisionInstruction = compileFunctions(executors, ["resolveCanvasVisionInstruction", "textValues"], "resolveCanvasVisionInstruction", { canvasVisionPresets: { describe: "默认图片描述" } });
+const visionNode = { config: { preset: "describe", instruction: "默认节点指令" } };
+assert.equal(resolveCanvasVisionInstruction(visionNode, [{ kind: "text", value: "  用户提示词  " }]), "用户提示词", "connected user text must fully replace the vision preset and node instruction");
+assert.equal(resolveCanvasVisionInstruction(visionNode, [{ kind: "text", value: "第一条" }, { kind: "text", value: "第二条" }]), "第一条\n\n第二条", "multiple user prompts must preserve incoming order");
+assert.equal(resolveCanvasVisionInstruction(visionNode, []), "默认图片描述\n\n默认节点指令", "legacy vision nodes without user text must retain preset fallback behavior");
+const resolveCanvasCompositionVehicle = compileFunctions(executors, ["resolveCanvasCompositionVehicle", "textValues"], "resolveCanvasCompositionVehicle");
+assert.equal(resolveCanvasCompositionVehicle({ config: { vehicle: "旧配置车型" } }, [{ kind: "text", value: "  小鹏 G6  " }]), "小鹏 G6", "connected vehicle text must override legacy node config");
+assert.equal(resolveCanvasCompositionVehicle({ config: { vehicle: "  旧配置车型  " } }, []), "旧配置车型", "legacy composition nodes must retain their saved vehicle fallback");
+assert.equal(resolveCanvasCompositionVehicle({ config: {} }, []), undefined, "new composition nodes may omit vehicle text");
 const resolveCanvasGptImageReferences = compileFunction(executors, "resolveCanvasGptImageReferences");
 assert.deepEqual(resolveCanvasGptImageReferences([], []), [], "zero references must remain text-to-image mode");
 assert.deepEqual(resolveCanvasGptImageReferences(["direct-1"], []), ["direct-1"], "one direct reference must be retained");
@@ -406,12 +561,24 @@ for (const route of [
 }
 
 const page = read("src/app/canvas/page.tsx");
-requireText(page, ["ReactFlow", "onConnect", "wouldCreateCycle", "NodeInspector", "ConfirmationDialog", "panOnDrag", "nodesDraggable={!isMobile}", "RunSummary", "FlowingCanvasEdge", "canvas-port-row", "colorMode={flowColorMode}", "subscribeTheme", "CANVAS_CLIPBOARD_MIME", "clipboardDataImageFiles", "isEditableClipboardTarget", "pasteFromSystemClipboard", "canvas-image-file-input", "CanvasNodeInteractionContext", "latestNodeRuns", "latestSuccessfulNodeRuns", "useMemo(() => latestAttempts", "(result.get(nodeRun.nodeId)?.attempt || 0) < nodeRun.attempt", "const selectedRun = explicitRun || data.runs[0]", "await refreshRun(selectedRun.id, workflowId)", "runSelectionIsExplicitRef", "focusCanvasNode", "selectedNodeId", "if (selectedNode) setSelectedNodeId(selectedNode.id)", "interaction?.selectedNodeId === node.id", "canvas-node-text-editor nodrag nopan nowheel", "event.currentTarget.focus({ preventScroll: true })", "interaction?.onNodeFocus(node.id)", "onClick={(event) => {", "onKeyDown={(event) => event.stopPropagation()}", "CanvasModelNodeResult", "CanvasImagePreviewNodeResult", "updateNodeExecutionMode", "仅运行此节点", "运行到此节点", 'requestRun([selectedNodeId], "isolated")', "打开评审", "历史版本 r", "最近成功结果 · r", "definition?.outputs", "isPreviewableModelArtifact", "artifact.value.trim()", "artifact.items.length > 0", "showArtifact", "运行完成，但没有可预览内容", "CanvasTextPreviewDialog", "CanvasVideoPreviewDialog", "CanvasImagePreviewDialog", "canvas-node-result-gallery", "canvas-node-result-gallery-open", "canvas-node-result-gallery-meta", "canvas-image-preview-open", "图片{index + 1}", "imageUrls.length}/16", "moveListItem", 'form.append("mode", "gpt-reference")', "edgeAnimationDelay", "pathLength={100}", "canvas-flow-edge-glow", "canvas-flow-edge-highlight", "打开原图", "缩小图片", "放大图片", "重置图片缩放"], "canvas UI");
-requireText(page, ["ContentPoolSnapshotPicker", "LibraryImageSnapshotPicker", "contentPoolSnapshotConfig", "刷新快照", "刷新所选素材", "CanvasQuickAdd", "resolveQuickAddConnection", "quickAddChoices", "isQuickAddTargetOccupied", "eventPoint", "stageCenter", 'event.key === "Tab"', 'event.key === "ArrowDown"', 'event.key === "ArrowUp"', 'event.key === "Enter"', 'event.key === "Escape"', '.closest(".react-flow__pane")', "screenToFlowPosition", "connection.kind !== port.kind", "该输入端口已连接"], "snapshot pickers and ComfyUI quick add");
+requireText(page, ["CanvasTextSplitControls", "文本分割方式", "第几个分隔符", "CanvasTextSplitNodeResult", "CanvasTextSplitOutput", "未匹配，已全部作为正文", "getTextOutputArtifact", 'field.key === "delimiterIndex"'], "text split v2 UI");
+requireText(page, ["NodeResizer", "CANVAS_NODE_SIZE_LIMITS", "displayedNodes", "applyCanvasNodeChanges", "change.setAttributes", "applyFlowNodeSize", "canvas-node-resize-handle", "canvas-node-resize-line"], "canvas node resizing UI");
+requireText(page, ["CanvasNodeTextEditor", "setDraft(nextValue)", "document.activeElement !== editorRef.current", "data-node-id={nodeId}"], "canvas text editor caret preservation");
+requireText(page, ["CanvasDisplayAnyNodeResult", "CanvasDisplayAnyArtifact", "getDisplayAnyArtifact", "outputs.preview", "等待上游结果", "没有图片内容", "没有视频内容", "飞书发布任务", "areCanvasPortKindsCompatible", "isQuickAddPortCompatible", "portKindLabel", "utility.display-any"], "display-any UI");
+requireText(page, ["ReactFlow", "onConnect", "wouldCreateCycle", "NodeInspector", "panOnDrag={isMobile}", "selectionOnDrag={!isMobile}", "nodesDraggable={!isMobile}", "RunSummary", "FlowingCanvasEdge", "canvas-port-row", "colorMode={flowColorMode}", "subscribeTheme", "CANVAS_CLIPBOARD_MIME", "clipboardDataImageFiles", "isEditableClipboardTarget", "pasteFromSystemClipboard", "canvas-image-file-input", "CanvasNodeInteractionContext", "latestNodeRuns", "latestSuccessfulNodeRuns", "useMemo(() => latestAttempts", "(result.get(nodeRun.nodeId)?.attempt || 0) < nodeRun.attempt", "const selectedRun = explicitRun || data.runs[0]", "await refreshRun(selectedRun.id, workflowId)", "runSelectionIsExplicitRef", "focusCanvasNode", "selectedNodeId", "if (selectedNode) setSelectedNodeId(selectedNode.id)", "interaction?.selectedNodeId === node.id", "canvas-node-text-editor nodrag nopan nowheel", "event.currentTarget.focus({ preventScroll: true })", "interaction?.onNodeFocus(node.id)", "onClick={(event) => {", "onKeyDown={(event) => event.stopPropagation()}", "CanvasModelNodeResult", "CanvasImagePreviewNodeResult", "updateNodeExecutionMode", "仅运行此节点", "运行到此节点", 'requestRun([selectedNodeId], "isolated")', "打开评审", "历史版本 r", "最近成功结果 · r", "definition?.outputs", "isPreviewableModelArtifact", "artifact.value.trim()", "artifact.items.length > 0", "showArtifact", "运行完成，但没有可预览内容", "CanvasTextPreviewDialog", "CanvasVideoPreviewDialog", "CanvasImagePreviewDialog", "canvas-node-result-gallery", "canvas-node-result-gallery-open", "canvas-node-result-gallery-meta", "canvas-image-preview-open", "图片{index + 1}", "imageUrls.length}/16", "moveListItem", 'form.append("mode", "gpt-reference")', "edgeAnimationDelay", "pathLength={100}", "canvas-flow-edge-glow", "canvas-flow-edge-highlight", "打开原图", "缩小图片", "放大图片", "重置图片缩放"], "canvas UI");
+requireText(page, ["ContentPoolSnapshotPicker", "LibraryImageSnapshotPicker", "contentPoolSnapshotConfig", "刷新快照", "刷新所选素材", "CanvasQuickAdd", "resolveQuickAddConnection", "quickAddChoices", "isQuickAddTargetOccupied", "eventPoint", "stageCenter", 'event.key === "Tab"', 'event.key === "ArrowDown"', 'event.key === "ArrowUp"', 'event.key === "Enter"', 'event.key === "Escape"', '.closest(".react-flow__pane")', "screenToFlowPosition", "isQuickAddPortCompatible", "该输入端口已连接"], "snapshot pickers and ComfyUI quick add");
+requireText(page, ["canvasHistoryLimit", "createCanvasHistory", "commitCanvasHistory", "stepCanvasHistory", "scheduleCanvasHistoryCommit", "restoreCanvasHistory", "event.altKey", 'event.key.toLowerCase() === "s"', 'event.key.toLowerCase() === "z"', 'event.key.toLowerCase() === "y"', 'event.key.toLowerCase() === "a"', 'aria-keyshortcuts="Control+Enter Meta+Enter"', 'aria-keyshortcuts="Control+Alt+Enter Meta+Alt+Enter"', 'ariaKeyShortcuts="Control+S Meta+S"', "aria-keyshortcuts={ariaKeyShortcuts}"], "canvas shortcuts and history");
+requireText(page, ["paletteVisible", "canvas-workspace-palette-hidden", "canvas-palette-collapsed", "PanelLeftClose", "PanelLeftOpen", "CanvasTaskCenter", "openTaskCenter", "loadTaskCenterRuns", 'api<{ runs: CanvasRun[] }>("/api/canvas/runs")', "loadTaskRun", "CanvasTaskFilter", "isActiveCanvasRun", "isFailedCanvasRun", "mergeTaskRunHistory", "canvas-task-center-button"], "collapsible node library and task center");
+assert.ok(page.includes("await startRun(data.plan, targetNodeIds, runMode);"), "successful canvas plans must enqueue directly");
+assert.ok(!page.includes("ConfirmationDialog"), "canvas runs must not show a paid or external-write confirmation dialog");
+assert.ok(!page.includes("setConfirmation"), "canvas runs must not retain confirmation state");
 assert.ok(!page.includes("width={1600}"), "image preview must not impose a fixed 4:3 intrinsic width");
 assert.ok(!page.includes("height={1200}"), "image preview must not impose a fixed 4:3 intrinsic height");
 assert.ok(!page.includes("style={{ top:"), "canvas handles must be positioned by their port rows, not node-level pixel offsets");
 const latestAttempts = compileFunction(page, "latestAttempts");
+const getTextOutputArtifact = compileFunction(page, "getTextOutputArtifact");
+assert.equal(getTextOutputArtifact({ outputs: { head: { kind: "text", value: "标题" } } }, "head")?.value, "标题");
+assert.equal(getTextOutputArtifact({ outputs: { head: { kind: "text", value: "   " } } }, "head"), undefined, "empty title artifacts must not render or flow through the v2 result UI");
 const projectedAttempts = latestAttempts([
   { id: "first", nodeId: "model", attempt: 1 },
   { id: "other", nodeId: "other", attempt: 1 },
@@ -428,16 +595,52 @@ assert.deepEqual(
   ["new", "old"],
   "refreshing a historical run must not move it ahead of the newest run",
 );
+const mergeTaskRunHistory = compileFunction(page, "mergeTaskRunHistory", { mergeRunHistory });
+const otherWorkflowRun = { id: "other-workflow", workflowId: "other", createdAt: "2026-07-24T03:00:00.000Z", status: "running" };
+assert.deepEqual(
+  mergeTaskRunHistory([newestRun, olderRun, otherWorkflowRun], { ...olderRun, status: "failed" }).map((run) => run.id),
+  ["other-workflow", "new", "old"],
+  "task-center refreshes must preserve runs from other workflows and chronological ordering",
+);
+const canvasHistoryLimit = 50;
+const historyFunctions = compileFunctions(
+  page,
+  ["canvasGraphsEqual", "createCanvasHistory", "commitCanvasHistory", "stepCanvasHistory"],
+  "({ createCanvasHistory, commitCanvasHistory, stepCanvasHistory })",
+  { canvasHistoryLimit },
+);
+const historyGraph = (id) => ({ nodes: [{ id, position: { x: 0, y: 0 }, data: {} }], edges: [], viewport: { x: 0, y: 0, zoom: 1 } });
+let canvasHistory = historyFunctions.createCanvasHistory(historyGraph("base"));
+canvasHistory = historyFunctions.commitCanvasHistory(canvasHistory, historyGraph("one"));
+canvasHistory = historyFunctions.commitCanvasHistory(canvasHistory, historyGraph("two"));
+let historyStep = historyFunctions.stepCanvasHistory(canvasHistory, historyGraph("two"), -1);
+assert.equal(historyStep.graph.nodes[0].id, "one", "undo must restore the previous graph");
+historyStep = historyFunctions.stepCanvasHistory(historyStep.history, historyGraph("one"), 1);
+assert.equal(historyStep.graph.nodes[0].id, "two", "redo must restore the next graph");
+historyStep = historyFunctions.stepCanvasHistory(historyStep.history, historyGraph("branch"), -1);
+const branchedHistory = historyFunctions.commitCanvasHistory(historyStep.history, historyGraph("replacement"));
+assert.equal(branchedHistory.entries.at(-1).nodes[0].id, "replacement", "a new edit after undo must replace the abandoned redo branch");
+assert.ok(!branchedHistory.entries.some((graph) => graph.nodes[0].id === "branch"), "the transient current graph must not leak into a replacement branch");
+let boundedHistory = historyFunctions.createCanvasHistory(historyGraph("start"));
+for (let index = 0; index < canvasHistoryLimit + 8; index += 1) boundedHistory = historyFunctions.commitCanvasHistory(boundedHistory, historyGraph(`edit-${index}`));
+assert.equal(boundedHistory.entries.length, canvasHistoryLimit, "canvas history must remain bounded");
+assert.equal(boundedHistory.index, canvasHistoryLimit - 1, "bounded history must keep its index on the newest entry");
 const quickAddDefinitions = [
   { type: "input.content-pool", label: "内容池", description: "快照", category: "input", inputs: [], outputs: [{ id: "title", label: "标题", kind: "text" }, { id: "body", label: "正文", kind: "text" }] },
-  { type: "compose.social-post", label: "内容组装", description: "组装", category: "compose", inputs: [{ id: "title", label: "标题", kind: "text" }, { id: "body", label: "正文", kind: "text" }], outputs: [{ id: "post", label: "内容", kind: "socialPost" }] },
+  { type: "compose.social-post", label: "内容组装", description: "组装", category: "compose", inputs: [{ id: "title", label: "标题", kind: "text" }, { id: "body", label: "正文", kind: "text" }, { id: "vehicle", label: "车型", kind: "text" }], outputs: [{ id: "post", label: "内容", kind: "socialPost" }] },
   { type: "utility.image-select", label: "图片选择", description: "筛选", category: "utility", inputs: [{ id: "images", label: "图片", kind: "images", multiple: true }], outputs: [{ id: "images", label: "图片", kind: "images" }] },
+  { type: "utility.display-any", label: "展示任何", description: "预览", category: "utility", inputs: [{ id: "value", label: "任意", kind: "any" }], outputs: [] },
 ];
-const quickAddChoices = compileFunctions(page, ["quickAddChoices", "isQuickAddTargetOccupied"], "quickAddChoices", { canvasNodeDefinitions: quickAddDefinitions });
+const quickAddChoices = compileFunctions(page, ["quickAddChoices", "isQuickAddPortCompatible", "isQuickAddTargetOccupied"], "quickAddChoices", { canvasNodeDefinitions: quickAddDefinitions, areCanvasPortKindsCompatible: areCanvasPortKindsCompatibleForUi });
 assert.deepEqual(
   quickAddChoices({ nodeId: "source", portId: "text", handleType: "source", kind: "text" }, []).map((choice) => `${choice.definition.type}:${choice.port.id}`),
-  ["compose.social-post:title", "compose.social-post:body"],
+  ["compose.social-post:title", "compose.social-post:body", "compose.social-post:vehicle", "utility.display-any:value"],
   "dragging from a text output must expose ambiguous compatible input ports",
+);
+assert.deepEqual(
+  quickAddChoices({ nodeId: "display", portId: "value", handleType: "target", kind: "any" }, []).map((choice) => `${choice.definition.type}:${choice.port.id}`),
+  ["input.content-pool:title", "input.content-pool:body", "compose.social-post:post", "utility.image-select:images"],
+  "reverse dragging from an any input must expose every typed output",
 );
 assert.deepEqual(
   quickAddChoices({ nodeId: "compose", portId: "body", handleType: "target", kind: "text" }, []).map((choice) => `${choice.definition.type}:${choice.port.id}`),
@@ -458,8 +661,12 @@ requireText(uploadRoute, ["requireWorkspaceAccount", "request.formData()", "form
 const runtimeUpload = read("src/lib/runtime-image-upload.ts");
 requireText(runtimeUpload, ["sniffImageFormat(buffer)", "format?.browserSupported", "persistRuntimeMedia", 'directory: "review-uploads" | "canvas-uploads"'], "runtime image upload");
 const styles = read("src/app/globals.css");
+assert.ok(!styles.includes(".canvas-confirm-dialog"), "removed canvas confirmation UI must not leave dead styles");
+assert.ok(!styles.includes(".canvas-confirm-detail"), "removed canvas confirmation details must not leave dead styles");
+requireText(styles, [".canvas-node-resized", ".canvas-node-content", ".canvas-node-resize-handle", ".canvas-node-resize-line"], "canvas node resizing styles");
+requireText(styles, [".canvas-workspace-palette-hidden", ".canvas-palette-collapsed", ".canvas-palette-dismiss", ".canvas-task-center", ".canvas-task-center-panel", ".canvas-task-center-tools", ".canvas-task-filters", ".canvas-task-center-body", ".canvas-task-list", ".canvas-task-detail", ".canvas-task-center-button"], "collapsible palette and task-center styles");
 requireText(styles, ["--canvas-stage:", ".canvas-port-input .react-flow__handle-left", ".canvas-port-output .react-flow__handle-right", ".canvas-flow-edge-base", ".canvas-flow-edge-glow", ".canvas-flow-edge-highlight", "--canvas-edge-peak-opacity", "stroke-width: 3.6", "stroke-width: 4.4", "stroke-width: 1.8", "stroke-width: 2.4", "animation: canvas-edge-beam 2.3s", "--canvas-edge-delay", "@keyframes canvas-edge-beam", "prefers-reduced-motion", ".canvas-flow-edge-glow, .canvas-flow-edge-highlight { display: none;", ".canvas-selection-actions", ".canvas-node-text-editor", ".canvas-node-result", ".canvas-node-result-gallery", ".canvas-node-result-gallery-open", ".canvas-node-result-gallery-meta", ".canvas-node-video-result", ".canvas-node-bypassed", ".canvas-node-disabled", ".canvas-node-mode-menu", ".canvas-result-viewer-backdrop", ".canvas-image-preview-list", ".canvas-image-preview-list.is-ordered", "background-size: contain", ".canvas-image-viewer-backdrop", ".canvas-image-viewer-stage", ".canvas-image-viewer-image", ".canvas-snapshot-picker", ".canvas-picker-results", ".canvas-picker-selected", ".canvas-quick-add", ".canvas-quick-add-search", ".canvas-quick-add-list", ".canvas-quick-add-group", ".canvas-quick-add-empty"], "canvas theme, edge, result preview, picker, and quick-add styles");
-requireText(styles, [".canvas-stage .react-flow__pane.draggable { cursor: grab; }", ".canvas-stage .react-flow__pane.dragging { cursor: grabbing; }"], "canvas hand cursor");
+requireText(styles, [".canvas-stage .react-flow__pane.draggable { cursor: grab; }", ".canvas-stage .react-flow__pane.dragging { cursor: grabbing; }", ".canvas-stage .react-flow__pane.selection { cursor: default; }"], "canvas selection and pan cursors");
 assert.ok(!/canvas-flow-edge-glow[^}]*stroke-width:\s*(?:9|11)/.test(styles), "canvas glow must not restore the old thick beam");
 assert.ok(!styles.includes("stroke-dasharray: 2 12"), "canvas edges must not use the old repeated short-dash treatment");
 assert.ok(read("src/app/page.tsx").includes('href="/canvas"'), "home navigation should link to canvas");

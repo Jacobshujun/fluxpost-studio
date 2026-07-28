@@ -115,6 +115,10 @@ export function requireToApisTaskId(task: ToApisImageTask) {
   return taskId;
 }
 
+export function shouldReturnPendingAfterToApisAcceptance(status: string | undefined, enabled: boolean) {
+  return enabled && status !== undefined && ["pending", "queued", "in_progress"].includes(status);
+}
+
 export function getToApisCompletedImageUrls(task: ToApisImageTask) {
   const urls = (task.result?.data || []).map((item) => item.url).filter((url): url is string => Boolean(url));
   if (task.url) urls.push(task.url);
