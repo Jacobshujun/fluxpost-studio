@@ -8,8 +8,8 @@
 
 <!-- @@@auto:current-status -->
 - **Active File**: `journal-1.md`
-- **Total Sessions**: 7
-- **Last Active**: 2026-07-27
+- **Total Sessions**: 8
+- **Last Active**: 2026-07-28
 <!-- @@@/auto:current-status -->
 
 ---
@@ -19,7 +19,7 @@
 <!-- @@@auto:active-documents -->
 | File | Lines | Status |
 |------|-------|--------|
-| `journal-1.md` | ~243 | Active |
+| `journal-1.md` | ~277 | Active |
 <!-- @@@/auto:active-documents -->
 
 ---
@@ -29,6 +29,7 @@
 <!-- @@@auto:session-history -->
 | # | Date | Title | Commits | Branch |
 |---|------|-------|---------|--------|
+| 8 | 2026-07-28 | Libraries and Canvas batch rewriting | `6227c7e`, `503610f` | `main` |
 | 7 | 2026-07-27 | Infinite canvas workflows and common nodes | `164cb9e` | `main` |
 | 6 | 2026-07-23 | Repair review HEIC and TOS delivery | `2fef2e5`, `7e5f972` | `main` |
 | 5 | 2026-07-21 | Image provider profiles deployment | `8ee3498`, `e138c38` | `main` |

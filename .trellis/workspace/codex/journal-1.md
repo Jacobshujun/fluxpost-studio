@@ -241,3 +241,37 @@ Implemented and verified the infinite canvas workflow stack, eight common conten
 ### Next Steps
 
 - None - task complete
+
+
+## Session 8: Libraries and Canvas batch rewriting
+
+**Date**: 2026-07-28
+**Task**: Libraries and Canvas batch rewriting
+**Branch**: `main`
+
+### Summary
+
+Added reference and vehicle libraries, owner-scoped copy library CRUD, frozen Canvas copy nodes, round-robin batch scheduling, and separate GPT title/body rewriting calls; recorded verified workflow contracts.
+
+### Main Changes
+
+(Add details)
+
+### Git Commits
+
+| Hash | Message |
+|------|---------|
+| `6227c7e` | (see git log) |
+| `503610f` | (see git log) |
+
+### Testing
+
+- [OK] (Add test results)
+
+### Status
+
+[OK] **Completed**
+
+### Next Steps
+
+- None - task complete
