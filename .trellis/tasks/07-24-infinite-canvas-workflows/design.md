@@ -49,6 +49,8 @@ Desktop uses four stable regions: 248px palette, flexible canvas, 320px inspecto
 
 Desktop clipboard operations use a versioned FluxPost JSON envelope containing selected nodes and only edges whose endpoints are both selected. Paste validates registered node types and typed ports, assigns new ids, and positions the cloned fragment near the current canvas pointer. Native copy/paste remains untouched while an input, textarea, select, or editable element has focus.
 
+The desktop node palette is a collapsible workspace region. Hiding it removes its grid track so the React Flow stage immediately expands; a toolbar command restores it. Run actions remain in a compact bottom bar, while a right-side task-center drawer queries the existing owner-scoped run endpoints across workflows and separates list filtering from run-detail loading. Selecting a run from the active workflow also makes that snapshot the canvas result context; runs from other workflows remain inspectable without switching or mutating the open graph.
+
 Image files use an authenticated multipart canvas-media route and the shared runtime-media persistence boundary. The client stores only returned URLs in `input.images.config.urls`. Pasting into a selected image node appends images; otherwise the client creates a new typed image-input node at the paste position. Each “图片” node renders up to four references in a fixed-height gallery, with an overflow count, and opens the same root-level themed 50%-400% preview as inspector thumbnails. React Flow `nodrag`, `nopan`, and `nowheel` classes isolate gallery interaction without embedding file bytes in the graph.
 
 ## GPT-Image-2 V2 Data Flow

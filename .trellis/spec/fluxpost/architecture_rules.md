@@ -322,27 +322,30 @@ return url;
 
 ### 3. Contracts
 
-- Submit JSON uses `model`, `prompt`, `n: 1`, documented ratio `size`, `resolution: 1k|2k|4k`, `response_format: url`, and optional URL-only `reference_images`.
+- Submit JSON uses `model`, `prompt`, `n: 1..10`, documented ratio `size`, `resolution: 1k|2k|4k`, `quality`, `output_format`, `response_format: url`, optional JPEG `output_compression`, and up to 16 ordered URL-only `image_urls`.
 - Pixel presets map in `src/lib/toapis-image-api.ts`; unknown custom sizes fail before submission. Historical `1200x1600` maps to `3:4`/`1k`.
 - Public TOS/HTTP references pass directly. Local references upload first; generation endpoints never receive base64.
-- Submission returns a task id. Polling waits at least five seconds with jitter, respects `Retry-After`, and downloads `result.data[].url` into `persistRuntimeMedia` before the 24-hour provider URL expires.
+- Submission returns a task id. Non-Canvas callers retain foreground polling with at least five seconds of jitter and `Retry-After`; Canvas persists the accepted id/route/status, returns pending immediately for non-terminal acceptance, and requeues the run after 30 seconds. A resumed Canvas attempt queries immediately, then releases the image slot again when the provider remains non-terminal. Completed `result.data[].url` values are downloaded into `persistRuntimeMedia` before the 24-hour provider URL expires.
+- Shared remote image work uses `runWithConcurrencyPool("image", ...)`; `WORKER_IMAGE_CONCURRENCY` defaults to 100 and is hard-capped at the provider-confirmed 100 tasks. Ready nodes inside one DAG run use `Promise.all`; separate runs are claimed durably and submit without holding slots for long polling.
 
 ### 4. Validation & Error Matrix
 
 - Missing task id, unknown status, completed task without URL, unsupported size, or invalid upload envelope -> hard error.
 - `model_not_found` or `no available channel` -> may fail over before task acceptance, but must never return a source image as completed generation.
 - Accepted task status `pending`/`queued`/`in_progress` is non-terminal; query `429`/`500`-`504`/network error retries the same task. Do not create a duplicate paid task on the backup route.
-- Terminal `failed` or overall timeout after task acceptance -> surface provider error without resubmission.
+- Terminal `completed`/`failed` acceptance responses remain terminal and are never converted to pending. Canvas non-terminal acceptance or resumed non-terminal status -> running node/run plus delayed requeue; non-Canvas overall timeout -> provider timeout without resubmission.
 
 ### 5. Good/Base/Bad Cases
 
+- Good: 100 ready Canvas image nodes may submit through the 100-slot pool; every accepted non-terminal task persists its id and releases its slot while ToAPIs continues processing concurrently.
 - Good: ToAPIs completes, FluxPost downloads the temporary URL, TOS verifies the object, and the post stores the durable TOS URL.
 - Base: a non-ToAPIs relay under `auto` keeps the existing OpenAI JSON generations and multipart edits contract.
-- Bad: ToAPIs returns `queued`, code reads `data[].url` immediately, or a status-query timeout submits a second paid task.
+- Bad: ToAPIs returns `queued`, code holds the image slot for 180 seconds, reads `data[].url` immediately, or a status-query timeout submits a second paid task.
 
 ### 6. Tests Required
 
-- `.trellis/verification/toapis_image_api_check.mjs` executes size/body/task/error helpers and asserts upload, submit, query, retry, persistence, and hard-error wiring without live calls.
+- `.trellis/verification/toapis_image_api_check.mjs` executes size/body/task/error helpers and asserts upload, submit, immediate Canvas handoff, immediate resumed query, retry, persistence, terminal-status handling, and hard-error wiring without live calls.
+- `.trellis/verification/canvas_workflows_check.mjs` asserts parallel ready-node scheduling plus the image-pool default/hard cap of 100.
 - Existing `image_task_fallback_check.mjs`, `gpt_image_size_request_check.mjs`, and `viral_replication_regression_check.mjs` must continue to pass.
 - Live paid probes are manual: verify one text image and one public-TOS reference image become distinct durable TOS objects.
 
@@ -359,7 +362,7 @@ await fetch("/images/edits", { body: multipartReference });
 ```typescript
 await fetch("/images/generations", {
   method: "POST",
-  body: JSON.stringify({ size: "3:4", resolution: "1k", reference_images: [publicUrl] }),
+  body: JSON.stringify({ size: "3:4", resolution: "1k", n: 1, image_urls: [publicUrl] }),
 });
 ```
 
@@ -424,58 +427,106 @@ throw new ImageProviderError("accepted task timed out", {
 
 ### 1. Scope / Trigger
 
-- Trigger: changing the owner-scoped `/canvas` editor, typed DAG scheduling, result reuse/preview, persistence, or model/publish nodes.
-- Applies to `src/lib/canvas/*`, `src/app/api/canvas/**`, `src/app/canvas/page.tsx`, the canvas database tables, and `.trellis/verification/canvas_workflows_check.mjs`.
+- Trigger: changing the owner-scoped `/canvas` editor, copy library, typed DAG execution, batch scheduling, result reuse/preview, persistence, or model/publish nodes.
+- Applies to `src/instrumentation.ts`, `src/lib/copy-library.ts`, `src/lib/canvas/*`, `src/app/api/{copy-library,canvas}/**`, their pages, database tables, and verification scripts.
 
 ### 2. Signatures
 
 - `GET|POST /api/canvas/workflows`; `GET|PATCH|DELETE /api/canvas/workflows/:id`.
 - `POST /api/canvas/runs` accepts `{ workflowId, targetNodeIds?, runMode?: "with-upstream" | "isolated", confirmed?, confirmationNodeIds? }`; omission keeps `with-upstream`. `GET /api/canvas/runs?workflowId=...` returns recent runs plus durable latest-success projections; `GET|PATCH /api/canvas/runs/:id` reads/cancels/retries.
 - `POST /api/canvas/media` accepts authenticated multipart `files` and returns `{ images: [{ imageUrl, bytes, mimeType }] }`.
+- `GET|POST /api/canvas/schedules`; `GET|PATCH|DELETE /api/canvas/schedules/:id`. PATCH actions are `save|preflight|resample|launch|duplicate|pause|resume|cancel|retry|accept-candidates` and carry the current revision plus action-specific ids.
+- `GET|POST /api/copy-library`; `GET|PATCH|DELETE /api/copy-library/:id`. Copy entries store `title`, `body`, normalized manual `tags`, `visibility`, owner, and timestamps in `copy_library_entries` for both database backends.
 - `PATCH /api/canvas/workflows/:id` updates with `{ revision }`; a stale revision raises HTTP `409`.
-- PostgreSQL/SQLite tables: `canvas_workflows`, `canvas_runs`, `canvas_node_runs`, and `canvas_run_queue`.
+- PostgreSQL/SQLite tables: `canvas_workflows`, `canvas_schedules`, `canvas_runs`, `canvas_node_runs`, and `canvas_run_queue`.
+- `splitCanvasText(config, value, { fallbackToBody? }) -> { head?: string; tail: string }`; executors enable fallback only for `utility.text-split@2`.
+- `CanvasNode.size?: { width: number; height: number }` stores optional visual layout metadata in workflow JSON and immutable run snapshots; it does not change node versions or API route shapes.
+- `CanvasPortKind = CanvasArtifactKind | "any"`; `areCanvasPortKindsCompatible(outputKind, inputKind)` accepts a typed output only when the input is the same kind or `any`.
+- `createCanvasSchedulerSkeleton(graph, origin, createId?) -> CanvasGraph` appends the standard eleven-node scheduler structure and rejects a graph that already owns any scheduler role.
+- `register() -> Promise<void>` in `src/instrumentation.ts` calls `kickCanvasSchedulerWorker()` and `ensureCanvasRunWorker()` for a normal Node server start.
+- A terminal Canvas run with `batchContext` calls the scheduler wakeup through a dynamic `import("./scheduler")`; the run worker must not add a static scheduler import because the scheduler already imports run creation/worker APIs.
 
 ### 3. Contracts
 
-- `CanvasGraph` stores typed nodes, typed edges, and viewport. Only registered `CanvasNodeDefinition` versions may be saved; edges must connect equal artifact kinds and the graph must be acyclic.
+- `CanvasGraph` stores typed nodes, typed edges, and viewport. Only registered `CanvasNodeDefinition` versions may be saved; edges use the centralized, directional port compatibility rule and the graph must be acyclic. Existing typed inputs still require an equal typed output; `any` is input-only.
 - `CanvasArtifact` is a discriminated union of `text`, `images`, `videos`, `socialPost`, and `publishJobRef`; media values are object references/metadata, never embedded binary.
 - `CanvasNode.executionMode` defaults to `enabled`; `bypass` requires an explicit registry input/output mapping, while `disabled` produces no output. Snapshots and the `fluxpost.canvas.nodes` clipboard envelope preserve the mode.
-- Version-1 common nodes are `input.content-pool`, `input.library-images`, `utility.prompt-template`, `utility.text-split`, `model.gpt-vision`, `utility.image-select`, `utility.image-transform`, and `utility.video-frames`. Their config remains flat scalars/string arrays, and they reuse existing artifact kinds without schema migration.
+- `CanvasNode.size` is optional for legacy content-driven nodes. Explicit desktop resizing persists finite dimensions from `190x120` through `720x900`; workflow duplication and the version-1 `fluxpost.canvas.nodes` clipboard envelope preserve validated sizes. Size is excluded from config validation and execution fingerprints.
+- Common nodes include `input.content-pool`, `input.library-images`, `utility.prompt-template`, `utility.text-split`, `model.gpt-vision`, `utility.image-select`, `utility.image-transform`, and `utility.video-frames`. Their config remains flat scalars/string arrays, and they reuse existing artifact kinds without schema migration.
+- `utility.text-split@2` is the latest “文本分割” definition. It preserves input `text` and outputs `head`/`tail`, whose UI labels are “标题”/“正文”. Config is `{ mode: "first-line" | "delimiter", delimiter: string, delimiterIndex: positive integer }`, defaulting to `{ mode: "first-line", delimiter: "---", delimiterIndex: 1 }`; first-line mode ignores and hides delimiter fields. Editable V1 nodes upgrade on save/duplicate, while immutable V1 snapshots remain version-resolvable.
+- Delimiter mode finds the configured 1-based, exact, case-sensitive, non-overlapping occurrence from left to right, removes that boundary, and trims both outputs without changing body-internal paragraphs. V2 emits only `tail` with the trimmed original text when the boundary is absent or either side is empty; it never emits an empty `head` artifact. V1 keeps strict failure semantics.
 - Content-pool/library inputs execute only stored selection-time snapshots. Explicit inspector refresh replaces the flat snapshot; ordinary runs never read live content/library services. Prompt and selection nodes preserve incoming edge/item order.
+- `input.copy-library@1` freezes `entryId`, display title, title/body/tag snapshots, and `snapshotAt`; its literal executor returns independent `title:text` and `body:text` outputs without database access. Private entries are owner/admin readable, team entries are member-readable, and only owner/admin may edit or delete.
 - GPT vision accepts 1-8 prepared images, uses the configured Responses/Chat text endpoint plus the `gpt` pool, declares `text_model`, and maps missing text configuration to `needs_config`. Image transformation accepts 20 images at 30 MB each; video frames accept 4 videos/20 total frames and persist content-addressed URL/dimension metadata through runtime media.
+- `model.gpt-vision@1` treats non-empty text connected to `instruction` as the complete model prompt: it trims and joins multiple incoming text artifacts in edge order, then sends only that user text without the analysis preset or node-level default instruction. When no effective user text is connected, the existing preset plus optional node instruction remains the backward-compatible fallback.
+- `compose.social-post@1` accepts optional single text input `vehicle`, trims it into `GeneratedPost.feishuVehicle`, and no longer exposes vehicle as new-node config. Connected text takes precedence; persisted `config.vehicle` remains a read-only fallback for historical nodes.
 - `utility.image-preview` copies URL/metadata-only image artifacts into node runs. Direct sinks run passively after an included image producer; failed, cancelled, blocked, or empty attempts never replace the last output-bearing success. Durable lookup joins all workflow runs rather than scanning the recent-run limit.
+- `utility.display-any@1` is an outputless passive sink with one required, single-connection `value:any` input. Its executor requires exactly one upstream `CanvasArtifact` and clones it to the non-connectable `nodeRun.outputs.preview`; the node UI renders all five existing artifact kinds and uses the ordinary input fingerprint for reuse. It adds no capability or confirmation.
 - `isolated` requires one target: literal inputs execute from current config, other ancestors reuse compatible success, and missing reuse blocks before enqueue. Ordinary compatibility covers node id/type/version/config/mode plus normalized resolved inputs; preview compatibility uses incoming-edge identity. It never silently reruns a model/write ancestor.
 - Planning propagates output-port availability. Missing required input blocks only that branch; optional input does not. Confirmation includes only `execute` steps, excluding reuse/bypass/disabled/blocked. With-upstream branch blockers are non-fatal so independent branches run; isolated blockers are fatal preflight errors.
+- The `/canvas` client immediately acknowledges and enqueues every successful capability plan, including billable models and `external_write`; it shows no confirmation dialog. The server still validates `confirmed` plus exact `confirmationNodeIds`, so stale or non-planned callers fail closed.
 - Runs keep immutable snapshots and node attempts with `reusedFrom`; statuses include `reused`, `bypassed`, and `disabled`. Seedance persists `submit_id`/`gen_status`, requeues pending work, and queries the original id.
+- GPT-Image-2 ToAPIs attempts persist `providerTaskId`, `providerTaskRoute`, and `providerStatus` through `onProviderTaskUpdate` immediately after POST acceptance. Non-terminal acceptance returns pending immediately and releases the image slot; a running attempt with an id is reused, performs one immediate status GET after its 30-second durable delay, and requeues again without reference preparation/upload or another POST. Ready DAG nodes use `Promise.all`, bounded by the shared image pool default/hard cap of 100. Expired local leases recover only for persisted-id attempts, and `GET /api/canvas/runs` wakes recovery after a Windows process restart.
 - Handles stay row-relative; image import uses authenticated `persistRuntimeMedia` and stores references only. Previews use `contain` and natural/artifact dimensions. Theme variables, aligned source-colored edge beams, reduced-motion disabling, and native editing/clipboard behavior remain required.
-- Editable desktop canvas supports blank-pane right-click/Tab search and dangling-edge insertion. Search matches label/description/type/category; connection context filters equal artifact kinds, exposes ambiguous port labels, rejects occupied single inputs, and creates the selected typed edge. Mobile keeps structural quick-add disabled.
+- Editable desktop canvas supports blank-pane right-click/Tab search, typed dangling-edge insertion, ComfyUI-style run/cancel/save/select/edit shortcuts, and bounded 50-entry node/edge/viewport undo history. Editable controls isolate native keys, new edits truncate redo, workflow switches reset history, and mobile keeps structural shortcuts disabled.
+- Every registered node uses `NodeResizer` on editable desktop canvas with independent width/height control. Only dimension changes with `setAttributes` become durable; passive React Flow measurements do not. Resized nodes keep header/ports fixed and scroll body content. Mobile renders persisted nodes at the compact default without resize controls or mutating stored size.
+- `utility.prompt-switch@2` has required text ports `input1|input2|input3`, output `text`, and config `{ selectedInput: "1" | "2" | "3" }`. Prompt bodies exist only in the three connected `input.text` nodes. Editable V1 nodes and incoming `scene|sceneModification|scenePerson` edges upgrade together; immutable V1 run snapshots keep their legacy executor contract.
+- One immutable schedule revision owns multiple batches. Each batch stores only `strategy: "input-1" | "input-2" | "input-3"` plus independent Eagle-style scene/vehicle filters; launch writes the corresponding ordinal into the frozen Switch snapshot. One scene creates one content task, with an inclusive random distinct vehicle sample. Launch revalidates assets/bindings and atomically writes the schedule plus all image runs/queue rows before workers start. At least one successful image creates one finalization run; later retry success appends candidates without rerunning text, and edited/reviewed drafts require explicit acceptance.
+- A batch may add `copyFilter` in manual-id or AND-tag mode. Preflight resolves visible entries, sorts by `title ASC, id ASC`, assigns frozen snapshots round-robin, and requires the optional `copy-input` scheduler role/path. Launch and finalization consume those task snapshots without rereading source entries.
+- Content tasks finalize independently: once all image children for one content task are terminal and at least one image succeeded, its deterministic `canvas-scheduler-final-<contentTaskId>` run is created immediately without waiting for sibling content tasks, the batch, or the schedule to finish.
+- Durable Canvas recovery is process-started, not route-traffic-started. Normal Node startup wakes both run and schedule workers; `FLUXPOST_DISABLE_BACKGROUND_WORKERS=1` disables only this instrumentation bootstrap for deterministic smoke servers. It does not alter enqueue, API wakeup, or persisted queue semantics.
+- The standard skeleton creates three prompt nodes, one ordinal Switch, dynamically bound scene/vehicle inputs, GPT-Image-2 V2, one copy input, separate title/body GPT text nodes, and content assembly. The original five roles remain required; `copy-input` is optional for old graphs and required only when a copy pool is enabled. Each final content task therefore makes two distinct text-model calls before composition.
 
 ### 4. Validation & Error Matrix
 
 - Missing/invalid node type, node config, port, owner, or graph cycle -> domain error/HTTP `400`.
+- Missing size -> legacy default layout. Non-finite, partial, below-`190x120`, or above-`720x900` persisted size -> graph validation error/HTTP `400`; the same malformed size in a clipboard envelope invalidates the envelope.
 - Member access to another owner's workflow/run -> not found behavior; admins follow existing owner access rules.
 - Stale workflow revision -> HTTP `409`.
 - Isolated mode without exactly one target or compatible required reuse -> HTTP `400` before enqueue, identifying the blocked node.
 - Missing required artifact in with-upstream -> node `blocked`; independent branches continue and the run may become `partial`. Missing optional artifacts are omitted.
+- Missing or multiple `value` artifacts for `utility.display-any` -> explicit node failure; a second graph edge to its single input -> graph validation error. An `any` output connected to a typed input -> incompatible edge.
 - Unsupported/empty bypass input -> validation/blocked node; disabled nodes skip execution config validation but still receive graph/port validation.
 - Unconfirmed actual billable/external-write execution -> HTTP `409` with a confirmation plan; stale confirmation ids -> HTTP `400`.
 - Missing Dreamina CLI/login, low credit, unsupported media/model/ratio/resolution, or high compliance risk -> `needs_config`/blocked state; never fake success or retry an accepted task with a new submission.
+- Initial ToAPIs polling expiry or resumed `pending`/`queued`/`in_progress` -> node and run stay `running` and requeue; terminal provider failure -> node failure; an accepted response without a task id -> explicit provider failure.
+- `NEXT_RUNTIME !== "nodejs"`, production build phase, or `FLUXPOST_DISABLE_BACKGROUND_WORKERS=1` -> instrumentation returns before importing or starting Canvas workers. Normal Node runtime without those guards -> both workers wake.
+- Terminal batch child -> schedule wakeup. Dynamic scheduler import failure -> explicit server error log while the already-persisted terminal run remains terminal; process-start recovery or the next wakeup can reconcile it later.
 - Missing/too many/oversized/unsupported upload files -> HTTP `400`; unsigned upload -> `401`; storage failure -> surfaced `500` with no URL added to the graph; malformed clipboard envelopes are ignored.
-- Missing content/library snapshot, unresolved template placeholder, unsplittable text, invalid/out-of-range image index, invalid transform dimensions/format/quality, or invalid/excess frame plan -> node validation/execution error with no partial artifact.
+- Empty text-split input -> execution error in every version. Empty delimiter or non-positive/non-integer `delimiterIndex` in V2 delimiter mode -> config error. V1 absent/empty-sided boundary -> execution error; V2 absent/empty-sided boundary -> success with the complete trimmed input on `tail` only.
+- Missing content/library snapshot, unresolved template placeholder, invalid/out-of-range image index, invalid transform dimensions/format/quality, or invalid/excess frame plan -> node validation/execution error with no partial artifact.
+- Missing/duplicate scheduler roles are listed together with Chinese business labels, and the drawer requires five explicit unique node selections before preflight. Draft preflight adopts the workflow's latest saved revision, while launch still rejects any workflow/preview revision drift; missing frozen assets, insufficient distinct pools, or more than 2,000 image children also fail before atomic launch. Launched schedules are immutable and never auto-publish.
+- Copy create/update with empty or oversized title/body, invalid visibility, non-array tags, more than 30 tags, or a tag over 40 characters -> HTTP `400`; unsigned access -> `401`; invisible entry -> `404`; non-owner member mutation -> `403`.
+- Enabled copy pool with an empty/inaccessible selection, missing or wrong-type `copy-input`, or no path to `content-target` -> preflight error before provider work. A deleted source after preflight does not invalidate the already-frozen task snapshot.
+- Prompt Switch input outside `1..3`, an unconnected ordinal input, or an empty connected prompt -> config/graph/execution error before provider work. Skeleton insertion with any existing scheduler role -> explicit no-op error; it never replaces or duplicates graph content.
 - Missing `ffmpeg`/`ffprobe` -> `needs_config`; media command failure -> explicit node failure. Image/video helpers use allow-listed `execFile` argument arrays and never accept shell text from node config.
 
 ### 5. Good/Base/Bad Cases
 
 - Good: isolated content assembly executes current text, reuses compatible GPT image/preview output with provenance, creates a fresh draft, and makes zero image-model calls.
 - Good: a frozen content snapshot feeds a template/vision/image-selection chain, a dangling text edge creates `compose.social-post` on its selected body port, and local transforms persist bounded URL/dimension artifacts.
-- Base: omitted modes preserve legacy enabled/with-upstream behavior; disabled optional media does not block composition; SQLite/PostgreSQL share JSON contracts.
-- Bad: rerunning a paid isolated ancestor, refreshing snapshots implicitly during a run, connecting an occupied single input, embedding Base64, passing shell strings to ffmpeg, replacing preview history with an empty failure, or resubmitting Seedance after timeout.
+- Good: `A---B---C` with delimiter `---` and index `2` emits title `A---B` and body `C`; CRLF and body paragraphs remain intact after outer trimming.
+- Good: a selected node is resized freely, autosaves `{ size: { width, height } }`, reloads and pastes at the same size, while mobile remains compact and non-resizable.
+- Good: one typed output connects to “展示任何”, running that producer passively refreshes the sink, and text/image/video/social-post/publish-job results use the existing viewers without exposing a wildcard downstream port.
+- Good: three text nodes contain independently editable prompts, two batches select inputs 1 and 3, and their frozen Switch snapshots use those exact ordinals while variable vehicle counts queue round-robin.
+- Good: ToAPIs accepts up to 100 ready image tasks, each id is saved before the Canvas executor returns pending, image slots are released, and later worker GETs resume the same ids without a second paid POST.
+- Good: content task A writes its review draft while sibling B is still running, and a server restart reconciles stale completed image runs without opening the Canvas schedule drawer.
+- Good: three stable-sorted copy snapshots feed five content tasks as A/B/C/A/B; each task freezes its source and runs title GPT plus body GPT before `compose.social-post` creates the existing review draft.
+- Base: a V2 boundary miss emits no `head` artifact and sends the original copy through `tail`; omitted execution/run modes and node size preserve legacy enabled/content-driven behavior.
+- Bad: adding `any` to `CanvasArtifactKind`, declaring a wildcard output, duplicating compatibility conditions in graph/clipboard/UI, persisting ResizeObserver measurements as user size, allowing mobile resize handles, emitting an empty title on fallback, rerunning a paid isolated ancestor, embedding Base64, passing shell strings to ffmpeg, or resubmitting accepted Seedance/ToAPIs work after timeout.
+- Bad: editing prompt bodies in the scheduler, giving Switch ports semantic scene/person meanings, silently shrinking an insufficient sample, launching only valid batches, mutating a launched sample, or overwriting an edited draft when retry images arrive.
+- Bad: waiting for aggregate batch completion before creating review drafts, relying on `GET /api/canvas/schedules` as the only recovery trigger, or allowing a baseline smoke server to advance real persisted work.
+- Bad: reading the copy library during finalization, mutating saved Canvas snapshots after a source edit, treating `copy-input` as a sixth mandatory role for legacy schedules, or combining title/body into one model call in the standard skeleton.
 
 ### 6. Tests Required
 
-- `canvas_workflows_check.mjs`: registration, typed graph/clipboard/snapshot modes, all common-node ports/validators, template/split/index/time helpers, mocked Responses/Chat vision requests, snapshot-only literal projection, allow-listed media commands/limits/persistence/missing binaries, branch planning, confirmation exclusion, reuse, preview, isolated execution, result UI, and quick-add contracts.
+- `canvas_workflows_check.mjs`: node-size bounds, graph/clipboard round trip, resize/mobile lockout, V1/V2 text-split, display-any, graph/common-node/vision/media/reuse/preview/isolated execution, direct enqueue, shortcut guards, bounded history, and quick-add contracts.
+- `toapis_image_api_check.mjs` and `canvas_workflows_check.mjs`: accepted-id callback ordering, immediate non-terminal handoff, terminal-status preservation, immediate one-GET resume without POST/reference preparation, running-attempt reuse, provider-field round trip, expired-lease recovery, API wakeup, delayed requeue, parallel ready nodes, and image-pool cap 100.
 - TypeScript, lint, build, full Trellis baseline, and local production restart must pass without paid provider calls.
-- Mocked desktop/mobile browser coverage must exercise preview/fullscreen, modes, both run commands, review links, statuses, snapshot pickers, right-click/Tab search, keyboard navigation, compatible/ambiguous ports, automatic edges, mobile structural lockout, and overflow. Real model/Seedance/Feishu/PostgreSQL concurrency remain operator-approved.
+- Mocked desktop/mobile browser coverage must exercise text-split inline/inspector synchronization, display-any five-kind rendering/current-failure/latest-success/history state, preview/fullscreen, modes, compatible quick-add, mobile structural lockout, and horizontal overflow. Real model/Seedance/Feishu/PostgreSQL concurrency remain operator-approved.
+- `canvas_scheduler_check.mjs` plus the task browser check must cover ordinal Prompt Switch execution and V1 migration, the standard skeleton and duplicate-role guard, distinct sampling, transaction/ownership wiring, sequential autosave revisions, preflight/runtime controls, contrast, and 1440x960/390x844 overflow without live calls.
+- `canvas_scheduler_check.mjs` must also assert per-content finalization inside the content loop, terminal batch-run scheduler wakeup without a static circular import, Node startup worker bootstrap, and the baseline smoke disable contract. A user-approved local restart may separately verify drafts appear while sibling tasks remain active.
+- `copy_library_check.mjs` must cover both schemas, row-level helpers, authentication, visibility/edit permissions, tag normalization/AND filtering, page/navigation contracts, node registration/config validation, and literal frozen outputs. Scheduler checks must cover legacy five-role compatibility, copy binding/path enforcement, stable round-robin assignment, final graph injection, and the two-GPT skeleton.
 
 ### 7. Wrong vs Correct
 
@@ -488,8 +539,37 @@ await executeCanvasNode(ancestor); // isolated run silently spends again
 #### Correct
 
 ```typescript
-const step = compatible ? { action: "reuse", sourceNodeRunId } : { action: "blocked" };
-// Persist preview URLs/metadata only; accepted Seedance tasks query the saved submit_id.
+await onProviderTaskUpdate({ taskId, route, status });
+return resumeTaskId ? queryProviderTask(resumeTaskId) : submitProviderTask();
+
+const outputs = { tail: { kind: "text", value: split.tail } };
+if (split.head !== undefined) outputs.head = { kind: "text", value: split.head };
+
+// Persist only an explicit NodeResizer dimension change.
+if (change.type === "dimensions" && change.setAttributes && change.dimensions) {
+  node.size = change.dimensions;
+}
+
+// Keep wildcard compatibility directional and outside CanvasArtifactKind.
+if (!areCanvasPortKindsCompatible(output.kind, input.kind)) {
+  throw new Error("Incompatible canvas ports");
+}
+
+// Freeze every child run in the same transaction; only then wake workers.
+await launchCanvasScheduleInDb(schedule, expectedRevision, preparedRuns);
+
+// Freeze copy data during preflight; finalization never reads the source library.
+content.copy = copySnapshot(copyPool[index % copyPool.length]);
+finalGraph = createSchedulerFinalizationGraph(graph, bindings, imageUrls, content.copy);
+
+// Prompt content stays in text nodes; batches freeze only an input ordinal.
+switchNode.config.selectedInput = batch.strategy.slice(-1);
+
+// Wake reconciliation after each persisted terminal batch child.
+if (batchRunTerminal && batchRun?.batchContext) notifyCanvasScheduleRunTerminal(batchRun);
+
+// Keep deterministic smoke servers from advancing real persisted work.
+if (process.env.FLUXPOST_DISABLE_BACKGROUND_WORKERS === "1") return;
 ```
 
 ## Trellis Rules

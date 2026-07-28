@@ -14,7 +14,7 @@ Add an owner-scoped infinite canvas workspace where FluxPost operators can assem
 ## Requirements
 
 - Add a standalone `/canvas` operations workspace with a node palette, infinite canvas, property inspector, and run dock.
-- Default the empty canvas to left-button pan with an open-hand cursor and show a closed-hand cursor while panning.
+- Default the empty canvas to arrow-cursor selection; holding Space temporarily enables open-hand panning and shows a closed hand while dragging.
 - Support owner-scoped create, rename, duplicate, template copy, autosave, revision conflict detection, and delete operations.
 - Allow full structural editing on desktop. On narrow mobile layouts allow graph inspection, node configuration, confirmation, and execution without requiring touch-based graph construction.
 - Support only directed acyclic graphs in V1. Reject cycles and incompatible port connections before persistence or execution.
@@ -43,7 +43,7 @@ Add an owner-scoped infinite canvas workspace where FluxPost operators can assem
 - [ ] Seedance supports text-to-video, image-to-video, and multimodal submission contracts, preserves `submit_id`, and reports `needs_config` when Dreamina is unavailable.
 - [ ] Composition creates an owner-attributed generated post; Feishu publishing uses the existing durable publish queue and never exposes raw CLI execution.
 - [ ] Desktop UI supports pan, zoom, node addition, drag, selection, connection, deletion, editing, saving, and execution without layout overlap.
-- [ ] The desktop canvas defaults to an open-hand cursor for panning and changes to a closed hand while the viewport is being dragged.
+- [ ] The desktop canvas defaults to an arrow cursor and drag selection; holding Space changes it to an open hand, then a closed hand while the viewport is dragged.
 - [ ] Desktop node copy/cut/paste preserves selected nodes and their internal edges, creates collision-free ids, and places pasted content near the canvas pointer.
 - [ ] “图片” nodes render a stable inline gallery, support authenticated upload, clipboard images, thumbnail removal, 50%-400% full preview zoom, and direct canvas image paste without embedding binary/base64 data in workflow JSON.
 - [ ] Mobile UI supports graph inspection, node parameter edits, confirmation, execution, status, and result preview without horizontal overflow.
@@ -59,6 +59,15 @@ Add an owner-scoped infinite canvas workspace where FluxPost operators can assem
 - Preserve immutable v1 run snapshots while upgrading editable v1 nodes to v2 during their next normal save.
 - Show the latest successful node output independently from the selected run, including revision, timestamp, target settings, and loaded pixel dimensions.
 - Keep the animated edge core at the base edge width and constrain the halo to 3.6px (4.4px selected).
+- Persist an accepted ToAPIs task id, route, and status immediately. Canvas returns resumable pending as soon as a non-terminal task is accepted, releases the shared image slot, and requeues status GETs for the same id without reference preparation, upload, or another paid submission. Ready DAG branches may fill the confirmed 100-task ToAPIs/image-pool limit.
+
+## Workspace Visibility And Task Center Increment (2026-07-27)
+
+- Let desktop operators hide and restore the left node library so the infinite canvas can use the full available width.
+- Keep the restore control discoverable and preserve the existing mobile node-library sheet behavior.
+- Replace the permanently expanded run history area with a compact run bar and a dedicated task center.
+- Let operators query recent owner-scoped Canvas tasks across workflows by keyword and status, distinguish active tasks from historical tasks, and inspect a selected run's node-level details.
+- Reuse the existing Canvas run list and detail APIs; do not duplicate task state in browser-only storage or a new persistence model.
 
 ## Out Of Scope
 

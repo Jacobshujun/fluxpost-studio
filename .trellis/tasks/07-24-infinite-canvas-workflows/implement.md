@@ -22,7 +22,11 @@
 - [x] Add direct GPT image uploads, reorder/delete/count controls, ratio-aware result previews, latest-success projection, and loaded pixel dimensions.
 - [x] Reduce flowing-edge core/halo widths and verify normal, selected, and reduced-motion states.
 - [x] Add focused provider, executor, migration, API, and browser assertions, then run the full completion baseline and local restart.
-- [x] Make left-button canvas panning explicit and preserve open-hand/closed-hand cursor feedback with deterministic coverage.
+- [x] Default to arrow-cursor drag selection and reserve open-hand/closed-hand viewport panning for the Space modifier, with deterministic coverage.
+- [x] Persist accepted ToAPIs task state, immediately hand non-terminal Canvas tasks back to the durable queue, release the shared 100-slot image pool, and recover local queue leases by querying the original task without resubmission.
+- [x] Add a desktop node-library hide/restore control that expands the React Flow stage while preserving the mobile sheet.
+- [x] Move full run inspection into a responsive task center with cross-workflow owner-scoped loading, keyword/status filters, refresh, and node details.
+- [x] Reduce the persistent run dock to active commands and status, then add focused deterministic and browser coverage for the new workspace behavior.
 
 ## Verification
 

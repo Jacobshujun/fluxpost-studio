@@ -34,6 +34,54 @@ Use this pattern for UI that is route-specific. Extract a shared component only 
 - Long-running actions should show busy states, disabled controls, or progress text. Existing examples include `busy` in `src/app/review/page.tsx` and job progress polling in distribution/simple-run flows.
 - User-visible failures should surface as messages from API responses, not silent console-only errors.
 
+When a list selection owns an editable draft, update the selected id and draft in the same click/load command. Do not defer draft synchronization through `setTimeout`: a fast user can type before the timer fires and lose their input.
+
+```tsx
+selectedIdRef.current = entry.id;
+setSelectedId(entry.id);
+setDraft(draftFromEntry(entry));
+```
+
+## Interactive Controls Inside React Flow Nodes
+
+Desktop canvas panes use `panOnDrag={isMobile}` plus `selectionOnDrag={!isMobile}`: the idle desktop pane uses the arrow cursor, Space temporarily enables hand-cursor panning, and touch panning remains available on mobile.
+
+Controls rendered inside a React Flow node must isolate canvas gestures without changing node selection during `pointerdown`. A selection update can redraw a scaled mobile node before the browser delivers `click`, leaving the editor unfocused or stale. Keep inspector selection in route state, then focus and select from the completed click sequence.
+
+```tsx
+<textarea
+  className="nodrag nopan nowheel"
+  onPointerDown={(event) => event.stopPropagation()}
+  onClick={(event) => {
+    event.stopPropagation();
+    event.currentTarget.focus({ preventScroll: true });
+    selectNode(nodeId);
+  }}
+/>
+```
+
+Canvas-level empty-selection notifications must not clear this route-owned inspector state; use an explicit pane click or close command to clear it. This keeps native text editing, mobile focus, node highlighting, and the inspector synchronized without persisting UI callbacks in graph data.
+
+Long-text editors inside React Flow nodes must keep a component-local draft while focused, update that draft before writing through to graph state, and accept external values only while unfocused. A textarea controlled directly by graph state can receive its value back through the React Flow store after the native input event and move the caret to the end.
+
+```tsx
+const editorRef = useRef<HTMLTextAreaElement>(null);
+const [draft, setDraft] = useState(value);
+
+useEffect(() => {
+  if (document.activeElement !== editorRef.current) setDraft(value);
+}, [value]);
+
+<textarea
+  ref={editorRef}
+  value={draft}
+  onChange={(event) => {
+    setDraft(event.target.value);
+    updateGraph(event.target.value);
+  }}
+/>
+```
+
 ## Avoid
 
 - Do not introduce a UI component library without a strong local need.

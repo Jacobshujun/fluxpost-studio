@@ -71,6 +71,8 @@ Last updated: 2026-06-25
   - `POST /api/generate`
   - `POST /api/images`
   - `POST /api/lark/tasks`
+  - `GET|POST /api/library/tags`
+  - `GET|PATCH|DELETE /api/library/assets`
   - `GET|POST|PATCH|DELETE /api/materials/library`
   - `POST /api/materials/scan`
   - `GET|POST /api/production/batches`
@@ -91,7 +93,7 @@ Last updated: 2026-06-25
 - PostgreSQL schema: `db/migrations/001_initial_postgres.sql`.
 - Legacy JSON files under `data/` can be used as one-time migration sources: `content-pool.json`, `batch-production.json`, `generated-posts.json`, `material-library.json`, and `execution-log.json`.
 - Runtime database stores workspace accounts/sessions, content projects, generated posts, batch jobs, material folders/assets, execution logs, crawl jobs, runtime posts, simple runs, and workspace settings metadata, including saved production prompts and the `/distribution-check` audit prompt.
-- Runtime database also stores `simple_run_queue`, the durable queue table for simple-mode run execution; `image_generation_queue`, the local image job observability table for ComfyUI Klein; `feishu_publish_queue`, the durable queue table for asynchronous Feishu CLI writes; and `distribution_check_jobs`, the durable queue/progress table for large Feishu distribution audits.
+- Runtime database also stores durable simple/image/Feishu/distribution queues plus library assets, roles, collections, labels, manual overrides, and tagging jobs; library image binaries remain in TOS.
 - Workspace sessions use an HttpOnly `fluxpost_session` browser cookie. In default whitelist mode, the first-admin setup key is environment-driven and not stored in the runtime database; daily account passwords are stored only as Node `scrypt` hashes.
 - SQLite-to-PostgreSQL migration script: `scripts/db/migrate-sqlite-to-postgres.mjs`. It copies metadata and JSON payload rows; it does not move media binaries.
 - Feishu outbox payload directory from code/README: `data/feishu-outbox/`.
@@ -126,6 +128,7 @@ Last updated: 2026-06-25
 - V1/V2 Feishu/Lark conversation task launch is configured by `LARK_TASK_CHAT_IDS`, `LARK_TASK_USER_MAP`, `LARK_TASK_API_TOKEN`, `LARK_TASK_DEFAULT_PLATFORMS`, `LARK_TASK_DEFAULT_COUNT`, and `LARK_TASK_CONFIRM_ABOVE`. The local polling runner reads configured chats through bot identity, while the real-time event runner consumes `im.message.receive_v1` events; both post explicit commands to local `/api/lark/tasks`. Sender open ids must map to existing workspace account ids before a simple run is enqueued.
 - The confirmed default Feishu command shape is `lark-cli base +record-batch-create --as bot --base-token {appToken} --table-id {tableId} --json @{recordPayload}`.
 - Simple-mode throughput knobs include `SIMPLE_RUN_MAX_ITEMS` (fallback `500`, hard ceiling `2000`) and `SIMPLE_RUN_WORKER_CONCURRENCY` (fallback `4`, hard ceiling `10`).
+- Canvas run and batch-schedule workers wake automatically on normal Node server startup. `FLUXPOST_DISABLE_BACKGROUND_WORKERS=1` disables that instrumentation bootstrap for deterministic local smoke servers; normal production/local starts must leave it unset so persisted operator-launched work resumes.
 - Feishu publish queue throughput is controlled by `FEISHU_PUBLISH_WORKER_CONCURRENCY` (fallback `1`, hard ceiling `5`), with a per-owner running-job guard so Feishu CLI writes are serialized per user/owner.
 - Feishu attachment-upload throughput is controlled separately by `WORKER_FEISHU_ATTACHMENT_CONCURRENCY` (fallback `3`, hard ceiling `10`) so large attachment batches do not use the same high concurrency as record creation.
 - Distribution audit throughput is isolated from content collection and generation: `DISTRIBUTION_CHECK_WORKER_CONCURRENCY` defaults to `1` and caps at `3`; per-job work uses dedicated pools `WORKER_DISTRIBUTION_RECORD_CONCURRENCY` fallback `8` cap `20`, `WORKER_DISTRIBUTION_GPT_CONCURRENCY` fallback `6` cap `15`, `WORKER_DISTRIBUTION_FEISHU_READ_CONCURRENCY` fallback `8` cap `20`, and `WORKER_DISTRIBUTION_FEISHU_WRITE_CONCURRENCY` fallback `2` cap `5`.

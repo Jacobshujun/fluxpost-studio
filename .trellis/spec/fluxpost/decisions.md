@@ -1,6 +1,98 @@
 # Decisions
 
-Last updated: 2026-07-20
+Last updated: 2026-07-22
+
+## Scenario: Compact-only home and retired advanced production
+
+### 1. Scope / Trigger
+
+- The signed-in home has one compact automatic-task workspace. Content-pool and material-library management live under `/content`; draft review, distribution checks, and administrator configuration remain separate routes.
+
+### 2. Signatures
+
+- Retained: `GET|POST|PATCH|DELETE /api/materials/library`, `POST /api/materials/scan`, `GET /api/materials/preview`, `GET /api/production/posts`, and the existing `/api/simple/runs` contract.
+- Removed: `/api/generate`, `/api/production/batches`, and `/api/production/posts/regenerate`.
+- Storage: `simple_runs`, `SimpleRun`, and `batch_jobs` names and historical rows remain unchanged; no destructive migration runs.
+
+### 3. Contracts
+
+- Home reads account/session data, public config status, workspace settings, simple runs, and the owner-scoped material library. It does not preload content-pool projects, generated-post lists, batch jobs, or Feishu vehicle options.
+- `/content` owns material scan, folder/asset CRUD, and local image preview through the existing owner-scoped APIs.
+- `/review` remains the consumer of generated-post listing and all review/batch/publish write paths.
+
+### 4. Validation & Error Matrix
+
+- Missing workspace session on retained owner-scoped APIs -> `401`.
+- Removed route -> `404` with no compatibility handler.
+- Non-GET request to `/api/production/posts` -> `405`.
+- Material path outside the allowed preview boundary or an inaccessible owner-scoped record -> existing explicit `400`/`404` behavior.
+
+### 5. Good/Base/Bad Cases
+
+- Good: a signed-in user starts a compact task, watches multiple runs, and manages its source images in `/content`.
+- Base: `writeFeishu=false` leaves generated drafts for `/review` without an external write.
+- Bad: a caller posts to a retired production route; it receives `404` and no hidden work starts.
+
+### 6. Tests Required
+
+- `compact_only_workspace_check.mjs` asserts the retained compact request/settings/material/poll/terminate paths and the absence of retired modes, APIs, types, and wording.
+- Full baseline asserts owner scope, content/material workflows, queue persistence, lint, type-check, build, deleted-route `404`, read-only-route `405`, and local smoke.
+- Mocked desktop/mobile Playwright checks assert navigation, multi-run progress, content/material tabs, no horizontal overflow, and an in-viewport material preview.
+
+### 7. Wrong vs Correct
+
+- Wrong: keep hidden advanced state or return a compatibility shell from a deleted API.
+- Correct: remove the consumer and route together, preserve durable historical tables, and route ongoing work through compact tasks, `/content`, and `/review`.
+
+## Scenario: Role-aware library tags, themes, and vehicle no-AI boundary
+
+### 1. Scope / Trigger
+
+- `/library` presents reference and vehicle assets in one role-aware workbench. Reference assets keep structured GPT labels plus manual overrides; the vehicle view exposes only user-maintained labels and must not create or wake AI work.
+
+### 2. Signatures
+
+- `GET /api/library/tags?role=reference|vehicle&q=&limit=` returns `{ tags: LibraryTagSuggestion[] }` for assets visible to the signed-in account.
+- `POST /api/library/tags` accepts `{ role: "reference" | "vehicle", assetIds: string[], add?: string[], remove?: string[] }` and returns `LibraryTagBatchResult` with updated assets and per-asset failures.
+- Repeated `tag` parameters on `GET /api/library/assets` are AND filters. Existing dimension parameters remain supported.
+- `POST /api/library/import` keeps its multipart contract. A reference import returns a persisted `job`; a pure vehicle import saves only the asset and returns no `job`.
+
+### 3. Contracts
+
+- `src/lib/library-tags.ts` owns role projection, localized structured labels, case-insensitive deduplication, and manual-override transforms. `reference` reads effective AI + manual tags; `vehicle` builds its profile only from `manualOverrides`.
+- New labels write to manual `customTags`. Removing a display label removes every same-label effective source and writes empty/value overrides so retagging cannot restore it.
+- Restore AI sends every manual tag dimension through `restoreAi`; metadata save remains separate. `/library` uses `src/lib/theme.ts`; only the image stage stays fixed dark.
+- Vehicle imports use the same TOS object and owner/hash dedupe boundary but do not create `library_tagging_jobs`. Cross-role duplicates add the missing role without uploading a second object; adding `reference` creates the reference tagging job atomically.
+- `enqueueLibraryTagging(...)` and the worker require a current `reference` role. The worker checks eligibility before the provider call and again before writeback. The import route calls `kickLibraryTaggingWorker()` only when the domain result contains a persisted `job`.
+
+### 4. Validation & Error Matrix
+
+- Missing workspace session -> `401`; missing/invalid `role`, empty asset ids, or empty add/remove -> `400`.
+- Owner/admin asset -> updated asset; read-only shared or missing asset -> `{ assetId, error }` without failing other batch items.
+- Asset outside the submitted role -> per-asset failure; pure vehicle import -> asset save with zero tagging-job writes and zero worker wakeups.
+- Custom tags beyond the per-image limit -> explicit per-asset failure; unknown people state is not projected as a display tag.
+
+### 5. Good/Base/Bad Cases
+
+- Good: two vehicle tags match only assets containing both manual labels; a cross-role duplicate reuses the object and queues AI only when `reference` is newly added.
+- Base: a same-role duplicate performs no writes; a mixed batch updates editable assets and reports read-only failures.
+- Bad: vehicle suggestions include AI labels, a pure vehicle import wakes the shared AI worker, or a removed reference role receives a late AI writeback.
+
+### 6. Tests Required
+
+- `.trellis/verification/library_assets_check.mjs` asserts reference authentication, projection/removal ownership, suggestion visibility, AND filters, legacy parameters, combobox semantics, batch failures, and theme boundaries.
+- `.trellis/verification/vehicle_library_check.mjs` executes isolated import-domain cases for no-job vehicle saves, same-role duplicates, cross-role reuse/job creation, worker wake gating, manual projection, URL state, and hidden AI controls.
+- Mocked browser checks cover URL push/back, vehicle import/detail/batch/preview states, desktop/mobile layout, and overflow without live TOS/GPT calls.
+
+### 7. Wrong vs Correct
+
+```typescript
+// Wrong: wake the worker for every imported asset.
+if (result.status === "imported") kickLibraryTaggingWorker();
+
+// Correct: wake only after the domain persisted a reference tagging job.
+if (result.job) kickLibraryTaggingWorker();
+```
 
 ## Stable Decisions
 

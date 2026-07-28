@@ -52,9 +52,8 @@
         "Configured Ark video transcription can merge speech-to-text output into the source body before rewrite"
       ],
       "evidence": [
-        "2026-07-01 Douyin video ranking uses resolution, bitrate, URL br/dimension hints, and CDN/download hints; bit_rate[] extraction covers play_addr/play_addr_265/play_addr_h264/download_addr, and content-pool media caching supports explicit force video refresh. video_quality_selection_check.mjs, video_download_fallback_check.mjs, full baseline, and local:restart passed without live provider calls.",
-        "2026-07-01 video high-frame selection now samples across cached videos, adds local quality scoring, filters obvious bad frames, and can apply OpenAI-compatible visual review without requiring complete-car framing; .trellis/verification/video_frame_policy_check.mjs plus the full Trellis baseline passed without live model calls.",
-        "2026-06-25 video transcription now extracts MP3 audio from cached videos with ffmpeg, uploads the MP3 through Ark Files, calls Ark Responses with input_audio.file_id, stores successful text on videoTranscript, and appends it to contentText before rewrite; .trellis/verification/video_transcription_check.mjs and npx --no-install tsc --noEmit passed without live Ark calls."
+        "2026-06-25 through 2026-07-01 video transcription, quality ranking, frame selection, forced refresh, and optional visual review passed their focused checks and full baseline without live provider calls.",
+        "Detailed evidence is indexed in .trellis/spec/fluxpost/verification.md and its archive."
       ],
       "notes": "Requires system ffmpeg on PATH for video frames and MP3 audio extraction. Live transcription requires ARK_API_KEY or the existing VOLCENGINE_ASR_APP_KEY alias, plus optional Ark model/prompt/audio-size/timeout variables; default verification does not call the external Ark service."
     },
@@ -167,26 +166,26 @@
         "Default verification covers Compose parsing, Bash syntax, destructive-command absence, and private/HTTPS/legacy deployment plans without live infrastructure changes"
       ],
       "evidence": [
-        "2026-07-15 repository implementation includes parameterized compose.yaml, vps-bootstrap.sh, vps-deploy.sh --check, vps-enable-domain.sh, beginner deployment documentation, and .trellis/verification/vps_deployment_check.mjs. Private/HTTPS/legacy plan execution, Bash syntax, YAML parsing, focused checks, type-check, lint, build, and full baseline passed without a live VPS install."
+        "2026-07-15 through 2026-07-16 deployment contracts, private bootstrap, loopback access, isolated Nginx HTTPS, and preservation of existing services passed repository and live-host checks.",
+        "Detailed evidence is indexed in .trellis/spec/fluxpost/verification.md and its archive."
       ],
-      "notes": "Ready for review because the deterministic contracts pass; mark done only after one intentional clean Ubuntu 24.04 installation and later domain/HTTPS enablement are verified."
+      "notes": "Ready for review because deterministic contracts, clean private install, and Nginx-managed HTTPS pass; the repository's Caddy-specific enable-domain path remains unverified on this Nginx-managed host."
     },
     {
       "id": "modular-resource-workspaces",
-      "title": "Modular content, production, and material workspaces",
+      "title": "Content and material resource workspaces",
       "status": "ready_for_review",
       "definition_of_done": [
-        "The web UI exposes separate top-level modules for content pool management, production, and material library management",
+        "The /content workspace exposes separate content-pool and material-library views",
         "Content pool items can be created manually, edited, and deleted through local API routes",
-        "Generated posts are persisted, selectable, editable, deletable, and can be regenerated as versions",
-        "Material folders and assets can be created, edited, deleted, and used as production material paths"
+        "Material folders and assets support owner-scoped scan, create, edit, delete, and image preview operations",
+        "Generated drafts remain available through the independent /review workspace without a home production module"
       ],
       "evidence": [
-        "Source files present: src/app/page.tsx, src/app/globals.css",
-        "2026-06-02 passed browser check on http://127.0.0.1:3001/: production module rendered production queue/review/draft library and did not render crawl task, keyword pool, or content pool management on desktop/mobile",
+        "2026-07-22 /content content/material tabs, owner-scoped material APIs, CRUD/preview checks, full baseline, local restart, mocked desktop/mobile browser validation, and fixed-SHA 104 staging deployment passed",
         "Detailed historical evidence archived at .trellis/spec/fluxpost/archive/feature-list-history-2026-06-17.json"
       ],
-      "notes": "External OpenAI/TikHub/Feishu calls are not part of the default baseline. Browser manual UI review is still recommended."
+      "notes": "External provider calls and writes are excluded from default verification."
     },
     {
       "id": "ai-source-tagging",
@@ -260,22 +259,40 @@
     },
     {
       "id": "simple-auto-workflow",
-      "title": "Simple mode automatic content workflow",
+      "title": "Compact automatic content workflow",
       "status": "ready_for_review",
       "definition_of_done": [
-        "Users can switch between simple and advanced workspace modes",
-        "Simple mode accepts keyword crawl, exact links, Feishu task numbers, one viral source link, or one original prompt, plus scoped target/count controls",
-        "Simple mode runs crawl, AI tagging, content production, image processing, approval, and Feishu publish as one backend sequence",
-        "Simple mode avoids unbounded image/keyframe processing per source item",
-        "Advanced mode can edit and save the default text and image prompts used by simple mode",
+        "Signed-in users enter the compact task workspace directly without simple or advanced mode switching",
+        "The compact workspace accepts keyword crawl, exact links, Feishu task numbers, one viral source link, or one original prompt with scoped controls",
+        "Compact tasks run crawl, AI tagging, content production, optional image processing, review staging, and optional Feishu publishing through /api/simple/runs",
+        "Prompt, image-policy, media, material, and Feishu settings remain editable from the compact workspace",
+        "Polling, multi-run progress, and operator force termination remain available",
         "Generated posts publish content tags to the Feishu Base 内容标签 multi-select field"
       ],
       "evidence": [
         "Source files present: src/lib/simple-runs.ts, src/lib/workspace-settings.ts, src/lib/viral-replication.ts, src/app/api/simple/runs/route.ts, src/app/api/workspace/settings/route.ts",
-        "2026-06-30 simple-mode original generation added: UI/API accept sourceMode original with originalPrompt and default-off originalUseWebSearch; src/lib/original-creation.ts generates one platform=original post, plans up to 5 image prompts, uses the existing image provider path, auto-approves the post, and queues Feishu publish; focused checks simple_original_run_check.mjs, simple_link_run_check.mjs, simple_viral_run_check.mjs, simple_queue_check.mjs, tsc, and lint passed",
+        "2026-07-22 compact-only static checks, source-mode/config/material/queue checks, full baseline, local restart, mocked desktop/mobile multi-run validation, and fixed-SHA 104 staging deployment passed",
         "Detailed historical evidence archived at .trellis/spec/fluxpost/archive/feature-list-history-2026-06-17.json"
       ],
-      "notes": "External TikHub/OpenAI/image-generation/Feishu calls are not part of default baseline verification. A real small-count simple run and a larger two-keyword queue validation are still needed before marking done."
+      "notes": "External provider calls are excluded from default verification; internal SimpleRun and simple_runs contracts remain unchanged."
+    },
+    {
+      "id": "reference-image-library",
+      "title": "Reference and vehicle image library",
+      "status": "ready_for_review",
+      "definition_of_done": [
+        "Signed-in users can import clipboard, file, drag-drop, and folder images into TOS-backed reference or vehicle views with shareable role URLs",
+        "Reference assets support structured AI tags, manual overrides, and durable retagging while vehicle assets use only user-maintained free-form tags and never enqueue AI by themselves",
+        "Fullscreen preview supports bounded navigation, zoom, pan, touch, focus management, keyboard controls, editing, and two-level deletion",
+        "Legacy vehicle images can be migrated idempotently without changing existing material or generation paths",
+        "Default verification covers both schemas and critical contracts without calling live TOS or GPT"
+      ],
+      "evidence": [
+        "Implementation covers library assets/tagging, authenticated tag suggestions and batch mutation APIs, unified tag UI, and theme-aware library styling",
+        "2026-07-23 tag/theme contracts, lint, TypeScript, build, restart, auth probe, and mocked desktop/mobile Playwright passed; screenshots cover three themes and themed preview without overflow",
+        "2026-07-23 vehicle manual-tag/no-AI import checks, executable cross-role dedupe/job cases, full baseline, restart, and mocked 1440x960/390x844 URL/batch/preview validation passed"
+      ],
+      "notes": "Keep ready_for_review until operator-approved production 38 samples prove real TOS PUT/HEAD/public read/delete for both roles and GPT tagging/retry for reference assets. Retired 104 is not a validation gate. Generation consumes no new assetIds in this phase."
     },
     {
       "id": "tos-runtime-media-storage",
@@ -287,13 +304,14 @@
         "Failed uploads retain recoverable bytes under data/tos-pending and can be reconciled idempotently without writing unverified business URLs",
         "Historical local media URLs remain valid and file-only consumers safely materialize and clean HTTP media",
         "Advanced configuration masks TOS credentials and admin-only checks validate public GET, video Range, and cleanup",
-        "The 82.158.226.10 deployment passes a real application media workflow while unrelated VPS services remain healthy"
+        "The 38.76.210.136 deployment passes a real application media workflow while unrelated VPS services remain healthy"
       ],
       "evidence": [
         "2026-07-20 offline TOS runtime-media check, lint, type-check, build, full baseline, local restart, public config secrecy checks, route authorization checks, and responsive config-page screenshots passed",
-        "2026-07-20 isolated live TOS probe passed PUT, HEAD, anonymous GET, video Range 206, and DELETE without persisting or exposing operator credentials"
+        "2026-07-20 isolated live TOS probe passed PUT, HEAD, anonymous GET, video Range 206, and DELETE without persisting or exposing operator credentials",
+        "2026-07-21 f38a0f8 deployed; partial Feishu image publishes completed with verified attachments 1/1 and 9/9, including safe record-not-found recovery"
       ],
-      "notes": "Implementation and isolated provider validation are complete. Keep ready_for_review until deployment to 82.158.226.10 and a real FluxPost image/video workflow prove URL persistence, local staging cleanup, historical media compatibility, and service health. The older VPS remains out of scope."
+      "notes": "Implementation and isolated provider validation are complete. Keep ready_for_review until a real FluxPost image/video workflow on production 38 proves URL persistence, local staging cleanup, historical media compatibility, and service health. Retired 82 and 104 are out of scope."
     },
     {
       "id": "infinite-canvas-workflows",
@@ -303,17 +321,35 @@
         "Signed-in operators can manage owner-scoped workflows and copy, cut, paste, duplicate, or delete selected desktop nodes",
         "The canvas supports typed nodes with acyclic validation plus authenticated file/clipboard image import that stores media references only",
         "Runs persist immutable graph snapshots and execute ready DAG branches in parallel with node-level status, failure blocking, cancellation, retry, and upstream reuse",
-        "Billable model and external-write nodes require explicit confirmation, and Feishu nodes expose only the existing publish queue rather than arbitrary CLI commands",
+        "Billable model and external-write plans pass preflight then enqueue without browser prompts for unattended batches, while the server records plan acknowledgement and Feishu nodes expose only the existing publish queue",
         "Seedance validates inputs and credit, persists submit_id/gen_status, and resumes accepted tasks by querying the original submit_id",
-        "Default deterministic verification covers graph, persistence, API, desktop, and mobile contracts without paid provider or Feishu writes"
+        "Default deterministic verification covers graph, persistence, API, desktop, and mobile contracts without paid provider or Feishu writes",
+        "Batch scheduler V1 freezes multi-batch asset and copy samples, launches image children atomically, aggregates one review draft per scene, and supports pause, cancel, retry, and explicit candidate acceptance",
+        "Copy-library inputs freeze independent title/body/tag snapshots and the standard batch skeleton performs separate title and body text-model calls before content composition"
       ],
       "evidence": [
-        "2026-07-24 added @xyflow/react, typed owner-scoped canvas/API/database/Dreamina modules and mobile inspect/run; pending Seedance runs requeue and query persisted submit_id, while real Seedance/Feishu/PostgreSQL concurrency remain unverified",
-        "2026-07-24 deterministic checks, TypeScript, lint, build, full baseline, local restart, and mocked 1440x960/390x844 checks passed for clipboard/image import, inline editing, declared-output GPT previews, natural-aspect galleries/zoom, aligned single-beam edges, themes, and reduced motion without external calls",
-        "2026-07-27 GPT-Image-2 v2 plus durable image-preview capture, isolated compatible ancestor reuse, enabled/bypass/disabled modes, branch-aware confirmation, review links, focused checks, full baseline, local restart, and mocked 1440x1000/390x844 browser checks passed without paid or Feishu calls",
-        "2026-07-27 eight common content/image/video nodes, frozen content/library snapshots, mocked Responses/Chat vision, bounded ffmpeg transforms/frames, ComfyUI-style quick insertion, focused checks, full baseline, local restart, and mocked 1440x960/390x844 browser checks passed without live external calls"
+        "2026-07-24 added typed owner-scoped Canvas graph/API/database modules, immutable runs, mobile inspect/run, and persisted provider-id resumption",
+        "2026-07-27 common nodes, resizing, text-split/display-any, direct enqueue, task/history controls, shortcuts, bounded undo/redo, and the 100-slot image pool passed offline and mocked responsive checks",
+        "2026-07-28 batch scheduler V1 plus ordinal Prompt Switch, standard skeleton, explicit five-role binding editor, aggregate diagnostics, and latest-revision draft preflight passed deterministic, build/restart, HTTP/SQLite, and mocked desktop/mobile interaction, overflow, autosave, preflight, hierarchy, retry, candidate, layout, and contrast checks without paid calls"
       ],
-      "notes": "Keep ready_for_review until an operator approves one real Seedance smoke and one real Feishu write, and PostgreSQL migration/multi-user concurrency is live-verified. Dreamina CLI is not installed in the default local environment, so needs_config is the expected deterministic state."
+      "notes": "Keep ready_for_review until operator-approved real Seedance/Feishu and batch image-provider smokes plus PostgreSQL migration/multi-user concurrency are live-verified."
+    },
+    {
+      "id": "copy-library",
+      "title": "Owner-scoped copy library and batch rewriting",
+      "status": "ready_for_review",
+      "definition_of_done": [
+        "Signed-in users can manually create, search, tag, share, edit, and confirm-delete title/body copy entries while owner/admin write permissions remain enforced",
+        "PostgreSQL and SQLite persist copy entries and Canvas nodes execute frozen title/body/tag snapshots without rereading changed or deleted sources",
+        "Batch scheduling supports stable manual or AND-tag copy pools, round-robin frozen assignment, and an optional copy-input role compatible with old five-role workflows",
+        "The standard scheduler skeleton rewrites title and body through two separate GPT text nodes before existing review-draft composition",
+        "Default verification covers persistence, permissions, tags, snapshots, scheduling, build, and responsive UI without live provider calls"
+      ],
+      "evidence": [
+        "2026-07-28 copy_library_check.mjs and canvas_scheduler_check.mjs passed domain, schema, auth, snapshot, compatibility, injection, and two-call skeleton contracts",
+        "2026-07-28 TypeScript, focused lint, build/restart, HTTP smoke, and mocked 1440x960/390x844 CRUD/tag/sharing/Canvas/scheduler interaction and overflow checks passed; full baseline stopped only at an unrelated untracked temporary CJS lint file"
+      ],
+      "notes": "Keep ready_for_review until authenticated multi-user PostgreSQL use and an operator-approved real two-call text-model batch prove the live path. Default checks must not invoke paid models."
     }
   ]
 }
