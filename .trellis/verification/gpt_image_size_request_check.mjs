@@ -10,7 +10,7 @@ const imageGeneration = read("src/lib/image-generation.ts");
 
 assertContains(
   imageGeneration,
-  /const preparedReferences = await prepareReferenceImages\(referenceImages,\s*options\.size\)/,
+  /await prepareReferenceImages\(referenceImages,\s*options\.size,\s*options\.strictReferencePreparation === true\)/,
   "Image edit references must be prepared with the same requested size sent to gpt-image-2.",
 );
 

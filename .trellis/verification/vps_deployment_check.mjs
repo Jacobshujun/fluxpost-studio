@@ -291,6 +291,7 @@ fi
 exit 0
 `);
   writeExecutable(path.join(fakeBin, "sleep"), "#!/usr/bin/env bash\nexit 0\n");
+  writeExecutable(path.join(fakeBin, "flock"), "#!/usr/bin/env bash\nexit 0\n");
 
   const runner = path.join(tempRoot, "run-deploy.sh");
   writeExecutable(runner, `#!/usr/bin/env bash
@@ -381,6 +382,7 @@ if [ "\${1:-}" = image ] && [ "\${2:-}" = inspect ]; then
 fi
 exit 1
 `);
+  writeExecutable(path.join(fakeBin, "flock"), "#!/usr/bin/env bash\nexit 0\n");
   const runner = path.join(tempRoot, "run-verifier.sh");
   writeExecutable(runner, `#!/usr/bin/env bash
 set -euo pipefail

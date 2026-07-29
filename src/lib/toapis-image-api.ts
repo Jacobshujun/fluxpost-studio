@@ -71,20 +71,26 @@ export function buildToApisGenerationBody(input: {
     throw new Error(`ToAPIs accepts at most ${maxToApisReferenceImages} reference images; received ${referenceImages.length}.`);
   }
   const count = validateIntegerRange(input.count ?? 1, 1, maxToApisImageOutputs, "ToAPIs image count");
-  const quality = validateChoice(input.quality || "medium", ["low", "medium", "high"], "ToAPIs image quality");
-  const outputFormat = validateChoice(input.outputFormat || "png", ["png", "jpeg"], "ToAPIs output format") as ToApisImageOutputFormat;
-  const outputCompression = validateIntegerRange(input.outputCompression ?? 100, 0, 100, "ToAPIs JPEG compression");
+  const quality = input.quality
+    ? validateChoice(input.quality, ["low", "medium", "high"], "ToAPIs image quality")
+    : undefined;
+  const outputFormat = input.outputFormat
+    ? validateChoice(input.outputFormat, ["png", "jpeg"], "ToAPIs output format") as ToApisImageOutputFormat
+    : undefined;
+  const outputCompression = outputFormat === "jpeg"
+    ? validateIntegerRange(input.outputCompression ?? 100, 0, 100, "ToAPIs JPEG compression")
+    : undefined;
   return {
     model: input.model,
     prompt: input.prompt,
     n: count,
     size: dimensions.size,
     resolution: dimensions.resolution,
-    quality,
-    output_format: outputFormat,
+    ...(quality ? { quality } : {}),
+    ...(outputFormat ? { output_format: outputFormat } : {}),
     ...(outputFormat === "jpeg" ? { output_compression: outputCompression } : {}),
     response_format: "url" as const,
-    ...(referenceImages.length ? { image_urls: referenceImages } : {}),
+    ...(referenceImages.length ? { reference_images: referenceImages } : {}),
   };
 }
 

@@ -258,10 +258,10 @@ try {
   assert.match(instrumentation, /NEXT_PHASE === "phase-production-build"/);
   assert.match(instrumentation, /FLUXPOST_DISABLE_BACKGROUND_WORKERS === "1"/);
   assert.match(instrumentation, /kickCanvasSchedulerWorker\(\)[\s\S]*ensureCanvasRunWorker\(\)/);
-  const baseline = read(".trellis/verification/check.ps1");
+  const baseline = read(".trellis/verification/check.mjs");
   assert.match(
     baseline,
-    /FLUXPOST_DISABLE_BACKGROUND_WORKERS = "1"[\s\S]*Start-Process/,
+    /spawn\(nodeCommand[\s\S]*FLUXPOST_DISABLE_BACKGROUND_WORKERS: "1"/,
     "The baseline smoke server must not advance persisted background work.",
   );
   console.log("Canvas batch scheduler checks passed.");

@@ -1009,6 +1009,14 @@ async function requestStandardImagesApiWithRetry(
 ): Promise<ImagesApiResponse> {
   const endpointPath = referenceImages.files.length ? "images/edits" : "images/generations";
   try {
+    if (!asyncTask) {
+      const data: NonNullable<ImagesApiResponse["data"]> = [];
+      for (let index = 0; index < Math.max(1, Math.floor(count)); index += 1) {
+        const response = await requestSingleStandardImagesApiWithRetry(prompt, 1, startedAt, options, referenceImages, endpointPath);
+        data.push(...(response.data || []).slice(0, 1));
+      }
+      return { data };
+    }
     return await requestSingleStandardImagesApiWithRetry(prompt, count, startedAt, options, referenceImages, endpointPath, asyncTask);
   } finally {
     await cleanupPreparedReferenceImages(referenceImages);
@@ -1369,12 +1377,14 @@ async function requestSingleToApisImagesApiForRoute(
     model: routeConfig.model,
     prompt,
     requestedSize: options.size,
-    ratio: options.ratio,
-    resolution: options.resolution,
-    quality: options.quality,
-    count,
-    outputFormat: options.outputFormat,
-    outputCompression: options.outputCompression,
+    ...(asyncTask ? {
+      ratio: options.ratio,
+      resolution: options.resolution,
+      quality: options.quality,
+      count,
+      outputFormat: options.outputFormat,
+      outputCompression: options.outputCompression,
+    } : {}),
     referenceImages: referenceUrls,
   });
   let task: ToApisImageTask | undefined;
@@ -1677,7 +1687,7 @@ async function buildStandardImagesApiRequest(
 
   for (const referenceImage of referenceImages) {
     const file = await readFile(referenceImage.filePath);
-    form.append("image[]", new Blob([new Uint8Array(file)], { type: referenceImage.mimeType }), referenceImage.fileName);
+    form.append("image", new Blob([new Uint8Array(file)], { type: referenceImage.mimeType }), referenceImage.fileName);
   }
 
   return {

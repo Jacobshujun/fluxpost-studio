@@ -326,8 +326,7 @@
         "Default deterministic verification covers graph, persistence, API, desktop, and mobile contracts without paid provider or Feishu writes"
       ],
       "evidence": [
-        "2026-07-24 added @xyflow/react, typed owner-scoped canvas/API/database/Dreamina modules and mobile inspect/run; pending Seedance runs requeue and query persisted submit_id, while real Seedance/Feishu/PostgreSQL concurrency remain unverified",
-        "2026-07-24 deterministic checks, TypeScript, lint, build, full baseline, local restart, and mocked 1440x960/390x844 checks passed for clipboard/image import, inline editing, declared-output GPT previews, natural-aspect galleries/zoom, aligned single-beam edges, themes, and reduced motion without external calls",
+        "2026-07-24 added @xyflow/react, typed owner-scoped Canvas/API/database/Dreamina modules, durable submit_id resume, clipboard/image import, inline editing, declared-output previews, natural-aspect galleries, aligned edges, themes, and mobile inspect/run; deterministic checks, TypeScript, lint, build, baseline, restart, and mocked 1440x960/390x844 passed without external calls, while real Seedance/Feishu/PostgreSQL concurrency remain unverified",
         "2026-07-27 GPT-Image-2 v2 plus durable image-preview capture, isolated compatible ancestor reuse, enabled/bypass/disabled modes, branch-aware confirmation, review links, focused checks, full baseline, local restart, and mocked 1440x1000/390x844 browser checks passed without paid or Feishu calls",
         "2026-07-27 eight common content/image/video nodes, frozen content/library snapshots, mocked Responses/Chat vision, bounded ffmpeg transforms/frames, ComfyUI-style quick insertion, focused checks, full baseline, local restart, and mocked 1440x960/390x844 browser checks passed without live external calls"
       ],

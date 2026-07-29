@@ -219,7 +219,7 @@ async function runHttpSmoke(port) {
   const errFd = openSync(errPath, "w");
   const child = spawn(nodeCommand, [nextBin, "start", "-H", "127.0.0.1", "-p", String(port)], {
     cwd: projectRoot,
-    env: process.env,
+    env: { ...process.env, FLUXPOST_DISABLE_BACKGROUND_WORKERS: "1" },
     stdio: ["ignore", outFd, errFd],
   });
 

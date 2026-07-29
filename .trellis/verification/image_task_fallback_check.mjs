@@ -199,8 +199,8 @@ assertContains(
 
 assertContains(
   imageGeneration,
-  /function buildStandardImagesGenerationBody[\s\S]*n:\s*1[\s\S]*output_format:\s*"png"[\s\S]*response_format:\s*"b64_json"/,
-  "Text-to-image requests should use the standard gpt-image-2 Images API body with n fixed to 1.",
+  /if \(!asyncTask\)[\s\S]*requestSingleStandardImagesApiWithRetry\(prompt, 1,[\s\S]*function buildStandardImagesGenerationBody[\s\S]*n:\s*count[\s\S]*response_format:\s*"b64_json"/,
+  "Existing image production should keep one image per provider request while Canvas may submit an explicit batch count.",
 );
 
 assertContains(
@@ -229,7 +229,7 @@ assertContains(
 
 assertContains(
   imageGeneration,
-  /const preparedReferences = await prepareReferenceImages\(referenceImages,\s*options\.size\)/,
+  /await prepareReferenceImages\(referenceImages,\s*options\.size,\s*options\.strictReferencePreparation === true\)/,
   "Image edit references should be prepared against the same requested size before calling gpt-image-2.",
 );
 
