@@ -18,8 +18,14 @@ const tagging = read("src/lib/library-tagging.ts");
 const tags = read("src/lib/library-tags.ts");
 const storage = read("src/lib/runtime-media-storage.ts");
 const page = read("src/app/library/page.tsx");
+const importRoute = read("src/app/api/library/import/route.ts");
 const css = read("src/app/library/library.module.css");
 const home = read("src/app/page.tsx");
+
+const importAssetStart = assets.indexOf("export async function importLibraryAsset");
+const importAssetEnd = assets.indexOf("export async function patchLibraryAsset", importAssetStart);
+assert(importAssetStart >= 0 && importAssetEnd > importAssetStart, "Library import implementation contract is missing.");
+const importAssetContract = assets.slice(importAssetStart, importAssetEnd);
 
 for (const name of ["LibraryAsset", "LibraryCollection", "LibraryTagProfile", "LibraryTaggingJob", "LibraryTagSuggestion", "LibraryTagBatchResult", "ReferenceAssetSelection"]) {
   contains(types, new RegExp(`export type ${name}\\b`), `Missing shared type ${name}.`);
@@ -34,6 +40,14 @@ contains(assets, /detectImageFormat\(input\.bytes\)/, "Imports must inspect file
 contains(assets, /const job = role === "reference" \? makeLibraryTaggingJob\(asset, now\) : undefined;[\s\S]*if \(job\) await saveLibraryAssetAndTaggingJobToDb\(asset, job\)/, "Reference imports must atomically create their tagging job.");
 contains(storage, /Library imports require fully configured TOS object storage/, "Library imports must not fall back to local storage.");
 contains(storage, /ensureVerifiedTosObject\([\s\S]*contentLength: input\.body\.length/, "Library upload must use verified PUT/HEAD storage.");
+contains(types, /WorkspaceAccountRole = "admin" \| "operator"/, "Workspace operator role contract is missing.");
+contains(importRoute, /const account = await requireWorkspaceAccount\(request\)[\s\S]*importLibraryAsset\(account, \{/, "Signed-in operators must reach the library import service as the current account.");
+assert(!/\bowner\s*:/.test(importRoute), "Browser imports must not accept an owner override.");
+contains(importAssetContract, /const owner = input\.owner \|\| \{ id: account\.id, displayName: account\.displayName \|\| account\.id \}/, "Normal imports must default ownership to the signed-in account.");
+contains(importAssetContract, /ownerUserId: owner\.id[\s\S]*return \{ status: "imported" as const, asset: \{ \.\.\.asset, canEdit: true \}/, "Imported assets must belong to the current owner and remain editable.");
+assert(!/isWorkspaceAdmin\(/.test(importAssetContract), "Library imports must not require an administrator role.");
+contains(importAssetContract, /input\.collectionId[\s\S]*validateCollectionIds\(account, \[input\.collectionId\], \[role\]\)/, "Imports into collections must retain owner-scoped validation.");
+contains(assets, /validateCollectionIds[\s\S]*!isWorkspaceAdmin\(account\) && collection\.ownerUserId !== account\.id/, "Operators must not import into another owner's collection.");
 contains(assets, /asset\.ownerUserId === account\.id \|\| asset\.visibility === "team"/, "Team read visibility is missing.");
 contains(assets, /isWorkspaceAdmin\(account\) \|\| asset\.ownerUserId === account\.id/, "Owner/admin edit authorization is missing.");
 contains(tags, /Object\.prototype\.hasOwnProperty\.call\(overrides, key\)/, "Manual empty overrides must remain distinguishable from AI values.");
@@ -85,6 +99,10 @@ contains(assets, /updateLibraryAssetTags[\s\S]*requireEditableAsset\(account, as
 contains(page, /role="combobox"[\s\S]*aria-autocomplete="list"[\s\S]*aria-activedescendant/, "Unified tag picker must expose combobox semantics.");
 for (const key of ["ArrowDown", "ArrowUp", "Enter", "Escape", "Backspace"]) assert(page.includes(`event.key === "${key}"`), `Tag combobox keyboard contract missing ${key}.`);
 contains(page, /filterTags\.forEach\(\(tag\) => params\.append\("tag", tag\)\)/, "Library UI must submit repeated unified tag filters.");
+contains(page, /const importItemSequence = useRef\(0\)/, "Image uploads must keep a page-local queue sequence.");
+contains(page, /id: `\$\{Date\.now\(\)\}-\$\{\+\+importItemSequence\.current\}`/, "Image uploads must create unique temporary queue ids without secure-context APIs.");
+assert(!/randomUUID/.test(page), "The browser upload queue must not depend on crypto.randomUUID.");
+contains(page, /try \{\s*const form = new FormData\(\)[\s\S]*catch \(error\) \{\s*updateImport\(item\.id, "error"/, "Synchronous upload preparation failures must update the visible import row.");
 contains(page, /BatchTagManager[\s\S]*只读团队资产会跳过/, "Batch tag management and read-only feedback are missing.");
 contains(page, /restoreAi: manualTagKeys/, "Restore AI must clear every manual tag override.");
 contains(page, /role: activeRole, assetIds: \[asset\.id\]/, "Single-asset tag changes must carry the active library role.");

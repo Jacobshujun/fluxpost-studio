@@ -46,6 +46,7 @@ export default function LibraryPage() {
   const [dragging, setDragging] = useState(false);
   const [batchTagsOpen, setBatchTagsOpen] = useState(false);
   const requestId = useRef(0);
+  const importItemSequence = useRef(0);
   const loadMoreRef = useRef<HTMLDivElement>(null);
   const loadingMoreRef = useRef(false);
   const loadMorePromiseRef = useRef<Promise<LibraryAsset[]> | null>(null);
@@ -188,19 +189,23 @@ export default function LibraryPage() {
   async function uploadFiles(files: File[]) {
     const images = files.filter((file) => file.type.startsWith("image/") || /\.(png|jpe?g|gif|webp)$/i.test(file.name));
     if (!images.length) return setMessage("未发现可导入的图片文件");
-    const queue = images.map((file) => ({ file, id: `${Date.now()}-${crypto.randomUUID()}` }));
-    setImports((items) => [...queue.map(({ file, id }) => ({ id, name: file.webkitRelativePath || file.name, status: "uploading" as const })), ...items].slice(0, 100));
+    const queue = images.map((file) => ({
+      file,
+      id: `${Date.now()}-${++importItemSequence.current}`,
+      name: file.webkitRelativePath || file.name,
+    }));
+    setImports((items) => [...queue.map(({ id, name }) => ({ id, name, status: "uploading" as const })), ...items].slice(0, 100));
     let cursor = 0;
     const worker = async () => {
       while (cursor < queue.length) {
         const item = queue[cursor++];
-        const form = new FormData();
-        form.set("file", item.file);
-        form.set("role", role);
-        form.set("visibility", "private");
-        form.set("relativePath", item.file.webkitRelativePath || item.file.name);
-        if (collectionId) form.set("collectionId", collectionId);
         try {
+          const form = new FormData();
+          form.set("file", item.file);
+          form.set("role", role);
+          form.set("visibility", "private");
+          form.set("relativePath", item.name);
+          if (collectionId) form.set("collectionId", collectionId);
           const response = await fetch("/api/library/import", { method: "POST", body: form });
           const result = (await response.json()) as { status?: string; error?: string };
           if (!response.ok) throw new Error(result.error || "导入失败");

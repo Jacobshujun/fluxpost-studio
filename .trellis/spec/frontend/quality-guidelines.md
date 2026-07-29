@@ -37,6 +37,8 @@ Default checks must not call live TikHub, OpenAI-compatible text/image providers
 - Surface API errors to the user with useful messages.
 - Do not add broad catch blocks that hide provider, queue, auth, or database failures.
 - Do not convert unknown behavior into silent fallbacks; identify and verify the cause.
+- LAN HTTP is a supported browser context. Do not require secure-context-only APIs such as browser `crypto.randomUUID()` for local UI state; use a page-local monotonic identifier when the value never crosses the API boundary.
+- Insert visible pending rows before request preparation, and keep `FormData` construction and field writes inside the row-level error boundary so synchronous browser failures cannot look like an unresponsive control.
 
 ## Review Checklist
 

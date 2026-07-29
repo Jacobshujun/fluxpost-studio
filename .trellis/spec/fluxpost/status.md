@@ -1,14 +1,15 @@
 # Trellis Status
 
-Last updated: 2026-07-28
+Last updated: 2026-07-29
 
 ## One-Line Status
 
-104 staging is retired; local Windows plus production 38 are now the only supported FluxPost fix path, and 38 is healthy at commit `542cbb5`.
+Normal-member image imports now work without secure-context UUID APIs on LAN HTTP; production 38 remains healthy at commit `542cbb5`.
 
 ## Current Focus
 
 - Production 38 is healthy at release `20260723-113938-542cbb5e2d1f`; 104 is retired and its DNS cleanup remains separate.
+- Image-library upload queues use page-local monotonic IDs and surface synchronous preparation failures, so normal members on LAN HTTP do not silently lose file selections when `crypto.randomUUID()` is unavailable.
 - HEIC/TOS, Weibo App-detail, vehicle/reference library, Windows Feishu CLI, and Canvas workflows are locally verified but remain behind their documented operator gates.
 - The owner-scoped copy library, frozen Canvas copy input, round-robin batch copy pools, and separate title/body GPT paths are locally verified and `ready_for_review`; live model calls remain an operator gate.
 - Trellis uses `.trellis/spec/fluxpost` and `.trellis/verification`; disabled Harness paths remain migration archives only.
@@ -32,6 +33,7 @@ Last updated: 2026-07-28
 
 ## Recent Verification
 
+- 2026-07-29: Normal-member image imports no longer depend on secure-context `crypto.randomUUID`; operator ownership/collection permission contracts, focused/dynamic library checks, TypeScript, scoped lint, build/restart/HTTP smoke, and mocked Playwright with `randomUUID` forced to throw passed without external calls. The full baseline passed all library checks and stopped at an unrelated Node 24 `fetch bad port` in the historical TOS recovery check; full lint also retains the unrelated temporary CJS blocker.
 - 2026-07-28: Copy library CRUD/permissions/tags, frozen Canvas input, stable batch assignment, two-GPT skeleton, build/restart, and mocked 1440x960/390x844 interactions passed without external calls. Playwright found and regression coverage fixed delayed draft synchronization erasing fast new-copy input; full baseline passed all domain checks and stopped only on the unrelated temporary CJS lint error.
 - Earlier verification evidence is indexed in `.trellis/spec/fluxpost/verification.md` and preserved under `.trellis/spec/fluxpost/archive/`.
 
