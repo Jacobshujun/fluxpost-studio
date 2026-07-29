@@ -18,10 +18,16 @@ const tagging = read("src/lib/library-tagging.ts");
 const tags = read("src/lib/library-tags.ts");
 const storage = read("src/lib/runtime-media-storage.ts");
 const page = read("src/app/library/page.tsx");
+const importRoute = read("src/app/api/library/import/route.ts");
 const css = read("src/app/library/library.module.css");
 const home = read("src/app/page.tsx");
 
-for (const name of ["LibraryAsset", "LibraryCollection", "LibraryTagProfile", "LibraryTaggingJob", "LibraryTagSuggestion", "LibraryTagBatchResult", "ReferenceAssetSelection"]) {
+const importAssetStart = assets.indexOf("export async function importLibraryAsset");
+const importAssetEnd = assets.indexOf("export async function patchLibraryAsset", importAssetStart);
+assert(importAssetStart >= 0 && importAssetEnd > importAssetStart, "Library import implementation contract is missing.");
+const importAssetContract = assets.slice(importAssetStart, importAssetEnd);
+
+for (const name of ["LibraryAsset", "LibraryCollection", "LibraryListSort", "LibraryTagProfile", "LibraryTaggingJob", "LibraryTagSuggestion", "LibraryTagBatchResult", "ReferenceAssetSelection"]) {
   contains(types, new RegExp(`export type ${name}\\b`), `Missing shared type ${name}.`);
 }
 for (const table of ["library_assets", "library_asset_roles", "library_collections", "library_collection_assets", "library_asset_labels", "library_tagging_jobs"]) {
@@ -34,6 +40,14 @@ contains(assets, /detectImageFormat\(input\.bytes\)/, "Imports must inspect file
 contains(assets, /const job = role === "reference" \? makeLibraryTaggingJob\(asset, now\) : undefined;[\s\S]*if \(job\) await saveLibraryAssetAndTaggingJobToDb\(asset, job\)/, "Reference imports must atomically create their tagging job.");
 contains(storage, /Library imports require fully configured TOS object storage/, "Library imports must not fall back to local storage.");
 contains(storage, /ensureVerifiedTosObject\([\s\S]*contentLength: input\.body\.length/, "Library upload must use verified PUT/HEAD storage.");
+contains(types, /WorkspaceAccountRole = "admin" \| "operator"/, "Workspace operator role contract is missing.");
+contains(importRoute, /const account = await requireWorkspaceAccount\(request\)[\s\S]*importLibraryAsset\(account, \{/, "Signed-in operators must reach the library import service as the current account.");
+assert(!/\bowner\s*:/.test(importRoute), "Browser imports must not accept an owner override.");
+contains(importAssetContract, /const owner = input\.owner \|\| \{ id: account\.id, displayName: account\.displayName \|\| account\.id \}/, "Normal imports must default ownership to the signed-in account.");
+contains(importAssetContract, /ownerUserId: owner\.id[\s\S]*return \{ status: "imported" as const, asset: \{ \.\.\.asset, canEdit: true \}/, "Imported assets must belong to the current owner and remain editable.");
+assert(!/isWorkspaceAdmin\(/.test(importAssetContract), "Library imports must not require an administrator role.");
+contains(importAssetContract, /input\.collectionId[\s\S]*validateCollectionIds\(account, \[input\.collectionId\], \[role\]\)/, "Imports into collections must retain owner-scoped validation.");
+contains(assets, /validateCollectionIds[\s\S]*!isWorkspaceAdmin\(account\) && collection\.ownerUserId !== account\.id/, "Operators must not import into another owner's collection.");
 contains(assets, /asset\.ownerUserId === account\.id \|\| asset\.visibility === "team"/, "Team read visibility is missing.");
 contains(assets, /isWorkspaceAdmin\(account\) \|\| asset\.ownerUserId === account\.id/, "Owner/admin edit authorization is missing.");
 contains(tags, /Object\.prototype\.hasOwnProperty\.call\(overrides, key\)/, "Manual empty overrides must remain distinguishable from AI values.");
@@ -45,6 +59,10 @@ contains(tagging, /job\.attempts < job\.maxAttempts/, "Tagging retry attempts mu
 contains(tagging, /isTransientTaggingError/, "Transient tagging failures must be classified.");
 contains(tagging, /mergeLibraryTagProfile\(aiTags, current\.manualOverrides\)/, "Retagging must preserve manual overrides.");
 contains(assets, /cleanupStatus: "failed"/, "Object cleanup failures must remain visible.");
+contains(assets, /requireVisibility\(input\.visibility \|\| "team"\)/, "New library imports must default to team visibility.");
+contains(assets, /migrateLegacyMaterialAssets[\s\S]*role: "vehicle",[\s\S]*visibility: "private"/, "Legacy material migration must preserve private visibility explicitly.");
+contains(assets, /type LibraryAssetCursor = \{ version: 1; sort: LibraryListSort; value: string; id: string \}/, "Sorted image cursors must carry their sort contract.");
+contains(assets, /compareAssets\(left\.asset, right\.asset, sort\)[\s\S]*compareAssetToCursor\(asset, cursor, sort\)/, "Image list and cursor pagination must use the same sort contract.");
 
 const routeFiles = [
   "src/app/api/library/assets/route.ts",
@@ -85,6 +103,18 @@ contains(assets, /updateLibraryAssetTags[\s\S]*requireEditableAsset\(account, as
 contains(page, /role="combobox"[\s\S]*aria-autocomplete="list"[\s\S]*aria-activedescendant/, "Unified tag picker must expose combobox semantics.");
 for (const key of ["ArrowDown", "ArrowUp", "Enter", "Escape", "Backspace"]) assert(page.includes(`event.key === "${key}"`), `Tag combobox keyboard contract missing ${key}.`);
 contains(page, /filterTags\.forEach\(\(tag\) => params\.append\("tag", tag\)\)/, "Library UI must submit repeated unified tag filters.");
+for (const label of ["最新导入", "最早导入", "名称 A-Z", "名称 Z-A", "提交人 A-Z", "提交人 Z-A"]) assert(page.includes(label), `Image sort option missing ${label}.`);
+contains(page, /useLibraryListSort\(librarySortStorageKey\)/, "Image sort preference must persist in browser storage.");
+contains(page, /useMarqueeSelection[\s\S]*data-marquee-id=\{asset\.id\}/, "Image grid marquee selection is missing.");
+contains(page, /const selectAllAssets = useCallback[\s\S]*while \(cursor\)[\s\S]*setSelected\(new Set\(assets\.map/, "Image select-all must load every cursor page before selecting the filtered result.");
+contains(page, /event\.key\.toLowerCase\(\) !== "a"[\s\S]*isEditableTarget\(event\.target\)[\s\S]*void selectAllAssets\(\)/, "Image select-all shortcut must use Ctrl or Cmd+A without intercepting editable controls.");
+contains(page, /aria-label="全选当前筛选结果"[\s\S]*aria-keyshortcuts="Control\+A Meta\+A"/, "Image library must expose the select-all control and shortcut semantics.");
+contains(css, /\.filterBar select option[^}]*background:var\(--library-panel\)[^}]*color:var\(--library-text\)/, "Image-library native options must keep a solid, theme-aware background and readable text.");
+contains(page, /form\.set\("visibility", "team"\)/, "Image upload UI must submit team visibility by default.");
+contains(page, /const importItemSequence = useRef\(0\)/, "Image uploads must keep a page-local queue sequence.");
+contains(page, /id: `\$\{Date\.now\(\)\}-\$\{\+\+importItemSequence\.current\}`/, "Image uploads must create unique temporary queue ids without secure-context APIs.");
+assert(!/randomUUID/.test(page), "The browser upload queue must not depend on crypto.randomUUID.");
+contains(page, /try \{\s*const form = new FormData\(\)[\s\S]*catch \(error\) \{\s*updateImport\(item\.id, "error"/, "Synchronous upload preparation failures must update the visible import row.");
 contains(page, /BatchTagManager[\s\S]*只读团队资产会跳过/, "Batch tag management and read-only feedback are missing.");
 contains(page, /restoreAi: manualTagKeys/, "Restore AI must clear every manual tag override.");
 contains(page, /role: activeRole, assetIds: \[asset\.id\]/, "Single-asset tag changes must carry the active library role.");
@@ -93,6 +123,9 @@ contains(page, /getStoredTheme[\s\S]*setStoredTheme[\s\S]*themeOptions/, "Librar
 contains(css, /--library-bg:var\(--background\)/, "Library surfaces must use global theme variables.");
 contains(css, /\.previewStage\{[^}]*background:#0d1013/, "Preview image stage must remain neutral dark.");
 contains(css, /\.previewInfo\{background:var\(--library-panel\)/, "Preview details must follow the active theme.");
+contains(css, /\.marquee\{[^}]*position:fixed/, "Image marquee styling is missing.");
+contains(css, /\.page\{[^}]*height:100dvh[^}]*overflow:hidden/, "Library page must stay viewport-bound so its navigation remains fixed.");
+contains(css, /\.workspace\{[^}]*min-height:0[^}]*overflow:hidden/, "Library assets must scroll inside the bounded workspace.");
 contains(home, /href="\/library\?role=reference"/, "Content desk reference-library entry is missing.");
 
 console.log("Reference library assets, unified tags, themes, permissions, and preview contract check ok");

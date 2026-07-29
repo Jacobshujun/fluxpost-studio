@@ -5,7 +5,8 @@ import {
   listCopyLibraryEntriesFromDb,
   saveCopyLibraryEntryToDb,
 } from "./database";
-import type { CopyLibraryEntry, CopyLibraryEntryView, LibraryVisibility } from "./types";
+import { compareLibraryText, libraryListSortDirection, normalizeLibraryListSort } from "./library-sort";
+import type { CopyLibraryEntry, CopyLibraryEntryView, LibraryListSort, LibraryVisibility } from "./types";
 import { isWorkspaceAdmin, scopeWorkspaceOwner, type WorkspaceAccessActor } from "./workspace-ownership";
 
 const validVisibility = new Set<LibraryVisibility>(["private", "team"]);
@@ -18,6 +19,7 @@ export type CopyLibraryFilters = {
   search?: string;
   tags?: string[];
   visibility?: LibraryVisibility;
+  sort?: LibraryListSort;
 };
 
 export type CopyLibraryInput = {
@@ -30,12 +32,13 @@ export type CopyLibraryInput = {
 export async function listCopyLibraryEntries(account: WorkspaceAccessActor, filters: CopyLibraryFilters = {}) {
   const search = normalizeSearch(filters.search);
   const filterTags = normalizeTags(filters.tags || []);
+  const sort = normalizeLibraryListSort(filters.sort);
   const entries = (await listCopyLibraryEntriesFromDb())
     .filter((entry) => canReadCopyLibraryEntry(account, entry))
     .filter((entry) => !filters.visibility || entry.visibility === filters.visibility)
     .filter((entry) => !search || [entry.title, entry.body, ...entry.tags].some((value) => normalizeSearch(value).includes(search)))
     .filter((entry) => filterTags.every((tag) => entry.tags.some((value) => normalizeTagKey(value) === normalizeTagKey(tag))))
-    .sort(compareCopyLibraryEntries)
+    .sort((left, right) => compareCopyLibraryEntries(left, right, sort))
     .map((entry) => toEntryView(account, entry));
   return { entries, tags: collectVisibleTags(entries) };
 }
@@ -80,6 +83,7 @@ export function parseCopyLibraryFilters(url: URL): CopyLibraryFilters {
     search: url.searchParams.get("q") || undefined,
     tags: url.searchParams.getAll("tag").flatMap((value) => value.split(",")),
     visibility: visibility && validVisibility.has(visibility) ? visibility : undefined,
+    sort: normalizeLibraryListSort(url.searchParams.get("sort")),
   };
 }
 
@@ -118,7 +122,7 @@ function normalizeCopyLibraryInput(input: CopyLibraryInput, creating: boolean) {
   if (creating || input.body !== undefined) result.body = requireText(input.body, "Body", bodyLimit);
   if (creating || input.tags !== undefined) result.tags = normalizeTags(input.tags || []);
   if (creating || input.visibility !== undefined) {
-    const visibility = input.visibility === undefined ? "private" : input.visibility;
+    const visibility = input.visibility === undefined ? "team" : input.visibility;
     if (typeof visibility !== "string" || !validVisibility.has(visibility as LibraryVisibility)) throw new Error("Invalid copy visibility.");
     result.visibility = visibility as LibraryVisibility;
   }
@@ -148,8 +152,14 @@ function collectVisibleTags(entries: CopyLibraryEntry[]) {
   return [...labels.values()].sort((left, right) => left.localeCompare(right, "zh-CN"));
 }
 
-function compareCopyLibraryEntries(left: CopyLibraryEntry, right: CopyLibraryEntry) {
-  return right.updatedAt.localeCompare(left.updatedAt) || right.id.localeCompare(left.id);
+export function compareCopyLibraryEntries(left: CopyLibraryEntry, right: CopyLibraryEntry, sort: LibraryListSort = "newest") {
+  const direction = libraryListSortDirection(sort);
+  const value = sort === "newest" || sort === "oldest"
+    ? left.updatedAt.localeCompare(right.updatedAt)
+    : sort === "name-asc" || sort === "name-desc"
+      ? compareLibraryText(left.title, right.title)
+      : compareLibraryText(left.ownerDisplayName, right.ownerDisplayName);
+  return direction * value || direction * left.id.localeCompare(right.id);
 }
 
 function requireEntryId(value: string) {

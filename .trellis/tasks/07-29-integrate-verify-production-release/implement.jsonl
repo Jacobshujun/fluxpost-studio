@@ -1,0 +1,4 @@
+{"file":".trellis/spec/fluxpost/index.md","reason":"FluxPost deployment and completion entry point."}
+{"file":".trellis/spec/fluxpost/architecture_rules.md","reason":"Exact-SHA deployment, persistent-data, and direct-to-38 boundaries."}
+{"file":".trellis/spec/fluxpost/pitfalls.md","reason":"Dirty-worktree, named-volume, local/VPS, and release risks."}
+{"file":".trellis/tasks/07-29-integrate-verify-production-release/research/release-evidence.md","reason":"Confirmed lineage, approved inventory, overlap risks, and promotion contract."}

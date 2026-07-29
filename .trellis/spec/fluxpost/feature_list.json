@@ -291,7 +291,8 @@
       ],
       "evidence": [
         "Candidate 542cbb5e passed the 104 full Docker verifier and immutable release checks; the operator confirmed isolated live TOS/GPT/delete plus reference/vehicle functional scenarios passed on 104.",
-        "The unchanged SHA deployed to production release 20260723-113938-542cbb5e2d1f; manifest/image/container identity, library schema creation, rollback-write smoke, idle queues, HTTPS /library, persistent volumes, Nginx, and unchanged healthy Open WebUI passed."
+        "The unchanged SHA deployed to production release 20260723-113938-542cbb5e2d1f; manifest/image/container identity, library schema creation, rollback-write smoke, idle queues, HTTPS /library, persistent volumes, Nginx, and unchanged healthy Open WebUI passed.",
+        "2026-07-29 candidate checks cover team-default imports, explicit private legacy migration, six stable server sorts, versioned cursors, all-page select-all, marquee selection, and LAN-safe upload queue ids without live TOS or GPT calls."
       ],
       "notes": "Completed through the mandatory immutable 104-to-38 promotion path. Vehicle imports remain manual-tag-only and must not enqueue AI work."
     },
@@ -331,6 +332,23 @@
         "2026-07-27 eight common content/image/video nodes, frozen content/library snapshots, mocked Responses/Chat vision, bounded ffmpeg transforms/frames, ComfyUI-style quick insertion, focused checks, full baseline, local restart, and mocked 1440x960/390x844 browser checks passed without live external calls"
       ],
       "notes": "Keep ready_for_review until an operator approves one real Seedance smoke and one real Feishu write, and PostgreSQL migration/multi-user concurrency is live-verified. Dreamina CLI is not installed in the default local environment, so needs_config is the expected deterministic state."
+    },
+    {
+      "id": "copy-library",
+      "title": "Owner-scoped copy library and batch rewriting",
+      "status": "ready_for_review",
+      "definition_of_done": [
+        "Signed-in users can create, search, tag, share, edit, and confirm-delete copy entries while owner/admin write permissions remain enforced",
+        "Copy entries default to team visibility while explicit private entries remain supported",
+        "Six server-side sorts, batch visibility/delete commands, select-all, range, marquee, and keyboard selection remain deterministic and permission-aware",
+        "Copy-library inputs and scheduler assignments use frozen title, body, and tag snapshots without rereading changed or deleted sources",
+        "Default verification covers storage, permissions, sorting, selection, scrolling, Canvas integration, and responsive UI without paid model calls"
+      ],
+      "evidence": [
+        "2026-07-29 the deployed Canvas base contains copy CRUD, persistence, frozen Canvas inputs, scheduler assignment, and separate title/body text-node paths.",
+        "2026-07-29 candidate focused checks, TypeScript, lint, production build, and mocked desktop/mobile browser checks passed for team defaults, six sorts, permission-aware batch actions, range/marquee/keyboard selection, editable-target guards, and internal scrolling."
+      ],
+      "notes": "Keep ready_for_review until authenticated multi-user PostgreSQL use and an operator-approved real two-call text-model batch prove the live path. Default checks must not invoke paid models."
     }
   ]
 }

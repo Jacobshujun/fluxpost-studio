@@ -554,6 +554,60 @@ const step = compatible ? { action: "reuse", sourceNodeRunId } : { action: "bloc
 // Persist preview URLs/metadata only; accepted Seedance tasks query the saved submit_id.
 ```
 
+## Scenario: Shared Library Visibility, Sorting, And Selection
+
+### 1. Scope / Trigger
+
+- Applies when changing image-library or copy-library visibility defaults, list sorting, cursor pagination, or multi-selection behavior.
+
+### 2. Signatures
+
+- `GET /api/library/assets?...&sort=<LibraryListSort>&cursor=<versioned-cursor>` returns `LibraryAssetPage`.
+- `GET /api/copy-library?...&sort=<LibraryListSort>` returns visible copy entries and tags.
+- `LibraryListSort` is `newest | oldest | name-asc | name-desc | owner-asc | owner-desc`.
+
+### 3. Contracts
+
+- New image and copy entries default to `team` when visibility is omitted; callers may still explicitly create `private` entries.
+- Legacy material migration remains explicitly `private` and is not affected by the new-entry default.
+- Image pagination cursors carry a version, selected sort, normalized sort value, and stable id; list ordering and cursor filtering must use the same comparator.
+- Sort preference is browser-local per library. Selection is transient UI state and never changes ownership or edit permissions.
+- Batch visibility and delete operations reuse existing item-level authorization. Read-only team items report partial failure instead of being silently mutated.
+
+### 4. Validation & Error Matrix
+
+- Unknown sort -> normalize to `newest`.
+- Malformed cursor or cursor for another sort -> explicit invalid-cursor error; never continue with ambiguous ordering.
+- Repeated cursor while loading all filtered image pages -> stop with a visible error.
+- Batch contains read-only entries -> authorized entries may succeed; UI reports the succeeded/attempted count.
+- Ctrl/Cmd+A inside an editable control or open dialog -> preserve native editing behavior.
+
+### 5. Good/Base/Bad Cases
+
+- Good: `owner-asc` pages remain stable across equal submitter names because ids break ties in the same direction.
+- Base: omitting `sort` preserves newest-first behavior; an explicit private upload remains private.
+- Bad: using a newest cursor after switching to name sort, silently making migrated legacy assets shared, or treating a team-readable item as team-writable.
+
+### 6. Tests Required
+
+- `.trellis/verification/library_assets_check.mjs` covers defaults, explicit legacy privacy, six sorts, cursor binding, LAN-safe upload ids, and image selection contracts.
+- `.trellis/verification/copy_library_check.mjs` covers defaults, six sorts, permissions, range/marquee/keyboard selection, partial batch behavior, and bounded list scrolling.
+- TypeScript, lint, production build, full Trellis baseline, and mocked desktop/mobile browser checks must pass without external service calls.
+
+### 7. Wrong vs Correct
+
+#### Wrong
+
+```typescript
+const cursor = { createdAt: asset.createdAt, id: asset.id }; // Cannot prove which sort produced it.
+```
+
+#### Correct
+
+```typescript
+const cursor = { version: 1, sort, value: assetSortValue(asset, sort), id: asset.id };
+```
+
 ## Trellis Rules
 
 - `.trellis/` is the only active persistent AI collaboration system. `.trellis/spec/fluxpost/` is the FluxPost project-memory layer inside that system.

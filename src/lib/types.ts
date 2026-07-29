@@ -878,6 +878,14 @@ export type LibraryAssetRole = "reference" | "vehicle";
 
 export type LibraryVisibility = "private" | "team";
 
+export type LibraryListSort =
+  | "newest"
+  | "oldest"
+  | "name-asc"
+  | "name-desc"
+  | "owner-asc"
+  | "owner-desc";
+
 export type CopyLibraryEntry = {
   id: string;
   ownerUserId: string;

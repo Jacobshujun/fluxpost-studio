@@ -25,6 +25,7 @@ import {
   normalizeLibraryManualOverrides,
   normalizeStringList,
 } from "./library-tags";
+import { compareLibraryText, libraryListSortDirection, normalizeLibraryListSort } from "./library-sort";
 import { listMaterialLibrary } from "./material-library";
 import { deleteRuntimeMediaObject, persistLibraryObject } from "./runtime-media-storage";
 import type {
@@ -32,6 +33,7 @@ import type {
   LibraryAssetPage,
   LibraryAssetRole,
   LibraryCollection,
+  LibraryListSort,
   LibraryManualTagOverrides,
   LibraryTagProfile,
   LibraryTaggingJob,
@@ -65,6 +67,7 @@ export type LibraryAssetFilters = {
   people?: string[];
   customTags?: string[];
   tags?: string[];
+  sort?: LibraryListSort;
 };
 
 export type PatchLibraryAssetInput = Partial<Pick<LibraryAsset, "name" | "roles" | "visibility" | "collectionIds">> & {
@@ -87,7 +90,8 @@ export type ImportLibraryAssetInput = {
 export async function listLibraryAssets(account: WorkspaceAccessActor, filters: LibraryAssetFilters = {}): Promise<LibraryAssetPage> {
   const collections = await listLibraryCollectionsFromDb();
   const visibleCollections = collections.filter((item) => isWorkspaceAdmin(account) || item.ownerUserId === account.id);
-  const cursor = decodeCursor(filters.cursor);
+  const sort = normalizeLibraryListSort(filters.sort);
+  const cursor = decodeCursor(filters.cursor, sort);
   const query = normalizeSearch(filters.search);
   const assets = (await listLibraryAssetsFromDb())
     .filter((asset) => canReadAsset(account, asset))
@@ -105,17 +109,17 @@ export async function listLibraryAssets(account: WorkspaceAccessActor, filters: 
     .filter(({ tagProfile }) => matchDimension([tagProfile.people], filters.people))
     .filter(({ tagProfile }) => matchDimension(tagProfile.customTags, filters.customTags))
     .filter(({ tagProfile }) => matchesAllLibraryTags(tagProfile, filters.tags))
-    .sort((left, right) => compareAssets(left.asset, right.asset))
+    .sort((left, right) => compareAssets(left.asset, right.asset, sort))
     .map(({ asset }) => asset);
   const total = assets.length;
-  const afterCursor = cursor ? assets.filter((asset) => compareAssetToCursor(asset, cursor) > 0) : assets;
+  const afterCursor = cursor ? assets.filter((asset) => compareAssetToCursor(asset, cursor, sort) > 0) : assets;
   const limit = Math.max(1, Math.min(pageLimitMax, Math.floor(filters.limit || 60)));
   const page = afterCursor.slice(0, limit);
   return {
     assets: page.map((asset) => ({ ...asset, canEdit: canEditAsset(account, asset) })),
     collections: visibleCollections,
     total,
-    nextCursor: afterCursor.length > limit && page.length ? encodeCursor(page[page.length - 1]) : undefined,
+    nextCursor: afterCursor.length > limit && page.length ? encodeCursor(page[page.length - 1], sort) : undefined,
   };
 }
 
@@ -211,7 +215,7 @@ export async function createLibraryCollection(
 
 export async function importLibraryAsset(account: WorkspaceAccessActor, input: ImportLibraryAssetInput) {
   const role = requireRole(input.role);
-  const visibility = requireVisibility(input.visibility || "private");
+  const visibility = requireVisibility(input.visibility || "team");
   if (!input.bytes.length) throw new Error("Image file is empty.");
   if (input.bytes.length > maxImageBytes) throw new Error("Image exceeds the 30 MB limit.");
   const format = detectImageFormat(input.bytes);
@@ -379,6 +383,7 @@ export async function migrateLegacyMaterialAssets(account: WorkspaceAccessActor,
         originalName: legacy.name,
         relativePath: legacyRelativePath(legacy, library.folders),
         role: "vehicle",
+        visibility: "private",
         legacyMaterialAssetId: legacy.id,
         manualCustomTags: legacy.tags,
         owner: { id: legacy.ownerUserId || account.id, displayName: legacy.ownerDisplayName || account.displayName || account.id },
@@ -542,28 +547,46 @@ function searchAsset(asset: LibraryAsset, tags: LibraryTagProfile, query: string
     .some((value) => normalizeSearch(value).includes(query));
 }
 
-function compareAssets(left: LibraryAsset, right: LibraryAsset) {
-  return right.createdAt.localeCompare(left.createdAt) || right.id.localeCompare(left.id);
+type LibraryAssetCursor = { version: 1; sort: LibraryListSort; value: string; id: string };
+
+export function compareAssets(left: LibraryAsset, right: LibraryAsset, sort: LibraryListSort = "newest") {
+  return compareAssetSortValues(assetSortValue(left, sort), left.id, assetSortValue(right, sort), right.id, sort);
 }
 
-function compareAssetToCursor(asset: LibraryAsset, cursor: { createdAt: string; id: string }) {
-  if (asset.createdAt !== cursor.createdAt) return cursor.createdAt.localeCompare(asset.createdAt);
-  return cursor.id.localeCompare(asset.id);
+function compareAssetToCursor(asset: LibraryAsset, cursor: LibraryAssetCursor, sort: LibraryListSort) {
+  return compareAssetSortValues(assetSortValue(asset, sort), asset.id, cursor.value, cursor.id, sort);
 }
 
-function encodeCursor(asset: LibraryAsset) {
-  return Buffer.from(JSON.stringify({ createdAt: asset.createdAt, id: asset.id })).toString("base64url");
+function encodeCursor(asset: LibraryAsset, sort: LibraryListSort) {
+  const cursor: LibraryAssetCursor = { version: 1, sort, value: assetSortValue(asset, sort), id: asset.id };
+  return Buffer.from(JSON.stringify(cursor)).toString("base64url");
 }
 
-function decodeCursor(value?: string) {
+function decodeCursor(value: string | undefined, sort: LibraryListSort) {
   if (!value) return undefined;
   try {
-    const decoded = JSON.parse(Buffer.from(value, "base64url").toString("utf8")) as { createdAt?: unknown; id?: unknown };
-    if (typeof decoded.createdAt === "string" && typeof decoded.id === "string") return { createdAt: decoded.createdAt, id: decoded.id };
+    const decoded = JSON.parse(Buffer.from(value, "base64url").toString("utf8")) as Partial<LibraryAssetCursor>;
+    if (decoded.version === 1 && decoded.sort === sort && typeof decoded.value === "string" && typeof decoded.id === "string") {
+      return decoded as LibraryAssetCursor;
+    }
   } catch {
     throw new Error("Invalid library cursor.");
   }
   throw new Error("Invalid library cursor.");
+}
+
+function assetSortValue(asset: LibraryAsset, sort: LibraryListSort) {
+  if (sort === "newest" || sort === "oldest") return asset.createdAt;
+  if (sort === "name-asc" || sort === "name-desc") return asset.name;
+  return asset.ownerDisplayName;
+}
+
+function compareAssetSortValues(leftValue: string, leftId: string, rightValue: string, rightId: string, sort: LibraryListSort) {
+  const direction = libraryListSortDirection(sort);
+  const value = sort === "newest" || sort === "oldest"
+    ? leftValue.localeCompare(rightValue)
+    : compareLibraryText(leftValue, rightValue);
+  return direction * value || direction * leftId.localeCompare(rightId);
 }
 
 function normalizeRelativePath(value: string) {
@@ -623,5 +646,6 @@ export function parseLibraryAssetFilters(url: URL): LibraryAssetFilters {
     imageTypes: list("imageType"), scenes: list("scene"), vehicleModels: list("vehicleModel"),
     vehicleColors: list("vehicleColor"), angles: list("angle"), people: list("people"), customTags: list("customTag"),
     tags: list("tag"),
+    sort: normalizeLibraryListSort(url.searchParams.get("sort")),
   };
 }
