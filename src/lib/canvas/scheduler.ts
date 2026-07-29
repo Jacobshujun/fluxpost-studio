@@ -157,11 +157,11 @@ export async function preflightCanvasSchedule(scheduleId: string, account: Works
       ? scenePool
       : sampleCanvasAssets(scenePool, batch.sceneCount);
     if (!scenes.length) throw new Error(`${batch.name}: 场景素材池为空。`);
-    if (copyPool && !copyPool.length) throw new Error(`${batch.name}: 文案池为空。`);
+    const copies = copyPool ? assignCanvasScheduleCopies(copyPool, scenes.length, batch.name) : undefined;
     if (batch.vehicleCountMax > vehiclePool.length) {
       throw new Error(`${batch.name}: 车型素材池只有 ${vehiclePool.length} 张，无法满足最多 ${batch.vehicleCountMax} 张的不重复抽样。`);
     }
-    const contentTasks = scenes.map((scene, index) => makeContentTask(scene, vehiclePool, batch, now, undefined, copyPool?.[index % copyPool.length]));
+    const contentTasks = scenes.map((scene, index) => makeContentTask(scene, vehiclePool, batch, now, undefined, copies?.[index]));
     totalImageTasks += contentTasks.reduce((sum, task) => sum + task.imageTasks.length, 0);
     if (totalImageTasks > maxImageTasks) throw new Error(`本次调度包含 ${totalImageTasks} 个图片子任务，超过 V1 上限 ${maxImageTasks}。`);
     batches.push({ ...stripBatchRuntime(batch), status: "ready", contentTasks, updatedAt: now });
@@ -195,14 +195,17 @@ export async function resampleCanvasSchedule(
   if (!batch) throw new Error("Batch not found");
   const vehiclePool = await resolveScheduleAssetPool(account, "vehicle", batch.vehicleFilter);
   if (batch.vehicleCountMax > vehiclePool.length) throw new Error(`${batch.name}: 车型素材池数量不足。`);
+  const copies = !input.contentTaskId && batch.copyFilter
+    ? assignCanvasScheduleCopies(await resolveScheduleCopyPool(account, batch.copyFilter), batch.contentTasks.length, batch.name)
+    : undefined;
   const now = new Date().toISOString();
   let foundContent = !input.contentTaskId;
   const batches = current.batches.map((item) => item.id !== batch.id ? item : {
     ...item,
-    contentTasks: item.contentTasks.map((task) => {
+    contentTasks: item.contentTasks.map((task, index) => {
       if (input.contentTaskId && task.id !== input.contentTaskId) return task;
       foundContent = true;
-      return makeContentTask(task.scene, vehiclePool, item, now, task.id, task.copy);
+      return makeContentTask(task.scene, vehiclePool, item, now, task.id, input.contentTaskId ? task.copy : copies?.[index]);
     }),
     updatedAt: now,
   });
@@ -395,7 +398,11 @@ export async function retryCanvasScheduleImageTask(
   const run = await getCanvasRun(imageTask.runId, account);
   if (!run) throw new Error("Canvas child run not found");
   const latest = latestNodeAttempts(run.nodeRuns);
-  const failedNode = Array.from(latest.values()).find((nodeRun) => ["failed", "blocked", "needs_config"].includes(nodeRun.status));
+  const orderedAttempts = [
+    ...(run.run.steps || []).map((step) => latest.get(step.nodeId)).filter((nodeRun): nodeRun is NonNullable<typeof nodeRun> => Boolean(nodeRun)),
+    ...latest.values(),
+  ];
+  const failedNode = orderedAttempts.find((nodeRun) => ["failed", "blocked", "needs_config"].includes(nodeRun.status));
   if (!failedNode) throw new Error("No failed Canvas node is available to retry.");
   await retryCanvasNode(run.run.id, failedNode.nodeId, account);
   const now = new Date().toISOString();
@@ -515,6 +522,19 @@ export function sampleCanvasAssets<T>(items: T[], count: number, random: () => n
   return pool.slice(0, count);
 }
 
+export function assignCanvasScheduleCopies(
+  items: CanvasScheduleCopySnapshot[],
+  count: number,
+  batchName: string,
+  random: () => number = Math.random,
+) {
+  if (!Number.isInteger(count) || count < 0) throw new Error("Copy sample count must be a non-negative integer.");
+  if (count > items.length) {
+    throw new Error(`${batchName}: 文案池当前可用 ${items.length} 篇，本批次需要 ${count} 篇，无法保证批次内去重。`);
+  }
+  return sampleCanvasAssets(items, count, random);
+}
+
 export function createSchedulerImageGraph(
   source: CanvasGraph,
   bindings: CanvasScheduleBindings,
@@ -595,12 +615,13 @@ async function reconcileSchedule(current: CanvasSchedule) {
         const run = await getCanvasRunFromDb(imageTask.runId);
         if (!run) continue;
         const status = scheduleTaskStatusFromRun(run.status);
+        const error = terminalRunStatuses.has(run.status) ? run.error : undefined;
         const nodeRuns = terminalRunStatuses.has(run.status) ? await listCanvasNodeRunsFromDb(run.id) : [];
         const imageUrls = extractImageUrls(nodeRuns, bindings["image-target"]);
-        if (imageTask.status !== status || stableSerialize(imageTask.imageUrls) !== stableSerialize(imageUrls) || imageTask.error !== run.error) {
+        if (imageTask.status !== status || stableSerialize(imageTask.imageUrls) !== stableSerialize(imageUrls) || imageTask.error !== error) {
           imageTask.status = status;
           imageTask.imageUrls = imageUrls;
-          imageTask.error = run.error;
+          imageTask.error = error;
           imageTask.updatedAt = now;
           changed = true;
         }

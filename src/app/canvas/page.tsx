@@ -2420,7 +2420,7 @@ function ScheduleCopyFilterEditor({ filter, onChange, onDisable }: {
     entryIds: filter.entryIds.includes(entryId) ? filter.entryIds.filter((id) => id !== entryId) : [...filter.entryIds, entryId],
   });
   return <div className="canvas-schedule-assets canvas-schedule-copy-pool">
-    <div className="canvas-schedule-assets-head"><strong>文案池</strong><div className="canvas-task-filters"><button type="button" aria-pressed={filter.mode === "manual"} onClick={() => onChange({ ...filter, mode: "manual" })}>手动选择</button><button type="button" aria-pressed={filter.mode === "tags"} onClick={() => onChange({ ...filter, mode: "tags" })}>标签筛选</button><button type="button" onClick={onDisable}>停用</button></div></div>
+    <div className="canvas-schedule-assets-head"><strong>文案池</strong><div className="canvas-task-filters"><button type="button" aria-pressed={filter.mode === "manual"} onClick={() => onChange({ ...filter, mode: "manual" })}>手动选择</button><button type="button" aria-pressed={filter.mode === "tags"} onClick={() => onChange({ ...filter, mode: "tags" })}>条件随机</button><button type="button" onClick={onDisable}>停用</button></div></div>
     <div className="canvas-schedule-filter-row">
       <label><Search /><input value={filter.search} onChange={(event) => onChange({ ...filter, search: event.target.value })} placeholder="搜索文案" /></label>
       <input value={tagsText} disabled={filter.mode !== "tags"} onChange={(event) => onChange({ ...filter, tags: splitScheduleTags(event.target.value) })} placeholder="多个标签，AND" />
@@ -2428,7 +2428,7 @@ function ScheduleCopyFilterEditor({ filter, onChange, onDisable }: {
     <div className="canvas-schedule-copy-list">{data.entries.slice(0, 50).map((entry) => <button type="button" key={entry.id} className={filter.entryIds.includes(entry.id) ? "is-selected" : ""} onClick={() => filter.mode === "manual" && toggle(entry.id)} disabled={filter.mode === "tags"}>
       <BookOpenText /><span><strong>{entry.title}</strong><small>{entry.tags.join(" · ") || "无标签"}</small></span>{filter.mode === "manual" && filter.entryIds.includes(entry.id) ? <CheckCircle2 /> : null}
     </button>)}</div>
-    <small className="canvas-schedule-pool-count">{busy ? "正在筛选" : `匹配 ${data.entries.length} 篇${filter.mode === "manual" ? ` · 已选 ${filter.entryIds.length} 篇` : " · 将按标题稳定排序"}`}</small>
+    <small className="canvas-schedule-pool-count">{busy ? "正在筛选" : filter.mode === "manual" ? `匹配 ${data.entries.length} 篇 · 已选 ${filter.entryIds.length} 篇 · 批次内随机去重` : `条件匹配 ${data.entries.length} 篇 · 批次内随机去重`}</small>
     {error ? <p className="canvas-picker-error">{error}</p> : null}
   </div>;
 }

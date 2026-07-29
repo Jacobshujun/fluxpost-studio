@@ -9,6 +9,12 @@ const root = process.cwd();
 const read = (relative) => readFileSync(path.join(root, relative), "utf8");
 const temp = mkdtempSync(path.join(tmpdir(), "fluxpost-canvas-scheduler-"));
 let edgeSequence = 0;
+let storedSchedule;
+let savedSchedule;
+let workflowRecord;
+let copyEntries = [];
+let copyListCalls = 0;
+let libraryAssetsByRole = { reference: [], vehicle: [] };
 
 try {
   writeFileSync(path.join(temp, "toapis-image-api.js"), "exports.toApisImageRatios=['1:1'];exports.toApis4kImageRatios=['16:9'];", "utf8");
@@ -31,10 +37,25 @@ try {
   const schedulerModule = { exports: {} };
   const emptyAsync = async () => undefined;
   const stubs = {
-    "../copy-library": new Proxy({}, { get: () => emptyAsync }),
-    "../database": new Proxy({}, { get: () => emptyAsync }),
+    "../copy-library": new Proxy({
+      listCopyLibraryEntries: async () => {
+        copyListCalls += 1;
+        return { entries: structuredClone(copyEntries), tags: [] };
+      },
+    }, { get: (target, key) => target[key] || emptyAsync }),
+    "../database": new Proxy({
+      getCanvasScheduleFromDb: async () => structuredClone(storedSchedule),
+      updateCanvasScheduleInDb: async (schedule, expectedRevision) => {
+        if (!storedSchedule || storedSchedule.revision !== expectedRevision) return false;
+        savedSchedule = structuredClone(schedule);
+        storedSchedule = structuredClone(schedule);
+        return true;
+      },
+    }, { get: (target, key) => target[key] || emptyAsync }),
     "../generated-posts": new Proxy({}, { get: () => emptyAsync }),
-    "../library-assets": new Proxy({}, { get: () => emptyAsync }),
+    "../library-assets": new Proxy({
+      listLibraryAssets: async (_account, options) => ({ assets: structuredClone(libraryAssetsByRole[options.role] || []), nextCursor: undefined }),
+    }, { get: (target, key) => target[key] || emptyAsync }),
     "../workspace-ownership": {
       assertCanAccessWorkspaceRecord: () => undefined,
       canAccessWorkspaceOwner: () => true,
@@ -45,7 +66,9 @@ try {
     "./registry": registry,
     "./runs": new Proxy({}, { get: () => emptyAsync }),
     "./types": require(path.join(temp, "types.js")),
-    "./workflows": new Proxy({}, { get: () => emptyAsync }),
+    "./workflows": new Proxy({
+      getCanvasWorkflow: async () => structuredClone(workflowRecord),
+    }, { get: (target, key) => target[key] || emptyAsync }),
   };
   Function("require", "module", "exports", "structuredClone", "setTimeout", `${schedulerOutput}`)(
     (name) => {
@@ -129,6 +152,15 @@ try {
   assert.equal(sampled.length, 3);
   assert.equal(new Set(sampled).size, 3, "sampling must be without replacement");
   assert.throws(() => scheduler.sampleCanvasAssets(["a"], 2), /素材池只有 1 张/);
+  const copyCandidates = ["a", "b", "c", "d"].map((id) => ({ id, title: id, body: `${id} body`, tags: [], updatedAt: `${id} updated` }));
+  const sampledCopies = scheduler.assignCanvasScheduleCopies(copyCandidates, 3, "测试批次", () => 0);
+  assert.deepEqual(sampledCopies.map((copy) => copy.id), ["b", "c", "d"], "copy assignment must use the injected random source");
+  assert.equal(new Set(sampledCopies.map((copy) => copy.id)).size, 3, "copy sampling must be without replacement");
+  assert.deepEqual(copyCandidates.map((copy) => copy.id), ["a", "b", "c", "d"], "copy sampling must not mutate the candidate pool");
+  assert.throws(
+    () => scheduler.assignCanvasScheduleCopies(copyCandidates.slice(0, 1), 2, "测试批次", () => 0),
+    /测试批次: 文案池当前可用 1 篇，本批次需要 2 篇/,
+  );
 
   const scene = { id: "scene-asset", url: "/scene.jpg", name: "scene" };
   const vehicle = { id: "vehicle-asset", url: "/vehicle.jpg", name: "vehicle" };
@@ -181,13 +213,87 @@ try {
   assert.equal(graphModule.buildCanvasRunPlan(copyFinalGraph, ["content"]).blockers.length, 0);
   assert.match(
     schedulerSource,
-    /copyPool\?\.\[index % copyPool\.length\]/,
-    "Copy snapshots must be assigned round-robin across content tasks.",
+    /left\.title\.localeCompare\(right\.title, "zh-CN"\) \|\| left\.id\.localeCompare\(right\.id\)/,
+    "Copy pools must use stable title/id ordering.",
+  );
+
+  const account = { id: "owner", displayName: "Owner", role: "operator" };
+  const createdAt = "2026-07-29T00:00:00.000Z";
+  libraryAssetsByRole = {
+    reference: [
+      { id: "scene-1", role: "reference", publicUrl: "/scene-1.jpg", name: "scene 1", mimeType: "image/jpeg" },
+      { id: "scene-2", role: "reference", publicUrl: "/scene-2.jpg", name: "scene 2", mimeType: "image/jpeg" },
+    ],
+    vehicle: [{ id: "vehicle-1", role: "vehicle", publicUrl: "/vehicle-1.jpg", name: "vehicle 1", mimeType: "image/jpeg" }],
+  };
+  copyEntries = [{ id: "copy-1", title: "Only copy", body: "Only body", tags: ["ev"], updatedAt: createdAt }];
+  workflowRecord = { id: "workflow-1", name: "Workflow", revision: 3, ownerUserId: account.id, ownerDisplayName: account.displayName, graph: copyGraph };
+  storedSchedule = {
+    id: "schedule-1",
+    ownerUserId: account.id,
+    ownerDisplayName: account.displayName,
+    name: "Schedule",
+    revision: 1,
+    workflowId: workflowRecord.id,
+    workflowRevision: workflowRecord.revision,
+    status: "draft",
+    batches: [{
+      id: "batch-1",
+      name: "批次 1",
+      strategy: "input-1",
+      sceneFilter: { mode: "manual", assetIds: ["scene-1", "scene-2"], search: "", tags: [] },
+      sceneCount: 2,
+      vehicleFilter: { mode: "manual", assetIds: ["vehicle-1"], search: "", tags: [] },
+      vehicleCountMin: 1,
+      vehicleCountMax: 1,
+      copyFilter: { mode: "manual", entryIds: ["copy-1"], search: "", tags: [] },
+      status: "draft",
+      contentTasks: [],
+      createdAt,
+      updatedAt: createdAt,
+    }],
+    totalContentTasks: 0,
+    totalImageTasks: 0,
+    createdAt,
+    updatedAt: createdAt,
+  };
+  savedSchedule = undefined;
+  await assert.rejects(
+    scheduler.preflightCanvasSchedule(storedSchedule.id, account, storedSchedule.revision),
+    /批次 1: 文案池当前可用 1 篇，本批次需要 2 篇/,
+  );
+  assert.equal(savedSchedule, undefined, "insufficient copy capacity must fail before saving a preview");
+
+  copyEntries = ["1", "2", "3"].map((id) => ({ id: `copy-${id}`, title: `Copy ${id}`, body: `Body ${id}`, tags: ["ev"], updatedAt: createdAt }));
+  storedSchedule.batches[0].copyFilter.entryIds = copyEntries.map((entry) => entry.id);
+  const preview = await scheduler.preflightCanvasSchedule(storedSchedule.id, account, storedSchedule.revision);
+  assert.equal(new Set(preview.batches[0].contentTasks.map((task) => task.copy.id)).size, 2, "preflight copies must be unique within the batch");
+
+  copyEntries = copyEntries.map((entry) => ({ ...entry, title: `Resampled ${entry.title}`, updatedAt: "2026-07-29T01:00:00.000Z" }));
+  const wholeBatch = await scheduler.resampleCanvasSchedule(preview.id, account, { revision: preview.revision, batchId: "batch-1" });
+  const wholeCopies = wholeBatch.batches[0].contentTasks.map((task) => task.copy);
+  assert.equal(new Set(wholeCopies.map((copy) => copy.id)).size, 2, "whole-batch resampling must keep copy ids unique");
+  assert.ok(wholeCopies.every((copy) => copy.title.startsWith("Resampled ")), "whole-batch resampling must resolve fresh copy snapshots");
+
+  const callsBeforeSingleResample = copyListCalls;
+  copyEntries = copyEntries.map((entry) => ({ ...entry, title: `Changed ${entry.title}`, updatedAt: "2026-07-29T02:00:00.000Z" }));
+  const singleContentId = wholeBatch.batches[0].contentTasks[0].id;
+  const singleContent = await scheduler.resampleCanvasSchedule(wholeBatch.id, account, { revision: wholeBatch.revision, batchId: "batch-1", contentTaskId: singleContentId });
+  assert.equal(copyListCalls, callsBeforeSingleResample, "single-content resampling must not reread the copy library");
+  assert.deepEqual(
+    singleContent.batches[0].contentTasks.map((task) => task.copy),
+    wholeCopies,
+    "single-content resampling must preserve every frozen copy snapshot",
   );
   assert.match(
     schedulerSource,
-    /left\.title\.localeCompare\(right\.title, "zh-CN"\) \|\| left\.id\.localeCompare\(right\.id\)/,
-    "Copy pools must use stable title/id ordering.",
+    /\(run\.run\.steps \|\| \[\]\)\.map\(\(step\) => latest\.get\(step\.nodeId\)\)/,
+    "Image-child retry must prefer the earliest failed node in execution order instead of a downstream display failure.",
+  );
+  assert.match(
+    schedulerSource,
+    /const error = terminalRunStatuses\.has\(run\.status\) \? run\.error : undefined/,
+    "Active image children must not expose stale terminal errors.",
   );
 
   const skeleton = skeletonModule.createCanvasSchedulerSkeleton(
@@ -228,7 +334,7 @@ try {
   }
   const page = read("src/app/canvas/page.tsx");
   const css = read("src/app/globals.css");
-  for (const snippet of ["CanvasScheduleCenter", "ScheduleAssetFilterEditor", "多个标签，AND", "确认并启动", "接受新增候选图", "onSchedulerRoleChange", "insertSchedulerSkeleton", "Switch 输入", "画布绑定", "onSaveBindings", "saveQueueRef.current = saveQueueRef.current.then", "current?.id === schedule.id ? current.revision : schedule.revision"]) {
+  for (const snippet of ["CanvasScheduleCenter", "ScheduleAssetFilterEditor", "多个标签，AND", "条件随机", "批次内随机去重", "确认并启动", "接受新增候选图", "onSchedulerRoleChange", "insertSchedulerSkeleton", "Switch 输入", "画布绑定", "onSaveBindings", "saveQueueRef.current = saveQueueRef.current.then", "current?.id === schedule.id ? current.revision : schedule.revision"]) {
     assert.ok(page.includes(snippet), `Canvas UI is missing ${snippet}`);
   }
   assert.ok(css.includes(".canvas-schedule-panel"));
