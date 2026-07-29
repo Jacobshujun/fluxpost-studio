@@ -1,6 +1,6 @@
 # Project Brief
 
-Last updated: 2026-06-25
+Last updated: 2026-07-29
 
 ## Project Name, Goal, Path
 
@@ -8,7 +8,7 @@ Last updated: 2026-06-25
 - Package name: `social-content-studio`.
 - Project path: `C:\Users\Administrator\.codex\social-content-studio`.
 - GitHub upload remote: `https://github.com/Jacobshujun/fluxpost-studio.git`; it had no refs when checked on 2026-06-08 before the initial local snapshot upload.
-- Goal confirmed from README and code: local social media content production workspace covering TikHub harvesting, local image material scanning, GPT text draft generation, GPT image generation boundary, review edits, and Feishu CLI payload publishing.
+- Goal: social content production covering TikHub harvesting, managed TOS image libraries, GPT text/image generation, review, and Feishu CLI publishing.
 
 ## User Roles
 
@@ -25,7 +25,7 @@ Last updated: 2026-06-25
 2. Start the local web app.
 3. Search/crawl content by platform and keyword through `/content` and `/api/crawl/jobs`, batch-import supported source links into the content pool through `/content` and `/api/crawl/links`, or use `/api/simple/runs` for one-click production from keywords, exact source links, Feishu task numbers, one viral source link, original prompts, or selected content-pool samples.
 4. Assess harvested items with the crawl-stage content safety gate, then persist retained items into the runtime database-backed content pool.
-5. Optionally scan local image material folders through `/api/materials/scan`.
+5. Select managed reference/vehicle images from `/library`; simple runs freeze validated asset URLs into durable input.
 6. Generate post drafts through `/api/generate` or through the simple-run one-click workflow, including text and optional image generation.
 7. Review or edit drafts through `/api/review`.
 8. Publish approved posts through `/api/publish/feishu` or through the simple-run publish stage, which writes a local payload and calls Feishu CLI when target Base config is available.
@@ -71,8 +71,7 @@ Last updated: 2026-06-25
   - `POST /api/generate`
   - `POST /api/images`
   - `POST /api/lark/tasks`
-  - `GET|POST|PATCH|DELETE /api/materials/library`
-  - `POST /api/materials/scan`
+  - Managed image library: `/api/library/assets`, `/api/library/import`, and `/api/library/collections`
   - `GET|POST /api/production/batches`
   - `GET|POST|PATCH|DELETE /api/production/posts`
   - `POST /api/production/posts/regenerate`
@@ -89,8 +88,8 @@ Last updated: 2026-06-25
 - Local runtime database in this workspace: PostgreSQL on `127.0.0.1:5432` through `DATABASE_URL` in `.env.local`; do not expose the connection string.
 - Fallback runtime database when `DATABASE_URL` is not configured: `data/fluxpost.db` SQLite.
 - PostgreSQL schema: `db/migrations/001_initial_postgres.sql`.
-- Legacy JSON files under `data/` can be used as one-time migration sources: `content-pool.json`, `batch-production.json`, `generated-posts.json`, `material-library.json`, and `execution-log.json`.
-- Runtime database stores workspace accounts/sessions, content projects, generated posts, batch jobs, material folders/assets, execution logs, crawl jobs, runtime posts, simple runs, and workspace settings metadata, including saved production prompts and the `/distribution-check` audit prompt.
+- Legacy JSON under `data/` may migrate content pool, batch production, generated posts, and execution logs. Retired `material-library.json` is not imported.
+- Runtime storage includes accounts/sessions, content, posts, jobs, managed libraries, logs, queues, simple runs, and workspace settings.
 - Runtime database also stores `simple_run_queue`, the durable queue table for simple-mode run execution; `image_generation_queue`, the local image job observability table for ComfyUI Klein; `feishu_publish_queue`, the durable queue table for asynchronous Feishu CLI writes; and `distribution_check_jobs`, the durable queue/progress table for large Feishu distribution audits.
 - Workspace sessions use an HttpOnly `fluxpost_session` browser cookie. In default whitelist mode, the first-admin setup key is environment-driven and not stored in the runtime database; daily account passwords are stored only as Node `scrypt` hashes.
 - SQLite-to-PostgreSQL migration script: `scripts/db/migrate-sqlite-to-postgres.mjs`. It copies metadata and JSON payload rows; it does not move media binaries.
@@ -99,7 +98,7 @@ Last updated: 2026-06-25
 - Generated AI images: `public/generated/`.
 - Crawled media cache and video frames: `public/media/crawl/`.
 - Source-based generated posts can store final source video materials in optional `GeneratedPost.videoUrls` only when the operator enables the default-off `引用源视频素材` / `includeSourceVideo` switch; resolution prefers cached local `downloadedVideoUrl` over remote `videoUrl`.
-- Local material scanning accepts image extensions only: `.png`, `.jpg`, `.jpeg`, `.webp`, `.gif`.
+- Legacy local-material APIs/tables are retired and dropped idempotently; original image files are not deleted.
 - Video frame extraction uses the system `ffmpeg` executable through `src/lib/media-cache.ts`.
 - Video transcription receives the cached local video path from `src/lib/media-cache.ts` only when a crawl/import/simple-run task passes `enableVideoTranscription === true`; when the switch is enabled and `ARK_API_KEY` or the existing `VOLCENGINE_ASR_APP_KEY` alias is configured, `src/lib/video-transcription.ts` extracts MP3 audio with `ffmpeg`, uploads the MP3 to Ark `/files` with `purpose=user_data`, calls Ark `/responses` with `input_audio.file_id`, and merges successful transcript text into `NormalizedSourceItem.contentText` before rewrite.
 - Sensitive config is environment-based and must stay out of Trellis docs: `.env.local`, `.env*`, API keys, Feishu tokens, and local user material paths when private.
@@ -128,6 +127,7 @@ Last updated: 2026-06-25
 - Simple-mode throughput knobs include `SIMPLE_RUN_MAX_ITEMS` (fallback `500`, hard ceiling `2000`) and `SIMPLE_RUN_WORKER_CONCURRENCY` (fallback `4`, hard ceiling `10`).
 - Feishu publish queue throughput is controlled by `FEISHU_PUBLISH_WORKER_CONCURRENCY` (fallback `1`, hard ceiling `5`), with a per-owner running-job guard so Feishu CLI writes are serialized per user/owner.
 - Feishu attachment-upload throughput is controlled separately by `WORKER_FEISHU_ATTACHMENT_CONCURRENCY` (fallback `3`, hard ceiling `10`) so large attachment batches do not use the same high concurrency as record creation.
+- `WORKER_CANVAS_RUN_CONCURRENCY` controls Canvas run consumers (default `8`, cap `20`); provider pools still apply.
 - Distribution audit throughput is isolated from content collection and generation: `DISTRIBUTION_CHECK_WORKER_CONCURRENCY` defaults to `1` and caps at `3`; per-job work uses dedicated pools `WORKER_DISTRIBUTION_RECORD_CONCURRENCY` fallback `8` cap `20`, `WORKER_DISTRIBUTION_GPT_CONCURRENCY` fallback `6` cap `15`, `WORKER_DISTRIBUTION_FEISHU_READ_CONCURRENCY` fallback `8` cap `20`, and `WORKER_DISTRIBUTION_FEISHU_WRITE_CONCURRENCY` fallback `2` cap `5`.
 
 ## Deployment Facts
@@ -135,14 +135,14 @@ Last updated: 2026-06-25
 - Confirmed local dev entry: `npm run dev`.
 - Confirmed production entry: `npm run build` followed by `npm run start`.
 - Confirmed local LAN production refresh entry: `npm run local:restart`.
-- Code-fix promotion no longer uses local application/build/test/browser evidence. Local clean worktrees are limited to editing, diff review, and Git operations.
-- `next.config.ts` sets Turbopack root to `process.cwd()`.
+- Code-fix promotion uses an isolated clean worktree, focused checks, the complete deterministic baseline, and task-specific local browser evidence where applicable. Live provider calls remain explicit manual checks.
+- `next.config.ts` defaults to non-standalone, enables standalone with `FLUXPOST_STANDALONE_BUILD=1` in Docker, and excludes runtime/debug paths from tracing.
 - GitHub-driven Ubuntu deployment is owned by `scripts/deploy/vps-bootstrap.sh`, `scripts/deploy/vps-verify-candidate.sh`, `scripts/deploy/vps-deploy.sh`, `scripts/deploy/vps-enable-domain.sh`, `compose.yaml`, and `docs/deployment/ubuntu-docker.md`.
 - A fresh bootstrap requires at least 2 GB RAM, installs Docker Engine/Compose from Docker's official Ubuntu repository, generates PostgreSQL and first-admin setup secrets, writes `/opt/fluxpost-studio/shared/env.production` with mode `0600`, and creates the standard repo/releases/current/bin layout.
 - Pre-domain mode sets `FLUXPOST_PROXY_ENABLED=false`, starts only PostgreSQL and app, and binds the app to `127.0.0.1:${FLUXPOST_APP_PORT:-3101}` for SSH-tunnel access. `enable-domain.sh` requires resolvable DNS, persists `FLUXPOST_PUBLIC_HOST`, enables Caddy, and verifies public HTTPS.
 - Existing deployments without the new deployment keys retain compatibility defaults: proxy enabled, public host `bbs.vollov1.xyz`, and loopback app port `3101`.
-- Staging `104.243.21.233:29891` uses Docker Compose project `fluxpost`, Caddy for `bbs.vollov1.xyz`, isolated PostgreSQL/config/media volumes, and protected `x-ui`/`xray`/`frps` services. It is the mandatory complete candidate and bug-scenario gate.
-- Production `38.76.210.136` uses Nginx for `flux.lightmoment.net`, loopback app port 3101, persistent FluxPost volumes, and co-located Open WebUI. It accepts only the unchanged full SHA that passed 104.
+- Production `38.76.210.136` is the only remote FluxPost deployment target. It uses Nginx for `https://flux.lightmoment.net`, loopback app port 3101, persistent FluxPost volumes, and co-located Open WebUI.
+- Historical staging `104.243.21.233:29891` was permanently retired as a FluxPost target on 2026-07-23 without changing its unrelated services. It is not a test, promotion, or deployment gate.
 - Candidate verification writes a non-secret manifest under `/opt/fluxpost-studio/verifications/` and never reads environment files, mounts runtime volumes, invokes Compose, or changes the active release.
 
 ## Not Covered Or Pending Confirmation

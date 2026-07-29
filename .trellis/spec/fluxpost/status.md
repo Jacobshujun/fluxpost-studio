@@ -4,14 +4,14 @@ Last updated: 2026-07-29
 
 ## One-Line Status
 
-Production 38 runs verified Canvas SHA `d05caddb17875bb9a5dde924f9e4e8654f8d3ee3`; the isolated shared-library release candidate is awaiting exact-SHA baseline, remote equality, and read-only production preflight.
+Production 38 runs verified Canvas SHA `d05caddb17875bb9a5dde924f9e4e8654f8d3ee3`; the expanded isolated release candidate is awaiting commit, exact-SHA baseline, remote equality, and read-only production preflight.
 
 ## Current Focus
 
 - Candidate branch `release/shared-libraries-20260729` is based on the deployed Canvas release, not the dirty divergent local `main`.
-- Candidate scope is limited to the LAN-safe member upload fix, team-default image/copy entries, six stable sorts, versioned image cursors, batch selection/actions, and fixed internal scrolling.
-- Legacy material types and migration remain present and private. Tag-input, image-role removal, unfinished tasks, runtime data, local configuration, screenshots, and unrelated infrastructure changes remain excluded.
-- Focused library, copy, Canvas, scheduler, and deployment checks, TypeScript, lint, production build, and mocked desktop/mobile browser regression passed before commit without external service calls.
+- Candidate scope includes the LAN-safe member upload fix, shared image/copy library visibility/sorting/selection, legacy local-material retirement, local Next build slimming, Canvas condition-random unique copy assignment, bounded Canvas run workers, and directly related stale-error/retry-order reliability fixes.
+- Legacy local-material types, routes, tables, and JSON migration are retired; original local image files are not deleted. Tag-input, image-role removal, unfinished tasks, runtime data, local configuration, screenshots, root wrapper v2, Feishu table-id/CLI edits, review-upload refactoring, and unrelated infrastructure changes remain excluded.
+- The untouched candidate baseline passed before the expanded port. After the port, focused library/local-material/build-output/Canvas checks, TypeScript, lint, the 47-route production build, and the VPS deployment contract check passed locally without external service calls; the complete baseline remains required on the final committed SHA.
 - Production mutation remains blocked until the committed full SHA passes the complete baseline, is pushed to a dedicated branch with matching remote SHA, passes read-only production preflight, and receives explicit user approval.
 
 ## Next Entry
@@ -23,8 +23,8 @@ Production 38 runs verified Canvas SHA `d05caddb17875bb9a5dde924f9e4e8654f8d3ee3
 
 ## Recent Verification
 
-- 2026-07-29: Focused library/copy/Canvas/scheduler/deployment checks, TypeScript, lint with six existing Canvas warnings, production build, and mocked 1440x960/390x844 library browser checks passed. Four screenshots were inspected without page overflow or incoherent overlap.
-- 2026-07-29: Candidate inventory review preserved legacy migration and excluded debug screenshots, environment/runtime files, tag-input changes, image-role changes, unfinished tasks, and unrelated deployment work.
+- 2026-07-29: After the expanded port, focused local-material, local-build-output, library, Canvas scheduler/workflow/concurrency, simple-run, and viral checks passed; TypeScript passed and lint reported only six existing Canvas warnings. The VPS check still requires the staging/Docker gate because sandboxed Bash spawn returned `EPERM`.
+- 2026-07-29: Candidate inventory review retired the approved legacy local-material surfaces and excluded debug screenshots, environment/runtime files, tag-input changes, image-role changes, unfinished tasks, root wrapper v2, Feishu/media refactors, and unrelated deployment work.
 - Earlier production evidence is preserved in the active release task and verification history.
 
 ## Current Risks

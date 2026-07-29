@@ -16,12 +16,23 @@
 - Port the completed shared-library task contracts: default team visibility, six stable server-side sorts, versioned image cursors, selection preference, desktop marquee selection, copy batch actions, selection shortcuts, and fixed copy-library scrolling.
 - Relevant tracked implementation/check files are limited to the two library pages and CSS modules, the library import route, the image/copy domain modules, shared types, and their focused deterministic checks.
 - Relevant new helper modules are `library-sort.ts`, `list-selection.ts`, `marquee-selection.ts`, `use-library-list-sort.ts`, and `use-marquee-selection.ts`.
+- The user subsequently approved executing the grouped cleanup and release plan. The expanded candidate also includes the verified legacy local-material retirement, local Next build slimming, Canvas condition-random unique copy assignment, bounded Canvas queue concurrency, and directly related Canvas run/retry reliability fixes.
 
 ## Overlap Risk
 
 - The same dirty files also contain unrelated legacy-material removal, image-role removal, and tag-input changes that are not part of the approved shared-library task.
-- Therefore copying whole dirty files into the candidate is unsafe. Port requirement-owned hunks against `d05cadd`, preserving its legacy material types/migration behavior and all remote production contracts.
+- Therefore copying whole dirty files into the candidate is unsafe. Port requirement-owned hunks against `d05cadd`, preserving all remote production contracts while retiring only the approved legacy local-material types, routes, tables, and migration path.
 - Unrelated changes under `src/app/content/page.tsx`, configuration, Feishu, review upload, Docker/deployment scripts, broad Trellis verification rewrites, unfinished tasks, screenshots, and `.tmp-*` paths remain excluded unless a focused candidate failure proves a direct dependency.
+- Targeted comparison found the root deployment wrapper at version 2 while the candidate already contains version-3 wrapper locking and candidate verification; copying root deployment files would be a regression, so they remain excluded.
+- Root Feishu table-id/CLI edits and review-upload delegation have no release-owned task/evidence boundary and remain excluded. Root media and broad verification diffs also contain branch-divergence noise and must not be copied wholesale.
+- `src/lib/canvas/runs.ts` and `src/lib/canvas/scheduler.ts` mix separately owned behavior. Port random-copy, queue-concurrency, stale-error, and retry-order hunks independently and verify each contract.
+
+## Expanded Local Evidence
+
+- Legacy local-material retirement has focused API/schema/simple-run checks, TypeScript, changed-file lint, builds/restarts, HTTP route probes, and read-only PostgreSQL/SQLite evidence recorded in the task/status files.
+- Local build slimming has a completed seven-item acceptance checklist covering default non-standalone builds, Docker standalone wiring, tracing exclusions, build/start behavior, and preservation of runtime media/config.
+- Canvas condition-random copy assignment has completed deterministic scheduler/workflow checks for no-replacement sampling, strict capacity errors, whole-batch resampling, and single-content snapshot preservation.
+- Canvas queue concurrency and run reliability have focused concurrency, workflow, and scheduler checks; final candidate verification must still run the full baseline and must not restart port 3001 while a real simple run is active.
 
 ## Release And Promotion Contract
 

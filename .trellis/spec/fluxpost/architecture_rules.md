@@ -76,7 +76,7 @@ Last updated: 2026-07-20
 - Content pool persistence belongs in `src/lib/content-pool.ts`.
 - Batch production persistence belongs in `src/lib/batch-production.ts`.
 - Generated post persistence belongs in `src/lib/generated-posts.ts`.
-- Material library persistence belongs in `src/lib/material-library.ts`.
+- Managed reference/vehicle library persistence belongs in `src/lib/library-assets.ts` and the library tables in `src/lib/database.ts`. The retired local-material service, routes, tables, and JSON migration must not be reintroduced.
 - Execution logs belong in `src/lib/activity-log.ts`.
 - Normal execution-log appends use the row-level append helper in `src/lib/database.ts`; regular log writes must not read and rewrite the whole execution-log table.
 - Runtime storage backend selection, SQLite/PostgreSQL connection setup, schema setup, legacy JSON migration, and persistence helpers belong in `src/lib/database.ts`.
@@ -120,6 +120,7 @@ Last updated: 2026-07-20
 - Keep external API calls server-side.
 - Do not expose API keys or tokens through API responses.
 - TikHub, media cache, GPT, image-generation, Feishu, and production fan-out should use the shared pools from `src/lib/concurrency.ts`; do not introduce new hard-coded provider concurrency numbers in feature code.
+- Durable Canvas run consumers must use the bounded `canvasRun` setting from `src/lib/concurrency.ts`; provider-specific limits still apply inside node execution.
 - Local ComfyUI Klein work must use the dedicated `localImage` pool from `src/lib/concurrency.ts`. Keep it separate from the high-throughput `image` pool because the current local workflow cannot run more than one image at a time.
 - `src/lib/image-generation.ts` must treat stale/historical `provider="comfyui_klein"` tasks as normal OpenAI Images tasks when `isComfyUiKleinConfigured()` is false, so turning `COMFYUI_KLEIN_ENABLED` off actually restores GPT-Image-2 behavior.
 - Simple-mode API routes should enqueue work and return run state; long-running simple workflow execution belongs in the simple-run worker path, not in the API route handler.
@@ -275,7 +276,7 @@ return NextResponse.json({ status: getConfigStatus(), advanced: getAdvancedConfi
 - Treat `public/media/crawl` and `public/generated` as runtime media stores. Do not rely on Next production static file discovery for newly created files; use the local media API route.
 - Do not write directly to runtime data from the frontend.
 - Do not mutate `data/`, `public/generated/`, `public/media/`, `.tmp-*.json`, or `test-artifacts/` during Trellis-only work except through explicit verification that is documented.
-- Do not reintroduce JSON file read/write stores for content pool, generated posts, batch jobs, material library, execution logs, crawl jobs, simple runs, or runtime posts.
+- Do not reintroduce JSON file read/write stores for content pool, generated posts, batch jobs, managed image/copy libraries, execution logs, crawl jobs, simple runs, or runtime posts. The retired local `material-library.json` migration and `material_folders`/`material_assets` tables must remain absent.
 - Runtime PostgreSQL tables should store metadata, indexed status/time fields, and JSON payloads; do not store crawled/generated media binaries in PostgreSQL.
 - Workspace account passwords must remain hashed; session cookies/tokens must not be stored or exposed in plaintext outside the browser cookie value. Store only session token hashes in runtime tables.
 - In whitelist auth mode, `WORKSPACE_ACCESS_PASSWORD` stays environment-driven as the first-admin setup key and is never persisted to runtime tables. Daily sign-in must use per-user account-table password hashes, and whitelist users should use stable account ids shaped as `whitelist:{username}` for local owner attribution.
@@ -290,6 +291,7 @@ return NextResponse.json({ status: getConfigStatus(), advanced: getAdvancedConfi
 ## Deployment Rules
 
 - Confirmed entries are `npm run dev`, `npm run build`, and `npm run start`.
+- Default local builds must remain non-standalone. Docker verification/builder stages set `FLUXPOST_STANDALONE_BUILD=1`, and output tracing must exclude runtime `data`, generated/media, and debug-artifact paths.
 - For the local LAN production server on port `3001`, use `npm run local:restart` after frontend or API code changes. Do not rely on `npm run build` alone to refresh an already-running `next start` process.
 - Use `npm run dev:lan` when hot reload is desired during active frontend development.
 - GitHub-driven Ubuntu production is owned by `scripts/deploy/vps-bootstrap.sh`, `scripts/deploy/vps-deploy.sh`, `scripts/deploy/vps-enable-domain.sh`, root `compose.yaml`, and `docs/deployment/ubuntu-docker.md`; do not add a second server layout or competing update script.
@@ -509,6 +511,8 @@ throw new ImageProviderError("accepted task timed out", {
 - `isolated` requires one target: literal inputs execute from current config, other ancestors reuse compatible success, and missing reuse blocks before enqueue. Ordinary compatibility covers node id/type/version/config/mode plus normalized resolved inputs; preview compatibility uses incoming-edge identity. It never silently reruns a model/write ancestor.
 - Planning propagates output-port availability. Missing required input blocks only that branch; optional input does not. Confirmation includes only `execute` steps, excluding reuse/bypass/disabled/blocked. With-upstream branch blockers are non-fatal so independent branches run; isolated blockers are fatal preflight errors.
 - Runs keep immutable snapshots and node attempts with `reusedFrom`; statuses include `reused`, `bypassed`, and `disabled`. Seedance persists `submit_id`/`gen_status`, requeues pending work, and queries the original id.
+- Canvas queue consumers are bounded by `WORKER_CANVAS_RUN_CONCURRENCY`. Pending provider runs clear stale terminal errors, and scheduler image retries choose the earliest failed node in saved execution-step order.
+- Scheduler copy filters sample without replacement within each batch. Insufficient copy capacity fails preflight, whole-batch resampling refreshes unique copy snapshots, and single-content resampling preserves its frozen copy snapshot.
 - Handles stay row-relative; image import uses authenticated `persistRuntimeMedia` and stores references only. Previews use `contain` and natural/artifact dimensions. Theme variables, aligned source-colored edge beams, reduced-motion disabling, and native editing/clipboard behavior remain required.
 - Editable desktop canvas supports blank-pane right-click/Tab search and dangling-edge insertion. Search matches label/description/type/category; connection context filters equal artifact kinds, exposes ambiguous port labels, rejects occupied single inputs, and creates the selected typed edge. Mobile keeps structural quick-add disabled.
 
@@ -535,7 +539,7 @@ throw new ImageProviderError("accepted task timed out", {
 
 ### 6. Tests Required
 
-- `canvas_workflows_check.mjs`: registration, typed graph/clipboard/snapshot modes, all common-node ports/validators, template/split/index/time helpers, mocked Responses/Chat vision requests, snapshot-only literal projection, allow-listed media commands/limits/persistence/missing binaries, branch planning, confirmation exclusion, reuse, preview, isolated execution, result UI, and quick-add contracts.
+- `canvas_workflows_check.mjs`, `canvas_scheduler_check.mjs`, and `concurrency_check.mjs`: workflow registration/types/reuse, scheduler copy sampling/capacity/resampling/retry/error behavior, and bounded Canvas run-worker wiring.
 - TypeScript, lint, build, full Trellis baseline, and local production restart must pass without paid provider calls.
 - Mocked desktop/mobile browser coverage must exercise preview/fullscreen, modes, both run commands, review links, statuses, snapshot pickers, right-click/Tab search, keyboard navigation, compatible/ambiguous ports, automatic edges, mobile structural lockout, and overflow. Real model/Seedance/Feishu/PostgreSQL concurrency remain operator-approved.
 
