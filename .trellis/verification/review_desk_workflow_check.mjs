@@ -4,7 +4,7 @@ import path from "node:path";
 const projectRoot = process.cwd();
 
 function read(relativePath) {
-  return readFileSync(path.join(projectRoot, relativePath), "utf8");
+  return readFileSync(path.join(projectRoot, relativePath), "utf8").replace(/\r\n/g, "\n");
 }
 
 function assertContains(source, pattern, message) {
