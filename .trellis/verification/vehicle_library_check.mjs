@@ -14,6 +14,7 @@ const contains = (value, pattern, message) => assert(pattern.test(value), messag
 
 const tags = read("src/lib/library-tags.ts");
 const assets = read("src/lib/library-assets.ts");
+const sort = read("src/lib/library-sort.ts");
 const tagging = read("src/lib/library-tagging.ts");
 const tagRoute = read("src/app/api/library/tags/route.ts");
 const assetRoute = read("src/app/api/library/assets/[id]/route.ts");
@@ -34,6 +35,13 @@ const {
   mergeLibraryTagProfile,
 } = tagModule.exports;
 
+const compiledSort = ts.transpileModule(sort, {
+  compilerOptions: { module: ts.ModuleKind.CommonJS, target: ts.ScriptTarget.ES2022 },
+  fileName: "library-sort.ts",
+}).outputText;
+const sortModule = { exports: {} };
+new Function("exports", "module", compiledSort)(sortModule.exports, sortModule);
+
 const compiledAssets = ts.transpileModule(assets, {
   compilerOptions: { esModuleInterop: true, module: ts.ModuleKind.CommonJS, target: ts.ScriptTarget.ES2022 },
   fileName: "library-assets.ts",
@@ -53,6 +61,7 @@ const assetRequire = (specifier) => {
     saveLibraryAssetAndTaggingJobToDb: async (asset, job) => { atomicAssetJobSaves.push({ asset, job }); return { asset, job }; },
   };
   if (specifier === "./library-image") return { readLibraryImageDimensions: () => ({ width: 1, height: 1 }) };
+  if (specifier === "./library-sort") return sortModule.exports;
   if (specifier === "./library-tags") return tagModule.exports;
   if (specifier === "./material-library") return { listMaterialLibrary: async () => ({ folders: [], assets: [] }) };
   if (specifier === "./runtime-media-storage") return {
