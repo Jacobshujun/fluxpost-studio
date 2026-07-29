@@ -8,8 +8,8 @@
 
 <!-- @@@auto:current-status -->
 - **Active File**: `journal-1.md`
-- **Total Sessions**: 8
-- **Last Active**: 2026-07-28
+- **Total Sessions**: 9
+- **Last Active**: 2026-07-29
 <!-- @@@/auto:current-status -->
 
 ---
@@ -19,7 +19,7 @@
 <!-- @@@auto:active-documents -->
 | File | Lines | Status |
 |------|-------|--------|
-| `journal-1.md` | ~277 | Active |
+| `journal-1.md` | ~310 | Active |
 <!-- @@@/auto:active-documents -->
 
 ---
@@ -29,6 +29,7 @@
 <!-- @@@auto:session-history -->
 | # | Date | Title | Commits | Branch |
 |---|------|-------|---------|--------|
+| 9 | 2026-07-29 | Fix member library uploads on LAN HTTP | `9092a11` | `main` |
 | 8 | 2026-07-28 | Libraries and Canvas batch rewriting | `6227c7e`, `503610f` | `main` |
 | 7 | 2026-07-27 | Infinite canvas workflows and common nodes | `164cb9e` | `main` |
 | 6 | 2026-07-23 | Repair review HEIC and TOS delivery | `2fef2e5`, `7e5f972` | `main` |

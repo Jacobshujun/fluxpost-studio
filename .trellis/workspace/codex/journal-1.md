@@ -275,3 +275,36 @@ Added reference and vehicle libraries, owner-scoped copy library CRUD, frozen Ca
 ### Next Steps
 
 - None - task complete
+
+
+## Session 9: Fix member library uploads on LAN HTTP
+
+**Date**: 2026-07-29
+**Task**: Fix member library uploads on LAN HTTP
+**Branch**: `main`
+
+### Summary
+
+Replaced secure-context browser UUID usage in image upload queues, surfaced synchronous preparation failures, added operator permission regressions, restarted local production, and verified with randomUUID forced to throw.
+
+### Main Changes
+
+(Add details)
+
+### Git Commits
+
+| Hash | Message |
+|------|---------|
+| `9092a11` | (see git log) |
+
+### Testing
+
+- [OK] (Add test results)
+
+### Status
+
+[OK] **Completed**
+
+### Next Steps
+
+- None - task complete
