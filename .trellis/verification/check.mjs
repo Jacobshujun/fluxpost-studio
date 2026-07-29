@@ -18,6 +18,7 @@ const nodeChecks = [
   ["Advanced config admin boundary check", "advanced_config_check.mjs"],
   ["TOS runtime media storage check", "tos_runtime_media_check.mjs"],
   ["Feishu CLI identity auto-init check", "feishu_cli_identity_check.mjs"],
+  ["Local Next build output check", "local_build_output_check.mjs"],
   ["Ubuntu VPS deployment check", "vps_deployment_check.mjs"],
   ["Execution log append check", "execution_log_append_check.mjs"],
   ["Keyword relevance check", "keyword_relevance_check.mjs"],
