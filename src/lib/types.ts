@@ -835,45 +835,6 @@ export type ImageGenerationQueueJob = {
   error?: string;
 };
 
-export type MaterialAsset = {
-  id: string;
-  path: string;
-  name: string;
-  extension: string;
-};
-
-export type MaterialAssetKind = "image" | "document" | "other";
-
-export type MaterialFolder = {
-  id: string;
-  ownerUserId?: string;
-  ownerDisplayName?: string;
-  name: string;
-  parentId?: string;
-  createdAt: string;
-  updatedAt: string;
-};
-
-export type MaterialLibraryAsset = {
-  id: string;
-  ownerUserId?: string;
-  ownerDisplayName?: string;
-  folderId: string;
-  path: string;
-  name: string;
-  extension: string;
-  kind: MaterialAssetKind;
-  tags: string[];
-  visualProfile?: MaterialVisualProfile;
-  createdAt: string;
-  updatedAt: string;
-};
-
-export type MaterialLibrarySnapshot = {
-  folders: MaterialFolder[];
-  assets: MaterialLibraryAsset[];
-};
-
 export type LibraryAssetRole = "reference" | "vehicle";
 
 export type LibraryVisibility = "private" | "team";
@@ -968,7 +929,6 @@ export type LibraryAsset = {
   taggingError?: string;
   cleanupStatus: LibraryObjectCleanupStatus;
   cleanupError?: string;
-  legacyMaterialAssetId?: string;
   canEdit?: boolean;
   createdAt: string;
   updatedAt: string;

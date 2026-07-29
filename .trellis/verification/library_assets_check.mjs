@@ -60,7 +60,6 @@ contains(tagging, /isTransientTaggingError/, "Transient tagging failures must be
 contains(tagging, /mergeLibraryTagProfile\(aiTags, current\.manualOverrides\)/, "Retagging must preserve manual overrides.");
 contains(assets, /cleanupStatus: "failed"/, "Object cleanup failures must remain visible.");
 contains(assets, /requireVisibility\(input\.visibility \|\| "team"\)/, "New library imports must default to team visibility.");
-contains(assets, /migrateLegacyMaterialAssets[\s\S]*role: "vehicle",[\s\S]*visibility: "private"/, "Legacy material migration must preserve private visibility explicitly.");
 contains(assets, /type LibraryAssetCursor = \{ version: 1; sort: LibraryListSort; value: string; id: string \}/, "Sorted image cursors must carry their sort contract.");
 contains(assets, /compareAssets\(left\.asset, right\.asset, sort\)[\s\S]*compareAssetToCursor\(asset, cursor, sort\)/, "Image list and cursor pagination must use the same sort contract.");
 
@@ -72,7 +71,6 @@ const routeFiles = [
   "src/app/api/library/collections/[collectionId]/assets/[assetId]/route.ts",
   "src/app/api/library/tagging/route.ts",
   "src/app/api/library/tagging/jobs/route.ts",
-  "src/app/api/library/migrate/route.ts",
   "src/app/api/library/tags/route.ts",
 ];
 for (const route of routeFiles) contains(read(route), /requireWorkspaceAccount\(request\)/, `${route} must require authentication.`);

@@ -23,7 +23,7 @@ const types = read("src/lib/types.ts");
 const database = read("src/lib/database.ts");
 
 has(home, /function CompactWorkspace\(/, "Home must render one compact-only workspace component.");
-has(home, /<CompactWorkspace[\s\S]*materialPaths=\{materialLibraryAssetPaths\}/, "Compact workspace must receive material-library paths.");
+has(home, /<CompactWorkspace[\s\S]*materialPaths=\{vehicleLibrary\.assets\.map\(\(asset\) => asset\.publicUrl\)\}/, "Compact workspace must receive vehicle-library URL snapshots.");
 has(home, /<SimpleOverallProgressBar/, "Compact workspace must retain the overall multi-run progress surface.");
 has(home, /href="\/content"/, "Home must retain the content desk entry.");
 has(home, /href="\/review"/, "Home must retain the review desk entry.");
@@ -36,11 +36,20 @@ lacks(home, /variant=|SimpleWorkspaceVariant|const isCompact/, "Compact workspac
 lacks(home, /简单版|高级版/, "Home must not expose removed mode names.");
 lacks(home, /\/api\/generate|\/api\/production\/batches|\/api\/production\/posts\/regenerate/, "Home must not call removed production APIs.");
 
-has(content, /type ContentDeskView = "content" \| "materials"/, "Content desk must own content/material views.");
-has(content, /function MaterialLibraryWorkspace\(/, "Content desk must own material-library management UI.");
-has(content, /\/api\/materials\/scan/, "Content desk must retain material scanning.");
-has(content, /\/api\/materials\/library/, "Content desk must retain material-library CRUD.");
-has(content, /onPreviewAsset/, "Content desk must retain material preview actions.");
+lacks(content, /MaterialLibraryWorkspace|\/api\/materials\//, "Content desk must not expose the retired local material library.");
+lacks(types, /MaterialFolder|MaterialLibraryAsset/, "Retired local-material types must be absent.");
+lacks(database, /CREATE TABLE IF NOT EXISTS material_(?:folders|assets)/, "Runtime schema must not recreate retired local-material tables.");
+
+for (const retiredPath of [
+  "src/app/api/materials/library/route.ts",
+  "src/app/api/materials/preview/route.ts",
+  "src/app/api/materials/scan/route.ts",
+  "src/app/api/library/migrate/route.ts",
+  "src/lib/material-library.ts",
+  "src/lib/materials.ts",
+]) {
+  if (existsSync(path.join(root, retiredPath))) throw new Error(`Retired local-material surface still exists: ${retiredPath}`);
+}
 
 missing("src/app/api/generate/route.ts", "Advanced single-generate route must be removed.");
 missing("src/app/api/production/batches/route.ts", "Advanced batch-production route must be removed.");

@@ -1,9 +1,7 @@
 import { createHash, randomUUID } from "node:crypto";
-import { readFile } from "node:fs/promises";
 import path from "node:path";
 import {
   deleteLibraryAssetFromDb,
-  findLibraryAssetByLegacyMaterialIdFromDb,
   findLibraryAssetByOwnerHashFromDb,
   getLibraryAssetFromDb,
   listLibraryAssetsFromDb,
@@ -26,7 +24,6 @@ import {
   normalizeStringList,
 } from "./library-tags";
 import { compareLibraryText, libraryListSortDirection, normalizeLibraryListSort } from "./library-sort";
-import { listMaterialLibrary } from "./material-library";
 import { deleteRuntimeMediaObject, persistLibraryObject } from "./runtime-media-storage";
 import type {
   LibraryAsset,
@@ -41,7 +38,6 @@ import type {
   LibraryTagBatchResult,
   LibraryTagSuggestion,
   LibraryVisibility,
-  MaterialLibraryAsset,
 } from "./types";
 import { isWorkspaceAdmin, scopeWorkspaceOwner, type WorkspaceAccessActor } from "./workspace-ownership";
 
@@ -82,7 +78,6 @@ export type ImportLibraryAssetInput = {
   role: LibraryAssetRole;
   visibility?: LibraryVisibility;
   collectionId?: string;
-  legacyMaterialAssetId?: string;
   manualCustomTags?: string[];
   owner?: { id: string; displayName: string };
 };
@@ -121,6 +116,26 @@ export async function listLibraryAssets(account: WorkspaceAccessActor, filters: 
     total,
     nextCursor: afterCursor.length > limit && page.length ? encodeCursor(page[page.length - 1], sort) : undefined,
   };
+}
+
+export async function resolveLibraryAssetSelections(
+  account: WorkspaceAccessActor,
+  assetIds: unknown[],
+  role: LibraryAssetRole,
+) {
+  const ids = Array.from(new Set(assetIds.map((value) => {
+    if (typeof value !== "string") throw new Error("Vehicle library asset id must be a string.");
+    return value.trim();
+  }).filter(Boolean)));
+  if (!ids.length) return [];
+  const assetsById = new Map((await listLibraryAssetsFromDb()).map((asset) => [asset.id, asset]));
+  return ids.map((id) => {
+    const asset = assetsById.get(id);
+    if (!asset || !canReadAsset(account, asset) || !asset.roles.includes(role)) {
+      throw new Error(`Vehicle library asset is not accessible: ${id}`);
+    }
+    return asset;
+  });
 }
 
 export async function listLibraryTagSuggestions(
@@ -222,18 +237,10 @@ export async function importLibraryAsset(account: WorkspaceAccessActor, input: I
   if (!format) throw new Error("Unsupported or invalid image file. Use JPEG, PNG, GIF, or WebP.");
   const owner = input.owner || { id: account.id, displayName: account.displayName || account.id };
   const sha256 = createHash("sha256").update(input.bytes).digest("hex");
-  let duplicate = await findLibraryAssetByOwnerHashFromDb(owner.id, sha256);
+  const duplicate = await findLibraryAssetByOwnerHashFromDb(owner.id, sha256);
   if (duplicate?.roles.includes(role)) {
     return { status: "skipped_duplicate" as const, asset: { ...duplicate, canEdit: canEditAsset(account, duplicate) } };
   }
-  if (input.legacyMaterialAssetId) {
-    const migrated = await findLibraryAssetByLegacyMaterialIdFromDb(input.legacyMaterialAssetId);
-    if (migrated?.roles.includes(role)) {
-      return { status: "skipped_duplicate" as const, asset: { ...migrated, canEdit: canEditAsset(account, migrated) } };
-    }
-    duplicate ||= migrated;
-  }
-
   const relativePath = normalizeRelativePath(input.relativePath || input.originalName);
   const collectionId = input.collectionId
     ? (await validateCollectionIds(account, [input.collectionId], [role]))[0]
@@ -243,7 +250,6 @@ export async function importLibraryAsset(account: WorkspaceAccessActor, input: I
   if (duplicate) {
     return reuseLibraryAssetForRole(account, duplicate, role, {
       collectionId,
-      legacyMaterialAssetId: input.legacyMaterialAssetId,
       manualCustomTags: input.manualCustomTags,
     });
   }
@@ -277,7 +283,6 @@ export async function importLibraryAsset(account: WorkspaceAccessActor, input: I
     effectiveTags: mergeLibraryTagProfile(aiTags, manualOverrides),
     taggingStatus: role === "reference" ? "queued" : "completed",
     cleanupStatus: "ready",
-    legacyMaterialAssetId: input.legacyMaterialAssetId,
     createdAt: now,
     updatedAt: now,
   };
@@ -294,7 +299,6 @@ export async function importLibraryAsset(account: WorkspaceAccessActor, input: I
       if (racedDuplicate) {
         return reuseLibraryAssetForRole(account, racedDuplicate, role, {
           collectionId,
-          legacyMaterialAssetId: input.legacyMaterialAssetId,
           manualCustomTags: input.manualCustomTags,
         });
       }
@@ -366,43 +370,11 @@ export async function permanentlyDeleteLibraryAsset(account: WorkspaceAccessActo
   }
 }
 
-export async function migrateLegacyMaterialAssets(account: WorkspaceAccessActor, limit = 20) {
-  if (!isWorkspaceAdmin(account)) throw new Error("Only workspace admins can migrate legacy materials.");
-  const library = await listMaterialLibrary(account);
-  const candidates = library.assets.filter((asset) => asset.kind === "image").slice(0, Math.max(1, Math.min(100, limit)));
-  const result = { imported: 0, skipped: 0, failed: 0, errors: [] as string[] };
-  for (const legacy of candidates) {
-    try {
-      if (await findLibraryAssetByLegacyMaterialIdFromDb(legacy.id)) {
-        result.skipped += 1;
-        continue;
-      }
-      const bytes = await readFile(legacy.path);
-      const imported = await importLibraryAsset(account, {
-        bytes,
-        originalName: legacy.name,
-        relativePath: legacyRelativePath(legacy, library.folders),
-        role: "vehicle",
-        visibility: "private",
-        legacyMaterialAssetId: legacy.id,
-        manualCustomTags: legacy.tags,
-        owner: { id: legacy.ownerUserId || account.id, displayName: legacy.ownerDisplayName || account.displayName || account.id },
-      });
-      if (imported.status === "imported") result.imported += 1;
-      else result.skipped += 1;
-    } catch (error) {
-      result.failed += 1;
-      result.errors.push(`${legacy.name}: ${errorMessage(error)}`);
-    }
-  }
-  return result;
-}
-
 async function reuseLibraryAssetForRole(
   account: WorkspaceAccessActor,
   asset: LibraryAsset,
   role: LibraryAssetRole,
-  input: { collectionId?: string; legacyMaterialAssetId?: string; manualCustomTags?: string[] },
+  input: { collectionId?: string; manualCustomTags?: string[] },
 ) {
   if (!canEditAsset(account, asset)) throw new Error("Library asset not found or is read-only.");
   const manualOverrides = input.manualCustomTags?.length
@@ -420,7 +392,6 @@ async function reuseLibraryAssetForRole(
       : asset.collectionIds,
     manualOverrides,
     effectiveTags: mergeLibraryTagProfile(asset.aiTags, manualOverrides),
-    legacyMaterialAssetId: asset.legacyMaterialAssetId || input.legacyMaterialAssetId,
     updatedAt: now,
   };
   const saved = await saveLibraryAssetRoleChange(asset, next);
@@ -604,20 +575,6 @@ function safeObjectSegment(value: string) {
 
 function normalizeSearch(value?: string) {
   return (value || "").trim().toLocaleLowerCase();
-}
-
-function legacyRelativePath(asset: MaterialLibraryAsset, folders: Array<{ id: string; name: string; parentId?: string }>) {
-  const parts: string[] = [asset.name];
-  let folderId: string | undefined = asset.folderId;
-  const visited = new Set<string>();
-  while (folderId && folderId !== "root" && !visited.has(folderId)) {
-    visited.add(folderId);
-    const folder = folders.find((item) => item.id === folderId);
-    if (!folder) break;
-    parts.unshift(folder.name);
-    folderId = folder.parentId;
-  }
-  return normalizeRelativePath(parts.join("/"));
 }
 
 function errorMessage(error: unknown) {

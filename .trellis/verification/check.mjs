@@ -63,7 +63,6 @@ const nodeChecks = [
   ["Title prompt guard check", "title_prompt_guard_check.mjs"],
   ["Image prompt guard check", "image_prompt_guard_check.mjs"],
   ["Image generation toggle check", "image_generation_toggle_check.mjs"],
-  ["Material library preview check", "material_library_preview_check.mjs"],
   ["Review preview layout check", "review_preview_layout_check.mjs"],
   ["Review desk workflow check", "review_desk_workflow_check.mjs"],
   ["Review desk scroll layout check", "review_desk_scroll_layout_check.mjs"],

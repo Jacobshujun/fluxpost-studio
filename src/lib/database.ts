@@ -15,7 +15,6 @@ import type {
   LibraryAsset,
   LibraryCollection,
   LibraryTaggingJob,
-  MaterialLibrarySnapshot,
   SimpleRun,
   SimpleRunQueueItem,
   WorkspaceAccountRecord,
@@ -197,8 +196,6 @@ type StoreTable =
   | "content_projects"
   | "generated_posts"
   | "batch_jobs"
-  | "material_folders"
-  | "material_assets"
   | "execution_logs"
   | "crawl_jobs"
   | "runtime_posts"
@@ -265,21 +262,6 @@ export async function findLibraryAssetByOwnerHashFromDb(ownerUserId: string, sha
   const row = getSqliteDatabase().prepare(
     "SELECT data_json FROM library_assets WHERE owner_user_id = ? AND sha256 = ? AND deleted_at IS NULL LIMIT 1",
   ).get(ownerUserId, sha256) as JsonRow | undefined;
-  return row ? fromJson<LibraryAsset>(row.data_json) : undefined;
-}
-
-export async function findLibraryAssetByLegacyMaterialIdFromDb(legacyMaterialAssetId: string) {
-  await ensureDatabaseReady();
-  if (getDatabaseBackend() === "postgres") {
-    const result = await getPostgresPool().query<JsonRow>(
-      "SELECT data_json FROM library_assets WHERE legacy_material_asset_id = $1 AND deleted_at IS NULL LIMIT 1",
-      [legacyMaterialAssetId],
-    );
-    return result.rows[0] ? fromJson<LibraryAsset>(result.rows[0].data_json) : undefined;
-  }
-  const row = getSqliteDatabase().prepare(
-    "SELECT data_json FROM library_assets WHERE legacy_material_asset_id = ? AND deleted_at IS NULL LIMIT 1",
-  ).get(legacyMaterialAssetId) as JsonRow | undefined;
   return row ? fromJson<LibraryAsset>(row.data_json) : undefined;
 }
 
@@ -642,43 +624,6 @@ export async function deleteGeneratedPostsFromDb(postIds: string[]) {
   runSqliteTransaction(db, () => {
     const statement = db.prepare("DELETE FROM generated_posts WHERE id = ?");
     ids.forEach((id) => statement.run(id));
-  });
-}
-
-export async function readMaterialLibraryFromDb(): Promise<MaterialLibrarySnapshot> {
-  return {
-    folders: await readJsonRows("material_folders", "created_at ASC"),
-    assets: await readJsonRows("material_assets", "updated_at DESC"),
-  };
-}
-
-export async function writeMaterialLibraryToDb(library: MaterialLibrarySnapshot) {
-  await ensureDatabaseReady();
-  if (getDatabaseBackend() === "postgres") {
-    await writeMaterialLibraryPostgres(library);
-    return;
-  }
-
-  const db = getSqliteDatabase();
-  runSqliteTransaction(db, () => {
-    db.prepare("DELETE FROM material_folders").run();
-    db.prepare("DELETE FROM material_assets").run();
-
-    const insertFolder = db.prepare(`
-      INSERT INTO material_folders (id, parent_id, name, created_at, updated_at, data_json)
-      VALUES (?, ?, ?, ?, ?, ?)
-    `);
-    for (const folder of library.folders) {
-      insertFolder.run(folder.id, folder.parentId || null, folder.name, folder.createdAt, folder.updatedAt, toJson(folder));
-    }
-
-    const insertAsset = db.prepare(`
-      INSERT INTO material_assets (id, folder_id, path, kind, created_at, updated_at, data_json)
-      VALUES (?, ?, ?, ?, ?, ?, ?)
-    `);
-    for (const asset of library.assets) {
-      insertAsset.run(asset.id, asset.folderId, asset.path, asset.kind, asset.createdAt, asset.updatedAt, toJson(asset));
-    }
   });
 }
 
@@ -2568,6 +2513,7 @@ function getSqliteDatabase() {
   sqliteDatabase = new DatabaseSync(sqliteStorePath);
   configureSqliteDatabase(sqliteDatabase);
   createSqliteSchema(sqliteDatabase);
+  retireLegacyMaterialLibrarySqlite(sqliteDatabase);
   migrateLegacyJsonToSqlite(sqliteDatabase);
   return sqliteDatabase;
 }
@@ -2596,7 +2542,16 @@ function getPostgresPool() {
 
 async function initializePostgres() {
   await getPostgresPool().query(postgresSchemaSql);
+  await retireLegacyMaterialLibraryPostgres();
   await migrateLegacyJsonToPostgres();
+}
+
+function retireLegacyMaterialLibrarySqlite(db: SqliteDatabase) {
+  db.exec("DROP TABLE IF EXISTS material_assets; DROP TABLE IF EXISTS material_folders;");
+}
+
+async function retireLegacyMaterialLibraryPostgres() {
+  await getPostgresPool().query("DROP TABLE IF EXISTS material_assets; DROP TABLE IF EXISTS material_folders;");
 }
 
 async function readJsonRows<T>(table: StoreTable, orderBy?: string, limit?: number): Promise<T[]> {
@@ -2708,36 +2663,6 @@ async function updateSimpleRunQueueTerminalStatus(
   `).run(status, now, now, error || null, queueId, workerId);
 }
 
-async function writeMaterialLibraryPostgres(library: MaterialLibrarySnapshot) {
-  const client = await getPostgresPool().connect();
-  try {
-    await client.query("BEGIN");
-    await client.query("DELETE FROM material_folders");
-    await client.query("DELETE FROM material_assets");
-
-    for (const folder of library.folders) {
-      await client.query(
-        resolvePostgresInsertSql("material_folders"),
-        [folder.id, folder.parentId || null, folder.name, folder.createdAt, folder.updatedAt, toJson(folder)],
-      );
-    }
-
-    for (const asset of library.assets) {
-      await client.query(
-        resolvePostgresInsertSql("material_assets"),
-        [asset.id, asset.folderId, asset.path, asset.kind, asset.createdAt, asset.updatedAt, toJson(asset)],
-      );
-    }
-
-    await client.query("COMMIT");
-  } catch (error) {
-    await client.query("ROLLBACK");
-    throw error;
-  } finally {
-    client.release();
-  }
-}
-
 function configureSqliteDatabase(db: SqliteDatabase) {
   db.exec(`
     PRAGMA journal_mode = WAL;
@@ -2814,27 +2739,6 @@ function createSqliteSchema(db: SqliteDatabase) {
     );
     CREATE INDEX IF NOT EXISTS idx_batch_jobs_created_at ON batch_jobs(created_at DESC);
 
-    CREATE TABLE IF NOT EXISTS material_folders (
-      id TEXT PRIMARY KEY,
-      parent_id TEXT,
-      name TEXT NOT NULL,
-      created_at TEXT NOT NULL,
-      updated_at TEXT NOT NULL,
-      data_json TEXT NOT NULL
-    );
-    CREATE INDEX IF NOT EXISTS idx_material_folders_parent_id ON material_folders(parent_id);
-
-    CREATE TABLE IF NOT EXISTS material_assets (
-      id TEXT PRIMARY KEY,
-      folder_id TEXT NOT NULL,
-      path TEXT NOT NULL UNIQUE,
-      kind TEXT NOT NULL,
-      created_at TEXT NOT NULL,
-      updated_at TEXT NOT NULL,
-      data_json TEXT NOT NULL
-    );
-    CREATE INDEX IF NOT EXISTS idx_material_assets_folder_id ON material_assets(folder_id);
-    CREATE INDEX IF NOT EXISTS idx_material_assets_updated_at ON material_assets(updated_at DESC);
 
     CREATE TABLE IF NOT EXISTS execution_logs (
       id TEXT PRIMARY KEY,
@@ -3056,7 +2960,6 @@ function createSqliteSchema(db: SqliteDatabase) {
       public_url TEXT NOT NULL,
       tagging_status TEXT NOT NULL,
       cleanup_status TEXT NOT NULL,
-      legacy_material_asset_id TEXT,
       created_at TEXT NOT NULL,
       updated_at TEXT NOT NULL,
       deleted_at TEXT,
@@ -3066,7 +2969,6 @@ function createSqliteSchema(db: SqliteDatabase) {
     CREATE INDEX IF NOT EXISTS idx_library_assets_owner_created ON library_assets(owner_user_id, created_at DESC, id DESC);
     CREATE INDEX IF NOT EXISTS idx_library_assets_visibility_created ON library_assets(visibility, created_at DESC, id DESC);
     CREATE INDEX IF NOT EXISTS idx_library_assets_tagging_status ON library_assets(tagging_status, updated_at DESC);
-    CREATE UNIQUE INDEX IF NOT EXISTS idx_library_assets_legacy_material ON library_assets(legacy_material_asset_id) WHERE legacy_material_asset_id IS NOT NULL;
 
     CREATE TABLE IF NOT EXISTS library_asset_roles (
       asset_id TEXT NOT NULL,
@@ -3212,27 +3114,6 @@ const postgresSchemaSql = `
   );
   CREATE INDEX IF NOT EXISTS idx_batch_jobs_created_at ON batch_jobs(created_at DESC);
 
-  CREATE TABLE IF NOT EXISTS material_folders (
-    id TEXT PRIMARY KEY,
-    parent_id TEXT,
-    name TEXT NOT NULL,
-    created_at TIMESTAMPTZ NOT NULL,
-    updated_at TIMESTAMPTZ NOT NULL,
-    data_json JSONB NOT NULL
-  );
-  CREATE INDEX IF NOT EXISTS idx_material_folders_parent_id ON material_folders(parent_id);
-
-  CREATE TABLE IF NOT EXISTS material_assets (
-    id TEXT PRIMARY KEY,
-    folder_id TEXT NOT NULL,
-    path TEXT NOT NULL UNIQUE,
-    kind TEXT NOT NULL,
-    created_at TIMESTAMPTZ NOT NULL,
-    updated_at TIMESTAMPTZ NOT NULL,
-    data_json JSONB NOT NULL
-  );
-  CREATE INDEX IF NOT EXISTS idx_material_assets_folder_id ON material_assets(folder_id);
-  CREATE INDEX IF NOT EXISTS idx_material_assets_updated_at ON material_assets(updated_at DESC);
 
   CREATE TABLE IF NOT EXISTS execution_logs (
     id TEXT PRIMARY KEY,
@@ -3454,7 +3335,6 @@ const postgresSchemaSql = `
     public_url TEXT NOT NULL,
     tagging_status TEXT NOT NULL,
     cleanup_status TEXT NOT NULL,
-    legacy_material_asset_id TEXT,
     created_at TIMESTAMPTZ NOT NULL,
     updated_at TIMESTAMPTZ NOT NULL,
     deleted_at TIMESTAMPTZ,
@@ -3464,7 +3344,6 @@ const postgresSchemaSql = `
   CREATE INDEX IF NOT EXISTS idx_library_assets_owner_created ON library_assets(owner_user_id, created_at DESC, id DESC);
   CREATE INDEX IF NOT EXISTS idx_library_assets_visibility_created ON library_assets(visibility, created_at DESC, id DESC);
   CREATE INDEX IF NOT EXISTS idx_library_assets_tagging_status ON library_assets(tagging_status, updated_at DESC);
-  CREATE UNIQUE INDEX IF NOT EXISTS idx_library_assets_legacy_material ON library_assets(legacy_material_asset_id) WHERE legacy_material_asset_id IS NOT NULL;
 
   CREATE TABLE IF NOT EXISTS library_asset_roles (
     asset_id TEXT NOT NULL REFERENCES library_assets(id) ON DELETE CASCADE,
@@ -3580,33 +3459,6 @@ async function migrateLegacyJsonToPostgres() {
       }
     }
 
-    if ((await postgresTableCount(client, "material_folders")) === 0 && (await postgresTableCount(client, "material_assets")) === 0) {
-      const store = readLegacyJson<MaterialLibrarySnapshot>("material-library.json");
-      if (store && (Array.isArray(store.folders) || Array.isArray(store.assets))) {
-        for (const folder of store.folders || []) {
-          await client.query(resolvePostgresInsertSql("material_folders"), [
-            folder.id,
-            folder.parentId || null,
-            folder.name,
-            folder.createdAt,
-            folder.updatedAt,
-            toJson(folder),
-          ]);
-        }
-        for (const asset of store.assets || []) {
-          await client.query(resolvePostgresInsertSql("material_assets"), [
-            asset.id,
-            asset.folderId,
-            asset.path,
-            asset.kind,
-            asset.createdAt,
-            asset.updatedAt,
-            toJson(asset),
-          ]);
-        }
-      }
-    }
-
     if ((await postgresTableCount(client, "execution_logs")) === 0) {
       const store = readLegacyJson<{ entries?: ExecutionLogEntry[] }>("execution-log.json");
       if (Array.isArray(store?.entries)) {
@@ -3662,13 +3514,6 @@ function migrateLegacyJsonToSqlite(db: SqliteDatabase) {
       if (Array.isArray(store?.posts)) writeGeneratedPostsRowsSqlite(db, store.posts);
     }
 
-    if (sqliteTableCount(db, "material_folders") === 0 && sqliteTableCount(db, "material_assets") === 0) {
-      const store = readLegacyJson<MaterialLibrarySnapshot>("material-library.json");
-      if (store && (Array.isArray(store.folders) || Array.isArray(store.assets))) {
-        writeMaterialRowsSqlite(db, { folders: store.folders || [], assets: store.assets || [] });
-      }
-    }
-
     if (sqliteTableCount(db, "execution_logs") === 0) {
       const store = readLegacyJson<{ entries?: ExecutionLogEntry[] }>("execution-log.json");
       if (Array.isArray(store?.entries)) writeExecutionRowsSqlite(db, store.entries);
@@ -3698,12 +3543,6 @@ function resolveSqliteInsertSql(table: StoreTable) {
   if (table === "batch_jobs") {
     return "INSERT INTO batch_jobs (id, status, created_at, updated_at, data_json) VALUES (?, ?, ?, ?, ?)";
   }
-  if (table === "material_folders") {
-    return "INSERT INTO material_folders (id, parent_id, name, created_at, updated_at, data_json) VALUES (?, ?, ?, ?, ?, ?)";
-  }
-  if (table === "material_assets") {
-    return "INSERT INTO material_assets (id, folder_id, path, kind, created_at, updated_at, data_json) VALUES (?, ?, ?, ?, ?, ?, ?)";
-  }
   if (table === "execution_logs") {
     return "INSERT INTO execution_logs (id, scope, action, status, created_at, data_json) VALUES (?, ?, ?, ?, ?, ?)";
   }
@@ -3720,12 +3559,6 @@ function resolvePostgresInsertSql(table: StoreTable) {
   if (table === "batch_jobs") {
     return "INSERT INTO batch_jobs (id, status, created_at, updated_at, data_json) VALUES ($1, $2, $3, $4, $5::jsonb)";
   }
-  if (table === "material_folders") {
-    return "INSERT INTO material_folders (id, parent_id, name, created_at, updated_at, data_json) VALUES ($1, $2, $3, $4, $5, $6::jsonb)";
-  }
-  if (table === "material_assets") {
-    return "INSERT INTO material_assets (id, folder_id, path, kind, created_at, updated_at, data_json) VALUES ($1, $2, $3, $4, $5, $6, $7::jsonb)";
-  }
   if (table === "execution_logs") {
     return "INSERT INTO execution_logs (id, scope, action, status, created_at, data_json) VALUES ($1, $2, $3, $4, $5, $6::jsonb)";
   }
@@ -3736,18 +3569,6 @@ function writeGeneratedPostsRowsSqlite(db: SqliteDatabase, posts: GeneratedPost[
   const insert = db.prepare(resolveSqliteInsertSql("generated_posts"));
   for (const post of posts) {
     insert.run(post.id, post.sourceItemId, post.platform, post.status, post.createdAt || post.updatedAt, post.updatedAt, toJson(post));
-  }
-}
-
-function writeMaterialRowsSqlite(db: SqliteDatabase, library: MaterialLibrarySnapshot) {
-  const insertFolder = db.prepare(resolveSqliteInsertSql("material_folders"));
-  for (const folder of library.folders) {
-    insertFolder.run(folder.id, folder.parentId || null, folder.name, folder.createdAt, folder.updatedAt, toJson(folder));
-  }
-
-  const insertAsset = db.prepare(resolveSqliteInsertSql("material_assets"));
-  for (const asset of library.assets) {
-    insertAsset.run(asset.id, asset.folderId, asset.path, asset.kind, asset.createdAt, asset.updatedAt, toJson(asset));
   }
 }
 
@@ -3949,12 +3770,12 @@ async function saveLibraryAssetPostgres(client: PoolClient, asset: LibraryAsset)
   await client.query(
     `INSERT INTO library_assets (
        id, owner_user_id, visibility, sha256, object_key, public_url, tagging_status, cleanup_status,
-       legacy_material_asset_id, created_at, updated_at, deleted_at, data_json
-     ) VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13::jsonb)
+       created_at, updated_at, deleted_at, data_json
+     ) VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12::jsonb)
      ON CONFLICT(id) DO UPDATE SET owner_user_id=excluded.owner_user_id, visibility=excluded.visibility,
        sha256=excluded.sha256, object_key=excluded.object_key, public_url=excluded.public_url,
        tagging_status=excluded.tagging_status, cleanup_status=excluded.cleanup_status,
-       legacy_material_asset_id=excluded.legacy_material_asset_id, updated_at=excluded.updated_at,
+       updated_at=excluded.updated_at,
        deleted_at=excluded.deleted_at, data_json=excluded.data_json`,
     libraryAssetValues(asset),
   );
@@ -3982,12 +3803,12 @@ function saveLibraryAssetSqlite(db: SqliteDatabase, asset: LibraryAsset) {
   db.prepare(
     `INSERT INTO library_assets (
        id, owner_user_id, visibility, sha256, object_key, public_url, tagging_status, cleanup_status,
-       legacy_material_asset_id, created_at, updated_at, deleted_at, data_json
-     ) VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?)
+       created_at, updated_at, deleted_at, data_json
+     ) VALUES (?,?,?,?,?,?,?,?,?,?,?,?)
      ON CONFLICT(id) DO UPDATE SET owner_user_id=excluded.owner_user_id, visibility=excluded.visibility,
        sha256=excluded.sha256, object_key=excluded.object_key, public_url=excluded.public_url,
        tagging_status=excluded.tagging_status, cleanup_status=excluded.cleanup_status,
-       legacy_material_asset_id=excluded.legacy_material_asset_id, updated_at=excluded.updated_at,
+       updated_at=excluded.updated_at,
        deleted_at=excluded.deleted_at, data_json=excluded.data_json`,
   ).run(...libraryAssetValues(asset));
   db.prepare("DELETE FROM library_asset_roles WHERE asset_id=?").run(asset.id);
@@ -4017,7 +3838,6 @@ function libraryAssetValues(asset: LibraryAsset) {
     asset.publicUrl,
     asset.taggingStatus,
     asset.cleanupStatus,
-    asset.legacyMaterialAssetId || null,
     asset.createdAt,
     asset.updatedAt,
     asset.deletedAt || null,
@@ -4124,8 +3944,6 @@ function assertStoreTable(table: StoreTable) {
     "content_projects",
     "generated_posts",
     "batch_jobs",
-    "material_folders",
-    "material_assets",
     "execution_logs",
     "crawl_jobs",
     "runtime_posts",

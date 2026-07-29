@@ -48,9 +48,9 @@ import {
   type ConfigStatus,
   type CrawlPlatform,
   type ImageStrategyPrompts,
-  type MaterialFolder,
-  type MaterialLibraryAsset,
-  type MaterialLibrarySnapshot,
+  type LibraryAsset,
+  type LibraryAssetPage,
+  type LibraryCollection,
   type SimpleRun,
   type SimpleRunMediaSettings,
   type SourceLinkPlatform,
@@ -84,9 +84,9 @@ type PreviewState =
 
 type ViralMaterialCandidate = {
   id: string;
-  path: string;
+  url: string;
   name: string;
-  folderId: string;
+  collectionIds: string[];
   sourceLabel: string;
 };
 
@@ -95,7 +95,7 @@ type ViralMaterialFolderCandidate = {
   name: string;
   imageCount: number;
   selectedCount: number;
-  paths: string[];
+  assetIds: string[];
 };
 
 const defaultTextInstruction = "保留“热点观点”角度，换成品牌自己的素材和观点，避免复述原文表达。";
@@ -179,7 +179,7 @@ export default function Home() {
   const [simpleGenerateImages, setSimpleGenerateImages] = useState(defaultSimpleRunMediaSettings.generateImages);
   const [simpleWriteFeishu, setSimpleWriteFeishu] = useState(false);
   const [simpleViralImitateImages, setSimpleViralImitateImages] = useState(false);
-  const [simpleViralMaterialPaths, setSimpleViralMaterialPaths] = useState<string[]>([]);
+  const [simpleViralMaterialAssetIds, setSimpleViralMaterialAssetIds] = useState<string[]>([]);
   const [simpleViralMaterialFolderId, setSimpleViralMaterialFolderId] = useState("");
   const [simpleFeishuTaskText, setSimpleFeishuTaskText] = useState("");
   const [simpleViralUrl, setSimpleViralUrl] = useState("");
@@ -187,7 +187,7 @@ export default function Home() {
   const [simpleOriginalUseWebSearch, setSimpleOriginalUseWebSearch] = useState(false);
   const [simpleRuns, setSimpleRuns] = useState<SimpleRun[]>([]);
   const [activeSimpleRunId, setActiveSimpleRunId] = useState("");
-  const [materialLibrary, setMaterialLibrary] = useState<MaterialLibrarySnapshot>({ folders: [], assets: [] });
+  const [vehicleLibrary, setVehicleLibrary] = useState<LibraryAssetPage>({ assets: [], collections: [], total: 0 });
   const [message, setMessage] = useState("");
   const [busy, setBusy] = useState<"settings" | "simpleRun" | null>(null);
   const [terminatingSimpleRunId, setTerminatingSimpleRunId] = useState("");
@@ -199,24 +199,19 @@ export default function Home() {
   );
   const simpleLinkCount = useMemo(() => splitLines(simpleLinkText).length, [simpleLinkText]);
   const simpleFeishuTaskCount = useMemo(() => splitFeishuTaskNumbers(simpleFeishuTaskText).length, [simpleFeishuTaskText]);
-  const materialLibraryAssetPaths = useMemo(() => materialLibrary.assets.map((asset) => asset.path).filter(Boolean), [materialLibrary.assets]);
-  const viralMaterialCandidates = useMemo(() => buildViralMaterialCandidates(materialLibrary.assets, materialLibrary.folders), [materialLibrary.assets, materialLibrary.folders]);
+  const vehicleMaterialAssetIds = useMemo(() => vehicleLibrary.assets.map((asset) => asset.id), [vehicleLibrary.assets]);
+  const viralMaterialCandidates = useMemo(() => buildViralMaterialCandidates(vehicleLibrary.assets, vehicleLibrary.collections), [vehicleLibrary.assets, vehicleLibrary.collections]);
   const viralMaterialFolders = useMemo(
-    () => buildViralMaterialFolders(materialLibrary.folders, materialLibrary.assets, simpleViralMaterialPaths),
-    [materialLibrary.assets, materialLibrary.folders, simpleViralMaterialPaths],
+    () => buildViralMaterialFolders(vehicleLibrary.collections, vehicleLibrary.assets, simpleViralMaterialAssetIds),
+    [simpleViralMaterialAssetIds, vehicleLibrary.assets, vehicleLibrary.collections],
   );
   const activeSimpleViralMaterialFolderId = useMemo(() => {
     if (viralMaterialFolders.some((folder) => folder.id === simpleViralMaterialFolderId)) return simpleViralMaterialFolderId;
     return findMatchingViralMaterialFolderId(viralMaterialFolders, simpleKeyword) || viralMaterialFolders[0]?.id || "";
   }, [simpleKeyword, simpleViralMaterialFolderId, viralMaterialFolders]);
   const displayedViralMaterialCandidates = useMemo(
-    () => viralMaterialCandidates.filter((asset) => !activeSimpleViralMaterialFolderId || asset.folderId === activeSimpleViralMaterialFolderId),
+    () => viralMaterialCandidates.filter((asset) => activeSimpleViralMaterialFolderId === "all" || asset.collectionIds.includes(activeSimpleViralMaterialFolderId)),
     [activeSimpleViralMaterialFolderId, viralMaterialCandidates],
-  );
-  const visibleViralMaterialPathSet = useMemo(() => new Set(displayedViralMaterialCandidates.map((asset) => asset.path)), [displayedViralMaterialCandidates]);
-  const selectedSimpleViralMaterialPaths = useMemo(
-    () => simpleViralMaterialPaths.filter((path) => visibleViralMaterialPathSet.has(path)),
-    [simpleViralMaterialPaths, visibleViralMaterialPathSet],
   );
 
   useEffect(() => {
@@ -231,7 +226,7 @@ export default function Home() {
 
   useEffect(() => {
     if (!currentAccount) return;
-    void Promise.all([loadWorkspaceSettings(), loadSimpleRuns(), loadMaterialLibrary()]);
+    void Promise.all([loadWorkspaceSettings(), loadSimpleRuns(), loadVehicleLibrary()]);
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [currentAccount?.id]);
 
@@ -321,7 +316,7 @@ export default function Home() {
       setAccountPanelOpen(false);
       setSimpleRuns([]);
       setActiveSimpleRunId("");
-      setMaterialLibrary({ folders: [], assets: [] });
+      setVehicleLibrary({ assets: [], collections: [], total: 0 });
       setAccountBusy(false);
     }
   }
@@ -357,14 +352,27 @@ export default function Home() {
     }
   }
 
-  async function loadMaterialLibrary() {
+  async function loadVehicleLibrary() {
     try {
-      const res = await fetch("/api/materials/library");
-      const data = (await res.json()) as MaterialLibrarySnapshot & { error?: string };
-      if (!res.ok) throw new Error(data.error || "素材库读取失败");
-      setMaterialLibrary({ folders: data.folders || [], assets: data.assets || [] });
+      const assets: LibraryAsset[] = [];
+      const seenCursors = new Set<string>();
+      let cursor = "";
+      let page: LibraryAssetPage | undefined;
+      do {
+        const params = new URLSearchParams({ role: "vehicle", limit: "100", sort: "name-asc" });
+        if (cursor) params.set("cursor", cursor);
+        const res = await fetch(`/api/library/assets?${params}`);
+        const data = (await res.json()) as LibraryAssetPage & { error?: string };
+        if (!res.ok) throw new Error(data.error || "车型图库读取失败");
+        page = data;
+        assets.push(...data.assets);
+        cursor = data.nextCursor || "";
+        if (cursor && seenCursors.has(cursor)) throw new Error("车型图库分页游标重复");
+        if (cursor) seenCursors.add(cursor);
+      } while (cursor);
+      setVehicleLibrary({ assets, collections: page?.collections || [], total: page?.total || assets.length });
     } catch (error) {
-      setMessage(error instanceof Error ? error.message : "素材库读取失败");
+      setMessage(error instanceof Error ? error.message : "车型图库读取失败");
     }
   }
 
@@ -433,10 +441,10 @@ export default function Home() {
     setSimplePlatforms((current) => (current.includes(value) ? current.filter((item) => item !== value) : [...current, value]));
   }
 
-  function onToggleViralMaterialPath(path: string) {
-    setSimpleViralMaterialPaths((current) => {
-      if (current.includes(path)) return current.filter((item) => item !== path);
-      return current.length >= maxSimpleImageTasksPerPost ? current : [...current, path];
+  function onToggleViralMaterialAsset(assetId: string) {
+    setSimpleViralMaterialAssetIds((current) => {
+      if (current.includes(assetId)) return current.filter((item) => item !== assetId);
+      return current.length >= maxSimpleImageTasksPerPost ? current : [...current, assetId];
     });
   }
 
@@ -444,20 +452,24 @@ export default function Home() {
     const folder = viralMaterialFolders.find((item) => item.id === folderId);
     if (!folder) return;
     setSimpleViralMaterialFolderId(folderId);
-    setSimpleViralMaterialPaths((current) => {
-      const allSelected = folder.paths.every((path) => current.includes(path));
-      const withoutFolder = current.filter((path) => !folder.paths.includes(path));
-      return allSelected ? withoutFolder : [...withoutFolder, ...folder.paths.slice(0, maxSimpleImageTasksPerPost)];
+    setSimpleViralMaterialAssetIds((current) => {
+      const hasSelection = folder.assetIds.some((assetId) => current.includes(assetId));
+      const withoutFolder = current.filter((assetId) => !folder.assetIds.includes(assetId));
+      if (hasSelection) return withoutFolder;
+      const availableSlots = Math.max(0, maxSimpleImageTasksPerPost - withoutFolder.length);
+      return [...withoutFolder, ...folder.assetIds.slice(0, availableSlots)];
     });
   }
 
-  function previewViralMaterialPath(path: string) {
-    const imageUrls = displayedViralMaterialCandidates.map((asset) => asset.path);
+  function previewViralMaterialAsset(assetId: string) {
+    const imageUrls = displayedViralMaterialCandidates.map((asset) => asset.url);
+    const selectedImageUrls = vehicleLibrary.assets.filter((asset) => simpleViralMaterialAssetIds.includes(asset.id)).map((asset) => asset.publicUrl);
+    const asset = displayedViralMaterialCandidates.find((candidate) => candidate.id === assetId);
     setPreview({
-      title: displayedViralMaterialCandidates.find((asset) => asset.path === path)?.name || "素材预览",
+      title: asset?.name || "车型图预览",
       imageUrls,
-      imageIndex: Math.max(0, imageUrls.indexOf(path)),
-      selectedImageUrls: selectedSimpleViralMaterialPaths,
+      imageIndex: Math.max(0, imageUrls.indexOf(asset?.url || "")),
+      selectedImageUrls,
     });
   }
 
@@ -473,7 +485,7 @@ export default function Home() {
     if (sourceMode === "links" && !links.length) return setMessage("请先粘贴需要导入的链接");
     if (sourceMode === "feishu" && !feishuTaskNumbers.length) return setMessage("请先输入飞书任务编号");
     if (sourceMode === "viral" && !viralUrl) return setMessage("请先输入爆款图文链接");
-    if (sourceMode === "viral" && simpleGenerateImages && simpleViralImitateImages && !selectedSimpleViralMaterialPaths.length) return setMessage("请选择至少 1 张车型图用于图片模仿");
+    if (sourceMode === "viral" && simpleGenerateImages && simpleViralImitateImages && !simpleViralMaterialAssetIds.length) return setMessage("请选择至少 1 张车型图用于图片模仿");
     if (sourceMode === "original" && !originalPrompt) return setMessage("请先输入原创选题、提问或要求");
     if (sourceMode === "original" && simpleOriginalUseWebSearch && config?.openaiTextEndpoint !== "responses") return setMessage("当前文本接口不支持原创联网搜索");
 
@@ -526,10 +538,10 @@ export default function Home() {
           feishuTaskNumbers: sourceMode === "feishu" ? feishuTaskNumbers : undefined,
           viralUrl: sourceMode === "viral" ? viralUrl : undefined,
           viralImitateImages: sourceMode === "viral" ? simpleViralImitateImages : undefined,
-          viralMaterialPaths: sourceMode === "viral" && simpleGenerateImages && simpleViralImitateImages ? selectedSimpleViralMaterialPaths : undefined,
+          viralMaterialAssetIds: sourceMode === "viral" && simpleGenerateImages && simpleViralImitateImages ? simpleViralMaterialAssetIds : undefined,
           originalPrompt: sourceMode === "original" ? originalPrompt : undefined,
           originalUseWebSearch: sourceMode === "original" ? simpleOriginalUseWebSearch : undefined,
-          materialPaths: materialLibraryAssetPaths,
+          materialAssetIds: vehicleMaterialAssetIds,
           settings: settingsForRun,
         }),
       });
@@ -649,7 +661,7 @@ export default function Home() {
             viralMaterialFolders={viralMaterialFolders}
             activeViralMaterialFolderId={activeSimpleViralMaterialFolderId}
             viralMaterialCandidates={displayedViralMaterialCandidates}
-            selectedViralMaterialPaths={selectedSimpleViralMaterialPaths}
+            selectedViralMaterialAssetIds={simpleViralMaterialAssetIds}
             linkCount={simpleLinkCount}
             feishuTaskText={simpleFeishuTaskText}
             feishuTaskCount={simpleFeishuTaskCount}
@@ -657,7 +669,7 @@ export default function Home() {
             originalPrompt={simpleOriginalPrompt}
             originalUseWebSearch={simpleOriginalUseWebSearch}
             config={config}
-            materialPaths={materialLibraryAssetPaths}
+            materialPaths={vehicleLibrary.assets.map((asset) => asset.publicUrl)}
             settings={workspaceSettings}
             runs={simpleRuns}
             activeRun={activeSimpleRun}
@@ -680,9 +692,9 @@ export default function Home() {
             onWriteFeishuChange={setSimpleWriteFeishu}
             onViralImitateImagesChange={setSimpleViralImitateImages}
             onToggleViralMaterialFolder={onToggleViralMaterialFolder}
-            onToggleViralMaterialPath={onToggleViralMaterialPath}
-            onPreviewViralMaterial={previewViralMaterialPath}
-            onClearViralMaterialPaths={() => setSimpleViralMaterialPaths([])}
+            onToggleViralMaterialAsset={onToggleViralMaterialAsset}
+            onPreviewViralMaterial={previewViralMaterialAsset}
+            onClearViralMaterialAssets={() => setSimpleViralMaterialAssetIds([])}
             onFeishuTaskTextChange={updateSimpleFeishuTaskText}
             onViralUrlChange={setSimpleViralUrl}
             onOriginalPromptChange={setSimpleOriginalPrompt}
@@ -700,7 +712,7 @@ export default function Home() {
           <span>完成草稿可在内容审查台继续处理</span>
         </footer>
       </div>
-      <MaterialPreviewDialog preview={preview} onClose={() => setPreview(null)} onNavigate={(index) => setPreview((current) => current ? { ...current, imageIndex: index } : current)} onToggle={(path) => { onToggleViralMaterialPath(path); setPreview((current) => current ? { ...current, selectedImageUrls: current.selectedImageUrls.includes(path) ? current.selectedImageUrls.filter((item) => item !== path) : [...current.selectedImageUrls, path].slice(0, maxSimpleImageTasksPerPost) } : current); }} />
+      <MaterialPreviewDialog preview={preview} onClose={() => setPreview(null)} onNavigate={(index) => setPreview((current) => current ? { ...current, imageIndex: index } : current)} onToggle={(url) => { const asset = vehicleLibrary.assets.find((item) => item.publicUrl === url); if (!asset) return; onToggleViralMaterialAsset(asset.id); setPreview((current) => current ? { ...current, selectedImageUrls: current.selectedImageUrls.includes(url) ? current.selectedImageUrls.filter((item) => item !== url) : [...current.selectedImageUrls, url].slice(0, maxSimpleImageTasksPerPost) } : current); }} />
     </main>
   );
 }
@@ -724,7 +736,7 @@ function CompactWorkspace(props: {
   viralMaterialFolders: ViralMaterialFolderCandidate[];
   activeViralMaterialFolderId: string;
   viralMaterialCandidates: ViralMaterialCandidate[];
-  selectedViralMaterialPaths: string[];
+  selectedViralMaterialAssetIds: string[];
   linkCount: number;
   feishuTaskText: string;
   feishuTaskCount: number;
@@ -755,9 +767,9 @@ function CompactWorkspace(props: {
   onWriteFeishuChange: (value: boolean) => void;
   onViralImitateImagesChange: (value: boolean) => void;
   onToggleViralMaterialFolder: (folderId: string) => void;
-  onToggleViralMaterialPath: (path: string) => void;
-  onPreviewViralMaterial: (path: string) => void;
-  onClearViralMaterialPaths: () => void;
+  onToggleViralMaterialAsset: (assetId: string) => void;
+  onPreviewViralMaterial: (assetId: string) => void;
+  onClearViralMaterialAssets: () => void;
   onFeishuTaskTextChange: (value: string) => void;
   onViralUrlChange: (value: string) => void;
   onOriginalPromptChange: (value: string) => void;
@@ -768,9 +780,9 @@ function CompactWorkspace(props: {
   onTerminateRun: (runId: string) => void;
   onSelectRun: (runId: string) => void;
 }) {
-  const { sourceMode, keyword, targetCount, selectedPlatforms, linkText, linkPlatform, cookie, videoFrameOriginalReference, useComfyUiKlein, directOriginalReference, includeSourceVideo, enableVideoTranscription, generateImages, writeFeishu, viralImitateImages, viralMaterialFolders, activeViralMaterialFolderId, viralMaterialCandidates, selectedViralMaterialPaths, linkCount, feishuTaskText, feishuTaskCount, viralUrl, originalPrompt, originalUseWebSearch, config, materialPaths, settings, runs, activeRun, busy, terminatingRunId, settingsBusy } = props;
+  const { sourceMode, keyword, targetCount, selectedPlatforms, linkText, linkPlatform, cookie, videoFrameOriginalReference, useComfyUiKlein, directOriginalReference, includeSourceVideo, enableVideoTranscription, generateImages, writeFeishu, viralImitateImages, viralMaterialFolders, activeViralMaterialFolderId, viralMaterialCandidates, selectedViralMaterialAssetIds, linkCount, feishuTaskText, feishuTaskCount, viralUrl, originalPrompt, originalUseWebSearch, config, materialPaths, settings, runs, activeRun, busy, terminatingRunId, settingsBusy } = props;
   const sourceDetail = sourceMode === "links" ? `链接 ${linkCount} 条` : sourceMode === "feishu" ? `飞书 ${feishuTaskCount} 条` : sourceMode === "viral" ? "爆款仿写 1 条" : sourceMode === "original" ? "原创 1 条" : `平台 ${selectedPlatforms.length} 个`;
-  const canStart = sourceMode === "feishu" ? feishuTaskCount > 0 : sourceMode === "links" ? Boolean(keyword.trim()) && linkCount > 0 : sourceMode === "viral" ? Boolean(keyword.trim() && viralUrl.trim()) && (!generateImages || !viralImitateImages || selectedViralMaterialPaths.length > 0) : sourceMode === "original" ? Boolean(keyword.trim() && originalPrompt.trim()) && (!originalUseWebSearch || config?.openaiTextEndpoint === "responses") : Boolean(keyword.trim() && selectedPlatforms.length);
+  const canStart = sourceMode === "feishu" ? feishuTaskCount > 0 : sourceMode === "links" ? Boolean(keyword.trim()) && linkCount > 0 : sourceMode === "viral" ? Boolean(keyword.trim() && viralUrl.trim()) && (!generateImages || !viralImitateImages || selectedViralMaterialAssetIds.length > 0) : sourceMode === "original" ? Boolean(keyword.trim() && originalPrompt.trim()) && (!originalUseWebSearch || config?.openaiTextEndpoint === "responses") : Boolean(keyword.trim() && selectedPlatforms.length);
 
   return (
     <section className="simple-workspace simple-workspace-compact">
@@ -799,7 +811,7 @@ function CompactWorkspace(props: {
           ) : sourceMode === "feishu" ? (
             <div className="simple-link-panel"><FieldLabel label={`飞书任务编号 · ${feishuTaskCount} 条`} /><textarea className="field simple-link-textarea" value={feishuTaskText} onChange={(event) => props.onFeishuTaskTextChange(event.target.value)} disabled={busy || settingsBusy} /></div>
           ) : sourceMode === "viral" ? (
-            <div className="simple-link-panel"><FieldLabel label="爆款图文链接" /><input className="field" value={viralUrl} onChange={(event) => props.onViralUrlChange(event.target.value)} disabled={busy || settingsBusy} /><CheckRow checked={viralImitateImages} disabled={busy || settingsBusy || !generateImages} onChange={props.onViralImitateImagesChange}>使用素材库图片进行图片模仿</CheckRow>{viralImitateImages && generateImages ? <ViralMaterialPicker folders={viralMaterialFolders} activeFolderId={activeViralMaterialFolderId} candidates={viralMaterialCandidates} selectedPaths={selectedViralMaterialPaths} disabled={busy || settingsBusy} onToggleFolder={props.onToggleViralMaterialFolder} onTogglePath={props.onToggleViralMaterialPath} onPreview={props.onPreviewViralMaterial} onClear={props.onClearViralMaterialPaths} /> : null}</div>
+            <div className="simple-link-panel"><FieldLabel label="爆款图文链接" /><input className="field" value={viralUrl} onChange={(event) => props.onViralUrlChange(event.target.value)} disabled={busy || settingsBusy} /><CheckRow checked={viralImitateImages} disabled={busy || settingsBusy || !generateImages} onChange={props.onViralImitateImagesChange}>使用车型图库图片进行图片模仿</CheckRow>{viralImitateImages && generateImages ? <ViralMaterialPicker folders={viralMaterialFolders} activeFolderId={activeViralMaterialFolderId} candidates={viralMaterialCandidates} selectedAssetIds={selectedViralMaterialAssetIds} disabled={busy || settingsBusy} onToggleFolder={props.onToggleViralMaterialFolder} onToggleAsset={props.onToggleViralMaterialAsset} onPreview={props.onPreviewViralMaterial} onClear={props.onClearViralMaterialAssets} /> : null}</div>
           ) : (
             <div className="simple-link-panel"><FieldLabel label="原创选题、提问或要求" /><textarea className="field simple-link-textarea" value={originalPrompt} onChange={(event) => props.onOriginalPromptChange(event.target.value)} disabled={busy || settingsBusy} /><CheckRow checked={originalUseWebSearch} disabled={busy || settingsBusy || config?.openaiTextEndpoint !== "responses"} onChange={props.onOriginalUseWebSearchChange}>联网搜索</CheckRow></div>
           )}
@@ -821,8 +833,8 @@ function CompactWorkspace(props: {
   );
 }
 
-function ViralMaterialPicker({ folders, activeFolderId, candidates, selectedPaths, disabled, onToggleFolder, onTogglePath, onPreview, onClear }: { folders: ViralMaterialFolderCandidate[]; activeFolderId: string; candidates: ViralMaterialCandidate[]; selectedPaths: string[]; disabled: boolean; onToggleFolder: (id: string) => void; onTogglePath: (path: string) => void; onPreview: (path: string) => void; onClear: () => void }) {
-  return <div className="mt-3"><div className="flex items-center justify-between gap-2"><FieldLabel label={`车型素材 ${selectedPaths.length}/${maxSimpleImageTasksPerPost}`} /><button className="soft-button h-8 px-2 text-[10px]" type="button" onClick={onClear} disabled={disabled || !selectedPaths.length}>清空</button></div><div className="grid grid-cols-2 gap-2">{folders.map((folder) => <button key={folder.id} className={`soft-button h-10 px-2 text-xs ${activeFolderId === folder.id ? "platform-card-active" : ""}`} type="button" onClick={() => onToggleFolder(folder.id)} disabled={disabled}><FolderOpen className="mr-1 inline h-3.5 w-3.5" />{folder.name} {folder.selectedCount}/{folder.imageCount}</button>)}</div><div className="thin-scrollbar mt-3 max-h-56 space-y-2 overflow-y-auto">{candidates.length ? candidates.map((asset) => { const selected = selectedPaths.includes(asset.path); return <div key={asset.id} className={`flex items-center gap-2 rounded-[8px] border p-2 ${selected ? "border-[var(--mint)] bg-[var(--mint)]/10" : "border-white/10 bg-white/[0.035]"}`}><button className="min-w-0 flex-1 text-left" type="button" onClick={() => onTogglePath(asset.path)} disabled={disabled}><span className="flex items-center gap-2"><ImageIcon className="h-3.5 w-3.5" /><span className="truncate text-xs font-black">{asset.name}</span></span></button><button className="soft-button grid h-8 w-8 place-items-center" type="button" onClick={() => onPreview(asset.path)} aria-label="预览车型图"><Maximize2 className="h-3.5 w-3.5" /></button></div>; }) : <div className="empty-state min-h-0 p-4 text-xs text-white/50">暂无可选图片，请到内容台的素材库导入。</div>}</div></div>;
+function ViralMaterialPicker({ folders, activeFolderId, candidates, selectedAssetIds, disabled, onToggleFolder, onToggleAsset, onPreview, onClear }: { folders: ViralMaterialFolderCandidate[]; activeFolderId: string; candidates: ViralMaterialCandidate[]; selectedAssetIds: string[]; disabled: boolean; onToggleFolder: (id: string) => void; onToggleAsset: (assetId: string) => void; onPreview: (assetId: string) => void; onClear: () => void }) {
+  return <div className="mt-3"><div className="flex items-center justify-between gap-2"><FieldLabel label={`车型素材 ${selectedAssetIds.length}/${maxSimpleImageTasksPerPost}`} /><button className="soft-button h-8 px-2 text-[10px]" type="button" onClick={onClear} disabled={disabled || !selectedAssetIds.length}>清空</button></div><div className="grid grid-cols-2 gap-2">{folders.map((folder) => <button key={folder.id} className={`soft-button h-10 px-2 text-xs ${activeFolderId === folder.id ? "platform-card-active" : ""}`} type="button" onClick={() => onToggleFolder(folder.id)} disabled={disabled}><FolderOpen className="mr-1 inline h-3.5 w-3.5" />{folder.name} {folder.selectedCount}/{folder.imageCount}</button>)}</div><div className="thin-scrollbar mt-3 max-h-56 space-y-2 overflow-y-auto">{candidates.length ? candidates.map((asset) => { const selected = selectedAssetIds.includes(asset.id); return <div key={asset.id} className={`flex items-center gap-2 rounded-[8px] border p-2 ${selected ? "border-[var(--mint)] bg-[var(--mint)]/10" : "border-white/10 bg-white/[0.035]"}`}><button className="min-w-0 flex-1 text-left" type="button" onClick={() => onToggleAsset(asset.id)} disabled={disabled}><span className="flex items-center gap-2"><ImageIcon className="h-3.5 w-3.5" /><span className="truncate text-xs font-black">{asset.name}</span></span></button><button className="soft-button grid h-8 w-8 place-items-center" type="button" onClick={() => onPreview(asset.id)} aria-label="预览车型图"><Maximize2 className="h-3.5 w-3.5" /></button></div>; }) : <div className="empty-state min-h-0 p-4 text-xs text-white/50">暂无可选图片，请到车型图库导入。</div>}</div></div>;
 }
 
 function SimpleOverallProgressBar({ runs, activeRun, busy, terminatingRunId, sourceDetail, targetCount, onTerminateRun, onSelectRun }: { runs: SimpleRun[]; activeRun: SimpleRun | null; busy: boolean; terminatingRunId: string; sourceDetail: string; targetCount: number; onTerminateRun: (runId: string) => void; onSelectRun: (runId: string) => void }) {
@@ -872,18 +884,18 @@ function FieldLabel({ label }: { label: string }) { return <span className="mb-1
 function ConfigChip({ label, ok }: { label: string; ok: boolean }) { return <span className={`config-chip ${ok ? "config-chip-ok" : ""}`}><span className={`h-1.5 w-1.5 rounded-full ${ok ? "bg-[var(--success)]" : "bg-white/30"}`} />{label}</span>; }
 function CheckRow({ checked, disabled, onChange, children }: { checked: boolean; disabled?: boolean; onChange: (value: boolean) => void; children: ReactNode }) { return <label className="mt-3 flex items-start gap-2 rounded-[8px] border border-white/10 bg-white/[0.035] p-3 text-xs text-white/62"><input className="mt-0.5 h-4 w-4 accent-[var(--mint)]" type="checkbox" checked={checked} disabled={disabled} onChange={(event) => onChange(event.target.checked)} /><span>{children}</span></label>; }
 
-function buildViralMaterialCandidates(assets: MaterialLibraryAsset[], folders: MaterialFolder[]) {
-  const folderNames = new Map(folders.map((folder) => [folder.id, folder.name]));
-  return assets.filter((asset) => asset.kind === "image" || isImageMaterialPath(asset.path, asset.extension)).map<ViralMaterialCandidate>((asset) => ({ id: asset.id, path: asset.path, name: asset.name || getPathFileName(asset.path), folderId: asset.folderId, sourceLabel: folderNames.get(asset.folderId) || "素材库" }));
+function buildViralMaterialCandidates(assets: LibraryAsset[], collections: LibraryCollection[]) {
+  const collectionNames = new Map(collections.map((collection) => [collection.id, collection.name]));
+  return assets.map<ViralMaterialCandidate>((asset) => ({ id: asset.id, url: asset.publicUrl, name: asset.name, collectionIds: asset.collectionIds, sourceLabel: asset.collectionIds.map((id) => collectionNames.get(id)).find(Boolean) || "车型图库" }));
 }
 
-function buildViralMaterialFolders(folders: MaterialFolder[], assets: MaterialLibraryAsset[], selectedPaths: string[]) {
-  return folders.map<ViralMaterialFolderCandidate>((folder) => { const paths = assets.filter((asset) => asset.folderId === folder.id && (asset.kind === "image" || isImageMaterialPath(asset.path, asset.extension))).map((asset) => asset.path); return { id: folder.id, name: folder.name, imageCount: paths.length, selectedCount: paths.filter((path) => selectedPaths.includes(path)).length, paths }; }).filter((folder) => folder.imageCount > 0);
+function buildViralMaterialFolders(collections: LibraryCollection[], assets: LibraryAsset[], selectedAssetIds: string[]) {
+  const all = { id: "all", name: "全部车型", imageCount: assets.length, selectedCount: assets.filter((asset) => selectedAssetIds.includes(asset.id)).length, assetIds: assets.map((asset) => asset.id) };
+  const folders = collections.filter((collection) => collection.role === "vehicle").map<ViralMaterialFolderCandidate>((collection) => { const assetIds = assets.filter((asset) => asset.collectionIds.includes(collection.id)).map((asset) => asset.id); return { id: collection.id, name: collection.name, imageCount: assetIds.length, selectedCount: assetIds.filter((id) => selectedAssetIds.includes(id)).length, assetIds }; }).filter((folder) => folder.imageCount > 0);
+  return assets.length ? [all, ...folders] : [];
 }
 
 function findMatchingViralMaterialFolderId(folders: ViralMaterialFolderCandidate[], keyword: string) { const normalized = keyword.trim().toLowerCase(); if (!normalized) return folders[0]?.id || ""; return folders.find((folder) => folder.name.trim().toLowerCase() === normalized)?.id || folders.find((folder) => normalized.includes(folder.name.trim().toLowerCase()) || folder.name.trim().toLowerCase().includes(normalized))?.id || folders[0]?.id || ""; }
-function isImageMaterialPath(path: string, extension?: string) { return /\.(?:png|jpe?g|webp|gif|bmp|avif)$/i.test(path) || ["png", "jpg", "jpeg", "webp", "gif", "bmp", "avif"].includes((extension || "").toLowerCase()); }
-function getPathFileName(path: string) { return path.split(/[\\/]/).filter(Boolean).pop() || path; }
 function splitLines(value: string) { return value.split(/\r?\n/).map((item) => item.trim()).filter(Boolean); }
 function splitFeishuTaskNumbers(value: string) { return Array.from(new Set(value.split(/[\s,，;；\n]+/).map((item) => item.trim()).filter(Boolean))); }
 function trimImageStrategyPrompts(prompts: ImageStrategyPrompts): ImageStrategyPrompts { return { carExterior: prompts.carExterior.trim(), textImage: prompts.textImage.trim(), peopleWithCar: prompts.peopleWithCar.trim() }; }
@@ -896,5 +908,4 @@ function buildSimpleOverallProgressSummary(run: SimpleRun | null | undefined, bu
 function buildSimpleRunMessage(run: SimpleRun) { const crawled = run.platformResults.reduce((sum, item) => sum + item.crawled, 0); return `任务完成：抓取 ${crawled} 条，生成 ${run.posts.length} 条`; }
 function formatSimpleRunStatus(value: SimpleRun["status"]) { return { queued: "排队中", running: "执行中", completed: "已完成", partial: "部分完成", failed: "失败" }[value]; }
 function getSimpleRunStatusClass(value: SimpleRun["status"]) { return value === "completed" ? "text-[var(--mint)]" : value === "failed" ? "text-[var(--rose)]" : value === "running" ? "text-[var(--cyan)]" : "text-[var(--amber)]"; }
-function isAbsoluteLocalPath(url: string) { return /^[A-Za-z]:[\\/]/.test(url) || url.startsWith("\\\\") || url.startsWith("/"); }
-function toDisplayImageSrc(url: string) { if (/^https?:\/\//i.test(url)) return toRemoteImagePreviewSrc(url); if (isAbsoluteLocalPath(url) && !url.startsWith("/media/") && !url.startsWith("/generated/")) return `/api/materials/preview?path=${encodeURIComponent(url)}`; return url; }
+function toDisplayImageSrc(url: string) { return /^https?:\/\//i.test(url) ? toRemoteImagePreviewSrc(url) : url; }

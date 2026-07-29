@@ -26,7 +26,7 @@ const globals = read("src/app/globals.css");
 const types = read("src/lib/types.ts");
 const simpleRoute = read("src/app/api/simple/runs/route.ts");
 const simpleRuns = read("src/lib/simple-runs.ts");
-const checkPs1 = read(".trellis/verification/check.mjs");
+const baseline = read(".trellis/verification/check.mjs");
 
 assertContains(contentPage, /fetch\(`?\/api\/content-pool/, "/content should read the owner-scoped content pool API.");
 assertContains(contentPage, /fetch\("\/api\/crawl\/jobs"/, "/content should keep keyword crawl entry.");
@@ -59,15 +59,13 @@ assertContains(simpleRuns, /message:\s*`内容池取样/, "Pool progress should 
 
 assertContains(mainPage, /href="\/content"/, "Main workspace should expose a /content entry.");
 assertNotContains(mainPage, /ActiveModule|ProductionWorkspace|WorkspaceModeSwitcher/, "Main workspace should not retain removed mode or production modules.");
-assertContains(contentPage, /type ContentDeskView = "content" \| "materials"/, "/content should own the content/material view switch.");
-assertContains(contentPage, /function MaterialLibraryWorkspace\(/, "/content should own material-library management.");
+assertNotContains(contentPage, /ContentDeskView|MaterialLibraryWorkspace|\/api\/materials\//, "/content should not expose the retired local material library.");
 
 assertContains(globals, /\.content-desk-shell\s*\{/, "Global CSS should define the /content shell.");
 assertContains(globals, /\.content-desk-workspace\s*\{[\s\S]*display:\s*grid/, "Global CSS should define the /content workbench grid.");
-assertContains(globals, /\.content-desk-material-workspace\s*\{[\s\S]*display:\s*grid/, "Global CSS should define the /content material workbench grid.");
+assertNotContains(globals, /\.content-desk-material-workspace\s*\{/, "Global CSS should not retain the retired material workbench layout.");
 assertContains(globals, /\.content-desk-source-card-active\s*\{/, "Global CSS should define selected content-pool card styling.");
-
-assertContains(checkPs1, /Content desk check/, "Trellis baseline should include the content desk check.");
+assertContains(baseline, /Content desk check/, "Trellis baseline should include the content desk check.");
 
 assertContains(contentPage, /poolGenerateImages,\s*setPoolGenerateImages/, "/content should expose a secondary-creation image-generation option.");
 assertContains(contentPage, /poolUseComfyUiKlein,\s*setPoolUseComfyUiKlein/, "/content should expose the simple-run ComfyUI Klein option for pool secondary creation.");

@@ -16,8 +16,6 @@ try {
     "content_projects",
     "generated_posts",
     "batch_jobs",
-    "material_folders",
-    "material_assets",
     "execution_logs",
     "crawl_jobs",
     "runtime_posts",
@@ -29,6 +27,11 @@ try {
     if (!row || Number(row.count) !== 1) {
       throw new Error(`Missing SQLite table: ${table}`);
     }
+  }
+
+  for (const table of ["material_folders", "material_assets"]) {
+    const row = db.prepare("SELECT COUNT(*) AS count FROM sqlite_master WHERE type = 'table' AND name = ?").get(table);
+    if (Number(row?.count || 0) !== 0) throw new Error(`Retired SQLite table still exists: ${table}`);
   }
 
   const contentRow = db.prepare("SELECT COUNT(*) AS count FROM content_projects").get();

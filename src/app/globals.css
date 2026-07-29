@@ -3595,14 +3595,6 @@ body {
   min-height: 0;
 }
 
-.content-desk-material-workspace {
-  display: grid;
-  flex: 1;
-  grid-template-columns: minmax(0, 1fr);
-  gap: clamp(10px, 1vw, 16px);
-  min-height: 0;
-}
-
 .content-desk-pane {
   min-width: 0;
   padding: clamp(12px, 1vw, 16px);
@@ -3687,18 +3679,6 @@ body {
   .content-desk-workspace {
     grid-template-columns: clamp(280px, 21vw, 360px) minmax(380px, 1fr) clamp(320px, 24vw, 440px);
     overflow: hidden;
-  }
-
-  .content-desk-material-workspace {
-    grid-template-columns: clamp(280px, 22vw, 360px) minmax(0, 1fr);
-    overflow: hidden;
-  }
-
-  .content-desk-material-workspace > .content-desk-pane {
-    overflow-x: hidden;
-    overflow-y: auto;
-    overscroll-behavior: contain;
-    scrollbar-gutter: stable;
   }
 
   .content-desk-capture,

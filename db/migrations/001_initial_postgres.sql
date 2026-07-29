@@ -63,28 +63,6 @@ CREATE TABLE IF NOT EXISTS batch_jobs (
 );
 CREATE INDEX IF NOT EXISTS idx_batch_jobs_created_at ON batch_jobs(created_at DESC);
 
-CREATE TABLE IF NOT EXISTS material_folders (
-  id TEXT PRIMARY KEY,
-  parent_id TEXT,
-  name TEXT NOT NULL,
-  created_at TIMESTAMPTZ NOT NULL,
-  updated_at TIMESTAMPTZ NOT NULL,
-  data_json JSONB NOT NULL
-);
-CREATE INDEX IF NOT EXISTS idx_material_folders_parent_id ON material_folders(parent_id);
-
-CREATE TABLE IF NOT EXISTS material_assets (
-  id TEXT PRIMARY KEY,
-  folder_id TEXT NOT NULL,
-  path TEXT NOT NULL UNIQUE,
-  kind TEXT NOT NULL,
-  created_at TIMESTAMPTZ NOT NULL,
-  updated_at TIMESTAMPTZ NOT NULL,
-  data_json JSONB NOT NULL
-);
-CREATE INDEX IF NOT EXISTS idx_material_assets_folder_id ON material_assets(folder_id);
-CREATE INDEX IF NOT EXISTS idx_material_assets_updated_at ON material_assets(updated_at DESC);
-
 CREATE TABLE IF NOT EXISTS execution_logs (
   id TEXT PRIMARY KEY,
   scope TEXT NOT NULL,
@@ -235,7 +213,6 @@ CREATE TABLE IF NOT EXISTS library_assets (
   public_url TEXT NOT NULL,
   tagging_status TEXT NOT NULL,
   cleanup_status TEXT NOT NULL,
-  legacy_material_asset_id TEXT,
   created_at TIMESTAMPTZ NOT NULL,
   updated_at TIMESTAMPTZ NOT NULL,
   deleted_at TIMESTAMPTZ,
@@ -245,7 +222,6 @@ CREATE TABLE IF NOT EXISTS library_assets (
 CREATE INDEX IF NOT EXISTS idx_library_assets_owner_created ON library_assets(owner_user_id, created_at DESC, id DESC);
 CREATE INDEX IF NOT EXISTS idx_library_assets_visibility_created ON library_assets(visibility, created_at DESC, id DESC);
 CREATE INDEX IF NOT EXISTS idx_library_assets_tagging_status ON library_assets(tagging_status, updated_at DESC);
-CREATE UNIQUE INDEX IF NOT EXISTS idx_library_assets_legacy_material ON library_assets(legacy_material_asset_id) WHERE legacy_material_asset_id IS NOT NULL;
 
 CREATE TABLE IF NOT EXISTS library_asset_roles (
   asset_id TEXT NOT NULL REFERENCES library_assets(id) ON DELETE CASCADE,

@@ -50,18 +50,6 @@ const tables = [
     jsonColumns: new Set(["data_json"]),
   },
   {
-    name: "material_folders",
-    columns: ["id", "parent_id", "name", "created_at", "updated_at", "data_json"],
-    conflict: "id",
-    jsonColumns: new Set(["data_json"]),
-  },
-  {
-    name: "material_assets",
-    columns: ["id", "folder_id", "path", "kind", "created_at", "updated_at", "data_json"],
-    conflict: "id",
-    jsonColumns: new Set(["data_json"]),
-  },
-  {
     name: "execution_logs",
     columns: ["id", "scope", "action", "status", "created_at", "data_json"],
     conflict: "id",
