@@ -562,6 +562,9 @@ for (const route of [
 
 const page = read("src/app/canvas/page.tsx");
 requireText(page, ["onlyRenderVisibleElements", "displayedEdges", "markActiveCanvasEdges", "canvasViewportDetail", "syncCanvasViewportDetail", "dataset.canvasViewportDetail", 'classList.add("canvas-stage-viewport-moving")', 'classList.remove("canvas-stage-viewport-moving")'], "canvas viewport performance policy");
+const canvasFlowNodeSource = page.slice(page.indexOf("function CanvasFlowNode"), page.indexOf("function CanvasNodeTextEditor"));
+requireText(canvasFlowNodeSource, ["visibleImageUrls.map", "<Image src={url}"], "canvas media nodes must retain their mounted media subtree");
+assert.ok(!canvasFlowNodeSource.includes("canvasViewportDetail"), "viewport detail must not conditionally remount Canvas node media");
 requireText(page, ["CanvasTextSplitControls", "文本分割方式", "第几个分隔符", "CanvasTextSplitNodeResult", "CanvasTextSplitOutput", "未匹配，已全部作为正文", "getTextOutputArtifact", 'field.key === "delimiterIndex"'], "text split v2 UI");
 requireText(page, ["NodeResizer", "CANVAS_NODE_SIZE_LIMITS", "displayedNodes", "applyCanvasNodeChanges", "change.setAttributes", "applyFlowNodeSize", "canvas-node-resize-handle", "canvas-node-resize-line"], "canvas node resizing UI");
 requireText(page, ["CanvasNodeTextEditor", "setDraft(nextValue)", "document.activeElement !== editorRef.current", "data-node-id={nodeId}"], "canvas text editor caret preservation");
@@ -713,6 +716,7 @@ requireText(runtimeUpload, ["sniffImageFormat(buffer)", "format?.browserSupporte
 const styles = read("src/app/globals.css");
 requireText(styles, [".canvas-flow-edge-beam-active .canvas-flow-edge-glow", ".canvas-stage-viewport-moving .canvas-flow-edge-glow", "animation: none", "filter: none"], "canvas edge performance styles");
 requireText(styles, ['.canvas-stage[data-canvas-viewport-detail="reduced"]', '.canvas-stage[data-canvas-viewport-detail="overview"]', ".canvas-node:not(.canvas-node-selected)", ".canvas-stage-viewport-moving .canvas-node-image-grid", ".canvas-stage-viewport-moving .react-flow__minimap", "visibility: hidden !important", "box-shadow: none"], "canvas viewport detail styles");
+requireText(styles, [".canvas-stage .react-flow__viewport { will-change: transform; }"], "canvas viewport compositor hint");
 assert.ok(!styles.includes(".canvas-confirm-dialog"), "removed canvas confirmation UI must not leave dead styles");
 assert.ok(!styles.includes(".canvas-confirm-detail"), "removed canvas confirmation details must not leave dead styles");
 requireText(styles, [".canvas-node-resized", ".canvas-node-content", ".canvas-node-resize-handle", ".canvas-node-resize-line"], "canvas node resizing styles");
