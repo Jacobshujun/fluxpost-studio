@@ -561,6 +561,7 @@ for (const route of [
 }
 
 const page = read("src/app/canvas/page.tsx");
+requireText(page, ["onlyRenderVisibleElements", "displayedEdges", "markActiveCanvasEdges", 'classList.add("canvas-stage-viewport-moving")', 'classList.remove("canvas-stage-viewport-moving")'], "canvas viewport performance policy");
 requireText(page, ["CanvasTextSplitControls", "文本分割方式", "第几个分隔符", "CanvasTextSplitNodeResult", "CanvasTextSplitOutput", "未匹配，已全部作为正文", "getTextOutputArtifact", 'field.key === "delimiterIndex"'], "text split v2 UI");
 requireText(page, ["NodeResizer", "CANVAS_NODE_SIZE_LIMITS", "displayedNodes", "applyCanvasNodeChanges", "change.setAttributes", "applyFlowNodeSize", "canvas-node-resize-handle", "canvas-node-resize-line"], "canvas node resizing UI");
 requireText(page, ["CanvasNodeTextEditor", "setDraft(nextValue)", "document.activeElement !== editorRef.current", "data-node-id={nodeId}"], "canvas text editor caret preservation");
@@ -576,6 +577,20 @@ assert.ok(!page.includes("width={1600}"), "image preview must not impose a fixed
 assert.ok(!page.includes("height={1200}"), "image preview must not impose a fixed 4:3 intrinsic height");
 assert.ok(!page.includes("style={{ top:"), "canvas handles must be positioned by their port rows, not node-level pixel offsets");
 const latestAttempts = compileFunction(page, "latestAttempts");
+const markActiveCanvasEdges = compileFunction(page, "markActiveCanvasEdges");
+const canvasEdgeFixtures = [
+  { id: "active-source", source: "running", target: "idle" },
+  { id: "active-target", source: "idle", target: "queued" },
+  { id: "inactive", source: "idle", target: "completed" },
+];
+const projectedEdges = markActiveCanvasEdges(canvasEdgeFixtures, new Map([
+  ["running", { nodeId: "running", status: "running" }],
+  ["queued", { nodeId: "queued", status: "queued" }],
+  ["completed", { nodeId: "completed", status: "completed" }],
+]));
+assert.equal(projectedEdges.find((edge) => edge.id === "active-source")?.data?.beamActive, true, "an edge leaving a running node must retain its beam");
+assert.equal(projectedEdges.find((edge) => edge.id === "active-target")?.data?.beamActive, true, "an edge entering a queued node must retain its beam");
+assert.equal(projectedEdges.find((edge) => edge.id === "inactive")?.data?.beamActive, false, "an idle edge must remain a single static path");
 const getTextOutputArtifact = compileFunction(page, "getTextOutputArtifact");
 assert.equal(getTextOutputArtifact({ outputs: { head: { kind: "text", value: "标题" } } }, "head")?.value, "标题");
 assert.equal(getTextOutputArtifact({ outputs: { head: { kind: "text", value: "   " } } }, "head"), undefined, "empty title artifacts must not render or flow through the v2 result UI");
@@ -656,11 +671,14 @@ const edgeFunction = page.slice(page.indexOf("function FlowingCanvasEdge"), page
 assert.equal((edgeFunction.match(/<BaseEdge\b/g) || []).length, 1, "each edge must render exactly one continuous base path");
 assert.equal((edgeFunction.match(/className="canvas-flow-edge-glow"/g) || []).length, 1, "each edge must render one soft layer for the moving beam");
 assert.equal((edgeFunction.match(/className="canvas-flow-edge-highlight"/g) || []).length, 1, "each edge must render exactly one moving highlight");
+assert.ok(edgeFunction.includes("selected || data?.beamActive"), "only selected or running-related edges may activate the beam");
+assert.ok(edgeFunction.includes("beamActive ? <>"), "inactive edges must not render beam paths");
 const uploadRoute = read("src/app/api/canvas/media/route.ts");
 requireText(uploadRoute, ["requireWorkspaceAccount", "request.formData()", "form.getAll(\"files\")", "maxCanvasUploadFiles", "maxCanvasUploadBytes", "saveRuntimeImageUpload"], "canvas media route");
 const runtimeUpload = read("src/lib/runtime-image-upload.ts");
 requireText(runtimeUpload, ["sniffImageFormat(buffer)", "format?.browserSupported", "persistRuntimeMedia", 'directory: "review-uploads" | "canvas-uploads"'], "runtime image upload");
 const styles = read("src/app/globals.css");
+requireText(styles, [".canvas-flow-edge-beam-active .canvas-flow-edge-glow", ".canvas-stage-viewport-moving .canvas-flow-edge-glow", "animation: none", "filter: none"], "canvas edge performance styles");
 assert.ok(!styles.includes(".canvas-confirm-dialog"), "removed canvas confirmation UI must not leave dead styles");
 assert.ok(!styles.includes(".canvas-confirm-detail"), "removed canvas confirmation details must not leave dead styles");
 requireText(styles, [".canvas-node-resized", ".canvas-node-content", ".canvas-node-resize-handle", ".canvas-node-resize-line"], "canvas node resizing styles");

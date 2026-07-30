@@ -1,6 +1,6 @@
 # Trellis Status
 
-Last updated: 2026-07-29
+Last updated: 2026-07-30
 
 ## One-Line Status
 
@@ -8,6 +8,7 @@ Normal-member image imports now work without secure-context UUID APIs on LAN HTT
 
 ## Current Focus
 
+- Infinite Canvas zoom phase 1 is loaded by the local port-3001 production process: React Flow culls offscreen elements, idle edges render only a static path, selected or queued/running-related edges retain beams, and pan/zoom or reduced-motion disables beam animation and SVG filters. This local refinement is not deployed to production 38.
 - Production 38 is healthy at release `20260723-113938-542cbb5e2d1f`; 104 is retired and its DNS cleanup remains separate.
 - Image-library upload queues use page-local monotonic IDs and surface synchronous preparation failures, so normal members on LAN HTTP do not silently lose file selections when `crypto.randomUUID()` is unavailable.
 - HEIC/TOS, Weibo App-detail, vehicle/reference library, Windows Feishu CLI, and Canvas workflows are locally verified but remain behind their documented operator gates.
@@ -33,12 +34,14 @@ Normal-member image imports now work without secure-context UUID APIs on LAN HTT
 
 ## Recent Verification
 
+- 2026-07-30: Canvas zoom phase 1 passed focused Canvas contracts, active-edge projection cases, TypeScript, scoped lint with five pre-existing warnings, `git diff --check`, two production builds, local restart/HTTP smoke, and mocked Chromium checks proving 4/7 viewport nodes rendered, idle/active business path counts of 1/3, movement-time beam suppression, end-of-movement restoration, and reduced-motion suppression without external calls. The documented baseline wrapper still stops at its missing `.trellis/verification/check.mjs`.
 - 2026-07-29: Normal-member image imports no longer depend on secure-context `crypto.randomUUID`; operator ownership/collection permission contracts, focused/dynamic library checks, TypeScript, scoped lint, build/restart/HTTP smoke, and mocked Playwright with `randomUUID` forced to throw passed without external calls. The full baseline passed all library checks and stopped at an unrelated Node 24 `fetch bad port` in the historical TOS recovery check; full lint also retains the unrelated temporary CJS blocker.
 - 2026-07-28: Copy library CRUD/permissions/tags, frozen Canvas input, stable batch assignment, two-GPT skeleton, build/restart, and mocked 1440x960/390x844 interactions passed without external calls. Playwright found and regression coverage fixed delayed draft synchronization erasing fast new-copy input; full baseline passed all domain checks and stopped only on the unrelated temporary CJS lint error.
 - Earlier verification evidence is indexed in `.trellis/spec/fluxpost/verification.md` and preserved under `.trellis/spec/fluxpost/archive/`.
 
 ## Current Risks
 
+- Real operator-scale Canvas frame timing is pending confirmation; the isolated browser check verifies DOM and computed-style load reduction but does not reproduce a production user's largest workflow or input device cadence.
 - Four historical exact matches remain intentionally unchanged: three source images exceed the 12 MB cache limit and one source returns `HEIF image not found`; address them only through a separately scoped ingestion-policy decision.
 - The Weibo App detail path is deployed and contract-tested but not yet validated against a paid live TikHub response; one approved sample should confirm the response shape and fallback observability before calling the migration fully live-validated.
 - `bbs.vollov1.xyz` still resolves to retired host 104 even though HTTPS and the FluxPost service are gone; remove the external DNS record when convenient to avoid a stale hostname.

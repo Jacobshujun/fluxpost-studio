@@ -211,9 +211,12 @@ button {
 .canvas-stage .react-flow__controls { box-shadow: var(--shadow-soft); border: 1px solid var(--line-strong); }
 .canvas-stage .react-flow__minimap { border: 1px solid var(--line-strong); box-shadow: var(--shadow-soft); }
 .canvas-flow-edge-base { fill: none; stroke: var(--canvas-edge-color, var(--accent)); stroke-width: 1.8; stroke-linecap: round; opacity: .5; }
-.canvas-flow-edge-glow, .canvas-flow-edge-highlight { fill: none; stroke-linecap: round; pointer-events: none; }
-.canvas-flow-edge-glow { --canvas-edge-peak-opacity: .5; stroke: var(--canvas-edge-color, var(--accent)); stroke-width: 3.6; stroke-dasharray: 18 82; stroke-dashoffset: 100; opacity: 0; filter: blur(1.2px) drop-shadow(0 0 3px color-mix(in srgb, var(--canvas-edge-color, var(--accent)) 72%, transparent)); animation: canvas-edge-beam 2.3s linear var(--canvas-edge-delay, 0s) infinite; }
-.canvas-flow-edge-highlight { --canvas-edge-peak-opacity: .96; stroke: color-mix(in srgb, var(--canvas-edge-color, var(--accent)) 38%, white); stroke-width: 1.8; stroke-dasharray: 14 86; stroke-dashoffset: 100; opacity: 0; filter: blur(.15px) drop-shadow(0 0 2px color-mix(in srgb, var(--canvas-edge-color, var(--accent)) 78%, transparent)); animation: canvas-edge-beam 2.3s linear var(--canvas-edge-delay, 0s) infinite; }
+.canvas-flow-edge-glow, .canvas-flow-edge-highlight { display: none; fill: none; stroke-linecap: round; pointer-events: none; }
+.canvas-flow-edge-glow { --canvas-edge-peak-opacity: .5; stroke: var(--canvas-edge-color, var(--accent)); stroke-width: 3.6; stroke-dasharray: 18 82; stroke-dashoffset: 100; opacity: 0; }
+.canvas-flow-edge-highlight { --canvas-edge-peak-opacity: .96; stroke: color-mix(in srgb, var(--canvas-edge-color, var(--accent)) 38%, white); stroke-width: 1.8; stroke-dasharray: 14 86; stroke-dashoffset: 100; opacity: 0; }
+.canvas-flow-edge-beam-active .canvas-flow-edge-glow { display: block; filter: blur(1.2px) drop-shadow(0 0 3px color-mix(in srgb, var(--canvas-edge-color, var(--accent)) 72%, transparent)); animation: canvas-edge-beam 2.3s linear var(--canvas-edge-delay, 0s) infinite; }
+.canvas-flow-edge-beam-active .canvas-flow-edge-highlight { display: block; filter: blur(.15px) drop-shadow(0 0 2px color-mix(in srgb, var(--canvas-edge-color, var(--accent)) 78%, transparent)); animation: canvas-edge-beam 2.3s linear var(--canvas-edge-delay, 0s) infinite; }
+.canvas-stage-viewport-moving .canvas-flow-edge-glow, .canvas-stage-viewport-moving .canvas-flow-edge-highlight { display: none; animation: none; filter: none; }
 .react-flow__edge.selected .canvas-flow-edge-base { stroke-width: 2.4; opacity: .9; }
 .react-flow__edge.selected .canvas-flow-edge-glow { stroke-width: 4.4; }
 .react-flow__edge.selected .canvas-flow-edge-highlight { stroke-width: 2.4; }
@@ -445,7 +448,7 @@ button {
 .canvas-image-viewer-image { display: block; width: auto; height: auto; object-fit: contain; transform-origin: center; transition: transform .14s ease; user-select: none; }
 .canvas-image-viewer > footer { display: flex; align-items: center; justify-content: center; gap: 8px; padding: 10px; border-top: 1px solid var(--line); background: var(--canvas-panel); }
 .canvas-image-viewer output { width: 64px; color: var(--text-soft); font-size: 12px; font-variant-numeric: tabular-nums; font-weight: 800; text-align: center; }
-@media (prefers-reduced-motion: reduce) { .canvas-flow-edge-glow, .canvas-flow-edge-highlight { display: none; }.canvas-flow-edge-base { opacity: .82; }.canvas-node-image-grid img, .canvas-node-image-grid > button::after, .canvas-node-result-gallery-open, .canvas-image-preview-open > span, .canvas-image-viewer-image { transition: none; } }
+@media (prefers-reduced-motion: reduce) { .canvas-flow-edge-beam-active .canvas-flow-edge-glow, .canvas-flow-edge-beam-active .canvas-flow-edge-highlight { display: none; animation: none; filter: none; }.canvas-flow-edge-base { opacity: .82; }.canvas-node-image-grid img, .canvas-node-image-grid > button::after, .canvas-node-result-gallery-open, .canvas-image-preview-open > span, .canvas-image-viewer-image { transition: none; } }
 @media (max-width: 1100px) { .canvas-workspace { grid-template-columns: 220px minmax(0, 1fr) 280px; }.canvas-workspace-palette-hidden { grid-template-columns: minmax(0, 1fr) 280px; }.canvas-toolbar-actions button span { display: none; }.canvas-toolbar-actions button { width: 36px; padding: 7px; }.canvas-name-input { width: 150px; } }
 @media (max-width: 820px) {
   .canvas-shell { grid-template-rows: 58px minmax(0, 1fr) 128px; }

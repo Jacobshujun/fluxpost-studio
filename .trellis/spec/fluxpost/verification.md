@@ -1,6 +1,6 @@
 # Verification
 
-Last updated: 2026-07-28
+Last updated: 2026-07-30
 
 ## Baseline Command
 
@@ -49,11 +49,11 @@ node .trellis/verification/http_smoke.js http://127.0.0.1:3001
 
 ## Recent Verification
 
+- 2026-07-30: Local Infinite Canvas zoom phase 1 enabled visible-element culling, reduced idle edges to one business path, limited beam paths to selected or queued/running-related edges, and suspended beam animation/filters during pan/zoom and reduced-motion. Focused Canvas checks, TypeScript, scoped lint, two production builds, local restart/HTTP smoke, and a mocked Chromium DOM/computed-style check passed without external calls; the required wrapper still cannot start because its delegated `check.mjs` is absent.
 - 2026-07-28: Copy library and Canvas batch copy integration passed `copy_library_check.mjs`, `canvas_scheduler_check.mjs`, TypeScript, focused lint, build/restart, HTTP smoke, and mocked desktop/mobile creation, tags, sharing, picker, scheduling, and overflow checks. Playwright exposed and verified the fix for delayed draft synchronization erasing fast input. The full baseline passed every domain check and stopped only at the unrelated untracked `.tmp-canvas-common-nodes-browser-check.cjs` lint error.
 - 2026-07-28: Canvas startup recovery/terminal wakeup passed `canvas_scheduler_check.mjs`, TypeScript, focused lint, full lint with the unrelated `.tmp-canvas-common-nodes-browser-check.cjs` excluded, build/restart, isolated no-worker HTTP smoke, and read-only local PostgreSQL observation. The full baseline passed all domain checks through Canvas and stopped only at that unrelated temporary-script lint error. After the user-authorized real restart, review draft count advanced from 0 to 2 while sibling content tasks remained active.
 - 2026-07-27: Canvas collapsible node library, compact run bar, cross-workflow task/history query center, prompt-free enqueue, and shortcuts passed deterministic checks, TypeScript, focused lint, build/restart, HTTP smoke, and mocked 1440x960/390x844 checks without external calls. Palette collapse expanded the 1440px viewport stage from 872px to 1120px; full baseline passed through Canvas and remains blocked only by unrelated `.tmp-canvas-common-nodes-browser-check.cjs` lint.
 - 2026-07-27: Canvas all-node resizing, text-split V2, and ToAPIs 100-slot concurrency passed focused checks, TypeScript, focused lint, build/restart, `/canvas` HTTP 200, and mocked desktop/mobile checks without paid calls. Sizes persist within `190x120..720x900` across reload/clipboard while mobile stays compact without handles. Full baseline reached lint and stopped only on unrelated untracked `.tmp-canvas-common-nodes-browser-check.cjs`.
-- 2026-07-23: 104 retirement preflight and guarded execution verified exactly 3 FluxPost containers, 1 network, 8 volumes, 6 application image tags, the app root, and root-only staging credential, then removed them. Independent post-checks found zero FluxPost resources and no 80/443/3101 listeners while `frps/x-ui/xray` and unrelated listeners remained unchanged. Production 38 independently passed release/manifest/image `542cbb5`, app/PostgreSQL, loopback/public HTTPS, Nginx, and Open WebUI health checks. The full Trellis baseline passed on port 45678; no paid service or production workflow was called.
 - Older 2026-07-23 library and HEIC/TOS verification is preserved in `archive/verification-history.md`.
 
 ## Missing Coverage

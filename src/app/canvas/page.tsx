@@ -119,7 +119,7 @@ import type {
 } from "@/lib/canvas/types";
 
 type FlowNode = Node<{ canvasNode: CanvasNode }, "canvasNode">;
-type FlowEdge = Edge;
+type FlowEdge = Edge<{ beamActive?: boolean }>;
 type CanvasHistory = { entries: CanvasGraph[]; index: number };
 type CanvasHistoryStep = { history: CanvasHistory; graph?: CanvasGraph };
 type QuickAddConnection = { nodeId: string; portId: string; handleType: "source" | "target"; kind: CanvasPortKind; multiple?: boolean };
@@ -205,6 +205,7 @@ export default function CanvasPage() {
   const displayedNodes = useMemo(() => nodes.map((node) => applyFlowNodeSize(node, isMobile)), [isMobile, nodes]);
   const editableGraph = useMemo(() => currentGraph(nodes, edges, viewport), [edges, nodes, viewport]);
   const latestNodeRuns = useMemo(() => latestAttempts(activeRun?.nodeRuns || []), [activeRun?.nodeRuns]);
+  const displayedEdges = useMemo(() => markActiveCanvasEdges(edges, latestNodeRuns), [edges, latestNodeRuns]);
   const activeTaskCount = taskRuns.length
     ? taskRuns.filter((run) => isActiveCanvasRun(run.status)).length
     : activeRun && isActiveCanvasRun(activeRun.run.status) ? 1 : 0;
@@ -345,6 +346,7 @@ export default function CanvasPage() {
   }
 
   function selectWorkflow(workflow: CanvasWorkflow) {
+    stageRef.current?.classList.remove("canvas-stage-viewport-moving");
     if (canvasHistoryTimerRef.current) clearTimeout(canvasHistoryTimerRef.current);
     canvasHistoryTimerRef.current = null;
     canvasHistoryRef.current = createCanvasHistory(workflow.graph);
@@ -1081,7 +1083,7 @@ export default function CanvasPage() {
         }} onPointerMove={(event) => { canvasPointerRef.current = { x: event.clientX, y: event.clientY }; }} onPointerLeave={() => { canvasPointerRef.current = null; }}>
           {activeWorkflow ? <CanvasNodeInteractionContext.Provider value={nodeInteraction}><ReactFlow<FlowNode, FlowEdge>
             nodes={displayedNodes}
-            edges={edges}
+            edges={displayedEdges}
             nodeTypes={nodeTypes}
             edgeTypes={edgeTypes}
             onNodesChange={onNodesChange}
@@ -1096,10 +1098,12 @@ export default function CanvasPage() {
               const selectedNode = selectedNodes.at(-1);
               if (selectedNode) setSelectedNodeId(selectedNode.id);
             }}
-            onMoveEnd={(_, nextViewport) => { setViewport(nextViewport); markDirty(); }}
+            onMoveStart={() => stageRef.current?.classList.add("canvas-stage-viewport-moving")}
+            onMoveEnd={(_, nextViewport) => { stageRef.current?.classList.remove("canvas-stage-viewport-moving"); setViewport(nextViewport); markDirty(); }}
             defaultViewport={viewport}
             minZoom={0.2}
             maxZoom={2.2}
+            onlyRenderVisibleElements
             panOnDrag={isMobile}
             selectionOnDrag={!isMobile}
             nodesDraggable={!isMobile}
@@ -1467,13 +1471,16 @@ function CanvasCompositionNodeResult({ nodeRun, latestSuccessful }: { nodeRun?: 
   </div>;
 }
 
-function FlowingCanvasEdge({ id, sourceX, sourceY, targetX, targetY, sourcePosition, targetPosition, markerEnd, style }: EdgeProps) {
+function FlowingCanvasEdge({ id, sourceX, sourceY, targetX, targetY, sourcePosition, targetPosition, markerEnd, style, selected, data }: EdgeProps<FlowEdge>) {
   const [path] = getBezierPath({ sourceX, sourceY, targetX, targetY, sourcePosition, targetPosition });
   const animationDelay = `${edgeAnimationDelay(id)}s`;
-  return <g style={{ ...style, "--canvas-edge-delay": animationDelay } as React.CSSProperties}>
+  const beamActive = selected || data?.beamActive;
+  return <g className={beamActive ? "canvas-flow-edge-beam-active" : undefined} style={{ ...style, "--canvas-edge-delay": animationDelay } as React.CSSProperties}>
     <BaseEdge id={id} path={path} markerEnd={markerEnd} className="canvas-flow-edge-base" />
-    <path d={path} pathLength={100} className="canvas-flow-edge-glow" aria-hidden="true" />
-    <path d={path} pathLength={100} className="canvas-flow-edge-highlight" aria-hidden="true" />
+    {beamActive ? <>
+      <path d={path} pathLength={100} className="canvas-flow-edge-glow" aria-hidden="true" />
+      <path d={path} pathLength={100} className="canvas-flow-edge-highlight" aria-hidden="true" />
+    </> : null}
   </g>;
 }
 
@@ -2749,6 +2756,15 @@ function isDurableCanvasNodeChange(change: NodeChange<FlowNode>) {
     || change.type === "add"
     || change.type === "replace"
     || (change.type === "dimensions" && Boolean(change.setAttributes));
+}
+function markActiveCanvasEdges(edges: FlowEdge[], latestNodeRuns: Map<string, CanvasNodeRun>): FlowEdge[] {
+  const activeNodeIds = new Set(Array.from(latestNodeRuns.entries())
+    .filter(([, nodeRun]) => nodeRun.status === "queued" || nodeRun.status === "running")
+    .map(([nodeId]) => nodeId));
+  return edges.map((edge) => ({
+    ...edge,
+    data: { ...edge.data, beamActive: activeNodeIds.has(edge.source) || activeNodeIds.has(edge.target) },
+  }));
 }
 function toFlowEdges(edges: CanvasEdge[], nodes: CanvasNode[]): FlowEdge[] {
   const nodeById = new Map(nodes.map((node) => [node.id, node]));
