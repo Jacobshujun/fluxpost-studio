@@ -217,6 +217,22 @@ button {
 .canvas-flow-edge-beam-active .canvas-flow-edge-glow { display: block; filter: blur(1.2px) drop-shadow(0 0 3px color-mix(in srgb, var(--canvas-edge-color, var(--accent)) 72%, transparent)); animation: canvas-edge-beam 2.3s linear var(--canvas-edge-delay, 0s) infinite; }
 .canvas-flow-edge-beam-active .canvas-flow-edge-highlight { display: block; filter: blur(.15px) drop-shadow(0 0 2px color-mix(in srgb, var(--canvas-edge-color, var(--accent)) 78%, transparent)); animation: canvas-edge-beam 2.3s linear var(--canvas-edge-delay, 0s) infinite; }
 .canvas-stage-viewport-moving .canvas-flow-edge-glow, .canvas-stage-viewport-moving .canvas-flow-edge-highlight { display: none; animation: none; filter: none; }
+.canvas-stage[data-canvas-viewport-detail="reduced"] .canvas-node:not(.canvas-node-selected) .canvas-node-image-grid,
+.canvas-stage[data-canvas-viewport-detail="reduced"] .canvas-node:not(.canvas-node-selected) .canvas-node-result { visibility: hidden; }
+.canvas-stage[data-canvas-viewport-detail="overview"] .canvas-node:not(.canvas-node-selected) .canvas-node-content,
+.canvas-stage[data-canvas-viewport-detail="overview"] .canvas-node:not(.canvas-node-selected) .canvas-node-head strong,
+.canvas-stage[data-canvas-viewport-detail="overview"] .canvas-node:not(.canvas-node-selected) .canvas-node-head small,
+.canvas-stage[data-canvas-viewport-detail="overview"] .canvas-node:not(.canvas-node-selected) .canvas-node-mode-menu,
+.canvas-stage[data-canvas-viewport-detail="overview"] .canvas-node:not(.canvas-node-selected) .canvas-port > span { visibility: hidden; }
+.canvas-stage-viewport-moving .canvas-node-image-grid,
+.canvas-stage-viewport-moving .canvas-node-result,
+.canvas-stage-viewport-moving .canvas-node-mode-menu,
+.canvas-stage-viewport-moving .canvas-node-resize-handle,
+.canvas-stage-viewport-moving .canvas-node-resize-line,
+.canvas-stage-viewport-moving .react-flow__minimap { visibility: hidden !important; }
+.canvas-stage-viewport-moving .canvas-node,
+.canvas-stage-viewport-moving .canvas-node-selected,
+.canvas-stage-viewport-moving .canvas-node-disabled { box-shadow: none; filter: none; transition: none; }
 .react-flow__edge.selected .canvas-flow-edge-base { stroke-width: 2.4; opacity: .9; }
 .react-flow__edge.selected .canvas-flow-edge-glow { stroke-width: 4.4; }
 .react-flow__edge.selected .canvas-flow-edge-highlight { stroke-width: 2.4; }

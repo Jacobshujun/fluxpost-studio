@@ -561,7 +561,7 @@ for (const route of [
 }
 
 const page = read("src/app/canvas/page.tsx");
-requireText(page, ["onlyRenderVisibleElements", "displayedEdges", "markActiveCanvasEdges", 'classList.add("canvas-stage-viewport-moving")', 'classList.remove("canvas-stage-viewport-moving")'], "canvas viewport performance policy");
+requireText(page, ["onlyRenderVisibleElements", "displayedEdges", "markActiveCanvasEdges", "canvasViewportDetail", "syncCanvasViewportDetail", "dataset.canvasViewportDetail", 'classList.add("canvas-stage-viewport-moving")', 'classList.remove("canvas-stage-viewport-moving")'], "canvas viewport performance policy");
 requireText(page, ["CanvasTextSplitControls", "文本分割方式", "第几个分隔符", "CanvasTextSplitNodeResult", "CanvasTextSplitOutput", "未匹配，已全部作为正文", "getTextOutputArtifact", 'field.key === "delimiterIndex"'], "text split v2 UI");
 requireText(page, ["NodeResizer", "CANVAS_NODE_SIZE_LIMITS", "displayedNodes", "applyCanvasNodeChanges", "change.setAttributes", "applyFlowNodeSize", "canvas-node-resize-handle", "canvas-node-resize-line"], "canvas node resizing UI");
 requireText(page, ["CanvasNodeTextEditor", "setDraft(nextValue)", "document.activeElement !== editorRef.current", "data-node-id={nodeId}"], "canvas text editor caret preservation");
@@ -578,6 +578,31 @@ assert.ok(!page.includes("height={1200}"), "image preview must not impose a fixe
 assert.ok(!page.includes("style={{ top:"), "canvas handles must be positioned by their port rows, not node-level pixel offsets");
 const latestAttempts = compileFunction(page, "latestAttempts");
 const markActiveCanvasEdges = compileFunction(page, "markActiveCanvasEdges");
+const viewportDetailFunctions = compileFunctions(
+  page,
+  ["canvasViewportDetail", "syncCanvasViewportDetail"],
+  "({ canvasViewportDetail, syncCanvasViewportDetail })",
+  { canvasViewportDetailZoom: { reduced: 0.65, overview: 0.35 } },
+);
+assert.equal(viewportDetailFunctions.canvasViewportDetail(1), "full");
+assert.equal(viewportDetailFunctions.canvasViewportDetail(0.65), "full", "the full-detail threshold must be inclusive");
+assert.equal(viewportDetailFunctions.canvasViewportDetail(0.64), "reduced");
+assert.equal(viewportDetailFunctions.canvasViewportDetail(0.35), "reduced", "the reduced-detail threshold must be inclusive");
+assert.equal(viewportDetailFunctions.canvasViewportDetail(0.34), "overview");
+let viewportDetailWrites = 0;
+const viewportDetailDataset = new Proxy({}, {
+  set(target, key, value) {
+    viewportDetailWrites += 1;
+    target[key] = value;
+    return true;
+  },
+});
+const viewportDetailStage = { dataset: viewportDetailDataset };
+viewportDetailFunctions.syncCanvasViewportDetail(viewportDetailStage, 1);
+viewportDetailFunctions.syncCanvasViewportDetail(viewportDetailStage, 0.8);
+assert.equal(viewportDetailWrites, 1, "moves inside one detail tier must not rewrite the stage dataset");
+viewportDetailFunctions.syncCanvasViewportDetail(viewportDetailStage, 0.5);
+assert.equal(viewportDetailWrites, 2, "crossing a detail threshold must update the stage dataset once");
 const canvasEdgeFixtures = [
   { id: "active-source", source: "running", target: "idle" },
   { id: "active-target", source: "idle", target: "queued" },
@@ -591,6 +616,14 @@ const projectedEdges = markActiveCanvasEdges(canvasEdgeFixtures, new Map([
 assert.equal(projectedEdges.find((edge) => edge.id === "active-source")?.data?.beamActive, true, "an edge leaving a running node must retain its beam");
 assert.equal(projectedEdges.find((edge) => edge.id === "active-target")?.data?.beamActive, true, "an edge entering a queued node must retain its beam");
 assert.equal(projectedEdges.find((edge) => edge.id === "inactive")?.data?.beamActive, false, "an idle edge must remain a single static path");
+const currentGraph = compileFunction(page, "currentGraph");
+const projectedGraph = currentGraph(
+  [{ id: "node", position: { x: 10, y: 20 }, data: { canvasNode: { id: "node", type: "input.text", version: 1, position: { x: 0, y: 0 }, config: {} } } }],
+  [{ id: "edge", source: "node", target: "node", sourceHandle: "text", targetHandle: "prompt", data: { beamActive: true, canvasViewportDetail: "overview" } }],
+  { x: 1, y: 2, zoom: 0.34 },
+);
+assert.deepEqual(projectedGraph.edges, [{ id: "edge", source: "node", target: "node", sourcePort: "text", targetPort: "prompt" }], "display-only viewport and beam data must not persist in graph edges");
+assert.ok(!JSON.stringify(projectedGraph).includes("canvasViewportDetail"), "viewport detail must remain a stage-only display concern");
 const getTextOutputArtifact = compileFunction(page, "getTextOutputArtifact");
 assert.equal(getTextOutputArtifact({ outputs: { head: { kind: "text", value: "标题" } } }, "head")?.value, "标题");
 assert.equal(getTextOutputArtifact({ outputs: { head: { kind: "text", value: "   " } } }, "head"), undefined, "empty title artifacts must not render or flow through the v2 result UI");
@@ -679,6 +712,7 @@ const runtimeUpload = read("src/lib/runtime-image-upload.ts");
 requireText(runtimeUpload, ["sniffImageFormat(buffer)", "format?.browserSupported", "persistRuntimeMedia", 'directory: "review-uploads" | "canvas-uploads"'], "runtime image upload");
 const styles = read("src/app/globals.css");
 requireText(styles, [".canvas-flow-edge-beam-active .canvas-flow-edge-glow", ".canvas-stage-viewport-moving .canvas-flow-edge-glow", "animation: none", "filter: none"], "canvas edge performance styles");
+requireText(styles, ['.canvas-stage[data-canvas-viewport-detail="reduced"]', '.canvas-stage[data-canvas-viewport-detail="overview"]', ".canvas-node:not(.canvas-node-selected)", ".canvas-stage-viewport-moving .canvas-node-image-grid", ".canvas-stage-viewport-moving .react-flow__minimap", "visibility: hidden !important", "box-shadow: none"], "canvas viewport detail styles");
 assert.ok(!styles.includes(".canvas-confirm-dialog"), "removed canvas confirmation UI must not leave dead styles");
 assert.ok(!styles.includes(".canvas-confirm-detail"), "removed canvas confirmation details must not leave dead styles");
 requireText(styles, [".canvas-node-resized", ".canvas-node-content", ".canvas-node-resize-handle", ".canvas-node-resize-line"], "canvas node resizing styles");

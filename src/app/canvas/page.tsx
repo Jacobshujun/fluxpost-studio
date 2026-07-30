@@ -133,6 +133,7 @@ type CanvasLibraryAssetPage = {
 };
 type CanvasCopyLibraryResponse = { entries: CopyLibraryEntryView[]; tags: string[] };
 type CanvasTaskFilter = "all" | "active" | "history" | "failed";
+type CanvasViewportDetail = "full" | "reduced" | "overview";
 type PreviewState =
   | { kind: "text"; value: string }
   | { kind: "image"; url: string; index: number; width?: number; height?: number }
@@ -157,6 +158,7 @@ const edgeTypes = { flowing: FlowingCanvasEdge };
 const terminalStatuses = new Set(["completed", "partial", "failed", "cancelled"]);
 const canvasHistoryLimit = 50;
 const canvasHistoryCommitDelayMs = 350;
+const canvasViewportDetailZoom = { reduced: 0.65, overview: 0.35 } as const;
 
 export default function CanvasPage() {
   const [workflows, setWorkflows] = useState<CanvasWorkflow[]>([]);
@@ -347,6 +349,7 @@ export default function CanvasPage() {
 
   function selectWorkflow(workflow: CanvasWorkflow) {
     stageRef.current?.classList.remove("canvas-stage-viewport-moving");
+    syncCanvasViewportDetail(stageRef.current, workflow.graph.viewport.zoom);
     if (canvasHistoryTimerRef.current) clearTimeout(canvasHistoryTimerRef.current);
     canvasHistoryTimerRef.current = null;
     canvasHistoryRef.current = createCanvasHistory(workflow.graph);
@@ -437,6 +440,7 @@ export default function CanvasPage() {
       setNodes(toFlowNodes(data.workflow.graph.nodes, isMobile));
       setEdges(toFlowEdges(data.workflow.graph.edges, data.workflow.graph.nodes));
       setViewport(data.workflow.graph.viewport);
+      syncCanvasViewportDetail(stageRef.current, data.workflow.graph.viewport.zoom);
       canvasHistoryRef.current = commitCanvasHistory(canvasHistoryRef.current, data.workflow.graph);
       setDirty(false);
       setMessage("画布调度绑定已保存");
@@ -909,6 +913,7 @@ export default function CanvasPage() {
     setNodes(toFlowNodes(step.graph.nodes, isMobile));
     setEdges(toFlowEdges(step.graph.edges, step.graph.nodes));
     setViewport(step.graph.viewport);
+    syncCanvasViewportDetail(stageRef.current, step.graph.viewport.zoom);
     void reactFlowRef.current?.setViewport(step.graph.viewport);
     setSelectedNodeId(undefined);
     setQuickAdd(null);
@@ -1091,15 +1096,16 @@ export default function CanvasPage() {
             onConnect={onConnect}
             onConnectStart={(_, params) => startQuickConnection(params)}
             onConnectEnd={finishQuickConnection}
-            onInit={(instance) => { reactFlowRef.current = instance; }}
+            onInit={(instance) => { reactFlowRef.current = instance; syncCanvasViewportDetail(stageRef.current, instance.getViewport().zoom); }}
             onNodeClick={(_, node) => setSelectedNodeId(node.id)}
             onPaneClick={() => { setSelectedNodeId(undefined); setQuickAdd(null); }}
             onSelectionChange={({ nodes: selectedNodes }) => {
               const selectedNode = selectedNodes.at(-1);
               if (selectedNode) setSelectedNodeId(selectedNode.id);
             }}
-            onMoveStart={() => stageRef.current?.classList.add("canvas-stage-viewport-moving")}
-            onMoveEnd={(_, nextViewport) => { stageRef.current?.classList.remove("canvas-stage-viewport-moving"); setViewport(nextViewport); markDirty(); }}
+            onMoveStart={(_, nextViewport) => { stageRef.current?.classList.add("canvas-stage-viewport-moving"); syncCanvasViewportDetail(stageRef.current, nextViewport.zoom); }}
+            onMove={(_, nextViewport) => { syncCanvasViewportDetail(stageRef.current, nextViewport.zoom); }}
+            onMoveEnd={(_, nextViewport) => { stageRef.current?.classList.remove("canvas-stage-viewport-moving"); syncCanvasViewportDetail(stageRef.current, nextViewport.zoom); setViewport(nextViewport); markDirty(); }}
             defaultViewport={viewport}
             minZoom={0.2}
             maxZoom={2.2}
@@ -2727,6 +2733,17 @@ function StatusIcon({ status }: { status: string }) {
   if (status === "completed") return <CheckCircle2 />;
   if (status === "queued" || status === "running") return <LoaderCircle className={status === "running" ? "animate-spin" : ""} />;
   return <AlertTriangle />;
+}
+
+function canvasViewportDetail(zoom: number): CanvasViewportDetail {
+  if (zoom < canvasViewportDetailZoom.overview) return "overview";
+  if (zoom < canvasViewportDetailZoom.reduced) return "reduced";
+  return "full";
+}
+function syncCanvasViewportDetail(stage: HTMLElement | null, zoom: number): CanvasViewportDetail {
+  const detail = canvasViewportDetail(zoom);
+  if (stage && stage.dataset.canvasViewportDetail !== detail) stage.dataset.canvasViewportDetail = detail;
+  return detail;
 }
 
 function toFlowNodes(nodes: CanvasNode[], compact = false) { return nodes.map((node) => toFlowNode(node, compact)); }
