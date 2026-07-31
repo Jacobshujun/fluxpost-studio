@@ -407,3 +407,36 @@ Added one stable Canvas viewport compositor hint without changing native React F
 ### Next Steps
 
 - None - task complete
+
+
+## Session 13: Consolidate recent local workflows
+
+**Date**: 2026-07-31
+**Task**: Consolidate recent local workflows
+**Branch**: `main`
+
+### Summary
+
+Committed the durable original batch workspace, Canvas scheduler and library improvements, legacy material retirement, and restored cross-platform baseline after full deterministic verification.
+
+### Main Changes
+
+(Add details)
+
+### Git Commits
+
+| Hash | Message |
+|------|---------|
+| `683cf9e` | (see git log) |
+
+### Testing
+
+- [OK] (Add test results)
+
+### Status
+
+[OK] **Completed**
+
+### Next Steps
+
+- None - task complete
