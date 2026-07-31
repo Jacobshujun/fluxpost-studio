@@ -440,3 +440,38 @@ Committed the durable original batch workspace, Canvas scheduler and library imp
 ### Next Steps
 
 - None - task complete
+
+
+## Session 14: Prepare GitHub sync candidate
+
+**Date**: 2026-07-31
+**Task**: Prepare GitHub sync candidate
+**Branch**: `sync/local-release-20260731`
+
+### Summary
+
+Separated remote verification artifacts from Canvas selection and edge-flow changes, reconciled origin/main history, excluded local screenshots and sensitive/runtime paths, verified the exact candidate, and pushed sync/local-release-20260731.
+
+### Main Changes
+
+(Add details)
+
+### Git Commits
+
+| Hash | Message |
+|------|---------|
+| `2b2f159` | (see git log) |
+| `d2742ad` | (see git log) |
+| `17be55b` | (see git log) |
+
+### Testing
+
+- [OK] (Add test results)
+
+### Status
+
+[OK] **Completed**
+
+### Next Steps
+
+- None - task complete

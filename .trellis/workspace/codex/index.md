@@ -8,7 +8,7 @@
 
 <!-- @@@auto:current-status -->
 - **Active File**: `journal-1.md`
-- **Total Sessions**: 13
+- **Total Sessions**: 14
 - **Last Active**: 2026-07-31
 <!-- @@@/auto:current-status -->
 
@@ -19,7 +19,7 @@
 <!-- @@@auto:active-documents -->
 | File | Lines | Status |
 |------|-------|--------|
-| `journal-1.md` | ~442 | Active |
+| `journal-1.md` | ~477 | Active |
 <!-- @@@/auto:active-documents -->
 
 ---
@@ -29,6 +29,7 @@
 <!-- @@@auto:session-history -->
 | # | Date | Title | Commits | Branch |
 |---|------|-------|---------|--------|
+| 14 | 2026-07-31 | Prepare GitHub sync candidate | `2b2f159`, `d2742ad`, `17be55b` | `sync/local-release-20260731` |
 | 13 | 2026-07-31 | Consolidate recent local workflows | `683cf9e` | `main` |
 | 12 | 2026-07-30 | Infinite Canvas zoom phase 3 | `89abfac` | `main` |
 | 11 | 2026-07-30 | Canvas zoom performance phase 2 | `817baf2` | `main` |
