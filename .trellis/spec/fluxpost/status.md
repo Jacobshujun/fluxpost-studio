@@ -4,11 +4,12 @@ Last updated: 2026-07-31
 
 ## One-Line Status
 
-Infinite Canvas is live at `https://flux.lightmoment.net/canvas` on production release `20260729-061224-d05caddb1787`; newer Canvas, library, and original-batch work remains local on port 3001.
+Infinite Canvas is live at `https://flux.lightmoment.net/canvas` on production release `20260729-061224-d05caddb1787`; the local candidate is on `sync/local-release-20260731` for GitHub review and is not deployed.
 
 ## Current Focus
 
 - Production 38 runs exact SHA `d05caddb17875bb9a5dde924f9e4e8654f8d3ee3`; image identity, protected services, schema, workers, volumes, auth, and rollback were verified. Hosts 82 and 104 are retired.
+- `sync/local-release-20260731` preserves the current local application tree while reconciling the GitHub `main` history; it is the review lane for the combined Canvas, library, and original-batch candidate.
 - Local `/original` provides durable owner-scoped 1-100 topic batches, cover-first card generation, QA/retry, review drafts, and resumable ToAPIs tasks. It is not deployed.
 - Local Canvas adds exact/range sampling, no-replacement parameter/copy pools, frozen-image preflight, cross-cursor selection, copy-pool bulk selection, guarded previews, distance-bounded three-layer edge pulses, native zoom, culling/detail tiers, stable media, and bounded queue concurrency. These refinements are not deployed.
 - Team image/copy libraries use server sorting, stable cursors, batch/range selection, and anchored preview. The local-path material domain was retired; compact runs freeze validated vehicle-library URLs.
@@ -16,12 +17,12 @@ Infinite Canvas is live at `https://flux.lightmoment.net/canvas` on production r
 
 ## Next Entry
 
-1. Commit the combined local release candidate without `.tmp-*`, runtime data, generated media, credentials, or environment files.
+1. Review `sync/local-release-20260731` against GitHub `main`; do not fast-forward `main` or deploy without separate explicit approval.
 2. Run an operator-approved real `/original` smoke with 2 topics and 3 cards each; verify ratio, consistency, QA, regeneration, review, and billing.
 3. Review/archive the Canvas image-source and scheduler tasks after their commits are isolated; keep them local until a dedicated exact-SHA release.
 4. Use a small authenticated non-paid Canvas workflow before any operator-approved provider batch.
 5. Keep Seedance, GPT image/text, TikHub, ComfyUI, Feishu writes, and Lark actions behind explicit operator approval.
-6. For future deployment, start from current GitHub `main`, reapply bounded local features, verify a clean candidate, push its full SHA, and deploy only through the confirmed release wrapper.
+6. For any future deployment, verify a clean exact-SHA candidate, push it first, and deploy only through the confirmed release wrapper.
 
 ## Recent Verification
 
