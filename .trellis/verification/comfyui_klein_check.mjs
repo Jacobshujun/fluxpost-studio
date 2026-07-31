@@ -24,7 +24,7 @@ const page = read("src/app/page.tsx");
 const comfyKlein = read("src/lib/comfyui-klein.ts");
 const database = read("src/lib/database.ts");
 const schema = read("db/migrations/001_initial_postgres.sql");
-const envExample = read(".env.example");
+const deploymentEnvExample = read("deploy/env.production.example");
 
 assertContains(config, /comfyUiBaseUrl:\s*normalizeBaseUrl\(process\.env\.COMFYUI_BASE_URL/, "ComfyUI base URL must be configurable.");
 assertContains(
@@ -135,8 +135,8 @@ assertContains(comfyKlein, /applyKSamplerOverrides/, "Klein KSampler env overrid
 
 assertContains(database, /image_generation_queue/, "Runtime database must include image_generation_queue support.");
 assertContains(schema, /CREATE TABLE IF NOT EXISTS image_generation_queue/, "PostgreSQL schema must include image_generation_queue.");
-assertContains(envExample, /COMFYUI_KLEIN_ENABLED=false/, ".env.example must keep local Klein disabled by default.");
-assertContains(envExample, /COMFYUI_KLEIN_WORKFLOW_API_JSON=/, ".env.example must document the inline Klein workflow API JSON.");
-assertContains(envExample, /COMFYUI_KLEIN_WORKFLOW_PATH=/, ".env.example must document the Klein workflow path.");
+assertContains(deploymentEnvExample, /COMFYUI_KLEIN_ENABLED=false/, "The deployment environment template must keep local Klein disabled by default.");
+assertContains(deploymentEnvExample, /COMFYUI_KLEIN_WORKFLOW_API_JSON=/, "The deployment environment template must document the inline Klein workflow API JSON.");
+assertContains(deploymentEnvExample, /COMFYUI_KLEIN_WORKFLOW_PATH=/, "The deployment environment template must document the Klein workflow path.");
 
 console.log("ComfyUI Klein integration check passed.");
