@@ -10,7 +10,7 @@ Infinite Canvas is live at `https://flux.lightmoment.net/canvas` on production r
 
 - Production 38 runs exact SHA `d05caddb17875bb9a5dde924f9e4e8654f8d3ee3`; image identity, protected services, schema, workers, volumes, auth, and rollback were verified. Hosts 82 and 104 are retired.
 - Local `/original` provides durable owner-scoped 1-100 topic batches, cover-first card generation, QA/retry, review drafts, and resumable ToAPIs tasks. It is not deployed.
-- Local Canvas adds exact/range sampling, no-replacement parameter/copy pools, frozen-image preflight, cross-cursor selection, guarded previews, native zoom, culling/detail tiers, stable media, and bounded queue concurrency. These refinements are not deployed.
+- Local Canvas adds exact/range sampling, no-replacement parameter/copy pools, frozen-image preflight, cross-cursor selection, copy-pool bulk selection, guarded previews, distance-bounded three-layer edge pulses, native zoom, culling/detail tiers, stable media, and bounded queue concurrency. These refinements are not deployed.
 - Team image/copy libraries use server sorting, stable cursors, batch/range selection, and anchored preview. The local-path material domain was retired; compact runs freeze validated vehicle-library URLs.
 - The cross-platform baseline is restored and passed for the combined local worktree on 2026-07-31.
 
@@ -25,6 +25,8 @@ Infinite Canvas is live at `https://flux.lightmoment.net/canvas` on production r
 
 ## Recent Verification
 
+- 2026-07-31: Canvas edge pulses now use distance-bounded trail/body/core layers with idle/active timing, duration-aware phase offsets, moving/reduced-motion suspension, and source-to-target interpolation. Focused checks, TypeScript, lint, production build/restart, full baseline, HTTP smoke, and mocked dark/light/mobile browser checks passed without external calls.
+- 2026-07-31: Canvas copy-pool manual selection now supports selecting and clearing all entries in the current filter. The mistakenly restored retired `src/app/api/library/migrate/route.ts` surface was removed; focused checks, the full baseline, production build/restart, and port 3001 HTTP smoke passed.
 - 2026-07-30: `/original` passed deterministic domain, schema, API, resume/recovery, review, TypeScript, lint, build/restart, HTTP, and mocked responsive checks without provider calls.
 - 2026-07-30: Canvas image preflight, selection, scheduler sampling, native zoom, and visual fixes passed focused contracts, TypeScript, lint, build/restart, HTTP, and mocked responsive checks.
 - 2026-07-29: Production SHA `d05caddb17875bb9a5dde924f9e4e8654f8d3ee3` passed candidate and deployment identity, schema, auth, service, volume, worker, and rollback checks.

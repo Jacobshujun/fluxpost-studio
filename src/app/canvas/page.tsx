@@ -163,6 +163,7 @@ const terminalStatuses = new Set(["completed", "partial", "failed", "cancelled"]
 const canvasHistoryLimit = 50;
 const canvasHistoryCommitDelayMs = 350;
 const canvasViewportDetailZoom = { reduced: 0.65, overview: 0.35 } as const;
+const canvasEdgeAnimationDuration = { idle: 3.6, active: 1.8 } as const;
 let canvasScheduleParameterSequence = 0;
 const canvasScheduleParameterTypes = ["image", "image-group", "text", "copy", "number", "boolean", "enum"] as const satisfies readonly CanvasScheduleParameterType[];
 
@@ -1493,12 +1494,19 @@ function CanvasCompositionNodeResult({ nodeRun, latestSuccessful }: { nodeRun?: 
 
 function FlowingCanvasEdge({ id, sourceX, sourceY, targetX, targetY, sourcePosition, targetPosition, markerEnd, style, selected, data }: EdgeProps<FlowEdge>) {
   const [path] = getBezierPath({ sourceX, sourceY, targetX, targetY, sourcePosition, targetPosition });
-  const animationDelay = `${edgeAnimationDelay(id)}s`;
   const beamActive = selected || data?.beamActive;
-  return <g className={`canvas-flow-edge-flowing${beamActive ? " canvas-flow-edge-beam-active" : ""}`} style={{ ...style, "--canvas-edge-delay": animationDelay } as React.CSSProperties}>
+  const animationDuration = beamActive ? canvasEdgeAnimationDuration.active : canvasEdgeAnimationDuration.idle;
+  const beam = canvasEdgeBeamProfile(sourceX, sourceY, targetX, targetY);
+  const edgeStyle = {
+    ...style,
+    "--canvas-edge-delay": `${edgeAnimationDelay(id, animationDuration)}s`,
+    "--canvas-edge-duration": `${animationDuration}s`,
+  } as React.CSSProperties;
+  return <g className={`canvas-flow-edge-flowing${beamActive ? " canvas-flow-edge-beam-active" : ""}`} style={edgeStyle}>
     <BaseEdge id={id} path={path} markerEnd={markerEnd} className="canvas-flow-edge-base" />
-    <path d={path} pathLength={100} className="canvas-flow-edge-glow" aria-hidden="true" />
-    <path d={path} pathLength={100} className="canvas-flow-edge-highlight" aria-hidden="true" />
+    <path d={path} pathLength={100} strokeDasharray={beam.trailDash} className="canvas-flow-edge-trail" aria-hidden="true" />
+    <path d={path} pathLength={100} strokeDasharray={beam.bodyDash} className="canvas-flow-edge-body" style={canvasEdgeLayerStyle(beam.bodyShift)} aria-hidden="true" />
+    <path d={path} pathLength={100} strokeDasharray={beam.coreDash} className="canvas-flow-edge-core" style={canvasEdgeLayerStyle(beam.coreShift)} aria-hidden="true" />
   </g>;
 }
 
@@ -2883,16 +2891,31 @@ function ScheduleCopyFilterEditor({ filter, onChange, onDisable, singleSelection
     ...filter,
     entryIds: filter.entryIds.includes(entryId) ? filter.entryIds.filter((id) => id !== entryId) : singleSelection ? [entryId] : [...filter.entryIds, entryId],
   });
+  const allMatchesSelected = data.entries.length > 0 && data.entries.every((entry) => filter.entryIds.includes(entry.id));
+  const selectAllEntries = () => {
+    if (filter.mode !== "manual" || singleSelection || !data.entries.length) return;
+    onChange({ ...filter, entryIds: data.entries.map((entry) => entry.id) });
+  };
+  const clearSelectedEntries = () => {
+    if (singleSelection || !filter.entryIds.length) return;
+    onChange({ ...filter, entryIds: [] });
+  };
   return <div className="canvas-schedule-assets canvas-schedule-copy-pool">
     <div className="canvas-schedule-assets-head"><strong>文案池</strong><div className="canvas-task-filters"><button type="button" aria-pressed={filter.mode === "manual"} onClick={() => onChange({ ...filter, mode: "manual" })}>手动选择</button><button type="button" aria-pressed={filter.mode === "tags"} onClick={() => onChange({ ...filter, mode: "tags" })}>{filterMatchLabel ? "条件匹配" : "条件随机"}</button>{onDisable ? <button type="button" onClick={onDisable}>停用</button> : null}</div></div>
     <div className="canvas-schedule-filter-row">
       <label><Search /><input value={filter.search} onChange={(event) => onChange({ ...filter, search: event.target.value })} placeholder="搜索文案" /></label>
       <input value={tagsText} disabled={filter.mode !== "tags"} onChange={(event) => onChange({ ...filter, tags: splitScheduleTags(event.target.value) })} placeholder="多个标签，AND" />
     </div>
+    <div className="canvas-schedule-asset-toolbar">
+      <small className="canvas-schedule-pool-count" aria-live="polite">{busy ? "正在筛选" : filter.mode === "manual" ? `匹配 ${data.entries.length} 篇 · 已选 ${filter.entryIds.length} 篇 · 批次内随机去重` : `条件匹配 ${data.entries.length} 篇 · 批次内随机去重`}</small>
+      {filter.mode === "manual" && !singleSelection ? <div>
+        <button type="button" onClick={selectAllEntries} disabled={busy || !data.entries.length || allMatchesSelected}><CheckCircle2 />{allMatchesSelected ? "已全选" : "全选当前筛选结果"}</button>
+        <button type="button" onClick={clearSelectedEntries} disabled={busy || !filter.entryIds.length}><X />清空已选</button>
+      </div> : null}
+    </div>
     <div className="canvas-schedule-copy-list">{data.entries.slice(0, 50).map((entry) => <button type="button" key={entry.id} className={filter.entryIds.includes(entry.id) ? "is-selected" : ""} onClick={() => filter.mode === "manual" && toggle(entry.id)} disabled={filter.mode === "tags"}>
       <BookOpenText /><span><strong>{entry.title}</strong><small>{entry.tags.join(" · ") || "无标签"}</small></span>{filter.mode === "manual" && filter.entryIds.includes(entry.id) ? <CheckCircle2 /> : null}
     </button>)}</div>
-    <small className="canvas-schedule-pool-count">{busy ? "正在筛选" : filter.mode === "manual" ? `匹配 ${data.entries.length} 篇 · 已选 ${filter.entryIds.length} 篇 · 批次内随机去重` : `条件匹配 ${data.entries.length} 篇 · 批次内随机去重`}</small>
     {error ? <p className="canvas-picker-error">{error}</p> : null}
   </div>;
 }
@@ -3447,10 +3470,51 @@ function wouldCreateCycle(edges: FlowEdge[], source: string, target: string) {
   return false;
 }
 
-function edgeAnimationDelay(edgeId: string) {
+function canvasEdgeBeamProfile(sourceX: number, sourceY: number, targetX: number, targetY: number) {
+  const chordLength = Math.max(Math.hypot(targetX - sourceX, targetY - sourceY), 1);
+  const bodyCanvasLength = clampCanvasEdgeValue(chordLength * 0.12, 40, 70);
+  const trailCanvasLength = clampCanvasEdgeValue(bodyCanvasLength * 1.55, 64, 110);
+  const coreCanvasLength = clampCanvasEdgeValue(bodyCanvasLength * 0.16, 6, 12);
+  const trailLength = normalizedCanvasEdgeLength(trailCanvasLength, chordLength, 28);
+  const bodyLength = normalizedCanvasEdgeLength(bodyCanvasLength, chordLength, 18);
+  const coreLength = normalizedCanvasEdgeLength(coreCanvasLength, chordLength, 6);
+  return {
+    trailDash: canvasEdgeDashPattern(trailLength),
+    bodyDash: canvasEdgeDashPattern(bodyLength),
+    coreDash: canvasEdgeDashPattern(coreLength),
+    bodyShift: roundCanvasEdgeValue(-(trailLength - bodyLength) * 0.55),
+    coreShift: roundCanvasEdgeValue(-(trailLength - coreLength) * 0.84),
+  };
+}
+
+function normalizedCanvasEdgeLength(canvasLength: number, chordLength: number, maximum: number) {
+  return roundCanvasEdgeValue(Math.min((canvasLength / chordLength) * 100, maximum));
+}
+
+function canvasEdgeDashPattern(length: number) {
+  return `${length} ${roundCanvasEdgeValue(100 - length)}`;
+}
+
+function canvasEdgeLayerStyle(shift: number) {
+  return {
+    "--canvas-edge-layer-start": roundCanvasEdgeValue(100 + shift),
+    "--canvas-edge-layer-end": shift,
+  } as React.CSSProperties;
+}
+
+function clampCanvasEdgeValue(value: number, minimum: number, maximum: number) {
+  return Math.min(maximum, Math.max(minimum, value));
+}
+
+function roundCanvasEdgeValue(value: number) {
+  return Number(value.toFixed(3));
+}
+
+function edgeAnimationDelay(edgeId: string, durationSeconds: number) {
   let hash = 0;
   for (let index = 0; index < edgeId.length; index += 1) hash = ((hash << 5) - hash + edgeId.charCodeAt(index)) | 0;
-  return -(Math.abs(hash) % 1800) / 1000;
+  const phase = (Math.abs(hash) % 1000) / 1000;
+  return roundCanvasEdgeValue(-phase * durationSeconds);
 }
 
 function getModelArtifact(nodeType: CanvasNodeType, nodeRun: CanvasNodeRun) {
