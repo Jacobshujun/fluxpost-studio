@@ -17,7 +17,7 @@ export async function POST(request: Request) {
     const body = (await request.json()) as {
       post?: GeneratedPost;
       instruction?: string;
-      manualPatch?: Partial<Pick<GeneratedPost, "title" | "body" | "imagePrompt" | "status" | "imageUrls" | "videoUrls" | "imageTasks" | "feishuVehicle">>;
+      manualPatch?: Partial<Pick<GeneratedPost, "title" | "body" | "imagePrompt" | "status" | "imageUrls" | "videoUrls" | "imageTasks" | "feishuVehicle" | "xhsSeries">>;
     };
 
     if (!body.post) {
@@ -47,7 +47,7 @@ export async function POST(request: Request) {
     if (!currentPost) return NextResponse.json({ error: "Post not found" }, { status: 404 });
     let post = currentPost;
     if (body.manualPatch) {
-      const allowedPatch: Partial<Pick<GeneratedPost, "title" | "body" | "imagePrompt" | "status" | "imageUrls" | "videoUrls" | "imageTasks" | "feishuVehicle">> = {};
+      const allowedPatch: Partial<Pick<GeneratedPost, "title" | "body" | "imagePrompt" | "status" | "imageUrls" | "videoUrls" | "imageTasks" | "feishuVehicle" | "xhsSeries">> = {};
       if ("title" in body.manualPatch) allowedPatch.title = body.manualPatch.title;
       if ("body" in body.manualPatch) allowedPatch.body = body.manualPatch.body;
       if ("imagePrompt" in body.manualPatch) allowedPatch.imagePrompt = body.manualPatch.imagePrompt;
@@ -56,6 +56,10 @@ export async function POST(request: Request) {
       if ("videoUrls" in body.manualPatch) allowedPatch.videoUrls = body.manualPatch.videoUrls;
       if ("imageTasks" in body.manualPatch) allowedPatch.imageTasks = body.manualPatch.imageTasks;
       if ("feishuVehicle" in body.manualPatch) allowedPatch.feishuVehicle = body.manualPatch.feishuVehicle;
+      if ("xhsSeries" in body.manualPatch) allowedPatch.xhsSeries = body.manualPatch.xhsSeries;
+      if (allowedPatch.xhsSeries) {
+        allowedPatch.imageUrls = allowedPatch.xhsSeries.cards.map((card) => card.imageUrl).filter((url): url is string => Boolean(url));
+      }
       post = {
         ...post,
         ...allowedPatch,

@@ -78,7 +78,7 @@ const xiaopeng = loadTsModule("src/lib/xiaopeng-bbs.ts", {
   "./video-quality": videoQuality,
 });
 
-assertContains(read(".trellis/verification/check.ps1"), /Video quality selection check/, "Trellis baseline must include the video quality selection check.");
+assertContains(read(".trellis/verification/check.mjs"), /Video quality selection check/, "Trellis baseline must include the video quality selection check.");
 
 const orderedNoMetadata = videoQuality.rankVideoUrlsByQuality([
   { url: "https://cdn.example.invalid/video-first.mp4" },

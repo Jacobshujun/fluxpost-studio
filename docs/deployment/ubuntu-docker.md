@@ -106,7 +106,7 @@ Before removing an old FluxPost deployment from a host that runs other services:
 4. Never run a global Docker prune, restart Docker, modify firewall rules, or stop a process merely because it owns a port.
 5. Abort if any FluxPost-labelled resource overlaps a protected service.
 
-Place the current `vps-bootstrap.sh` and `vps-deploy.sh` together in a temporary directory when the target application commit predates the fixed-ref deploy wrapper. Then rebuild without changing system packages or Docker. Full installation remains Ubuntu 24.04-only; `--app-only` may reuse an existing Linux host after verifying all required tools:
+Place the current `vps-bootstrap.sh`, `vps-deploy.sh`, and `vps-enable-domain.sh` together in a temporary directory when the target application commit predates the fixed-ref wrappers. Then rebuild without changing system packages or Docker. Full installation remains Ubuntu 24.04-only; `--app-only` may reuse an existing Linux host after verifying all required tools:
 
 ```bash
 sudo bash /tmp/fluxpost-deploy/vps-bootstrap.sh \
@@ -118,6 +118,10 @@ sudo bash /tmp/fluxpost-deploy/vps-bootstrap.sh \
 ```
 
 `--staging` forces private mode, disables TOS initially, sets `TOS_OBJECT_PREFIX=fluxpost/staging`, and clears Feishu notification recipients. The generated administrator credentials are written with mode `0600` instead of being printed. Configure a test Feishu Base and other isolated provider credentials only after the private deployment passes its baseline checks.
+
+On an existing low-memory host, `--app-only` may use already-enabled swap for the image build when combined RAM and swap meet the bootstrap minimum. It never creates or changes swap; a fresh system installation still requires the physical-memory minimum.
+
+After the private baseline passes and DNS points to the host, `enable-domain.sh <hostname>` enables Caddy while pinning the redeploy to the active release manifest commit. Set `DEPLOY_REF` only when intentionally enabling the domain and promoting a different approved ref in one operation.
 
 ## Status And Logs
 

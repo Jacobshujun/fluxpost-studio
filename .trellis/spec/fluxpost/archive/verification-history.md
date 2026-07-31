@@ -1,6 +1,6 @@
 # Verification
 
-Last updated: 2026-06-16
+Last updated: 2026-07-16
 
 ## Baseline Command
 
@@ -13,6 +13,8 @@ powershell -ExecutionPolicy Bypass -File .trellis/verification/check.ps1
 ## Archived Recent Verification
 
 - 2026-07-15: Full baseline passed with `TRELLIS_SMOKE_PORT=45678 powershell -ExecutionPolicy Bypass -File .trellis/verification/check.ps1` after adding the one-command Ubuntu 24.04 deployment path. `.trellis/verification/vps_deployment_check.mjs` parses Compose YAML, runs `bash -n`, executes private/HTTPS/legacy `vps-deploy.sh --check` plans, verifies random-secret/mode-0600 wiring, persistent named volumes, loopback-only pre-domain access, domain validation, and absence of SSH/firewall/`down -v` mutations. Focused checks, `npx --no-install tsc --noEmit`, `npm run lint`, and `npm run build` passed; 15 Turbopack path-tracing warnings remain. No live VPS, Docker, DNS, certificate, GitHub, or provider operation was triggered by verification.
+
+- 2026-07-08: Full baseline passed with `TRELLIS_SMOKE_PORT=45678 powershell -ExecutionPolicy Bypass -File .trellis/verification/check.ps1` after adding admin-only `/config` advanced environment configuration. Focused coverage verified plain status compatibility, admin-only advanced read/write, secret masking, allow-listed config writes, and admin-only navigation. Type-check, lint, local restart, and the full baseline passed with the existing Turbopack path warnings.
 
 ## Current Automated Checks
 
@@ -366,6 +368,18 @@ This command runs `npm run build`, stops any process bound to port `3001`, start
 - Build warnings observed: Turbopack tracing warnings involving `src/lib/media-cache.ts` and `next.config.ts`. These warnings did not fail the build.
 
 ## Missing Coverage
+
+### Archived July 2026 verification
+
+- 2026-07-23: Vehicle library manual-tag/no-AI contracts, executable isolated vehicle import and cross-role reuse/job cases, reference regression, lint, TypeScript, full baseline on port 45678, local restart, and mocked Chromium at 1440x960 and 390x844 passed. URL push/back, import/detail/batch/preview AI suppression, and zero horizontal overflow were verified without live TOS/GPT calls.
+- 2026-07-23: HEIC/TOS checks decoded a real Windows-generated HEIC fixture saved as `.jpg`, verified atomic JPEG replacement, 1 JPEG + 8 HEIC complete TOS persistence, invalid keep `needs_review`, no-video repair, exact/idempotent repair, lint, TypeScript, build, full baseline on port 45678, local restart, and browser smoke. Commit `2fef2e5` then deployed healthy to production 38; root-only backup, admin scan/apply (37 candidates, 33 repaired, 4 safely unchanged), and known-post 9/9 direct TOS HTTP 200 JPEG/non-zero-dimension checks passed without paid service calls.
+- 2026-07-23: Unified library tag/theme contracts, lint, TypeScript, production build, local restart, unauthenticated tag-API 401, and mocked Playwright at 1440x960 and 390x844 passed. Screenshots covered all three themes, tag keyboard/batch flows, and themed mobile preview without overflow; no live TOS/GPT call ran.
+- 2026-07-21: Feishu/TOS recovery `c743eca` passed focused checks, type-check, lint, build, local restart, and baseline. Release `20260721-081849`, app/PostgreSQL/Open WebUI, Nginx, config endpoints, and proxy absence passed on `82.158.226.10`. The old job remains `failed`, `attempts=1`; no retry or live Feishu write occurred.
+- 2026-07-21: ToAPIs focused checks, TypeScript, lint, build, local restart, and full baseline passed. Commits `d9095ea`/`4a9bd8e` deployed healthy to `82.158.226.10`; paid text/reference probes returned distinct durable TOS images without fallback. A complex reference exceeded 180 seconds, later completed provider-side, and was recovered through the same persistence boundary.
+- 2026-07-21: Feishu publish resume regression now models `lark-cli@1.0.67` single-select read-back as a one-item array, with wrong/empty/multi-item arrays still failing. Focused Feishu checks, TypeScript, targeted lint, and local build passed. Commit `f38a0f8` deployed to `82.158.226.10`; two existing partial jobs completed with `published`, verified record fields, and attachment counts `1/1` and `9/9`. The full baseline passed all checks through domain verification but was blocked by the pre-existing lint error in `.trellis/workspace/codex/inspect-image-bundle.cjs`.
+- 2026-07-20: `.trellis/verification/tos_runtime_media_check.mjs`, lint, type-check, build, the full baseline on port 45678, and `npm run local:restart` passed. Commits `303e597` and Linux-lock fix `0039408` deployed to `82.158.226.10`; Linux `npm ci`, app/PostgreSQL/Open WebUI health, Nginx, loopback/public `/api/config`, `tosConfigured=true`, `tosEnabled=true`, absence of FluxPost proxy, unset `NODE_TLS_REJECT_UNAUTHORIZED`, chat/sd/run/aitool HTTPS, and sampled historical media Range `206` passed. Before enabling, a temporary dependency-stage container using the deployed persistent config verified object-level upload, HEAD length/ETag, anonymous GET, video Range `206`, and DELETE, then its image was removed. The admin route still returns boolean-only HTTP 401 without authentication; a normal authenticated admin button run and real FluxPost media production remain outstanding.
+- 2026-07-17: `node .trellis/verification/feishu_cli_identity_check.mjs`, the advanced-config, Feishu publish/resume/queue, content-import, distribution, and vehicle-option checks, `npx --no-install tsc --noEmit`, `npm run lint`, `npm run build`, and the full baseline passed without live Feishu calls. Commit `81ef2d0` was deployed to `82.158.226.10`; both FluxPost containers are healthy, loopback and public HTTPS `/api/config` return 200, 3101 remains loopback-only, release/repository heads match, persistent volumes remain, Open WebUI retained container ID `1ee7b99...` and healthy state, Nginx validates, and existing application services remain active. `lark-cli doctor --offline` remains not configured until the administrator saves the new advanced identity fields.
+- 2026-07-16: Live Ubuntu 24.04 bootstrap on `82.158.226.10` deployed commit `a73ed01` in private mode. App/PostgreSQL health, loopback-only port 3101, proxy absence, root-only base config, `/api/config`, and a temporary Windows SSH tunnel passed. Existing Open WebUI container identity/health, Nginx listeners/PIDs, and Dongchedi/RunningHub/Seedance services remained active. The full local baseline also passed with 15 existing Turbopack broad-path warnings; no live provider or Feishu write was called.
 
 - No unit tests are defined in `package.json`.
 - No isolated TikHub/OpenAI/Feishu integration tests are configured.

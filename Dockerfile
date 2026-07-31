@@ -8,6 +8,7 @@ RUN npm ci
 FROM node:24-bookworm-slim AS builder
 WORKDIR /app
 ENV NEXT_TELEMETRY_DISABLED=1
+ENV FLUXPOST_STANDALONE_BUILD=1
 COPY --from=deps /app/node_modules ./node_modules
 COPY . .
 RUN npm run build

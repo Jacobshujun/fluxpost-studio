@@ -26,15 +26,15 @@ Permanently recover generated-post media references that still point at deleted 
 
 ## Acceptance Criteria
 
-- [ ] A missing `/media/crawl/feishu/AI7379/11.jpg` local file with an exact verified TOS object resolves to its durable HTTPS URL and that URL is persisted before publish.
-- [ ] Existing local files and existing HTTP(S) URLs are not rewritten or unnecessarily looked up in TOS.
-- [ ] TOS disabled, missing object, invalid input, HEAD failure, public download failure, and timeout return distinct actionable failures.
-- [ ] In a 17-post batch with one unrecoverable post, 16 valid posts publish and the invalid post creates no Base record.
-- [ ] If every post fails media preflight, no Feishu record-create command runs and the job fails terminally.
-- [ ] Retry continues to reuse persisted Feishu record ids and cannot create duplicate records for already-started posts.
-- [ ] Queue polling reports `queueAhead` and `activeJobId` for queued same-owner work.
-- [ ] Focused TOS and Feishu checks, type-check, lint, build, full Trellis baseline, and local production refresh pass without live provider calls.
-- [ ] Deployment changes only `82.158.226.10`; the old failed job remains untouched until manual retry.
+- [x] A missing `/media/crawl/feishu/AI7379/11.jpg` local file with an exact verified TOS object resolves to its durable HTTPS URL and that URL is persisted before publish.
+- [x] Existing local files and existing HTTP(S) URLs are not rewritten or unnecessarily looked up in TOS.
+- [x] TOS disabled, missing object, invalid input, HEAD failure, public download failure, and timeout return distinct actionable failures.
+- [x] In a 17-post batch with one unrecoverable post, 16 valid posts publish and the invalid post creates no Base record.
+- [x] If every post fails media preflight, no Feishu record-create command runs and the job fails terminally.
+- [x] Retry continues to reuse persisted Feishu record ids and cannot create duplicate records for already-started posts.
+- [x] Queue polling reports `queueAhead` and `activeJobId` for queued same-owner work.
+- [x] Focused TOS and Feishu checks, type-check, lint, build, full Trellis baseline, and local production refresh pass without live provider calls.
+- [x] Deployment changes only `82.158.226.10`; the old failed job remains untouched until manual retry.
 
 ## Out Of Scope
 

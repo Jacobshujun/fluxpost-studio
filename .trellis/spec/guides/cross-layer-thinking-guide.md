@@ -71,7 +71,7 @@ An external API version change is a change-propagation task, not a one-call-site
 - For writes where empty or partial entities are harmful, read the created entities back and compare the critical fields before reporting success.
 - Persist returned IDs before surfacing a partial failure so retries repair the same entities instead of creating duplicates.
 - Regression coverage must include a technically successful response whose read-back fields are blank.
-- Build round-trip fixtures from observed external read responses, not the write payload shape. A CLI may accept a scalar for a single-select write but return a one-item array on read; normalize only the confirmed equivalent shape and keep empty, multi-item, and wrong-value responses as failures.
+- Build round-trip fixtures from observed reads, not writes. If a CLI returns a one-item array for a scalar single-select write, normalize only that shape; empty, multi-item, and wrong-value reads must fail.
 
 ### Mistake 1: Implicit Format Assumptions
 

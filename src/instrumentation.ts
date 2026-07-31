@@ -5,10 +5,12 @@ export async function register() {
     || process.env.FLUXPOST_DISABLE_BACKGROUND_WORKERS === "1"
   ) return;
 
-  const [{ ensureCanvasRunWorker }, { kickCanvasSchedulerWorker }] = await Promise.all([
+  const [{ ensureCanvasRunWorker }, { kickCanvasSchedulerWorker }, { ensureOriginalBatchWorker }] = await Promise.all([
     import("@/lib/canvas/runs"),
     import("@/lib/canvas/scheduler"),
+    import("@/lib/original-batches"),
   ]);
   kickCanvasSchedulerWorker();
   ensureCanvasRunWorker();
+  ensureOriginalBatchWorker();
 }

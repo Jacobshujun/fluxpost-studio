@@ -15,7 +15,7 @@ const openai = read("src/lib/openai.ts");
 const imageGeneration = read("src/lib/image-generation.ts");
 const page = read("src/app/page.tsx");
 const feishu = read("src/lib/feishu-cli.ts");
-const check = read(".trellis/verification/check.ps1");
+const check = read(".trellis/verification/check.mjs");
 
 has(types, /export type Platform = SourceLinkPlatform \| "feishu" \| "original"/, "Platform must include original.");
 has(types, /openaiTextEndpoint:\s*string/, "ConfigStatus must expose the OpenAI text endpoint.");

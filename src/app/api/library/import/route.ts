@@ -17,7 +17,7 @@ export async function POST(request: Request) {
       originalName: file.name,
       relativePath: stringValue(form.get("relativePath")),
       role: (stringValue(form.get("role")) || "reference") as LibraryAssetRole,
-      visibility: (stringValue(form.get("visibility")) || "private") as LibraryVisibility,
+      visibility: (stringValue(form.get("visibility")) || "team") as LibraryVisibility,
       collectionId: stringValue(form.get("collectionId")),
     });
     if ("job" in result && result.job) kickLibraryTaggingWorker();

@@ -1,5 +1,6 @@
 import { existsSync, readFileSync, writeFileSync } from "node:fs";
 import path from "node:path";
+import { normalizeFeishuTableId } from "./feishu-table-id";
 import type { ConfigStatus } from "./types";
 import { getDatabaseRuntimeStatus } from "./database";
 import type { AdvancedConfigPatch, AdvancedConfigPatchValue, AdvancedConfigSnapshot } from "./types";
@@ -92,10 +93,12 @@ function readAppConfig() {
   feishuCliBin: process.env.FEISHU_CLI_BIN || "",
   feishuCliArgs: process.env.FEISHU_CLI_BITABLE_ARGS || "",
   feishuBitableAppToken: process.env.FEISHU_BITABLE_APP_TOKEN || "",
-  feishuBitableTableId: process.env.FEISHU_BITABLE_TABLE_ID || "",
+  feishuBitableTableId: normalizeFeishuTableId(process.env.FEISHU_BITABLE_TABLE_ID || ""),
   feishuBitableFieldMap: process.env.FEISHU_BITABLE_FIELD_MAP || "",
   feishuContentImportBaseToken: process.env.FEISHU_CONTENT_IMPORT_BASE_TOKEN || process.env.FEISHU_BITABLE_APP_TOKEN || "",
-  feishuContentImportTableId: process.env.FEISHU_CONTENT_IMPORT_TABLE_ID || process.env.FEISHU_BITABLE_TABLE_ID || "",
+  feishuContentImportTableId: normalizeFeishuTableId(
+    process.env.FEISHU_CONTENT_IMPORT_TABLE_ID || process.env.FEISHU_BITABLE_TABLE_ID || "",
+  ),
   feishuContentImportFieldMap: process.env.FEISHU_CONTENT_IMPORT_FIELD_MAP || "",
   feishuDistributionCheckBaseToken: process.env.FEISHU_DISTRIBUTION_CHECK_BASE_TOKEN || "JbpPbSIMqaD75wsZ9fAcBy9mnEe",
   feishuDistributionCheckTableId: process.env.FEISHU_DISTRIBUTION_CHECK_TABLE_ID || "tblA0EfoAF9J4ffi",
@@ -396,6 +399,7 @@ const advancedConfigGroups: ConfigDefinitionGroup[] = [
       configField("DATABASE_POOL_MAX", "数据库连接池上限", "PostgreSQL 连接池最大连接数。", "number", "runtime"),
       configField("SIMPLE_RUN_MAX_ITEMS", "简单任务最大条数", "简单模式单次任务允许处理的最大内容数。", "number", "runtime"),
       configField("SIMPLE_RUN_WORKER_CONCURRENCY", "简单任务 worker 并发", "后台简单任务队列并发。", "number", "runtime"),
+      configField("WORKER_ORIGINAL_BATCH_CONCURRENCY", "批量原创 worker 并发", "批量原创选题的后台并发，默认 2，最高 8。", "number", "runtime"),
       configField("FEISHU_PUBLISH_WORKER_CONCURRENCY", "飞书发布队列并发", "飞书记录写入 worker 并发。", "number", "runtime"),
       configField("WORKER_FEISHU_ATTACHMENT_CONCURRENCY", "飞书附件上传并发", "附件上传独立并发上限。", "number", "runtime"),
     ],

@@ -36,7 +36,7 @@ const reviewRoute = read("src/app/api/review/route.ts");
 const reviewPage = read("src/app/review/page.tsx");
 const page = read("src/app/page.tsx");
 const feishuCli = read("src/lib/feishu-cli.ts");
-const baseline = read(".trellis/verification/check.ps1");
+const baseline = read(".trellis/verification/check.mjs");
 
 assertContains(types, /GeneratedPost[\s\S]*videoUrls\?:\s*string\[\]/, "GeneratedPost must carry optional final source video URLs.");
 assertContains(types, /SimpleRunInput[\s\S]*includeSourceVideo\?:\s*boolean/, "SimpleRunInput must carry the source-video opt-in switch.");

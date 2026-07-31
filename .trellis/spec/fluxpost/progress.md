@@ -6,17 +6,15 @@ This file is an on-demand history library. Current state belongs in `.trellis/sp
 
 ## 最近一条
 <!-- TRELLIS-LATEST-START -->
-2026-07-15 Ubuntu VPS bootstrap work:
+2026-07-29 Canvas batch concurrency repair:
 
 Done:
-- Parameterized the loopback app port and Caddy hostname without breaking the existing VPS defaults.
-- Added root-only Ubuntu bootstrap, private pre-domain mode, persistent random base secrets, domain/HTTPS enablement, installed wrapper refresh, and read-only deployment plan output.
-- Added beginner instructions for one-paste install, Windows SSH tunnel, first-admin setup, advanced configuration, DNS enablement, updates, diagnostics, persistent data, and private/HTTPS rollback.
-- Added deterministic baseline coverage for Compose structure, all named volumes, Bash syntax, private/HTTPS/legacy plan behavior, root/Ubuntu/Docker/secret contracts, hostname/DNS guards, and prohibited destructive/SSH/firewall commands.
-- Full Trellis baseline passed with the existing class of Turbopack path-tracing warnings.
+- Replaced the single Canvas durable-run queue consumer with a bounded consumer group controlled by `WORKER_CANVAS_RUN_CONCURRENCY` (default 8, cap 20).
+- Confirmed focused Canvas/concurrency checks, TypeScript, scoped lint, and production build without live provider calls.
 
 Next:
-- Run one intentional fresh Ubuntu 24.04 installation when target SSH access is available, then enable a real DNS hostname and verify HTTPS before changing the feature from `ready_for_review` to `done`.
+- Leave the current local server running while `simple-1785314521332` is active; after it reaches a terminal status, run `npm run local:restart` to activate the repair.
+- The full Trellis wrapper remains externally blocked by absent `.trellis/verification/check.mjs`; do not treat that as an implementation failure for this repair.
 <!-- TRELLIS-LATEST-END -->
 
 ## 历史记录

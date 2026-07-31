@@ -16,6 +16,10 @@ function assertContains(source, pattern, message) {
   if (!pattern.test(source)) throw new Error(message);
 }
 
+function assertNotContains(source, pattern, message) {
+  if (pattern.test(source)) throw new Error(message);
+}
+
 function assertEqual(actual, expected, message) {
   if (actual !== expected) throw new Error(`${message} Expected ${JSON.stringify(expected)}, got ${JSON.stringify(actual)}.`);
 }
@@ -42,6 +46,11 @@ assertContains(activityLog, /FEISHU_BITABLE_APP_TOKEN=/, "Execution log compacti
 assertContains(feishu, /function getExistingFeishuRecordId\(post: GeneratedPost\)[\s\S]*post\.feishu\?\.recordId/, "Feishu publish must reuse existing per-post record IDs.");
 assertContains(feishu, /mapWithConcurrency\(posts,\s*concurrencyConfig\.feishuAttachment/, "Attachment uploads must use the low attachment concurrency.");
 assertContains(feishu, /"\+record-upsert"/, "Feishu publish must repair created and reused record fields with record-upsert.");
+assertNotContains(
+  feishu,
+  /"\+record-upsert"[\s\S]{0,500}"--format"/,
+  "Feishu record-upsert must not pass the unsupported --format flag; its output is not parsed.",
+);
 assertContains(feishu, /"\+record-get"/, "Feishu publish must read records back after field writes.");
 assertContains(feishu, /verifyFeishuRecordFields/, "Feishu publish must verify read-back fields before reporting success.");
 assertContains(feishu, /failure\.reason === "not_found"/, "Missing persisted record IDs must be replaced instead of retried forever.");

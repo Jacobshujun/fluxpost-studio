@@ -1,6 +1,7 @@
 import { NextResponse } from "next/server";
 import { compactError, recordExecutionLog } from "@/lib/activity-log";
 import { appConfig } from "@/lib/config";
+import { resolveLibraryAssetSelections } from "@/lib/library-assets";
 import { listSimpleRuns, startSimpleRun, terminateSimpleRun } from "@/lib/simple-runs";
 import { requireWorkspaceAccount } from "@/lib/workspace-accounts";
 import type { CrawlPlatform, SourceLinkPlatform, WorkspacePromptSettings } from "@/lib/types";
@@ -40,10 +41,10 @@ export async function POST(request: Request) {
       feishuTaskNumbers?: string[] | string;
       viralUrl?: string;
       viralImitateImages?: boolean;
-      viralMaterialPaths?: string[];
+      viralMaterialAssetIds?: string[];
       originalPrompt?: string;
       originalUseWebSearch?: boolean;
-      materialPaths?: string[];
+      materialAssetIds?: string[];
       settings?: Partial<WorkspacePromptSettings>;
     };
     if (body.sourceMode === "original" && body.originalUseWebSearch === true && appConfig.openaiTextEndpoint !== "responses") {
@@ -51,6 +52,16 @@ export async function POST(request: Request) {
     }
     const baseSourceMode =
       body.sourceMode === "feishu" ? "feishu" : body.sourceMode === "links" ? "links" : body.sourceMode === "pool" ? "pool" : "keyword";
+    const materialAssets = await resolveLibraryAssetSelections(
+      account,
+      Array.isArray(body.materialAssetIds) ? body.materialAssetIds : [],
+      "vehicle",
+    );
+    const viralMaterialAssets = await resolveLibraryAssetSelections(
+      account,
+      Array.isArray(body.viralMaterialAssetIds) ? body.viralMaterialAssetIds : [],
+      "vehicle",
+    );
     const run = await startSimpleRun({
       sourceMode: body.sourceMode === "original" ? "original" : body.sourceMode === "viral" ? "viral" : baseSourceMode,
       keyword: body.keyword || "",
@@ -70,10 +81,10 @@ export async function POST(request: Request) {
       feishuTaskNumbers: body.feishuTaskNumbers,
       viralUrl: body.viralUrl,
       viralImitateImages: body.viralImitateImages === true,
-      viralMaterialPaths: Array.isArray(body.viralMaterialPaths) ? body.viralMaterialPaths : [],
+      viralMaterialPaths: viralMaterialAssets.map((asset) => asset.publicUrl),
       originalPrompt: body.originalPrompt,
       originalUseWebSearch: body.originalUseWebSearch === true,
-      materialPaths: Array.isArray(body.materialPaths) ? body.materialPaths : [],
+      materialPaths: materialAssets.map((asset) => asset.publicUrl),
       settings: body.settings,
       ownerUserId: account.id,
       ownerDisplayName: account.displayName,
@@ -88,7 +99,7 @@ export async function POST(request: Request) {
       message: compactError(error),
       durationMs: Date.now() - startedAt,
     });
-    const status = /sign-in/i.test(message) ? 401 : /requires|required|platform/i.test(message) ? 400 : 500;
+    const status = /sign-in/i.test(message) ? 401 : /requires|required|platform/i.test(message) ? 400 : /library asset/i.test(message) ? 400 : 500;
     return NextResponse.json({ error: message }, { status });
   }
 }

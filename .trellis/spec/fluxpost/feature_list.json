@@ -173,19 +173,21 @@
     },
     {
       "id": "modular-resource-workspaces",
-      "title": "Content and material resource workspaces",
+      "title": "Content and TOS-backed image resource workspaces",
       "status": "ready_for_review",
       "definition_of_done": [
-        "The /content workspace exposes separate content-pool and material-library views",
+        "The /content workspace exposes content-pool harvesting and management without the retired local-path material library",
         "Content pool items can be created manually, edited, and deleted through local API routes",
-        "Material folders and assets support owner-scoped scan, create, edit, delete, and image preview operations",
+        "Reference and vehicle assets use the authenticated TOS-backed library with role, collection, tag, visibility, and preview behavior",
+        "Compact viral image imitation selects vehicle asset ids and freezes validated public URLs before queue execution",
         "Generated drafts remain available through the independent /review workspace without a home production module"
       ],
       "evidence": [
+        "2026-07-29 retired the legacy local material UI/APIs/types/schema and local PostgreSQL/SQLite tables; compact vehicle selection, access/role validation, frozen TOS URLs, remote viral pairing, focused checks, TypeScript, changed-file lint, build/restart, and HTTP boundaries passed without live provider calls or source-file deletion code.",
         "2026-07-22 /content content/material tabs, owner-scoped material APIs, CRUD/preview checks, full baseline, local restart, mocked desktop/mobile browser validation, and fixed-SHA 104 staging deployment passed",
         "Detailed historical evidence archived at .trellis/spec/fluxpost/archive/feature-list-history-2026-06-17.json"
       ],
-      "notes": "External provider calls and writes are excluded from default verification."
+      "notes": "The 2026-07-22 local material workspace evidence is historical; that domain was intentionally retired on 2026-07-29. External provider calls and writes remain excluded from default verification."
     },
     {
       "id": "ai-source-tagging",
@@ -290,7 +292,7 @@
       "evidence": [
         "Implementation covers library assets/tagging, authenticated tag suggestions and batch mutation APIs, unified tag UI, and theme-aware library styling",
         "2026-07-23 tag/theme contracts, lint, TypeScript, build, restart, auth probe, and mocked desktop/mobile Playwright passed; screenshots cover three themes and themed preview without overflow",
-        "2026-07-23 vehicle manual-tag/no-AI import checks, executable cross-role dedupe/job cases, full baseline, restart, and mocked 1440x960/390x844 URL/batch/preview validation passed"
+        "2026-07-29 new image imports default to team while explicit private and legacy migration remain private; six server-backed sorts, versioned cursors, submitter display, marquee/Ctrl-add, mobile checkbox fallback, and normal-member LAN HTTP upload without secure-context UUID passed build/restart and mocked responsive checks without live TOS or GPT"
       ],
       "notes": "Keep ready_for_review until operator-approved production 38 samples prove real TOS PUT/HEAD/public read/delete for both roles and GPT tagging/retry for reference assets. Retired 104 is not a validation gate. Generation consumes no new assetIds in this phase."
     },
@@ -325,12 +327,13 @@
         "Seedance validates inputs and credit, persists submit_id/gen_status, and resumes accepted tasks by querying the original submit_id",
         "Default deterministic verification covers graph, persistence, API, desktop, and mobile contracts without paid provider or Feishu writes",
         "Batch scheduler V1 freezes multi-batch asset and copy samples, launches image children atomically, aggregates one review draft per scene, and supports pause, cancel, retry, and explicit candidate acceptance",
-        "Copy-library inputs freeze independent title/body/tag snapshots and the standard batch skeleton performs separate title and body text-model calls before content composition"
+        "Copy-library inputs freeze independent title/body/tag snapshots and the standard batch skeleton performs separate title and body text-model calls before content composition",
+        "Batch scheduler V2 lets users define typed main/child parameters, source filters, fixed/full/random expansion with exact or inclusive-range counts, main-once and child-per-main preview-frozen no-replacement selection, cartesian/zip composition, explicit node-field bindings, partial/strict aggregation, and custom names for same-type Canvas nodes"
       ],
       "evidence": [
-        "2026-07-24 added typed owner-scoped Canvas graph/API/database modules, immutable runs, mobile inspect/run, and persisted provider-id resumption",
-        "2026-07-27 common nodes, resizing, text-split/display-any, direct enqueue, task/history controls, shortcuts, bounded undo/redo, and the 100-slot image pool passed offline and mocked responsive checks",
-        "2026-07-28 batch scheduler V1 plus ordinal Prompt Switch, standard skeleton, explicit five-role binding editor, aggregate diagnostics, and latest-revision draft preflight passed deterministic, build/restart, HTTP/SQLite, and mocked desktop/mobile interaction, overflow, autosave, preflight, hierarchy, retry, candidate, layout, and contrast checks without paid calls"
+        "2026-07-29 core and batch Canvas commits deployed at d05caddb17875bb9a5dde924f9e4e8654f8d3ee3 with exact image identity, /canvas 200, unsigned API 401s, six schema tables, enabled workers, healthy protected services, and retained rollback; later local-only Canvas refinements remain outside this release",
+        "2026-07-27 to 2026-07-28 common nodes, resizing, text split/display-any, direct enqueue, task/history controls, shortcuts, bounded undo/redo, the 100-slot image pool, batch scheduler V1, Prompt Switch, standard skeleton, binding editor, aggregate diagnostics, and draft preflight passed deterministic, build/restart, HTTP/SQLite, and mocked responsive checks without paid calls",
+        "2026-07-30 flexible scheduler exact/range sampling passed deterministic main-once/child-per-main, Cartesian/zip, capacity, image-group, cumulative-limit, legacy compatibility, TypeScript, scoped lint, production build/restart/HTTP smoke, and mocked 1440x960/390x844 controls/layout checks without live providers"
       ],
       "notes": "Keep ready_for_review until operator-approved real Seedance/Feishu and batch image-provider smokes plus PostgreSQL migration/multi-user concurrency are live-verified."
     },
@@ -341,15 +344,33 @@
       "definition_of_done": [
         "Signed-in users can manually create, search, tag, share, edit, and confirm-delete title/body copy entries while owner/admin write permissions remain enforced",
         "PostgreSQL and SQLite persist copy entries and Canvas nodes execute frozen title/body/tag snapshots without rereading changed or deleted sources",
-        "Batch scheduling supports stable manual or AND-tag copy pools, round-robin frozen assignment, and an optional copy-input role compatible with old five-role workflows",
+        "Batch scheduling supports manual or AND-tag condition-random copy pools, batch-local no-replacement frozen assignment, strict capacity errors, and an optional copy-input role compatible with old five-role workflows",
         "The standard scheduler skeleton rewrites title and body through two separate GPT text nodes before existing review-draft composition",
         "Default verification covers persistence, permissions, tags, snapshots, scheduling, build, and responsive UI without live provider calls"
       ],
       "evidence": [
         "2026-07-28 copy_library_check.mjs and canvas_scheduler_check.mjs passed domain, schema, auth, snapshot, compatibility, injection, and two-call skeleton contracts",
-        "2026-07-28 TypeScript, focused lint, build/restart, HTTP smoke, and mocked 1440x960/390x844 CRUD/tag/sharing/Canvas/scheduler interaction and overflow checks passed; full baseline stopped only at an unrelated untracked temporary CJS lint file"
+        "2026-07-29 copy defaults/sorts, batch permissions, marquee/select-all/modifier shortcuts, editable-target guards, fixed header/editor with independent list scrolling, wrapped mobile batch controls, build/restart, and mocked responsive wheel/interaction checks passed; full baseline stopped only at an unrelated untracked temporary CJS lint file",
+        "2026-07-29 batch-local random unique copy assignment, explicit insufficient-capacity errors, whole-batch copy resampling, single-content frozen-copy preservation, scheduler/copy checks, TypeScript, scoped lint, production build/restart, and HTTP smoke passed without live providers; the full wrapper remains blocked by its documented missing check.mjs"
       ],
       "notes": "Keep ready_for_review until authenticated multi-user PostgreSQL use and an operator-approved real two-call text-model batch prove the live path. Default checks must not invoke paid models."
+    },
+    {
+      "id": "original-xhs-batch-workspace",
+      "title": "Batch original Xiaohongshu card workspace",
+      "status": "ready_for_review",
+      "definition_of_done": [
+        "Signed-in operators can paste or edit 1-100 topics with atomic row validation and batch-level generation settings",
+        "Durable PostgreSQL and SQLite queues execute two-stage copy generation, cover-first anchored card generation, vision QA, one failed-card retry, pause, resume, cancel, and explicit failed-item retry",
+        "GeneratedPost preserves batch source and versioned structured card metadata while imageUrls remains an ordered projection compatible with review and Feishu publishing",
+        "The review desk exposes frozen prompts, candidates, QA issues, missing-card recovery, and cover-anchored regeneration",
+        "Default deterministic verification covers catalog, validation, schema, APIs, orchestration contracts, build, and responsive UI without paid provider calls"
+      ],
+      "evidence": [
+        "2026-07-30 original card checks proved cover-first generation, one shared cover anchor, one failed-QA retry, pending ToAPIs task-id persistence, 30-second same-id resume without resubmission, pending-cover child blocking without failure, expired-lock recovery only with a persisted id, and asynchronous review regeneration; PostgreSQL/SQLite recovery SQL, workspace/concurrency/review checks, TypeScript, scoped lint, production build/restart/HTTP smoke, and mocked Playwright at 1440x960 and 390x844 passed without external provider calls.",
+        "Source and MIT notice preserve baoyu-xhs-images v2.0.1 commit 6b7a2e417500561a5ecdd0b168332f4142584617 attribution."
+      ],
+      "notes": "Keep ready_for_review until an operator approves a real two-topic, three-card-per-topic provider smoke and authenticated multi-user PostgreSQL lifecycle checks. The required Trellis wrapper remains blocked by the separately missing .trellis/verification/check.mjs, and repository-wide lint remains polluted by existing .tmp-* generated trees."
     }
   ]
 }

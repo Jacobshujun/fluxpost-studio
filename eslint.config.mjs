@@ -12,6 +12,8 @@ const eslintConfig = defineConfig([
     "out/**",
     "build/**",
     "next-env.d.ts",
+    ".tmp-*",
+    ".tmp-*/**",
     "docs/harness.disabled/**",
     "scripts/harness.disabled/**",
   ]),

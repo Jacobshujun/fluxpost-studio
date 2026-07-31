@@ -51,6 +51,9 @@ const mediaCache = loadTsModule("src/lib/media-cache.ts", {
   "./image-format": {
     sniffImageFormat: () => ({ browserSupported: true, mimeType: "image/jpeg" }),
   },
+  "./image-normalization": {
+    normalizeHeicFileToJpeg: async () => false,
+  },
   "./media-cache-status": {
     buildMediaCacheStatus: () => ({ status: "local_complete" }),
   },

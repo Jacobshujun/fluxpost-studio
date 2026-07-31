@@ -15,7 +15,9 @@ import type {
   LibraryAsset,
   LibraryCollection,
   LibraryTaggingJob,
-  MaterialLibrarySnapshot,
+  OriginalBatch,
+  OriginalBatchItem,
+  OriginalBatchQueueItem,
   SimpleRun,
   SimpleRunQueueItem,
   WorkspaceAccountRecord,
@@ -60,6 +62,28 @@ type SimpleRunQueueRow = {
   completed_at?: string | null;
   error?: string | null;
 };
+
+type OriginalBatchQueueRow = {
+  id: string;
+  batch_id: string;
+  item_id: string;
+  owner_user_id: string;
+  status: OriginalBatchQueueItem["status"];
+  priority: number;
+  attempts: number;
+  max_attempts: number;
+  run_after: string;
+  locked_by?: string | null;
+  locked_until?: string | null;
+  created_at: string;
+  updated_at: string;
+  started_at?: string | null;
+  completed_at?: string | null;
+  error?: string | null;
+  data_json: unknown;
+};
+
+type ExpiredOriginalBatchQueueRow = { item_id: string; batch_id: string };
 
 type FeishuPublishQueueRow = {
   id: string;
@@ -197,8 +221,6 @@ type StoreTable =
   | "content_projects"
   | "generated_posts"
   | "batch_jobs"
-  | "material_folders"
-  | "material_assets"
   | "execution_logs"
   | "crawl_jobs"
   | "runtime_posts"
@@ -265,21 +287,6 @@ export async function findLibraryAssetByOwnerHashFromDb(ownerUserId: string, sha
   const row = getSqliteDatabase().prepare(
     "SELECT data_json FROM library_assets WHERE owner_user_id = ? AND sha256 = ? AND deleted_at IS NULL LIMIT 1",
   ).get(ownerUserId, sha256) as JsonRow | undefined;
-  return row ? fromJson<LibraryAsset>(row.data_json) : undefined;
-}
-
-export async function findLibraryAssetByLegacyMaterialIdFromDb(legacyMaterialAssetId: string) {
-  await ensureDatabaseReady();
-  if (getDatabaseBackend() === "postgres") {
-    const result = await getPostgresPool().query<JsonRow>(
-      "SELECT data_json FROM library_assets WHERE legacy_material_asset_id = $1 AND deleted_at IS NULL LIMIT 1",
-      [legacyMaterialAssetId],
-    );
-    return result.rows[0] ? fromJson<LibraryAsset>(result.rows[0].data_json) : undefined;
-  }
-  const row = getSqliteDatabase().prepare(
-    "SELECT data_json FROM library_assets WHERE legacy_material_asset_id = ? AND deleted_at IS NULL LIMIT 1",
-  ).get(legacyMaterialAssetId) as JsonRow | undefined;
   return row ? fromJson<LibraryAsset>(row.data_json) : undefined;
 }
 
@@ -645,43 +652,6 @@ export async function deleteGeneratedPostsFromDb(postIds: string[]) {
   });
 }
 
-export async function readMaterialLibraryFromDb(): Promise<MaterialLibrarySnapshot> {
-  return {
-    folders: await readJsonRows("material_folders", "created_at ASC"),
-    assets: await readJsonRows("material_assets", "updated_at DESC"),
-  };
-}
-
-export async function writeMaterialLibraryToDb(library: MaterialLibrarySnapshot) {
-  await ensureDatabaseReady();
-  if (getDatabaseBackend() === "postgres") {
-    await writeMaterialLibraryPostgres(library);
-    return;
-  }
-
-  const db = getSqliteDatabase();
-  runSqliteTransaction(db, () => {
-    db.prepare("DELETE FROM material_folders").run();
-    db.prepare("DELETE FROM material_assets").run();
-
-    const insertFolder = db.prepare(`
-      INSERT INTO material_folders (id, parent_id, name, created_at, updated_at, data_json)
-      VALUES (?, ?, ?, ?, ?, ?)
-    `);
-    for (const folder of library.folders) {
-      insertFolder.run(folder.id, folder.parentId || null, folder.name, folder.createdAt, folder.updatedAt, toJson(folder));
-    }
-
-    const insertAsset = db.prepare(`
-      INSERT INTO material_assets (id, folder_id, path, kind, created_at, updated_at, data_json)
-      VALUES (?, ?, ?, ?, ?, ?, ?)
-    `);
-    for (const asset of library.assets) {
-      insertAsset.run(asset.id, asset.folderId, asset.path, asset.kind, asset.createdAt, asset.updatedAt, toJson(asset));
-    }
-  });
-}
-
 export async function readExecutionLogsFromDb(limit?: number): Promise<ExecutionLogEntry[]> {
   return readJsonRows<ExecutionLogEntry>("execution_logs", "created_at DESC", limit);
 }
@@ -938,6 +908,270 @@ export async function failSimpleRunQueueItemByRunId(runId: string, error: string
         error = ?
     WHERE run_id = ? AND status IN ('queued', 'running')
   `).run(now, now, error, runId);
+}
+
+export async function createOriginalBatchRecords(batch: OriginalBatch, items: OriginalBatchItem[], queueItems: OriginalBatchQueueItem[]) {
+  await ensureDatabaseReady();
+  if (items.length !== queueItems.length) throw new Error("Original batch items and queue items must have equal length.");
+  if (getDatabaseBackend() === "postgres") {
+    const client = await getPostgresPool().connect();
+    try {
+      await client.query("BEGIN");
+      await client.query(
+        `INSERT INTO original_batches (id, owner_user_id, status, created_at, updated_at, data_json)
+         VALUES ($1,$2,$3,$4,$5,$6::jsonb)`,
+        [batch.id, batch.ownerUserId, batch.status, batch.createdAt, batch.updatedAt, toJson(batch)],
+      );
+      for (const item of items) {
+        await client.query(
+          `INSERT INTO original_batch_items (id, batch_id, owner_user_id, ordinal, status, created_at, updated_at, data_json)
+           VALUES ($1,$2,$3,$4,$5,$6,$7,$8::jsonb)`,
+          [item.id, item.batchId, item.ownerUserId, item.ordinal, item.status, item.createdAt, item.updatedAt, toJson(item)],
+        );
+      }
+      for (const queueItem of queueItems) {
+        await client.query(
+          `INSERT INTO original_batch_queue (
+             id,batch_id,item_id,owner_user_id,status,priority,attempts,max_attempts,run_after,
+             locked_by,locked_until,created_at,updated_at,started_at,completed_at,error,data_json
+           ) VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,NULL,NULL,$10,$11,NULL,NULL,NULL,$12::jsonb)`,
+          [queueItem.id, queueItem.batchId, queueItem.itemId, queueItem.ownerUserId, queueItem.status, queueItem.priority, queueItem.attempts, queueItem.maxAttempts, queueItem.runAfter, queueItem.createdAt, queueItem.updatedAt, toJson(queueItem)],
+        );
+      }
+      await client.query("COMMIT");
+      return;
+    } catch (error) {
+      await client.query("ROLLBACK");
+      throw error;
+    } finally {
+      client.release();
+    }
+  }
+
+  const db = getSqliteDatabase();
+  runSqliteTransaction(db, () => {
+    db.prepare("INSERT INTO original_batches (id,owner_user_id,status,created_at,updated_at,data_json) VALUES (?,?,?,?,?,?)")
+      .run(batch.id, batch.ownerUserId, batch.status, batch.createdAt, batch.updatedAt, toJson(batch));
+    const itemStatement = db.prepare("INSERT INTO original_batch_items (id,batch_id,owner_user_id,ordinal,status,created_at,updated_at,data_json) VALUES (?,?,?,?,?,?,?,?)");
+    items.forEach((item) => itemStatement.run(item.id, item.batchId, item.ownerUserId, item.ordinal, item.status, item.createdAt, item.updatedAt, toJson(item)));
+    const queueStatement = db.prepare(`INSERT INTO original_batch_queue (
+      id,batch_id,item_id,owner_user_id,status,priority,attempts,max_attempts,run_after,
+      locked_by,locked_until,created_at,updated_at,started_at,completed_at,error,data_json
+    ) VALUES (?,?,?,?,?,?,?,?,?,NULL,NULL,?,?,NULL,NULL,NULL,?)`);
+    queueItems.forEach((item) => queueStatement.run(item.id, item.batchId, item.itemId, item.ownerUserId, item.status, item.priority, item.attempts, item.maxAttempts, item.runAfter, item.createdAt, item.updatedAt, toJson(item)));
+  });
+}
+
+export async function listOriginalBatchesFromDb(limit = 30, offset = 0) {
+  await ensureDatabaseReady();
+  if (getDatabaseBackend() === "postgres") {
+    const result = await getPostgresPool().query<JsonRow>("SELECT data_json FROM original_batches ORDER BY created_at DESC LIMIT $1 OFFSET $2", [limit, offset]);
+    return result.rows.map((row) => fromJson<OriginalBatch>(row.data_json));
+  }
+  const rows = getSqliteDatabase().prepare("SELECT data_json FROM original_batches ORDER BY created_at DESC LIMIT ? OFFSET ?").all(limit, offset) as JsonRow[];
+  return rows.map((row) => fromJson<OriginalBatch>(row.data_json));
+}
+
+export async function getOriginalBatchFromDb(batchId: string) {
+  await ensureDatabaseReady();
+  const row = getDatabaseBackend() === "postgres"
+    ? (await getPostgresPool().query<JsonRow>("SELECT data_json FROM original_batches WHERE id = $1", [batchId])).rows[0]
+    : getSqliteDatabase().prepare("SELECT data_json FROM original_batches WHERE id = ?").get(batchId) as JsonRow | undefined;
+  return row ? fromJson<OriginalBatch>(row.data_json) : undefined;
+}
+
+export async function listOriginalBatchItemsFromDb(batchId: string) {
+  await ensureDatabaseReady();
+  const rows = getDatabaseBackend() === "postgres"
+    ? (await getPostgresPool().query<JsonRow>("SELECT data_json FROM original_batch_items WHERE batch_id = $1 ORDER BY ordinal ASC", [batchId])).rows
+    : getSqliteDatabase().prepare("SELECT data_json FROM original_batch_items WHERE batch_id = ? ORDER BY ordinal ASC").all(batchId) as JsonRow[];
+  return rows.map((row) => fromJson<OriginalBatchItem>(row.data_json));
+}
+
+export async function getOriginalBatchItemFromDb(itemId: string) {
+  await ensureDatabaseReady();
+  const row = getDatabaseBackend() === "postgres"
+    ? (await getPostgresPool().query<JsonRow>("SELECT data_json FROM original_batch_items WHERE id = $1", [itemId])).rows[0]
+    : getSqliteDatabase().prepare("SELECT data_json FROM original_batch_items WHERE id = ?").get(itemId) as JsonRow | undefined;
+  return row ? fromJson<OriginalBatchItem>(row.data_json) : undefined;
+}
+
+export async function saveOriginalBatchToDb(batch: OriginalBatch) {
+  await ensureDatabaseReady();
+  if (getDatabaseBackend() === "postgres") {
+    await getPostgresPool().query(
+      `INSERT INTO original_batches (id,owner_user_id,status,created_at,updated_at,data_json)
+       VALUES ($1,$2,$3,$4,$5,$6::jsonb)
+       ON CONFLICT(id) DO UPDATE SET status=excluded.status,updated_at=excluded.updated_at,data_json=excluded.data_json`,
+      [batch.id, batch.ownerUserId, batch.status, batch.createdAt, batch.updatedAt, toJson(batch)],
+    );
+  } else {
+    getSqliteDatabase().prepare(`INSERT INTO original_batches (id,owner_user_id,status,created_at,updated_at,data_json)
+      VALUES (?,?,?,?,?,?) ON CONFLICT(id) DO UPDATE SET status=excluded.status,updated_at=excluded.updated_at,data_json=excluded.data_json`)
+      .run(batch.id, batch.ownerUserId, batch.status, batch.createdAt, batch.updatedAt, toJson(batch));
+  }
+  return batch;
+}
+
+export async function saveOriginalBatchItemToDb(item: OriginalBatchItem) {
+  await ensureDatabaseReady();
+  if (getDatabaseBackend() === "postgres") {
+    await getPostgresPool().query(
+      `INSERT INTO original_batch_items (id,batch_id,owner_user_id,ordinal,status,created_at,updated_at,data_json)
+       VALUES ($1,$2,$3,$4,$5,$6,$7,$8::jsonb)
+       ON CONFLICT(id) DO UPDATE SET status=excluded.status,updated_at=excluded.updated_at,data_json=excluded.data_json`,
+      [item.id, item.batchId, item.ownerUserId, item.ordinal, item.status, item.createdAt, item.updatedAt, toJson(item)],
+    );
+  } else {
+    getSqliteDatabase().prepare(`INSERT INTO original_batch_items (id,batch_id,owner_user_id,ordinal,status,created_at,updated_at,data_json)
+      VALUES (?,?,?,?,?,?,?,?) ON CONFLICT(id) DO UPDATE SET status=excluded.status,updated_at=excluded.updated_at,data_json=excluded.data_json`)
+      .run(item.id, item.batchId, item.ownerUserId, item.ordinal, item.status, item.createdAt, item.updatedAt, toJson(item));
+  }
+  return item;
+}
+
+export async function claimNextOriginalBatchQueueItem(workerId: string, lockMs = 5 * 60_000) {
+  await ensureDatabaseReady();
+  const now = new Date();
+  const nowIso = now.toISOString();
+  const lockedUntil = new Date(now.getTime() + lockMs).toISOString();
+  if (getDatabaseBackend() === "postgres") {
+    const result = await getPostgresPool().query<OriginalBatchQueueRow>(
+      `WITH next_item AS (
+         SELECT queue.id FROM original_batch_queue queue
+         JOIN original_batches batch ON batch.id = queue.batch_id
+         WHERE queue.status='queued' AND queue.run_after <= $1 AND queue.attempts < queue.max_attempts
+           AND batch.status IN ('queued','running')
+         ORDER BY queue.priority DESC, queue.created_at ASC LIMIT 1 FOR UPDATE OF queue SKIP LOCKED
+       )
+       UPDATE original_batch_queue queue SET status='running',attempts=queue.attempts+1,locked_by=$2,locked_until=$3,
+         started_at=COALESCE(queue.started_at,$1),updated_at=$1
+       FROM next_item WHERE queue.id=next_item.id RETURNING queue.*`,
+      [nowIso, workerId, lockedUntil],
+    );
+    return result.rows[0] ? fromOriginalBatchQueueRow(result.rows[0]) : undefined;
+  }
+  const db = getSqliteDatabase();
+  let claimed: OriginalBatchQueueItem | undefined;
+  runSqliteTransaction(db, () => {
+    const row = db.prepare(`SELECT queue.* FROM original_batch_queue queue
+      JOIN original_batches batch ON batch.id=queue.batch_id
+      WHERE queue.status='queued' AND queue.run_after <= ? AND queue.attempts < queue.max_attempts
+        AND batch.status IN ('queued','running')
+      ORDER BY queue.priority DESC,queue.created_at ASC LIMIT 1`).get(nowIso) as OriginalBatchQueueRow | undefined;
+    if (!row) return;
+    db.prepare(`UPDATE original_batch_queue SET status='running',attempts=attempts+1,locked_by=?,locked_until=?,
+      started_at=COALESCE(started_at,?),updated_at=? WHERE id=?`).run(workerId, lockedUntil, nowIso, nowIso, row.id);
+    const next = db.prepare("SELECT * FROM original_batch_queue WHERE id=?").get(row.id) as OriginalBatchQueueRow;
+    claimed = fromOriginalBatchQueueRow(next);
+  });
+  return claimed;
+}
+
+export async function heartbeatOriginalBatchQueueItem(queueId: string, workerId: string, lockMs = 5 * 60_000) {
+  await ensureDatabaseReady();
+  const now = new Date();
+  const nowIso = now.toISOString();
+  const lockedUntil = new Date(now.getTime() + lockMs).toISOString();
+  if (getDatabaseBackend() === "postgres") {
+    await getPostgresPool().query("UPDATE original_batch_queue SET locked_until=$1,updated_at=$2 WHERE id=$3 AND locked_by=$4 AND status='running'", [lockedUntil, nowIso, queueId, workerId]);
+  } else {
+    getSqliteDatabase().prepare("UPDATE original_batch_queue SET locked_until=?,updated_at=? WHERE id=? AND locked_by=? AND status='running'").run(lockedUntil, nowIso, queueId, workerId);
+  }
+}
+
+export async function completeOriginalBatchQueueItem(queueId: string, workerId: string) {
+  return updateOriginalBatchQueueTerminalStatus(queueId, workerId, "completed");
+}
+
+export async function failOriginalBatchQueueItem(queueId: string, workerId: string, error: string) {
+  return updateOriginalBatchQueueTerminalStatus(queueId, workerId, "failed", error);
+}
+
+export async function cancelOriginalBatchQueueItem(queueId: string, workerId: string) {
+  return updateOriginalBatchQueueTerminalStatus(queueId, workerId, "cancelled", "Batch cancelled");
+}
+
+export async function cancelOriginalBatchQueuedItems(batchId: string) {
+  await ensureDatabaseReady();
+  const now = new Date().toISOString();
+  if (getDatabaseBackend() === "postgres") {
+    await getPostgresPool().query("UPDATE original_batch_queue SET status='cancelled',completed_at=$1,updated_at=$1,error='Batch cancelled' WHERE batch_id=$2 AND status='queued'", [now, batchId]);
+  } else {
+    getSqliteDatabase().prepare("UPDATE original_batch_queue SET status='cancelled',completed_at=?,updated_at=?,error='Batch cancelled' WHERE batch_id=? AND status='queued'").run(now, now, batchId);
+  }
+}
+
+export async function requeueOriginalBatchItem(itemId: string, delayMs = 0) {
+  await ensureDatabaseReady();
+  const now = new Date().toISOString();
+  const runAfter = new Date(Date.now() + delayMs).toISOString();
+  if (getDatabaseBackend() === "postgres") {
+    await getPostgresPool().query(`UPDATE original_batch_queue SET status='queued',attempts=0,run_after=$1,locked_by=NULL,locked_until=NULL,
+      started_at=NULL,completed_at=NULL,updated_at=$2,error=NULL WHERE item_id=$3`, [runAfter, now, itemId]);
+  } else {
+    getSqliteDatabase().prepare(`UPDATE original_batch_queue SET status='queued',attempts=0,run_after=?,locked_by=NULL,locked_until=NULL,
+      started_at=NULL,completed_at=NULL,updated_at=?,error=NULL WHERE item_id=?`).run(runAfter, now, itemId);
+  }
+}
+
+export async function requeueExpiredOriginalBatchQueueItemsWithProviderTasks() {
+  await ensureDatabaseReady();
+  const now = new Date().toISOString();
+  if (getDatabaseBackend() === "postgres") {
+    const result = await getPostgresPool().query(
+      `UPDATE original_batch_queue queue
+       SET status='queued',attempts=0,run_after=$1,locked_by=NULL,locked_until=NULL,
+           completed_at=NULL,updated_at=$1,error=NULL
+       WHERE queue.status='running' AND queue.locked_until < $1
+         AND EXISTS (
+           SELECT 1
+           FROM original_batch_items item,
+             LATERAL jsonb_array_elements(COALESCE(item.data_json->'series'->'cards', '[]'::jsonb)) card
+           WHERE item.id=queue.item_id
+             AND COALESCE(card->>'providerTaskId', '') <> ''
+             AND COALESCE(card->>'providerStatus', 'pending') IN ('pending','queued','in_progress')
+         )`,
+      [now],
+    );
+    return Number(result.rowCount || 0);
+  }
+  const result = getSqliteDatabase().prepare(
+    `UPDATE original_batch_queue
+     SET status='queued',attempts=0,run_after=?,locked_by=NULL,locked_until=NULL,
+         completed_at=NULL,updated_at=?,error=NULL
+     WHERE status='running' AND locked_until < ?
+       AND EXISTS (
+         SELECT 1
+         FROM original_batch_items item, json_each(item.data_json, '$.series.cards') card
+         WHERE item.id=original_batch_queue.item_id
+           AND COALESCE(json_extract(card.value, '$.providerTaskId'), '') <> ''
+           AND COALESCE(json_extract(card.value, '$.providerStatus'), 'pending') IN ('pending','queued','in_progress')
+       )`,
+  ).run(now, now, now) as { changes?: number };
+  return Number(result.changes || 0);
+}
+
+export async function failExpiredOriginalBatchQueueItems() {
+  await ensureDatabaseReady();
+  const now = new Date().toISOString();
+  const error = "Worker lock expired after an ambiguous provider boundary; explicit retry is required.";
+  if (getDatabaseBackend() === "postgres") {
+    const result = await getPostgresPool().query<ExpiredOriginalBatchQueueRow>(
+      `UPDATE original_batch_queue SET status='failed',locked_by=NULL,locked_until=NULL,completed_at=$1,updated_at=$1,error=$2
+       WHERE status='running' AND locked_until < $1 RETURNING item_id,batch_id`,
+      [now, error],
+    );
+    return result.rows.map((row) => ({ itemId: row.item_id, batchId: row.batch_id, error }));
+  }
+  const db = getSqliteDatabase();
+  let rows: ExpiredOriginalBatchQueueRow[] = [];
+  runSqliteTransaction(db, () => {
+    rows = db.prepare("SELECT item_id,batch_id FROM original_batch_queue WHERE status='running' AND locked_until < ?").all(now) as ExpiredOriginalBatchQueueRow[];
+    db.prepare(`UPDATE original_batch_queue SET status='failed',locked_by=NULL,locked_until=NULL,completed_at=?,updated_at=?,error=?
+      WHERE status='running' AND locked_until < ?`).run(now, now, error, now);
+  });
+  return rows.map((row) => ({ itemId: row.item_id, batchId: row.batch_id, error }));
 }
 
 export async function saveImageGenerationQueueJobToDb(job: ImageGenerationQueueJob) {
@@ -2568,6 +2802,7 @@ function getSqliteDatabase() {
   sqliteDatabase = new DatabaseSync(sqliteStorePath);
   configureSqliteDatabase(sqliteDatabase);
   createSqliteSchema(sqliteDatabase);
+  retireLegacyMaterialLibrarySqlite(sqliteDatabase);
   migrateLegacyJsonToSqlite(sqliteDatabase);
   return sqliteDatabase;
 }
@@ -2596,7 +2831,16 @@ function getPostgresPool() {
 
 async function initializePostgres() {
   await getPostgresPool().query(postgresSchemaSql);
+  await retireLegacyMaterialLibraryPostgres();
   await migrateLegacyJsonToPostgres();
+}
+
+function retireLegacyMaterialLibrarySqlite(db: SqliteDatabase) {
+  db.exec("DROP TABLE IF EXISTS material_assets; DROP TABLE IF EXISTS material_folders;");
+}
+
+async function retireLegacyMaterialLibraryPostgres() {
+  await getPostgresPool().query("DROP TABLE IF EXISTS material_assets; DROP TABLE IF EXISTS material_folders;");
 }
 
 async function readJsonRows<T>(table: StoreTable, orderBy?: string, limit?: number): Promise<T[]> {
@@ -2708,36 +2952,6 @@ async function updateSimpleRunQueueTerminalStatus(
   `).run(status, now, now, error || null, queueId, workerId);
 }
 
-async function writeMaterialLibraryPostgres(library: MaterialLibrarySnapshot) {
-  const client = await getPostgresPool().connect();
-  try {
-    await client.query("BEGIN");
-    await client.query("DELETE FROM material_folders");
-    await client.query("DELETE FROM material_assets");
-
-    for (const folder of library.folders) {
-      await client.query(
-        resolvePostgresInsertSql("material_folders"),
-        [folder.id, folder.parentId || null, folder.name, folder.createdAt, folder.updatedAt, toJson(folder)],
-      );
-    }
-
-    for (const asset of library.assets) {
-      await client.query(
-        resolvePostgresInsertSql("material_assets"),
-        [asset.id, asset.folderId, asset.path, asset.kind, asset.createdAt, asset.updatedAt, toJson(asset)],
-      );
-    }
-
-    await client.query("COMMIT");
-  } catch (error) {
-    await client.query("ROLLBACK");
-    throw error;
-  } finally {
-    client.release();
-  }
-}
-
 function configureSqliteDatabase(db: SqliteDatabase) {
   db.exec(`
     PRAGMA journal_mode = WAL;
@@ -2814,27 +3028,53 @@ function createSqliteSchema(db: SqliteDatabase) {
     );
     CREATE INDEX IF NOT EXISTS idx_batch_jobs_created_at ON batch_jobs(created_at DESC);
 
-    CREATE TABLE IF NOT EXISTS material_folders (
+    CREATE TABLE IF NOT EXISTS original_batches (
       id TEXT PRIMARY KEY,
-      parent_id TEXT,
-      name TEXT NOT NULL,
+      owner_user_id TEXT NOT NULL,
+      status TEXT NOT NULL,
       created_at TEXT NOT NULL,
       updated_at TEXT NOT NULL,
       data_json TEXT NOT NULL
     );
-    CREATE INDEX IF NOT EXISTS idx_material_folders_parent_id ON material_folders(parent_id);
+    CREATE INDEX IF NOT EXISTS idx_original_batches_owner_created ON original_batches(owner_user_id, created_at DESC);
+    CREATE INDEX IF NOT EXISTS idx_original_batches_status_updated ON original_batches(status, updated_at ASC);
 
-    CREATE TABLE IF NOT EXISTS material_assets (
+    CREATE TABLE IF NOT EXISTS original_batch_items (
       id TEXT PRIMARY KEY,
-      folder_id TEXT NOT NULL,
-      path TEXT NOT NULL UNIQUE,
-      kind TEXT NOT NULL,
+      batch_id TEXT NOT NULL,
+      owner_user_id TEXT NOT NULL,
+      ordinal INTEGER NOT NULL,
+      status TEXT NOT NULL,
       created_at TEXT NOT NULL,
       updated_at TEXT NOT NULL,
+      data_json TEXT NOT NULL,
+      UNIQUE(batch_id, ordinal)
+    );
+    CREATE INDEX IF NOT EXISTS idx_original_batch_items_batch_ordinal ON original_batch_items(batch_id, ordinal ASC);
+    CREATE INDEX IF NOT EXISTS idx_original_batch_items_owner_status ON original_batch_items(owner_user_id, status, updated_at ASC);
+
+    CREATE TABLE IF NOT EXISTS original_batch_queue (
+      id TEXT PRIMARY KEY,
+      batch_id TEXT NOT NULL,
+      item_id TEXT NOT NULL UNIQUE,
+      owner_user_id TEXT NOT NULL,
+      status TEXT NOT NULL,
+      priority INTEGER NOT NULL DEFAULT 0,
+      attempts INTEGER NOT NULL DEFAULT 0,
+      max_attempts INTEGER NOT NULL DEFAULT 1,
+      run_after TEXT NOT NULL,
+      locked_by TEXT,
+      locked_until TEXT,
+      created_at TEXT NOT NULL,
+      updated_at TEXT NOT NULL,
+      started_at TEXT,
+      completed_at TEXT,
+      error TEXT,
       data_json TEXT NOT NULL
     );
-    CREATE INDEX IF NOT EXISTS idx_material_assets_folder_id ON material_assets(folder_id);
-    CREATE INDEX IF NOT EXISTS idx_material_assets_updated_at ON material_assets(updated_at DESC);
+    CREATE INDEX IF NOT EXISTS idx_original_batch_queue_ready ON original_batch_queue(status, run_after, priority DESC, created_at ASC);
+    CREATE INDEX IF NOT EXISTS idx_original_batch_queue_batch ON original_batch_queue(batch_id, status);
+
 
     CREATE TABLE IF NOT EXISTS execution_logs (
       id TEXT PRIMARY KEY,
@@ -3056,7 +3296,6 @@ function createSqliteSchema(db: SqliteDatabase) {
       public_url TEXT NOT NULL,
       tagging_status TEXT NOT NULL,
       cleanup_status TEXT NOT NULL,
-      legacy_material_asset_id TEXT,
       created_at TEXT NOT NULL,
       updated_at TEXT NOT NULL,
       deleted_at TEXT,
@@ -3066,7 +3305,6 @@ function createSqliteSchema(db: SqliteDatabase) {
     CREATE INDEX IF NOT EXISTS idx_library_assets_owner_created ON library_assets(owner_user_id, created_at DESC, id DESC);
     CREATE INDEX IF NOT EXISTS idx_library_assets_visibility_created ON library_assets(visibility, created_at DESC, id DESC);
     CREATE INDEX IF NOT EXISTS idx_library_assets_tagging_status ON library_assets(tagging_status, updated_at DESC);
-    CREATE UNIQUE INDEX IF NOT EXISTS idx_library_assets_legacy_material ON library_assets(legacy_material_asset_id) WHERE legacy_material_asset_id IS NOT NULL;
 
     CREATE TABLE IF NOT EXISTS library_asset_roles (
       asset_id TEXT NOT NULL,
@@ -3212,27 +3450,53 @@ const postgresSchemaSql = `
   );
   CREATE INDEX IF NOT EXISTS idx_batch_jobs_created_at ON batch_jobs(created_at DESC);
 
-  CREATE TABLE IF NOT EXISTS material_folders (
+  CREATE TABLE IF NOT EXISTS original_batches (
     id TEXT PRIMARY KEY,
-    parent_id TEXT,
-    name TEXT NOT NULL,
+    owner_user_id TEXT NOT NULL,
+    status TEXT NOT NULL,
     created_at TIMESTAMPTZ NOT NULL,
     updated_at TIMESTAMPTZ NOT NULL,
     data_json JSONB NOT NULL
   );
-  CREATE INDEX IF NOT EXISTS idx_material_folders_parent_id ON material_folders(parent_id);
+  CREATE INDEX IF NOT EXISTS idx_original_batches_owner_created ON original_batches(owner_user_id, created_at DESC);
+  CREATE INDEX IF NOT EXISTS idx_original_batches_status_updated ON original_batches(status, updated_at ASC);
 
-  CREATE TABLE IF NOT EXISTS material_assets (
+  CREATE TABLE IF NOT EXISTS original_batch_items (
     id TEXT PRIMARY KEY,
-    folder_id TEXT NOT NULL,
-    path TEXT NOT NULL UNIQUE,
-    kind TEXT NOT NULL,
+    batch_id TEXT NOT NULL,
+    owner_user_id TEXT NOT NULL,
+    ordinal INTEGER NOT NULL,
+    status TEXT NOT NULL,
     created_at TIMESTAMPTZ NOT NULL,
     updated_at TIMESTAMPTZ NOT NULL,
+    data_json JSONB NOT NULL,
+    UNIQUE(batch_id, ordinal)
+  );
+  CREATE INDEX IF NOT EXISTS idx_original_batch_items_batch_ordinal ON original_batch_items(batch_id, ordinal ASC);
+  CREATE INDEX IF NOT EXISTS idx_original_batch_items_owner_status ON original_batch_items(owner_user_id, status, updated_at ASC);
+
+  CREATE TABLE IF NOT EXISTS original_batch_queue (
+    id TEXT PRIMARY KEY,
+    batch_id TEXT NOT NULL,
+    item_id TEXT NOT NULL UNIQUE,
+    owner_user_id TEXT NOT NULL,
+    status TEXT NOT NULL,
+    priority INTEGER NOT NULL DEFAULT 0,
+    attempts INTEGER NOT NULL DEFAULT 0,
+    max_attempts INTEGER NOT NULL DEFAULT 1,
+    run_after TIMESTAMPTZ NOT NULL,
+    locked_by TEXT,
+    locked_until TIMESTAMPTZ,
+    created_at TIMESTAMPTZ NOT NULL,
+    updated_at TIMESTAMPTZ NOT NULL,
+    started_at TIMESTAMPTZ,
+    completed_at TIMESTAMPTZ,
+    error TEXT,
     data_json JSONB NOT NULL
   );
-  CREATE INDEX IF NOT EXISTS idx_material_assets_folder_id ON material_assets(folder_id);
-  CREATE INDEX IF NOT EXISTS idx_material_assets_updated_at ON material_assets(updated_at DESC);
+  CREATE INDEX IF NOT EXISTS idx_original_batch_queue_ready ON original_batch_queue(status, run_after, priority DESC, created_at ASC);
+  CREATE INDEX IF NOT EXISTS idx_original_batch_queue_batch ON original_batch_queue(batch_id, status);
+
 
   CREATE TABLE IF NOT EXISTS execution_logs (
     id TEXT PRIMARY KEY,
@@ -3454,7 +3718,6 @@ const postgresSchemaSql = `
     public_url TEXT NOT NULL,
     tagging_status TEXT NOT NULL,
     cleanup_status TEXT NOT NULL,
-    legacy_material_asset_id TEXT,
     created_at TIMESTAMPTZ NOT NULL,
     updated_at TIMESTAMPTZ NOT NULL,
     deleted_at TIMESTAMPTZ,
@@ -3464,7 +3727,6 @@ const postgresSchemaSql = `
   CREATE INDEX IF NOT EXISTS idx_library_assets_owner_created ON library_assets(owner_user_id, created_at DESC, id DESC);
   CREATE INDEX IF NOT EXISTS idx_library_assets_visibility_created ON library_assets(visibility, created_at DESC, id DESC);
   CREATE INDEX IF NOT EXISTS idx_library_assets_tagging_status ON library_assets(tagging_status, updated_at DESC);
-  CREATE UNIQUE INDEX IF NOT EXISTS idx_library_assets_legacy_material ON library_assets(legacy_material_asset_id) WHERE legacy_material_asset_id IS NOT NULL;
 
   CREATE TABLE IF NOT EXISTS library_asset_roles (
     asset_id TEXT NOT NULL REFERENCES library_assets(id) ON DELETE CASCADE,
@@ -3580,33 +3842,6 @@ async function migrateLegacyJsonToPostgres() {
       }
     }
 
-    if ((await postgresTableCount(client, "material_folders")) === 0 && (await postgresTableCount(client, "material_assets")) === 0) {
-      const store = readLegacyJson<MaterialLibrarySnapshot>("material-library.json");
-      if (store && (Array.isArray(store.folders) || Array.isArray(store.assets))) {
-        for (const folder of store.folders || []) {
-          await client.query(resolvePostgresInsertSql("material_folders"), [
-            folder.id,
-            folder.parentId || null,
-            folder.name,
-            folder.createdAt,
-            folder.updatedAt,
-            toJson(folder),
-          ]);
-        }
-        for (const asset of store.assets || []) {
-          await client.query(resolvePostgresInsertSql("material_assets"), [
-            asset.id,
-            asset.folderId,
-            asset.path,
-            asset.kind,
-            asset.createdAt,
-            asset.updatedAt,
-            toJson(asset),
-          ]);
-        }
-      }
-    }
-
     if ((await postgresTableCount(client, "execution_logs")) === 0) {
       const store = readLegacyJson<{ entries?: ExecutionLogEntry[] }>("execution-log.json");
       if (Array.isArray(store?.entries)) {
@@ -3662,13 +3897,6 @@ function migrateLegacyJsonToSqlite(db: SqliteDatabase) {
       if (Array.isArray(store?.posts)) writeGeneratedPostsRowsSqlite(db, store.posts);
     }
 
-    if (sqliteTableCount(db, "material_folders") === 0 && sqliteTableCount(db, "material_assets") === 0) {
-      const store = readLegacyJson<MaterialLibrarySnapshot>("material-library.json");
-      if (store && (Array.isArray(store.folders) || Array.isArray(store.assets))) {
-        writeMaterialRowsSqlite(db, { folders: store.folders || [], assets: store.assets || [] });
-      }
-    }
-
     if (sqliteTableCount(db, "execution_logs") === 0) {
       const store = readLegacyJson<{ entries?: ExecutionLogEntry[] }>("execution-log.json");
       if (Array.isArray(store?.entries)) writeExecutionRowsSqlite(db, store.entries);
@@ -3698,12 +3926,6 @@ function resolveSqliteInsertSql(table: StoreTable) {
   if (table === "batch_jobs") {
     return "INSERT INTO batch_jobs (id, status, created_at, updated_at, data_json) VALUES (?, ?, ?, ?, ?)";
   }
-  if (table === "material_folders") {
-    return "INSERT INTO material_folders (id, parent_id, name, created_at, updated_at, data_json) VALUES (?, ?, ?, ?, ?, ?)";
-  }
-  if (table === "material_assets") {
-    return "INSERT INTO material_assets (id, folder_id, path, kind, created_at, updated_at, data_json) VALUES (?, ?, ?, ?, ?, ?, ?)";
-  }
   if (table === "execution_logs") {
     return "INSERT INTO execution_logs (id, scope, action, status, created_at, data_json) VALUES (?, ?, ?, ?, ?, ?)";
   }
@@ -3720,12 +3942,6 @@ function resolvePostgresInsertSql(table: StoreTable) {
   if (table === "batch_jobs") {
     return "INSERT INTO batch_jobs (id, status, created_at, updated_at, data_json) VALUES ($1, $2, $3, $4, $5::jsonb)";
   }
-  if (table === "material_folders") {
-    return "INSERT INTO material_folders (id, parent_id, name, created_at, updated_at, data_json) VALUES ($1, $2, $3, $4, $5, $6::jsonb)";
-  }
-  if (table === "material_assets") {
-    return "INSERT INTO material_assets (id, folder_id, path, kind, created_at, updated_at, data_json) VALUES ($1, $2, $3, $4, $5, $6, $7::jsonb)";
-  }
   if (table === "execution_logs") {
     return "INSERT INTO execution_logs (id, scope, action, status, created_at, data_json) VALUES ($1, $2, $3, $4, $5, $6::jsonb)";
   }
@@ -3736,18 +3952,6 @@ function writeGeneratedPostsRowsSqlite(db: SqliteDatabase, posts: GeneratedPost[
   const insert = db.prepare(resolveSqliteInsertSql("generated_posts"));
   for (const post of posts) {
     insert.run(post.id, post.sourceItemId, post.platform, post.status, post.createdAt || post.updatedAt, post.updatedAt, toJson(post));
-  }
-}
-
-function writeMaterialRowsSqlite(db: SqliteDatabase, library: MaterialLibrarySnapshot) {
-  const insertFolder = db.prepare(resolveSqliteInsertSql("material_folders"));
-  for (const folder of library.folders) {
-    insertFolder.run(folder.id, folder.parentId || null, folder.name, folder.createdAt, folder.updatedAt, toJson(folder));
-  }
-
-  const insertAsset = db.prepare(resolveSqliteInsertSql("material_assets"));
-  for (const asset of library.assets) {
-    insertAsset.run(asset.id, asset.folderId, asset.path, asset.kind, asset.createdAt, asset.updatedAt, toJson(asset));
   }
 }
 
@@ -3949,12 +4153,12 @@ async function saveLibraryAssetPostgres(client: PoolClient, asset: LibraryAsset)
   await client.query(
     `INSERT INTO library_assets (
        id, owner_user_id, visibility, sha256, object_key, public_url, tagging_status, cleanup_status,
-       legacy_material_asset_id, created_at, updated_at, deleted_at, data_json
-     ) VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13::jsonb)
+       created_at, updated_at, deleted_at, data_json
+     ) VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12::jsonb)
      ON CONFLICT(id) DO UPDATE SET owner_user_id=excluded.owner_user_id, visibility=excluded.visibility,
        sha256=excluded.sha256, object_key=excluded.object_key, public_url=excluded.public_url,
        tagging_status=excluded.tagging_status, cleanup_status=excluded.cleanup_status,
-       legacy_material_asset_id=excluded.legacy_material_asset_id, updated_at=excluded.updated_at,
+       updated_at=excluded.updated_at,
        deleted_at=excluded.deleted_at, data_json=excluded.data_json`,
     libraryAssetValues(asset),
   );
@@ -3982,12 +4186,12 @@ function saveLibraryAssetSqlite(db: SqliteDatabase, asset: LibraryAsset) {
   db.prepare(
     `INSERT INTO library_assets (
        id, owner_user_id, visibility, sha256, object_key, public_url, tagging_status, cleanup_status,
-       legacy_material_asset_id, created_at, updated_at, deleted_at, data_json
-     ) VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?)
+       created_at, updated_at, deleted_at, data_json
+     ) VALUES (?,?,?,?,?,?,?,?,?,?,?,?)
      ON CONFLICT(id) DO UPDATE SET owner_user_id=excluded.owner_user_id, visibility=excluded.visibility,
        sha256=excluded.sha256, object_key=excluded.object_key, public_url=excluded.public_url,
        tagging_status=excluded.tagging_status, cleanup_status=excluded.cleanup_status,
-       legacy_material_asset_id=excluded.legacy_material_asset_id, updated_at=excluded.updated_at,
+       updated_at=excluded.updated_at,
        deleted_at=excluded.deleted_at, data_json=excluded.data_json`,
   ).run(...libraryAssetValues(asset));
   db.prepare("DELETE FROM library_asset_roles WHERE asset_id=?").run(asset.id);
@@ -4017,7 +4221,6 @@ function libraryAssetValues(asset: LibraryAsset) {
     asset.publicUrl,
     asset.taggingStatus,
     asset.cleanupStatus,
-    asset.legacyMaterialAssetId || null,
     asset.createdAt,
     asset.updatedAt,
     asset.deletedAt || null,
@@ -4117,6 +4320,49 @@ function normalizeDateValue(value: unknown) {
   return typeof value === "string" ? value : new Date(String(value)).toISOString();
 }
 
+async function updateOriginalBatchQueueTerminalStatus(
+  queueId: string,
+  workerId: string,
+  status: "completed" | "failed" | "cancelled",
+  error?: string,
+) {
+  await ensureDatabaseReady();
+  const now = new Date().toISOString();
+  if (getDatabaseBackend() === "postgres") {
+    await getPostgresPool().query(
+      `UPDATE original_batch_queue SET status=$1,locked_by=NULL,locked_until=NULL,completed_at=$2,updated_at=$2,error=$3
+       WHERE id=$4 AND locked_by=$5 AND status='running'`,
+      [status, now, error || null, queueId, workerId],
+    );
+  } else {
+    getSqliteDatabase().prepare(`UPDATE original_batch_queue SET status=?,locked_by=NULL,locked_until=NULL,completed_at=?,updated_at=?,error=?
+      WHERE id=? AND locked_by=? AND status='running'`).run(status, now, now, error || null, queueId, workerId);
+  }
+}
+
+function fromOriginalBatchQueueRow(row: OriginalBatchQueueRow): OriginalBatchQueueItem {
+  const data = fromJson<Partial<OriginalBatchQueueItem>>(row.data_json);
+  return {
+    ...data,
+    id: row.id,
+    batchId: row.batch_id,
+    itemId: row.item_id,
+    ownerUserId: row.owner_user_id,
+    status: row.status,
+    priority: Number(row.priority),
+    attempts: Number(row.attempts),
+    maxAttempts: Number(row.max_attempts),
+    runAfter: normalizeDateValue(row.run_after),
+    createdAt: normalizeDateValue(row.created_at),
+    updatedAt: normalizeDateValue(row.updated_at),
+    lockedBy: row.locked_by || undefined,
+    lockedUntil: row.locked_until ? normalizeDateValue(row.locked_until) : undefined,
+    startedAt: row.started_at ? normalizeDateValue(row.started_at) : undefined,
+    completedAt: row.completed_at ? normalizeDateValue(row.completed_at) : undefined,
+    error: row.error || undefined,
+  };
+}
+
 function assertStoreTable(table: StoreTable) {
   const allowedTables: StoreTable[] = [
     "workspace_accounts",
@@ -4124,8 +4370,6 @@ function assertStoreTable(table: StoreTable) {
     "content_projects",
     "generated_posts",
     "batch_jobs",
-    "material_folders",
-    "material_assets",
     "execution_logs",
     "crawl_jobs",
     "runtime_posts",

@@ -17,10 +17,10 @@ export async function GET(request: Request) {
 export async function POST(request: Request) {
   try {
     const account = await requireWorkspaceAccount(request);
-    const body = (await request.json()) as { workflowId?: string; name?: string };
+    const body = (await request.json()) as { workflowId?: string; name?: string; schemaVersion?: 1 | 2 };
     const workflowId = body.workflowId?.trim();
     if (!workflowId) return NextResponse.json({ error: "workflowId is required." }, { status: 400 });
-    const schedule = await createCanvasSchedule(account, { workflowId, name: body.name });
+    const schedule = await createCanvasSchedule(account, { workflowId, name: body.name, schemaVersion: body.schemaVersion });
     return NextResponse.json({ schedule }, { status: 201 });
   } catch (error) {
     return scheduleError(error, 400);

@@ -16,7 +16,6 @@ const files = {
   publishQueue: read("src/lib/feishu-publish-queue.ts"),
   contentPool: read("src/lib/content-pool.ts"),
   generatedPosts: read("src/lib/generated-posts.ts"),
-  materialLibrary: read("src/lib/material-library.ts"),
   activityLog: read("src/lib/activity-log.ts"),
   store: read("src/lib/store.ts"),
   page: read("src/app/page.tsx"),
@@ -68,14 +67,13 @@ assertContains(files.accountsRoute, /isWorkspaceAdmin\(actor\)/, "Account manage
 assertContains(files.sessionRoute, /authenticateWorkspaceAccount/, "Session route must authenticate accounts.");
 assertContains(files.sessionRoute, /httpOnly:\s*true/, "Session cookie must be HttpOnly.");
 
-for (const typeName of ["ContentProject", "NormalizedSourceItem", "GeneratedPost", "MaterialFolder", "MaterialLibraryAsset", "ExecutionLogEntry", "CrawlJob", "SimpleRun"]) {
+for (const typeName of ["ContentProject", "NormalizedSourceItem", "GeneratedPost", "ExecutionLogEntry", "CrawlJob", "SimpleRun"]) {
   assertContains(files.types, new RegExp(`export type ${typeName} = \\{[\\s\\S]*ownerUserId\\?:\\s*string`), `${typeName} must carry ownerUserId.`);
 }
 
 assertContains(files.contentPool, /normalizeProjectKey\(query,\s*owner\?\.ownerUserId\)/, "Content projects must use owner-scoped project keys.");
 assertContains(files.contentPool, /filterWorkspaceOwnedRecords\(pool\.projects/, "Content-pool reads must filter by owner.");
 assertContains(files.generatedPosts, /filterWorkspaceOwnedRecords\(store\.posts/, "Generated-post reads must filter by owner.");
-assertContains(files.materialLibrary, /scopeLibrary\(normalizeLibrary\(store\),\s*account\)/, "Material library reads must filter by owner.");
 assertContains(files.activityLog, /listExecutionLogs\(limit = 120,\s*account/, "Activity log reads must accept an owner account.");
 assertContains(files.activityLog, /enterExecutionLogOwner/, "Activity log must expose request owner context.");
 assertContains(files.activityLog, /ownerUserId:\s*input\.ownerUserId \|\| owner\?\.ownerUserId/, "Activity log writes must stamp the current owner context.");
@@ -104,7 +102,6 @@ for (const route of [
   "src/app/api/content-pool/route.ts",
   "src/app/api/content/items/route.ts",
   "src/app/api/crawl/jobs/route.ts",
-  "src/app/api/materials/library/route.ts",
   "src/app/api/production/posts/route.ts",
   "src/app/api/activity/route.ts",
   "src/app/api/simple/runs/route.ts",

@@ -63,27 +63,52 @@ CREATE TABLE IF NOT EXISTS batch_jobs (
 );
 CREATE INDEX IF NOT EXISTS idx_batch_jobs_created_at ON batch_jobs(created_at DESC);
 
-CREATE TABLE IF NOT EXISTS material_folders (
+CREATE TABLE IF NOT EXISTS original_batches (
   id TEXT PRIMARY KEY,
-  parent_id TEXT,
-  name TEXT NOT NULL,
+  owner_user_id TEXT NOT NULL,
+  status TEXT NOT NULL,
   created_at TIMESTAMPTZ NOT NULL,
   updated_at TIMESTAMPTZ NOT NULL,
   data_json JSONB NOT NULL
 );
-CREATE INDEX IF NOT EXISTS idx_material_folders_parent_id ON material_folders(parent_id);
+CREATE INDEX IF NOT EXISTS idx_original_batches_owner_created ON original_batches(owner_user_id, created_at DESC);
+CREATE INDEX IF NOT EXISTS idx_original_batches_status_updated ON original_batches(status, updated_at ASC);
 
-CREATE TABLE IF NOT EXISTS material_assets (
+CREATE TABLE IF NOT EXISTS original_batch_items (
   id TEXT PRIMARY KEY,
-  folder_id TEXT NOT NULL,
-  path TEXT NOT NULL UNIQUE,
-  kind TEXT NOT NULL,
+  batch_id TEXT NOT NULL,
+  owner_user_id TEXT NOT NULL,
+  ordinal INTEGER NOT NULL,
+  status TEXT NOT NULL,
   created_at TIMESTAMPTZ NOT NULL,
   updated_at TIMESTAMPTZ NOT NULL,
+  data_json JSONB NOT NULL,
+  UNIQUE(batch_id, ordinal)
+);
+CREATE INDEX IF NOT EXISTS idx_original_batch_items_batch_ordinal ON original_batch_items(batch_id, ordinal ASC);
+CREATE INDEX IF NOT EXISTS idx_original_batch_items_owner_status ON original_batch_items(owner_user_id, status, updated_at ASC);
+
+CREATE TABLE IF NOT EXISTS original_batch_queue (
+  id TEXT PRIMARY KEY,
+  batch_id TEXT NOT NULL,
+  item_id TEXT NOT NULL UNIQUE,
+  owner_user_id TEXT NOT NULL,
+  status TEXT NOT NULL,
+  priority INTEGER NOT NULL DEFAULT 0,
+  attempts INTEGER NOT NULL DEFAULT 0,
+  max_attempts INTEGER NOT NULL DEFAULT 1,
+  run_after TIMESTAMPTZ NOT NULL,
+  locked_by TEXT,
+  locked_until TIMESTAMPTZ,
+  created_at TIMESTAMPTZ NOT NULL,
+  updated_at TIMESTAMPTZ NOT NULL,
+  started_at TIMESTAMPTZ,
+  completed_at TIMESTAMPTZ,
+  error TEXT,
   data_json JSONB NOT NULL
 );
-CREATE INDEX IF NOT EXISTS idx_material_assets_folder_id ON material_assets(folder_id);
-CREATE INDEX IF NOT EXISTS idx_material_assets_updated_at ON material_assets(updated_at DESC);
+CREATE INDEX IF NOT EXISTS idx_original_batch_queue_ready ON original_batch_queue(status, run_after, priority DESC, created_at ASC);
+CREATE INDEX IF NOT EXISTS idx_original_batch_queue_batch ON original_batch_queue(batch_id, status);
 
 CREATE TABLE IF NOT EXISTS execution_logs (
   id TEXT PRIMARY KEY,
@@ -235,7 +260,6 @@ CREATE TABLE IF NOT EXISTS library_assets (
   public_url TEXT NOT NULL,
   tagging_status TEXT NOT NULL,
   cleanup_status TEXT NOT NULL,
-  legacy_material_asset_id TEXT,
   created_at TIMESTAMPTZ NOT NULL,
   updated_at TIMESTAMPTZ NOT NULL,
   deleted_at TIMESTAMPTZ,
@@ -245,7 +269,6 @@ CREATE TABLE IF NOT EXISTS library_assets (
 CREATE INDEX IF NOT EXISTS idx_library_assets_owner_created ON library_assets(owner_user_id, created_at DESC, id DESC);
 CREATE INDEX IF NOT EXISTS idx_library_assets_visibility_created ON library_assets(visibility, created_at DESC, id DESC);
 CREATE INDEX IF NOT EXISTS idx_library_assets_tagging_status ON library_assets(tagging_status, updated_at DESC);
-CREATE UNIQUE INDEX IF NOT EXISTS idx_library_assets_legacy_material ON library_assets(legacy_material_asset_id) WHERE legacy_material_asset_id IS NOT NULL;
 
 CREATE TABLE IF NOT EXISTS library_asset_roles (
   asset_id TEXT NOT NULL REFERENCES library_assets(id) ON DELETE CASCADE,

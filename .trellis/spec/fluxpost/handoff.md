@@ -6,20 +6,19 @@ This file is an on-demand history library. Do not read it during default startup
 
 ## 最近一条
 <!-- TRELLIS-LATEST-START -->
-2026-07-15 one-command Ubuntu VPS deployment implementation is repository-complete and awaiting a real clean-host review.
+2026-07-29 local Canvas batch concurrency repair is ready but not loaded.
 
-Implemented:
-- `scripts/deploy/vps-bootstrap.sh` prepares a fresh Ubuntu 24.04/2 GB+ host, installs official Docker/Compose, generates database/setup secrets, writes mode-0600 base config, and deploys from GitHub.
-- Pre-domain mode starts only app/PostgreSQL on loopback for SSH-tunnel access. `vps-enable-domain.sh` validates resolvable DNS, enables Caddy, and checks HTTPS.
-- `vps-deploy.sh --check` reports private/HTTPS service plans without GitHub, Docker, or service mutation. Legacy environments retain proxy-on, `bbs.vollov1.xyz`, and port 3101 defaults.
-- Named volumes remain the persistence boundary; install/update/domain/rollback paths never use `docker compose down -v` and never modify SSH/firewall/DNS.
+Completed:
+- Root cause: `ensureCanvasRunWorker()` had one global consumer, so Canvas image child runs were claimed serially despite the shared image pool allowing concurrent provider work.
+- Added `WORKER_CANVAS_RUN_CONCURRENCY` (default 8, cap 20) in `src/lib/concurrency.ts`; `src/lib/canvas/runs.ts` now starts enough short-lived consumers to fill missing worker slots. Provider image and one-slot Klein limits are unchanged.
+- Focused concurrency/Canvas checks, TypeScript, changed-file lint, and `npm run build` passed without live providers.
 
-Verification:
-- Focused deployment contract, Bash syntax, Compose YAML parsing, private/HTTPS/legacy plan execution, advanced-config regression, type-check, lint, build, and full Trellis baseline passed.
-- No live second VPS, Docker daemon, DNS, certificate, GitHub, or paid provider action occurred during verification.
+Blocked before local refresh:
+- Read-only `npm run db:diagnose` found `simple-1785314521332` still running at 2026-07-29T08:45Z. Do not run `npm run local:restart` until it is terminal because restart can interrupt a simple run.
+- The required wrapper cannot start because `.trellis/verification/check.ps1` references missing `.trellis/verification/check.mjs`; repository-wide lint also scans existing `.tmp-*` artifacts. Do not repair either unrelated issue as part of this task.
 
-Operational next:
-- Follow `docs/deployment/ubuntu-docker.md` on the new VPS. Keep feature `one-command-vps-deployment` at `ready_for_review` until one clean install plus later domain/HTTPS enablement is observed.
+Next:
+- Recheck `npm run db:diagnose`; when no simple run is running, run `npm run local:restart` and confirm the Canvas worker concurrency repair is live.
 <!-- TRELLIS-LATEST-END -->
 
 ## 历史记录

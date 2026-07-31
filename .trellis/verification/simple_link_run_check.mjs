@@ -17,7 +17,7 @@ const route = read("src/app/api/simple/runs/route.ts");
 const simpleRuns = read("src/lib/simple-runs.ts");
 const sourceLinkImport = read("src/lib/source-link-import.ts");
 const types = read("src/lib/types.ts");
-const checkPs1 = read(".trellis/verification/check.ps1");
+const checkPs1 = read(".trellis/verification/check.mjs");
 
 assertContains(types, /sourceMode\?:\s*"keyword"\s*\|\s*"links"\s*\|\s*"feishu"/, "SimpleRunInput must persist keyword/link/Feishu source mode.");
 assertContains(types, /links\?:\s*string\[\]/, "SimpleRunInput must persist source links for link-mode simple runs.");

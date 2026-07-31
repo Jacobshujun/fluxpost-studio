@@ -44,19 +44,22 @@ function loadTsModule(relativePath, requireMap = {}) {
 }
 
 const helperPath = "src/lib/feishu-field-options.ts";
+const tableIdPath = "src/lib/feishu-table-id.ts";
 const routePath = "src/app/api/publish/feishu/vehicle-options/route.ts";
 
 const types = read("src/lib/types.ts");
+const config = read("src/lib/config.ts");
 const feishu = read("src/lib/feishu-cli.ts");
 const reviewRoute = read("src/app/api/review/route.ts");
 const publishRoute = read("src/app/api/publish/feishu/route.ts");
 const reviewPage = read("src/app/review/page.tsx");
-const check = read(".trellis/verification/check.ps1");
+const check = read(".trellis/verification/check.mjs");
 
 if (!existsSync(path.join(projectRoot, helperPath))) throw new Error("Feishu field-options helper is missing.");
 if (!existsSync(path.join(projectRoot, routePath))) throw new Error("Feishu vehicle options API route is missing.");
 
 const helper = read(helperPath);
+const tableId = read(tableIdPath);
 const vehicleRoute = read(routePath);
 
 assertContains(types, /export type GeneratedPost = \{[\s\S]*feishuVehicle\?:\s*string/, "GeneratedPost must persist a manual Feishu vehicle value.");
@@ -71,6 +74,12 @@ assertContains(helper, /appConfig\.feishuBitableTableId/, "Vehicle options helpe
 assertContains(helper, /extractSingleSelectOptions/, "Vehicle options helper must extract single-select options.");
 assertContains(helper, /export function normalizeFeishuVehicleValue/, "Vehicle options helper must expose publish-time vehicle normalization.");
 assertContains(helper, /normalizeMonaAlias/, "Vehicle normalization must support MONA alias matching.");
+assertContains(tableId, /export function normalizeFeishuTableId/, "Feishu table id normalization must be centralized at the config boundary.");
+assertContains(
+  config,
+  /feishuBitableTableId:\s*normalizeFeishuTableId\(process\.env\.FEISHU_BITABLE_TABLE_ID/,
+  "Feishu publish config must remove view parameters from the table id.",
+);
 assertContains(vehicleRoute, /requireWorkspaceAccount\(request\)/, "Vehicle options API must require a workspace account.");
 assertContains(vehicleRoute, /listFeishuVehicleOptions/, "Vehicle options API must delegate to the helper.");
 assertContains(publishRoute, /normalizePostsForFeishuPublish/, "Manual Feishu publish route must preflight posts before enqueue.");
@@ -108,6 +117,17 @@ if (!normalized.matched || normalized.value !== "小鹏MONA L03" || normalized.n
 const unknown = helperModule.normalizeFeishuVehicleValue("小鹏L05", ["小鹏G6", "小鹏MONA L03", "小鹏X9"]);
 if (unknown.matched || unknown.value !== "小鹏L05") {
   throw new Error("Vehicle normalization should reject unknown vehicle values.");
+}
+
+const tableIdModule = loadTsModule(tableIdPath);
+for (const [input, expected] of [
+  ["tblA0EfoAF9J4ffi&view=vewiJwISLG", "tblA0EfoAF9J4ffi"],
+  ["tblA0EfoAF9J4ffi?view=vewiJwISLG", "tblA0EfoAF9J4ffi"],
+  ["tblA0EfoAF9J4ffi", "tblA0EfoAF9J4ffi"],
+]) {
+  if (tableIdModule.normalizeFeishuTableId(input) !== expected) {
+    throw new Error(`Feishu table id normalization mismatch for ${input}.`);
+  }
 }
 
 console.log("Feishu vehicle options check passed.");

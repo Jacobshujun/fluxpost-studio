@@ -1,48 +1,52 @@
 # Decisions
 
-Last updated: 2026-07-22
+Last updated: 2026-07-29
 
-## Scenario: Compact-only home and retired advanced production
+## Scenario: Compact home with TOS-backed vehicle materials
 
 ### 1. Scope / Trigger
 
-- The signed-in home has one compact automatic-task workspace. Content-pool and material-library management live under `/content`; draft review, distribution checks, and administrator configuration remain separate routes.
+- The signed-in home has one compact automatic-task workspace. Reusable image selection comes from the authenticated TOS-backed vehicle library; `/content` is content-pool only, while draft review, distribution checks, and administrator configuration remain separate routes.
 
 ### 2. Signatures
 
-- Retained: `GET|POST|PATCH|DELETE /api/materials/library`, `POST /api/materials/scan`, `GET /api/materials/preview`, `GET /api/production/posts`, and the existing `/api/simple/runs` contract.
-- Removed: `/api/generate`, `/api/production/batches`, and `/api/production/posts/regenerate`.
-- Storage: `simple_runs`, `SimpleRun`, and `batch_jobs` names and historical rows remain unchanged; no destructive migration runs.
+- Browser input: `materialAssetIds?: string[]` and `viralMaterialAssetIds?: string[]` on `POST /api/simple/runs`.
+- Durable input: existing `materialPaths: string[]` and `viralMaterialPaths?: string[]` store validated `LibraryAsset.publicUrl` snapshots.
+- Removed: `/api/materials/library`, `/api/materials/scan`, `/api/materials/preview`, `/api/library/migrate`, `/api/generate`, `/api/production/batches`, and `/api/production/posts/regenerate`.
+- Storage: `material_assets` and `material_folders` are dropped idempotently from SQLite/PostgreSQL initialization; `library_assets` and related role/collection/tag tables remain active.
 
 ### 3. Contracts
 
-- Home reads account/session data, public config status, workspace settings, simple runs, and the owner-scoped material library. It does not preload content-pool projects, generated-post lists, batch jobs, or Feishu vehicle options.
-- `/content` owns material scan, folder/asset CRUD, and local image preview through the existing owner-scoped APIs.
+- Home pages through `/api/library/assets?role=vehicle` until `nextCursor` is empty, groups visible assets by vehicle collections, and keeps browser selection as asset ids.
+- `POST /api/simple/runs` resolves ids under the signed-in account, requires the `vehicle` role, and freezes public URLs before queueing. Workers never reread mutable library records for that run.
+- Viral image imitation accepts frozen HTTP(S) vehicle URLs while retaining local-path support only for historical queued inputs.
+- Original local images are not migration inputs and are never opened or deleted by table retirement.
 - `/review` remains the consumer of generated-post listing and all review/batch/publish write paths.
 
 ### 4. Validation & Error Matrix
 
-- Missing workspace session on retained owner-scoped APIs -> `401`.
-- Removed route -> `404` with no compatibility handler.
+- Missing workspace session on the vehicle library or simple-run API -> `401`.
+- Non-string, missing, inaccessible, or non-vehicle asset id -> `400`; no run is queued.
+- Removed local-material route -> `404` with no compatibility handler.
 - Non-GET request to `/api/production/posts` -> `405`.
-- Material path outside the allowed preview boundary or an inaccessible owner-scoped record -> existing explicit `400`/`404` behavior.
 
 ### 5. Good/Base/Bad Cases
 
-- Good: a signed-in user starts a compact task, watches multiple runs, and manages its source images in `/content`.
-- Base: `writeFeishu=false` leaves generated drafts for `/review` without an external write.
-- Bad: a caller posts to a retired production route; it receives `404` and no hidden work starts.
+- Good: a signed-in user selects up to nine accessible vehicle images, starts viral imitation, and the queued run retains those exact TOS URLs.
+- Base: an ordinary compact run receives all currently accessible vehicle ids as general material references; `writeFeishu=false` leaves drafts for `/review`.
+- Bad: the browser submits a private asset owned by another user, a reference-only asset, or a raw URL; the API rejects it before enqueue.
 
 ### 6. Tests Required
 
-- `compact_only_workspace_check.mjs` asserts the retained compact request/settings/material/poll/terminate paths and the absence of retired modes, APIs, types, and wording.
-- Full baseline asserts owner scope, content/material workflows, queue persistence, lint, type-check, build, deleted-route `404`, read-only-route `405`, and local smoke.
-- Mocked desktop/mobile Playwright checks assert navigation, multi-run progress, content/material tabs, no horizontal overflow, and an in-viewport material preview.
+- `simple_viral_run_check.mjs` asserts full cursor paging, asset-id submission, URL freezing, selection limits, and retired-route absence.
+- `vehicle_library_check.mjs` dynamically asserts access/role/type rejection plus id order and deduplication; `viral_replication_regression_check.mjs` asserts HTTP(S) URL indexing and dual-reference pairing.
+- `compact_only_workspace_check.mjs`, `content_desk_check.mjs`, `db_check.mjs`, and `postgres_schema_check.mjs` assert removal of legacy UI, APIs, types, and schema tables.
+- TypeScript, changed-file lint, production build/restart, HTTP `200/401/404`, and read-only PostgreSQL plus SQLite table checks are required without live providers.
 
 ### 7. Wrong vs Correct
 
-- Wrong: keep hidden advanced state or return a compatibility shell from a deleted API.
-- Correct: remove the consumer and route together, preserve durable historical tables, and route ongoing work through compact tasks, `/content`, and `/review`.
+- Wrong: trust browser URLs or resolve asset ids later inside a queue worker.
+- Correct: submit ids, validate account access and `vehicle` role once at the API boundary, then persist immutable public URL snapshots.
 
 ## Scenario: Role-aware library tags, themes, and vehicle no-AI boundary
 
@@ -212,11 +216,54 @@ if (result.job) kickLibraryTaggingWorker();
 - Feishu IM publish notifications prefer `FEISHU_NOTIFY_CHAT_ID` when both chat and user notification recipients are configured.
 - Feishu IM publish notifications describe the publish job/batch, not an individual generated post. Batch messages must not label the first post title as the notification title; they show task/source/job context, record/material counts, and a short `内容示例` list instead. Single-post notifications may show the one title as `内容`. Attachment-upload failures may send a `写入飞书部分完成` warning notification when IM recipients are configured.
 - Default baseline verification must avoid production external service calls.
+- Infinite-canvas capability plans no longer require a browser prompt, including billable models and Feishu writes, so unattended batch execution can proceed after preflight. The client still sends the exact planned confirmation node ids with `confirmed: true`; server-side stale-plan and preflight validation remain mandatory.
 - Local production refresh on port `3001` uses `npm run local:restart`, which rebuilds, stops the old port-3001 process, starts `next start`, and runs local HTTP smoke.
-- New runtime media on `82.158.226.10` may use Volcengine TOS behind the default-off `TOS_ENABLED` switch. FluxPost stores verified public absolute URLs with ETag version parameters, sets object-level `public-read`, retains failed uploads under `data/tos-pending`, and keeps historical local URLs and external material directories unchanged. Rollback disables TOS instead of reverting code or rewriting existing URLs; the older VPS at `104.243.21.233` is not part of this rollout.
+- Default local Next builds use standard output because local production runs through `next start`. Docker builder sets `FLUXPOST_STANDALONE_BUILD=1` to retain standalone output, and output tracing excludes runtime `data`, `public/media`, `public/generated`, and `test-artifacts` paths because production supplies runtime state through named volumes.
+- New runtime media on production `38.76.210.136` may use Volcengine TOS behind the default-off `TOS_ENABLED` switch. FluxPost stores verified public absolute URLs with ETag version parameters, sets object-level `public-read`, retains failed uploads under `data/tos-pending`, and keeps historical local URLs and external material directories unchanged. Rollback disables TOS instead of reverting code or rewriting existing URLs. Retired hosts 82 and 104 are not provider-test targets.
+- Releases are commit-based without a staging gate: after local deterministic verification and operator approval, deploy the exact full SHA directly to `38.76.210.136`. The wrapper stores immutable image tags plus manifests, preserves production volumes, verifies app/PostgreSQL/Nginx/public health, and restores the prior release/image on activation failure. `104.243.21.233` was permanently retired as a FluxPost target on 2026-07-23.
+
+## Scenario: Shared library defaults, sorting, and marquee selection
+
+### 1. Scope / Trigger
+
+- Trigger: changing visibility defaults, list ordering, pagination, submitter display, or batch selection in `/library` or `/copy-library`.
+
+### 2. Signatures
+
+- `LibraryListSort = "newest" | "oldest" | "name-asc" | "name-desc" | "owner-asc" | "owner-desc"`.
+- `GET /api/library/assets?sort=...` and `GET /api/copy-library?sort=...`; image cursors encode `{ version: 1, sort, value, id }`.
+- Omitted visibility on normal image/copy creation resolves to `team`; callers may still send `private`.
+
+### 3. Contracts
+
+- Domain services sort the complete filtered result with `zh-CN` text comparison and ID tie-breaking; the image cursor reuses the same comparator. Each page persists its own validated sort key in localStorage.
+- Desktop marquee starts only on list/grid background; normal drag replaces selection and Ctrl/Cmd drag adds the pointer-down selection snapshot. Touch keeps native checkboxes.
+- Copy batch visibility and deletion reuse per-entry APIs, preserve owner/admin enforcement, confirm deletion, and report succeeded/failed counts.
+- Duplicate image reuse never rewrites the canonical asset visibility.
+
+### 4. Validation & Error Matrix
+
+- Missing/unknown `sort` -> `newest`; malformed or cross-sort image cursor -> `Invalid library cursor.`
+- Read-only shared entry mutation -> existing permission failure counted in the batch; other entries continue.
+- Empty/internal image drop -> close drag state without opening import; file drops retain the existing import path.
+
+### 5. Good/Base/Bad Cases
+
+- Good: owner-sort page 1 and its cursor page 2 form one stable sequence; Ctrl marquee adds cards without opening preview/import.
+- Base: refresh restores each library's last valid sort; mobile users select with checkboxes and can return from the copy editor.
+- Bad: sort only the loaded client page, accept a cursor from another order, change legacy private assets to team, or let marquee start on a card control.
+
+### 6. Tests Required
+
+- `copy_library_check.mjs`, `library_assets_check.mjs`, and `vehicle_library_check.mjs` assert defaults, explicit private, all six orders, stable cursors, permissions, migration, and marquee geometry.
+- Mocked 1440x960 and 390x844 Playwright must assert sort persistence, ordinary/Ctrl marquee, checkbox/editor fallback, batch confirmation/results, no spurious import dialog, console cleanliness, and no page overflow.
+
+### 7. Wrong vs Correct
+
+- Wrong: reorder only `data.assets` in React or default a legacy migration through the new team setting.
+- Correct: send the validated sort to the API, paginate with the matching versioned cursor, and make historical privacy explicit at the migration call site.
 
 ## Pending Decisions
 
-- Server deployment target, process manager, reverse proxy, domain, and health checks: 待确认.
 - Subtask-level durable simple workflow, image-provider task replay, and Feishu per-post idempotency mapping for safe publish-stage replay: 待确认.
 - Whether `.tmp-*.json`, `test-artifacts/`, and existing generated media should be cleaned or retained: 待确认.

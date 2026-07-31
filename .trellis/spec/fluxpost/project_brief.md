@@ -91,8 +91,9 @@ Last updated: 2026-06-25
 - Local runtime database in this workspace: PostgreSQL on `127.0.0.1:5432` through `DATABASE_URL` in `.env.local`; do not expose the connection string.
 - Fallback runtime database when `DATABASE_URL` is not configured: `data/fluxpost.db` SQLite.
 - PostgreSQL schema: `db/migrations/001_initial_postgres.sql`.
-- Legacy JSON files under `data/` can be used as one-time migration sources: `content-pool.json`, `batch-production.json`, `generated-posts.json`, `material-library.json`, and `execution-log.json`.
-- Runtime database stores workspace accounts/sessions, content projects, generated posts, batch jobs, material folders/assets, execution logs, crawl jobs, runtime posts, simple runs, and workspace settings metadata, including saved production prompts and the `/distribution-check` audit prompt.
+- Legacy JSON files under `data/` can be used as one-time migration sources for active domains: `content-pool.json`, `batch-production.json`, `generated-posts.json`, and `execution-log.json`. `material-library.json` is retired local state and is not imported.
+- Runtime database stores workspace accounts/sessions, content projects, generated posts, batch jobs, execution logs, crawl jobs, runtime posts, simple runs, and workspace settings metadata, including saved production prompts and the `/distribution-check` audit prompt.
+- Runtime database also stores owner-scoped `original_batches`, `original_batch_items`, and `original_batch_queue` records for the `/original` 1-100 topic Xiaohongshu card workspace. Its worker concurrency is controlled by `WORKER_ORIGINAL_BATCH_CONCURRENCY`, default `2` and hard-capped at `8`.
 - Runtime database also stores durable simple/image/Feishu/distribution queues plus library assets, roles, collections, labels, manual overrides, and tagging jobs; library image binaries remain in TOS.
 - Workspace sessions use an HttpOnly `fluxpost_session` browser cookie. In default whitelist mode, the first-admin setup key is environment-driven and not stored in the runtime database; daily account passwords are stored only as Node `scrypt` hashes.
 - SQLite-to-PostgreSQL migration script: `scripts/db/migrate-sqlite-to-postgres.mjs`. It copies metadata and JSON payload rows; it does not move media binaries.
@@ -101,7 +102,7 @@ Last updated: 2026-06-25
 - Generated AI images: `public/generated/`.
 - Crawled media cache and video frames: `public/media/crawl/`.
 - Source-based generated posts can store final source video materials in optional `GeneratedPost.videoUrls` only when the operator enables the default-off `引用源视频素材` / `includeSourceVideo` switch; resolution prefers cached local `downloadedVideoUrl` over remote `videoUrl`.
-- Local material scanning accepts image extensions only: `.png`, `.jpg`, `.jpeg`, `.webp`, `.gif`.
+- Reusable reference/vehicle images live in the TOS-backed `library_assets` domain; the compact home consumes accessible vehicle assets by id and freezes their public URLs into simple runs.
 - Video frame extraction uses the system `ffmpeg` executable through `src/lib/media-cache.ts`.
 - Video transcription receives the cached local video path from `src/lib/media-cache.ts` only when a crawl/import/simple-run task passes `enableVideoTranscription === true`; when the switch is enabled and `ARK_API_KEY` or the existing `VOLCENGINE_ASR_APP_KEY` alias is configured, `src/lib/video-transcription.ts` extracts MP3 audio with `ffmpeg`, uploads the MP3 to Ark `/files` with `purpose=user_data`, calls Ark `/responses` with `input_audio.file_id`, and merges successful transcript text into `NormalizedSourceItem.contentText` before rewrite.
 - Sensitive config is environment-based and must stay out of Trellis docs: `.env.local`, `.env*`, API keys, Feishu tokens, and local user material paths when private.
@@ -140,15 +141,15 @@ Last updated: 2026-06-25
 - Confirmed local LAN production refresh entry: `npm run local:restart`.
 - `next.config.ts` sets Turbopack root to `process.cwd()`.
 - GitHub-driven Ubuntu 24.04 deployment is owned by `scripts/deploy/vps-bootstrap.sh`, `scripts/deploy/vps-deploy.sh`, `scripts/deploy/vps-enable-domain.sh`, `compose.yaml`, and `docs/deployment/ubuntu-docker.md`.
-- A fresh bootstrap requires at least 2 GB RAM, installs Docker Engine/Compose from Docker's official Ubuntu repository, generates PostgreSQL and first-admin setup secrets, writes `/opt/fluxpost-studio/shared/env.production` with mode `0600`, and creates the standard repo/releases/current/bin layout.
+- Fresh bootstrap enforces the RAM minimum, installs official Docker/Compose, generates secrets, and creates the root-only repo/releases/current/bin layout. Existing `--app-only` hosts may count enabled swap toward a 1.5 GB combined minimum but never change swap.
 - Pre-domain mode sets `FLUXPOST_PROXY_ENABLED=false`, starts only PostgreSQL and app, and binds the app to `127.0.0.1:${FLUXPOST_APP_PORT:-3101}` for SSH-tunnel access. `enable-domain.sh` requires resolvable DNS, persists `FLUXPOST_PUBLIC_HOST`, enables Caddy, and verifies public HTTPS.
 - Existing deployments without the new deployment keys retain compatibility defaults: proxy enabled, public host `bbs.vollov1.xyz`, and loopback app port `3101`.
-- The confirmed production VPS at `104.243.21.233` uses Docker Compose project `fluxpost`, Caddy HTTPS, PostgreSQL without a public host port, and GitHub release directories under `/opt/fluxpost-studio`.
+- Production `38.76.210.136` is the only remote FluxPost fix/deployment target and uses Nginx for `https://flux.lightmoment.net` with app port 3101 loopback-only. `82.158.226.10` is retired and stopped. The FluxPost deployment on `104.243.21.233:29891` was permanently removed on 2026-07-23 without changing its unrelated services; `bbs.vollov1.xyz` remains an external DNS cleanup item. Production configuration/data remains forbidden.
 
 ## Not Covered Or Pending Confirmation
 
 - Formal user roles beyond V1 `admin`/`operator`: 待确认.
-- Live installation on a second VPS remains pending target SSH access; the runbook and deterministic deployment contracts are repository-backed.
+- Historical staging 104 was rebuilt on 2026-07-22 and permanently retired on 2026-07-23; it is not a supported test, promotion, or deployment target.
 - Generated-post Feishu target Base token and table ID for deployment: 待确认. Source-link import sync has a user-requested default target in `src/lib/config.ts`.
 - Safe isolated test credentials for TikHub/OpenAI/Feishu: 待确认.
 - PostgreSQL server installation, database/user provisioning, and live migration execution: confirmed locally on 2026-06-04.

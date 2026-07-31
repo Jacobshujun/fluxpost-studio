@@ -161,11 +161,18 @@ export type CanvasRun = {
   targetNodeIds?: string[];
   retryNodeIds?: string[];
   batchContext?: {
+    schemaVersion?: 1;
     scheduleId: string;
     batchId: string;
     contentTaskId: string;
     imageTaskId?: string;
     phase: "image" | "finalize";
+  } | {
+    schemaVersion: 2;
+    scheduleId: string;
+    mainTaskId: string;
+    childTaskId?: string;
+    phase: "child" | "aggregate";
   };
   confirmation: CanvasRunConfirmation;
   cancelRequestedAt?: string;
@@ -229,7 +236,7 @@ export type CanvasPortDefinition = {
 export type CanvasConfigFieldDefinition = {
   key: string;
   label: string;
-  kind: "text" | "textarea" | "number" | "select" | "url-list" | "content-pool-picker" | "library-image-picker" | "copy-library-picker";
+  kind: "text" | "textarea" | "number" | "boolean" | "select" | "url-list" | "content-pool-picker" | "library-image-picker" | "copy-library-picker";
   placeholder?: string;
   min?: number;
   max?: number;
@@ -325,6 +332,96 @@ export type CanvasScheduleCopySnapshot = {
   updatedAt: string;
 };
 
+export type CanvasScheduleParameterType = "image" | "image-group" | "text" | "copy" | "number" | "boolean" | "enum";
+export type CanvasScheduleParameterScope = "main" | "child";
+export type CanvasScheduleExpansionMode = "cartesian" | "zip";
+export type CanvasScheduleAggregationPolicy = "at-least-one" | "all";
+
+export type CanvasScheduleParameterValue =
+  | string
+  | number
+  | boolean
+  | CanvasScheduleAssetSnapshot
+  | CanvasScheduleAssetSnapshot[]
+  | CanvasScheduleCopySnapshot;
+
+export type CanvasScheduleParameterSource =
+  | { mode: "fixed" | "manual-list"; values: CanvasScheduleParameterValue[] }
+  | { mode: "library-filter"; role: "reference" | "vehicle"; filter: CanvasScheduleAssetFilter }
+  | { mode: "copy-filter"; filter: CanvasScheduleCopyFilter };
+
+export type CanvasScheduleParameterBinding = {
+  nodeId: string;
+  fieldKey: string;
+};
+
+export type CanvasScheduleSampleCount =
+  | { mode: "exact"; value: number }
+  | { mode: "range"; min: number; max: number };
+
+export type CanvasScheduleParameter = {
+  id: string;
+  name: string;
+  scope: CanvasScheduleParameterScope;
+  valueType: CanvasScheduleParameterType;
+  source: CanvasScheduleParameterSource;
+  expansion: "fixed" | "each" | "random";
+  sampleCount?: CanvasScheduleSampleCount;
+  /** Compatibility reader for V2 definitions saved before range sampling. */
+  randomCount?: number;
+  binding: CanvasScheduleParameterBinding;
+};
+
+export type CanvasScheduleV2Definition = {
+  parameters: CanvasScheduleParameter[];
+  expansion: Record<CanvasScheduleParameterScope, CanvasScheduleExpansionMode>;
+  childResult: {
+    nodeId: string;
+    outputPort: string;
+    artifactKind: "text" | "images" | "videos";
+  };
+  mainTargetNodeId?: string;
+  aggregationPolicy: CanvasScheduleAggregationPolicy;
+};
+
+export type CanvasScheduleAggregateArtifact = Extract<CanvasArtifact, { kind: "text" | "images" | "videos" }>;
+
+export type CanvasScheduleV2ChildTask = {
+  id: string;
+  parameterValues: Record<string, CanvasScheduleParameterValue>;
+  status: CanvasScheduleTaskStatus;
+  runId?: string;
+  resultArtifacts: CanvasScheduleAggregateArtifact[];
+  error?: string;
+  createdAt: string;
+  updatedAt: string;
+};
+
+export type CanvasScheduleV2MainTask = {
+  id: string;
+  parameterValues: Record<string, CanvasScheduleParameterValue>;
+  childTasks: CanvasScheduleV2ChildTask[];
+  status: CanvasScheduleTaskStatus;
+  mainRunId?: string;
+  resultArtifacts: CanvasArtifact[];
+  generatedPostId?: string;
+  generatedPostUpdatedAt?: string;
+  candidateFingerprint?: string;
+  pendingCandidateSync?: boolean;
+  error?: string;
+  createdAt: string;
+  updatedAt: string;
+};
+
+export type CanvasBatchBindingAdapter = "config-value" | "image-input" | "copy-input";
+
+export type CanvasBatchBindableField = {
+  key: string;
+  label: string;
+  parameterTypes: CanvasScheduleParameterType[];
+  adapter: CanvasBatchBindingAdapter;
+};
+
 export type CanvasScheduleImageTask = {
   id: string;
   vehicle: CanvasScheduleAssetSnapshot;
@@ -384,6 +481,11 @@ export type CanvasSchedule = {
   workflowSnapshot?: CanvasGraph;
   status: CanvasScheduleStatus;
   batches: CanvasScheduleBatch[];
+  schemaVersion?: 1 | 2;
+  definition?: CanvasScheduleV2Definition;
+  mainTasks?: CanvasScheduleV2MainTask[];
+  totalMainTasks?: number;
+  totalChildTasks?: number;
   bindings?: CanvasScheduleBindings;
   previewRevision?: string;
   totalContentTasks: number;

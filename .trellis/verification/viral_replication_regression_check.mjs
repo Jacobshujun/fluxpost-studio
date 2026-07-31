@@ -70,6 +70,7 @@ const cjsModule = { exports: {} };
   };
   vm.runInNewContext(transpiled.outputText, {
     console,
+    URL,
     fetch: async (_url, request) => {
       const body = JSON.parse(request.body);
       const imageUrl = body.input?.[0]?.content?.find((part) => part.type === "input_image")?.image_url || "";
@@ -118,7 +119,6 @@ const cjsModule = { exports: {} };
 const tikhub = read("src/lib/tikhub.ts");
 const viral = read("src/lib/viral-replication.ts");
 const imageGeneration = read("src/lib/image-generation.ts");
-const check = read(".trellis/verification/check.ps1");
 const types = read("src/lib/types.ts");
 
 const titleExtractor = tikhub.slice(tikhub.indexOf("function extractSourceTitle"), tikhub.indexOf("function extractContentText"));
@@ -168,7 +168,8 @@ assertIncludes(imageGeneration, "task.referenceUrls", "Image generation must sub
 assertIncludes(imageGeneration, "isStrictDualReferenceTask", "Image generation must identify strict viral dual-reference tasks.");
 assertIncludes(imageGeneration, "Strict viral image imitation requires exactly 2 prepared reference images", "Strict viral image tasks must fail closed when both references are not prepared.");
 assertIncludes(imageGeneration, "recordStrictTaskNeedsReview", "Strict viral image task fallback should produce needs-review diagnostics instead of source-image fallback.");
-assertIncludes(imageGeneration, "referenceImages.slice(0, 4)", "Images API edit requests must upload multiple ordered reference images, including viral source style references.");
+assertIncludes(imageGeneration, "for (const referenceImage of referenceImages)", "Images API edit requests must upload all ordered reference images, including viral source style references.");
+assertNotIncludes(imageGeneration, "referenceImages.slice(0, 4)", "Images API edit requests must not silently truncate references.");
 assertIncludes(imageGeneration, 'const endpointPath = initialProfile === "toapis_async" ? "images/generations" : preparedReferences.files.length ? "images/edits" : "images/generations"', "Images API request logging must resolve the provider-specific endpoint path before recording.");
 assertIncludes(imageGeneration, "Preparing to generate images through ${endpointPath}", "Images API request log message must name the actual provider endpoint.");
 assertIncludes(imageGeneration, "endpointPath,", "Images API request log details must include endpointPath for diagnosis.");
@@ -178,7 +179,6 @@ assertIncludes(simpleRuns, "useComfyUiKlein: normalizedInput.useComfyUiKlein ===
 assertNotIncludes(simpleRuns, "useComfyUiKlein: isComfyUiKleinConfigured()", "Simple viral runs must not auto-enable Klein for viral image imitation.");
 assertIncludes(simpleRuns, "爆款风格图生成待复核", "Simple viral runs must save strict-reference image failures as review notes.");
 assertIncludes(simpleRuns, "postNeedsManualReview", "Simple viral runs must skip automatic Feishu publishing for strict-reference image review cases.");
-assertIncludes(check, "Viral replication regression check", "Trellis baseline must include this regression check.");
 
 const viralModule = loadViralModule();
 if (typeof viralModule.stripViralBodyHashtags !== "function") {
@@ -214,6 +214,14 @@ if (analysis.specs[1].recommendedStrategy !== "text_image") {
 
 if (typeof viralModule.pairViralImagesWithMaterials !== "function") {
   throw new Error("Viral replication must expose pairViralImagesWithMaterials.");
+}
+
+const remoteMaterials = await viralModule.indexMaterialImages(
+  ["https://tos.example.test/library/g6-front.jpg?v=etag"],
+  "小鹏G6",
+);
+if (remoteMaterials.length !== 1 || remoteMaterials[0].referenceMaterialPath !== "https://tos.example.test/library/g6-front.jpg?v=etag") {
+  throw new Error("Viral material indexing must preserve a frozen HTTP(S) vehicle-library URL.");
 }
 
 const pairing = await viralModule.pairViralImagesWithMaterials(

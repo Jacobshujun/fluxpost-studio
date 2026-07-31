@@ -1,8 +1,10 @@
 import { NextResponse } from "next/server";
 import {
   acceptCanvasScheduleCandidates,
+  acceptCanvasScheduleV2Candidates,
   cancelCanvasSchedule,
   CanvasScheduleRevisionConflictError,
+  convertCanvasScheduleToV2,
   deleteCanvasSchedule,
   duplicateCanvasSchedule,
   getCanvasSchedule,
@@ -10,15 +12,16 @@ import {
   preflightCanvasSchedule,
   resampleCanvasSchedule,
   retryCanvasScheduleImageTask,
+  retryCanvasScheduleV2ChildTask,
   setCanvasSchedulePaused,
   updateCanvasScheduleDraft,
 } from "@/lib/canvas/scheduler";
-import type { CanvasScheduleBatch } from "@/lib/canvas/types";
+import type { CanvasScheduleBatch, CanvasScheduleV2Definition } from "@/lib/canvas/types";
 import { isWorkspaceSignInError, requireWorkspaceAccount } from "@/lib/workspace-accounts";
 
 export const runtime = "nodejs";
 type RouteContext = { params: Promise<{ id: string }> };
-type ScheduleAction = "save" | "preflight" | "resample" | "launch" | "duplicate" | "pause" | "resume" | "cancel" | "retry" | "accept-candidates";
+type ScheduleAction = "save" | "preflight" | "resample" | "launch" | "duplicate" | "convert-v2" | "pause" | "resume" | "cancel" | "retry" | "accept-candidates";
 
 export async function GET(request: Request, context: RouteContext) {
   try {
@@ -41,9 +44,12 @@ export async function PATCH(request: Request, context: RouteContext) {
       previewRevision?: string;
       name?: string;
       batches?: CanvasScheduleBatch[];
+      definition?: CanvasScheduleV2Definition;
       batchId?: string;
       contentTaskId?: string;
       imageTaskId?: string;
+      mainTaskId?: string;
+      childTaskId?: string;
     };
     const action = body.action || "save";
     let schedule;
@@ -52,6 +58,7 @@ export async function PATCH(request: Request, context: RouteContext) {
         revision: Number(body.revision),
         name: body.name,
         batches: body.batches,
+        definition: body.definition,
       });
     } else if (action === "preflight") {
       schedule = await preflightCanvasSchedule(scheduleId, account, Number(body.revision));
@@ -70,23 +77,34 @@ export async function PATCH(request: Request, context: RouteContext) {
       });
     } else if (action === "duplicate") {
       schedule = await duplicateCanvasSchedule(scheduleId, account);
+    } else if (action === "convert-v2") {
+      schedule = await convertCanvasScheduleToV2(scheduleId, account);
     } else if (action === "pause" || action === "resume") {
       schedule = await setCanvasSchedulePaused(scheduleId, account, action === "pause");
     } else if (action === "cancel") {
       schedule = await cancelCanvasSchedule(scheduleId, account);
     } else if (action === "retry") {
-      if (!body.batchId || !body.contentTaskId || !body.imageTaskId) return badRequest("batchId, contentTaskId, and imageTaskId are required.");
-      schedule = await retryCanvasScheduleImageTask(scheduleId, account, {
-        batchId: body.batchId,
-        contentTaskId: body.contentTaskId,
-        imageTaskId: body.imageTaskId,
-      });
+      if (body.mainTaskId || body.childTaskId) {
+        if (!body.mainTaskId || !body.childTaskId) return badRequest("mainTaskId and childTaskId are required.");
+        schedule = await retryCanvasScheduleV2ChildTask(scheduleId, account, { mainTaskId: body.mainTaskId, childTaskId: body.childTaskId });
+      } else {
+        if (!body.batchId || !body.contentTaskId || !body.imageTaskId) return badRequest("batchId, contentTaskId, and imageTaskId are required.");
+        schedule = await retryCanvasScheduleImageTask(scheduleId, account, {
+          batchId: body.batchId,
+          contentTaskId: body.contentTaskId,
+          imageTaskId: body.imageTaskId,
+        });
+      }
     } else if (action === "accept-candidates") {
-      if (!body.batchId || !body.contentTaskId) return badRequest("batchId and contentTaskId are required.");
-      schedule = await acceptCanvasScheduleCandidates(scheduleId, account, {
-        batchId: body.batchId,
-        contentTaskId: body.contentTaskId,
-      });
+      if (body.mainTaskId) {
+        schedule = await acceptCanvasScheduleV2Candidates(scheduleId, account, { mainTaskId: body.mainTaskId });
+      } else {
+        if (!body.batchId || !body.contentTaskId) return badRequest("batchId and contentTaskId are required.");
+        schedule = await acceptCanvasScheduleCandidates(scheduleId, account, {
+          batchId: body.batchId,
+          contentTaskId: body.contentTaskId,
+        });
+      }
     } else {
       return badRequest("Unknown Canvas schedule action.");
     }

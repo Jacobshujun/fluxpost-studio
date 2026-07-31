@@ -20,8 +20,8 @@ const types = read("src/lib/types.ts");
 
 assertContains(
   page,
-  /body:\s*JSON\.stringify\(\{[\s\S]*materialPaths:\s*materialLibraryAssetPaths[\s\S]*settings:\s*settingsForRun/,
-  "Compact start request must include the current material-library paths.",
+  /body:\s*JSON\.stringify\(\{[\s\S]*materialAssetIds:\s*vehicleMaterialAssetIds[\s\S]*settings:\s*settingsForRun/,
+  "Compact start request must submit current vehicle-library asset ids.",
 );
 
 assertContains(
@@ -32,13 +32,13 @@ assertContains(
 
 assertContains(
   route,
-  /materialPaths\?:\s*string\[\]/,
-  "Simple run API request body should accept materialPaths.",
+  /materialAssetIds\?:\s*string\[\]/,
+  "Simple run API request body should accept vehicle material asset ids.",
 );
 assertContains(
   route,
-  /materialPaths:\s*Array\.isArray\(body\.materialPaths\)\s*\?\s*body\.materialPaths\s*:\s*\[\]/,
-  "Simple run API should pass materialPaths through to startSimpleRun.",
+  /materialPaths:\s*materialAssets\.map\(\(asset\) => asset\.publicUrl\)/,
+  "Simple run API should freeze validated vehicle-library URLs before starting the run.",
 );
 
 assertContains(

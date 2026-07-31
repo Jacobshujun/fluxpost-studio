@@ -193,14 +193,14 @@ assertNotContains(
 
 assertContains(
   imageGeneration,
-  /new FormData\(\)[\s\S]*form\.append\("image"[\s\S]*openaiImageHeaders\(false,\s*route,\s*true\)/,
+  /new FormData\(\)[\s\S]*form\.append\("image\[\]"[\s\S]*openaiImageHeaders\(false,\s*route,\s*true\)/,
   "Image edits should use multipart/form-data with binary image upload and the active route key.",
 );
 
 assertContains(
   imageGeneration,
-  /function buildStandardImagesGenerationBody[\s\S]*n:\s*1[\s\S]*output_format:\s*"png"[\s\S]*response_format:\s*"b64_json"/,
-  "Text-to-image requests should use the standard gpt-image-2 Images API body with n fixed to 1.",
+  /function buildStandardImagesGenerationBody[\s\S]*n:\s*count[\s\S]*output_format:\s*options\.outputFormat \|\| "png"[\s\S]*response_format:\s*"b64_json"/,
+  "Text-to-image requests should pass the requested count and output format in one standard Images API body.",
 );
 
 assertContains(
@@ -229,8 +229,8 @@ assertContains(
 
 assertContains(
   imageGeneration,
-  /const preparedReferences = await prepareReferenceImages\(referenceImages,\s*options\.size\)/,
-  "Image edit references should be prepared against the same requested size before calling gpt-image-2.",
+  /const preparedReferences = asyncTask\?\.resumeTaskId\s*\?\s*makeResumedTaskReferences\(referenceImages\)\s*:\s*await prepareReferenceImages\(referenceImages,\s*options\.size,\s*options\.strictReferencePreparation === true\)/,
+  "New image edits should prepare references at the requested size, while accepted tasks resume without preparing or uploading references again.",
 );
 
 assertContains(
@@ -289,8 +289,13 @@ assertNotContains(
 
 assertContains(
   imageGeneration,
+  /return await requestSingleStandardImagesApiWithRetry\(prompt,\s*count,\s*startedAt/,
+  "Multiple requested images should be generated through one request carrying n.",
+);
+assertNotContains(
+  imageGeneration,
   /for \(let index = 0; index < Math\.max\(1,\s*Math\.floor\(count\)\); index \+= 1\)/,
-  "Multiple requested images should be generated through repeated n=1 requests.",
+  "Image count must not fan out into repeated paid requests.",
 );
 
 assertContains(
@@ -361,8 +366,8 @@ assertContains(
 
 assertContains(
   imageGeneration,
-  /if \(isImageTaskSourceFallbackError\(error\)\) \{[\s\S]*const fallbackUrl = await resolveDirectSourceImageUrl\(task\.url\)[\s\S]*Image task failed; using source image[\s\S]*fallbackUrl: task\.url[\s\S]*outputUrl: fallbackUrl[\s\S]*imageUrls: \[fallbackUrl\]/,
-  "Recoverable selected image task failures should return the direct source image URL after WebP-to-JPG normalization.",
+  /if \(isImageTaskSourceFallbackError\(error\)\) \{[\s\S]*const fallback = await resolveSourceFallback\(task, message\)[\s\S]*Image task failed; using source image[\s\S]*fallbackUrl: task\.url[\s\S]*outputUrl: fallbackUrl[\s\S]*imageUrls: \[fallbackUrl\]/,
+  "Recoverable selected image task failures should use the verified durable source-image fallback.",
 );
 
 assertContains(
@@ -374,13 +379,13 @@ assertContains(
 assertContains(
   imageGeneration,
   /if \(task\.mode === "keep"\) \{[\s\S]*const sourceImageUrl = await resolveDirectSourceImageUrl\(task\.url\)[\s\S]*imageUrls: \[sourceImageUrl\]/,
-  "Keep-mode image tasks should route direct source images through WebP-to-JPG normalization.",
+  "Keep-mode image tasks should route direct source images through browser-readable normalization and persistence.",
 );
 
 assertContains(
   imageGeneration,
-  /function isWebpImageReference\(value: string\)[\s\S]*\.webp[\s\S]*format[\s\S]*webp/,
-  "Direct source-image normalization should detect WebP URLs before returning keep/fallback images.",
+  /async function materializeRemoteSourceImage\(url: string\)[\s\S]*sniffImageFormat\(buffer\)[\s\S]*convertHeicBufferToJpeg[\s\S]*persistRemoteSourceImage/,
+  "Direct source-image normalization should sniff remote bytes and persist only browser-readable media.",
 );
 
 assertContains(

@@ -52,7 +52,7 @@ const route = read("src/app/api/crawl/links/route.ts");
 const simpleRoute = read("src/app/api/simple/runs/route.ts");
 const page = read("src/app/page.tsx");
 const launcher = read("src/lib/lark-task-launcher.ts");
-const checkPs1 = read(".trellis/verification/check.ps1");
+const checkPs1 = read(".trellis/verification/check.mjs");
 
 assertContains(types, /export type SourceLinkPlatform = CrawlPlatform \| "xiaopeng_bbs" \| "dongchedi"/, "Dongchedi should be a source-link platform, not a keyword crawl platform.");
 assertContains(types, /export type Platform = SourceLinkPlatform \| "feishu"/, "Platform union must include Dongchedi through SourceLinkPlatform.");

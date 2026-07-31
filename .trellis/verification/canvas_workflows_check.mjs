@@ -405,8 +405,9 @@ const workflows = read("src/lib/canvas/workflows.ts");
 requireText(workflows, ["filterWorkspaceOwnedRecords", "assertCanAccessWorkspaceRecord", "CanvasRevisionConflictError", "structuredClone(graph)"], "workflow service");
 
 const runs = read("src/lib/canvas/runs.ts");
-requireText(runs, ["structuredClone(workflow.graph)", "runMode", "isolated", "inputFingerprint", "reusedFrom", "bypassed", "disabled", "Missing required input", "cancelRequestedAt", "collectDescendants", "previousNodeRun", "resumableNodeRun", "onProviderTaskUpdate", "providerTaskRoute", "result.providerTaskId || nodeRun.providerTaskId", "finalRun.status === \"running\"", "requeueCanvasRunQueueItem(finalRun.id, 30_000)", "setTimeout(ensureCanvasRunWorker, 30_000)", "requeueExpiredCanvasRunQueueItemsWithProviderTasks", "listCanvasRunHistory", "listCanvasSuccessfulNodeRunsForWorkflowFromDb", "latestSuccessfulNodeRuns", "workflowRevision", "nodeConfig"], "DAG scheduler and latest-success projection");
+requireText(runs, ["structuredClone(workflow.graph)", "runMode", "isolated", "inputFingerprint", "reusedFrom", "bypassed", "disabled", "Missing required input", "cancelRequestedAt", "collectDescendants", "previousNodeRun", "resumableNodeRun", "onProviderTaskUpdate", "providerTaskRoute", "result.providerTaskId || nodeRun.providerTaskId", "finalRun.status === \"running\"", "requeueCanvasRunQueueItem(finalRun.id, 30_000)", "setTimeout(ensureCanvasRunWorker, 30_000)", "requeueExpiredCanvasRunQueueItemsWithProviderTasks", "listCanvasRunHistory", "listCanvasSuccessfulNodeRunsForWorkflowFromDb", "latestSuccessfulNodeRuns", "workflowRevision", "nodeConfig", "concurrencyConfig.canvasRun", "activeWorkers", "storedQueueState.activeWorkers ??= 0"], "DAG scheduler and latest-success projection");
 requireText(runs, ["Promise.all(ready.map((nodeId) => runPlannedNode"], "ready DAG branch concurrency");
+assert.match(runs, /error: status === "running"\s*\? undefined\s*:/, "Pending provider runs must clear stale errors from earlier failed attempts.");
 requireText(read("src/lib/concurrency.ts"), ["image: readConcurrencyEnv(\"WORKER_IMAGE_CONCURRENCY\", 100, 100)"], "confirmed ToAPIs 100-task submission concurrency");
 requireText(read("src/app/api/canvas/runs/route.ts"), ["ensureCanvasRunWorker", "export async function GET"], "canvas status reads must wake durable recovery after a local restart");
 
@@ -618,7 +619,7 @@ const projectedEdges = markActiveCanvasEdges(canvasEdgeFixtures, new Map([
 ]));
 assert.equal(projectedEdges.find((edge) => edge.id === "active-source")?.data?.beamActive, true, "an edge leaving a running node must retain its beam");
 assert.equal(projectedEdges.find((edge) => edge.id === "active-target")?.data?.beamActive, true, "an edge entering a queued node must retain its beam");
-assert.equal(projectedEdges.find((edge) => edge.id === "inactive")?.data?.beamActive, false, "an idle edge must remain a single static path");
+assert.equal(projectedEdges.find((edge) => edge.id === "inactive")?.data?.beamActive, false, "an idle edge must remain visually distinct from a running-related edge");
 const currentGraph = compileFunction(page, "currentGraph");
 const projectedGraph = currentGraph(
   [{ id: "node", position: { x: 10, y: 20 }, data: { canvasNode: { id: "node", type: "input.text", version: 1, position: { x: 0, y: 0 }, config: {} } } }],
@@ -707,15 +708,23 @@ const edgeFunction = page.slice(page.indexOf("function FlowingCanvasEdge"), page
 assert.equal((edgeFunction.match(/<BaseEdge\b/g) || []).length, 1, "each edge must render exactly one continuous base path");
 assert.equal((edgeFunction.match(/className="canvas-flow-edge-glow"/g) || []).length, 1, "each edge must render one soft layer for the moving beam");
 assert.equal((edgeFunction.match(/className="canvas-flow-edge-highlight"/g) || []).length, 1, "each edge must render exactly one moving highlight");
-assert.ok(edgeFunction.includes("selected || data?.beamActive"), "only selected or running-related edges may activate the beam");
-assert.ok(edgeFunction.includes("beamActive ? <>"), "inactive edges must not render beam paths");
+assert.ok(edgeFunction.includes("selected || data?.beamActive"), "selected or running-related edges must retain their emphasized beam state");
+assert.ok(!edgeFunction.includes("beamActive ? <>"), "idle edges must keep their flow paths mounted");
+requireText(page, ['minZoom={0.2}', '<Controls showInteractive={false} />'], "canvas native zoom policy");
+for (const removedZoomController of ["CanvasViewportControls", "canvasWheelZoomTarget", "canvasZoomEase", "canvasZoomTransition", "smoothCanvasWheelZoom", "zoomOnScroll={false}"]) {
+  assert.ok(!page.includes(removedZoomController), `custom eased zoom controller must stay removed: ${removedZoomController}`);
+}
 const uploadRoute = read("src/app/api/canvas/media/route.ts");
 requireText(uploadRoute, ["requireWorkspaceAccount", "request.formData()", "form.getAll(\"files\")", "maxCanvasUploadFiles", "maxCanvasUploadBytes", "saveRuntimeImageUpload"], "canvas media route");
 const runtimeUpload = read("src/lib/runtime-image-upload.ts");
 requireText(runtimeUpload, ["sniffImageFormat(buffer)", "format?.browserSupported", "persistRuntimeMedia", 'directory: "review-uploads" | "canvas-uploads"'], "runtime image upload");
 const styles = read("src/app/globals.css");
-requireText(styles, [".canvas-flow-edge-beam-active .canvas-flow-edge-glow", ".canvas-stage-viewport-moving .canvas-flow-edge-glow", "animation: none", "filter: none"], "canvas edge performance styles");
-requireText(styles, ['.canvas-stage[data-canvas-viewport-detail="reduced"]', '.canvas-stage[data-canvas-viewport-detail="overview"]', ".canvas-node:not(.canvas-node-selected)", ".canvas-stage-viewport-moving .canvas-node-image-grid", ".canvas-stage-viewport-moving .react-flow__minimap", "visibility: hidden !important", "box-shadow: none"], "canvas viewport detail styles");
+requireText(styles, [".canvas-flow-edge-flowing .canvas-flow-edge-highlight", ".canvas-flow-edge-beam-active .canvas-flow-edge-glow", ".canvas-stage-viewport-moving .canvas-flow-edge-glow", "animation: none", "filter: none"], "canvas edge performance styles");
+requireText(styles, ['.canvas-stage[data-canvas-viewport-detail="reduced"]', '.canvas-stage[data-canvas-viewport-detail="overview"]', ".canvas-node:not(.canvas-node-selected)", ".canvas-stage-viewport-moving .react-flow__minimap", "visibility: hidden !important", "box-shadow: none"], "canvas viewport detail styles");
+assert.ok(!styles.includes(".canvas-stage-viewport-moving .canvas-node-image-grid"), "viewport movement must not hide node image grids");
+assert.ok(!styles.includes(".canvas-stage-viewport-moving .canvas-node-result"), "viewport movement must not hide node media results");
+requireText(page, ["--xy-edge-stroke-selected"], "selected canvas edge color variable");
+requireText(styles, [".react-flow__edge.selected .canvas-flow-edge-base", "stroke: var(--canvas-edge-color, var(--accent))"], "selected canvas edge color policy");
 requireText(styles, [".canvas-stage .react-flow__viewport { will-change: transform; }"], "canvas viewport compositor hint");
 assert.ok(!styles.includes(".canvas-confirm-dialog"), "removed canvas confirmation UI must not leave dead styles");
 assert.ok(!styles.includes(".canvas-confirm-detail"), "removed canvas confirmation details must not leave dead styles");

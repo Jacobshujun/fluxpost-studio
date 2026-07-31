@@ -1,4 +1,4 @@
-import type { CanvasGraph, CanvasNode, CanvasNodeConfig, CanvasNodeDefinition, CanvasNodeExecutionMode, CanvasNodeType } from "./types";
+import type { CanvasBatchBindableField, CanvasGraph, CanvasNode, CanvasNodeConfig, CanvasNodeDefinition, CanvasNodeExecutionMode, CanvasNodeType } from "./types";
 import { toApis4kImageRatios, toApisImageRatios } from "../toapis-image-api";
 import { canvasPromptPresets, canvasVisionPresets, parseCanvasImageSelection, parseCanvasVideoTimestamps, resolveCanvasImageDimensions } from "./node-utils";
 
@@ -496,6 +496,35 @@ const definitionVersionMap = new Map(
 
 export function getCanvasNodeDefinition(type: CanvasNodeType, version?: number) {
   return version === undefined ? definitionMap.get(type) : definitionVersionMap.get(`${type}@${version}`);
+}
+
+export function getCanvasBatchBindableFields(node: Pick<CanvasNode, "type" | "version">): CanvasBatchBindableField[] {
+  const definition = getCanvasNodeDefinition(node.type, node.version);
+  if (!definition) return [];
+  return definition.fields.flatMap((field): CanvasBatchBindableField[] => {
+    if (node.type === "input.library-images" && field.key === "assetIds") {
+      return [{ key: field.key, label: field.label, parameterTypes: ["image", "image-group"], adapter: "image-input" }];
+    }
+    if (node.type === "input.images" && field.key === "urls") {
+      return [{ key: field.key, label: field.label, parameterTypes: ["image", "image-group"], adapter: "image-input" }];
+    }
+    if (node.type === "input.copy-library" && field.key === "entryId") {
+      return [{ key: field.key, label: field.label, parameterTypes: ["copy"], adapter: "copy-input" }];
+    }
+    if (field.kind === "text" || field.kind === "textarea") {
+      return [{ key: field.key, label: field.label, parameterTypes: ["text"], adapter: "config-value" }];
+    }
+    if (field.kind === "number") {
+      return [{ key: field.key, label: field.label, parameterTypes: ["number"], adapter: "config-value" }];
+    }
+    if (field.kind === "boolean") {
+      return [{ key: field.key, label: field.label, parameterTypes: ["boolean"], adapter: "config-value" }];
+    }
+    if (field.kind === "select") {
+      return [{ key: field.key, label: field.label, parameterTypes: ["enum"], adapter: "config-value" }];
+    }
+    return [];
+  });
 }
 
 export function createCanvasNode(type: CanvasNodeType, id: string, position: { x: number; y: number }): CanvasNode {

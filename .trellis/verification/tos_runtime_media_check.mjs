@@ -20,6 +20,7 @@ const files = {
   imageGeneration: "src/lib/image-generation.ts",
   comfy: "src/lib/comfyui-klein.ts",
   reviewUpload: "src/lib/review-image-upload.ts",
+  runtimeImageUpload: "src/lib/runtime-image-upload.ts",
   feishuImport: "src/lib/feishu-content-import.ts",
   feishuCli: "src/lib/feishu-cli.ts",
   modelImageInput: "src/lib/model-image-input.ts",
@@ -42,6 +43,7 @@ const mediaCache = read(files.mediaCache);
 const imageGeneration = read(files.imageGeneration);
 const comfy = read(files.comfy);
 const reviewUpload = read(files.reviewUpload);
+const runtimeImageUpload = read(files.runtimeImageUpload);
 const feishuImport = read(files.feishuImport);
 const feishuCli = read(files.feishuCli);
 const modelImageInput = read(files.modelImageInput);
@@ -110,9 +112,10 @@ assertContains(storage, /metadata\.size\s*>\s*0/, "Existing runtime media recove
 assertContains(storage, /data[\"']?,\s*[\"']tos-pending|tos-pending/, "Failed uploads must retain files under data/tos-pending.");
 assertContains(storage, /rm\([^)]*filePath/, "Verified uploads must remove their local staging file.");
 
-for (const [name, source] of Object.entries({ mediaCache, imageGeneration, comfy, reviewUpload, feishuImport })) {
+for (const [name, source] of Object.entries({ mediaCache, imageGeneration, comfy, runtimeImageUpload, feishuImport })) {
   assertContains(source, /persistRuntimeMedia/, `${name} must persist final runtime media through the shared storage boundary.`);
 }
+assertContains(reviewUpload, /saveRuntimeImageUpload/, "Review uploads must delegate to the shared runtime image upload boundary.");
 assertContains(feishuCli, /materializeRuntimeMedia/, "Feishu publish must materialize remote TOS attachments through the shared helper.");
 assertContains(
   materializer,

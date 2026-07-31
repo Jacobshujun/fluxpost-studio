@@ -34,6 +34,8 @@ import {
   ArrowUp,
   BookOpenText,
   CheckCircle2,
+  ChevronLeft,
+  ChevronRight,
   Clapperboard,
   ClipboardPaste,
   Copy,
@@ -75,7 +77,7 @@ import {
   ZoomIn,
   ZoomOut,
 } from "lucide-react";
-import { createContext, useCallback, useContext, useEffect, useMemo, useRef, useState } from "react";
+import { createContext, useCallback, useContext, useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
 import {
   CANVAS_CLIPBOARD_MIME,
   createCanvasClipboardPayload,
@@ -83,7 +85,7 @@ import {
   parseCanvasClipboardPayload,
   type CanvasClipboardPayload,
 } from "@/lib/canvas/clipboard";
-import { canvasNodeDefinitions, createCanvasNode, getCanvasNodeDefinition } from "@/lib/canvas/registry";
+import { canvasNodeDefinitions, createCanvasNode, getCanvasBatchBindableFields, getCanvasNodeDefinition } from "@/lib/canvas/registry";
 import { createCanvasSchedulerSkeleton } from "@/lib/canvas/scheduler-skeleton";
 import {
   areCanvasPortKindsCompatible,
@@ -93,7 +95,8 @@ import {
   CANVAS_SCHEDULER_ROLE_LABELS,
 } from "@/lib/canvas/types";
 import { getStoredTheme, subscribeTheme } from "@/lib/theme";
-import type { ContentPoolSnapshot, CopyLibraryEntryView, NormalizedSourceItem } from "@/lib/types";
+import { selectIdRange } from "@/lib/list-selection";
+import type { ContentPoolSnapshot, CopyLibraryEntryView, LibraryAsset, LibraryAssetPage, NormalizedSourceItem } from "@/lib/types";
 import type {
   CanvasArtifact,
   CanvasEdge,
@@ -111,9 +114,16 @@ import type {
   CanvasRunWithNodes,
   CanvasSchedule,
   CanvasScheduleAssetFilter,
+  CanvasScheduleAssetSnapshot,
   CanvasScheduleBatch,
   CanvasScheduleBindings,
   CanvasScheduleCopyFilter,
+  CanvasScheduleParameter,
+  CanvasScheduleParameterSource,
+  CanvasScheduleParameterType,
+  CanvasScheduleParameterValue,
+  CanvasScheduleSampleCount,
+  CanvasScheduleV2Definition,
   CanvasSchedulerRole,
   CanvasWorkflow,
 } from "@/lib/canvas/types";
@@ -125,18 +135,12 @@ type CanvasHistoryStep = { history: CanvasHistory; graph?: CanvasGraph };
 type QuickAddConnection = { nodeId: string; portId: string; handleType: "source" | "target"; kind: CanvasPortKind; multiple?: boolean };
 type QuickAddState = { screen: { x: number; y: number }; position: { x: number; y: number }; connection?: QuickAddConnection } | null;
 type QuickAddChoice = { definition: (typeof canvasNodeDefinitions)[number]; port?: CanvasPortDefinition };
-type CanvasLibraryAsset = { id: string; name: string; publicUrl: string };
-type CanvasLibraryAssetPage = {
-  assets: CanvasLibraryAsset[];
-  collections: Array<{ id: string; name: string }>;
-  total: number;
-};
 type CanvasCopyLibraryResponse = { entries: CopyLibraryEntryView[]; tags: string[] };
 type CanvasTaskFilter = "all" | "active" | "history" | "failed";
 type CanvasViewportDetail = "full" | "reduced" | "overview";
 type PreviewState =
   | { kind: "text"; value: string }
-  | { kind: "image"; url: string; index: number; width?: number; height?: number }
+  | { kind: "image"; url: string; index: number; width?: number; height?: number; sequence?: Array<{ id: string; url: string; width?: number; height?: number }> }
   | { kind: "video"; url: string; index: number }
   | null;
 type CanvasNodeInteraction = {
@@ -159,6 +163,8 @@ const terminalStatuses = new Set(["completed", "partial", "failed", "cancelled"]
 const canvasHistoryLimit = 50;
 const canvasHistoryCommitDelayMs = 350;
 const canvasViewportDetailZoom = { reduced: 0.65, overview: 0.35 } as const;
+let canvasScheduleParameterSequence = 0;
+const canvasScheduleParameterTypes = ["image", "image-group", "text", "copy", "number", "boolean", "enum"] as const satisfies readonly CanvasScheduleParameterType[];
 
 export default function CanvasPage() {
   const [workflows, setWorkflows] = useState<CanvasWorkflow[]>([]);
@@ -234,6 +240,13 @@ export default function CanvasPage() {
     setNodes((current) => current.map((node) => node.id !== nodeId ? node : {
       ...node,
       data: { canvasNode: { ...node.data.canvasNode, executionMode } },
+    }));
+    markDirty();
+  }, [markDirty]);
+  const updateNodeLabel = useCallback((nodeId: string, label: string) => {
+    setNodes((current) => current.map((node) => node.id !== nodeId ? node : {
+      ...node,
+      data: { canvasNode: { ...node.data.canvasNode, label: label.slice(0, 80) } },
     }));
     markDirty();
   }, [markDirty]);
@@ -1108,7 +1121,6 @@ export default function CanvasPage() {
             onMoveEnd={(_, nextViewport) => { stageRef.current?.classList.remove("canvas-stage-viewport-moving"); syncCanvasViewportDetail(stageRef.current, nextViewport.zoom); setViewport(nextViewport); markDirty(); }}
             defaultViewport={viewport}
             minZoom={0.2}
-            maxZoom={2.2}
             onlyRenderVisibleElements
             panOnDrag={isMobile}
             selectionOnDrag={!isMobile}
@@ -1140,6 +1152,7 @@ export default function CanvasPage() {
             node={selectedCanvasNode}
             onChange={updateSelectedConfig}
             onPatch={(patch) => updateNodeConfigPatch(selectedCanvasNode.id, patch)}
+            onLabelChange={(label) => updateNodeLabel(selectedCanvasNode.id, label)}
             onExecutionModeChange={(mode) => updateNodeExecutionMode(selectedCanvasNode.id, mode)}
             onSchedulerRoleChange={(role) => updateNodeSchedulerRole(selectedCanvasNode.id, role)}
             onImportImages={(files) => importImageFiles(files, selectedCanvasNode.id)}
@@ -1183,6 +1196,7 @@ export default function CanvasPage() {
         workflow={activeWorkflow}
         graph={editableGraph}
         onSaveBindings={saveSchedulerBindings}
+        onPreview={(nextPreview) => setPreview(nextPreview)}
         onClose={() => setScheduleCenterOpen(false)}
         onOpenRuns={() => { setScheduleCenterOpen(false); void openTaskCenter(); }}
       /> : null}
@@ -1481,12 +1495,10 @@ function FlowingCanvasEdge({ id, sourceX, sourceY, targetX, targetY, sourcePosit
   const [path] = getBezierPath({ sourceX, sourceY, targetX, targetY, sourcePosition, targetPosition });
   const animationDelay = `${edgeAnimationDelay(id)}s`;
   const beamActive = selected || data?.beamActive;
-  return <g className={beamActive ? "canvas-flow-edge-beam-active" : undefined} style={{ ...style, "--canvas-edge-delay": animationDelay } as React.CSSProperties}>
+  return <g className={`canvas-flow-edge-flowing${beamActive ? " canvas-flow-edge-beam-active" : ""}`} style={{ ...style, "--canvas-edge-delay": animationDelay } as React.CSSProperties}>
     <BaseEdge id={id} path={path} markerEnd={markerEnd} className="canvas-flow-edge-base" />
-    {beamActive ? <>
-      <path d={path} pathLength={100} className="canvas-flow-edge-glow" aria-hidden="true" />
-      <path d={path} pathLength={100} className="canvas-flow-edge-highlight" aria-hidden="true" />
-    </> : null}
+    <path d={path} pathLength={100} className="canvas-flow-edge-glow" aria-hidden="true" />
+    <path d={path} pathLength={100} className="canvas-flow-edge-highlight" aria-hidden="true" />
   </g>;
 }
 
@@ -1644,6 +1656,7 @@ function NodeInspector({
   node,
   onChange,
   onPatch,
+  onLabelChange,
   onExecutionModeChange,
   onSchedulerRoleChange,
   onImportImages,
@@ -1654,6 +1667,7 @@ function NodeInspector({
   node: CanvasNode;
   onChange: (key: string, value: string | number | string[]) => void;
   onPatch: (patch: CanvasNode["config"]) => void;
+  onLabelChange: (label: string) => void;
   onExecutionModeChange: (mode: CanvasNodeExecutionMode) => void;
   onSchedulerRoleChange: (role?: CanvasSchedulerRole) => void;
   onImportImages: (files: File[]) => Promise<void>;
@@ -1662,13 +1676,25 @@ function NodeInspector({
   mediaBusy: boolean;
 }) {
   const definition = getCanvasNodeDefinition(node.type, node.version);
+  const defaultLabel = definition?.label || node.type;
+  const labelInputRef = useRef<HTMLInputElement>(null);
+  const [labelDraft, setLabelDraft] = useState(node.label?.trim() || defaultLabel);
+  useEffect(() => {
+    if (document.activeElement !== labelInputRef.current) setLabelDraft(node.label?.trim() || defaultLabel);
+  }, [defaultLabel, node.id, node.label]);
   if (!definition) return null;
   const isGptImageV2 = node.type === "model.gpt-image" && node.version >= 2;
   const imageConfigKey = isGptImageV2 ? "referenceUrls" : "urls";
   const imageUrls = node.type === "input.images" || isGptImageV2 ? normalizeConfigUrls(node.config[imageConfigKey]) : [];
   const executionMode = node.executionMode === "bypass" || node.executionMode === "disabled" ? node.executionMode : "enabled";
+  const commitLabel = () => {
+    const normalized = labelDraft.trim().slice(0, 80) || defaultLabel;
+    setLabelDraft(normalized);
+    if (normalized !== node.label) onLabelChange(normalized);
+  };
   return <div className="canvas-inspector-content">
     <div className="canvas-inspector-title"><span style={{ color: definition.color }}>{iconForNode(node.type)}</span><div><strong>{definition.label}</strong><small>{definition.description}</small></div></div>
+    <label><span>节点名称</span><input ref={labelInputRef} maxLength={80} value={labelDraft} placeholder={definition.label} onChange={(event) => setLabelDraft(event.target.value)} onBlur={commitLabel} onKeyDown={(event) => { if (event.key === "Enter") event.currentTarget.blur(); }} /></label>
     <label><span>节点状态</span><select value={executionMode} onChange={(event) => onExecutionModeChange(event.target.value as CanvasNodeExecutionMode)}>
       <option value="enabled">启用</option>
       <option value="bypass" disabled={!definition.bypass}>跳过</option>
@@ -1856,7 +1882,7 @@ function LibraryImageSnapshotPicker({ node, onPatch, onPreviewImage }: {
   onPatch: (patch: CanvasNode["config"]) => void;
   onPreviewImage: (url: string, index: number) => void;
 }) {
-  const [data, setData] = useState<CanvasLibraryAssetPage>({ assets: [], collections: [], total: 0 });
+  const [data, setData] = useState<LibraryAssetPage>({ assets: [], collections: [], total: 0 });
   const [search, setSearch] = useState("");
   const [tag, setTag] = useState("");
   const [collectionId, setCollectionId] = useState("");
@@ -1873,7 +1899,7 @@ function LibraryImageSnapshotPicker({ node, onPatch, onPreviewImage }: {
     if (tag.trim()) params.set("tag", tag.trim());
     if (collectionId) params.set("collectionId", collectionId);
     try {
-      setData(await api<CanvasLibraryAssetPage>(`/api/library/assets?${params}`));
+      setData(await api<LibraryAssetPage>(`/api/library/assets?${params}`));
     } catch (loadError) {
       setError(errorMessage(loadError));
     } finally {
@@ -1885,7 +1911,7 @@ function LibraryImageSnapshotPicker({ node, onPatch, onPreviewImage }: {
     return () => clearTimeout(timer);
   }, [load]);
   const patchSelection = (nextIds: string[], nextNames: string[], nextUrls: string[]) => onPatch({ assetIds: nextIds, assetNames: nextNames, urls: nextUrls, snapshotAt: new Date().toISOString() });
-  const toggle = (asset: CanvasLibraryAsset) => {
+  const toggle = (asset: LibraryAsset) => {
     const index = ids.indexOf(asset.id);
     if (index >= 0) {
       patchSelection(ids.filter((_, itemIndex) => itemIndex !== index), names.filter((_, itemIndex) => itemIndex !== index), urls.filter((_, itemIndex) => itemIndex !== index));
@@ -1903,7 +1929,7 @@ function LibraryImageSnapshotPicker({ node, onPatch, onPreviewImage }: {
     setBusy(true);
     setError("");
     try {
-      const assets = await Promise.all(ids.map((id) => api<{ asset: CanvasLibraryAsset }>(`/api/library/assets/${encodeURIComponent(id)}`).then((result) => result.asset)));
+      const assets = await Promise.all(ids.map((id) => api<{ asset: LibraryAsset }>(`/api/library/assets/${encodeURIComponent(id)}`).then((result) => result.asset)));
       patchSelection(assets.map((asset) => asset.id), assets.map((asset) => asset.name), assets.map((asset) => asset.publicUrl));
     } catch (refreshError) {
       setError(`刷新失败，已保留原快照：${errorMessage(refreshError)}`);
@@ -2024,10 +2050,11 @@ function CanvasQuickAdd({ state, edges, onChoose, onClose }: {
   </section>;
 }
 
-function CanvasScheduleCenter({ workflow, graph, onSaveBindings, onClose, onOpenRuns }: {
+function CanvasScheduleCenter({ workflow, graph, onSaveBindings, onPreview, onClose, onOpenRuns }: {
   workflow: CanvasWorkflow;
   graph: CanvasGraph;
   onSaveBindings: (bindings: CanvasScheduleBindings) => Promise<CanvasWorkflow | undefined>;
+  onPreview: (preview: Extract<NonNullable<PreviewState>, { kind: "image" }>) => void;
   onClose: () => void;
   onOpenRuns: () => void;
 }) {
@@ -2118,7 +2145,7 @@ function CanvasScheduleCenter({ workflow, graph, onSaveBindings, onClose, onOpen
         const revision = current?.id === schedule.id ? current.revision : schedule.revision;
         const data = await api<{ schedule: CanvasSchedule }>(`/api/canvas/schedules/${schedule.id}`, {
           method: "PATCH",
-          body: JSON.stringify({ action: "save", revision, name: schedule.name, batches: schedule.batches }),
+          body: JSON.stringify({ action: "save", revision, name: schedule.name, batches: schedule.batches, definition: schedule.definition }),
         });
         if (editSequenceRef.current === sequence) {
           adoptSchedule(data.schedule);
@@ -2276,6 +2303,7 @@ function CanvasScheduleCenter({ workflow, graph, onSaveBindings, onClose, onOpen
       <div className="canvas-schedule-toolbar">
         <button type="button" onClick={() => void createSchedule()} disabled={busy}><Plus />新建任务</button>
         {selected ? <button type="button" onClick={() => void scheduleAction("duplicate")} disabled={busy}><CopyPlus />复制为新任务</button> : null}
+        {selected && selected.schemaVersion !== 2 && editable ? <button type="button" onClick={() => void scheduleAction("convert-v2")} disabled={busy}><GitBranch />转换为灵活调度</button> : null}
         {selected && editable ? <button className="danger" type="button" onClick={() => void removeSchedule()} disabled={busy}><Trash2 />删除</button> : null}
         <span>{editSequence ? "保存中" : "已保存"}</span>
       </div>
@@ -2284,13 +2312,13 @@ function CanvasScheduleCenter({ workflow, graph, onSaveBindings, onClose, onOpen
         <nav className="canvas-schedule-list" aria-label="批量任务列表">
           {schedules.map((schedule) => <button type="button" key={schedule.id} className={selected?.id === schedule.id ? "is-selected" : ""} onClick={() => adoptSchedule(schedule)}>
             <StatusIcon status={schedule.status} />
-            <span><strong>{schedule.name}</strong><small>{schedule.totalContentTasks} 篇 · {schedule.totalImageTasks} 图 · {formatCanvasRunTime(schedule.updatedAt)}</small></span>
+            <span><strong>{schedule.name}</strong><small>{schedule.schemaVersion === 2 ? `${schedule.totalMainTasks || 0} 主任务 · ${schedule.totalChildTasks || 0} 子任务` : `${schedule.totalContentTasks} 篇 · ${schedule.totalImageTasks} 图`} · {formatCanvasRunTime(schedule.updatedAt)}</small></span>
             <em>{canvasScheduleStatusLabel(schedule.status)}</em>
           </button>)}
           {!schedules.length && !busy ? <div className="canvas-task-empty"><ListChecks /><span>当前还没有批量任务</span></div> : null}
         </nav>
         <section className="canvas-schedule-editor">
-          <section className="canvas-scheduler-bindings" aria-label="画布绑定">
+          {selected?.schemaVersion !== 2 ? <section className="canvas-scheduler-bindings" aria-label="画布绑定">
             <header>
               <span><strong>画布绑定</strong><small>为当前工作流指定批量调度使用的节点</small></span>
               <button type="button" onClick={() => void saveBindings()} disabled={bindingBusy || !bindingsComplete}>
@@ -2307,18 +2335,35 @@ function CanvasScheduleCenter({ workflow, graph, onSaveBindings, onClose, onOpen
               </label>)}
             </div>
             {!bindingsComplete ? <p><AlertTriangle />请完成五项必需节点绑定后再预演；使用文案池时还需绑定文案库输入。</p> : !bindingsSaved ? <p><AlertTriangle />绑定已修改，请先保存再预演。</p> : null}
-          </section>
+          </section> : null}
           {!selected ? <div className="canvas-task-empty"><Plus /><span>新建一个批量任务</span></div> : <>
             <div className="canvas-schedule-head">
               <input value={selected.name} disabled={!editable} aria-label="批量任务名称" onChange={(event) => patchSelected((schedule) => ({ ...schedule, name: event.target.value }))} />
               <span className={`is-${selected.status}`}>{canvasScheduleStatusLabel(selected.status)}</span>
             </div>
             <div className="canvas-schedule-metrics">
-              <div><small>图文任务</small><strong>{selected.totalContentTasks}</strong></div>
-              <div><small>图片子任务</small><strong>{selected.totalImageTasks}</strong></div>
+              <div><small>{selected.schemaVersion === 2 ? "主任务" : "图文任务"}</small><strong>{selected.schemaVersion === 2 ? selected.totalMainTasks || 0 : selected.totalContentTasks}</strong></div>
+              <div><small>{selected.schemaVersion === 2 ? "子任务" : "图片子任务"}</small><strong>{selected.schemaVersion === 2 ? selected.totalChildTasks || 0 : selected.totalImageTasks}</strong></div>
               <div><small>画布版本</small><strong>r{selected.workflowRevision}</strong></div>
             </div>
-            {editable ? <>
+            {editable ? selected.schemaVersion === 2 ? <CanvasScheduleV2Editor
+              schedule={selected}
+              graph={graph}
+              busy={busy}
+              onPreview={onPreview}
+              onDefinitionChange={(definition) => patchSelected((schedule) => ({
+                ...schedule,
+                status: "draft",
+                definition,
+                mainTasks: [],
+                totalMainTasks: 0,
+                totalChildTasks: 0,
+                totalContentTasks: 0,
+                totalImageTasks: 0,
+                previewRevision: undefined,
+              }))}
+              onAction={(action, payload, saveFirst) => void scheduleAction(action, payload, saveFirst)}
+            /> : <>
               <div className="canvas-schedule-batches">
                 {selected.batches.map((batch, index) => <section className="canvas-schedule-batch" key={batch.id}>
                   <header><strong>{index + 1}. {batch.name}</strong><button type="button" onClick={() => removeBatch(batch.id)} disabled={selected.batches.length === 1} aria-label="删除批次" title="删除批次"><Trash2 /></button></header>
@@ -2328,8 +2373,8 @@ function CanvasScheduleCenter({ workflow, graph, onSaveBindings, onClose, onOpen
                       <option value="input-1">输入 1</option><option value="input-2">输入 2</option><option value="input-3">输入 3</option>
                     </select></label>
                   </div>
-                  <ScheduleAssetFilterEditor title="场景 / 内容素材" role="reference" filter={batch.sceneFilter} count={batch.sceneCount} onCountChange={(sceneCount) => patchBatch(batch.id, { sceneCount })} onChange={(sceneFilter) => patchBatch(batch.id, { sceneFilter })} />
-                  <ScheduleAssetFilterEditor title="车型素材" role="vehicle" filter={batch.vehicleFilter} onChange={(vehicleFilter) => patchBatch(batch.id, { vehicleFilter })} />
+                  <ScheduleAssetFilterEditor title="场景 / 内容素材" role="reference" filter={batch.sceneFilter} count={batch.sceneCount} onCountChange={(sceneCount) => patchBatch(batch.id, { sceneCount })} onChange={(sceneFilter) => patchBatch(batch.id, { sceneFilter })} onPreview={onPreview} />
+                  <ScheduleAssetFilterEditor title="车型素材" role="vehicle" filter={batch.vehicleFilter} onChange={(vehicleFilter) => patchBatch(batch.id, { vehicleFilter })} onPreview={onPreview} />
                   {batch.copyFilter ? <ScheduleCopyFilterEditor filter={batch.copyFilter} onChange={(copyFilter) => patchBatch(batch.id, { copyFilter })} onDisable={() => patchBatch(batch.id, { copyFilter: undefined })} /> : <button className="canvas-schedule-add" type="button" onClick={() => patchBatch(batch.id, { copyFilter: emptyScheduleCopyFilter() })}><BookOpenText />启用文案池</button>}
                   <div className="canvas-schedule-range"><span>每篇车型图片数</span><label><small>最少</small><input type="number" min={1} max={16} value={batch.vehicleCountMin} onChange={(event) => patchBatch(batch.id, { vehicleCountMin: Number(event.target.value) })} /></label><span>至</span><label><small>最多</small><input type="number" min={1} max={16} value={batch.vehicleCountMax} onChange={(event) => patchBatch(batch.id, { vehicleCountMax: Number(event.target.value) })} /></label></div>
                   {batch.contentTasks.length ? <SchedulePreview batch={batch} busy={busy} onResample={(contentTaskId) => void scheduleAction("resample", { batchId: batch.id, contentTaskId }, false)} /> : null}
@@ -2340,7 +2385,9 @@ function CanvasScheduleCenter({ workflow, graph, onSaveBindings, onClose, onOpen
                 <button type="button" onClick={() => void scheduleAction("preflight", {}, true)} disabled={busy || bindingBusy || !bindingsSaved}><RefreshCw />预演抽样</button>
                 {selected.status === "ready" && selected.previewRevision ? <button type="button" onClick={() => void scheduleAction("launch", { previewRevision: selected.previewRevision })} disabled={busy}><Play />确认并启动</button> : null}
               </div>
-            </> : <ScheduleRuntimeTree schedule={selected} busy={busy} onAction={(action, payload) => void scheduleAction(action, payload)} />}
+            </> : selected.schemaVersion === 2
+              ? <ScheduleV2RuntimeTree schedule={selected} busy={busy} onAction={(action, payload) => void scheduleAction(action, payload)} />
+              : <ScheduleRuntimeTree schedule={selected} busy={busy} onAction={(action, payload) => void scheduleAction(action, payload)} />}
           </>}
         </section>
       </div>
@@ -2348,60 +2395,464 @@ function CanvasScheduleCenter({ workflow, graph, onSaveBindings, onClose, onOpen
   </div>;
 }
 
-function ScheduleAssetFilterEditor({ title, role, filter, count, onCountChange, onChange }: {
+function CanvasScheduleV2Editor({ schedule, graph, busy, onDefinitionChange, onAction, onPreview }: {
+  schedule: CanvasSchedule;
+  graph: CanvasGraph;
+  busy: boolean;
+  onDefinitionChange: (definition: CanvasScheduleV2Definition) => void;
+  onAction: (action: string, payload?: Record<string, unknown>, saveFirst?: boolean) => void;
+  onPreview: (preview: Extract<NonNullable<PreviewState>, { kind: "image" }>) => void;
+}) {
+  const definition = schedule.definition;
+  if (!definition) return <div className="canvas-task-empty"><AlertTriangle /><span>灵活调度定义缺失</span></div>;
+  const childOutputs = graph.nodes.flatMap((node) => {
+    const nodeDefinition = getCanvasNodeDefinition(node.type, node.version);
+    return (nodeDefinition?.outputs || []).filter((port) => ["text", "images", "videos"].includes(port.kind)).map((port) => ({
+      node,
+      port,
+      label: `${canvasNodeDisplayName(node)} · ${port.label} · ${node.id.slice(-4)}`,
+    }));
+  });
+  const mainTargets = graph.nodes.filter((node) => node.type !== "publish.feishu");
+  const patchDefinition = (patch: Partial<CanvasScheduleV2Definition>) => onDefinitionChange({ ...definition, ...patch });
+  const patchParameter = (parameterId: string, updater: (parameter: CanvasScheduleParameter) => CanvasScheduleParameter) => {
+    patchDefinition({ parameters: definition.parameters.map((parameter) => parameter.id === parameterId ? updater(parameter) : parameter) });
+  };
+  const addParameter = (scope: "main" | "child") => {
+    const first = firstCanvasBatchBinding(graph);
+    if (!first) return;
+    const valueType = first.field.parameterTypes[0];
+    const source = defaultCanvasScheduleParameterSource(valueType);
+    if (scope === "main" && source.mode === "library-filter") source.filter.mode = "manual";
+    patchDefinition({ parameters: [...definition.parameters, {
+      id: nextCanvasScheduleParameterId(),
+      name: scope === "main" ? `主任务参数 ${definition.parameters.filter((parameter) => parameter.scope === scope).length + 1}` : `子任务参数 ${definition.parameters.filter((parameter) => parameter.scope === scope).length + 1}`,
+      scope,
+      valueType,
+      source,
+      expansion: scope === "child" ? "each" : "fixed",
+      binding: { nodeId: first.node.id, fieldKey: first.field.key },
+    }] });
+  };
+  const applyPeopleSceneVehiclePreset = () => {
+    const imageInputs = graph.nodes.filter((node) => getCanvasBatchBindableFields(node).some((field) => field.parameterTypes.includes("image")));
+    if (imageInputs.length < 3) return;
+    const names = ["人物参考图", "场景参考图", "车辆角度图"];
+    const parameters = imageInputs.slice(0, 3).map((node, index): CanvasScheduleParameter => ({
+      id: nextCanvasScheduleParameterId(),
+      name: names[index],
+      scope: index === 2 ? "child" : "main",
+      valueType: "image",
+      source: { mode: "library-filter", role: index === 2 ? "vehicle" : "reference", filter: { ...emptyScheduleFilter(), mode: "manual" } },
+      expansion: index === 2 ? "each" : "fixed",
+      binding: { nodeId: node.id, fieldKey: getCanvasBatchBindableFields(node).find((field) => field.parameterTypes.includes("image"))!.key },
+    }));
+    patchDefinition({ parameters, expansion: { main: "cartesian", child: "cartesian" }, aggregationPolicy: "at-least-one" });
+  };
+  return <div className="canvas-schedule-v2">
+    <section className="canvas-scheduler-bindings">
+      <header><span><strong>执行节点</strong><small>子任务输出会在主任务阶段替换为冻结结果</small></span><button type="button" disabled={graph.nodes.filter((node) => getCanvasBatchBindableFields(node).some((field) => field.parameterTypes.includes("image"))).length < 3} onClick={applyPeopleSceneVehiclePreset}><Images />人物场景预设</button></header>
+      <div>
+        <label><span>子任务结果</span><select value={`${definition.childResult.nodeId}::${definition.childResult.outputPort}`} onChange={(event) => {
+          const output = childOutputs.find((candidate) => `${candidate.node.id}::${candidate.port.id}` === event.target.value);
+          if (output && ["text", "images", "videos"].includes(output.port.kind)) patchDefinition({ childResult: { nodeId: output.node.id, outputPort: output.port.id, artifactKind: output.port.kind as "text" | "images" | "videos" } });
+        }}><option value="::">未选择</option>{childOutputs.map((output) => <option key={`${output.node.id}-${output.port.id}`} value={`${output.node.id}::${output.port.id}`}>{output.label}</option>)}</select></label>
+        <label><span>主任务目标（可选）</span><select value={definition.mainTargetNodeId || ""} onChange={(event) => patchDefinition({ mainTargetNodeId: event.target.value || undefined })}><option value="">仅汇总子任务结果</option>{mainTargets.map((node) => <option key={node.id} value={node.id}>{canvasNodeOptionLabel(node)}</option>)}</select></label>
+        <label><span>失败聚合</span><select value={definition.aggregationPolicy} onChange={(event) => patchDefinition({ aggregationPolicy: event.target.value as CanvasScheduleV2Definition["aggregationPolicy"] })}><option value="at-least-one">至少一个成功</option><option value="all">必须全部成功</option></select></label>
+      </div>
+    </section>
+    {(["main", "child"] as const).map((scope) => <section className="canvas-schedule-parameter-section" key={scope}>
+      <header><span><strong>{scope === "main" ? "主任务参数" : "子任务参数"}</strong><small>{definition.parameters.filter((parameter) => parameter.scope === scope).length} 个参数</small></span><label><span>组合</span><select value={definition.expansion[scope]} onChange={(event) => patchDefinition({ expansion: { ...definition.expansion, [scope]: event.target.value as "cartesian" | "zip" } })}><option value="cartesian">笛卡尔积</option><option value="zip">按序配对</option></select></label><button className="canvas-schedule-add" type="button" onClick={() => addParameter(scope)}><Plus />添加参数</button></header>
+      <div>{definition.parameters.filter((parameter) => parameter.scope === scope).map((parameter) => <CanvasScheduleParameterEditor
+        key={parameter.id}
+        parameter={parameter}
+        graph={graph}
+        onPreview={onPreview}
+        onChange={(next) => patchParameter(parameter.id, () => next)}
+        onRemove={() => patchDefinition({ parameters: definition.parameters.filter((candidate) => candidate.id !== parameter.id) })}
+      />)}</div>
+      {!definition.parameters.some((parameter) => parameter.scope === scope) ? <div className="canvas-task-empty"><Plus /><span>添加一个{scope === "main" ? "主任务" : "子任务"}参数</span></div> : null}
+    </section>)}
+    {schedule.mainTasks?.length ? <ScheduleV2Preview schedule={schedule} onPreview={onPreview} /> : null}
+    <div className="canvas-schedule-primary-actions">
+      <button type="button" onClick={() => onAction("preflight", {}, true)} disabled={busy}><RefreshCw />预演展开</button>
+      {schedule.status === "ready" && schedule.previewRevision ? <button type="button" onClick={() => onAction("launch", { previewRevision: schedule.previewRevision })} disabled={busy}><Play />确认并启动</button> : null}
+    </div>
+  </div>;
+}
+
+function CanvasScheduleParameterEditor({ parameter, graph, onChange, onRemove, onPreview }: {
+  parameter: CanvasScheduleParameter;
+  graph: CanvasGraph;
+  onChange: (parameter: CanvasScheduleParameter) => void;
+  onRemove: () => void;
+  onPreview: (preview: Extract<NonNullable<PreviewState>, { kind: "image" }>) => void;
+}) {
+  const bindingOptions = canvasBatchBindingOptions(graph, parameter.valueType);
+  const sampleCount = canvasScheduleParameterSampleCount(parameter);
+  const updateType = (valueType: CanvasScheduleParameterType) => {
+    const binding = canvasBatchBindingOptions(graph, valueType)[0];
+    let source = defaultCanvasScheduleParameterSource(valueType);
+    if (source.mode === "fixed" && parameter.expansion !== "fixed") source = { mode: "manual-list", values: source.values };
+    if ((valueType === "image" || valueType === "image-group") && parameter.expansion === "fixed" && source.mode === "library-filter") source.filter.mode = "manual";
+    onChange({
+      ...parameter,
+      valueType,
+      source,
+      binding: binding ? { nodeId: binding.node.id, fieldKey: binding.field.key } : { nodeId: "", fieldKey: "" },
+    });
+  };
+  const updateExpansion = (expansion: CanvasScheduleParameter["expansion"]) => {
+    const source = parameter.source;
+    if (source.mode === "fixed" || source.mode === "manual-list") {
+      const values = expansion === "fixed" ? source.values.slice(0, 1) : source.values;
+      onChange({
+        ...parameter,
+        expansion,
+        sampleCount: expansion === "random" ? sampleCount : undefined,
+        randomCount: undefined,
+        source: {
+          mode: expansion === "fixed" ? "fixed" : "manual-list",
+          values: values.length ? values : [defaultCanvasScheduleScalarValue(parameter.valueType)],
+        },
+      });
+      return;
+    }
+    onChange({ ...parameter, expansion, sampleCount: expansion === "random" ? sampleCount : undefined, randomCount: undefined });
+  };
+  return <article className="canvas-schedule-parameter">
+    <header><input maxLength={80} value={parameter.name} onChange={(event) => onChange({ ...parameter, name: event.target.value })} aria-label="参数名称" /><button type="button" onClick={onRemove} aria-label="删除参数" title="删除参数"><Trash2 /></button></header>
+    <div className="canvas-schedule-parameter-grid">
+      <label><span>类型</span><select value={parameter.valueType} onChange={(event) => updateType(event.target.value as CanvasScheduleParameterType)}>{canvasScheduleParameterTypes.map((type) => <option key={type} value={type}>{canvasScheduleParameterTypeLabel(type)}</option>)}</select></label>
+      <label><span>展开</span><select value={parameter.expansion} onChange={(event) => updateExpansion(event.target.value as CanvasScheduleParameter["expansion"])}><option value="fixed">固定共享</option><option value="each">全量逐项</option><option value="random">随机抽取</option></select></label>
+      <label><span>绑定字段</span><select value={`${parameter.binding.nodeId}::${parameter.binding.fieldKey}`} onChange={(event) => {
+        const option = bindingOptions.find((candidate) => `${candidate.node.id}::${candidate.field.key}` === event.target.value);
+        if (option) onChange({ ...parameter, binding: { nodeId: option.node.id, fieldKey: option.field.key } });
+      }}><option value="::">未选择</option>{bindingOptions.map((option) => <option key={`${option.node.id}-${option.field.key}`} value={`${option.node.id}::${option.field.key}`}>{option.label}</option>)}</select></label>
+    </div>
+    {parameter.expansion === "random" ? <CanvasScheduleSampleCountEditor parameter={parameter} sampleCount={sampleCount} onChange={onChange} /> : null}
+    <CanvasScheduleParameterSourceEditor parameter={parameter} onChange={onChange} onPreview={onPreview} />
+  </article>;
+}
+
+function CanvasScheduleSampleCountEditor({ parameter, sampleCount, onChange }: {
+  parameter: CanvasScheduleParameter;
+  sampleCount: CanvasScheduleSampleCount;
+  onChange: (parameter: CanvasScheduleParameter) => void;
+}) {
+  const setSampleCount = (next: CanvasScheduleSampleCount) => onChange({ ...parameter, sampleCount: next, randomCount: undefined });
+  const exactValue = sampleCount.mode === "exact" ? sampleCount.value : sampleCount.min;
+  return <div className="canvas-schedule-sample-controls">
+    <div className="canvas-schedule-sample-mode"><span>抽取数量</span><div role="group" aria-label="抽取数量模式">
+      <button type="button" aria-pressed={sampleCount.mode === "exact"} onClick={() => setSampleCount({ mode: "exact", value: exactValue })}>固定个数</button>
+      <button type="button" aria-pressed={sampleCount.mode === "range"} onClick={() => setSampleCount({ mode: "range", min: exactValue, max: exactValue })}>随机范围</button>
+    </div></div>
+    {sampleCount.mode === "exact"
+      ? <label><span>个数</span><input type="number" min={1} step={1} value={sampleCount.value} onChange={(event) => setSampleCount({ mode: "exact", value: positiveCanvasScheduleInteger(event.target.value) })} /></label>
+      : <div className="canvas-schedule-sample-range"><label><span>最少</span><input type="number" min={1} step={1} value={sampleCount.min} onChange={(event) => {
+        const min = positiveCanvasScheduleInteger(event.target.value);
+        setSampleCount({ mode: "range", min, max: Math.max(min, sampleCount.max) });
+      }} /></label><label><span>最多</span><input type="number" min={1} step={1} value={sampleCount.max} onChange={(event) => {
+        const max = positiveCanvasScheduleInteger(event.target.value);
+        setSampleCount({ mode: "range", min: Math.min(sampleCount.min, max), max });
+      }} /></label></div>}
+    <small>{canvasScheduleSampleCountSummary(parameter.scope, sampleCount)}</small>
+  </div>;
+}
+
+function CanvasScheduleParameterSourceEditor({ parameter, onChange, onPreview }: { parameter: CanvasScheduleParameter; onChange: (parameter: CanvasScheduleParameter) => void; onPreview: (preview: Extract<NonNullable<PreviewState>, { kind: "image" }>) => void }) {
+  if (parameter.valueType === "image" || parameter.valueType === "image-group") {
+    const source = parameter.source.mode === "library-filter" ? parameter.source : defaultCanvasScheduleParameterSource(parameter.valueType) as Extract<CanvasScheduleParameterSource, { mode: "library-filter" }>;
+    return <div className="canvas-schedule-parameter-source"><label><span>图库</span><select value={source.role} onChange={(event) => onChange({ ...parameter, source: { ...source, role: event.target.value as "reference" | "vehicle" } })}><option value="reference">参考图库</option><option value="vehicle">车型图库</option></select></label><ScheduleAssetFilterEditor title={parameter.valueType === "image-group" ? "图片组来源" : "图片来源"} role={source.role} filter={source.filter} singleSelection={parameter.valueType === "image" && parameter.expansion === "fixed"} filterMatchLabel onChange={(filter) => onChange({ ...parameter, source: { ...source, filter } })} onPreview={onPreview} /></div>;
+  }
+  if (parameter.valueType === "copy") {
+    const source = parameter.source.mode === "copy-filter" ? parameter.source : defaultCanvasScheduleParameterSource("copy") as Extract<CanvasScheduleParameterSource, { mode: "copy-filter" }>;
+    return <ScheduleCopyFilterEditor filter={source.filter} singleSelection={parameter.expansion === "fixed"} filterMatchLabel onChange={(filter) => onChange({ ...parameter, source: { mode: "copy-filter", filter } })} />;
+  }
+  const source = parameter.source.mode === "fixed" || parameter.source.mode === "manual-list" ? parameter.source : defaultCanvasScheduleParameterSource(parameter.valueType) as Extract<CanvasScheduleParameterSource, { mode: "fixed" | "manual-list" }>;
+  const values = source.values.map((value) => String(value)).join("\n");
+  return <div className="canvas-schedule-parameter-source canvas-schedule-parameter-values"><label><span>值来源</span><select value={source.mode} onChange={(event) => {
+    const mode = event.target.value as "fixed" | "manual-list";
+    const nextValues = mode === "fixed" ? source.values.slice(0, 1) : source.values;
+    onChange({ ...parameter, expansion: mode === "manual-list" ? "each" : "fixed", sampleCount: undefined, randomCount: undefined, source: { mode, values: nextValues.length ? nextValues : [defaultCanvasScheduleScalarValue(parameter.valueType)] } });
+  }}><option value="fixed">固定值</option><option value="manual-list">手工列表</option></select></label><label><span>{source.mode === "fixed" ? "参数值" : "每行一个值"}</span><textarea value={values} onChange={(event) => onChange({ ...parameter, source: { mode: source.mode, values: parseCanvasScheduleScalarValues(parameter.valueType, event.target.value, source.mode) } })} /></label></div>;
+}
+
+function ScheduleV2Preview({ schedule, onPreview }: {
+  schedule: CanvasSchedule;
+  onPreview: (preview: Extract<NonNullable<PreviewState>, { kind: "image" }>) => void;
+}) {
+  return <div className="canvas-schedule-preview canvas-schedule-v2-preview"><header><span>展开预览 · {schedule.totalMainTasks || 0} 主任务 · {schedule.totalChildTasks || 0} 子任务</span></header><div>{(schedule.mainTasks || []).map((main, index) => <article key={main.id}><div className="canvas-schedule-v2-main-task"><ScheduleV2PreviewImages values={main.parameterValues} label={`主任务 ${index + 1}`} onPreview={onPreview} /><span><strong>主任务 {index + 1} · {main.childTasks.length} 子任务</strong><small>{formatCanvasScheduleParameterValues(main.parameterValues)}</small></span></div><div>{main.childTasks.map((child, childIndex) => <span className="canvas-schedule-v2-child-task" key={child.id}><ScheduleV2PreviewImages values={child.parameterValues} label={`子任务 ${childIndex + 1}`} onPreview={onPreview} /><strong>子任务 {childIndex + 1}</strong><small>{formatCanvasScheduleParameterValues(child.parameterValues)}</small></span>)}</div></article>)}</div></div>;
+}
+
+function ScheduleV2PreviewImages({ values, label, onPreview }: {
+  values: Record<string, CanvasScheduleParameterValue>;
+  label: string;
+  onPreview: (preview: Extract<NonNullable<PreviewState>, { kind: "image" }>) => void;
+}) {
+  const images = canvasScheduleParameterImages(values);
+  if (!images.length) return null;
+  const sequence = images.map((image) => ({ id: image.id, url: image.url, width: image.width, height: image.height }));
+  return <div className="canvas-schedule-v2-preview-images">{images.slice(0, 4).map((image, index) => <button
+    type="button"
+    key={`${image.id}-${index}`}
+    onClick={() => onPreview({ kind: "image", url: image.url, index, width: image.width, height: image.height, sequence })}
+    aria-label={`预览${label}图片 ${index + 1}：${image.name || image.id}`}
+    title="预览图片"
+  >
+    <Image src={image.url} alt={image.name || ""} width={72} height={52} unoptimized referrerPolicy="no-referrer" />
+    {index === 3 && images.length > 4 ? <em>+{images.length - 4}</em> : null}
+  </button>)}</div>;
+}
+
+function ScheduleV2RuntimeTree({ schedule, busy, onAction }: { schedule: CanvasSchedule; busy: boolean; onAction: (action: string, payload?: Record<string, unknown>) => void }) {
+  const mainTasks = schedule.mainTasks || [];
+  const completed = mainTasks.filter((main) => ["completed", "partial"].includes(main.status)).length;
+  return <div className="canvas-schedule-runtime">
+    <div className="canvas-schedule-runtime-actions">
+      {["queued", "running"].includes(schedule.status) ? <button type="button" onClick={() => onAction("pause")} disabled={busy}><Square />暂停</button> : null}
+      {schedule.status === "paused" ? <button type="button" onClick={() => onAction("resume")} disabled={busy}><Play />继续</button> : null}
+      {["queued", "running", "paused"].includes(schedule.status) ? <button className="danger" type="button" onClick={() => onAction("cancel")} disabled={busy}><X />取消</button> : null}
+      <span>{completed}/{mainTasks.length} 主任务完成</span>
+    </div>
+    {mainTasks.map((main, index) => <details key={main.id} open><summary><StatusIcon status={main.status} /><strong>主任务 {index + 1} · {formatCanvasScheduleParameterValues(main.parameterValues)}</strong><span>{main.childTasks.filter((child) => child.status === "completed").length}/{main.childTasks.length}</span><em>{canvasScheduleStatusLabel(main.status)}</em></summary><div className="canvas-schedule-runtime-content">
+      {main.resultArtifacts.length ? <CanvasScheduleArtifactSummary artifacts={main.resultArtifacts} /> : null}
+      {main.pendingCandidateSync ? <button type="button" onClick={() => onAction("accept-candidates", { mainTaskId: main.id })} disabled={busy}>接受新增候选图</button> : null}
+      {main.error ? <p>{main.error}</p> : null}
+      <ul>{main.childTasks.map((child, childIndex) => <li key={child.id}><StatusIcon status={child.status} /><span>子任务 {childIndex + 1} · {formatCanvasScheduleParameterValues(child.parameterValues)}</span><em>{canvasScheduleStatusLabel(child.status)}</em>{child.error ? <small>{child.error}</small> : null}{child.status === "failed" ? <button type="button" onClick={() => onAction("retry", { mainTaskId: main.id, childTaskId: child.id })} disabled={busy}><RotateCcw />重试</button> : null}</li>)}</ul>
+    </div></details>)}
+  </div>;
+}
+
+function CanvasScheduleArtifactSummary({ artifacts }: { artifacts: CanvasArtifact[] }) {
+  const images = artifacts.flatMap((artifact) => artifact.kind === "images" ? artifact.items : []);
+  const videos = artifacts.flatMap((artifact) => artifact.kind === "videos" ? artifact.items : []);
+  const texts = artifacts.flatMap((artifact) => artifact.kind === "text" ? [artifact.value] : []);
+  const posts = artifacts.flatMap((artifact) => artifact.kind === "socialPost" ? [artifact] : []);
+  return <div className="canvas-schedule-runtime-media">{images.map((item, index) => <Image key={`${item.url}-${index}`} src={item.url} alt="" width={70} height={52} unoptimized referrerPolicy="no-referrer" />)}{videos.map((item, index) => <span key={`${item.url}-${index}`}><Video />视频 {index + 1}</span>)}{texts.map((value, index) => <span key={index}>{value.slice(0, 80)}</span>)}{posts.map((artifact) => <Link key={artifact.postId} href={`/review?postId=${encodeURIComponent(artifact.postId)}`}>打开评审草稿</Link>)}</div>;
+}
+
+function ScheduleAssetFilterEditor({ title, role, filter, count, onCountChange, onChange, onPreview, singleSelection = false, filterMatchLabel = false }: {
   title: string;
   role: "reference" | "vehicle";
   filter: CanvasScheduleAssetFilter;
   count?: number;
   onCountChange?: (value: number) => void;
   onChange: (filter: CanvasScheduleAssetFilter) => void;
+  onPreview: (preview: Extract<NonNullable<PreviewState>, { kind: "image" }>) => void;
+  singleSelection?: boolean;
+  filterMatchLabel?: boolean;
 }) {
-  const [data, setData] = useState<CanvasLibraryAssetPage>({ assets: [], collections: [], total: 0 });
+  const [data, setData] = useState<LibraryAssetPage>({ assets: [], collections: [], total: 0 });
   const [busy, setBusy] = useState(false);
+  const [loadingMore, setLoadingMore] = useState(false);
+  const [selectingAll, setSelectingAll] = useState(false);
   const [error, setError] = useState("");
+  const requestGenerationRef = useRef(0);
+  const pageOperationRef = useRef(0);
+  const loadingMoreRef = useRef(false);
+  const selectingAllRef = useRef(false);
+  const selectionAnchorIdRef = useRef<string | undefined>(undefined);
+  const resultViewportRef = useRef<HTMLDivElement>(null);
+  const loadMoreRef = useRef<HTMLDivElement>(null);
   const tagsText = filter.tags.join(", ");
+  const queryString = useMemo(() => {
+    const params = new URLSearchParams({ role, limit: "100" });
+    if (filter.search.trim()) params.set("search", filter.search.trim());
+    if (filter.collectionId) params.set("collectionId", filter.collectionId);
+    splitScheduleTags(tagsText).forEach((tag) => params.append("tag", tag));
+    return params.toString();
+  }, [filter.collectionId, filter.search, role, tagsText]);
+  const queryStringRef = useRef(queryString);
+  const filterRef = useRef(filter);
+
+  useLayoutEffect(() => {
+    queryStringRef.current = queryString;
+    filterRef.current = filter;
+  }, [filter, queryString]);
+
   useEffect(() => {
-    const timer = setTimeout(async () => {
+    const generation = ++requestGenerationRef.current;
+    pageOperationRef.current += 1;
+    loadingMoreRef.current = false;
+    selectingAllRef.current = false;
+    selectionAnchorIdRef.current = undefined;
+    const controller = new AbortController();
+    const resetTimer = setTimeout(() => {
       setBusy(true);
+      setLoadingMore(false);
+      setSelectingAll(false);
       setError("");
-      const params = new URLSearchParams({ role, limit: "100" });
-      if (filter.search) params.set("search", filter.search);
-      if (filter.collectionId) params.set("collectionId", filter.collectionId);
-      splitScheduleTags(tagsText).forEach((tag) => params.append("tag", tag));
+      setData({ assets: [], collections: [], total: 0 });
+    }, 0);
+    const timer = setTimeout(async () => {
       try {
-        setData(await api<CanvasLibraryAssetPage>(`/api/library/assets?${params}`));
+        const result = await api<LibraryAssetPage>(`/api/library/assets?${queryString}`, { signal: controller.signal });
+        if (generation === requestGenerationRef.current && queryString === queryStringRef.current) setData(result);
       } catch (loadError) {
-        setError(errorMessage(loadError));
+        if (!controller.signal.aborted && generation === requestGenerationRef.current && queryString === queryStringRef.current) setError(errorMessage(loadError));
       } finally {
-        setBusy(false);
+        if (!controller.signal.aborted && generation === requestGenerationRef.current && queryString === queryStringRef.current) setBusy(false);
       }
     }, 250);
-    return () => clearTimeout(timer);
-  }, [filter.collectionId, filter.search, tagsText, role]);
-  const toggle = (assetId: string) => onChange({
-    ...filter,
-    assetIds: filter.assetIds.includes(assetId) ? filter.assetIds.filter((id) => id !== assetId) : [...filter.assetIds, assetId],
+    return () => {
+      clearTimeout(resetTimer);
+      clearTimeout(timer);
+      controller.abort();
+      if (requestGenerationRef.current === generation) requestGenerationRef.current += 1;
+    };
+  }, [queryString]);
+
+  const loadMore = useCallback(async () => {
+    const cursor = data.nextCursor;
+    if (!cursor || loadingMoreRef.current || selectingAllRef.current) return;
+    const generation = requestGenerationRef.current;
+    const operation = ++pageOperationRef.current;
+    loadingMoreRef.current = true;
+    setLoadingMore(true);
+    setError("");
+    try {
+      const result = await api<LibraryAssetPage>(`/api/library/assets?${queryString}&cursor=${encodeURIComponent(cursor)}`);
+      if (generation !== requestGenerationRef.current || queryString !== queryStringRef.current) return;
+      if (result.nextCursor === cursor) throw new Error("图库分页游标重复，无法继续加载");
+      setData((current) => {
+        if (current.nextCursor !== cursor) return current;
+        const knownIds = new Set(current.assets.map((asset) => asset.id));
+        return { ...result, collections: current.collections.length ? current.collections : result.collections, assets: [...current.assets, ...result.assets.filter((asset) => !knownIds.has(asset.id))] };
+      });
+    } catch (loadError) {
+      if (generation === requestGenerationRef.current && queryString === queryStringRef.current) setError(errorMessage(loadError));
+    } finally {
+      if (operation === pageOperationRef.current) {
+        loadingMoreRef.current = false;
+        setLoadingMore(false);
+      }
+    }
+  }, [data.nextCursor, queryString]);
+
+  const selectAllAssets = useCallback(async () => {
+    if (busy || loadingMoreRef.current || selectingAllRef.current || !data.assets.length) return;
+    selectingAllRef.current = true;
+    setSelectingAll(true);
+    setError("");
+    const generation = requestGenerationRef.current;
+    const operation = ++pageOperationRef.current;
+    const assets = [...data.assets];
+    const knownIds = new Set(assets.map((asset) => asset.id));
+    const seenCursors = new Set<string>();
+    let cursor = data.nextCursor;
+    try {
+      while (cursor) {
+        if (seenCursors.has(cursor)) throw new Error("图库分页游标重复，无法完成全选");
+        seenCursors.add(cursor);
+        const result = await api<LibraryAssetPage>(`/api/library/assets?${queryString}&cursor=${encodeURIComponent(cursor)}`);
+        if (generation !== requestGenerationRef.current || queryString !== queryStringRef.current) return;
+        result.assets.forEach((asset) => {
+          if (!knownIds.has(asset.id)) {
+            knownIds.add(asset.id);
+            assets.push(asset);
+          }
+        });
+        cursor = result.nextCursor;
+      }
+      const latestFilter = filterRef.current;
+      if (generation !== requestGenerationRef.current || queryString !== queryStringRef.current || latestFilter.mode !== "manual") return;
+      setData((current) => ({ ...current, assets, nextCursor: undefined }));
+      onChange({ ...latestFilter, assetIds: assets.map((asset) => asset.id) });
+    } catch (selectError) {
+      if (generation === requestGenerationRef.current && queryString === queryStringRef.current) setError(errorMessage(selectError));
+    } finally {
+      if (operation === pageOperationRef.current) {
+        selectingAllRef.current = false;
+        setSelectingAll(false);
+      }
+    }
+  }, [busy, data.assets, data.nextCursor, onChange, queryString]);
+
+  useEffect(() => {
+    const target = loadMoreRef.current;
+    if (!target || !data.nextCursor || typeof IntersectionObserver === "undefined") return;
+    const observer = new IntersectionObserver((entries) => {
+      if (entries.some((entry) => entry.isIntersecting)) void loadMore();
+    }, { root: resultViewportRef.current, rootMargin: "160px 0px" });
+    observer.observe(target);
+    return () => observer.disconnect();
+  }, [data.nextCursor, loadMore]);
+
+  const toggle = (assetId: string, event: React.MouseEvent<HTMLButtonElement>) => {
+    if (filter.mode !== "manual") return;
+    if (singleSelection) {
+      selectionAnchorIdRef.current = assetId;
+      onChange({ ...filter, assetIds: filter.assetIds.includes(assetId) ? [] : [assetId] });
+      return;
+    }
+    const selectedIds = new Set(filter.assetIds);
+    if (event.shiftKey) {
+      const anchorId = selectionAnchorIdRef.current;
+      const next = selectIdRange(data.assets.map((asset) => asset.id), selectedIds, anchorId, assetId, event.ctrlKey || event.metaKey);
+      if (!anchorId || !data.assets.some((asset) => asset.id === anchorId)) selectionAnchorIdRef.current = assetId;
+      onChange({ ...filter, assetIds: [...next] });
+      return;
+    }
+    selectionAnchorIdRef.current = assetId;
+    if (selectedIds.has(assetId)) selectedIds.delete(assetId);
+    else selectedIds.add(assetId);
+    onChange({ ...filter, assetIds: [...selectedIds] });
+  };
+
+  const openPreview = (asset: LibraryAsset, index: number) => onPreview({
+    kind: "image",
+    url: asset.publicUrl,
+    index,
+    width: asset.width,
+    height: asset.height,
+    sequence: data.assets.map((item) => ({ id: item.id, url: item.publicUrl, width: item.width, height: item.height })),
   });
+  const allMatchesSelected = data.total > 0 && !data.nextCursor && data.assets.length === data.total && data.assets.every((asset) => filter.assetIds.includes(asset.id));
+  const status = busy
+    ? "正在筛选"
+    : selectingAll
+      ? "正在全选匹配图片"
+      : loadingMore
+        ? `正在加载更多 · 已加载 ${data.assets.length} 张`
+        : `已加载 ${data.assets.length} / 匹配 ${data.total} 张${filter.mode === "manual" ? ` · 已选 ${filter.assetIds.length} 张` : ""}`;
+
   return <div className="canvas-schedule-assets">
-    <div className="canvas-schedule-assets-head"><strong>{title}</strong><div className="canvas-task-filters"><button type="button" aria-pressed={filter.mode === "manual"} onClick={() => onChange({ ...filter, mode: "manual" })}>手动选择</button><button type="button" aria-pressed={filter.mode === "random"} onClick={() => onChange({ ...filter, mode: "random" })}>条件随机</button></div></div>
+    <div className="canvas-schedule-assets-head"><strong>{title}</strong><div className="canvas-task-filters"><button type="button" aria-pressed={filter.mode === "manual"} onClick={() => onChange({ ...filter, mode: "manual" })}>手动选择</button><button type="button" aria-pressed={filter.mode === "random"} onClick={() => onChange({ ...filter, mode: "random" })}>{filterMatchLabel ? "条件匹配" : "条件随机"}</button></div></div>
     <div className="canvas-schedule-filter-row">
       <label><Search /><input value={filter.search} onChange={(event) => onChange({ ...filter, search: event.target.value })} placeholder="关键字" /></label>
       <select value={filter.collectionId || ""} onChange={(event) => onChange({ ...filter, collectionId: event.target.value || undefined })}><option value="">全部集合</option>{data.collections.map((collection) => <option value={collection.id} key={collection.id}>{collection.name}</option>)}</select>
       <input value={tagsText} onChange={(event) => onChange({ ...filter, tags: splitScheduleTags(event.target.value) })} placeholder="多个标签，AND" />
       {count !== undefined && filter.mode === "random" ? <label className="canvas-schedule-count"><span>抽取</span><input type="number" min={1} max={500} value={count} onChange={(event) => onCountChange?.(Number(event.target.value))} /></label> : null}
     </div>
-    <div className="canvas-schedule-asset-grid">{data.assets.slice(0, 30).map((asset) => <button type="button" key={asset.id} className={filter.assetIds.includes(asset.id) ? "is-selected" : ""} onClick={() => filter.mode === "manual" && toggle(asset.id)} disabled={filter.mode === "random"} title={asset.name}>
-      <Image src={asset.publicUrl} alt="" width={88} height={64} unoptimized referrerPolicy="no-referrer" /><span>{asset.name}</span>{filter.mode === "manual" && filter.assetIds.includes(asset.id) ? <CheckCircle2 /> : null}
-    </button>)}</div>
-    <small className="canvas-schedule-pool-count">{busy ? "正在筛选" : `匹配 ${data.total} 张${filter.mode === "manual" ? ` · 已选 ${filter.assetIds.length} 张` : ""}`}</small>
+    <div className="canvas-schedule-asset-toolbar">
+      <small className="canvas-schedule-pool-count" aria-live="polite">{status}</small>
+      {filter.mode === "manual" && !singleSelection ? <div>
+        <button type="button" onClick={() => void selectAllAssets()} disabled={busy || loadingMore || selectingAll || !data.assets.length || allMatchesSelected}><CheckCircle2 />{selectingAll ? "全选中..." : allMatchesSelected ? "已全选" : "全选当前筛选结果"}</button>
+        <button type="button" onClick={() => onChange({ ...filter, assetIds: [] })} disabled={selectingAll || !filter.assetIds.length}><X />清空已选</button>
+      </div> : null}
+    </div>
+    <div className="canvas-schedule-asset-results" ref={resultViewportRef}>
+      {busy && !data.assets.length ? <div className="canvas-schedule-asset-state"><LoaderCircle className="animate-spin" />正在载入图片</div> : null}
+      {!busy && !error && !data.assets.length ? <div className="canvas-schedule-asset-state"><Images />当前筛选没有图片</div> : null}
+      {data.assets.length ? <div className="canvas-schedule-asset-grid">{data.assets.map((asset, index) => <article key={asset.id} className={filter.assetIds.includes(asset.id) ? "is-selected" : ""}>
+        <button className="canvas-schedule-asset-select" type="button" onClick={(event) => toggle(asset.id, event)} disabled={filter.mode !== "manual" || selectingAll} title={filter.mode === "manual" ? asset.name : undefined} aria-label={`${filter.assetIds.includes(asset.id) ? "取消选择" : "选择"} ${asset.name}`}>
+          <Image src={asset.publicUrl} alt="" width={88} height={64} unoptimized referrerPolicy="no-referrer" /><span>{asset.name}</span>{filter.mode === "manual" && filter.assetIds.includes(asset.id) ? <CheckCircle2 className="canvas-schedule-asset-selected-mark" /> : null}
+        </button>
+        <button className="canvas-schedule-asset-preview" type="button" onPointerDown={(event) => event.stopPropagation()} onClick={(event) => { event.stopPropagation(); openPreview(asset, index); }} aria-label={`预览 ${asset.name}`} title="预览图片"><Eye /></button>
+      </article>)}</div> : null}
+      {data.nextCursor ? <div className="canvas-schedule-asset-load-more" ref={loadMoreRef}><button type="button" onClick={() => void loadMore()} disabled={loadingMore || selectingAll}>{loadingMore ? <LoaderCircle className="animate-spin" /> : <ArrowDown />}{loadingMore ? "正在加载下一页..." : "加载更多"}</button></div> : null}
+    </div>
     {error ? <p className="canvas-picker-error">{error}</p> : null}
   </div>;
 }
 
-function ScheduleCopyFilterEditor({ filter, onChange, onDisable }: {
+function ScheduleCopyFilterEditor({ filter, onChange, onDisable, singleSelection = false, filterMatchLabel = false }: {
   filter: CanvasScheduleCopyFilter;
   onChange: (filter: CanvasScheduleCopyFilter) => void;
-  onDisable: () => void;
+  onDisable?: () => void;
+  singleSelection?: boolean;
+  filterMatchLabel?: boolean;
 }) {
   const [data, setData] = useState<CanvasCopyLibraryResponse>({ entries: [], tags: [] });
   const [busy, setBusy] = useState(false);
@@ -2414,7 +2865,7 @@ function ScheduleCopyFilterEditor({ filter, onChange, onDisable }: {
       try {
         const params = new URLSearchParams();
         if (filter.search.trim()) params.set("q", filter.search.trim());
-        if (filter.mode === "tags") filter.tags.forEach((tagValue) => params.append("tag", tagValue));
+        if (filter.mode === "tags") splitScheduleTags(tagsText).forEach((tagValue) => params.append("tag", tagValue));
         const response = await fetch(`/api/copy-library${params.size ? `?${params}` : ""}`, { signal: controller.signal });
         const result = (await response.json()) as CanvasCopyLibraryResponse & { error?: string };
         if (!response.ok) throw new Error(result.error || "文案池加载失败");
@@ -2430,10 +2881,10 @@ function ScheduleCopyFilterEditor({ filter, onChange, onDisable }: {
   }, [filter.mode, filter.search, tagsText]);
   const toggle = (entryId: string) => onChange({
     ...filter,
-    entryIds: filter.entryIds.includes(entryId) ? filter.entryIds.filter((id) => id !== entryId) : [...filter.entryIds, entryId],
+    entryIds: filter.entryIds.includes(entryId) ? filter.entryIds.filter((id) => id !== entryId) : singleSelection ? [entryId] : [...filter.entryIds, entryId],
   });
   return <div className="canvas-schedule-assets canvas-schedule-copy-pool">
-    <div className="canvas-schedule-assets-head"><strong>文案池</strong><div className="canvas-task-filters"><button type="button" aria-pressed={filter.mode === "manual"} onClick={() => onChange({ ...filter, mode: "manual" })}>手动选择</button><button type="button" aria-pressed={filter.mode === "tags"} onClick={() => onChange({ ...filter, mode: "tags" })}>标签筛选</button><button type="button" onClick={onDisable}>停用</button></div></div>
+    <div className="canvas-schedule-assets-head"><strong>文案池</strong><div className="canvas-task-filters"><button type="button" aria-pressed={filter.mode === "manual"} onClick={() => onChange({ ...filter, mode: "manual" })}>手动选择</button><button type="button" aria-pressed={filter.mode === "tags"} onClick={() => onChange({ ...filter, mode: "tags" })}>{filterMatchLabel ? "条件匹配" : "条件随机"}</button>{onDisable ? <button type="button" onClick={onDisable}>停用</button> : null}</div></div>
     <div className="canvas-schedule-filter-row">
       <label><Search /><input value={filter.search} onChange={(event) => onChange({ ...filter, search: event.target.value })} placeholder="搜索文案" /></label>
       <input value={tagsText} disabled={filter.mode !== "tags"} onChange={(event) => onChange({ ...filter, tags: splitScheduleTags(event.target.value) })} placeholder="多个标签，AND" />
@@ -2441,7 +2892,7 @@ function ScheduleCopyFilterEditor({ filter, onChange, onDisable }: {
     <div className="canvas-schedule-copy-list">{data.entries.slice(0, 50).map((entry) => <button type="button" key={entry.id} className={filter.entryIds.includes(entry.id) ? "is-selected" : ""} onClick={() => filter.mode === "manual" && toggle(entry.id)} disabled={filter.mode === "tags"}>
       <BookOpenText /><span><strong>{entry.title}</strong><small>{entry.tags.join(" · ") || "无标签"}</small></span>{filter.mode === "manual" && filter.entryIds.includes(entry.id) ? <CheckCircle2 /> : null}
     </button>)}</div>
-    <small className="canvas-schedule-pool-count">{busy ? "正在筛选" : `匹配 ${data.entries.length} 篇${filter.mode === "manual" ? ` · 已选 ${filter.entryIds.length} 篇` : " · 将按标题稳定排序"}`}</small>
+    <small className="canvas-schedule-pool-count">{busy ? "正在筛选" : filter.mode === "manual" ? `匹配 ${data.entries.length} 篇 · 已选 ${filter.entryIds.length} 篇 · 批次内随机去重` : `条件匹配 ${data.entries.length} 篇 · 批次内随机去重`}</small>
     {error ? <p className="canvas-picker-error">{error}</p> : null}
   </div>;
 }
@@ -2658,9 +3109,56 @@ const imagePreviewMaxZoom = 4;
 const imagePreviewZoomStep = 0.25;
 
 function CanvasImagePreviewDialog({ preview, onClose }: { preview: Extract<NonNullable<PreviewState>, { kind: "image" }>; onClose: () => void }) {
-  const [zoom, setZoom] = useState(1);
-  const [naturalSize, setNaturalSize] = useState(preview.width && preview.height ? { width: preview.width, height: preview.height } : undefined);
+  const sequence = preview.sequence?.length ? preview.sequence : [{ id: `${preview.url}-${preview.index}`, url: preview.url, width: preview.width, height: preview.height }];
+  const [activeIndex, setActiveIndex] = useState(() => Math.min(Math.max(0, preview.index), sequence.length - 1));
   const closeButtonRef = useRef<HTMLButtonElement | null>(null);
+  const active = sequence[activeIndex] || sequence[0];
+
+  useEffect(() => {
+    const previousFocus = document.activeElement instanceof HTMLElement ? document.activeElement : null;
+    closeButtonRef.current?.focus();
+    const handleKeyDown = (event: KeyboardEvent) => {
+      if (event.key === "Escape") {
+        event.preventDefault();
+        event.stopPropagation();
+        onClose();
+      } else if (event.key === "ArrowLeft") {
+        event.preventDefault();
+        event.stopPropagation();
+        setActiveIndex((current) => Math.max(0, current - 1));
+      } else if (event.key === "ArrowRight") {
+        event.preventDefault();
+        event.stopPropagation();
+        setActiveIndex((current) => Math.min(sequence.length - 1, current + 1));
+      }
+    };
+    document.addEventListener("keydown", handleKeyDown);
+    return () => {
+      document.removeEventListener("keydown", handleKeyDown);
+      previousFocus?.focus();
+    };
+  }, [onClose, sequence.length]);
+
+  return <div className="canvas-image-viewer-backdrop" onMouseDown={(event) => event.target === event.currentTarget && onClose()}>
+    <section className="canvas-image-viewer" role="dialog" aria-modal="true" aria-labelledby="canvas-image-viewer-title">
+      <CanvasImagePreviewBody key={active.id} item={active} index={preview.sequence?.length ? activeIndex : preview.index} total={preview.sequence?.length ? sequence.length : 1} closeButtonRef={closeButtonRef} onClose={onClose} />
+      {sequence.length > 1 ? <>
+        <button className="canvas-image-viewer-sequence-button is-previous" type="button" onClick={() => setActiveIndex((current) => current - 1)} disabled={activeIndex === 0} aria-label="上一张图片" title="上一张"><ChevronLeft /></button>
+        <button className="canvas-image-viewer-sequence-button is-next" type="button" onClick={() => setActiveIndex((current) => current + 1)} disabled={activeIndex === sequence.length - 1} aria-label="下一张图片" title="下一张"><ChevronRight /></button>
+      </> : null}
+    </section>
+  </div>;
+}
+
+function CanvasImagePreviewBody({ item, index, total, closeButtonRef, onClose }: {
+  item: { id: string; url: string; width?: number; height?: number };
+  index: number;
+  total: number;
+  closeButtonRef: React.RefObject<HTMLButtonElement | null>;
+  onClose: () => void;
+}) {
+  const [zoom, setZoom] = useState(1);
+  const [naturalSize, setNaturalSize] = useState(item.width && item.height ? { width: item.width, height: item.height } : undefined);
   const updateZoom = useCallback((next: number | ((current: number) => number)) => {
     setZoom((current) => {
       const value = typeof next === "function" ? next(current) : next;
@@ -2668,27 +3166,13 @@ function CanvasImagePreviewDialog({ preview, onClose }: { preview: Extract<NonNu
     });
   }, []);
 
-  useEffect(() => {
-    const previousFocus = document.activeElement instanceof HTMLElement ? document.activeElement : null;
-    closeButtonRef.current?.focus();
-    const handleKeyDown = (event: KeyboardEvent) => {
-      if (event.key === "Escape") onClose();
-    };
-    document.addEventListener("keydown", handleKeyDown);
-    return () => {
-      document.removeEventListener("keydown", handleKeyDown);
-      previousFocus?.focus();
-    };
-  }, [onClose]);
-
   const zoomPercent = Math.round(zoom * 100);
   const canvasSize = `${Math.max(100, zoomPercent)}%`;
   const imageLimit = `${92 / Math.max(1, zoom)}%`;
 
-  return <div className="canvas-image-viewer-backdrop" onMouseDown={(event) => event.target === event.currentTarget && onClose()}>
-    <section className="canvas-image-viewer" role="dialog" aria-modal="true" aria-labelledby="canvas-image-viewer-title">
+  return <>
       <header>
-        <div><ImageIcon /><strong id="canvas-image-viewer-title">图片 {preview.index + 1}</strong>{naturalSize ? <small>{naturalSize.width}×{naturalSize.height}</small> : null}</div>
+        <div><ImageIcon /><strong id="canvas-image-viewer-title">图片 {index + 1}{total > 1 ? ` / ${total}` : ""}</strong>{naturalSize ? <small>{naturalSize.width}×{naturalSize.height}</small> : null}</div>
         <button ref={closeButtonRef} type="button" onClick={onClose} aria-label="关闭图片预览" title="关闭"><X /></button>
       </header>
       <div className="canvas-image-viewer-stage" onWheel={(event) => {
@@ -2699,10 +3183,10 @@ function CanvasImagePreviewDialog({ preview, onClose }: { preview: Extract<NonNu
           {/* eslint-disable-next-line @next/next/no-img-element */}
           <img
             className="canvas-image-viewer-image"
-            src={preview.url}
-            alt={`图片 ${preview.index + 1} 预览`}
-            width={preview.width}
-            height={preview.height}
+            src={item.url}
+            alt={`图片 ${index + 1} 预览`}
+            width={item.width}
+            height={item.height}
             draggable={false}
             referrerPolicy="no-referrer"
             onLoad={(event) => {
@@ -2719,10 +3203,9 @@ function CanvasImagePreviewDialog({ preview, onClose }: { preview: Extract<NonNu
         <output aria-live="polite">{zoomPercent}%</output>
         <button type="button" onClick={() => updateZoom((current) => current + imagePreviewZoomStep)} disabled={zoom >= imagePreviewMaxZoom} aria-label="放大图片" title="放大"><ZoomIn /></button>
         <button type="button" onClick={() => updateZoom(1)} disabled={zoom === 1} aria-label="重置图片缩放" title="重置缩放"><RotateCcw /></button>
-        <a href={preview.url} target="_blank" rel="noreferrer" aria-label="打开原图" title="打开原图"><ExternalLink /></a>
+        <a href={item.url} target="_blank" rel="noreferrer" aria-label="打开原图" title="打开原图"><ExternalLink /></a>
       </footer>
-    </section>
-  </div>;
+  </>;
 }
 
 function ToolbarButton({ label, icon, onClick, disabled, danger, ariaKeyShortcuts }: { label: string; icon: React.ReactNode; onClick: () => void; disabled?: boolean; danger?: boolean; ariaKeyShortcuts?: string }) {
@@ -2795,7 +3278,7 @@ function toFlowEdges(edges: CanvasEdge[], nodes: CanvasNode[]): FlowEdge[] {
       sourceHandle: edge.sourcePort,
       targetHandle: edge.targetPort,
       type: "flowing",
-      style: { "--canvas-edge-color": edgeColor || "var(--accent)" } as React.CSSProperties,
+      style: { "--canvas-edge-color": edgeColor || "var(--accent)", "--xy-edge-stroke-selected": edgeColor || "var(--accent)" } as React.CSSProperties,
     };
   });
 }
@@ -3101,6 +3584,110 @@ function schedulerRolesForNode(node: CanvasNode): CanvasSchedulerRole[] {
   return [];
 }
 
+function canvasBatchBindingOptions(graph: CanvasGraph, valueType: CanvasScheduleParameterType) {
+  return graph.nodes.flatMap((node) => getCanvasBatchBindableFields(node)
+    .filter((field) => field.parameterTypes.includes(valueType))
+    .map((field) => ({ node, field, label: `${canvasNodeDisplayName(node)} · ${field.label} · ${node.id.slice(-4)}` })));
+}
+
+function firstCanvasBatchBinding(graph: CanvasGraph) {
+  for (const node of graph.nodes) {
+    const field = getCanvasBatchBindableFields(node)[0];
+    if (field) return { node, field };
+  }
+  return undefined;
+}
+
+function canvasNodeDisplayName(node: CanvasNode) {
+  return node.label?.trim() || getCanvasNodeDefinition(node.type, node.version)?.label || node.type;
+}
+
+function canvasNodeOptionLabel(node: CanvasNode) {
+  return `${canvasNodeDisplayName(node)} · ${getCanvasNodeDefinition(node.type, node.version)?.label || node.type} · ${node.id.slice(-4)}`;
+}
+
+function nextCanvasScheduleParameterId() {
+  canvasScheduleParameterSequence += 1;
+  return `canvas-v2-parameter-${Date.now()}-${canvasScheduleParameterSequence}`;
+}
+
+function defaultCanvasScheduleParameterSource(valueType: CanvasScheduleParameterType): CanvasScheduleParameterSource {
+  if (valueType === "image" || valueType === "image-group") return { mode: "library-filter", role: "reference", filter: emptyScheduleFilter() };
+  if (valueType === "copy") return { mode: "copy-filter", filter: emptyScheduleCopyFilter() };
+  return { mode: "fixed", values: [defaultCanvasScheduleScalarValue(valueType)] };
+}
+
+function canvasScheduleParameterSampleCount(parameter: CanvasScheduleParameter): CanvasScheduleSampleCount {
+  if (parameter.sampleCount?.mode === "exact") return { mode: "exact", value: positiveCanvasScheduleInteger(parameter.sampleCount.value) };
+  if (parameter.sampleCount?.mode === "range") return {
+    mode: "range",
+    min: positiveCanvasScheduleInteger(parameter.sampleCount.min),
+    max: Math.max(positiveCanvasScheduleInteger(parameter.sampleCount.min), positiveCanvasScheduleInteger(parameter.sampleCount.max)),
+  };
+  return { mode: "exact", value: positiveCanvasScheduleInteger(parameter.randomCount) };
+}
+
+function positiveCanvasScheduleInteger(value: unknown) {
+  return Math.max(1, Math.trunc(Number(value) || 1));
+}
+
+function canvasScheduleSampleCountSummary(scope: CanvasScheduleParameter["scope"], sampleCount: CanvasScheduleSampleCount) {
+  const count = sampleCount.mode === "exact" ? `${sampleCount.value}` : `${sampleCount.min}-${sampleCount.max}`;
+  return scope === "child" ? `每个主任务随机抽取 ${count} 项` : `每次预演随机抽取 ${count} 项`;
+}
+
+function defaultCanvasScheduleScalarValue(valueType: CanvasScheduleParameterType): CanvasScheduleParameterValue {
+  if (valueType === "number") return 1;
+  if (valueType === "boolean") return false;
+  return "";
+}
+
+function parseCanvasScheduleScalarValues(valueType: CanvasScheduleParameterType, value: string, mode: "fixed" | "manual-list") {
+  const lines = value.split(/\r?\n/).map((item) => item.trim()).filter((item, index) => item || (mode === "fixed" && index === 0));
+  const selected = mode === "fixed" ? lines.slice(0, 1) : lines;
+  return (selected.length ? selected : [""]).map((item): CanvasScheduleParameterValue => {
+    if (valueType === "number") return Number(item || 0);
+    if (valueType === "boolean") return ["true", "1", "是", "yes"].includes(item.toLowerCase());
+    return item;
+  });
+}
+
+function canvasScheduleParameterTypeLabel(value: CanvasScheduleParameterType) {
+  return ({ image: "图片", "image-group": "图片组", text: "文本", copy: "文案记录", number: "数字", boolean: "布尔值", enum: "枚举" } as const)[value];
+}
+
+function formatCanvasScheduleParameterValues(values: Record<string, CanvasScheduleParameterValue>) {
+  const labels = Object.values(values).map((value) => {
+    if (Array.isArray(value)) return `${value.length} 张图片`;
+    if (value && typeof value === "object") {
+      if ("url" in value) return value.name || value.id;
+      if ("body" in value) return value.title;
+    }
+    return String(value);
+  }).filter(Boolean);
+  return labels.join(" · ") || "固定参数";
+}
+
+function canvasScheduleParameterImages(values: Record<string, CanvasScheduleParameterValue>) {
+  const seen = new Set<string>();
+  return Object.values(values).flatMap((value) => Array.isArray(value) ? value : [value])
+    .filter((value): value is CanvasScheduleAssetSnapshot => Boolean(
+      value
+      && typeof value === "object"
+      && "id" in value
+      && typeof value.id === "string"
+      && "url" in value
+      && typeof value.url === "string"
+      && value.url,
+    ))
+    .filter((image) => {
+      const key = `${image.id}\u0000${image.url}`;
+      if (seen.has(key)) return false;
+      seen.add(key);
+      return true;
+    });
+}
+
 function schedulerRoleLabel(role: CanvasSchedulerRole) {
   return CANVAS_SCHEDULER_ROLE_LABELS[role];
 }
@@ -3126,7 +3713,7 @@ function schedulerBindingNodeOptions(graph: CanvasGraph, role: CanvasSchedulerRo
     const definition = getCanvasNodeDefinition(node.type, node.version);
     return {
       id: node.id,
-      label: node.label?.trim() || assetNames[0]?.trim() || `${definition?.label || node.type} ${index + 1}`,
+      label: `${node.label?.trim() || assetNames[0]?.trim() || `${definition?.label || node.type} ${index + 1}`} · ${definition?.label || node.type} · ${node.id.slice(-4)}`,
     };
   });
 }

@@ -29,7 +29,7 @@ assertThrows(() => contract.resolveToApisImageSize("1234x987"), /does not have a
 
 assertDeepEqual(
   contract.buildToApisGenerationBody({ model: "gpt-image-2", prompt: "city", requestedSize: "1024x1536" }),
-  { model: "gpt-image-2", prompt: "city", n: 1, size: "2:3", resolution: "1k", response_format: "url" },
+  { model: "gpt-image-2", prompt: "city", n: 1, size: "2:3", resolution: "1k", quality: "medium", output_format: "png", response_format: "url" },
   "Text-to-image body must follow the documented asynchronous ToAPIs contract.",
 );
 assertDeepEqual(
@@ -45,15 +45,53 @@ assertDeepEqual(
     n: 1,
     size: "16:9",
     resolution: "2k",
+    quality: "medium",
+    output_format: "png",
     response_format: "url",
-    reference_images: ["https://bucket.example/source.jpg"],
+    image_urls: ["https://bucket.example/source.jpg"],
   },
-  "Reference generation must use URL-only reference_images on /images/generations.",
+  "Reference generation must use URL-only image_urls on /images/generations.",
 );
+
+for (const resolution of ["1k", "2k"]) {
+  for (const ratio of contract.toApisImageRatios) {
+    assertDeepEqual(contract.validateToApisDimensions(ratio, resolution), { size: ratio, resolution }, `${resolution} must support ${ratio}.`);
+  }
+}
+for (const ratio of contract.toApis4kImageRatios) {
+  assertDeepEqual(contract.validateToApisDimensions(ratio, "4k"), { size: ratio, resolution: "4k" }, `4K must support ${ratio}.`);
+}
+assertThrows(() => contract.validateToApisDimensions("1:1", "4k"), /4K does not support/, "4K must reject unsupported square output.");
+
+const sixteenReferences = Array.from({ length: 16 }, (_, index) => `https://bucket.example/${index + 1}.jpg`);
+const fullBody = contract.buildToApisGenerationBody({
+  model: "gpt-image-2",
+  prompt: "edit all",
+  ratio: "21:9",
+  resolution: "4k",
+  quality: "high",
+  count: 10,
+  outputFormat: "jpeg",
+  outputCompression: 72,
+  referenceImages: sixteenReferences,
+});
+assertEqual(fullBody.n, 10, "ToAPIs must receive one n=10 task.");
+assertEqual(fullBody.image_urls.length, 16, "All 16 ordered references must be retained.");
+assertEqual(fullBody.output_format, "jpeg", "JPEG output must be forwarded.");
+assertEqual(fullBody.output_compression, 72, "JPEG compression must be forwarded.");
+assertThrows(() => contract.buildToApisGenerationBody({ model: "gpt-image-2", prompt: "too many", ratio: "1:1", resolution: "1k", referenceImages: [...sixteenReferences, "https://bucket.example/17.jpg"] }), /at most 16/, "The seventeenth reference must fail before submission.");
+assertThrows(() => contract.buildToApisGenerationBody({ model: "gpt-image-2", prompt: "too many outputs", ratio: "1:1", resolution: "1k", count: 11 }), /integer from 1 to 10/, "n=11 must fail.");
 
 assertEqual(contract.requireToApisTaskId({ id: "task-1" }), "task-1", "Submission id must be accepted.");
 assertEqual(contract.requireToApisTaskId({ task_id: "task-2" }), "task-2", "Documented compatibility task_id must be accepted.");
 assertThrows(() => contract.requireToApisTaskId({ status: "queued" }), /did not include a task id/, "Missing task ids must fail.");
+for (const status of ["pending", "queued", "in_progress"]) {
+  assertEqual(contract.shouldReturnPendingAfterToApisAcceptance(status, true), true, `${status} Canvas tasks must release the submission worker immediately.`);
+  assertEqual(contract.shouldReturnPendingAfterToApisAcceptance(status, false), false, `${status} non-Canvas calls must retain foreground polling.`);
+}
+for (const status of ["completed", "failed"]) {
+  assertEqual(contract.shouldReturnPendingAfterToApisAcceptance(status, true), false, `${status} tasks must be handled as terminal provider responses.`);
+}
 assertDeepEqual(
   contract.getToApisCompletedImageUrls({ status: "completed", result: { data: [{ url: "https://files.example/a.jpg" }, { url: "https://files.example/a.jpg" }] } }),
   ["https://files.example/a.jpg"],
@@ -78,6 +116,15 @@ assertContains(imageGeneration, /getToApisCompletedImageUrls[\s\S]*urls\.map\(\(
 assertContains(imageGeneration, /function isImageProviderCapabilityError[\s\S]*model_not_found\|no available channel/, "Model channel failures must have an explicit hard-error classifier.");
 assertContains(imageGeneration, /function isImageTaskSourceFallbackError[\s\S]*isImageProviderCapabilityError\(error\)\) return false/, "Model channel failures must not silently fall back to source images.");
 assertContains(imageGeneration, /function isImageTaskSourceFallbackError[\s\S]*ToAPIs image[\s\S]*return false/, "ToAPIs boundary failures must never masquerade as successful source-image generation.");
+assertContains(imageGeneration, /generateCanvasGptImages[\s\S]*orderedReferences\.length > 16[\s\S]*imageUrls\.length !== count/, "Canvas generation must reject excess references and incomplete output sets.");
+assertContains(imageGeneration, /asyncTask\?\.resumeTaskId[\s\S]*ToAPIs image task resumed[\s\S]*return pollToApisImageTask[\s\S]*const referenceUrls = await prepareToApisReferenceUrls/, "A persisted ToAPIs task id must enter the polling path before reference upload or generation submission.");
+assertContains(imageGeneration, /ToAPIs image task submitted[\s\S]*onTaskUpdate\?\.[\s\S]*pollToApisImageTask/, "Accepted ToAPIs task ids must be persisted before polling continues.");
+assertContains(imageGeneration, /onTaskUpdate\?\.[\s\S]*shouldReturnPendingAfterToApisAcceptance[\s\S]*throwOrPreservePendingToApisTask[\s\S]*pollToApisImageTask/, "Canvas submissions must persist the accepted task id and release the worker before foreground polling.");
+assertContains(imageGeneration, /class ImageProviderTaskPendingError[\s\S]*returnPendingOnTimeout[\s\S]*status: "pending" as const/, "Canvas polling timeout must remain a resumable pending result instead of a terminal generation failure.");
+assertContains(imageGeneration, /resumed && \["pending", "queued", "in_progress"\]\.includes\(status\)[\s\S]*throwOrPreservePendingToApisTask/, "A resumed task must perform status polling without submitting another paid generation.");
+assertContains(imageGeneration, /if \(!resumed\) await sleepWithinDeadline\(getToApisPollDelayMs/, "A resumed task must query immediately after the durable queue delay instead of holding an image slot for another polling interval.");
+assertContains(imageGeneration, /form\.append\("image\[\]"[\s\S]*for \(const referenceImage of referenceImages\)/, "Standard multipart edits must repeat image[] without truncation.");
+assertNotContains(imageGeneration, /referenceImages\.slice\(0, 4\)|reference_images/, "Active image code must not retain the old field or four-image truncation.");
 
 console.log("ToAPIs GPT-Image-2 adapter check passed.");
 
@@ -99,6 +146,10 @@ function read(relativePath) {
 
 function assertContains(value, pattern, message) {
   if (!pattern.test(value)) throw new Error(message);
+}
+
+function assertNotContains(value, pattern, message) {
+  if (pattern.test(value)) throw new Error(message);
 }
 
 function assertEqual(actual, expected, message) {

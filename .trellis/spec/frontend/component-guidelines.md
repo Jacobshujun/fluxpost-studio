@@ -42,6 +42,12 @@ setSelectedId(entry.id);
 setDraft(draftFromEntry(entry));
 ```
 
+Keep batch selected ids independent from the editable item id. `Ctrl`/`Cmd` click toggles one item, `Shift` click selects an ordered range, and `Ctrl`/`Cmd` + `Shift` unions that range. For cursor-paginated lists, select-all must consume every `nextCursor` before committing. Visible and keyboard select-all share one command; global shortcuts ignore editable targets and dialogs, and `Delete` only opens confirmation. Deterministic checks cover range union, cursor consumption, and the editable-target guard.
+
+Cursor-consuming commands must also validate the latest query identity and latest selection mode immediately before committing. A request generation captured when the command starts is insufficient because React has a render-to-effect window: a slow select-all response can otherwise commit an old filter object after the user switches modes. Keep the current query and filter in refs, invalidate the generation during effect cleanup, and build the final update from the live manual filter only. Browser checks should hold a later cursor response, change the query or mode, release the old response, and assert that neither visible results nor selected ids roll back.
+
+For viewport-height split workspaces, constrain the root and each intervening flex/grid child with an explicit height or `min-height: 0`. Put `overflow: auto` only on the intended list/editor panes; otherwise a Grid child keeps `min-height: auto`, expands the document, and scrolls fixed tools away. Browser checks should send a wheel event and assert pane `scrollTop` changes while `window.scrollY` and sibling pane coordinates do not.
+
 ## Interactive Controls Inside React Flow Nodes
 
 Desktop canvas panes use `panOnDrag={isMobile}` plus `selectionOnDrag={!isMobile}`: the idle desktop pane uses the arrow cursor, Space temporarily enables hand-cursor panning, and touch panning remains available on mobile.

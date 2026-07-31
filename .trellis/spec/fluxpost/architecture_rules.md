@@ -14,7 +14,7 @@ Last updated: 2026-07-20
 - Content pool persistence belongs in `src/lib/content-pool.ts`.
 - Batch production persistence belongs in `src/lib/batch-production.ts`.
 - Generated post persistence belongs in `src/lib/generated-posts.ts`.
-- Material library persistence belongs in `src/lib/material-library.ts`.
+- TOS-backed reference/vehicle library persistence and selection validation belong in `src/lib/library-assets.ts`.
 - Execution logs belong in `src/lib/activity-log.ts`.
 - Normal execution-log appends use the row-level append helper in `src/lib/database.ts`; regular log writes must not read and rewrite the whole execution-log table.
 - Runtime storage backend selection, SQLite/PostgreSQL connection setup, schema setup, legacy JSON migration, and persistence helpers belong in `src/lib/database.ts`.
@@ -213,7 +213,7 @@ return NextResponse.json({ status: getConfigStatus(), advanced: getAdvancedConfi
 - Treat `public/media/crawl` and `public/generated` as runtime media stores. Do not rely on Next production static file discovery for newly created files; use the local media API route.
 - Do not write directly to runtime data from the frontend.
 - Do not mutate `data/`, `public/generated/`, `public/media/`, `.tmp-*.json`, or `test-artifacts/` during Trellis-only work except through explicit verification that is documented.
-- Do not reintroduce JSON file read/write stores for content pool, generated posts, batch jobs, material library, execution logs, crawl jobs, simple runs, or runtime posts.
+- Do not reintroduce JSON file read/write stores for content pool, generated posts, batch jobs, the retired local material library, execution logs, crawl jobs, simple runs, or runtime posts.
 - Runtime PostgreSQL tables should store metadata, indexed status/time fields, and JSON payloads; do not store crawled/generated media binaries in PostgreSQL.
 - Workspace account passwords must remain hashed; session cookies/tokens must not be stored or exposed in plaintext outside the browser cookie value. Store only session token hashes in runtime tables.
 - In whitelist auth mode, `WORKSPACE_ACCESS_PASSWORD` stays environment-driven as the first-admin setup key and is never persisted to runtime tables. Daily sign-in must use per-user account-table password hashes, and whitelist users should use stable account ids shaped as `whitelist:{username}` for local owner attribution.
@@ -229,6 +229,7 @@ return NextResponse.json({ status: getConfigStatus(), advanced: getAdvancedConfi
 
 - Confirmed entries are `npm run dev`, `npm run build`, and `npm run start`.
 - For the local LAN production server on port `3001`, use `npm run local:restart` after frontend or API code changes. Do not rely on `npm run build` alone to refresh an already-running `next start` process.
+- Keep standalone output opt-in through `FLUXPOST_STANDALONE_BUILD=1` for Docker builds. Default local builds must remain compatible with `next start` without creating `.next/standalone`, and standalone tracing must not package runtime data, generated media, crawled media, or test artifacts.
 - Use `npm run dev:lan` when hot reload is desired during active frontend development.
 - GitHub-driven Ubuntu production is owned by `scripts/deploy/vps-bootstrap.sh`, `scripts/deploy/vps-deploy.sh`, `scripts/deploy/vps-enable-domain.sh`, root `compose.yaml`, and `docs/deployment/ubuntu-docker.md`; do not add a second server layout or competing update script.
 - New pre-domain installs must keep the app on `127.0.0.1:${FLUXPOST_APP_PORT:-3101}`, start only `postgres app`, and use SSH tunneling. Caddy ports 80/443 start only when `FLUXPOST_PROXY_ENABLED=true` and `FLUXPOST_PUBLIC_HOST` is a validated DNS hostname.
@@ -236,19 +237,133 @@ return NextResponse.json({ status: getConfigStatus(), advanced: getAdvancedConfi
 - Routine install, deploy, domain, diagnostic, and rollback commands must preserve all named volumes. Never add `docker compose down -v` or an equivalent volume deletion path.
 - Bootstrap must not change SSH daemon settings, host firewall rules, cloud security groups, or DNS. Those are operator/provider boundaries.
 - Do not add a new deployment path, process manager, service file, or server target without updating `project_brief.md`, `decisions.md`, `verification.md`, and `handoff.md`.
+- Local Windows plus `38.76.210.136` is the supported fix path. After local verification and operator approval, deploy an exact full SHA directly to 38 with the installed wrapper; 82 and 104 are retired FluxPost targets and must not be reintroduced as promotion gates.
+
+## Scenario: Direct Fixed-SHA Deployment To 38
+
+### 1. Scope / Trigger
+
+- Applies to bug fixes and release activation on the sole remote FluxPost target, `38.76.210.136`.
+
+### 2. Signatures
+
+- Deploy: `/opt/fluxpost-studio/bin/deploy.sh --ref <approved-full-sha>`.
+- Rollback: `/opt/fluxpost-studio/bin/deploy.sh --rollback <release-id>`.
+- Fresh-host bootstrap remains `vps-bootstrap.sh --admin-user <user> --ref <sha>` and is not the routine 38 update path.
+
+### 3. Contracts
+
+- The requested ref resolves to a 40-hex commit; `release.manifest` records `commit=<sha>` and `image=fluxpost-app:<sha>`.
+- Local deterministic verification and explicit operator approval precede the remote deploy; no 104 staging approval or branch is required.
+- 38 preserves all named volumes, keeps app port 3101 loopback-only, and uses host Nginx for `https://flux.lightmoment.net`; FluxPost Caddy remains disabled there.
+- Older app commits must not replace newer installed deploy wrappers. Production secrets, runtime data, media, and volumes are never copied to another host.
+
+### 4. Validation & Error Matrix
+
+- Bad or non-resolving ref -> exit before release/build.
+- Local baseline failure or missing operator approval -> do not start the remote deploy.
+- Failed 38 app/PostgreSQL/public health -> restore the prior manifest/image and keep all volumes.
+- Full bootstrap on 38's existing Ubuntu 22.04 host -> reject; use the installed deploy wrapper.
+
+### 5. Good/Base/Bad Cases
+
+- Good: deploy the locally verified full SHA directly to 38; manifest/image, app/PostgreSQL, loopback/public HTTPS, Nginx, and Open WebUI checks pass.
+- Base: read-only diagnosis changes no release; an approved deploy preserves volumes and retains automatic rollback.
+- Bad: require a 104 staging pass, deploy mutable `main` without pinning the intended fix, copy production state, global-prune Docker, or change host swap/firewall/Docker service.
+
+### 6. Tests Required
+
+- Automated: ref/manifest/tag/rollback/domain-wrapper/memory/shell/destructive guards in `vps_deployment_check.mjs` plus the full Trellis baseline.
+- Live: release/manifest/image SHA equality, app/PostgreSQL health, loopback 3101, `https://flux.lightmoment.net` HTTP 200, Nginx validity, and unchanged healthy Open WebUI.
+
+### 7. Wrong vs Correct
+
+#### Wrong
+
+```bash
+ssh root@104.243.21.233 /opt/fluxpost-studio/bin/deploy.sh
+ssh root@38.76.210.136 /opt/fluxpost-studio/bin/deploy.sh
+```
+
+#### Correct
+
+```bash
+ssh root@38.76.210.136 "/opt/fluxpost-studio/bin/deploy.sh --ref $APPROVED_FULL_SHA"
+```
+
+## Scenario: Local And Docker Next Build Output
+
+### 1. Scope / Trigger
+
+- Applies when changing `next.config.ts`, `Dockerfile`, local build scripts, or Docker runner copies involving `.next/standalone`.
+
+### 2. Signatures
+
+- Local: `npm run build` followed by `npm run start` or `npm run local:restart`.
+- Docker builder: `FLUXPOST_STANDALONE_BUILD=1 npm run build`.
+- Build-time environment key: optional `FLUXPOST_STANDALONE_BUILD`; only exact value `1` enables standalone output.
+
+### 3. Contracts
+
+- Default local config has `output === undefined` and must not create `.next/standalone`.
+- Docker config has `output === "standalone"`; runner continues copying `/app/.next/standalone` and executing `server.js`.
+- `outputFileTracingExcludes["*"]` contains `public/generated/**/*`, `public/media/**/*`, `data/**/*`, and `test-artifacts/**/*`.
+- Source-controlled static assets outside those paths remain eligible for Docker's explicit `COPY --from=builder /app/public ./public`.
+- Production runtime data/media are supplied through existing named volumes, not the standalone bundle.
+
+### 4. Validation & Error Matrix
+
+- Local config returns `standalone` -> fail: local build would duplicate runtime media and local environment files.
+- Docker builder omits `FLUXPOST_STANDALONE_BUILD=1` -> fail: runner-stage standalone copy has no source.
+- Any runtime exclusion is missing -> fail: a local Docker-mode build can copy large mutable runtime stores.
+- Docker-mode build lacks `server.js` -> fail: the production container cannot start.
+- Default build creates `.next/standalone` -> fail: local output-mode isolation regressed.
+
+### 5. Good/Base/Bad Cases
+
+- Good: Docker mode produces a small standalone bundle with `server.js` and without runtime media/data directories.
+- Base: default local build produces standard `.next/server` output and starts through `next start`.
+- Bad: unconditional `output: "standalone"` traces the local 20+ GB runtime media store into `.next/standalone`.
+
+### 6. Tests Required
+
+- `.trellis/verification/local_build_output_check.mjs` evaluates default and Docker config modes, asserts all exclusions, and verifies Docker builder wiring.
+- Full baseline must run a default build plus `next start` HTTP smoke.
+- Deployment-affecting changes must run a Docker-mode build or equivalent isolated image build and assert `server.js` exists while excluded runtime paths do not.
+
+### 7. Wrong vs Correct
+
+#### Wrong
+
+```typescript
+const nextConfig: NextConfig = { output: "standalone" };
+```
+
+#### Correct
+
+```typescript
+const standaloneBuild = process.env.FLUXPOST_STANDALONE_BUILD === "1";
+const nextConfig: NextConfig = {
+  output: standaloneBuild ? "standalone" : undefined,
+  outputFileTracingExcludes: {
+    "*": ["public/generated/**/*", "public/media/**/*", "data/**/*", "test-artifacts/**/*"],
+  },
+};
+```
 
 ## Scenario: Volcengine TOS Runtime Media Storage
 
 ### 1. Scope / Trigger
 
-- Applies when changing runtime image/video/frame production, media consumers that require local files, advanced TOS configuration, pending-upload reconciliation, or the `82.158.226.10` deployment.
+- Applies when changing runtime image/video/frame production, media consumers that require local files, advanced TOS configuration, pending-upload reconciliation, or the `38.76.210.136` deployment.
 - Historical local URLs and administrator-managed external material directories stay outside this migration; the storage backend is selected only when a new runtime media file is persisted.
 
 ### 2. Signatures
 
 - `persistRuntimeMedia({ filePath, publicPath, contentType?, overwrite? }): Promise<string>` persists a staged file and returns either the existing local public path or an absolute TOS URL.
 - `findExistingRuntimeMedia(publicPath): Promise<string | undefined>` reuses a verified same-key/same-length object when TOS is enabled.
-- `materializeRuntimeMedia(url, { maxBytes, kind }): Promise<{ filePath, temporary, cleanup }>` resolves local app media or downloads HTTP(S) media for file-only consumers.
+- `materializeRuntimeMedia(url, { maxBytes, kind, timeoutMs? }): Promise<{ filePath, resolvedUrl, temporary, cleanup }>` resolves local app media, exact TOS mirrors, or HTTP(S) media for file-only consumers.
+- Missing app-managed `/media/` or `/generated/` files must resolve only through the exact logical object key via `findExistingRuntimeMedia`; successful recovery returns the canonical TOS URL so durable consumers can replace stale local references before external writes.
 - `POST /api/config/tos-check` is admin-only and returns `TosStorageProbeResult` after upload, HEAD, anonymous GET, Range, and cleanup checks.
 - `POST /api/config/tos-reconcile` is admin-only and returns `{ uploaded: number, failed: number, errors: string[] }`.
 - `GET /api/config` adds only `tosConfigured: boolean` and `tosEnabled: boolean`; advanced `PATCH /api/config` accepts only the allow-listed TOS keys.
@@ -261,7 +376,7 @@ return NextResponse.json({ status: getConfigStatus(), advanced: getAdvancedConfi
 - Uploads use object-level `public-read`, at most three application attempts, and SDK retries disabled. A successful PUT is not accepted until HEAD reports the expected length and a non-empty ETag.
 - Upload success deletes the staged file. Final failure moves it to `data/tos-pending/<object-key>`, records only redacted diagnostics, throws, and must not persist an unverified business URL.
 - Reconciliation is idempotent: it uploads pending keys without overwrite, deletes successfully verified pending files, reports failures, and does not alter the original business task state.
-- Video processing materializes the complete source on the VPS before frame extraction/transcription; only the source video and newly selected final frames are persisted. Historical frames are not uploaded during ordinary cache reads. Temporary HTTP downloads, intermediate frames, audio, and Feishu attachment copies must be cleaned in `finally` paths.
+- Video processing materializes the complete source on the VPS before frame extraction/transcription; only the source video and selected final frames are persisted. Temporary HTTP downloads, intermediate frames, audio, and Feishu attachment copies must be cleaned in `finally` paths.
 - `GeneratedPost.imageUrls`, `videoUrls`, `downloadedImages`, `downloadedVideoUrl`, and frame URLs remain strings and may contain either historical relative URLs or absolute TOS HTTP(S) URLs.
 
 ### 4. Validation & Error Matrix
@@ -272,7 +387,8 @@ return NextResponse.json({ status: getConfigStatus(), advanced: getAdvancedConfi
 - HEAD missing length/ETag or length mismatch -> treat upload as failed and retain pending file.
 - Existing object has the expected length and overwrite is false -> reuse its ETag URL without PUT; force refresh sets overwrite true.
 - Media materialization receives unsupported non-local/non-HTTP input, non-2xx response, empty body, or a byte-limit violation -> fail and remove any temporary directory.
-- Missing sign-in on TOS admin routes -> HTTP 401; signed-in non-admin -> HTTP 403; failed live probe -> HTTP 502. Probe responses contain boolean check fields only; detailed errors stay in server execution logs.
+- Feishu attachment preflight is per post: persist exact TOS repairs before CLI writes, exclude unrecoverable posts from Base record creation, publish valid posts, and keep failed posts approved with structured media errors.
+- Missing sign-in on TOS admin routes -> HTTP 401; signed-in non-admin -> HTTP 403; failed live probe -> HTTP 502 with boolean cleanup status and no credentials.
 
 ### 5. Good/Base/Bad Cases
 
@@ -282,7 +398,7 @@ return NextResponse.json({ status: getConfigStatus(), advanced: getAdvancedConfi
 
 ### 6. Tests Required
 
-- `.trellis/verification/tos_runtime_media_check.mjs` must assert disabled behavior, key/URL mapping, managed-cache recognition, retries, same-size reuse, overwrite, HEAD mismatch failure, pending retention, successful cleanup, no ordinary historical-frame migration, producer/consumer wiring, route authorization, boolean-only probe responses, and secret masking.
+- `.trellis/verification/tos_runtime_media_check.mjs` must assert disabled behavior, key/URL mapping, managed-cache recognition, retries, same-size reuse, overwrite, HEAD mismatch failure, pending retention, successful cleanup, producer/consumer wiring, route authorization, and secret masking.
 - Advanced-config checks must assert all eight keys are allow-listed while AK/SK values never appear in public or advanced responses.
 - The default baseline remains offline. A manual live probe may use isolated credentials to assert PUT, HEAD, anonymous GET, video Range `206`, and DELETE without retaining or printing secrets.
 - Deployment verification must prove `NODE_TLS_REJECT_UNAUTHORIZED` is unset, start disabled, pass the admin probe before enabling, and preserve historical local media plus unrelated VPS services.
@@ -469,15 +585,16 @@ throw new ImageProviderError("accepted task timed out", {
 - GPT-Image-2 ToAPIs attempts persist `providerTaskId`, `providerTaskRoute`, and `providerStatus` through `onProviderTaskUpdate` immediately after POST acceptance. Non-terminal acceptance returns pending immediately and releases the image slot; a running attempt with an id is reused, performs one immediate status GET after its 30-second durable delay, and requeues again without reference preparation/upload or another POST. Ready DAG nodes use `Promise.all`, bounded by the shared image pool default/hard cap of 100. Expired local leases recover only for persisted-id attempts, and `GET /api/canvas/runs` wakes recovery after a Windows process restart.
 - Handles stay row-relative; image import uses authenticated `persistRuntimeMedia` and stores references only. Previews use `contain` and natural/artifact dimensions. Theme variables, aligned source-colored edge beams, reduced-motion disabling, and native editing/clipboard behavior remain required.
 - Canvas rendering enables React Flow `onlyRenderVisibleElements`. `markActiveCanvasEdges(edges, latestNodeRuns) -> FlowEdge[]` may add display-only `data.beamActive` when either endpoint's latest attempt is `queued` or `running`; `currentGraph(...)` must continue serializing only graph edge identity and ports, never this display flag.
-- Idle Canvas edges render only the static base path. Selected or `beamActive` edges may render the two existing beam paths while the viewport is stationary. `onMoveStart`/`onMoveEnd` toggle `.canvas-stage-viewport-moving` directly on the stage DOM so pan/zoom suspends beam animation and SVG filters without per-frame React state; reduced-motion mode always suppresses them.
+- Every visible Canvas business edge renders one source-colored base path plus the existing glow/highlight flow paths while the viewport is stationary. Idle edges use the lightweight flow style; selected or `beamActive` edges use the stronger filter and width. The edge projection sets both `--canvas-edge-color` and React Flow's `--xy-edge-stroke-selected` from the source-node business color so selection cannot fall back to gray. `onMoveStart`/`onMoveEnd` toggle `.canvas-stage-viewport-moving` directly on the stage DOM so pan/zoom suspends flow animation and SVG filters without per-frame React state; reduced-motion mode suppresses the flow paths but preserves the static business-colored base path.
 - `canvasViewportDetail(zoom) -> "full" | "reduced" | "overview"` uses inclusive full/reduced boundaries at `0.65` and `0.35`. `syncCanvasViewportDetail(stage, zoom)` writes only a changed tier to `stage.dataset.canvasViewportDetail`; it must not add React state or graph fields. Reduced detail hides unselected rich media/results, overview hides unselected node content and unreadable chrome, and selected stationary nodes retain detail.
-- Viewport movement overrides every detail tier: node media/results and resize controls, MiniMap paint, node shadows, and node filters are suspended until `onMoveEnd`. Node content uses layout-preserving `visibility`, not `display`, so node measurements, handles, edge anchors, selection, and persisted graph geometry do not change.
+- Viewport movement does not override detail-tier media visibility: `.canvas-node-image-grid` and `.canvas-node-result` stay painted with stable DOM identity and resource requests throughout pan/zoom. Movement may still suspend resize controls, MiniMap paint, node shadows, node filters, and edge flow animation until `onMoveEnd`; the existing `full`/`reduced`/`overview` rules remain the only media visibility boundary, and their layout-preserving `visibility` must not change node measurements, handles, edge anchors, selection, or persisted graph geometry.
 - The Canvas-scoped `.canvas-stage .react-flow__viewport { will-change: transform; }` hint must keep exactly one stable compositor layer ready for React Flow's native D3 transform updates. Do not add `will-change` per node, override the viewport `transform`, promote the layer only after `onMoveStart`, add media placeholders/remounts, or apply paint containment that can clip the infinite viewport. Browser verification must attribute the viewport-owned layer to `WillChangeTransform` while preserving node/handle geometry and media DOM identity.
+- Canvas zoom uses React Flow's native wheel/trackpad/touch handling and built-in `<Controls showInteractive={false} />`, with the existing `minZoom={0.2}`. Do not add route-local easing/duration, wheel target accumulation, animation refs/timers, custom zoom Controls, or `zoomOnScroll={false}`; `onMoveStart`/`onMoveEnd` remain the single movement-class and viewport-persistence boundary.
 - Editable desktop canvas supports blank-pane right-click/Tab search, typed dangling-edge insertion, ComfyUI-style run/cancel/save/select/edit shortcuts, and bounded 50-entry node/edge/viewport undo history. Editable controls isolate native keys, new edits truncate redo, workflow switches reset history, and mobile keeps structural shortcuts disabled.
 - Every registered node uses `NodeResizer` on editable desktop canvas with independent width/height control. Only dimension changes with `setAttributes` become durable; passive React Flow measurements do not. Resized nodes keep header/ports fixed and scroll body content. Mobile renders persisted nodes at the compact default without resize controls or mutating stored size.
 - `utility.prompt-switch@2` has required text ports `input1|input2|input3`, output `text`, and config `{ selectedInput: "1" | "2" | "3" }`. Prompt bodies exist only in the three connected `input.text` nodes. Editable V1 nodes and incoming `scene|sceneModification|scenePerson` edges upgrade together; immutable V1 run snapshots keep their legacy executor contract.
 - One immutable schedule revision owns multiple batches. Each batch stores only `strategy: "input-1" | "input-2" | "input-3"` plus independent Eagle-style scene/vehicle filters; launch writes the corresponding ordinal into the frozen Switch snapshot. One scene creates one content task, with an inclusive random distinct vehicle sample. Launch revalidates assets/bindings and atomically writes the schedule plus all image runs/queue rows before workers start. At least one successful image creates one finalization run; later retry success appends candidates without rerunning text, and edited/reviewed drafts require explicit acceptance.
-- A batch may add `copyFilter` in manual-id or AND-tag mode. Preflight resolves visible entries, sorts by `title ASC, id ASC`, assigns frozen snapshots round-robin, and requires the optional `copy-input` scheduler role/path. Launch and finalization consume those task snapshots without rereading source entries.
+- A batch may add `copyFilter` in manual-id or AND-tag condition-random mode. Preflight resolves visible entries, sorts by `title ASC, id ASC`, samples one frozen snapshot per content task without replacement inside that batch, and requires the optional `copy-input` scheduler role/path. Whole-batch resampling resolves and resamples the copy pool; single-content resampling preserves its frozen copy. Launch and finalization consume task snapshots without rereading source entries.
 - Content tasks finalize independently: once all image children for one content task are terminal and at least one image succeeded, its deterministic `canvas-scheduler-final-<contentTaskId>` run is created immediately without waiting for sibling content tasks, the batch, or the schedule to finish.
 - Durable Canvas recovery is process-started, not route-traffic-started. Normal Node startup wakes both run and schedule workers; `FLUXPOST_DISABLE_BACKGROUND_WORKERS=1` disables only this instrumentation bootstrap for deterministic smoke servers. It does not alter enqueue, API wakeup, or persisted queue semantics.
 - The standard skeleton creates three prompt nodes, one ordinal Switch, dynamically bound scene/vehicle inputs, GPT-Image-2 V2, one copy input, separate title/body GPT text nodes, and content assembly. The original five roles remain required; `copy-input` is optional for old graphs and required only when a copy pool is enabled. Each final content task therefore makes two distinct text-model calls before composition.
@@ -502,7 +619,7 @@ throw new ImageProviderError("accepted task timed out", {
 - Missing content/library snapshot, unresolved template placeholder, invalid/out-of-range image index, invalid transform dimensions/format/quality, or invalid/excess frame plan -> node validation/execution error with no partial artifact.
 - Missing/duplicate scheduler roles are listed together with Chinese business labels, and the drawer requires five explicit unique node selections before preflight. Draft preflight adopts the workflow's latest saved revision, while launch still rejects any workflow/preview revision drift; missing frozen assets, insufficient distinct pools, or more than 2,000 image children also fail before atomic launch. Launched schedules are immutable and never auto-publish.
 - Copy create/update with empty or oversized title/body, invalid visibility, non-array tags, more than 30 tags, or a tag over 40 characters -> HTTP `400`; unsigned access -> `401`; invisible entry -> `404`; non-owner member mutation -> `403`.
-- Enabled copy pool with an empty/inaccessible selection, missing or wrong-type `copy-input`, or no path to `content-target` -> preflight error before provider work. A deleted source after preflight does not invalidate the already-frozen task snapshot.
+- Enabled copy pool with fewer accessible candidates than content tasks -> preflight error containing available and required counts before provider work; copies must never wrap or repeat inside one batch. Missing or wrong-type `copy-input`, or no path to `content-target` -> preflight error. A deleted source after preflight does not invalidate the already-frozen task snapshot.
 - Prompt Switch input outside `1..3`, an unconnected ordinal input, or an empty connected prompt -> config/graph/execution error before provider work. Skeleton insertion with any existing scheduler role -> explicit no-op error; it never replaces or duplicates graph content.
 - Missing `ffmpeg`/`ffprobe` -> `needs_config`; media command failure -> explicit node failure. Image/video helpers use allow-listed `execFile` argument arrays and never accept shell text from node config.
 
@@ -516,23 +633,23 @@ throw new ImageProviderError("accepted task timed out", {
 - Good: three text nodes contain independently editable prompts, two batches select inputs 1 and 3, and their frozen Switch snapshots use those exact ordinals while variable vehicle counts queue round-robin.
 - Good: ToAPIs accepts up to 100 ready image tasks, each id is saved before the Canvas executor returns pending, image slots are released, and later worker GETs resume the same ids without a second paid POST.
 - Good: content task A writes its review draft while sibling B is still running, and a server restart reconciles stale completed image runs without opening the Canvas schedule drawer.
-- Good: three stable-sorted copy snapshots feed five content tasks as A/B/C/A/B; each task freezes its source and runs title GPT plus body GPT before `compose.social-post` creates the existing review draft.
+- Good: five matching copy snapshots are shuffled without replacement for five content tasks; each task freezes a unique source and runs title GPT plus body GPT before `compose.social-post` creates the existing review draft.
 - Base: a V2 boundary miss emits no `head` artifact and sends the original copy through `tail`; omitted execution/run modes and node size preserve legacy enabled/content-driven behavior.
 - Bad: adding `any` to `CanvasArtifactKind`, declaring a wildcard output, duplicating compatibility conditions in graph/clipboard/UI, persisting ResizeObserver measurements as user size, allowing mobile resize handles, emitting an empty title on fallback, rerunning a paid isolated ancestor, embedding Base64, passing shell strings to ffmpeg, or resubmitting accepted Seedance/ToAPIs work after timeout.
 - Bad: editing prompt bodies in the scheduler, giving Switch ports semantic scene/person meanings, silently shrinking an insufficient sample, launching only valid batches, mutating a launched sample, or overwriting an edited draft when retry images arrive.
 - Bad: waiting for aggregate batch completion before creating review drafts, relying on `GET /api/canvas/schedules` as the only recovery trigger, or allowing a baseline smoke server to advance real persisted work.
-- Bad: reading the copy library during finalization, mutating saved Canvas snapshots after a source edit, treating `copy-input` as a sixth mandatory role for legacy schedules, or combining title/body into one model call in the standard skeleton.
+- Bad: wrapping a short copy pool with modulo assignment, rereading the copy library during single-content resampling or finalization, mutating saved Canvas snapshots after a source edit, treating `copy-input` as a sixth mandatory role for legacy schedules, or combining title/body into one model call in the standard skeleton.
 
 ### 6. Tests Required
 
 - `canvas_workflows_check.mjs`: node-size bounds, graph/clipboard round trip, resize/mobile lockout, V1/V2 text-split, display-any, graph/common-node/vision/media/reuse/preview/isolated execution, direct enqueue, shortcut guards, bounded history, and quick-add contracts.
-- `canvas_workflows_check.mjs` plus the scoped Canvas performance browser checks must assert visible-element culling, idle one-path edges, selected/running beam eligibility, pan/zoom suspension without persisted state, reduced-motion suppression, detail-tier boundaries/idempotence, selected-node detail, layout-preserving movement suppression, and an 80-node Fit View fixture with no external calls.
+- `canvas_workflows_check.mjs` plus scoped Canvas browser checks must assert visible-element culling; idle flow paths; selected/source-colored base paths; movement-time flow suspension; reduced-motion suppression; detail-tier boundaries/idempotence; media visibility, DOM identity, and request stability during movement; native wheel/control zoom without a custom easing controller; pointer anchoring; and preserved node/handle/MiniMap behavior without external calls.
 - `toapis_image_api_check.mjs` and `canvas_workflows_check.mjs`: accepted-id callback ordering, immediate non-terminal handoff, terminal-status preservation, immediate one-GET resume without POST/reference preparation, running-attempt reuse, provider-field round trip, expired-lease recovery, API wakeup, delayed requeue, parallel ready nodes, and image-pool cap 100.
 - TypeScript, lint, build, full Trellis baseline, and local production restart must pass without paid provider calls.
 - Mocked desktop/mobile browser coverage must exercise text-split inline/inspector synchronization, display-any five-kind rendering/current-failure/latest-success/history state, preview/fullscreen, modes, compatible quick-add, mobile structural lockout, and horizontal overflow. Real model/Seedance/Feishu/PostgreSQL concurrency remain operator-approved.
 - `canvas_scheduler_check.mjs` plus the task browser check must cover ordinal Prompt Switch execution and V1 migration, the standard skeleton and duplicate-role guard, distinct sampling, transaction/ownership wiring, sequential autosave revisions, preflight/runtime controls, contrast, and 1440x960/390x844 overflow without live calls.
 - `canvas_scheduler_check.mjs` must also assert per-content finalization inside the content loop, terminal batch-run scheduler wakeup without a static circular import, Node startup worker bootstrap, and the baseline smoke disable contract. A user-approved local restart may separately verify drafts appear while sibling tasks remain active.
-- `copy_library_check.mjs` must cover both schemas, row-level helpers, authentication, visibility/edit permissions, tag normalization/AND filtering, page/navigation contracts, node registration/config validation, and literal frozen outputs. Scheduler checks must cover legacy five-role compatibility, copy binding/path enforcement, stable round-robin assignment, final graph injection, and the two-GPT skeleton.
+- `copy_library_check.mjs` must cover both schemas, row-level helpers, authentication, visibility/edit permissions, tag normalization/AND filtering, page/navigation contracts, node registration/config validation, and literal frozen outputs. Scheduler checks must cover legacy five-role compatibility, copy binding/path enforcement, deterministic injected-random no-replacement assignment, insufficient capacity, whole-batch copy resampling, single-content snapshot preservation, final graph injection, and the two-GPT skeleton.
 
 ### 7. Wrong vs Correct
 
@@ -564,8 +681,9 @@ if (!areCanvasPortKindsCompatible(output.kind, input.kind)) {
 // Freeze every child run in the same transaction; only then wake workers.
 await launchCanvasScheduleInDb(schedule, expectedRevision, preparedRuns);
 
-// Freeze copy data during preflight; finalization never reads the source library.
-content.copy = copySnapshot(copyPool[index % copyPool.length]);
+// Sample enough distinct copies during preflight; finalization never reads the source library.
+const copies = assignCanvasScheduleCopies(copyPool, scenes.length, batch.name);
+content.copy = copies[index];
 finalGraph = createSchedulerFinalizationGraph(graph, bindings, imageUrls, content.copy);
 
 // Prompt content stays in text nodes; batches freeze only an input ordinal.
@@ -576,6 +694,143 @@ if (batchRunTerminal && batchRun?.batchContext) notifyCanvasScheduleRunTerminal(
 
 // Keep deterministic smoke servers from advancing real persisted work.
 if (process.env.FLUXPOST_DISABLE_BACKGROUND_WORKERS === "1") return;
+```
+
+## Scenario: Flexible Canvas Batch Scheduling V2
+
+### 1. Scope / Trigger
+
+- Trigger: changing user-defined batch parameters, two-level expansion, Canvas field injection, V2 schedule APIs, main/child reconciliation, or node naming.
+- V2 is a parameter layer over the existing Canvas DAG/run/queue engine. It must not create recursive task trees, a second executor, arbitrary JSON-path writes, or new database tables.
+
+### 2. Signatures
+
+- `CanvasScheduleV2Definition = { parameters, expansion: { main, child }, childResult, mainTargetNodeId?, aggregationPolicy }`.
+- A parameter stores `id`, user `name`, `scope: "main" | "child"`, `valueType`, `source`, `expansion: "fixed" | "each" | "random"`, optional `sampleCount: { mode: "exact", value } | { mode: "range", min, max }` for random expansion, and `binding: { nodeId, fieldKey }`. Historical `randomCount` is a read-only exact-count compatibility field; newly saved/preflighted/duplicated definitions persist only `sampleCount`.
+- Types are `image|image-group|text|copy|number|boolean|enum`; resolved sources are fixed/manual value arrays, library filters, or copy filters.
+- `PATCH /api/canvas/schedules/:id` adds `convert-v2`; V2 `retry` requires `mainTaskId + childTaskId`, while V2 `accept-candidates` requires `mainTaskId`.
+- `getCanvasBatchBindableFields(node)` is the registry-owned allow-list. `validateCanvasScheduleV2AggregateGraph(...)` validates the optional main target after child-result replacement.
+
+### 3. Contracts
+
+- The hierarchy is exactly schedule -> main task -> child tasks. Main parameters broadcast to every child under that main task; each vehicle angle or other child `each` value creates one independent child run.
+- Cartesian and zip expansion apply independently at each level. Main random parameters sample once per preview; child random parameters resample independently for every main task. Exact or inclusive-range counts apply to every parameter type, are selected without replacement inside one parameter/main sample, and may reuse candidates across main tasks. Cartesian parameters choose counts independently; zip parameters share one uniformly selected count from the intersection of their allowed count ranges. Scalar values deduplicate by canonical value, asset/copy snapshots by stable record ID, and image groups by ordered asset IDs while remaining one structured value. The cumulative hard schedule limit is 2,000 child runs.
+- Bindings persist stable `nodeId + fieldKey`; labels are display-only and may duplicate. Every Canvas node can persist a non-empty custom label of at most 80 characters, and selectors show custom label, node type, and short ID.
+- Preflight resolves owner-visible source records, performs random sampling, freezes the selected values into immutable task snapshots, expands both levels, validates every child plan and optional aggregate plan, and fingerprints the definition plus task tree. Launch never samples again: it revalidates workflow revision, preview fingerprint, frozen asset visibility, binding compatibility, and then atomically writes the schedule and all child runs/queue rows. Explicitly running preflight again creates a fresh random sample.
+- The expanded V2 preview renders every task-local `CanvasScheduleAssetSnapshot.url` found in frozen main/child `parameterValues`; image groups remain one frozen value but expose their ordered images through the existing bounded sequence viewer. Preview clicks never mutate the task snapshot, and the scrollable editor must retain enough clearance that the sticky launch bar cannot cover the final preview row.
+- The child result must be `text`, `images`, or `videos`. Without a main target, successful child artifacts are the main result. With one, the frozen child-result node is replaced by a matching literal input and only its downstream path executes; `external_write` ancestors are forbidden.
+- Default aggregation succeeds with at least one artifact-producing child; strict mode requires every child. Failed children retry independently. Image retries for an existing social-post main target preserve the original aggregate run and use the existing draft guard: unchanged drafts sync automatically, edited/reviewed drafts expose explicit candidate acceptance.
+- Schedules without `schemaVersion: 2` remain V1. Conversion creates a separate V2 draft and discovers image binding keys from the registry (`urls` or `assetIds`) instead of guessing by node type.
+
+### 4. Validation & Error Matrix
+
+- Empty/duplicate parameter ID, empty/over-80 name, unsupported type/source/scope/expansion -> preflight HTTP `400`.
+- Missing node/field, incompatible type, or two parameters bound to one field -> preflight HTTP `400` before provider work.
+- Fixed parameter resolving to other than one value, empty iterated source, invalid exact/range count, range minimum above maximum, configured maximum exceeding unique candidate capacity, empty zip-count intersection, or more than 2,000 cumulative children -> preflight HTTP `400`.
+- Missing/mismatched child output, blocked child/aggregate plan, main target outside the child-result downstream path, or an `external_write` ancestor -> preflight HTTP `400`.
+- Workflow/preview drift or deleted/inaccessible frozen library asset -> launch rejection with no partial runs inserted.
+- Retry on a non-failed/missing child or missing failed node attempt -> HTTP `400`; candidate acceptance without an existing V2 review draft -> HTTP `400`.
+
+### 5. Good/Base/Bad Cases
+
+- Good: one fixed person plus one fixed scene and three vehicle angles expands to one main task and three child runs, each receiving exactly one angle.
+- Good: a vehicle-angle child parameter with four candidates and `sampleCount: { mode: "range", min: 2, max: 4 }` independently freezes 2-4 distinct IDs under every main task; candidates may repeat only across different main tasks.
+- Good: random image and copy main parameters use zip with overlapping ranges, select one shared count from the intersection, and freeze one-to-one pairs for that preview.
+- Good: two renamed `input.images` nodes keep distinct ID-based bindings after save, copy, reload, preview, and launch.
+- Good: a main task with frozen person/scene images and three child vehicle snapshots displays two main thumbnails plus one thumbnail per child, and any thumbnail opens the task-local sequence without changing the preview fingerprint.
+- Base: no main target returns the successful artifact set; partial aggregation marks the main task `partial` when some children fail.
+- Bad: sampling with replacement inside one main task, silently shrinking an excessive maximum, sampling child parameters once and copying the same subset to every main, independently choosing incompatible zip counts, resampling at launch, rendering only image filenames in the expanded preview, covering preview rows with the sticky launch bar, adding `person`, `scene`, or `vehicleAngle` as fixed schema fields, binding by label, injecting an arbitrary config path, flattening all angles into one child, or recreating an edited review draft after retry.
+
+### 6. Tests Required
+
+- `canvas_scheduler_check.mjs` must cover exact/range boundaries, main-once and child-per-main sampling, Cartesian independent counts, zip range intersection, fixed/list/image-group values, deterministic random-source injection, scalar/stable-record/image-group deduplication, no source mutation, insufficient maximum capacity before preview save, cumulative 2,000-child rejection, legacy `randomCount` direct launch and duplicate normalization, typed injection, aggregate ancestor pruning, main-target planning, conversion field discovery, social-post retry preservation, and explicit candidate acceptance.
+- `canvas_workflows_check.mjs`, TypeScript, scoped lint, and production build must remain green without provider calls.
+- Mocked 1440x960 and 390x844 browser checks must cover two renamed same-type nodes, ID-disambiguated binding choices, random-mode selection and an editable random-count input, a one-main/three-child preview, decoded frozen main/child thumbnails, task-local full-screen preview, both aggregation policies, and zero horizontal overflow or sticky-action overlap.
+
+### 7. Wrong vs Correct
+
+#### Wrong
+
+```typescript
+node.config[parameter.name] = value; // labels and arbitrary keys are not contracts
+```
+
+#### Correct
+
+```typescript
+const count = parameter.sampleCount.mode === "range"
+  ? randomIntegerInRange(parameter.sampleCount.min, parameter.sampleCount.max, random)
+  : parameter.sampleCount.value;
+const values = sampleUniqueCanvasScheduleParameterValues(candidates, count, parameter.name, random);
+
+const field = getCanvasBatchBindableFields(node)
+  .find((candidate) => candidate.key === parameter.binding.fieldKey);
+if (!field?.parameterTypes.includes(parameter.valueType)) throw new Error("Incompatible batch binding");
+```
+
+## Scenario: Batch Original Xiaohongshu Card Workspace
+
+### 1. Scope / Trigger
+
+- Trigger: changing `/original`, its owner-scoped APIs, `original_*` persistence, card prompt/QA catalogs, worker recovery, or structured review regeneration.
+- The workflow adapts `baoyu-xhs-images` v2.0.1 commit `6b7a2e417500561a5ecdd0b168332f4142584617` as local versioned data and prompt rules. Runtime installation or invocation of the upstream Skill is forbidden; preserve the MIT attribution in `THIRD_PARTY_NOTICES.md`.
+
+### 2. Signatures
+
+- `POST /api/original/batches` accepts `{ items, settings }`; `{ action: "preflight", items, settings }` validates without persistence. `GET /api/original/batches?page=&pageSize=&status=` lists visible batches.
+- `GET /api/original/batches/:id` returns one visible batch and ordered items. `PATCH` accepts `{ action: "pause" | "resume" | "cancel" | "retry_failed" }`.
+- `POST /api/original/cards/regenerate` accepts `{ postId, cardId, prompt? }` and returns `{ post, card, pending?: true }`; `pending: true` means the accepted task will continue through the durable batch queue.
+- PostgreSQL and SQLite both own additive `original_batches`, `original_batch_items`, and `original_batch_queue` tables. `WORKER_ORIGINAL_BATCH_CONCURRENCY` defaults to `2` and is capped at `8`.
+- Each `XhsCard` snapshot may persist `providerTaskId`, `providerTaskRoute`, and `providerStatus` for accepted asynchronous image work.
+
+### 3. Contracts
+
+- A submission has 1-100 non-empty rows. Each row has `topic` 1-120 characters, optional `requirements` up to 4,000, and optional `vehicleKeyword` up to 96. Empty rows are ignored; exact duplicates are reported by one-based row number but remain valid. Any invalid row rejects the whole create before inserts.
+- Batch settings choose automatic or fixed strategy/style/layout/palette and automatic or fixed 2-10 cards. Web search defaults off and can be enabled only when the text endpoint supports Responses.
+- Planning and writing are separate model stages. The frozen plan and deterministic catalog assembly produce exact per-card prompts; models do not invent catalog rules. ToAPIs/SSE use 3:4, while standard OpenAI JSON uses uncropped `1024x1536` 2:3 compatibility output.
+- Generate the cover without references. Cards 2-N may start only after a completed cover exists and must receive that cover as their sole style reference. QA checks expected Chinese, corruption/missing text, hierarchy, safe zones, and series consistency; one failed card gets exactly one retry from the frozen prompt, then remains as a candidate marked `needs_review`.
+- `GeneratedPost.xhsSeries` is versioned and retains strategy, style, layout, palette, prompts, candidates, selected URLs, and QA. `imageUrls` is always the ordered projection of completed card URLs. Missing vehicle input uses the topic as `taskKeyword` and leaves `feishuVehicle` unset.
+- PostgreSQL claims with `FOR UPDATE SKIP LOCKED`; SQLite claims atomically. Paused/cancelled batches are excluded from claims. Stage-boundary checks stop new calls, while completed in-flight results are retained.
+- ToAPIs `pending`/`queued`/`in_progress` is non-terminal. Persist the task id/route/status on both the batch item and review draft before returning from the provider call, keep the card/item/batch generating, requeue the same item for 30 seconds later, and resume with the same task id without another paid POST. A pending cover leaves cards 2-N `planned` until the cover completes.
+- Startup recovery atomically requeues expired original work only when an item card has a pending provider task id. Expired work without a persisted id remains ambiguous and is failed for explicit review/retry rather than replayed.
+
+### 4. Validation & Error Matrix
+
+- Missing session -> HTTP `401`; missing or inaccessible owner record -> HTTP `404`; unsupported action, invalid transition, invalid row/settings, unavailable requested web search, missing card, or missing cover anchor -> HTTP `400`.
+- Any row error -> HTTP `400` with `{ error, rowErrors: [{ row, field, message }] }` and zero batch/item/queue inserts.
+- Planning or writing failure -> only that item becomes `failed`; sibling items continue. Partial image failure after copy success -> persist one review draft with successful candidates and mark the item/batch for review or partial completion.
+- Accepted provider task with id and non-terminal status -> card/item/batch stay generating and the queue polls the same id after 30 seconds. Accepted/pending response without an id -> explicit non-resumable card error; never submit a replacement automatically.
+- Resumed provider task returns terminal failure -> preserve its task identity and exact provider error, then mark only that card failed/needs-review according to retained candidates. Process restart with a persisted pending id -> requeue and query; process restart without an id -> fail as ambiguous.
+- Pause stops new item claims; resume requeues only non-terminal items. Cancel prevents new calls and retains completed artifacts. `retry_failed` is valid only for terminal batches with failed items and never recreates successful drafts.
+
+### 5. Good/Base/Bad Cases
+
+- Good: 100 pasted rows preflight atomically, show the maximum image-request budget, enqueue once, and produce independently reviewable drafts.
+- Good: cover generation completes first; every later card uses the same cover URL and a failed QA card alone consumes one retry.
+- Good: ToAPIs accepts the cover, the card snapshot saves its task id, the queue releases its image slot, and a later GET completes the same task before cards 2-N start.
+- Base: title/body succeed and some card calls fail; one partial draft remains in `/review` with frozen prompts, candidates, QA issues, and missing-card recovery.
+- Bad: marking normal ToAPIs pending as `needs_review`, failing cards 2-N while their cover is merely pending, replaying a provider request after ambiguous acceptance, using a non-cover card as a style reference, patching text onto generated images, silently dropping invalid rows, or auto-publishing to Feishu.
+
+### 6. Tests Required
+
+- `original_batch_workspace_check.mjs` must cover catalog counts, validation/duplicates, settings, API auth/error contracts, schemas, queue claiming, aspect mapping, review projection, task-id persistence, delayed requeue, expired-lock recovery, and homepage/workspace wiring.
+- `original_card_orchestrator_mock_check.mjs` must execute the orchestrator and assert cover-first ordering, the single shared cover reference, exactly one failed-card retry, no QA-unavailable retry, pending task retention/resume, pending-cover blocking without child failure, and no automatic replay without an id.
+- `review_desk_workflow_check.mjs`, concurrency/PostgreSQL checks, TypeScript, scoped lint, production build/restart, HTTP `200/401`, and mocked Chromium at 1440x960 and 390x844 must pass without external provider calls. Real two-topic/three-card and authenticated multi-user PostgreSQL tests remain explicit operator gates.
+
+### 7. Wrong vs Correct
+
+#### Wrong
+
+```typescript
+if (result.status === "pending") markNeedsReview(card);
+```
+
+#### Correct
+
+```typescript
+card.providerTaskId = result.providerTaskId;
+await persistSeries(card);
+await requeueOriginalBatchItem(item.id, 30_000);
 ```
 
 ## Trellis Rules

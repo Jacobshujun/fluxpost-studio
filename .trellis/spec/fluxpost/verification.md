@@ -1,80 +1,66 @@
 # Verification
 
-Last updated: 2026-07-30
+Last updated: 2026-07-31
 
 ## Baseline Command
 
-Run from the project root:
+Run the cross-platform deterministic baseline before claiming code completion:
 
 ```powershell
+$env:TRELLIS_SMOKE_PORT = "45678"
 powershell -ExecutionPolicy Bypass -File .trellis/verification/check.ps1
 ```
 
-Equivalent npm shortcut:
-
-```powershell
-npm run trellis:check
-```
+`.trellis/verification/check.ps1` is a Windows compatibility wrapper around `.trellis/verification/check.mjs`. The smoke server is an isolated child process with `FLUXPOST_DISABLE_BACKGROUND_WORKERS=1`; normal local and production starts must leave Canvas workers enabled.
 
 ## Current Automated Checks
 
-`.trellis/verification/check.ps1` currently verifies:
+The baseline verifies:
 
-- Trellis file existence and feature-state validity through `.trellis/verification/init.ps1`.
-- Trellis context budgets and `TRELLIS-LATEST` marker sizes.
-- Handoff validity through `.trellis/verification/handoff.ps1`.
-- JSON parse checks for project JSON, `.trellis/spec/fluxpost/feature_list.json`, and existing legacy `data/*.json`.
-- Static/domain checks for PostgreSQL schema, workspace accounts, role-aware libraries, advanced config, TOS/runtime media, build/deploy contracts, execution logs, platform mapping, HEIC/media/video behavior, concurrency, Feishu flows, production/review/crawl policies, GPT-Image-2/ToAPIs, ComfyUI, source tagging, infinite-canvas graph/common-node/text-split/display-any/vision/media/quick-add contracts, and row-level runtime mutations.
-- `npm run lint`.
-- `npx --no-install tsc --noEmit`.
-- `npm run build`.
-- Local production startability smoke on `127.0.0.1:3310` by default, overrideable with `TRELLIS_SMOKE_PORT`. On this Windows host, `3310` is in an excluded TCP range, so use `TRELLIS_SMOKE_PORT=45678`. The smoke child receives `FLUXPOST_DISABLE_BACKGROUND_WORKERS=1` so it cannot advance persisted Canvas work.
-- SQLite store validation through `node .trellis/verification/db_check.mjs`.
+- Trellis file existence, context budgets, latest markers, JSON validity, and feature evidence limits.
+- PostgreSQL schema, accounts/ownership, libraries, configuration, TOS, deployment scripts, execution logs, platform mappings, media, video, concurrency, queues, Feishu boundaries, source imports, review flows, and row-level persistence.
+- Infinite Canvas graph/workflow/API/DAG, common nodes, media helpers, provider resume, scheduler, frozen copy input, copy-library, and original-batch contracts without paid calls.
+- `npm run lint`, `npx --no-install tsc --noEmit`, and `npm run build`.
+- Isolated production HTTP smoke and SQLite store validation.
 
-The baseline must not call live TikHub, OpenAI-compatible text/image services, image providers, ComfyUI, Feishu writes, Lark replies, or simple-run production workflows.
+The default baseline must not call live TikHub, text/image providers, Seedance, ComfyUI, Feishu writes, Lark replies, or simple-run production.
 
-## Manual Smoke Command
+## Candidate Release Checks
 
-When a local server is already running:
+For a production candidate:
 
-```powershell
-node .trellis/verification/http_smoke.js http://127.0.0.1:3000
-```
+1. Build from a clean worktree rooted at current GitHub `main`.
+2. Run focused checks, the baseline, TypeScript, lint, and production build.
+3. Push a dedicated branch and verify the remote full SHA.
+4. Run read-only production preflight.
+5. Deploy only through `/opt/fluxpost-studio/bin/deploy.sh --ref FULL_40_CHARACTER_SHA`.
+6. Verify manifest/image/container identity, app/PostgreSQL, Nginx/public HTTPS, protected services, schema, auth boundaries, volumes, and retained rollback release.
 
-For the local production server on port `3001`, use:
-
-```powershell
-node .trellis/verification/http_smoke.js http://127.0.0.1:3001
-```
+Do not deploy a dirty worktree, branch name, abbreviated SHA, local runtime rows, or unpushed commit.
 
 ## Recent Verification
 
-- 2026-07-30: Local Infinite Canvas zoom phase 3 added one Canvas-scoped persistent `will-change: transform` compositor hint without changing React Flow gestures or media lifecycle. Focused Canvas contracts, TypeScript, scoped lint, two production builds, local restart/HTTP smoke, and a mocked 80-node Chromium/CDP check passed: 40 native wheel/transform updates held 16.7 ms P95 with no long tasks, LayerTree reported exactly one viewport-owned `WillChangeTransform` layer, and node/handle geometry, media DOM identity, 160 non-repeated media requests, Controls, MiniMap, nonblank pixels, and console health were preserved. The required wrapper still cannot start because its delegated `check.mjs` is absent.
-- 2026-07-30: Local Infinite Canvas zoom phase 2 added DOM-only `full`/`reduced`/`overview` detail tiers and movement-time node/MiniMap paint suppression while preserving node geometry and graph persistence. Focused Canvas contracts, TypeScript, scoped lint, two production builds, local restart/HTTP smoke, and a mocked 80-node Fit View Chromium check passed: tier crossings, selected detail, zero same-tier dataset writes, hidden movement media/MiniMap, removed movement shadow, stable `220x221` geometry, and restoration were confirmed without external calls. The required wrapper still cannot start because its delegated `check.mjs` is absent.
-- 2026-07-30: Local Infinite Canvas zoom phase 1 enabled visible-element culling, reduced idle edges to one business path, limited beam paths to selected or queued/running-related edges, and suspended beam animation/filters during pan/zoom and reduced-motion. Focused Canvas checks, TypeScript, scoped lint, two production builds, local restart/HTTP smoke, and a mocked Chromium DOM/computed-style check passed without external calls; the required wrapper still cannot start because its delegated `check.mjs` is absent.
-- 2026-07-28: Copy library and Canvas batch copy integration passed `copy_library_check.mjs`, `canvas_scheduler_check.mjs`, TypeScript, focused lint, build/restart, HTTP smoke, and mocked desktop/mobile creation, tags, sharing, picker, scheduling, and overflow checks. Playwright exposed and verified the fix for delayed draft synchronization erasing fast input. The full baseline passed every domain check and stopped only at the unrelated untracked `.tmp-canvas-common-nodes-browser-check.cjs` lint error.
-- 2026-07-28: Canvas startup recovery/terminal wakeup passed `canvas_scheduler_check.mjs`, TypeScript, focused lint, full lint with the unrelated `.tmp-canvas-common-nodes-browser-check.cjs` excluded, build/restart, isolated no-worker HTTP smoke, and read-only local PostgreSQL observation. The full baseline passed all domain checks through Canvas and stopped only at that unrelated temporary-script lint error. After the user-authorized real restart, review draft count advanced from 0 to 2 while sibling content tasks remained active.
-- Older 2026-07-23 library and HEIC/TOS verification is preserved in `archive/verification-history.md`.
+- 2026-07-31: The restored cross-platform baseline passed context budgets, JSON and feature gates, all deterministic domain checks including original-batch resume/orchestration, lint with five Canvas warnings and no errors, TypeScript, production build, isolated HTTP smoke on port 45678, and SQLite validation without external provider calls.
+- 2026-07-30: Batch original ToAPIs recovery passed executable pending-cover/resume orchestration, PostgreSQL `EXPLAIN`, isolated SQLite recovery, focused domain checks, TypeScript, scoped lint, two production builds, local restart/HTTP smoke, and mocked Chromium at 1440x960/390x844.
+- 2026-07-30: Canvas V2 expanded preflight images passed frozen-snapshot extraction, task-local preview, TypeScript, scoped lint, production build/restart, HTTP smoke, decoded image rendering, viewer navigation, and desktop/mobile overflow checks.
+- 2026-07-30: Native Canvas zoom and visual repairs passed focused contracts, TypeScript, scoped lint, production build/restart, HTTP smoke, native wheel/Controls behavior, pointer anchoring, stable media identity, and nonblank mocked browser checks.
+- 2026-07-29: Flexible scheduler V2 and condition-random copy pools passed deterministic expansion, no-replacement selection, capacity errors, snapshot freezing, TypeScript, scoped lint, production build/restart, HTTP smoke, and mocked responsive checks.
+
+Older evidence is preserved in `.trellis/spec/fluxpost/archive/verification-history.md`.
 
 ## Missing Coverage
 
-- Infinite canvas has deterministic graph/API/DAG and mocked desktop/mobile coverage, but no live Seedance submission/query, real Feishu write, PostgreSQL migration execution, or multi-user concurrency test. Keep those as operator-approved/manual gates.
-- TOS has real application image evidence; authenticated `/config` and real video checks remain.
-
-- No unit test script is defined in `package.json`.
-- No isolated live TikHub, OpenAI-compatible, image-provider, ComfyUI, Feishu, or Lark integration test is part of the default baseline.
-- No default end-to-end test posts to `POST /api/simple/runs`, because that workflow can call external providers and Feishu publishing.
-- No browser UI walkthrough is part of the default baseline; the HEIC/TOS task uses a separate local browser smoke script.
-- No live PostgreSQL service migration or multi-user concurrency test is part of the default baseline.
-- No default check installs packages or performs a real clean-host Ubuntu bootstrap, DNS change, Caddy certificate request, or firewall operation. The deployment check parses Compose, runs Bash syntax, and executes private/HTTPS/legacy `deploy.sh --check` plans without Docker or network access.
-- `ffmpeg` availability is verified for image-edit reference canvas preparation, but real video frame extraction is not verified by default.
+- No live paid Seedance, GPT image/text, TikHub, ComfyUI, Feishu, or Lark action is part of the default baseline.
+- No local Canvas history, media, account, or configuration migration was performed.
+- No authenticated production Canvas create/save/run walkthrough or multi-user PostgreSQL concurrency test was run during this release.
+- The unchanged `origin/main` review-desk source/check mismatch remains a separate integration issue; do not weaken the check to hide it.
+- No default check changes DNS, firewall, Nginx routing, Docker volumes, or external production services.
+- The package audit reports eight high-severity transitive advisories; do not run automatic `npm audit fix --force` as part of release verification.
 
 ## Future Check Rules
 
-- Add new baseline checks only when they are deterministic, local, and do not mutate production/runtime data.
-- If a check needs live external services, document it as a manual verification target instead of adding it to the default baseline.
-- Keep recent verification to the latest 5 entries. Move older verification history to `.trellis/spec/fluxpost/archive/verification-history.md` or monthly archive files.
-
-## History
-
-- Full pre-migration verification history is preserved at `.trellis/spec/fluxpost/archive/verification-history.md`.
+- Add baseline checks only when deterministic, isolated, and non-mutating.
+- Record live external checks as manual operator gates.
+- A candidate SHA change invalidates previous release evidence.
+- Keep recent verification to five entries and archive older detail.
+- Never weaken a failing check to make the baseline pass; isolate a demonstrably unchanged blocker and run the remaining checks explicitly.

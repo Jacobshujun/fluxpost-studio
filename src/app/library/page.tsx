@@ -3,13 +3,15 @@
 
 import {
   ArrowLeft, ChevronLeft, ChevronRight, Download, Eye, FileImage, FolderInput, Images, Info, LoaderCircle,
-  Maximize2, Minus, Moon, Plus, RefreshCw, RotateCcw, Save, Search, Share2, Sparkles, Sun, Tag, Tags, Trash2,
+  Maximize2, Minus, Moon, Plus, RefreshCw, RotateCcw, Save, Search, Share2, SortAsc, Sparkles, Sun, Tag, Tags, Trash2,
   Upload, UserRound, UsersRound, X, ZoomIn,
 } from "lucide-react";
 import Link from "next/link";
 import { useCallback, useEffect, useId, useMemo, useRef, useState, useSyncExternalStore, type DragEvent, type KeyboardEvent as ReactKeyboardEvent, type PointerEvent as ReactPointerEvent, type ReactNode } from "react";
 import { getLibraryUnifiedTagsForRole } from "@/lib/library-tags";
 import { getStoredTheme, setStoredTheme, subscribeTheme, type ThemeMode } from "@/lib/theme";
+import { useLibraryListSort } from "@/lib/use-library-list-sort";
+import { useMarqueeSelection } from "@/lib/use-marquee-selection";
 import type {
   LibraryAsset, LibraryAssetPage, LibraryAssetRole, LibraryCollection, LibraryTagBatchResult,
   LibraryTagSuggestion, LibraryVisibility,
@@ -19,6 +21,7 @@ import styles from "./library.module.css";
 type ImportItem = { id: string; name: string; status: "uploading" | "imported" | "duplicate" | "error"; message?: string };
 type DeleteMode = "menu" | "permanent" | null;
 const libraryPageSize = 60;
+const librarySortStorageKey = "fluxpost-image-library-sort";
 const manualTagKeys = ["imageType", "scenes", "vehicleModels", "vehicleColors", "angles", "people", "customTags"] as const;
 const themeOptions: Array<{ value: ThemeMode; label: string; icon: ReactNode }> = [
   { value: "professional", label: "专业浅色", icon: <Sun size={14} /> },
@@ -32,6 +35,7 @@ export default function LibraryPage() {
   const [data, setData] = useState<LibraryAssetPage>({ assets: [], collections: [], total: 0 });
   const [search, setSearch] = useState("");
   const [visibility, setVisibility] = useState("");
+  const [sort, setSort] = useLibraryListSort(librarySortStorageKey);
   const [taggingStatus, setTaggingStatus] = useState("");
   const [filterTags, setFilterTags] = useState<string[]>([]);
   const [collectionId, setCollectionId] = useState("");
@@ -40,6 +44,7 @@ export default function LibraryPage() {
   const [preview, setPreview] = useState<{ assets: LibraryAsset[]; index: number }>();
   const [loading, setLoading] = useState(true);
   const [loadingMore, setLoadingMore] = useState(false);
+  const [selectingAll, setSelectingAll] = useState(false);
   const [message, setMessage] = useState("");
   const [importOpen, setImportOpen] = useState(false);
   const [imports, setImports] = useState<ImportItem[]>([]);
@@ -47,19 +52,23 @@ export default function LibraryPage() {
   const [batchTagsOpen, setBatchTagsOpen] = useState(false);
   const requestId = useRef(0);
   const importItemSequence = useRef(0);
+  const gridRef = useRef<HTMLDivElement>(null);
   const loadMoreRef = useRef<HTMLDivElement>(null);
   const loadingMoreRef = useRef(false);
   const loadMorePromiseRef = useRef<Promise<LibraryAsset[]> | null>(null);
+  const selectingAllRef = useRef(false);
+  const { selectionRect, marqueeProps } = useMarqueeSelection({ containerRef: gridRef, selectedIds: selected, onSelectionChange: setSelected });
 
   const queryString = useMemo(() => {
     const params = new URLSearchParams({ role, limit: String(libraryPageSize) });
     if (search.trim()) params.set("search", search.trim());
     if (visibility) params.set("visibility", visibility);
+    params.set("sort", sort);
     if (role === "reference" && taggingStatus) params.set("taggingStatus", taggingStatus);
     filterTags.forEach((tag) => params.append("tag", tag));
     if (collectionId) params.set("collectionId", collectionId);
     return params.toString();
-  }, [collectionId, filterTags, role, search, taggingStatus, visibility]);
+  }, [collectionId, filterTags, role, search, sort, taggingStatus, visibility]);
 
   useEffect(() => { document.documentElement.dataset.theme = theme; }, [theme]);
   useEffect(() => {
@@ -165,6 +174,42 @@ export default function LibraryPage() {
     return request;
   }, [data.nextCursor, queryString]);
 
+  const selectAllAssets = useCallback(async () => {
+    if (loading || loadingMoreRef.current || selectingAllRef.current || !data.assets.length) return;
+    selectingAllRef.current = true;
+    setSelectingAll(true);
+    const currentRequest = requestId.current;
+    const assets = [...data.assets];
+    const knownIds = new Set(assets.map((asset) => asset.id));
+    const seenCursors = new Set<string>();
+    let cursor = data.nextCursor;
+    try {
+      while (cursor) {
+        if (seenCursors.has(cursor)) throw new Error("图库分页游标重复，无法完成全选");
+        seenCursors.add(cursor);
+        const response = await fetch(`/api/library/assets?${queryString}&cursor=${encodeURIComponent(cursor)}`);
+        const result = (await response.json()) as LibraryAssetPage & { error?: string };
+        if (!response.ok) throw new Error(result.error || "全选所需图片加载失败");
+        if (currentRequest !== requestId.current) return;
+        result.assets.forEach((asset) => {
+          if (!knownIds.has(asset.id)) {
+            knownIds.add(asset.id);
+            assets.push(asset);
+          }
+        });
+        cursor = result.nextCursor;
+      }
+      if (currentRequest !== requestId.current) return;
+      setData((current) => ({ ...current, assets, nextCursor: undefined }));
+      setSelected(new Set(assets.map((asset) => asset.id)));
+    } catch (error) {
+      if (currentRequest === requestId.current) setMessage(error instanceof Error ? error.message : "全选失败");
+    } finally {
+      selectingAllRef.current = false;
+      setSelectingAll(false);
+    }
+  }, [data.assets, data.nextCursor, loading, queryString]);
+
   useEffect(() => {
     const target = loadMoreRef.current;
     if (!target || !data.nextCursor) return;
@@ -186,6 +231,25 @@ export default function LibraryPage() {
   // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [role, collectionId]);
 
+  useEffect(() => {
+    const onKeyDown = (event: KeyboardEvent) => {
+      if (
+        event.defaultPrevented
+        || event.altKey
+        || event.shiftKey
+        || (!event.ctrlKey && !event.metaKey)
+        || event.key.toLowerCase() !== "a"
+        || isEditableTarget(event.target)
+        || importOpen
+        || Boolean(preview)
+      ) return;
+      event.preventDefault();
+      void selectAllAssets();
+    };
+    window.addEventListener("keydown", onKeyDown);
+    return () => window.removeEventListener("keydown", onKeyDown);
+  }, [importOpen, preview, selectAllAssets]);
+
   async function uploadFiles(files: File[]) {
     const images = files.filter((file) => file.type.startsWith("image/") || /\.(png|jpe?g|gif|webp)$/i.test(file.name));
     if (!images.length) return setMessage("未发现可导入的图片文件");
@@ -203,7 +267,7 @@ export default function LibraryPage() {
           const form = new FormData();
           form.set("file", item.file);
           form.set("role", role);
-          form.set("visibility", "private");
+          form.set("visibility", "team");
           form.set("relativePath", item.name);
           if (collectionId) form.set("collectionId", collectionId);
           const response = await fetch("/api/library/import", { method: "POST", body: form });
@@ -230,8 +294,12 @@ export default function LibraryPage() {
   }
 
   function handleDrop(event: DragEvent) {
-    event.preventDefault(); setDragging(false); setImportOpen(true);
-    void uploadFiles(Array.from(event.dataTransfer.files));
+    event.preventDefault();
+    setDragging(false);
+    const files = Array.from(event.dataTransfer.files);
+    if (!files.length) return;
+    setImportOpen(true);
+    void uploadFiles(files);
   }
 
   async function batchPatch(patch: Record<string, unknown>) {
@@ -267,7 +335,7 @@ export default function LibraryPage() {
     if (!ids.length || !window.confirm(`确认将 ${ids.length} 张图片移出当前${collectionId ? "集合" : "视图"}？`)) return;
     const tasks = ids.map((id) => collectionId
       ? apiJson(`/api/library/collections/${collectionId}/assets/${id}`, { method: "DELETE" })
-      : apiJson(`/api/library/assets/${id}`, { method: "PATCH", body: JSON.stringify({ roles: data.assets.find((item) => item.id === id)?.roles.filter((item) => item !== role) || [] }) }));
+      : apiJson(`/api/library/assets/${id}`, { method: "PATCH", body: JSON.stringify({ removeRole: role }) }));
     const results = await Promise.all(tasks.map((task) => task.then(() => true).catch(() => false)));
     setMessage(`已移出 ${results.filter(Boolean).length}/${ids.length} 张图片`); setSelected(new Set()); await loadAssets(true);
   }
@@ -302,6 +370,11 @@ export default function LibraryPage() {
     setTaggingStatus("");
   }
 
+  function changeSort(value: string) {
+    setSort(value);
+    setPreview(undefined);
+  }
+
   const activeCollections = data.collections.filter((collection) => collection.role === role);
   const detail = data.assets.find((asset) => asset.id === detailId);
   const importedCount = imports.filter((item) => item.status === "imported").length;
@@ -309,9 +382,10 @@ export default function LibraryPage() {
   const errorCount = imports.filter((item) => item.status === "error").length;
   const isVehicle = role === "vehicle";
   const libraryName = isVehicle ? "车型图库" : "参考图库";
+  const allSelected = data.assets.length > 0 && !data.nextCursor && selected.size === data.assets.length;
 
   return (
-    <main className={styles.page} onDragEnter={() => setDragging(true)} onDragOver={(event) => event.preventDefault()} onDrop={handleDrop}>
+    <main className={styles.page} onDragEnter={(event) => { if (event.dataTransfer.types.includes("Files")) setDragging(true); }} onDragOver={(event) => { if (event.dataTransfer.types.includes("Files")) event.preventDefault(); }} onDrop={handleDrop}>
       <header className={styles.header}>
         <div className={styles.brandBlock}>
           <Link href="/" className={styles.iconButton} title="返回内容台"><ArrowLeft size={18} /></Link>
@@ -346,7 +420,9 @@ export default function LibraryPage() {
             <label className={styles.search}><Search size={16} /><input value={search} onChange={(event) => setSearch(event.target.value)} placeholder={isVehicle ? "搜索名称、文件名或人工标签" : "搜索名称、文件名或标签"} /></label>
             <div className={styles.filterTags}><UnifiedTagPicker tags={filterTags.map((label) => ({ label }))} role={role} placeholder="按标签筛选" onAdd={(label) => setFilterTags((current) => current.some((item) => sameTag(item, label)) ? current : [...current, label])} onRemove={(label) => setFilterTags((current) => current.filter((item) => !sameTag(item, label)))} /></div>
             <select value={visibility} onChange={(event) => setVisibility(event.target.value)} aria-label="共享范围"><option value="">全部范围</option><option value="private">个人</option><option value="team">团队共享</option></select>
+            <label className={styles.sortControl}><SortAsc size={14} /><select value={sort} onChange={(event) => changeSort(event.target.value)} aria-label="图片排序"><option value="newest">最新导入</option><option value="oldest">最早导入</option><option value="name-asc">名称 A-Z</option><option value="name-desc">名称 Z-A</option><option value="owner-asc">提交人 A-Z</option><option value="owner-desc">提交人 Z-A</option></select></label>
             {!isVehicle ? <select value={taggingStatus} onChange={(event) => setTaggingStatus(event.target.value)} aria-label="打标状态"><option value="">全部状态</option><option value="queued">等待打标</option><option value="running">打标中</option><option value="completed">已完成</option><option value="failed">失败</option></select> : null}
+            <label className={styles.selectAllControl} title="全选当前筛选结果（Ctrl/Cmd+A）"><input type="checkbox" aria-label="全选当前筛选结果" aria-keyshortcuts="Control+A Meta+A" checked={allSelected} disabled={loading || loadingMore || selectingAll || !data.assets.length} onChange={(event) => { if (event.target.checked) void selectAllAssets(); else { setSelected(new Set()); setBatchTagsOpen(false); } }} />{selectingAll ? "全选中..." : "全选"}</label>
             {(search || visibility || taggingStatus || filterTags.length) ? <button className={styles.clearButton} onClick={() => { setSearch(""); setVisibility(""); setTaggingStatus(""); setFilterTags([]); }}><X size={14} />清除</button> : null}
             {!isVehicle ? <button className={styles.clearButton} onClick={() => void batchRetag("failed")}><RefreshCw size={14} />重试失败</button> : null}
           </div>
@@ -355,17 +431,18 @@ export default function LibraryPage() {
 
           {message ? <div className={styles.notice} role="status">{message}</div> : null}
           {loading ? <div className={styles.state}><LoaderCircle className={styles.spin} size={28} />正在载入图库</div> : data.assets.length ? (
-            <><div className={styles.grid}>
+            <><div ref={gridRef} className={`${styles.grid} ${selectionRect ? styles.gridSelecting : ""}`} {...marqueeProps}>
               {data.assets.map((asset) => <AssetCard key={asset.id} asset={asset} activeRole={role} selected={selected.has(asset.id)} onSelect={(checked) => setSelected((value) => { const next = new Set(value); if (checked) next.add(asset.id); else next.delete(asset.id); return next; })} onOpen={openPreview} onDetail={() => setDetailId(asset.id)} />)}
             </div>{data.nextCursor ? <div className={styles.loadMore} ref={loadMoreRef}><button disabled={loadingMore} onClick={() => void loadMore()}>{loadingMore ? <LoaderCircle className={styles.spin} size={15} /> : <ChevronRight size={15} />}{loadingMore ? "加载下一批..." : "加载更多"}</button></div> : null}</>
           ) : <div className={styles.empty}><div className={styles.emptyIcon}>{isVehicle ? <FileImage size={30} /> : <Images size={30} />}</div><h2>{message.includes("登录") ? "需要登录工作区" : `${libraryName}还没有图片`}</h2><p>{message.includes("登录") ? "返回内容台完成登录后再进入图库。" : isVehicle ? "导入车型图片，并用人工标签整理和筛选。" : "从剪贴板粘贴，或导入文件和文件夹开始整理。"}</p>{!message.includes("登录") ? <button className={styles.primaryButton} onClick={() => setImportOpen(true)}><Upload size={16} />导入第一批图片</button> : <Link className={styles.primaryButton} href="/">返回登录</Link>}</div>}
         </div>
 
-        {detail ? <AssetEditor key={detail.id} asset={detail} activeRole={role} onClose={() => setDetailId(undefined)} onSaved={(asset) => { setData((value) => ({ ...value, assets: value.assets.map((item) => item.id === asset.id ? asset : item) })); setMessage("图片信息已保存"); void loadAssets(true); }} /> : null}
+        {detail ? <AssetEditor key={detail.id} asset={detail} activeRole={role} onClose={() => setDetailId(undefined)} onSaved={(asset) => { const removedFromView = !asset.roles.includes(role); setData((value) => ({ ...value, assets: removedFromView ? value.assets.filter((item) => item.id !== asset.id) : value.assets.map((item) => item.id === asset.id ? asset : item), total: removedFromView ? Math.max(0, value.total - 1) : value.total })); if (removedFromView) setDetailId(undefined); setMessage(removedFromView ? "图片已移出当前图库" : "图片信息已保存"); void loadAssets(true); }} /> : null}
       </section>
 
       {importOpen ? <div className={styles.scrim} onMouseDown={(event) => event.target === event.currentTarget && setImportOpen(false)}><section className={styles.importPanel} role="dialog" aria-modal="true" aria-labelledby="import-title"><div className={styles.panelHeader}><div><h2 id="import-title">导入到{libraryName}</h2><p>{isVehicle ? "图片将直接进入车型图库，由用户维护标签" : "图片上传后会自动进入后台打标队列"}</p></div><button className={styles.iconButton} title="关闭" onClick={() => setImportOpen(false)}><X size={18} /></button></div><ImportDropZone dragging={dragging} onFiles={(files) => void uploadFiles(files)} /><div className={styles.importSummary}><span>成功 {importedCount}</span><span>重复 {duplicateCount}</span><span>失败 {errorCount}</span></div><div className={styles.importList}>{imports.length ? imports.map((item) => <div key={item.id} className={styles.importRow}><StatusIcon status={item.status} /><div><strong>{item.name}</strong><span>{item.message || "上传中..."}</span></div></div>) : <p>暂无导入任务</p>}</div></section></div> : null}
       {dragging ? <div className={styles.dropOverlay} onDragLeave={() => setDragging(false)}><Upload size={36} /><strong>释放以导入图片</strong></div> : null}
+      {selectionRect ? <div className={styles.marquee} aria-hidden="true" style={{ left: selectionRect.left, top: selectionRect.top, width: selectionRect.width, height: selectionRect.height }} /> : null}
       {preview ? <PreviewDialog sequence={preview.assets} initialIndex={preview.index} activeRole={role} collectionId={collectionId} hasMore={Boolean(data.nextCursor)} onLoadMore={loadMore} onClose={() => setPreview(undefined)} onChanged={(asset, deleted, removedFromView) => { if (deleted || removedFromView) setData((value) => ({ ...value, assets: value.assets.filter((item) => item.id !== asset.id), total: Math.max(0, value.total - 1) })); else setData((value) => ({ ...value, assets: value.assets.map((item) => item.id === asset.id ? asset : item) })); }} /> : null}
     </main>
   );
@@ -373,7 +450,7 @@ export default function LibraryPage() {
 
 function AssetCard({ asset, activeRole, selected, onSelect, onOpen, onDetail }: { asset: LibraryAsset; activeRole: LibraryAssetRole; selected: boolean; onSelect(value: boolean): void; onOpen(asset: LibraryAsset): void; onDetail(): void }) {
   const tags = getLibraryUnifiedTagsForRole(asset, activeRole).slice(0, 3);
-  return <article className={`${styles.card} ${selected ? styles.cardSelected : ""}`}>
+  return <article data-marquee-id={asset.id} className={`${styles.card} ${selected ? styles.cardSelected : ""}`}>
     <button className={styles.cardImage} data-preview-asset={asset.id} onClick={() => onOpen(asset)} aria-label={`预览 ${asset.name}`}><img src={asset.publicUrl} alt="" loading="lazy" /><span className={styles.imageShade} /><span className={styles.previewHint}><Eye size={15} />预览</span></button>
     <label className={styles.selectBox} title="选择图片"><input type="checkbox" checked={selected} onChange={(event) => onSelect(event.target.checked)} /><span /></label>
     <div className={styles.cardBadges}><span className={asset.visibility === "team" ? styles.sharedBadge : styles.privateBadge}>{asset.visibility === "team" ? <UsersRound size={11} /> : <UserRound size={11} />}{asset.visibility === "team" ? "共享" : "个人"}</span>{activeRole === "reference" ? <TaggingBadge status={asset.taggingStatus} /> : null}</div>
@@ -388,6 +465,7 @@ function AssetEditor({ asset, activeRole, onClose, onSaved }: { asset: LibraryAs
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState("");
   async function save() {
+    if (!roles.length) { setError("请至少保留一个图库角色；如需移出，请使用“移出”操作。"); return; }
     setSaving(true); setError("");
     try { const result = await apiJson<{ asset: LibraryAsset }>(`/api/library/assets/${asset.id}`, { method: "PATCH", body: JSON.stringify({ name, visibility, roles }) }); onSaved(result.asset); }
     catch (reason) { setError(reason instanceof Error ? reason.message : "保存失败"); } finally { setSaving(false); }
@@ -433,7 +511,7 @@ function UnifiedTagPicker({ tags, role, placeholder, disabled, onAdd, onRemove }
   const [draft, setDraft] = useState("");
   const [suggestions, setSuggestions] = useState<LibraryTagSuggestion[]>([]);
   const [open, setOpen] = useState(false);
-  const [activeIndex, setActiveIndex] = useState(0);
+  const [activeIndex, setActiveIndex] = useState(-1);
   const [committing, setCommitting] = useState(false);
   const [error, setError] = useState("");
   const selectedKeys = useMemo(() => new Set(tags.map((tag) => tag.label.trim().toLocaleLowerCase())), [tags]);
@@ -449,7 +527,7 @@ function UnifiedTagPicker({ tags, role, placeholder, disabled, onAdd, onRemove }
         const result = (await response.json()) as { tags?: LibraryTagSuggestion[]; error?: string };
         if (!response.ok) throw new Error(result.error || "标签建议加载失败");
         setSuggestions(result.tags || []);
-        setActiveIndex(0);
+        setActiveIndex(-1);
       } catch (reason) {
         if (reason instanceof DOMException && reason.name === "AbortError") return;
         setError(reason instanceof Error ? reason.message : "标签建议加载失败");
@@ -470,9 +548,13 @@ function UnifiedTagPicker({ tags, role, placeholder, disabled, onAdd, onRemove }
   function handleKeyDown(event: ReactKeyboardEvent<HTMLInputElement>) {
     if (event.key === "ArrowDown" || event.key === "ArrowUp") {
       event.preventDefault(); setOpen(true);
-      setActiveIndex((current) => options.length ? (current + (event.key === "ArrowDown" ? 1 : -1) + options.length) % options.length : 0);
+      setActiveIndex((current) => {
+        if (!options.length) return -1;
+        if (current < 0) return event.key === "ArrowDown" ? 0 : options.length - 1;
+        return (current + (event.key === "ArrowDown" ? 1 : -1) + options.length) % options.length;
+      });
     } else if (event.key === "Enter") {
-      event.preventDefault(); void commit(options[activeIndex]?.label || draft);
+      event.preventDefault(); void commit(activeIndex >= 0 ? options[activeIndex]?.label || draft : draft);
     } else if (event.key === "Escape") {
       event.preventDefault(); setOpen(false);
     } else if (event.key === "Backspace" && !draft && tags.length && onRemove) {
@@ -480,7 +562,7 @@ function UnifiedTagPicker({ tags, role, placeholder, disabled, onAdd, onRemove }
     }
   }
 
-  return <div className={styles.tagPicker} data-shortcuts="off"><div className={styles.tagPickerControl} onClick={(event) => (event.currentTarget.querySelector("input") as HTMLInputElement | null)?.focus()}>{tags.map((tag) => <span className={styles.tagChip} key={tag.label} title={tag.title}>{tag.label}{onRemove && !disabled ? <button type="button" title={`删除 ${tag.label}`} aria-label={`删除标签 ${tag.label}`} onClick={() => void onRemove(tag.label)}><X size={11} /></button> : null}</span>)}<input value={draft} disabled={disabled || committing} placeholder={tags.length ? "" : placeholder} role="combobox" aria-label={placeholder} aria-autocomplete="list" aria-expanded={open} aria-controls={listboxId} aria-activedescendant={open && options[activeIndex] ? `${listboxId}-${activeIndex}` : undefined} onFocus={() => setOpen(true)} onBlur={() => window.setTimeout(() => setOpen(false), 120)} onChange={(event) => { setDraft(event.target.value); setOpen(true); setError(""); }} onKeyDown={handleKeyDown} /></div>{open && !disabled ? <div className={styles.tagSuggestions} id={listboxId} role="listbox">{options.length ? options.map((item, itemIndex) => <button type="button" id={`${listboxId}-${itemIndex}`} role="option" aria-selected={itemIndex === activeIndex} className={itemIndex === activeIndex ? styles.tagSuggestionActive : ""} key={item.label} onMouseDown={(event) => event.preventDefault()} onClick={() => void commit(item.label)}><span>{item.label}</span><small>{item.count}</small></button>) : draft.trim() ? <button type="button" role="option" aria-selected="true" onMouseDown={(event) => event.preventDefault()} onClick={() => void commit(draft)}>添加“{draft.trim()}”</button> : <p>暂无可用标签</p>}</div> : null}{error ? <span className={styles.tagPickerError}>{error}</span> : null}</div>;
+  return <div className={styles.tagPicker} data-shortcuts="off"><div className={styles.tagPickerControl} onClick={(event) => (event.currentTarget.querySelector("input") as HTMLInputElement | null)?.focus()}>{tags.map((tag) => <span className={styles.tagChip} key={tag.label} title={tag.title}>{tag.label}{onRemove && !disabled ? <button type="button" title={`删除 ${tag.label}`} aria-label={`删除标签 ${tag.label}`} onClick={() => void onRemove(tag.label)}><X size={11} /></button> : null}</span>)}<input value={draft} disabled={disabled || committing} placeholder={tags.length ? "" : placeholder} role="combobox" aria-label={placeholder} aria-autocomplete="list" aria-expanded={open} aria-controls={listboxId} aria-activedescendant={open && activeIndex >= 0 && options[activeIndex] ? `${listboxId}-${activeIndex}` : undefined} onFocus={() => setOpen(true)} onBlur={() => window.setTimeout(() => setOpen(false), 120)} onChange={(event) => { setDraft(event.target.value); setActiveIndex(-1); setOpen(true); setError(""); }} onKeyDown={handleKeyDown} /></div>{open && !disabled ? <div className={styles.tagSuggestions} id={listboxId} role="listbox">{options.length ? options.map((item, itemIndex) => <button type="button" id={`${listboxId}-${itemIndex}`} role="option" aria-selected={itemIndex === activeIndex} className={itemIndex === activeIndex ? styles.tagSuggestionActive : ""} key={item.label} onMouseDown={(event) => event.preventDefault()} onClick={() => void commit(item.label)}><span>{item.label}</span><small>{item.count}</small></button>) : draft.trim() ? <button type="button" role="option" aria-selected="true" onMouseDown={(event) => event.preventDefault()} onClick={() => void commit(draft)}>添加“{draft.trim()}”</button> : <p>暂无可用标签</p>}</div> : null}{error ? <span className={styles.tagPickerError}>{error}</span> : null}</div>;
 }
 
 function BatchTagManager({ count, role, onApply, onClose }: { count: number; role: LibraryAssetRole; onApply(mode: "add" | "remove", label: string): Promise<void>; onClose(): void }) {
@@ -546,7 +628,7 @@ function PreviewDialog({ sequence, initialIndex, activeRole, collectionId, hasMo
   function calculateFit() { const image = imageRef.current; const stage = stageRef.current; if (!image || !stage) return; const next = Math.min((stage.clientWidth - 40) / image.naturalWidth, (stage.clientHeight - 40) / image.naturalHeight, 1); setFitScale(Math.max(.01, next)); setScale(Math.max(.01, next)); setPan({ x: 0, y: 0 }); setLoadState("ready"); }
   function zoom(direction: -1 | 1) { const levels = Array.from(new Set([fitScale, .25, .5, .75, 1, 1.5, 2, 3, 4, 6, 8].filter((value) => value >= fitScale))).sort((a, b) => a - b); setScale((currentScale) => { const current = levels.findIndex((value) => value >= currentScale - .001); const next = levels[Math.max(0, Math.min(levels.length - 1, current + direction))]; if (next === fitScale) setPan({ x: 0, y: 0 }); return next; }); }
   async function saveAsset(patch: Record<string, unknown>) { const result = await apiJson<{ asset: LibraryAsset }>(`/api/library/assets/${asset.id}`, { method: "PATCH", body: JSON.stringify(patch) }); setAssets((items) => items.map((item) => item.id === asset.id ? result.asset : item)); onChanged(result.asset, false); return result.asset; }
-  async function removeFromView() { setBusy(true); try { if (collectionId) await apiJson(`/api/library/collections/${collectionId}/assets/${asset.id}`, { method: "DELETE" }); else await saveAsset({ roles: asset.roles.filter((item) => item !== activeRole) }); removeCurrent(false); setAnnouncement("图片已移出当前视图"); } catch (error) { setAnnouncement(error instanceof Error ? error.message : "移出失败"); } finally { setBusy(false); setDeleteMode(null); } }
+  async function removeFromView() { setBusy(true); try { if (collectionId) await apiJson(`/api/library/collections/${collectionId}/assets/${asset.id}`, { method: "DELETE" }); else await saveAsset({ removeRole: activeRole }); removeCurrent(false); setAnnouncement("图片已移出当前视图"); } catch (error) { setAnnouncement(error instanceof Error ? error.message : "移出失败"); } finally { setBusy(false); setDeleteMode(null); } }
   async function permanentDelete() { setBusy(true); try { const response = await fetch(`/api/library/assets/${asset.id}`, { method: "DELETE" }); const result = (await response.json()) as { status?: string; asset?: LibraryAsset; error?: string }; if (!response.ok || result.status !== "deleted") { if (result.asset) { setAssets((items) => items.map((item) => item.id === asset.id ? result.asset! : item)); onChanged(result.asset, false); } throw new Error(result.asset?.cleanupError || result.error || "对象清理失败，资产已保留，可稍后重试"); } removeCurrent(true); setAnnouncement("图片已永久删除"); } catch (error) { setAnnouncement(error instanceof Error ? error.message : "删除失败"); } finally { setBusy(false); setDeleteMode(null); } }
   function removeCurrent(deleted: boolean) { const removed = asset; const next = assets.filter((item) => item.id !== removed.id); setAssets(next); onChanged(removed, deleted, true); if (!next.length) { close(); return; } setIndex(Math.min(index, next.length - 1)); setLoadState("loading"); setPan({ x: 0, y: 0 }); }
   function pointerDown(event: ReactPointerEvent) { event.currentTarget.setPointerCapture(event.pointerId); pointers.current.set(event.pointerId, { x: event.clientX, y: event.clientY }); if (pointers.current.size === 1) gesture.current = { ...gesture.current, startX: event.clientX, startY: event.clientY, moved: false }; if (pointers.current.size === 2) { const points = [...pointers.current.values()]; gesture.current.startDistance = distance(points[0], points[1]); gesture.current.startScale = scale; } }

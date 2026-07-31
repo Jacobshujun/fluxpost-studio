@@ -466,8 +466,6 @@ async function writeAndVerifyGeneratedFieldsToFeishu(
             recordId,
             "--json",
             `@${toCliRelativePath(patchPath)}`,
-            "--format",
-            "json",
           ],
           {
             timeout: 120_000,
@@ -545,8 +543,6 @@ async function writeAndVerifyGeneratedFieldsToFeishu(
                 appConfig.feishuBitableTableId,
                 "--json",
                 `@${toCliRelativePath(write.patchPath)}`,
-                "--format",
-                "json",
               ],
               {
                 timeout: 120_000,

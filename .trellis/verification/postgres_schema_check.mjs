@@ -12,8 +12,6 @@ const requiredTables = [
   "content_projects",
   "generated_posts",
   "batch_jobs",
-  "material_folders",
-  "material_assets",
   "execution_logs",
   "crawl_jobs",
   "runtime_posts",
@@ -37,6 +35,10 @@ if (!packageJson.dependencies?.pg) {
 const sql = readFileSync(schemaPath, "utf8");
 for (const table of requiredTables) {
   assertIncludes(sql, `CREATE TABLE IF NOT EXISTS ${table}`, `missing table ${table}`);
+}
+
+for (const table of ["material_folders", "material_assets"]) {
+  if (sql.includes(`CREATE TABLE IF NOT EXISTS ${table}`)) throw new Error(`Retired PostgreSQL table is still declared: ${table}`);
 }
 
 for (const table of requiredTables.filter((table) => table !== "app_meta")) {

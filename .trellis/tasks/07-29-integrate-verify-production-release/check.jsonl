@@ -1,0 +1,4 @@
+{"file":".trellis/spec/fluxpost/verification.md","reason":"Authoritative candidate baseline and production release gates."}
+{"file":".trellis/spec/fluxpost/architecture_rules.md","reason":"Review exact-SHA, volume preservation, rollback, and main-convergence behavior."}
+{"file":".trellis/spec/fluxpost/pitfalls.md","reason":"Check known deployment, environment, and dirty-worktree hazards."}
+{"file":".trellis/tasks/07-29-integrate-verify-production-release/research/release-evidence.md","reason":"Verify candidate files and history against the approved evidence inventory."}

@@ -143,17 +143,21 @@ export async function analyzeViralImages(images: string[]): Promise<ViralImageAn
 export async function indexMaterialImages(materialPaths: string[], targetKeyword: string): Promise<IndexedMaterialImage[]> {
   const indexed: IndexedMaterialImage[] = [];
   for (const materialPath of Array.from(new Set(materialPaths.map((item) => item.trim()).filter(Boolean)))) {
-    const extension = path.extname(materialPath).toLowerCase();
+    const remoteUrl = /^https?:\/\//i.test(materialPath);
+    const sourcePath = remoteUrl ? new URL(materialPath).pathname : materialPath;
+    const extension = path.extname(sourcePath).toLowerCase();
     if (!imageExtensions.has(extension)) continue;
-    try {
-      const fileStat = await stat(materialPath);
-      if (!fileStat.isFile()) continue;
-    } catch {
-      continue;
+    if (!remoteUrl) {
+      try {
+        const fileStat = await stat(materialPath);
+        if (!fileStat.isFile()) continue;
+      } catch {
+        continue;
+      }
     }
     indexed.push({
       path: materialPath,
-      name: path.basename(materialPath),
+      name: decodeURIComponent(path.basename(sourcePath)),
       referenceMaterialPath: materialPath,
       profile: inferMaterialProfile(materialPath, targetKeyword),
     });

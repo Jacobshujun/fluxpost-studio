@@ -1,5 +1,5 @@
 import { execFileSync } from "node:child_process";
-import { existsSync, mkdirSync, rmSync } from "node:fs";
+import { existsSync, mkdirSync, readFileSync, rmSync } from "node:fs";
 import path from "node:path";
 
 const projectRoot = process.cwd();
@@ -10,8 +10,8 @@ const imageGeneration = read("src/lib/image-generation.ts");
 
 assertContains(
   imageGeneration,
-  /const preparedReferences = await prepareReferenceImages\(referenceImages,\s*options\.size\)/,
-  "Image edit references must be prepared with the same requested size sent to gpt-image-2.",
+  /const preparedReferences = asyncTask\?\.resumeTaskId\s*\?\s*makeResumedTaskReferences\(referenceImages\)\s*:\s*await prepareReferenceImages\(referenceImages,\s*options\.size,\s*options\.strictReferencePreparation === true\)/,
+  "New image edit references must use the requested size, while accepted tasks must resume without preparing references again.",
 );
 
 assertContains(
@@ -120,9 +120,7 @@ try {
 console.log("GPT image size request check passed.");
 
 function read(relativePath) {
-  return execFileSync("node", ["-e", `process.stdout.write(require("node:fs").readFileSync(${JSON.stringify(path.join(projectRoot, relativePath))}, "utf8"))`], {
-    encoding: "utf8",
-  });
+  return readFileSync(path.join(projectRoot, relativePath), "utf8");
 }
 
 function assertContains(source, pattern, message) {

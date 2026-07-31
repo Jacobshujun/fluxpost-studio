@@ -353,7 +353,17 @@ if [[ "$candidate_version" =~ ^[0-9]+$ ]] && [ "$candidate_version" -ge "$DEPLOY
 else
   log "keeping deploy wrapper version $DEPLOY_SCRIPT_VERSION for older target commit"
 fi
-install -m 0755 "$REPO_DIR/scripts/deploy/vps-enable-domain.sh" "$BIN_DIR/enable-domain.sh"
+
+installed_domain_version="$(awk -F'"' '/^DOMAIN_SCRIPT_VERSION="[0-9]+"$/ { print $2; exit }' "$BIN_DIR/enable-domain.sh" 2>/dev/null || true)"
+candidate_domain_version="$(awk -F'"' '/^DOMAIN_SCRIPT_VERSION="[0-9]+"$/ { print $2; exit }' "$REPO_DIR/scripts/deploy/vps-enable-domain.sh")"
+if [[ "$candidate_domain_version" =~ ^[0-9]+$ ]] && \
+  { [[ ! "$installed_domain_version" =~ ^[0-9]+$ ]] || [ "$candidate_domain_version" -ge "$installed_domain_version" ]; }; then
+  install -m 0755 "$REPO_DIR/scripts/deploy/vps-enable-domain.sh" "$BIN_DIR/enable-domain.sh"
+elif [[ "$installed_domain_version" =~ ^[0-9]+$ ]]; then
+  log "keeping domain wrapper version $installed_domain_version for older target commit"
+else
+  install -m 0755 "$REPO_DIR/scripts/deploy/vps-enable-domain.sh" "$BIN_DIR/enable-domain.sh"
+fi
 
 log "service status"
 compose ps

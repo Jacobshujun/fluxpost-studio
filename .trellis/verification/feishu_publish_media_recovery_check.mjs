@@ -11,7 +11,7 @@ const files = {
   types: "src/lib/types.ts",
   route: "src/app/api/publish/feishu/route.ts",
   review: "src/app/review/page.tsx",
-  baseline: ".trellis/verification/check.ps1",
+  baseline: ".trellis/verification/check.mjs",
 };
 
 for (const relativePath of Object.values(files)) {

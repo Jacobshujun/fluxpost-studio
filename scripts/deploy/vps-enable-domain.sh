@@ -1,6 +1,7 @@
 #!/usr/bin/env bash
 set -euo pipefail
 
+DOMAIN_SCRIPT_VERSION="2"
 APP_ROOT="${APP_ROOT:-/opt/fluxpost-studio}"
 ENV_FILE="$APP_ROOT/shared/env.production"
 DEPLOY_SCRIPT="$APP_ROOT/bin/deploy.sh"
@@ -45,9 +46,27 @@ is_valid_hostname "$DOMAIN" || fail "hostname must not contain a scheme, path, p
 command -v getent >/dev/null 2>&1 || fail "missing getent command"
 getent ahosts "$DOMAIN" >/dev/null || fail "$DOMAIN does not resolve yet; add its DNS A/AAAA record and retry"
 
+DEPLOY_ARGS=()
+if [ -n "${DEPLOY_REF:-}" ]; then
+  DEPLOY_ARGS=(--ref "$DEPLOY_REF")
+elif [ -L "$APP_ROOT/current" ]; then
+  CURRENT_RELEASE="$(readlink -f "$APP_ROOT/current")"
+  case "$CURRENT_RELEASE" in
+    "$APP_ROOT/releases/"*) ;;
+    *) fail "current release points outside $APP_ROOT/releases" ;;
+  esac
+  CURRENT_MANIFEST="$CURRENT_RELEASE/release.manifest"
+  if [ -f "$CURRENT_MANIFEST" ]; then
+    CURRENT_COMMIT="$(awk -F= '$1 == "commit" { print $2; exit }' "$CURRENT_MANIFEST")"
+    [[ "$CURRENT_COMMIT" =~ ^[0-9a-f]{40}$ ]] || fail "current release manifest has an invalid commit"
+    DEPLOY_ARGS=(--ref "$CURRENT_COMMIT")
+    printf '[domain] pinning deployment to current commit %s\n' "$CURRENT_COMMIT"
+  fi
+fi
+
 set_env_value "$ENV_FILE" FLUXPOST_PUBLIC_HOST "$DOMAIN"
 set_env_value "$ENV_FILE" FLUXPOST_PROXY_ENABLED true
 
 printf '[domain] enabling HTTPS for %s\n' "$DOMAIN"
-APP_ROOT="$APP_ROOT" "$DEPLOY_SCRIPT"
+APP_ROOT="$APP_ROOT" "$DEPLOY_SCRIPT" "${DEPLOY_ARGS[@]}"
 printf '[domain] ready: https://%s\n' "$DOMAIN"

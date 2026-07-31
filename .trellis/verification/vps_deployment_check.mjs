@@ -69,7 +69,7 @@ assertContains(files.deploy, /if \[ "\$CHECK_ONLY" = "true" \][\s\S]*mode=%s[\s\
 assertContains(files.deploy, /if \[ "\$PROXY_ENABLED" = "true" \][\s\S]*compose up -d --no-build proxy[\s\S]*else[\s\S]*compose stop proxy[\s\S]*compose up -d --no-build --force-recreate app/, "Deploy must distinguish HTTPS and private service startup.");
 assertContains(files.deploy, /if \[ "\$PROXY_ENABLED" = "false" \][\s\S]*return 0[\s\S]*curl -fsS "\$PUBLIC_HEALTH_URL"/, "Public health must run only when proxy mode is enabled.");
 assertContains(files.deploy, /install -m 0755 .*vps-deploy\.sh.*"\$BIN_DIR\/deploy\.sh"/, "Deploy must refresh its installed wrapper for future updates.");
-assertContains(files.deploy, /install -m 0755 .*vps-enable-domain\.sh.*"\$BIN_DIR\/enable-domain\.sh"/, "Deploy must refresh the domain wrapper.");
+assertContains(files.deploy, /installed_domain_version[\s\S]*candidate_domain_version[\s\S]*keeping domain wrapper version/, "Deploy must preserve a newer domain wrapper when deploying an older target commit.");
 assertNotContains(files.deploy, /(?:source|\.)\s+"?\$ENV_FILE/, "Deploy must not execute the application environment file as shell code.");
 
 assertContains(files.bootstrap, /APP_ONLY.*!= "true"[\s\S]*this installer supports Ubuntu 24\.04 only/, "Full bootstrap must enforce the supported Ubuntu release while app-only mode reuses an existing Linux host.");
@@ -78,7 +78,11 @@ assertContains(files.bootstrap, /--admin-user/, "Bootstrap must require the firs
 assertContains(files.bootstrap, /--ref\)\s*\[ "\$#" -ge 2 \][\s\S]*REQUESTED_REF="\$2"/, "Bootstrap must accept an explicit Git ref.");
 assertContains(files.bootstrap, /--app-only\)\s*APP_ONLY="true"/, "Bootstrap must provide a host-preserving app-only mode.");
 assertContains(files.bootstrap, /if \[ "\$APP_ONLY" = "true" \][\s\S]*require_cmd docker[\s\S]*else[\s\S]*apt-get update/, "App-only bootstrap must verify existing tools instead of installing packages.");
+assertContains(files.bootstrap, /SWAP_KB=.*SwapTotal[\s\S]*APP_ONLY.*true[\s\S]*AVAILABLE_MEMORY_KB/, "App-only bootstrap must count already-enabled swap on an existing low-memory host.");
+assertContains(files.bootstrap, /AVAILABLE_MEMORY_KB.*-lt 1500000[\s\S]*combined RAM and enabled swap/, "App-only bootstrap must still reject hosts without enough combined build memory.");
+assertContains(files.bootstrap, /elif \[ "\$\{MEMORY_KB:-0\}" -lt 1500000 \]/, "Full bootstrap must keep the physical-memory requirement.");
 assertContains(files.bootstrap, /LOCAL_DEPLOY_SCRIPT=.*vps-deploy\.sh/, "Bootstrap must support an adjacent versioned deploy wrapper for older target commits.");
+assertContains(files.bootstrap, /LOCAL_DOMAIN_SCRIPT=.*vps-enable-domain\.sh[\s\S]*DOMAIN_SCRIPT_VERSION="2"/, "Bootstrap must support an adjacent versioned domain wrapper for older target commits.");
 assertContains(files.bootstrap, /--credentials-file\)\s*\[ "\$#" -ge 2 \][\s\S]*CREDENTIALS_FILE="\$2"/, "Bootstrap must support root-only credential output without logging the setup key.");
 assertContains(files.bootstrap, /chmod 0600 "\$CREDENTIALS_FILE"/, "Bootstrap credential files must be root-only.");
 assertContains(files.bootstrap, /https:\/\/download\.docker\.com\/linux\/ubuntu/, "Bootstrap must install Docker from the official Ubuntu repository.");
@@ -91,10 +95,13 @@ assertContains(files.bootstrap, /keeping existing .* and all current secrets/, "
 assertContains(files.bootstrap, /"\$BIN_DIR\/deploy\.sh"/, "Bootstrap must finish through the standard deploy wrapper.");
 
 assertContains(files.domain, /hostname must not contain a scheme, path, port, underscore, or invalid DNS label/, "Domain command must validate the hostname boundary.");
+assertContains(files.domain, /DOMAIN_SCRIPT_VERSION="2"/, "Domain command must expose a versioned wrapper contract.");
 assertContains(files.domain, /getent ahosts "\$DOMAIN"/, "Domain command must require working DNS resolution.");
+assertContains(files.domain, /CURRENT_MANIFEST=.*release\.manifest[\s\S]*CURRENT_COMMIT=.*commit[\s\S]*DEPLOY_ARGS=\(--ref "\$CURRENT_COMMIT"\)/, "Domain command must pin deployment to the active release commit by default.");
+assertContains(files.domain, /if \[ -n "\$\{DEPLOY_REF:-\}" \][\s\S]*DEPLOY_ARGS=\(--ref "\$DEPLOY_REF"\)/, "Domain command must allow an explicit deployment ref override.");
 assertContains(files.domain, /set_env_value "\$ENV_FILE" FLUXPOST_PUBLIC_HOST "\$DOMAIN"/, "Domain command must persist the public host.");
 assertContains(files.domain, /set_env_value "\$ENV_FILE" FLUXPOST_PROXY_ENABLED true/, "Domain command must enable proxy mode.");
-assertContains(files.domain, /APP_ROOT="\$APP_ROOT" "\$DEPLOY_SCRIPT"/, "Domain command must reuse the standard deploy path.");
+assertContains(files.domain, /APP_ROOT="\$APP_ROOT" "\$DEPLOY_SCRIPT" "\$\{DEPLOY_ARGS\[@\]\}"/, "Domain command must reuse the standard deploy path with the resolved ref.");
 
 for (const [name, source] of Object.entries({ deploy: files.deploy, bootstrap: files.bootstrap, domain: files.domain })) {
   assertNotContains(source, /docker(?:\s+compose| compose)[^\n]*(?:down\s+-v|down\s+--volumes)/, `${name} script must never remove Docker volumes.`);

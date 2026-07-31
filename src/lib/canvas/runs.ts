@@ -19,6 +19,7 @@ import {
   filterWorkspaceOwnedRecords,
   type WorkspaceAccessActor,
 } from "../workspace-ownership";
+import { concurrencyConfig } from "../concurrency";
 import { CanvasNeedsConfigError, executeCanvasNode, resolveCanvasLiteralOutputs } from "./executors";
 import { DreaminaNeedsConfigError, getDreaminaCredit } from "./dreamina";
 import { buildCanvasRunPlan, collectDescendants } from "./graph";
@@ -43,10 +44,13 @@ const queueLockMs = 10 * 60_000;
 const queueHeartbeatMs = 30_000;
 
 type CanvasQueueGlobalState = typeof globalThis & {
-  __fluxpostCanvasQueue?: { active: boolean; sequence: number };
+  __fluxpostCanvasQueue?: { activeWorkers?: number; sequence?: number };
 };
 
-const queueState = ((globalThis as CanvasQueueGlobalState).__fluxpostCanvasQueue ||= { active: false, sequence: 0 });
+const storedQueueState = ((globalThis as CanvasQueueGlobalState).__fluxpostCanvasQueue ||= {});
+storedQueueState.activeWorkers ??= 0;
+storedQueueState.sequence ??= 0;
+const queueState = storedQueueState as Required<typeof storedQueueState>;
 
 export async function planCanvasRun(workflowId: string, account: WorkspaceAccessActor, targetNodeIds?: string[]) {
   return planCanvasRunWithMode(workflowId, account, targetNodeIds, "with-upstream");
@@ -68,7 +72,7 @@ export async function planCanvasRunWithMode(
     const node = findNode(workflow.graph.nodes, nodeId);
     const definition = getCanvasNodeDefinition(node.type);
     if (node.type !== "model.seedance") {
-      details.push({ nodeId, label: definition?.label || node.type, status: "ready" });
+      details.push({ nodeId, label: node.label?.trim() || definition?.label || node.type, status: "ready" });
       continue;
     }
     try {
@@ -77,7 +81,7 @@ export async function planCanvasRunWithMode(
       preflightBlocked ||= blocked;
       details.push({
         nodeId,
-        label: definition?.label || node.type,
+        label: node.label?.trim() || definition?.label || node.type,
         model: String(node.config.modelVersion),
         resolution: String(node.config.resolution),
         durationSeconds: Number(node.config.duration),
@@ -89,7 +93,7 @@ export async function planCanvasRunWithMode(
       const needsConfig = error instanceof DreaminaNeedsConfigError;
       details.push({
         nodeId,
-        label: definition?.label || node.type,
+        label: node.label?.trim() || definition?.label || node.type,
         model: String(node.config.modelVersion),
         resolution: String(node.config.resolution),
         durationSeconds: Number(node.config.duration),
@@ -399,15 +403,17 @@ export async function retryCanvasNode(runId: string, nodeId: string, account: Wo
 }
 
 export function ensureCanvasRunWorker() {
-  if (queueState.active) return;
-  queueState.active = true;
-  queueState.sequence += 1;
-  const workerId = `canvas-worker-${process.pid}-${Date.now()}-${queueState.sequence}`;
-  setTimeout(() => {
-    void drainCanvasRuns(workerId).finally(() => {
-      queueState.active = false;
-    });
-  }, 0);
+  const workersToStart = Math.max(0, concurrencyConfig.canvasRun - queueState.activeWorkers);
+  for (let index = 0; index < workersToStart; index += 1) {
+    queueState.activeWorkers += 1;
+    queueState.sequence += 1;
+    const workerId = `canvas-worker-${process.pid}-${Date.now()}-${queueState.sequence}`;
+    setTimeout(() => {
+      void drainCanvasRuns(workerId).finally(() => {
+        queueState.activeWorkers = Math.max(0, queueState.activeWorkers - 1);
+      });
+    }, 0);
+  }
 }
 
 async function drainCanvasRuns(workerId: string) {
@@ -516,7 +522,9 @@ async function executeCanvasRun(run: CanvasRun) {
     ...run,
     status,
     retryNodeIds: hasPendingProvider ? run.retryNodeIds : undefined,
-    error: failures[0]?.error || (status === "failed" ? "Canvas run could not make progress." : undefined),
+    error: status === "running"
+      ? undefined
+      : failures[0]?.error || (status === "failed" ? "Canvas run could not make progress." : undefined),
     updatedAt: finishedAt,
     ...(status === "running" ? {} : { completedAt: finishedAt }),
   });
@@ -549,7 +557,7 @@ async function runPlannedNode(
       latest,
       "blocked",
       {},
-      `${definition?.label || node.id}: Missing required input ${missingInput}.`,
+      `${node.label?.trim() || definition?.label || node.id}: Missing required input ${missingInput}.`,
       inputs,
     );
     return { nodeId: node.id, nodeRun };

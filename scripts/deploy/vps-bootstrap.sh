@@ -16,6 +16,7 @@ SETUP_KEY=""
 CREDENTIALS_FILE=""
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 LOCAL_DEPLOY_SCRIPT="$SCRIPT_DIR/vps-deploy.sh"
+LOCAL_DOMAIN_SCRIPT="$SCRIPT_DIR/vps-enable-domain.sh"
 
 log() {
   printf '[bootstrap] %s\n' "$*"
@@ -132,7 +133,16 @@ if [ "$APP_ONLY" = "true" ] && [ "${ID:-}" != "ubuntu" ]; then
 fi
 
 MEMORY_KB="$(awk '/^MemTotal:/ { print $2 }' /proc/meminfo)"
-if [ "${MEMORY_KB:-0}" -lt 1500000 ]; then
+SWAP_KB="$(awk '/^SwapTotal:/ { print $2 }' /proc/meminfo)"
+if [ "$APP_ONLY" = "true" ]; then
+  AVAILABLE_MEMORY_KB="$(( ${MEMORY_KB:-0} + ${SWAP_KB:-0} ))"
+  if [ "$AVAILABLE_MEMORY_KB" -lt 1500000 ]; then
+    fail "app-only deployment requires at least 1.5 GB combined RAM and enabled swap"
+  fi
+  if [ "${MEMORY_KB:-0}" -lt 1500000 ]; then
+    log "low-memory app-only host: using existing enabled swap during the image build"
+  fi
+elif [ "${MEMORY_KB:-0}" -lt 1500000 ]; then
   fail "at least 2 GB RAM is recommended; provision a larger VPS before installing"
 fi
 
@@ -191,7 +201,12 @@ if [ -f "$LOCAL_DEPLOY_SCRIPT" ] && grep -q '^DEPLOY_SCRIPT_VERSION="2"$' "$LOCA
 else
   install -m 0755 "$REPO_DIR/scripts/deploy/vps-deploy.sh" "$BIN_DIR/deploy.sh"
 fi
-install -m 0755 "$REPO_DIR/scripts/deploy/vps-enable-domain.sh" "$BIN_DIR/enable-domain.sh"
+if [ -f "$LOCAL_DOMAIN_SCRIPT" ] && grep -q '^DOMAIN_SCRIPT_VERSION="2"$' "$LOCAL_DOMAIN_SCRIPT"; then
+  log "installing adjacent domain wrapper version 2"
+  install -m 0755 "$LOCAL_DOMAIN_SCRIPT" "$BIN_DIR/enable-domain.sh"
+else
+  install -m 0755 "$REPO_DIR/scripts/deploy/vps-enable-domain.sh" "$BIN_DIR/enable-domain.sh"
+fi
 
 if [ ! -f "$ENV_FILE" ]; then
   log "creating persistent deployment configuration"

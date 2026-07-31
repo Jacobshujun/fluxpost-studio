@@ -522,7 +522,160 @@ export type GeneratedPost = {
   feishu?: FeishuPostPublishState;
   status: ReviewStatus;
   aiNotes: string[];
+  sourceBatchId?: string;
+  sourceBatchItemId?: string;
+  xhsSeries?: XhsCardSeries;
   updatedAt: string;
+};
+
+export type XhsStrategy = "a" | "b" | "c";
+export type XhsStyle = "cute" | "fresh" | "warm" | "bold" | "minimal" | "retro" | "pop" | "notion" | "chalkboard" | "study-notes" | "screen-print" | "sketch-notes";
+export type XhsLayout = "sparse" | "balanced" | "dense" | "list" | "comparison" | "flow" | "mindmap" | "quadrant";
+export type XhsPalette = "macaron" | "warm" | "neon";
+export type XhsCardRole = "cover" | "content" | "ending";
+export type XhsCardStatus = "planned" | "generating" | "validating" | "completed" | "needs_review" | "failed";
+export type XhsQaStatus = "pending" | "passed" | "failed" | "unavailable";
+
+export type XhsCardQa = {
+  status: XhsQaStatus;
+  attempts: number;
+  issues: string[];
+  checkedAt?: string;
+};
+
+export type XhsCard = {
+  id: string;
+  index: number;
+  role: XhsCardRole;
+  layout: XhsLayout;
+  hook?: string;
+  coreMessage: string;
+  title: string;
+  subtitle?: string;
+  points: string[];
+  visualConcept: string;
+  swipeHook?: string;
+  prompt: string;
+  candidateUrls: string[];
+  imageUrl?: string;
+  providerTaskId?: string;
+  providerTaskRoute?: "primary" | "backup";
+  providerStatus?: string;
+  status: XhsCardStatus;
+  qa: XhsCardQa;
+  error?: string;
+};
+
+export type XhsCardSeries = {
+  schemaVersion: 1;
+  source: {
+    name: "baoyu-xhs-images";
+    version: "2.0.1";
+    commit: "6b7a2e417500561a5ecdd0b168332f4142584617";
+  };
+  strategy: XhsStrategy;
+  style: XhsStyle;
+  defaultLayout: XhsLayout;
+  palette?: XhsPalette;
+  effectiveRatio: "3:4" | "2:3";
+  cards: XhsCard[];
+};
+
+export type OriginalBatchStatus = "queued" | "running" | "paused" | "completed" | "partial" | "failed" | "cancelled";
+export type OriginalBatchItemStatus = "queued" | "planning" | "writing" | "generating" | "validating" | "completed" | "needs_review" | "failed" | "cancelled";
+export type OriginalBatchQueueStatus = "queued" | "running" | "completed" | "failed" | "cancelled";
+
+export type OriginalBatchInputItem = {
+  topic: string;
+  requirements?: string;
+  vehicleKeyword?: string;
+};
+
+export type OriginalBatchSettings = {
+  strategy: "auto" | XhsStrategy;
+  style: "auto" | XhsStyle;
+  layout: "auto" | XhsLayout;
+  palette: "auto" | "default" | XhsPalette;
+  imageCount: "auto" | number;
+  webSearch: boolean;
+};
+
+export type OriginalContentPlan = {
+  contentType: string;
+  targetAudience: string[];
+  hook: string;
+  factBoundary: string[];
+  strategy: XhsStrategy;
+  style: XhsStyle;
+  defaultLayout: XhsLayout;
+  palette?: XhsPalette;
+  cards: Array<{
+    role: XhsCardRole;
+    layout: XhsLayout;
+    coreMessage: string;
+    swipeHook?: string;
+  }>;
+};
+
+export type OriginalBatchItem = {
+  id: string;
+  batchId: string;
+  ownerUserId: string;
+  ownerDisplayName: string;
+  ordinal: number;
+  status: OriginalBatchItemStatus;
+  input: OriginalBatchInputItem;
+  plan?: OriginalContentPlan;
+  writing?: Record<string, unknown>;
+  series?: XhsCardSeries;
+  postId?: string;
+  createdAt: string;
+  updatedAt: string;
+  completedAt?: string;
+  error?: string;
+};
+
+export type OriginalBatchCounts = {
+  total: number;
+  queued: number;
+  running: number;
+  completed: number;
+  needsReview: number;
+  failed: number;
+  cancelled: number;
+};
+
+export type OriginalBatch = {
+  id: string;
+  ownerUserId: string;
+  ownerDisplayName: string;
+  status: OriginalBatchStatus;
+  settings: OriginalBatchSettings;
+  counts: OriginalBatchCounts;
+  createdAt: string;
+  updatedAt: string;
+  completedAt?: string;
+  error?: string;
+  items?: OriginalBatchItem[];
+};
+
+export type OriginalBatchQueueItem = {
+  id: string;
+  batchId: string;
+  itemId: string;
+  ownerUserId: string;
+  status: OriginalBatchQueueStatus;
+  priority: number;
+  attempts: number;
+  maxAttempts: number;
+  runAfter: string;
+  lockedBy?: string;
+  lockedUntil?: string;
+  createdAt: string;
+  updatedAt: string;
+  startedAt?: string;
+  completedAt?: string;
+  error?: string;
 };
 
 export type SimpleRunInput = {
@@ -835,48 +988,17 @@ export type ImageGenerationQueueJob = {
   error?: string;
 };
 
-export type MaterialAsset = {
-  id: string;
-  path: string;
-  name: string;
-  extension: string;
-};
-
-export type MaterialAssetKind = "image" | "document" | "other";
-
-export type MaterialFolder = {
-  id: string;
-  ownerUserId?: string;
-  ownerDisplayName?: string;
-  name: string;
-  parentId?: string;
-  createdAt: string;
-  updatedAt: string;
-};
-
-export type MaterialLibraryAsset = {
-  id: string;
-  ownerUserId?: string;
-  ownerDisplayName?: string;
-  folderId: string;
-  path: string;
-  name: string;
-  extension: string;
-  kind: MaterialAssetKind;
-  tags: string[];
-  visualProfile?: MaterialVisualProfile;
-  createdAt: string;
-  updatedAt: string;
-};
-
-export type MaterialLibrarySnapshot = {
-  folders: MaterialFolder[];
-  assets: MaterialLibraryAsset[];
-};
-
 export type LibraryAssetRole = "reference" | "vehicle";
 
 export type LibraryVisibility = "private" | "team";
+
+export type LibraryListSort =
+  | "newest"
+  | "oldest"
+  | "name-asc"
+  | "name-desc"
+  | "owner-asc"
+  | "owner-desc";
 
 export type CopyLibraryEntry = {
   id: string;
@@ -960,7 +1082,6 @@ export type LibraryAsset = {
   taggingError?: string;
   cleanupStatus: LibraryObjectCleanupStatus;
   cleanupError?: string;
-  legacyMaterialAssetId?: string;
   canEdit?: boolean;
   createdAt: string;
   updatedAt: string;

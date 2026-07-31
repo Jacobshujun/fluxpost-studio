@@ -172,7 +172,7 @@ const simpleRuns = read("src/lib/simple-runs.ts");
 assertContains(simpleRuns, /filterUnsafeSourceItems\(crawledItems/, "Simple run workflow must apply source safety before tagging and ingest.");
 assertContains(simpleRuns, /filteredUnsafe/, "Simple platform results must expose unsafe-filtered counts.");
 
-const checkPs1 = read(".trellis/verification/check.ps1");
+const checkPs1 = read(".trellis/verification/check.mjs");
 assertContains(checkPs1, /Source safety filter check/, "Trellis baseline must include the source safety filter check.");
 
 console.log("Source safety filter check passed.");

@@ -46,6 +46,7 @@ assertContains(
   "Feishu attachment pool must default to 3 and cap at 10.",
 );
 assertContains(concurrency, /production:\s*readConcurrencyEnv\("WORKER_PRODUCTION_CONCURRENCY",\s*30,\s*50\)/, "Production pool must default to 30 and cap at 50.");
+assertContains(concurrency, /canvasRun:\s*readConcurrencyEnv\("WORKER_CANVAS_RUN_CONCURRENCY",\s*8,\s*20\)/, "Canvas run workers must have bounded concurrency.");
 assertContains(concurrency, /distributionRecord:\s*readConcurrencyEnv\("WORKER_DISTRIBUTION_RECORD_CONCURRENCY",\s*2,\s*10\)/, "Distribution record pool must default to 2 and cap at 10.");
 assertContains(concurrency, /distributionGpt:\s*readConcurrencyEnv\("WORKER_DISTRIBUTION_GPT_CONCURRENCY",\s*6,\s*15\)/, "Distribution GPT pool must be isolated from main generation.");
 assertContains(concurrency, /distributionFeishuRead:\s*readConcurrencyEnv\("WORKER_DISTRIBUTION_FEISHU_READ_CONCURRENCY",\s*2,\s*10\)/, "Distribution Feishu read pool must stay conservative.");
@@ -81,5 +82,9 @@ assertContains(simpleRuns, /mapWithConcurrency\(productionItems,\s*concurrencyCo
 assertContains(simpleRuns, /runWithConcurrencyPool\("production"/, "Simple-mode post production must use the production pool.");
 assertContains(simpleRuns, /taskConcurrency:\s*concurrencyConfig\.image/, "Simple-mode image tasks must use the global image concurrency cap.");
 assertContains(simpleRuns, /createRunUpdateQueue/, "Simple-mode concurrent progress writes must use a serialized run update queue.");
+
+const canvasRuns = read("src/lib/canvas/runs.ts");
+assertContains(canvasRuns, /concurrencyConfig\.canvasRun/, "Canvas queue consumers must use bounded worker concurrency.");
+assertContains(canvasRuns, /activeWorkers/, "Canvas queue worker state must track parallel consumers.");
 
 console.log("Concurrency pool integration check passed.");

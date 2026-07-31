@@ -19,6 +19,7 @@ const reviewPage = read("src/app/review/page.tsx");
 const reviewRoute = read("src/app/api/review/route.ts");
 const reviewImageRoute = read("src/app/api/review/images/route.ts");
 const reviewImageUpload = read("src/lib/review-image-upload.ts");
+const runtimeImageUpload = read("src/lib/runtime-image-upload.ts");
 const mainPage = read("src/app/page.tsx");
 const rootLayout = read("src/app/layout.tsx");
 const themeHelper = read("src/lib/theme.ts");
@@ -390,15 +391,21 @@ assertContains(
 );
 
 assertContains(
-  reviewImageUpload,
+  runtimeImageUpload,
   /sniffImageFormat\(buffer\)/,
-  "Review image upload helper should sniff image bytes before writing browser-visible media.",
+  "Shared runtime image upload should sniff image bytes before writing browser-visible media.",
+);
+
+assertContains(
+  runtimeImageUpload,
+  /public",\s*"generated",\s*"review-uploads"/,
+  "Review image uploads should be written under public/generated/review-uploads.",
 );
 
 assertContains(
   reviewImageUpload,
-  /public",\s*"generated",\s*"review-uploads"/,
-  "Review image uploads should be written under public/generated/review-uploads.",
+  /saveRuntimeImageUpload\(file,\s*\{\s*directory:\s*"review-uploads",\s*prefix:\s*"review"\s*\}\)/,
+  "Review image upload helper should delegate to the shared runtime image upload boundary.",
 );
 
 assertContains(

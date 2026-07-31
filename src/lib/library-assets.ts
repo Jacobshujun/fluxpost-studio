@@ -1,9 +1,7 @@
 import { createHash, randomUUID } from "node:crypto";
-import { readFile } from "node:fs/promises";
 import path from "node:path";
 import {
   deleteLibraryAssetFromDb,
-  findLibraryAssetByLegacyMaterialIdFromDb,
   findLibraryAssetByOwnerHashFromDb,
   getLibraryAssetFromDb,
   listLibraryAssetsFromDb,
@@ -25,13 +23,14 @@ import {
   normalizeLibraryManualOverrides,
   normalizeStringList,
 } from "./library-tags";
-import { listMaterialLibrary } from "./material-library";
+import { compareLibraryText, libraryListSortDirection, normalizeLibraryListSort } from "./library-sort";
 import { deleteRuntimeMediaObject, persistLibraryObject } from "./runtime-media-storage";
 import type {
   LibraryAsset,
   LibraryAssetPage,
   LibraryAssetRole,
   LibraryCollection,
+  LibraryListSort,
   LibraryManualTagOverrides,
   LibraryTagProfile,
   LibraryTaggingJob,
@@ -39,7 +38,6 @@ import type {
   LibraryTagBatchResult,
   LibraryTagSuggestion,
   LibraryVisibility,
-  MaterialLibraryAsset,
 } from "./types";
 import { isWorkspaceAdmin, scopeWorkspaceOwner, type WorkspaceAccessActor } from "./workspace-ownership";
 
@@ -65,11 +63,13 @@ export type LibraryAssetFilters = {
   people?: string[];
   customTags?: string[];
   tags?: string[];
+  sort?: LibraryListSort;
 };
 
 export type PatchLibraryAssetInput = Partial<Pick<LibraryAsset, "name" | "roles" | "visibility" | "collectionIds">> & {
   manualOverrides?: LibraryManualTagOverrides;
   restoreAi?: Array<keyof LibraryManualTagOverrides>;
+  removeRole?: LibraryAssetRole;
 };
 
 export type ImportLibraryAssetInput = {
@@ -79,7 +79,6 @@ export type ImportLibraryAssetInput = {
   role: LibraryAssetRole;
   visibility?: LibraryVisibility;
   collectionId?: string;
-  legacyMaterialAssetId?: string;
   manualCustomTags?: string[];
   owner?: { id: string; displayName: string };
 };
@@ -87,7 +86,8 @@ export type ImportLibraryAssetInput = {
 export async function listLibraryAssets(account: WorkspaceAccessActor, filters: LibraryAssetFilters = {}): Promise<LibraryAssetPage> {
   const collections = await listLibraryCollectionsFromDb();
   const visibleCollections = collections.filter((item) => isWorkspaceAdmin(account) || item.ownerUserId === account.id);
-  const cursor = decodeCursor(filters.cursor);
+  const sort = normalizeLibraryListSort(filters.sort);
+  const cursor = decodeCursor(filters.cursor, sort);
   const query = normalizeSearch(filters.search);
   const assets = (await listLibraryAssetsFromDb())
     .filter((asset) => canReadAsset(account, asset))
@@ -105,18 +105,38 @@ export async function listLibraryAssets(account: WorkspaceAccessActor, filters: 
     .filter(({ tagProfile }) => matchDimension([tagProfile.people], filters.people))
     .filter(({ tagProfile }) => matchDimension(tagProfile.customTags, filters.customTags))
     .filter(({ tagProfile }) => matchesAllLibraryTags(tagProfile, filters.tags))
-    .sort((left, right) => compareAssets(left.asset, right.asset))
+    .sort((left, right) => compareAssets(left.asset, right.asset, sort))
     .map(({ asset }) => asset);
   const total = assets.length;
-  const afterCursor = cursor ? assets.filter((asset) => compareAssetToCursor(asset, cursor) > 0) : assets;
+  const afterCursor = cursor ? assets.filter((asset) => compareAssetToCursor(asset, cursor, sort) > 0) : assets;
   const limit = Math.max(1, Math.min(pageLimitMax, Math.floor(filters.limit || 60)));
   const page = afterCursor.slice(0, limit);
   return {
     assets: page.map((asset) => ({ ...asset, canEdit: canEditAsset(account, asset) })),
     collections: visibleCollections,
     total,
-    nextCursor: afterCursor.length > limit && page.length ? encodeCursor(page[page.length - 1]) : undefined,
+    nextCursor: afterCursor.length > limit && page.length ? encodeCursor(page[page.length - 1], sort) : undefined,
   };
+}
+
+export async function resolveLibraryAssetSelections(
+  account: WorkspaceAccessActor,
+  assetIds: unknown[],
+  role: LibraryAssetRole,
+) {
+  const ids = Array.from(new Set(assetIds.map((value) => {
+    if (typeof value !== "string") throw new Error("Vehicle library asset id must be a string.");
+    return value.trim();
+  }).filter(Boolean)));
+  if (!ids.length) return [];
+  const assetsById = new Map((await listLibraryAssetsFromDb()).map((asset) => [asset.id, asset]));
+  return ids.map((id) => {
+    const asset = assetsById.get(id);
+    if (!asset || !canReadAsset(account, asset) || !asset.roles.includes(role)) {
+      throw new Error(`Vehicle library asset is not accessible: ${id}`);
+    }
+    return asset;
+  });
 }
 
 export async function listLibraryTagSuggestions(
@@ -211,25 +231,17 @@ export async function createLibraryCollection(
 
 export async function importLibraryAsset(account: WorkspaceAccessActor, input: ImportLibraryAssetInput) {
   const role = requireRole(input.role);
-  const visibility = requireVisibility(input.visibility || "private");
+  const visibility = requireVisibility(input.visibility || "team");
   if (!input.bytes.length) throw new Error("Image file is empty.");
   if (input.bytes.length > maxImageBytes) throw new Error("Image exceeds the 30 MB limit.");
   const format = detectImageFormat(input.bytes);
   if (!format) throw new Error("Unsupported or invalid image file. Use JPEG, PNG, GIF, or WebP.");
   const owner = input.owner || { id: account.id, displayName: account.displayName || account.id };
   const sha256 = createHash("sha256").update(input.bytes).digest("hex");
-  let duplicate = await findLibraryAssetByOwnerHashFromDb(owner.id, sha256);
+  const duplicate = await findLibraryAssetByOwnerHashFromDb(owner.id, sha256);
   if (duplicate?.roles.includes(role)) {
     return { status: "skipped_duplicate" as const, asset: { ...duplicate, canEdit: canEditAsset(account, duplicate) } };
   }
-  if (input.legacyMaterialAssetId) {
-    const migrated = await findLibraryAssetByLegacyMaterialIdFromDb(input.legacyMaterialAssetId);
-    if (migrated?.roles.includes(role)) {
-      return { status: "skipped_duplicate" as const, asset: { ...migrated, canEdit: canEditAsset(account, migrated) } };
-    }
-    duplicate ||= migrated;
-  }
-
   const relativePath = normalizeRelativePath(input.relativePath || input.originalName);
   const collectionId = input.collectionId
     ? (await validateCollectionIds(account, [input.collectionId], [role]))[0]
@@ -239,7 +251,6 @@ export async function importLibraryAsset(account: WorkspaceAccessActor, input: I
   if (duplicate) {
     return reuseLibraryAssetForRole(account, duplicate, role, {
       collectionId,
-      legacyMaterialAssetId: input.legacyMaterialAssetId,
       manualCustomTags: input.manualCustomTags,
     });
   }
@@ -273,7 +284,6 @@ export async function importLibraryAsset(account: WorkspaceAccessActor, input: I
     effectiveTags: mergeLibraryTagProfile(aiTags, manualOverrides),
     taggingStatus: role === "reference" ? "queued" : "completed",
     cleanupStatus: "ready",
-    legacyMaterialAssetId: input.legacyMaterialAssetId,
     createdAt: now,
     updatedAt: now,
   };
@@ -290,7 +300,6 @@ export async function importLibraryAsset(account: WorkspaceAccessActor, input: I
       if (racedDuplicate) {
         return reuseLibraryAssetForRole(account, racedDuplicate, role, {
           collectionId,
-          legacyMaterialAssetId: input.legacyMaterialAssetId,
           manualCustomTags: input.manualCustomTags,
         });
       }
@@ -314,7 +323,14 @@ export async function patchLibraryAssetWithResult(account: WorkspaceAccessActor,
   const asset = await requireEditableAsset(account, assetId);
   const overrides = { ...asset.manualOverrides, ...(patch.manualOverrides ? normalizeLibraryManualOverrides(patch.manualOverrides) : {}) };
   for (const key of patch.restoreAi || []) delete overrides[key];
-  const roles = patch.roles ? Array.from(new Set(patch.roles.map(requireRole))) : asset.roles;
+  const removeRole = patch.removeRole === undefined ? undefined : requireRole(patch.removeRole);
+  if (patch.roles && removeRole) throw new Error("Set roles or remove one role, not both.");
+  const roles = removeRole
+    ? asset.roles.filter((role) => role !== removeRole)
+    : patch.roles
+      ? Array.from(new Set(patch.roles.map(requireRole)))
+      : asset.roles;
+  if (patch.roles && !roles.length) throw new Error("Select at least one library role.");
   const collectionIds = patch.collectionIds
     ? await validateCollectionIds(account, patch.collectionIds, roles)
     : asset.collectionIds;
@@ -362,42 +378,11 @@ export async function permanentlyDeleteLibraryAsset(account: WorkspaceAccessActo
   }
 }
 
-export async function migrateLegacyMaterialAssets(account: WorkspaceAccessActor, limit = 20) {
-  if (!isWorkspaceAdmin(account)) throw new Error("Only workspace admins can migrate legacy materials.");
-  const library = await listMaterialLibrary(account);
-  const candidates = library.assets.filter((asset) => asset.kind === "image").slice(0, Math.max(1, Math.min(100, limit)));
-  const result = { imported: 0, skipped: 0, failed: 0, errors: [] as string[] };
-  for (const legacy of candidates) {
-    try {
-      if (await findLibraryAssetByLegacyMaterialIdFromDb(legacy.id)) {
-        result.skipped += 1;
-        continue;
-      }
-      const bytes = await readFile(legacy.path);
-      const imported = await importLibraryAsset(account, {
-        bytes,
-        originalName: legacy.name,
-        relativePath: legacyRelativePath(legacy, library.folders),
-        role: "vehicle",
-        legacyMaterialAssetId: legacy.id,
-        manualCustomTags: legacy.tags,
-        owner: { id: legacy.ownerUserId || account.id, displayName: legacy.ownerDisplayName || account.displayName || account.id },
-      });
-      if (imported.status === "imported") result.imported += 1;
-      else result.skipped += 1;
-    } catch (error) {
-      result.failed += 1;
-      result.errors.push(`${legacy.name}: ${errorMessage(error)}`);
-    }
-  }
-  return result;
-}
-
 async function reuseLibraryAssetForRole(
   account: WorkspaceAccessActor,
   asset: LibraryAsset,
   role: LibraryAssetRole,
-  input: { collectionId?: string; legacyMaterialAssetId?: string; manualCustomTags?: string[] },
+  input: { collectionId?: string; manualCustomTags?: string[] },
 ) {
   if (!canEditAsset(account, asset)) throw new Error("Library asset not found or is read-only.");
   const manualOverrides = input.manualCustomTags?.length
@@ -415,7 +400,6 @@ async function reuseLibraryAssetForRole(
       : asset.collectionIds,
     manualOverrides,
     effectiveTags: mergeLibraryTagProfile(asset.aiTags, manualOverrides),
-    legacyMaterialAssetId: asset.legacyMaterialAssetId || input.legacyMaterialAssetId,
     updatedAt: now,
   };
   const saved = await saveLibraryAssetRoleChange(asset, next);
@@ -542,28 +526,46 @@ function searchAsset(asset: LibraryAsset, tags: LibraryTagProfile, query: string
     .some((value) => normalizeSearch(value).includes(query));
 }
 
-function compareAssets(left: LibraryAsset, right: LibraryAsset) {
-  return right.createdAt.localeCompare(left.createdAt) || right.id.localeCompare(left.id);
+type LibraryAssetCursor = { version: 1; sort: LibraryListSort; value: string; id: string };
+
+export function compareAssets(left: LibraryAsset, right: LibraryAsset, sort: LibraryListSort = "newest") {
+  return compareAssetSortValues(assetSortValue(left, sort), left.id, assetSortValue(right, sort), right.id, sort);
 }
 
-function compareAssetToCursor(asset: LibraryAsset, cursor: { createdAt: string; id: string }) {
-  if (asset.createdAt !== cursor.createdAt) return cursor.createdAt.localeCompare(asset.createdAt);
-  return cursor.id.localeCompare(asset.id);
+function compareAssetToCursor(asset: LibraryAsset, cursor: LibraryAssetCursor, sort: LibraryListSort) {
+  return compareAssetSortValues(assetSortValue(asset, sort), asset.id, cursor.value, cursor.id, sort);
 }
 
-function encodeCursor(asset: LibraryAsset) {
-  return Buffer.from(JSON.stringify({ createdAt: asset.createdAt, id: asset.id })).toString("base64url");
+function encodeCursor(asset: LibraryAsset, sort: LibraryListSort) {
+  const cursor: LibraryAssetCursor = { version: 1, sort, value: assetSortValue(asset, sort), id: asset.id };
+  return Buffer.from(JSON.stringify(cursor)).toString("base64url");
 }
 
-function decodeCursor(value?: string) {
+function decodeCursor(value: string | undefined, sort: LibraryListSort) {
   if (!value) return undefined;
   try {
-    const decoded = JSON.parse(Buffer.from(value, "base64url").toString("utf8")) as { createdAt?: unknown; id?: unknown };
-    if (typeof decoded.createdAt === "string" && typeof decoded.id === "string") return { createdAt: decoded.createdAt, id: decoded.id };
+    const decoded = JSON.parse(Buffer.from(value, "base64url").toString("utf8")) as Partial<LibraryAssetCursor>;
+    if (decoded.version === 1 && decoded.sort === sort && typeof decoded.value === "string" && typeof decoded.id === "string") {
+      return decoded as LibraryAssetCursor;
+    }
   } catch {
     throw new Error("Invalid library cursor.");
   }
   throw new Error("Invalid library cursor.");
+}
+
+function assetSortValue(asset: LibraryAsset, sort: LibraryListSort) {
+  if (sort === "newest" || sort === "oldest") return asset.createdAt;
+  if (sort === "name-asc" || sort === "name-desc") return asset.name;
+  return asset.ownerDisplayName;
+}
+
+function compareAssetSortValues(leftValue: string, leftId: string, rightValue: string, rightId: string, sort: LibraryListSort) {
+  const direction = libraryListSortDirection(sort);
+  const value = sort === "newest" || sort === "oldest"
+    ? leftValue.localeCompare(rightValue)
+    : compareLibraryText(leftValue, rightValue);
+  return direction * value || direction * leftId.localeCompare(rightId);
 }
 
 function normalizeRelativePath(value: string) {
@@ -581,20 +583,6 @@ function safeObjectSegment(value: string) {
 
 function normalizeSearch(value?: string) {
   return (value || "").trim().toLocaleLowerCase();
-}
-
-function legacyRelativePath(asset: MaterialLibraryAsset, folders: Array<{ id: string; name: string; parentId?: string }>) {
-  const parts: string[] = [asset.name];
-  let folderId: string | undefined = asset.folderId;
-  const visited = new Set<string>();
-  while (folderId && folderId !== "root" && !visited.has(folderId)) {
-    visited.add(folderId);
-    const folder = folders.find((item) => item.id === folderId);
-    if (!folder) break;
-    parts.unshift(folder.name);
-    folderId = folder.parentId;
-  }
-  return normalizeRelativePath(parts.join("/"));
 }
 
 function errorMessage(error: unknown) {
@@ -623,5 +611,6 @@ export function parseLibraryAssetFilters(url: URL): LibraryAssetFilters {
     imageTypes: list("imageType"), scenes: list("scene"), vehicleModels: list("vehicleModel"),
     vehicleColors: list("vehicleColor"), angles: list("angle"), people: list("people"), customTags: list("customTag"),
     tags: list("tag"),
+    sort: normalizeLibraryListSort(url.searchParams.get("sort")),
   };
 }

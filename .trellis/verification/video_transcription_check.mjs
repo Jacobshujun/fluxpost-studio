@@ -32,7 +32,7 @@ const simpleRuns = read("src/lib/simple-runs.ts");
 const feishuImport = read("src/lib/feishu-content-import.ts");
 const xiaopengBbs = read("src/lib/xiaopeng-bbs.ts");
 const dongchedi = read("src/lib/dongchedi.ts");
-const baseline = read(".trellis/verification/check.ps1");
+const baseline = read(".trellis/verification/check.mjs");
 const searchedSources = [config, transcription, mediaCache, mediaBackfill, types].join("\n");
 
 assertContains(types, /export type SourceVideoTranscript/, "SourceVideoTranscript metadata must be typed.");

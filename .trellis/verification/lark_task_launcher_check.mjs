@@ -51,7 +51,7 @@ const eventRunner = read("scripts/lark-task-events.mjs");
 const database = read("src/lib/database.ts");
 const schema = read("db/migrations/001_initial_postgres.sql");
 const packageJson = read("package.json");
-const check = read(".trellis/verification/check.ps1");
+const check = read(".trellis/verification/check.mjs");
 
 assertContains(config, /larkTaskChatIds:\s*parseCsv\(process\.env\.LARK_TASK_CHAT_IDS/, "Lark task chat allow-list config is missing.");
 assertContains(config, /larkTaskUserMap:\s*parseKeyValueMap\(process\.env\.LARK_TASK_USER_MAP/, "Lark sender-to-owner map config is missing.");

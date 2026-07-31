@@ -39,7 +39,7 @@ yarn-error.log*
 /public/generated/
 /public/media/
 /test-artifacts/
-/.tmp-*.json
+/.tmp-*
 
 # env files (can opt-in for committing if needed)
 .env*

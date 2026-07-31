@@ -1,6 +1,7 @@
 "use client";
 
 import Link from "next/link";
+import Image from "next/image";
 import { useCallback, useEffect, useMemo, useState, useSyncExternalStore } from "react";
 import type { ChangeEvent, ClipboardEvent, DragEvent, ReactNode } from "react";
 import {
@@ -32,7 +33,7 @@ import {
 } from "lucide-react";
 import { toRemoteImagePreviewSrc } from "@/lib/media-preview";
 import { getStoredTheme, setStoredTheme, subscribeTheme, type ThemeMode } from "@/lib/theme";
-import type { FeishuPostPublishState, FeishuPublishJob, GeneratedPost, Platform } from "@/lib/types";
+import type { FeishuPostPublishState, FeishuPublishJob, GeneratedPost, Platform, XhsCard } from "@/lib/types";
 
 type ReviewFilter = GeneratedPost["status"] | "all" | "ready";
 type ReviewTimeFilter = "all" | "today" | "7d" | "30d";
@@ -167,7 +168,8 @@ export default function ReviewPage() {
       const res = await fetch("/api/production/posts");
       const data = (await res.json()) as { posts?: GeneratedPost[]; error?: string };
       if (!res.ok) throw new Error(data.error || "加载生成稿失败");
-      const nextPosts = data.posts || [];
+      const sourceBatchId = new URLSearchParams(window.location.search).get("sourceBatchId");
+      const nextPosts = sourceBatchId ? (data.posts || []).filter((post) => post.sourceBatchId === sourceBatchId) : data.posts || [];
       const nextSelectedId =
         preferredPostId && nextPosts.some((post) => post.id === preferredPostId)
           ? preferredPostId
@@ -297,6 +299,7 @@ export default function ReviewPage() {
         videoUrls: draft.videoUrls,
         imageTasks: draft.imageTasks,
         feishuVehicle: draft.feishuVehicle,
+        xhsSeries: draft.xhsSeries,
         ...patch,
       };
       const res = await fetch("/api/review", {
@@ -324,6 +327,7 @@ export default function ReviewPage() {
 
   function moveDraftImage(index: number, delta: -1 | 1) {
     if (!draft) return;
+    if (draft.xhsSeries) return;
     const nextIndex = index + delta;
     if (nextIndex < 0 || nextIndex >= draft.imageUrls.length) return;
     const imageUrls = [...draft.imageUrls];
@@ -334,6 +338,11 @@ export default function ReviewPage() {
 
   function removeDraftImage(index: number) {
     if (!draft || !draft.imageUrls[index]) return;
+    if (draft.xhsSeries) {
+      const nextDraft = updateSeriesCardImage(draft, index, undefined);
+      setDraft(nextDraft);
+      return;
+    }
     const imageUrls = draft.imageUrls.filter((_, currentIndex) => currentIndex !== index);
     const nextDraft = { ...draft, imageUrls };
     setDraft(nextDraft);
@@ -362,9 +371,10 @@ export default function ReviewPage() {
     const postId = draft.id;
     setDraft((currentDraft) => {
       if (!currentDraft || currentDraft.id !== postId || !currentDraft.imageUrls[index]) return currentDraft;
-      const imageUrls = [...currentDraft.imageUrls];
-      imageUrls[index] = imageUrl;
-      const nextDraft = { ...currentDraft, imageUrls };
+      const nextDraft = currentDraft.xhsSeries
+        ? updateSeriesCardImage(currentDraft, index, imageUrl)
+        : { ...currentDraft, imageUrls: currentDraft.imageUrls.map((url, currentIndex) => currentIndex === index ? imageUrl : url) };
+      const imageUrls = nextDraft.imageUrls;
       setPreview((current) => {
         if (!current || current.post.id !== postId || current.kind === "video") return current;
         return { post: nextDraft, index: Math.min(current.index, imageUrls.length - 1), kind: "image" };
@@ -397,12 +407,24 @@ export default function ReviewPage() {
     setImageBusyKey(`regenerate:${index}`);
     setMessage("");
     try {
-      const res = await fetch("/api/images", {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ prompt, count: 1 }),
-      });
-      const data = (await res.json()) as ImageGenerationResponse;
+      const seriesCard = seriesCardAtImageIndex(draft, index);
+      const res = seriesCard
+        ? await fetch("/api/original/cards/regenerate", {
+            method: "POST",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify({ postId: draft.id, cardId: seriesCard.id, prompt }),
+          })
+        : await fetch("/api/images", {
+            method: "POST",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify({ prompt, count: 1 }),
+          });
+      const data = (await res.json()) as ImageGenerationResponse & { post?: GeneratedPost; pending?: boolean };
+      if (seriesCard && data.post) {
+        mergeSavedPost(data.post, data.post.id);
+        setMessage(data.pending ? `第 ${index + 1} 张卡片已受理，后台继续生成` : `第 ${index + 1} 张卡片已重新生成并完成 QA`);
+        return;
+      }
       const imageUrl = data.imageUrls?.[0];
       if (!res.ok || !imageUrl) throw new Error(data.error || data.message || "图片模型没有返回新图");
       replaceDraftImage(index, imageUrl, `第 ${index + 1} 张图片已重新生成，保存后生效`);
@@ -411,6 +433,33 @@ export default function ReviewPage() {
     } finally {
       setImageBusyKey("");
     }
+  }
+
+  async function regenerateMissingSeriesCard(card: XhsCard) {
+    if (!draft?.xhsSeries) return;
+    setImageBusyKey(`series:${card.id}`);
+    setMessage("");
+    try {
+      const res = await fetch("/api/original/cards/regenerate", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ postId: draft.id, cardId: card.id, prompt: card.prompt }),
+      });
+      const data = (await res.json()) as { post?: GeneratedPost; error?: string; pending?: boolean };
+      if (!res.ok || !data.post) throw new Error(data.error || "卡片重新生成失败");
+      mergeSavedPost(data.post, data.post.id);
+      setMessage(data.pending ? `第 ${card.index + 1} 张卡片已受理，后台继续生成` : `第 ${card.index + 1} 张卡片已重新生成`);
+    } catch (error) {
+      setMessage(error instanceof Error ? error.message : "卡片重新生成失败");
+    } finally {
+      setImageBusyKey("");
+    }
+  }
+
+  function selectSeriesCandidate(index: number, imageUrl: string) {
+    if (!draft?.xhsSeries) return;
+    setDraft(updateSeriesCardImage(draft, index, imageUrl));
+    setMessage(`已选择第 ${index + 1} 张卡片候选图，保存后生效`);
   }
 
   async function uploadDraftImageAddition(file: File) {
@@ -791,12 +840,14 @@ export default function ReviewPage() {
                             <span className="review-gallery-index">{index + 1}</span>
                           </button>
                           <div className="review-gallery-tools" aria-label={`配图 ${index + 1} 操作`}>
+                            {!draft.xhsSeries ? <>
                             <button className="review-gallery-tool" type="button" onClick={() => moveDraftImage(index, -1)} disabled={index === 0 || Boolean(busy)} aria-label="上移配图">
                               <ArrowUp className="h-3.5 w-3.5" />
                             </button>
                             <button className="review-gallery-tool" type="button" onClick={() => moveDraftImage(index, 1)} disabled={index === draft.imageUrls.length - 1 || Boolean(busy)} aria-label="下移配图">
                               <ArrowDown className="h-3.5 w-3.5" />
                             </button>
+                            </> : null}
                             <button className="review-gallery-tool review-gallery-tool-danger" type="button" onClick={() => removeDraftImage(index)} disabled={Boolean(busy)} aria-label="删除配图">
                               <Trash2 className="h-3.5 w-3.5" />
                             </button>
@@ -841,8 +892,14 @@ export default function ReviewPage() {
                               </label>
                             </div>
                           </div>
+                          {seriesCardAtImageIndex(draft, index) ? <SeriesCardMeta card={seriesCardAtImageIndex(draft, index)!} onSelect={(url) => selectSeriesCandidate(index, url)} /> : null}
                         </div>
                         ))}
+                        {draft.xhsSeries?.cards.filter((card) => !card.imageUrl).map((card) => <div className="review-gallery-tile review-series-missing" key={card.id}>
+                          <div><ImagePlus className="h-5 w-5" /><strong>第 {card.index + 1} 张待补图</strong><span>{card.error || card.qa.issues.join("；") || card.status}</span></div>
+                          <textarea className="field review-image-prompt" value={card.prompt} readOnly aria-label={`第 ${card.index + 1} 张图片 Prompt`} />
+                          <button className="soft-button" type="button" onClick={() => regenerateMissingSeriesCard(card)} disabled={Boolean(busy) || Boolean(imageBusyKey)}>{imageBusyKey === `series:${card.id}` ? <Loader2 className="h-3.5 w-3.5 animate-spin" /> : <Wand2 className="h-3.5 w-3.5" />}重新生成</button>
+                        </div>)}
                         <ReviewImageAddTile busy={Boolean(busy) || Boolean(imageBusyKey)} isUploading={imageBusyKey === "upload:add"} onOpen={() => setImageUploadPanelOpen(true)} />
                       </>
                     ) : (
@@ -1440,6 +1497,9 @@ function resolveDraftImagePrompt(post: GeneratedPost, imagePromptByIndex: Record
   const manualPrompt = imagePromptByIndex[imagePromptKey(post.id, index)];
   if (manualPrompt !== undefined) return manualPrompt;
 
+  const seriesPrompt = seriesCardAtImageIndex(post, index)?.prompt;
+  if (seriesPrompt) return seriesPrompt;
+
   const imagePromptParts = splitImagePrompt(post.imagePrompt);
   if (imagePromptParts.length > 1 && imagePromptParts[index]) return imagePromptParts[index];
 
@@ -1452,6 +1512,34 @@ function resolveDraftImagePrompt(post: GeneratedPost, imagePromptByIndex: Record
 
 function imagePromptKey(postId: string, index: number) {
   return `${postId}:${index}`;
+}
+
+function SeriesCardMeta({ card, onSelect }: { card: XhsCard; onSelect: (url: string) => void }) {
+  return <div className="review-series-meta">
+    <div className="review-series-meta-head"><span>{card.role}</span><span className={`status-badge ${card.status === "completed" ? "status-approved" : ""}`}>{card.status}</span></div>
+    {card.qa.issues.length ? <ul>{card.qa.issues.map((issue, index) => <li key={`${card.id}-issue-${index}`}>{issue}</li>)}</ul> : <p>QA {card.qa.status}</p>}
+    {card.candidateUrls.length > 1 ? <div className="review-series-candidates">{card.candidateUrls.map((url, index) => <button key={`${url}-${index}`} type="button" className={url === card.imageUrl ? "review-series-candidate-active" : ""} onClick={() => onSelect(url)} aria-label={`选择候选图 ${index + 1}`}>
+      <Image alt="" src={toDisplayImageSrc(url)} width={88} height={112} unoptimized />
+    </button>)}</div> : null}
+  </div>;
+}
+
+function seriesCardAtImageIndex(post: GeneratedPost, imageIndex: number) {
+  return post.xhsSeries?.cards.filter((card) => Boolean(card.imageUrl))[imageIndex];
+}
+
+function updateSeriesCardImage(post: GeneratedPost, imageIndex: number, imageUrl: string | undefined): GeneratedPost {
+  if (!post.xhsSeries) return post;
+  const target = seriesCardAtImageIndex(post, imageIndex);
+  if (!target) return post;
+  const cards = post.xhsSeries.cards.map((card) => card.id !== target.id ? card : {
+    ...card,
+    imageUrl,
+    candidateUrls: imageUrl ? Array.from(new Set([...card.candidateUrls, imageUrl])) : card.candidateUrls,
+    status: imageUrl ? card.status : "needs_review" as const,
+  });
+  const xhsSeries = { ...post.xhsSeries, cards };
+  return { ...post, xhsSeries, imageUrls: cards.map((card) => card.imageUrl).filter((url): url is string => Boolean(url)) };
 }
 
 function moveImagePromptValues(current: Record<string, string>, post: GeneratedPost, index: number, nextIndex: number) {
