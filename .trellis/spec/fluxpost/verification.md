@@ -41,11 +41,11 @@ Do not deploy a dirty worktree, branch name, abbreviated SHA, local runtime rows
 
 ## Recent Verification
 
+- 2026-08-03: Exact SHA `a65767384c1b1993c95c8c32d053edcd10c3fac6` passed the complete local baseline and commit-bound isolated VPS verifier, then deployed to production 38 as `20260803-075434-a65767384c1b` after a zero-active-work preflight and validated root-only PostgreSQL backup. Manifest/image/container identity, app/PostgreSQL health, Nginx/public HTTPS, Open WebUI identity, routes/auth boundaries, required schema, workers, six named volumes, and retained rollback passed without provider or external-write calls.
 - 2026-08-03: `release/production-20260803` restored wrapper/bootstrap v3, verifier v1, the shared operation lock, the Docker `verification` target, a Linux-complete dependency lock, and archive-safe deployment fixtures. Focused checks, candidate path and secret review, the complete local baseline, and the VPS clean-archive baseline passed without external provider calls or service activation.
 - 2026-07-31: The restored cross-platform baseline passed after the Canvas distance-bounded three-layer edge pulse update: context budgets, JSON and feature gates, all deterministic domain checks, lint with five existing Canvas warnings and no errors, TypeScript, production build, isolated HTTP smoke on port 45678, and SQLite validation passed without external provider calls. Mocked Chromium also verified dark/light rendering, 12-edge phase distribution, source-to-target offset interpolation, movement/reduced-motion suppression, and 390px overflow.
 - 2026-07-30: Batch original ToAPIs recovery passed executable pending-cover/resume orchestration, PostgreSQL `EXPLAIN`, isolated SQLite recovery, focused domain checks, TypeScript, scoped lint, two production builds, local restart/HTTP smoke, and mocked Chromium at 1440x960/390x844.
 - 2026-07-30: Canvas V2 expanded preflight images passed frozen-snapshot extraction, task-local preview, TypeScript, scoped lint, production build/restart, HTTP smoke, decoded image rendering, viewer navigation, and desktop/mobile overflow checks.
-- 2026-07-30: Native Canvas zoom and visual repairs passed focused contracts, TypeScript, scoped lint, production build/restart, HTTP smoke, native wheel/Controls behavior, pointer anchoring, stable media identity, and nonblank mocked browser checks.
 Older evidence is preserved in `.trellis/spec/fluxpost/archive/verification-history.md`.
 
 ## Missing Coverage

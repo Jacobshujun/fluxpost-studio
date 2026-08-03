@@ -4,31 +4,28 @@ Last updated: 2026-08-03
 
 ## One-Line Status
 
-Infinite Canvas is live at `https://flux.lightmoment.net/canvas` on production release `20260729-061224-d05caddb1787`; the repaired candidate on `release/production-20260803` has passed local and isolated VPS verification and is not deployed.
+Production 38 serves exact SHA `a65767384c1b1993c95c8c32d053edcd10c3fac6` as release `20260803-075434-a65767384c1b`; the combined Canvas, libraries, and `/original` release passed fixed-SHA deployment and post-deploy verification.
 
 ## Current Focus
 
-- Production 38 remains on exact SHA `d05caddb17875bb9a5dde924f9e4e8654f8d3ee3`; hosts 82 and 104 are retired.
-- `release/production-20260803` preserves the combined Canvas, library, and original-batch candidate while restoring production wrapper v3, candidate verifier v1, the shared operation lock, and the Docker verification target that were missing from the earlier candidate.
-- Local `/original` provides durable owner-scoped 1-100 topic batches, cover-first card generation, QA/retry, review drafts, and resumable ToAPIs tasks. It is not deployed.
-- Local Canvas adds exact/range sampling, no-replacement parameter/copy pools, frozen-image preflight, cross-cursor selection, copy-pool bulk selection, guarded previews, distance-bounded three-layer edge pulses, native zoom, culling/detail tiers, stable media, and bounded queue concurrency. These refinements are not deployed.
-- Team image/copy libraries use server sorting, stable cursors, batch/range selection, and anchored preview. The local-path material domain was retired; compact runs freeze validated vehicle-library URLs.
+- Production 38 runs exact SHA `a65767384c1b1993c95c8c32d053edcd10c3fac6`; hosts 82 and 104 remain retired. The release includes deployment wrapper v3, verifier v1, the shared lock, Docker verifier, and repaired dependency/check fixtures.
+- `/original` is deployed with durable owner-scoped 1-100 topic batches, cover-first card generation, QA/retry, review drafts, and resumable ToAPIs tasks. Its real provider smoke remains pending approval.
+- Canvas exact/range sampling, no-replacement parameter/copy pools, frozen-image preflight, cross-cursor selection, copy-pool bulk selection, guarded previews, distance-bounded three-layer edge pulses, native zoom, culling/detail tiers, stable media, and bounded queue concurrency are deployed.
+- Team image/copy libraries with server sorting, stable cursors, batch/range selection, and anchored preview are deployed. The local-path material domain remains retired; compact runs freeze validated vehicle-library URLs.
 
 ## Next Entry
 
-1. Present the exact `release/production-20260803` SHA and verification evidence for separate deployment approval; do not fast-forward `main` or deploy before that approval.
-2. Run an operator-approved real `/original` smoke with 2 topics and 3 cards each; verify ratio, consistency, QA, regeneration, review, and billing.
-3. Review/archive the Canvas image-source and scheduler tasks after their commits are isolated; keep them local until a dedicated exact-SHA release.
-4. Use a small authenticated non-paid Canvas workflow before any operator-approved provider batch.
-5. Keep Seedance, GPT image/text, TikHub, ComfyUI, Feishu writes, and Lark actions behind explicit operator approval.
+1. Run an operator-approved real `/original` smoke with 2 topics and 3 cards each; verify ratio, consistency, QA, regeneration, review, and billing.
+2. Use a small authenticated non-paid Canvas workflow before any operator-approved provider batch.
+3. Review/archive remaining Canvas task artifacts without changing the deployed release unless a new exact-SHA candidate is separately approved.
+4. Keep Seedance, GPT image/text, TikHub, ComfyUI, Feishu writes, and Lark actions behind explicit operator approval.
 
 ## Recent Verification
 
-- 2026-08-03: The repaired production candidate restored wrapper/verifier contracts, a Linux-complete dependency lock, and archive-safe deployment tests. Local and VPS clean-archive baselines passed without external provider calls or service activation.
+- 2026-08-03: Exact SHA `a65767384c1b1993c95c8c32d053edcd10c3fac6` deployed to production 38 as `20260803-075434-a65767384c1b` after local baseline, commit-bound isolated VPS verification, zero-active-work preflight, and a root-only PostgreSQL backup. Manifest/image/container identity, app/PostgreSQL, Nginx/public HTTPS, Open WebUI, six named volumes, required schema, auth boundaries, routes, workers, and retained rollback release passed without provider or external-write calls.
 - 2026-07-31: Canvas edge pulses now use distance-bounded trail/body/core layers with idle/active timing, duration-aware phase offsets, moving/reduced-motion suspension, and source-to-target interpolation. Focused checks, TypeScript, lint, production build/restart, full baseline, HTTP smoke, and mocked dark/light/mobile browser checks passed without external calls.
 - 2026-07-31: Canvas copy-pool manual selection now supports selecting and clearing all entries in the current filter. The mistakenly restored retired `src/app/api/library/migrate/route.ts` surface was removed; focused checks, the full baseline, production build/restart, and port 3001 HTTP smoke passed.
 - 2026-07-30: `/original` passed deterministic domain, schema, API, resume/recovery, review, TypeScript, lint, build/restart, HTTP, and mocked responsive checks without provider calls.
-- 2026-07-30: Canvas image preflight, selection, scheduler sampling, native zoom, and visual fixes passed focused contracts, TypeScript, lint, build/restart, HTTP, and mocked responsive checks.
 - Older evidence is indexed in `verification.md` and preserved under `.trellis/spec/fluxpost/archive/`.
 
 ## Current Risks
