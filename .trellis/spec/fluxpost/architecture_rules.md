@@ -238,6 +238,7 @@ return NextResponse.json({ status: getConfigStatus(), advanced: getAdvancedConfi
 - Bootstrap must not change SSH daemon settings, host firewall rules, cloud security groups, or DNS. Those are operator/provider boundaries.
 - Do not add a new deployment path, process manager, service file, or server target without updating `project_brief.md`, `decisions.md`, `verification.md`, and `handoff.md`.
 - Local Windows plus `38.76.210.136` is the supported fix path. After local verification and operator approval, deploy an exact full SHA directly to 38 with the installed wrapper; 82 and 104 are retired FluxPost targets and must not be reintroduced as promotion gates.
+- Production candidates must preserve bootstrap/deploy wrapper v3, verifier v1, the shared `.operation.lock`, and the Docker `verification` target. The verifier and deploy wrapper may preserve newer installed domain/verifier versions, but candidate source and deterministic checks must never normalize a v3 production wrapper back to v2.
 
 ## Scenario: Direct Fixed-SHA Deployment To 38
 
@@ -247,6 +248,7 @@ return NextResponse.json({ status: getConfigStatus(), advanced: getAdvancedConfi
 
 ### 2. Signatures
 
+- Isolated candidate verification: `/opt/fluxpost-studio/bin/verify-candidate.sh --ref <full-sha>`.
 - Deploy: `/opt/fluxpost-studio/bin/deploy.sh --ref <approved-full-sha>`.
 - Rollback: `/opt/fluxpost-studio/bin/deploy.sh --rollback <release-id>`.
 - Fresh-host bootstrap remains `vps-bootstrap.sh --admin-user <user> --ref <sha>` and is not the routine 38 update path.
@@ -254,7 +256,8 @@ return NextResponse.json({ status: getConfigStatus(), advanced: getAdvancedConfi
 ### 3. Contracts
 
 - The requested ref resolves to a 40-hex commit; `release.manifest` records `commit=<sha>` and `image=fluxpost-app:<sha>`.
-- Local deterministic verification and explicit operator approval precede the remote deploy; no 104 staging approval or branch is required.
+- Local deterministic verification and isolated VPS candidate verification precede explicit operator approval and remote deploy; no 104 staging approval or branch is required.
+- Candidate verification builds `Dockerfile` target `verification` from a clean Git archive, writes a commit-bound success manifest only after the offline baseline passes, and must not read `env.production`, mount runtime volumes, or activate services.
 - 38 preserves all named volumes, keeps app port 3101 loopback-only, and uses host Nginx for `https://flux.lightmoment.net`; FluxPost Caddy remains disabled there.
 - Older app commits must not replace newer installed deploy wrappers. Production secrets, runtime data, media, and volumes are never copied to another host.
 
@@ -262,18 +265,19 @@ return NextResponse.json({ status: getConfigStatus(), advanced: getAdvancedConfi
 
 - Bad or non-resolving ref -> exit before release/build.
 - Local baseline failure or missing operator approval -> do not start the remote deploy.
+- Missing Docker `verification` target, verifier build failure, or verifier/deploy lock contention -> do not write a passing verification manifest and do not deploy.
 - Failed 38 app/PostgreSQL/public health -> restore the prior manifest/image and keep all volumes.
 - Full bootstrap on 38's existing Ubuntu 22.04 host -> reject; use the installed deploy wrapper.
 
 ### 5. Good/Base/Bad Cases
 
-- Good: deploy the locally verified full SHA directly to 38; manifest/image, app/PostgreSQL, loopback/public HTTPS, Nginx, and Open WebUI checks pass.
+- Good: verify the clean full SHA in the isolated Docker target, then deploy that approved SHA directly to 38; manifest/image, app/PostgreSQL, loopback/public HTTPS, Nginx, and Open WebUI checks pass.
 - Base: read-only diagnosis changes no release; an approved deploy preserves volumes and retains automatic rollback.
-- Bad: require a 104 staging pass, deploy mutable `main` without pinning the intended fix, copy production state, global-prune Docker, or change host swap/firewall/Docker service.
+- Bad: require a 104 staging pass, accept wrapper v2 as a production candidate, remove the Docker verification target while keeping the verifier, deploy mutable `main`, copy production state, global-prune Docker, or change host swap/firewall/Docker service.
 
 ### 6. Tests Required
 
-- Automated: ref/manifest/tag/rollback/domain-wrapper/memory/shell/destructive guards in `vps_deployment_check.mjs` plus the full Trellis baseline.
+- Automated: wrapper/bootstrap v3, verifier v1, lock, clean-archive verification, Docker target, ref/manifest/tag/rollback/domain-wrapper/memory/shell/destructive guards in `vps_deployment_check.mjs` plus the full Trellis baseline.
 - Live: release/manifest/image SHA equality, app/PostgreSQL health, loopback 3101, `https://flux.lightmoment.net` HTTP 200, Nginx validity, and unchanged healthy Open WebUI.
 
 ### 7. Wrong vs Correct
@@ -288,6 +292,7 @@ ssh root@38.76.210.136 /opt/fluxpost-studio/bin/deploy.sh
 #### Correct
 
 ```bash
+ssh root@38.76.210.136 "/opt/fluxpost-studio/bin/verify-candidate.sh --ref $APPROVED_FULL_SHA"
 ssh root@38.76.210.136 "/opt/fluxpost-studio/bin/deploy.sh --ref $APPROVED_FULL_SHA"
 ```
 

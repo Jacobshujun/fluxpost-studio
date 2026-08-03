@@ -5,6 +5,16 @@ WORKDIR /app
 COPY package.json package-lock.json ./
 RUN npm ci
 
+FROM deps AS verification
+WORKDIR /app
+ENV NEXT_TELEMETRY_DISABLED=1
+ENV FLUXPOST_STANDALONE_BUILD=1
+RUN apt-get update \
+  && apt-get install -y --no-install-recommends bash ffmpeg git \
+  && rm -rf /var/lib/apt/lists/*
+COPY . .
+RUN node .trellis/verification/check.mjs
+
 FROM node:24-bookworm-slim AS builder
 WORKDIR /app
 ENV NEXT_TELEMETRY_DISABLED=1

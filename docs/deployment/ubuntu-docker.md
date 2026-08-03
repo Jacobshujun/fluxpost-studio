@@ -83,16 +83,18 @@ The deploy wrapper fetches `main`, creates a clean release, builds the app image
 
 Do not edit source code under `current`. Make changes locally, verify them, push GitHub, and deploy from GitHub.
 
-### Deploy An Approved Commit
+### Verify And Deploy An Approved Commit
 
-Staging and production promotion should use the same complete Git commit instead of a moving branch:
+Production promotion must verify and deploy the same complete Git commit instead of a moving branch:
 
 ```bash
+sudo /opt/fluxpost-studio/bin/verify-candidate.sh --check --ref FULL_40_CHARACTER_COMMIT
+sudo /opt/fluxpost-studio/bin/verify-candidate.sh --ref FULL_40_CHARACTER_COMMIT
 sudo /opt/fluxpost-studio/bin/deploy.sh --check --ref FULL_40_CHARACTER_COMMIT
 sudo /opt/fluxpost-studio/bin/deploy.sh --ref FULL_40_CHARACTER_COMMIT
 ```
 
-The deploy wrapper fetches the requested ref, resolves it to a full commit, archives that commit, tags the built app image with the commit, and writes `release.manifest` inside the release directory. A failed health check restores the previously running release and image. Omitting `--ref` retains the existing `main` branch behavior.
+The verifier builds the clean commit's isolated `verification` target without reading production configuration, mounting runtime volumes, or activating services. The deploy wrapper then fetches the same ref, resolves it to a full commit, archives that commit, tags the built app image with the commit, and writes `release.manifest` inside the release directory. A failed health check restores the previously running release and image. Omitting `--ref` retains the existing `main` branch behavior.
 
 Do not promote by copying `current`, `env.production`, Docker volumes, or runtime media between servers. The release contains a symlink to the server-local environment file, and each server must retain its own secrets and runtime state.
 
