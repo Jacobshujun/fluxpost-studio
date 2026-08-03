@@ -246,6 +246,7 @@ function checkPinnedReleaseAndAutomaticRollback() {
   const sharedDir = path.join(appRoot, "shared");
   const fakeBin = path.join(tempRoot, "fake-bin");
   const fakeState = path.join(tempRoot, "fake-state");
+  const sourceRepo = createFixtureRepository(path.join(tempRoot, "source-repo"));
   mkdirSync(sharedDir, { recursive: true });
   mkdirSync(fakeBin, { recursive: true });
   mkdirSync(fakeState, { recursive: true });
@@ -307,12 +308,12 @@ export PATH="$FAKE_BIN:$PATH"
 exec "$DEPLOY_SCRIPT" "$@"
 `);
 
-  const head = gitOutput(["rev-parse", "HEAD"]);
-  const parent = gitOutput(["rev-parse", "HEAD^"]);
+  const head = gitOutput(["rev-parse", "HEAD"], sourceRepo);
+  const parent = gitOutput(["rev-parse", "HEAD^"], sourceRepo);
   const baseEnv = {
     ...process.env,
     APP_ROOT: toGitBashPath(appRoot),
-    REPO_URL: toGitBashPath(projectRoot),
+    REPO_URL: toGitBashPath(sourceRepo),
     COMPOSE_PROJECT_NAME: "fluxpost",
     FAKE_BIN: toGitBashPath(fakeBin),
     FAKE_DOCKER_STATE: toGitBashPath(fakeState),
@@ -459,6 +460,9 @@ function createFixtureRepository(repoRoot) {
   gitOutput(["config", "user.email", "verification@example.invalid"], repoRoot);
   gitOutput(["add", "."], repoRoot);
   gitOutput(["commit", "-m", "fixture candidate"], repoRoot);
+  writeFileSync(path.join(repoRoot, "fixture-version.txt"), "2\n", "utf8");
+  gitOutput(["add", "fixture-version.txt"], repoRoot);
+  gitOutput(["commit", "-m", "fixture update"], repoRoot);
   return repoRoot;
 }
 
