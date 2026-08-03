@@ -37,6 +37,7 @@ export type CanvasNodeType =
   | "utility.image-preview"
   | "utility.display-any"
   | "utility.prompt-template"
+  | "utility.text-concatenate"
   | "utility.prompt-switch"
   | "utility.text-split"
   | "utility.image-select"

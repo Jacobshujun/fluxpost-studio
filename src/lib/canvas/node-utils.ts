@@ -29,6 +29,16 @@ export function renderCanvasPromptTemplate(config: CanvasNodeConfig, values: str
     .trim();
 }
 
+export function concatenateCanvasText(config: CanvasNodeConfig, values: string[]) {
+  const delimiterValue = String(config.delimiter ?? "");
+  const delimiter = delimiterValue === "\n" || delimiterValue === "\\n" ? "\n" : delimiterValue;
+  const cleanWhitespace = config.clean_whitespace === true;
+  return values
+    .map((value) => cleanWhitespace ? value.trim() : value)
+    .filter((value) => value !== "")
+    .join(delimiter);
+}
+
 export function splitCanvasText(
   config: CanvasNodeConfig,
   value: string,

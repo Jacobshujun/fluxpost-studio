@@ -269,6 +269,27 @@ const canvasNodeDefinitionVersions: CanvasNodeDefinition[] = [
     bypass: { inputPort: "values", outputPort: "text" },
   },
   {
+    type: "utility.text-concatenate",
+    version: 1,
+    label: "文本拼接",
+    description: "按顺序用指定分隔符合并最多四路文本。",
+    category: "utility",
+    icon: "Combine",
+    color: "#16a34a",
+    inputs: [
+      { id: "text_a", label: "文本 A", kind: "text" },
+      { id: "text_b", label: "文本 B", kind: "text" },
+      { id: "text_c", label: "文本 C", kind: "text" },
+      { id: "text_d", label: "文本 D", kind: "text" },
+    ],
+    outputs: [{ id: "text", label: "文字", kind: "text" }],
+    fields: [
+      { key: "delimiter", label: "分隔符", kind: "text", placeholder: "例如：\\n" },
+      { key: "clean_whitespace", label: "清理首尾空白", kind: "boolean" },
+    ],
+    defaultConfig: { delimiter: ", ", clean_whitespace: false },
+  },
+  {
     type: "utility.prompt-switch",
     version: 1,
     label: "提示词 Switch",
@@ -562,6 +583,9 @@ export function validateCanvasNodeConfig(type: CanvasNodeType, config: CanvasNod
     }
     if (field.kind === "url-list" && value !== undefined && !Array.isArray(value)) {
       errors.push(`${definition.label}: ${field.label} must be a URL list.`);
+    }
+    if (field.kind === "boolean" && typeof value !== "boolean") {
+      errors.push(`${definition.label}: ${field.label} must be a boolean.`);
     }
   }
   if (type === "input.text" && !String(config.text || "").trim()) errors.push("文字节点内容不能为空。");

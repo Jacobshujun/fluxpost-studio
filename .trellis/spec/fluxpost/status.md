@@ -4,7 +4,7 @@ Last updated: 2026-08-03
 
 ## One-Line Status
 
-Production 38 serves exact SHA `a65767384c1b1993c95c8c32d053edcd10c3fac6` as release `20260803-075434-a65767384c1b`; the combined Canvas, libraries, and `/original` release passed fixed-SHA deployment and post-deploy verification.
+The local `utility.text-concatenate@1` Canvas candidate is fully verified and awaiting commit/push/deployment; production 38 still serves exact SHA `a65767384c1b1993c95c8c32d053edcd10c3fac6` as release `20260803-075434-a65767384c1b`.
 
 ## Current Focus
 
@@ -15,13 +15,14 @@ Production 38 serves exact SHA `a65767384c1b1993c95c8c32d053edcd10c3fac6` as rel
 
 ## Next Entry
 
-1. Run an operator-approved real `/original` smoke with 2 topics and 3 cards each; verify ratio, consistency, QA, regeneration, review, and billing.
-2. Use a small authenticated non-paid Canvas workflow before any operator-approved provider batch.
-3. Review/archive remaining Canvas task artifacts without changing the deployed release unless a new exact-SHA candidate is separately approved.
+1. Commit/push the verified text-concatenate candidate, then deploy its exact SHA after the existing zero-work, backup, verifier, and wrapper gates pass.
+2. Run the established read-only post-deploy identity, route, auth, schema, worker, service, volume, and rollback checks.
+3. Run an operator-approved real `/original` smoke with 2 topics and 3 cards each; verify ratio, consistency, QA, regeneration, review, and billing.
 4. Keep Seedance, GPT image/text, TikHub, ComfyUI, Feishu writes, and Lark actions behind explicit operator approval.
 
 ## Recent Verification
 
+- 2026-08-03: Local `utility.text-concatenate@1` passed focused checks, TypeScript, lint, build/restart, HTTP, baseline, diff/task validation, and mocked desktop/mobile checks without external calls.
 - 2026-08-03: Exact SHA `a65767384c1b1993c95c8c32d053edcd10c3fac6` deployed to production 38 as `20260803-075434-a65767384c1b` after local baseline, commit-bound isolated VPS verification, zero-active-work preflight, and a root-only PostgreSQL backup. Manifest/image/container identity, app/PostgreSQL, Nginx/public HTTPS, Open WebUI, six named volumes, required schema, auth boundaries, routes, workers, and retained rollback release passed without provider or external-write calls.
 - 2026-07-31: Canvas edge pulses now use distance-bounded trail/body/core layers with idle/active timing, duration-aware phase offsets, moving/reduced-motion suspension, and source-to-target interpolation. Focused checks, TypeScript, lint, production build/restart, full baseline, HTTP smoke, and mocked dark/light/mobile browser checks passed without external calls.
 - 2026-07-31: Canvas copy-pool manual selection now supports selecting and clearing all entries in the current filter. The mistakenly restored retired `src/app/api/library/migrate/route.ts` surface was removed; focused checks, the full baseline, production build/restart, and port 3001 HTTP smoke passed.

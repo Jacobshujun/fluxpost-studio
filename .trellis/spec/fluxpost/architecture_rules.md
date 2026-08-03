@@ -560,6 +560,7 @@ throw new ImageProviderError("accepted task timed out", {
 - `GET|POST /api/copy-library`; `GET|PATCH|DELETE /api/copy-library/:id`. Copy entries store `title`, `body`, normalized manual `tags`, `visibility`, owner, and timestamps in `copy_library_entries` for both database backends.
 - `PATCH /api/canvas/workflows/:id` updates with `{ revision }`; a stale revision raises HTTP `409`.
 - PostgreSQL/SQLite tables: `canvas_workflows`, `canvas_schedules`, `canvas_runs`, `canvas_node_runs`, and `canvas_run_queue`.
+- `concatenateCanvasText(config, values) -> string` joins already port-ordered text values without I/O.
 - `splitCanvasText(config, value, { fallbackToBody? }) -> { head?: string; tail: string }`; executors enable fallback only for `utility.text-split@2`.
 - `CanvasNode.size?: { width: number; height: number }` stores optional visual layout metadata in workflow JSON and immutable run snapshots; it does not change node versions or API route shapes.
 - `CanvasPortKind = CanvasArtifactKind | "any"`; `areCanvasPortKindsCompatible(outputKind, inputKind)` accepts a typed output only when the input is the same kind or `any`.
@@ -574,6 +575,7 @@ throw new ImageProviderError("accepted task timed out", {
 - `CanvasNode.executionMode` defaults to `enabled`; `bypass` requires an explicit registry input/output mapping, while `disabled` produces no output. Snapshots and the `fluxpost.canvas.nodes` clipboard envelope preserve the mode.
 - `CanvasNode.size` is optional for legacy content-driven nodes. Explicit desktop resizing persists finite dimensions from `190x120` through `720x900`; workflow duplication and the version-1 `fluxpost.canvas.nodes` clipboard envelope preserve validated sizes. Size is excluded from config validation and execution fingerprints.
 - Common nodes include `input.content-pool`, `input.library-images`, `utility.prompt-template`, `utility.text-split`, `model.gpt-vision`, `utility.image-select`, `utility.image-transform`, and `utility.video-frames`. Their config remains flat scalars/string arrays, and they reuse existing artifact kinds without schema migration.
+- `utility.text-concatenate@1` is the "文本拼接" definition. It has optional single-connection text inputs `text_a` through `text_d`, processed in that fixed order, and one `text` output. Config is `{ delimiter: string, clean_whitespace: boolean }`, defaulting to `{ delimiter: ", ", clean_whitespace: false }`; literal `\\n` and an actual newline both normalize to one newline delimiter. The executor ignores empty strings, trims each input before filtering only when cleanup is enabled, preserves whitespace-only values when cleanup is disabled, and returns a successful empty text artifact when no valid input remains. It has no bypass mapping, capability, API, schema, migration, provider call, or external write.
 - `utility.text-split@2` is the latest “文本分割” definition. It preserves input `text` and outputs `head`/`tail`, whose UI labels are “标题”/“正文”. Config is `{ mode: "first-line" | "delimiter", delimiter: string, delimiterIndex: positive integer }`, defaulting to `{ mode: "first-line", delimiter: "---", delimiterIndex: 1 }`; first-line mode ignores and hides delimiter fields. Editable V1 nodes upgrade on save/duplicate, while immutable V1 snapshots remain version-resolvable.
 - Delimiter mode finds the configured 1-based, exact, case-sensitive, non-overlapping occurrence from left to right, removes that boundary, and trims both outputs without changing body-internal paragraphs. V2 emits only `tail` with the trimmed original text when the boundary is absent or either side is empty; it never emits an empty `head` artifact. V1 keeps strict failure semantics.
 - Content-pool/library inputs execute only stored selection-time snapshots. Explicit inspector refresh replaces the flat snapshot; ordinary runs never read live content/library services. Prompt and selection nodes preserve incoming edge/item order.
@@ -621,6 +623,7 @@ throw new ImageProviderError("accepted task timed out", {
 - Terminal batch child -> schedule wakeup. Dynamic scheduler import failure -> explicit server error log while the already-persisted terminal run remains terminal; process-start recovery or the next wakeup can reconcile it later.
 - Missing/too many/oversized/unsupported upload files -> HTTP `400`; unsigned upload -> `401`; storage failure -> surfaced `500` with no URL added to the graph; malformed clipboard envelopes are ignored.
 - Empty text-split input -> execution error in every version. Empty delimiter or non-positive/non-integer `delimiterIndex` in V2 delimiter mode -> config error. V1 absent/empty-sided boundary -> execution error; V2 absent/empty-sided boundary -> success with the complete trimmed input on `tail` only.
+- Missing or non-boolean `clean_whitespace` on `utility.text-concatenate@1` -> config validation error. Missing optional text inputs and all-empty effective inputs -> successful execution with `{ text: { kind: "text", value: "" } }`; they are not graph or execution errors.
 - Missing content/library snapshot, unresolved template placeholder, invalid/out-of-range image index, invalid transform dimensions/format/quality, or invalid/excess frame plan -> node validation/execution error with no partial artifact.
 - Missing/duplicate scheduler roles are listed together with Chinese business labels, and the drawer requires five explicit unique node selections before preflight. Draft preflight adopts the workflow's latest saved revision, while launch still rejects any workflow/preview revision drift; missing frozen assets, insufficient distinct pools, or more than 2,000 image children also fail before atomic launch. Launched schedules are immutable and never auto-publish.
 - Copy create/update with empty or oversized title/body, invalid visibility, non-array tags, more than 30 tags, or a tag over 40 characters -> HTTP `400`; unsigned access -> `401`; invisible entry -> `404`; non-owner member mutation -> `403`.
@@ -633,6 +636,7 @@ throw new ImageProviderError("accepted task timed out", {
 - Good: isolated content assembly executes current text, reuses compatible GPT image/preview output with provenance, creates a fresh draft, and makes zero image-model calls.
 - Good: a frozen content snapshot feeds a template/vision/image-selection chain, a dangling text edge creates `compose.social-post` on its selected body port, and local transforms persist bounded URL/dimension artifacts.
 - Good: `A---B---C` with delimiter `---` and index `2` emits title `A---B` and body `C`; CRLF and body paragraphs remain intact after outer trimming.
+- Good: text A ` first ` and text C `third` with `delimiter="\\n"` and cleanup enabled emit `first\nthird`; disconnected B/D inputs are omitted without changing A-D order.
 - Good: a selected node is resized freely, autosaves `{ size: { width, height } }`, reloads and pastes at the same size, while mobile remains compact and non-resizable.
 - Good: one typed output connects to “展示任何”, running that producer passively refreshes the sink, and text/image/video/social-post/publish-job results use the existing viewers without exposing a wildcard downstream port.
 - Good: three text nodes contain independently editable prompts, two batches select inputs 1 and 3, and their frozen Switch snapshots use those exact ordinals while variable vehicle counts queue round-robin.
@@ -640,14 +644,16 @@ throw new ImageProviderError("accepted task timed out", {
 - Good: content task A writes its review draft while sibling B is still running, and a server restart reconciles stale completed image runs without opening the Canvas schedule drawer.
 - Good: five matching copy snapshots are shuffled without replacement for five content tasks; each task freezes a unique source and runs title GPT plus body GPT before `compose.social-post` creates the existing review draft.
 - Base: a V2 boundary miss emits no `head` artifact and sends the original copy through `tail`; omitted execution/run modes and node size preserve legacy enabled/content-driven behavior.
+- Base: text A containing only spaces remains present when cleanup is disabled; four absent or empty inputs still emit a successful empty text artifact.
 - Bad: adding `any` to `CanvasArtifactKind`, declaring a wildcard output, duplicating compatibility conditions in graph/clipboard/UI, persisting ResizeObserver measurements as user size, allowing mobile resize handles, emitting an empty title on fallback, rerunning a paid isolated ancestor, embedding Base64, passing shell strings to ffmpeg, or resubmitting accepted Seedance/ToAPIs work after timeout.
 - Bad: editing prompt bodies in the scheduler, giving Switch ports semantic scene/person meanings, silently shrinking an insufficient sample, launching only valid batches, mutating a launched sample, or overwriting an edited draft when retry images arrive.
 - Bad: waiting for aggregate batch completion before creating review drafts, relying on `GET /api/canvas/schedules` as the only recovery trigger, or allowing a baseline smoke server to advance real persisted work.
 - Bad: wrapping a short copy pool with modulo assignment, rereading the copy library during single-content resampling or finalization, mutating saved Canvas snapshots after a source edit, treating `copy-input` as a sixth mandatory role for legacy schedules, or combining title/body into one model call in the standard skeleton.
+- Bad: sorting concatenation inputs by edge creation order, treating whitespace-only text as empty while cleanup is disabled, requiring any A-D port, or adding a bypass/provider capability to the local utility.
 
 ### 6. Tests Required
 
-- `canvas_workflows_check.mjs`: node-size bounds, graph/clipboard round trip, resize/mobile lockout, V1/V2 text-split, display-any, graph/common-node/vision/media/reuse/preview/isolated execution, direct enqueue, shortcut guards, bounded history, and quick-add contracts.
+- `canvas_workflows_check.mjs`: node-size bounds, graph/clipboard round trip, resize/mobile lockout, V1/V2 text-split, text-concatenate registration/config validation/A-D ordering/empty filtering/whitespace cleanup/newline normalization/empty success, display-any, graph/common-node/vision/media/reuse/preview/isolated execution, direct enqueue, shortcut guards, bounded history, and quick-add contracts.
 - `canvas_workflows_check.mjs` plus scoped Canvas browser checks must assert visible-element culling; distance-bounded idle trail/body/core paths; selected/source-colored base paths; source-to-target offset interpolation; non-synchronized phases; movement-time flow suspension; reduced-motion suppression; detail-tier boundaries/idempotence; media visibility, DOM identity, and request stability during movement; native wheel/control zoom without a custom easing controller; pointer anchoring; and preserved node/handle/MiniMap behavior without external calls.
 - `toapis_image_api_check.mjs` and `canvas_workflows_check.mjs`: accepted-id callback ordering, immediate non-terminal handoff, terminal-status preservation, immediate one-GET resume without POST/reference preparation, running-attempt reuse, provider-field round trip, expired-lease recovery, API wakeup, delayed requeue, parallel ready nodes, and image-pool cap 100.
 - TypeScript, lint, build, full Trellis baseline, and local production restart must pass without paid provider calls.
@@ -672,6 +678,11 @@ return resumeTaskId ? queryProviderTask(resumeTaskId) : submitProviderTask();
 
 const outputs = { tail: { kind: "text", value: split.tail } };
 if (split.head !== undefined) outputs.head = { kind: "text", value: split.head };
+
+// Keep concatenation ordered by stable port ids, not by edge insertion order.
+const values = ["text_a", "text_b", "text_c", "text_d"]
+  .flatMap((port) => textValues(inputs[port]));
+const text = concatenateCanvasText(node.config, values);
 
 // Persist only an explicit NodeResizer dimension change.
 if (change.type === "dimensions" && change.setAttributes && change.dimensions) {

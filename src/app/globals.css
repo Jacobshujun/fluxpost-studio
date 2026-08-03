@@ -243,7 +243,7 @@ button {
 .canvas-node-resized .canvas-node-head, .canvas-node-resized .canvas-node-ports { flex: 0 0 auto; }
 .canvas-node-resized .canvas-node-content { display: flex; flex: 1 1 auto; flex-direction: column; min-height: 0; overflow: auto; overscroll-behavior: contain; scrollbar-width: thin; }
 .canvas-node-resized .canvas-node-text-editor { flex: 1 1 112px; height: auto; resize: none; }
-.canvas-node-resized .canvas-text-split-controls { flex: 0 0 auto; }
+.canvas-node-resized .canvas-text-split-controls, .canvas-node-resized .canvas-text-concatenate-controls { flex: 0 0 auto; }
 .canvas-node-resized .canvas-node-image-grid { flex: 1 1 126px; min-height: 80px; height: auto; }
 .canvas-node-resized .canvas-node-result { display: flex; flex: 1 1 62px; flex-direction: column; min-height: 48px; }
 .canvas-node-resized .canvas-node-result-gallery { flex: 1 1 160px; min-height: 160px; height: auto; }
@@ -275,6 +275,13 @@ button {
 .canvas-text-split-controls input, .canvas-text-split-controls select { width: 100%; min-width: 0; height: 28px; padding: 4px 6px; border: 1px solid var(--line-strong); border-radius: 5px; outline: none; color: var(--foreground); background: var(--canvas-panel); font: inherit; font-size: 10px; }
 .canvas-text-split-controls input:focus, .canvas-text-split-controls select:focus { border-color: var(--node-color); box-shadow: 0 0 0 2px color-mix(in srgb, var(--node-color) 16%, transparent); }
 .canvas-text-split-fields { display: grid; grid-template-columns: minmax(0, 1fr) 56px; gap: 6px; min-width: 0; }
+.canvas-text-concatenate-controls { display: grid; gap: 7px; margin: 8px 8px 0; padding: 8px; border: 1px solid var(--line); border-radius: 6px; background: var(--canvas-panel-soft); }
+.canvas-text-concatenate-controls label { display: grid; gap: 3px; min-width: 0; }
+.canvas-text-concatenate-controls label > span { overflow: hidden; color: var(--text-muted); font-size: 8px; font-weight: 800; text-overflow: ellipsis; white-space: nowrap; }
+.canvas-text-concatenate-controls input:not([type]) { width: 100%; min-width: 0; height: 28px; padding: 4px 6px; border: 1px solid var(--line-strong); border-radius: 5px; outline: none; color: var(--foreground); background: var(--canvas-panel); font: inherit; font-size: 10px; }
+.canvas-text-concatenate-controls input:not([type]):focus { border-color: var(--node-color); box-shadow: 0 0 0 2px color-mix(in srgb, var(--node-color) 16%, transparent); }
+.canvas-text-concatenate-controls .canvas-text-concatenate-toggle { grid-template-columns: minmax(0, 1fr) auto; align-items: center; gap: 8px; }
+.canvas-text-concatenate-toggle input, .canvas-inspector-toggle input { width: 16px; height: 16px; margin: 0; accent-color: var(--node-color, var(--accent)); }
 .canvas-node-image-grid { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); grid-template-rows: repeat(2, minmax(0, 1fr)); gap: 3px; height: 126px; margin: 8px 8px 0; overflow: hidden; border: 1px solid var(--line); border-radius: 6px; background: var(--canvas-stage); }
 .canvas-node-image-grid.is-count-1 { grid-template-columns: minmax(0, 1fr); grid-template-rows: minmax(0, 1fr); }
 .canvas-node-image-grid.is-count-2 { grid-template-rows: minmax(0, 1fr); }
@@ -319,6 +326,7 @@ button {
 .canvas-inspector-content label > span, .canvas-port-list > span { font-size: 11px; color: var(--text-soft); font-weight: 800; }
 .canvas-inspector-content textarea { min-height: 76px; resize: vertical; font-size: 12px; }
 .canvas-inspector-content input, .canvas-inspector-content select { font-size: 12px; }
+.canvas-inspector-content .canvas-inspector-toggle { grid-template-columns: minmax(0, 1fr) auto; align-items: center; }
 .canvas-snapshot-picker { display: grid; gap: 8px; margin-bottom: 14px; padding-bottom: 14px; border-bottom: 1px solid var(--line); }
 .canvas-picker-heading { display: flex; align-items: center; gap: 7px; min-width: 0; }
 .canvas-picker-heading > span { flex: 1; color: var(--text-soft); font-size: 11px; font-weight: 800; }

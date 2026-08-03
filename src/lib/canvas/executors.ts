@@ -7,7 +7,7 @@ import type { GeneratedPost, SourceImageTask } from "../types";
 import type { WorkspaceAccessActor } from "../workspace-ownership";
 import { DreaminaNeedsConfigError, queryDreaminaVideo, submitDreaminaVideo } from "./dreamina";
 import { CanvasMediaNeedsConfigError, extractCanvasVideoFrames, transformCanvasImages } from "./media-tools";
-import { canvasVisionPresets, parseCanvasImageSelection, renderCanvasPromptTemplate, splitCanvasText } from "./node-utils";
+import { canvasVisionPresets, concatenateCanvasText, parseCanvasImageSelection, renderCanvasPromptTemplate, splitCanvasText } from "./node-utils";
 import { normalizeUrlList } from "./registry";
 import type { CanvasArtifact, CanvasNode, CanvasNodeRun } from "./types";
 
@@ -56,6 +56,7 @@ const executors: Record<CanvasNode["type"], CanvasNodeExecutor> = {
   "utility.image-preview": executeImagePreview,
   "utility.display-any": executeDisplayAny,
   "utility.prompt-template": executePromptTemplate,
+  "utility.text-concatenate": executeTextConcatenate,
   "utility.prompt-switch": executePromptSwitch,
   "utility.text-split": executeTextSplit,
   "utility.image-select": executeImageSelect,
@@ -120,6 +121,12 @@ async function executeDisplayAny({ inputs }: CanvasNodeExecutionContext) {
 
 async function executePromptTemplate({ node, inputs }: CanvasNodeExecutionContext) {
   const value = renderCanvasPromptTemplate(node.config, textValues(inputs.values));
+  return { outputs: { text: { kind: "text" as const, value } } };
+}
+
+async function executeTextConcatenate({ node, inputs }: CanvasNodeExecutionContext) {
+  const values = ["text_a", "text_b", "text_c", "text_d"].flatMap((port) => textValues(inputs[port]));
+  const value = concatenateCanvasText(node.config, values);
   return { outputs: { text: { kind: "text" as const, value } } };
 }
 

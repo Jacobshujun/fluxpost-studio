@@ -38,6 +38,7 @@ import {
   ChevronRight,
   Clapperboard,
   ClipboardPaste,
+  Combine,
   Copy,
   CopyPlus,
   FileText,
@@ -138,6 +139,7 @@ type QuickAddChoice = { definition: (typeof canvasNodeDefinitions)[number]; port
 type CanvasCopyLibraryResponse = { entries: CopyLibraryEntryView[]; tags: string[] };
 type CanvasTaskFilter = "all" | "active" | "history" | "failed";
 type CanvasViewportDetail = "full" | "reduced" | "overview";
+type CanvasEditableConfigValue = string | number | boolean | string[];
 type PreviewState =
   | { kind: "text"; value: string }
   | { kind: "image"; url: string; index: number; width?: number; height?: number; sequence?: Array<{ id: string; url: string; width?: number; height?: number }> }
@@ -150,7 +152,7 @@ type CanvasNodeInteraction = {
   selectedNodeId?: string;
   canResize: boolean;
   workflowRevision?: number;
-  onConfigChange: (nodeId: string, key: string, value: string | number | string[]) => void;
+  onConfigChange: (nodeId: string, key: string, value: CanvasEditableConfigValue) => void;
   onExecutionModeChange: (nodeId: string, mode: CanvasNodeExecutionMode) => void;
   onNodeFocus: (nodeId: string) => void;
   onPreview: (preview: NonNullable<PreviewState>) => void;
@@ -223,7 +225,7 @@ export default function CanvasPage() {
     dirtyVersionRef.current += 1;
     setDirty(true);
   }, []);
-  const updateNodeConfig = useCallback((nodeId: string, key: string, value: string | number | string[]) => {
+  const updateNodeConfig = useCallback((nodeId: string, key: string, value: CanvasEditableConfigValue) => {
     setNodes((current) => current.map((node) => node.id !== nodeId ? node : {
       ...node,
       data: { canvasNode: { ...node.data.canvasNode, config: { ...node.data.canvasNode.config, [key]: value } } },
@@ -730,7 +732,7 @@ export default function CanvasPage() {
     markDirty();
   }, [edges, isMobile, markDirty, nodes]);
 
-  function updateSelectedConfig(key: string, value: string | number | string[]) {
+  function updateSelectedConfig(key: string, value: CanvasEditableConfigValue) {
     if (selectedNodeId) updateNodeConfig(selectedNodeId, key, value);
   }
 
@@ -1274,6 +1276,11 @@ function CanvasFlowNode({ data, selected }: NodeProps<FlowNode>) {
       onChange={(key, value) => interaction?.onConfigChange(node.id, key, value)}
       onFocus={() => interaction?.onNodeFocus(node.id)}
     /> : null}
+    {node.type === "utility.text-concatenate" ? <CanvasTextConcatenateControls
+      node={node}
+      onChange={(key, value) => interaction?.onConfigChange(node.id, key, value)}
+      onFocus={() => interaction?.onNodeFocus(node.id)}
+    /> : null}
     {visibleImageUrls.length ? <div className={`canvas-node-image-grid is-count-${visibleImageUrls.length}`}>
       {visibleImageUrls.map((url, index) => <button className="nodrag nopan nowheel" type="button" key={`${url}-${index}`} onClick={(event) => {
         event.stopPropagation();
@@ -1284,7 +1291,7 @@ function CanvasFlowNode({ data, selected }: NodeProps<FlowNode>) {
       </button>)}
     </div> : null}
     {node.type === "utility.text-split" ? <CanvasTextSplitNodeResult nodeRun={nodeRun} latestSuccessful={latestSuccessful} historicalRevision={historicalRevision} onPreview={(next) => interaction?.onPreview(next)} />
-      : node.type.startsWith("model.") || ["utility.prompt-template", "utility.image-select", "utility.image-transform", "utility.video-frames"].includes(node.type)
+      : node.type.startsWith("model.") || ["utility.prompt-template", "utility.text-concatenate", "utility.image-select", "utility.image-transform", "utility.video-frames"].includes(node.type)
         ? <CanvasModelNodeResult node={node} nodeRun={nodeRun} latestSuccessful={latestSuccessful} historicalRevision={historicalRevision} onPreview={(next) => interaction?.onPreview(next)} />
         : null}
     {node.type === "utility.image-preview" ? <CanvasImagePreviewNodeResult nodeRun={nodeRun} latestSuccessful={latestSuccessful} onPreview={(next) => interaction?.onPreview(next)} /> : null}
@@ -1393,6 +1400,47 @@ function CanvasTextSplitControls({
         onClick={focusControl}
       /></label>
     </div> : null}
+  </div>;
+}
+
+function CanvasTextConcatenateControls({
+  node,
+  onChange,
+  onFocus,
+}: {
+  node: CanvasNode;
+  onChange: (key: string, value: string | boolean) => void;
+  onFocus: () => void;
+}) {
+  return <div
+    className="canvas-text-concatenate-controls nodrag nopan nowheel"
+    onPointerDown={(event) => event.stopPropagation()}
+    onDoubleClick={(event) => event.stopPropagation()}
+    onKeyDown={(event) => event.stopPropagation()}
+    onKeyUp={(event) => event.stopPropagation()}
+    onWheel={(event) => event.stopPropagation()}
+  >
+    <label><span>分隔符</span><input
+      aria-label="文本拼接分隔符"
+      value={String(node.config.delimiter ?? "")}
+      placeholder="例如：\\n"
+      onChange={(event) => onChange("delimiter", event.target.value)}
+      onClick={(event) => {
+        event.stopPropagation();
+        event.currentTarget.focus({ preventScroll: true });
+        onFocus();
+      }}
+    /></label>
+    <label className="canvas-text-concatenate-toggle"><span>清理首尾空白</span><input
+      type="checkbox"
+      aria-label="清理文本首尾空白"
+      checked={node.config.clean_whitespace === true}
+      onChange={(event) => onChange("clean_whitespace", event.target.checked)}
+      onClick={(event) => {
+        event.stopPropagation();
+        onFocus();
+      }}
+    /></label>
   </div>;
 }
 
@@ -1673,7 +1721,7 @@ function NodeInspector({
   mediaBusy,
 }: {
   node: CanvasNode;
-  onChange: (key: string, value: string | number | string[]) => void;
+  onChange: (key: string, value: CanvasEditableConfigValue) => void;
   onPatch: (patch: CanvasNode["config"]) => void;
   onLabelChange: (label: string) => void;
   onExecutionModeChange: (mode: CanvasNodeExecutionMode) => void;
@@ -1740,7 +1788,7 @@ function NodeInspector({
     {definition.fields.map((field) => {
       if (field.key === "outputCompression" && node.config.outputFormat !== "jpeg") return null;
       if (field.key === "template" && node.config.preset !== "custom") return null;
-      if ((field.key === "delimiter" || field.key === "delimiterIndex") && node.config.mode !== "delimiter") return null;
+      if (node.type === "utility.text-split" && (field.key === "delimiter" || field.key === "delimiterIndex") && node.config.mode !== "delimiter") return null;
       if ((field.key === "width" || field.key === "height") && node.config.preset !== "custom") return null;
       if (field.key === "coverSeconds" && node.config.mode !== "cover") return null;
       if (field.key === "count" && node.type === "utility.video-frames" && node.config.mode !== "even") return null;
@@ -1752,7 +1800,7 @@ function NodeInspector({
       if (field.kind === "content-pool-picker") return <ContentPoolSnapshotPicker key={field.key} node={node} onPatch={onPatch} />;
       if (field.kind === "library-image-picker") return <LibraryImageSnapshotPicker key={field.key} node={node} onPatch={onPatch} onPreviewImage={onPreviewImage} />;
       if (field.kind === "copy-library-picker") return <CopyLibrarySnapshotPicker key={field.key} node={node} onPatch={onPatch} />;
-      return <label key={field.key}><span>{field.label}</span>
+      return <label key={field.key} className={field.kind === "boolean" ? "canvas-inspector-toggle" : undefined}><span>{field.label}</span>
         {field.kind === "textarea" || field.kind === "url-list" ? <textarea value={field.kind === "url-list" && Array.isArray(value) ? value.join("\n") : String(value || "")} placeholder={field.placeholder} onChange={(event) => onChange(field.key, field.kind === "url-list" ? event.target.value.split(/\r?\n/).map((item) => item.trim()).filter(Boolean) : event.target.value)} />
           : field.kind === "select" ? <select value={String(value || "")} onChange={(event) => {
             const next = event.target.value;
@@ -1762,6 +1810,7 @@ function NodeInspector({
             }
             onChange(field.key, next);
           }}>{options?.map((option) => <option key={option.value} value={option.value}>{option.label}</option>)}</select>
+          : field.kind === "boolean" ? <input type="checkbox" checked={value === true} onChange={(event) => onChange(field.key, event.target.checked)} />
           : <input type={field.kind === "number" ? "number" : "text"} min={field.min} max={field.max} value={value === undefined ? "" : String(value)} placeholder={field.placeholder} onChange={(event) => onChange(field.key, field.kind === "number" ? Number(event.target.value) : event.target.value)} />}
       </label>;
     })}
@@ -3834,6 +3883,7 @@ function iconForNode(type: CanvasNodeType) {
   if (type === "utility.image-preview") return <Images {...props} />;
   if (type === "utility.display-any") return <Eye {...props} />;
   if (type === "utility.prompt-template") return <FileText {...props} />;
+  if (type === "utility.text-concatenate") return <Combine {...props} />;
   if (type === "utility.prompt-switch") return <GitBranch {...props} />;
   if (type === "utility.text-split") return <Scissors {...props} />;
   if (type === "utility.image-select") return <ImageIcon {...props} />;

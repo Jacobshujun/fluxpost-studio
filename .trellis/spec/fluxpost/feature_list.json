@@ -332,9 +332,9 @@
         "Batch scheduler V2 lets users define typed main/child parameters, source filters, fixed/full/random expansion with exact or inclusive-range counts, main-once and child-per-main preview-frozen no-replacement selection, cartesian/zip composition, explicit node-field bindings, partial/strict aggregation, and custom names for same-type Canvas nodes"
       ],
       "evidence": [
+        "2026-08-03 local utility.text-concatenate@1 candidate passed ordered-input, delimiter, whitespace, empty-output, inspector, TypeScript, lint, build/restart, baseline, HTTP, and mocked responsive checks without external calls; push/deploy pending.",
         "2026-08-03 combined Canvas release a65767384c1b1993c95c8c32d053edcd10c3fac6 passed production identity, /canvas 200, API 401, schema, workers, zero queues, protected-service, six-volume, and rollback checks",
-        "2026-07-27 to 2026-07-28 common nodes, resizing, text split/display-any, direct enqueue, task/history controls, shortcuts, bounded undo/redo, the 100-slot image pool, batch scheduler V1, Prompt Switch, standard skeleton, binding editor, aggregate diagnostics, and draft preflight passed deterministic, build/restart, HTTP/SQLite, and mocked responsive checks without paid calls",
-        "2026-07-30 flexible scheduler exact/range sampling passed deterministic main-once/child-per-main, Cartesian/zip, capacity, image-group, cumulative-limit, legacy compatibility, TypeScript, scoped lint, production build/restart/HTTP smoke, and mocked 1440x960/390x844 controls/layout checks without live providers"
+        "2026-07-27 to 2026-07-30 common nodes, resizing, text split/display-any, direct enqueue, task/history controls, shortcuts, bounded undo/redo, the 100-slot image pool, batch scheduler V1/V2, Prompt Switch, standard skeleton, binding editor, aggregate diagnostics, exact/range main-once/child-per-main sampling, Cartesian/zip, capacity/image-group/cumulative limits, legacy compatibility, draft preflight, TypeScript, lint, build/restart, HTTP/SQLite, and mocked responsive checks passed without paid calls"
       ],
       "notes": "Keep ready_for_review until operator-approved real Seedance/Feishu and batch image-provider smokes plus PostgreSQL migration/multi-user concurrency are live-verified."
     },

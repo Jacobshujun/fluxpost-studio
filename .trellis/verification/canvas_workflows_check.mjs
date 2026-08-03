@@ -89,6 +89,27 @@ try {
   assert.equal(getCanvasNodeDefinition("utility.text-split")?.label, "文本分割", "text split must use the confirmed node name");
   assert.deepEqual(getCanvasNodeDefinition("utility.text-split")?.outputs.map((port) => port.label), ["标题", "正文"]);
   assert.equal(getCanvasNodeDefinition("utility.text-split", 1)?.label, "文本拆分", "legacy text split snapshots must retain the v1 definition");
+  assert.deepEqual(getCanvasNodeDefinition("utility.text-concatenate"), {
+    type: "utility.text-concatenate",
+    version: 1,
+    label: "文本拼接",
+    description: "按顺序用指定分隔符合并最多四路文本。",
+    category: "utility",
+    icon: "Combine",
+    color: "#16a34a",
+    inputs: [
+      { id: "text_a", label: "文本 A", kind: "text" },
+      { id: "text_b", label: "文本 B", kind: "text" },
+      { id: "text_c", label: "文本 C", kind: "text" },
+      { id: "text_d", label: "文本 D", kind: "text" },
+    ],
+    outputs: [{ id: "text", label: "文字", kind: "text" }],
+    fields: [
+      { key: "delimiter", label: "分隔符", kind: "text", placeholder: "例如：\\n" },
+      { key: "clean_whitespace", label: "清理首尾空白", kind: "boolean" },
+    ],
+    defaultConfig: { delimiter: ", ", clean_whitespace: false },
+  }, "text concatenate must retain the WAS-compatible v1 contract");
   assert.deepEqual(getCanvasNodeDefinition("utility.image-preview")?.bypass, { inputPort: "images", outputPort: "images" }, "image preview must declare explicit image passthrough");
   assert.equal(getCanvasNodeDefinition("utility.image-preview")?.passiveSink, true, "image preview must retain passive sink behavior");
   assert.deepEqual(getCanvasNodeDefinition("utility.prompt-switch")?.inputs.map((port) => port.id), ["input1", "input2", "input3"], "prompt switch must expose three ordinal inputs");
@@ -119,6 +140,7 @@ try {
     "input.content-pool": { inputs: [], outputs: ["title:text", "body:text", "source:text", "images:images", "videos:videos"] },
     "input.library-images": { inputs: [], outputs: ["images:images"] },
     "utility.prompt-template": { inputs: ["values:text"], outputs: ["text:text"] },
+    "utility.text-concatenate": { inputs: ["text_a:text", "text_b:text", "text_c:text", "text_d:text"], outputs: ["text:text"] },
     "utility.text-split": { inputs: ["text:text"], outputs: ["head:text", "tail:text"] },
     "model.gpt-vision": { inputs: ["images:images", "instruction:text"], outputs: ["text:text"] },
     "utility.image-select": { inputs: ["images:images"], outputs: ["images:images"] },
@@ -148,9 +170,16 @@ try {
   assert.match(validateCanvasNodeConfig("utility.text-split", { mode: "delimiter", delimiter: "---", delimiterIndex: 0 }, 2).join(" "), /positive integer/i);
   assert.match(validateCanvasNodeConfig("utility.text-split", { mode: "delimiter", delimiter: "---", delimiterIndex: 1.5 }, 2).join(" "), /positive integer/i);
   assert.equal(validateCanvasNodeConfig("utility.text-split", { mode: "first-line", delimiter: "", delimiterIndex: 0 }, 2).length, 0, "first-line mode must ignore delimiter settings");
+  assert.equal(validateCanvasNodeConfig("utility.text-concatenate", { delimiter: ", ", clean_whitespace: false }, 1).length, 0);
+  assert.match(validateCanvasNodeConfig("utility.text-concatenate", { delimiter: ", ", clean_whitespace: "false" }, 1).join(" "), /must be a boolean/i);
 
   assert.equal(nodeUtils.renderCanvasPromptTemplate({ preset: "custom", template: "二={{input2}}\n一={{input1}}\n全部={{input}}" }, ["A", "B"]), "二=B\n一=A\n全部=A\n\nB");
   assert.throws(() => nodeUtils.renderCanvasPromptTemplate({ preset: "custom", template: "{{input3}}" }, ["A", "B"]), /missing input3/i);
+  assert.equal(nodeUtils.concatenateCanvasText({ delimiter: ", ", clean_whitespace: false }, ["A", "", " B ", "C"]), "A,  B , C");
+  assert.equal(nodeUtils.concatenateCanvasText({ delimiter: "\\n", clean_whitespace: true }, [" A ", "", " B ", "  "]), "A\nB");
+  assert.equal(nodeUtils.concatenateCanvasText({ delimiter: "\n", clean_whitespace: false }, ["A", "B"]), "A\nB");
+  assert.equal(nodeUtils.concatenateCanvasText({ delimiter: "-", clean_whitespace: false }, []), "");
+  assert.equal(nodeUtils.concatenateCanvasText({ delimiter: "-", clean_whitespace: false }, [" ", "B"]), " -B", "whitespace-only input must remain when cleanup is disabled");
   assert.deepEqual(nodeUtils.splitCanvasText({ mode: "first-line" }, "标题\n正文第一行\n正文第二行"), { head: "标题", tail: "正文第一行\n正文第二行" });
   assert.deepEqual(nodeUtils.splitCanvasText({ mode: "delimiter", delimiter: "---" }, "标题---正文"), { head: "标题", tail: "正文" });
   assert.throws(() => nodeUtils.splitCanvasText({ mode: "delimiter", delimiter: "---" }, "没有分隔符"), /does not contain/i);
@@ -196,6 +225,15 @@ try {
     edges: [{ id: "e1", source: "text", sourcePort: "text", target: "gpt", targetPort: "prompt" }],
     viewport: { x: 0, y: 0, zoom: 1 },
   };
+  const concatenateNode = { id: "concatenate", type: "utility.text-concatenate", version: 1, position: { x: 220, y: 0 }, config: { delimiter: "\\n", clean_whitespace: true } };
+  const concatenateGraph = {
+    nodes: [textNode, concatenateNode],
+    edges: [{ id: "concatenate-a", source: "text", sourcePort: "text", target: "concatenate", targetPort: "text_a" }],
+    viewport: { x: 0, y: 0, zoom: 1 },
+  };
+  assert.equal(validateCanvasGraph(concatenateGraph).valid, true, "text concatenate must participate in typed graph validation");
+  const concatenateClipboard = createCanvasClipboardPayload(concatenateGraph.nodes, concatenateGraph.edges, ["text", "concatenate"]);
+  assert.equal(parseCanvasClipboardPayload(JSON.stringify(concatenateClipboard))?.nodes.find((node) => node.type === "utility.text-concatenate")?.config.clean_whitespace, true, "text concatenate config must round-trip through clipboard validation");
   assert.deepEqual(CANVAS_NODE_SIZE_LIMITS, { minWidth: 190, minHeight: 120, maxWidth: 720, maxHeight: 900 }, "node resizing bounds must stay shared across persistence and UI");
   assert.equal(validateCanvasGraph(validGraph).valid, true, "valid typed graph should pass");
   const resizedGraph = structuredClone(validGraph);
@@ -348,6 +386,24 @@ try {
   assert.deepEqual((await executePromptSwitch({ node: { version: 2, config: { selectedInput: "3" } }, inputs: promptInputs })).outputs, { text: { kind: "text", value: "提示词三" } });
   await assert.rejects(() => executePromptSwitch({ node: { version: 2, config: { selectedInput: "1" } }, inputs: { ...promptInputs, input1: [] } }), /非空文字输入/);
   assert.deepEqual((await executePromptSwitch({ node: { version: 1, config: { strategy: "scene-person" } }, inputs: { scenePerson: [{ kind: "text", value: "旧提示词" }] } })).outputs, { text: { kind: "text", value: "旧提示词" } });
+  const executeTextConcatenate = compileFunctions(
+    executorSource,
+    ["executeTextConcatenate", "textValues"],
+    "executeTextConcatenate",
+    { concatenateCanvasText: nodeUtils.concatenateCanvasText },
+  );
+  assert.deepEqual((await executeTextConcatenate({
+    node: { type: "utility.text-concatenate", version: 1, config: { delimiter: "\\n", clean_whitespace: true } },
+    inputs: {
+      text_d: [{ kind: "text", value: " D " }],
+      text_b: [{ kind: "text", value: " B " }],
+      text_a: [{ kind: "text", value: " A " }],
+    },
+  })).outputs, { text: { kind: "text", value: "A\nB\nD" } }, "executor must use fixed A-D order instead of object insertion order");
+  assert.deepEqual((await executeTextConcatenate({
+    node: { type: "utility.text-concatenate", version: 1, config: { delimiter: ", ", clean_whitespace: false } },
+    inputs: {},
+  })).outputs, { text: { kind: "text", value: "" } }, "executor must succeed with no connected inputs");
   const executeTextSplit = compileFunctions(
     executorSource,
     ["executeTextSplit", "textValues"],
@@ -567,6 +623,7 @@ const canvasFlowNodeSource = page.slice(page.indexOf("function CanvasFlowNode"),
 requireText(canvasFlowNodeSource, ["visibleImageUrls.map", "<Image src={url}"], "canvas media nodes must retain their mounted media subtree");
 assert.ok(!canvasFlowNodeSource.includes("canvasViewportDetail"), "viewport detail must not conditionally remount Canvas node media");
 requireText(page, ["CanvasTextSplitControls", "文本分割方式", "第几个分隔符", "CanvasTextSplitNodeResult", "CanvasTextSplitOutput", "未匹配，已全部作为正文", "getTextOutputArtifact", 'field.key === "delimiterIndex"'], "text split v2 UI");
+requireText(page, ["CanvasTextConcatenateControls", "文本拼接分隔符", "清理文本首尾空白", 'node.type === "utility.text-concatenate"', 'field.kind === "boolean"', "canvas-inspector-toggle", "Combine"], "text concatenate UI");
 requireText(page, ["NodeResizer", "CANVAS_NODE_SIZE_LIMITS", "displayedNodes", "applyCanvasNodeChanges", "change.setAttributes", "applyFlowNodeSize", "canvas-node-resize-handle", "canvas-node-resize-line"], "canvas node resizing UI");
 requireText(page, ["CanvasNodeTextEditor", "setDraft(nextValue)", "document.activeElement !== editorRef.current", "data-node-id={nodeId}"], "canvas text editor caret preservation");
 requireText(page, ["CanvasDisplayAnyNodeResult", "CanvasDisplayAnyArtifact", "getDisplayAnyArtifact", "outputs.preview", "等待上游结果", "没有图片内容", "没有视频内容", "飞书发布任务", "areCanvasPortKindsCompatible", "isQuickAddPortCompatible", "portKindLabel", "utility.display-any"], "display-any UI");
