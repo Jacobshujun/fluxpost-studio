@@ -475,3 +475,36 @@ Separated remote verification artifacts from Canvas selection and edge-flow chan
 ### Next Steps
 
 - None - task complete
+
+
+## Session 15: Deploy production release a657673
+
+**Date**: 2026-08-03
+**Task**: Deploy production release a657673
+**Branch**: `release/production-20260803`
+
+### Summary
+
+Deployed exact SHA a65767384c1b1993c95c8c32d053edcd10c3fac6 to production 38 as release 20260803-075434-a65767384c1b after local and isolated verification, zero-active-work preflight, and a validated root-only PostgreSQL backup; post-deploy identity, health, routes, auth, schema, workers, volumes, rollback retention, and protected services passed without external provider or write calls.
+
+### Main Changes
+
+(Add details)
+
+### Git Commits
+
+| Hash | Message |
+|------|---------|
+| `59db8ea` | (see git log) |
+
+### Testing
+
+- [OK] (Add test results)
+
+### Status
+
+[OK] **Completed**
+
+### Next Steps
+
+- None - task complete
