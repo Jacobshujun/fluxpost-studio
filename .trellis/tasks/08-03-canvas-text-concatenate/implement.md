@@ -52,3 +52,11 @@ git ls-remote origin refs/heads/release/production-20260803
 - 提交前：只撤销本任务明确拥有的改动，不触碰用户已有提交和无关未跟踪文件。
 - 部署前：任何门禁失败都停止，生产保持不变。
 - 部署后：使用 `/opt/fluxpost-studio/bin/deploy.sh --rollback <captured-release-id>` 恢复，并复验原 manifest/image、应用/PostgreSQL、Nginx/HTTPS、Open WebUI 与 volumes。
+
+## Outcome
+
+- Feature commit and deployed SHA: `e090bf683599e8075f3fa71781c7d39faf9e007a`.
+- Production release: `20260803-111421-e090bf683599`; retained rollback release: `20260803-075434-a65767384c1b`.
+- Root-only backup: `pre-e090bf683599-20260803T111359Z.dump`, non-empty custom-format archive validated before activation.
+- Local/full and isolated candidate baselines passed. Post-deploy manifest/image/container identity, app/PostgreSQL, routes, auth boundaries, required schema, enabled workers, zero active queues, Nginx/HTTPS, Open WebUI, six volumes, rollback retention, zero restarts, and zero fatal log signals passed.
+- No provider, Feishu/Lark write, runtime-data import, DNS/Nginx/firewall change, source edit, volume deletion, or rollback occurred.
