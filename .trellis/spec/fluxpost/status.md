@@ -1,36 +1,34 @@
 # Trellis Status
 
-Last updated: 2026-07-31
+Last updated: 2026-08-03
 
 ## One-Line Status
 
-Infinite Canvas is live at `https://flux.lightmoment.net/canvas` on production release `20260729-061224-d05caddb1787`; the local candidate is on `sync/local-release-20260731` for GitHub review and is not deployed.
+Infinite Canvas is live at `https://flux.lightmoment.net/canvas` on production release `20260729-061224-d05caddb1787`; the repaired local candidate is on `release/production-20260803`, has passed the deterministic local baseline, and is not deployed.
 
 ## Current Focus
 
-- Production 38 runs exact SHA `d05caddb17875bb9a5dde924f9e4e8654f8d3ee3`; image identity, protected services, schema, workers, volumes, auth, and rollback were verified. Hosts 82 and 104 are retired.
-- `sync/local-release-20260731` preserves the current local application tree while reconciling the GitHub `main` history; it is the review lane for the combined Canvas, library, and original-batch candidate.
+- Production 38 remains on exact SHA `d05caddb17875bb9a5dde924f9e4e8654f8d3ee3`; hosts 82 and 104 are retired.
+- `release/production-20260803` preserves the combined Canvas, library, and original-batch candidate while restoring production wrapper v3, candidate verifier v1, the shared operation lock, and the Docker verification target that were missing from the earlier candidate.
 - Local `/original` provides durable owner-scoped 1-100 topic batches, cover-first card generation, QA/retry, review drafts, and resumable ToAPIs tasks. It is not deployed.
 - Local Canvas adds exact/range sampling, no-replacement parameter/copy pools, frozen-image preflight, cross-cursor selection, copy-pool bulk selection, guarded previews, distance-bounded three-layer edge pulses, native zoom, culling/detail tiers, stable media, and bounded queue concurrency. These refinements are not deployed.
 - Team image/copy libraries use server sorting, stable cursors, batch/range selection, and anchored preview. The local-path material domain was retired; compact runs freeze validated vehicle-library URLs.
-- The cross-platform baseline is restored and passed for the combined local worktree on 2026-07-31.
 
 ## Next Entry
 
-1. Review `sync/local-release-20260731` against GitHub `main`; do not fast-forward `main` or deploy without separate explicit approval.
+1. Push `release/production-20260803`, confirm remote full-SHA equality, and run isolated VPS candidate verification; do not fast-forward `main` or deploy without separate explicit approval.
 2. Run an operator-approved real `/original` smoke with 2 topics and 3 cards each; verify ratio, consistency, QA, regeneration, review, and billing.
 3. Review/archive the Canvas image-source and scheduler tasks after their commits are isolated; keep them local until a dedicated exact-SHA release.
 4. Use a small authenticated non-paid Canvas workflow before any operator-approved provider batch.
 5. Keep Seedance, GPT image/text, TikHub, ComfyUI, Feishu writes, and Lark actions behind explicit operator approval.
-6. For any future deployment, verify a clean exact-SHA candidate, push it first, and deploy only through the confirmed release wrapper.
 
 ## Recent Verification
 
+- 2026-08-03: The repaired production candidate passed deployment-wrapper/verifier contracts, Docker/local build-output contracts, secret/runtime-path review, and the complete deterministic local baseline without external provider calls. Isolated VPS candidate verification remains the next non-activating gate.
 - 2026-07-31: Canvas edge pulses now use distance-bounded trail/body/core layers with idle/active timing, duration-aware phase offsets, moving/reduced-motion suspension, and source-to-target interpolation. Focused checks, TypeScript, lint, production build/restart, full baseline, HTTP smoke, and mocked dark/light/mobile browser checks passed without external calls.
 - 2026-07-31: Canvas copy-pool manual selection now supports selecting and clearing all entries in the current filter. The mistakenly restored retired `src/app/api/library/migrate/route.ts` surface was removed; focused checks, the full baseline, production build/restart, and port 3001 HTTP smoke passed.
 - 2026-07-30: `/original` passed deterministic domain, schema, API, resume/recovery, review, TypeScript, lint, build/restart, HTTP, and mocked responsive checks without provider calls.
 - 2026-07-30: Canvas image preflight, selection, scheduler sampling, native zoom, and visual fixes passed focused contracts, TypeScript, lint, build/restart, HTTP, and mocked responsive checks.
-- 2026-07-29: Production SHA `d05caddb17875bb9a5dde924f9e4e8654f8d3ee3` passed candidate and deployment identity, schema, auth, service, volume, worker, and rollback checks.
 - Older evidence is indexed in `verification.md` and preserved under `.trellis/spec/fluxpost/archive/`.
 
 ## Current Risks

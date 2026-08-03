@@ -1,6 +1,6 @@
 # Verification
 
-Last updated: 2026-07-31
+Last updated: 2026-08-03
 
 ## Baseline Command
 
@@ -32,20 +32,20 @@ For a production candidate:
 1. Build from a clean worktree rooted at current GitHub `main`.
 2. Run focused checks, the baseline, TypeScript, lint, and production build.
 3. Push a dedicated branch and verify the remote full SHA.
-4. Run read-only production preflight.
-5. Deploy only through `/opt/fluxpost-studio/bin/deploy.sh --ref FULL_40_CHARACTER_SHA`.
-6. Verify manifest/image/container identity, app/PostgreSQL, Nginx/public HTTPS, protected services, schema, auth boundaries, volumes, and retained rollback release.
+4. Run `/opt/fluxpost-studio/bin/verify-candidate.sh --ref FULL_40_CHARACTER_SHA` and require a commit-bound passing manifest before approval; this isolated gate must not read production configuration, mount runtime volumes, or activate services.
+5. Run read-only production preflight.
+6. Deploy only through `/opt/fluxpost-studio/bin/deploy.sh --ref FULL_40_CHARACTER_SHA` after separate explicit approval.
+7. Verify manifest/image/container identity, app/PostgreSQL, Nginx/public HTTPS, protected services, schema, auth boundaries, volumes, and retained rollback release.
 
 Do not deploy a dirty worktree, branch name, abbreviated SHA, local runtime rows, or unpushed commit.
 
 ## Recent Verification
 
+- 2026-08-03: `release/production-20260803` restored wrapper/bootstrap v3, verifier v1, the shared operation lock, and the Docker `verification` target. Focused deployment/build-output checks, candidate path and secret review, lint, TypeScript, production build, isolated HTTP smoke, SQLite validation, and the complete deterministic baseline passed without external provider calls; isolated VPS verification is pending.
 - 2026-07-31: The restored cross-platform baseline passed after the Canvas distance-bounded three-layer edge pulse update: context budgets, JSON and feature gates, all deterministic domain checks, lint with five existing Canvas warnings and no errors, TypeScript, production build, isolated HTTP smoke on port 45678, and SQLite validation passed without external provider calls. Mocked Chromium also verified dark/light rendering, 12-edge phase distribution, source-to-target offset interpolation, movement/reduced-motion suppression, and 390px overflow.
 - 2026-07-30: Batch original ToAPIs recovery passed executable pending-cover/resume orchestration, PostgreSQL `EXPLAIN`, isolated SQLite recovery, focused domain checks, TypeScript, scoped lint, two production builds, local restart/HTTP smoke, and mocked Chromium at 1440x960/390x844.
 - 2026-07-30: Canvas V2 expanded preflight images passed frozen-snapshot extraction, task-local preview, TypeScript, scoped lint, production build/restart, HTTP smoke, decoded image rendering, viewer navigation, and desktop/mobile overflow checks.
 - 2026-07-30: Native Canvas zoom and visual repairs passed focused contracts, TypeScript, scoped lint, production build/restart, HTTP smoke, native wheel/Controls behavior, pointer anchoring, stable media identity, and nonblank mocked browser checks.
-- 2026-07-29: Flexible scheduler V2 and condition-random copy pools passed deterministic expansion, no-replacement selection, capacity errors, snapshot freezing, TypeScript, scoped lint, production build/restart, HTTP smoke, and mocked responsive checks.
-
 Older evidence is preserved in `.trellis/spec/fluxpost/archive/verification-history.md`.
 
 ## Missing Coverage
