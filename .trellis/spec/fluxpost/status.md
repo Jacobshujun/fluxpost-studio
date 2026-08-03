@@ -4,7 +4,7 @@ Last updated: 2026-08-03
 
 ## One-Line Status
 
-Infinite Canvas is live at `https://flux.lightmoment.net/canvas` on production release `20260729-061224-d05caddb1787`; the repaired local candidate is on `release/production-20260803`, has passed the deterministic local baseline, and is not deployed.
+Infinite Canvas is live at `https://flux.lightmoment.net/canvas` on production release `20260729-061224-d05caddb1787`; the repaired candidate on `release/production-20260803` has passed local and isolated VPS verification and is not deployed.
 
 ## Current Focus
 
@@ -16,7 +16,7 @@ Infinite Canvas is live at `https://flux.lightmoment.net/canvas` on production r
 
 ## Next Entry
 
-1. Push `release/production-20260803`, confirm remote full-SHA equality, and run isolated VPS candidate verification; do not fast-forward `main` or deploy without separate explicit approval.
+1. Present the exact `release/production-20260803` SHA and verification evidence for separate deployment approval; do not fast-forward `main` or deploy before that approval.
 2. Run an operator-approved real `/original` smoke with 2 topics and 3 cards each; verify ratio, consistency, QA, regeneration, review, and billing.
 3. Review/archive the Canvas image-source and scheduler tasks after their commits are isolated; keep them local until a dedicated exact-SHA release.
 4. Use a small authenticated non-paid Canvas workflow before any operator-approved provider batch.
@@ -24,7 +24,7 @@ Infinite Canvas is live at `https://flux.lightmoment.net/canvas` on production r
 
 ## Recent Verification
 
-- 2026-08-03: The repaired production candidate passed deployment-wrapper/verifier contracts, Docker/local build-output contracts, secret/runtime-path review, and the complete deterministic local baseline without external provider calls. Isolated VPS candidate verification remains the next non-activating gate.
+- 2026-08-03: The repaired production candidate restored wrapper/verifier contracts, a Linux-complete dependency lock, and archive-safe deployment tests. Local and VPS clean-archive baselines passed without external provider calls or service activation.
 - 2026-07-31: Canvas edge pulses now use distance-bounded trail/body/core layers with idle/active timing, duration-aware phase offsets, moving/reduced-motion suspension, and source-to-target interpolation. Focused checks, TypeScript, lint, production build/restart, full baseline, HTTP smoke, and mocked dark/light/mobile browser checks passed without external calls.
 - 2026-07-31: Canvas copy-pool manual selection now supports selecting and clearing all entries in the current filter. The mistakenly restored retired `src/app/api/library/migrate/route.ts` surface was removed; focused checks, the full baseline, production build/restart, and port 3001 HTTP smoke passed.
 - 2026-07-30: `/original` passed deterministic domain, schema, API, resume/recovery, review, TypeScript, lint, build/restart, HTTP, and mocked responsive checks without provider calls.
