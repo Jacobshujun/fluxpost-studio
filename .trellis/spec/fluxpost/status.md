@@ -4,11 +4,11 @@ Last updated: 2026-08-04
 
 ## One-Line Status
 
-Durable 10-post-batched Feishu publishing is deployed to production 38 at SHA `39f99e2415fa93c08e8727bea30841e88d28a2a6`.
+Configurable content safety is deployed to production 38 at SHA `e6692c3d0cce807106e343c43a9804be2686ec3d`.
 
 ## Current Focus
 
-- Configurable content safety is active locally: administrator categories, ordered rules, optional model review, thresholds, master-off, revisions, frozen snapshots, and draft tests are covered. Production remains behind candidate gates.
+- Configurable content safety is deployed: admin categories/rules, optional model review, thresholds, master-off, revisions, snapshots, and draft tests are available in `/config`.
 - Production Feishu publishing creates one durable Job before worker preparation, then persists ordered 10-post chunks, isolated failures, and review progress. The release was verified without a live Feishu write.
 - Cursor-anchored Canvas preview zoom is deployed in the current production lineage. V2 main-task shared outputs remain verified local work and are not deployed.
 - `/original` is deployed with durable owner-scoped 1-100 topic batches, cover-first card generation, QA/retry, review drafts, and resumable ToAPIs tasks. Its real provider smoke remains pending approval.
@@ -23,7 +23,7 @@ Durable 10-post-batched Feishu publishing is deployed to production 38 at SHA `3
 
 ## Recent Verification
 
-- 2026-08-04: Configurable safety passed domain/API/snapshot/model-fallback, mocked desktop/mobile Chromium, TypeScript, lint, baseline, build/restart, and HTTP offline; note `6a52fe8300000000060235f2` remains covered.
+- 2026-08-04: Safety policy SHA `e6692c3d0cce807106e343c43a9804be2686ec3d` passed isolated baseline and deployed as `20260804-102825-e6692c3d0cce`; identity, health, auth, zero queues, volumes, backup, and rollback passed offline.
 - 2026-08-04: Exact SHA `39f99e2415fa93c08e8727bea30841e88d28a2a6` passed local and isolated production baselines, then deployed as `20260804-081822-39f99e2415fa` after zero-active-work preflight and a validated root-only backup. Identity, health, routes/auth, workers, JSONB queue storage, six volumes, logs, and rollback retention passed without a live Feishu write.
 - 2026-08-04: Cursor-anchored Canvas image-preview zoom passed focused mocked Chromium, TypeScript, lint, production build/restart, isolated HTTP smoke, SQLite validation, and the complete Trellis baseline without external calls.
 - 2026-08-04: Exact SHA `06a2d7b81dc491c2c4ce1a17f6d3584e3c5d4605` deployed as `20260804-025759-06a2d7b81dc4` after captured-drag Chromium coverage, local/VPS baselines, zero-active-work preflight, and a validated root-only backup. Manifest/image/container identity, routes/auth, services, six volumes, logs, and rollback retention passed.
