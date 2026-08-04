@@ -1,0 +1,4 @@
+{"file":".trellis/spec/fluxpost/verification.md","reason":"Authoritative deterministic baseline and release checks"}
+{"file":".trellis/spec/fluxpost/rules.md","reason":"Context budgets, stable-fact recording, and no-live-provider rule"}
+{"file":".trellis/spec/frontend/quality-guidelines.md","reason":"Frontend verification and regression review expectations"}
+{"file":".trellis/spec/guides/cross-layer-thinking-guide.md","reason":"Review end-to-end policy snapshot and API flow"}

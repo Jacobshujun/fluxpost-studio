@@ -1,0 +1,5 @@
+{"file":".trellis/spec/fluxpost/rules.md","reason":"FluxPost quality, persistence, and external-service boundaries"}
+{"file":".trellis/spec/fluxpost/architecture_rules.md","reason":"API, runtime data, ownership, and task snapshot boundaries"}
+{"file":".trellis/spec/frontend/component-guidelines.md","reason":"Admin configuration controls and layout conventions"}
+{"file":".trellis/spec/frontend/type-safety.md","reason":"Browser/API shared contract requirements"}
+{"file":".trellis/spec/guides/cross-layer-thinking-guide.md","reason":"Policy data flow across storage, service, API, task snapshots, and UI"}

@@ -32,14 +32,13 @@
       "definition_of_done": [
         "Users can submit platform, keyword, count, and optional filters",
         "TikHub results are normalized and written to data/content-pool.json",
-        "Crawled items expose metrics, media URLs, crawled time, and published time when available"
+        "Crawled items expose metrics, media, timestamps, and a frozen administrator-configurable content-safety assessment"
       ],
       "evidence": [
-        "Source files present: src/app/api/crawl/jobs/route.ts, src/lib/tikhub.ts, src/lib/content-pool.ts",
-        "2026-06-16 Dongchedi source-link/ID import added through src/lib/dongchedi.ts and src/lib/source-link-import.ts, with advanced/simple link-mode UI/API wiring, generated-post/review labels, and .trellis/verification/dongchedi_import_check.mjs in the baseline; verification passed without live Dongchedi/TikHub/OpenAI/image-provider/Feishu production calls",
-        "Detailed historical evidence archived at .trellis/spec/fluxpost/archive/feature-list-history-2026-06-17.json"
+        "2026-08-04 configurable safety policy, API, model fallback, task snapshots, responsive UI, full baseline, build/restart, and local HTTP passed offline; note 6a52fe8300000000060235f2 remains covered.",
+        "2026-06-16 Dongchedi source-link/ID import added through src/lib/dongchedi.ts and src/lib/source-link-import.ts, with advanced/simple link-mode UI/API wiring, generated-post/review labels, and .trellis/verification/dongchedi_import_check.mjs in the baseline; verification passed without live Dongchedi/TikHub/OpenAI/image-provider/Feishu production calls"
       ],
-      "notes": "External TikHub behavior is not part of default baseline verification."
+      "notes": "Live provider tests and remote deployment require approval."
     },
     {
       "id": "media-cache-video-frames",

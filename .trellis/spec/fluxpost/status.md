@@ -8,6 +8,7 @@ Durable 10-post-batched Feishu publishing is deployed to production 38 at SHA `3
 
 ## Current Focus
 
+- Configurable workspace content safety is implemented and active locally on port `3001`: administrator categories/rules/model scope/prompt/thresholds, master-off, optimistic revisions, task snapshots, dry-run/model tests, and note `6a52fe8300000000060235f2` are covered. Remote still needs an exact-SHA candidate and separate deployment approval.
 - Production Feishu publishing creates one durable Job before worker preparation, then persists ordered 10-post chunks, isolated failures, and review progress. The release was verified without a live Feishu write.
 - Cursor-anchored Canvas preview zoom is deployed in the current production lineage. V2 main-task shared outputs remain verified local work and are not deployed.
 - `/original` is deployed with durable owner-scoped 1-100 topic batches, cover-first card generation, QA/retry, review drafts, and resumable ToAPIs tasks. Its real provider smoke remains pending approval.
@@ -22,6 +23,7 @@ Durable 10-post-batched Feishu publishing is deployed to production 38 at SHA `3
 
 ## Recent Verification
 
+- 2026-08-04: Configurable content safety passed domain/API/model-fallback/snapshot checks, mocked Chromium at 1440x960 and 390x844, TypeScript, lint, the complete baseline, build/restart, and local HTTP without live providers; note `6a52fe8300000000060235f2` remains covered.
 - 2026-08-04: Exact SHA `39f99e2415fa93c08e8727bea30841e88d28a2a6` passed local and isolated production baselines, then deployed as `20260804-081822-39f99e2415fa` after zero-active-work preflight and a validated root-only backup. Identity, health, routes/auth, workers, JSONB queue storage, six volumes, logs, and rollback retention passed without a live Feishu write.
 - 2026-08-04: Cursor-anchored Canvas image-preview zoom passed focused mocked Chromium, TypeScript, lint, production build/restart, isolated HTTP smoke, SQLite validation, and the complete Trellis baseline without external calls.
 - 2026-08-04: Exact SHA `06a2d7b81dc491c2c4ce1a17f6d3584e3c5d4605` deployed as `20260804-025759-06a2d7b81dc4` after captured-drag Chromium coverage, local/VPS baselines, zero-active-work preflight, and a validated root-only backup. Manifest/image/container identity, routes/auth, services, six volumes, logs, and rollback retention passed.

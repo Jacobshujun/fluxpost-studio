@@ -47,7 +47,7 @@ Last updated: 2026-07-20
 - Browser preview URL selection belongs in client-safe `src/lib/media-preview.ts`. Historical generated-media scan/apply logic belongs in `src/lib/generated-media-repair.ts`; `src/app/api/config/media-repair/route.ts` must stay admin-only and thin.
 - Runtime local media serving belongs in `src/app/api/media/local/[...path]/route.ts`, with browser-stable rewrites configured in `next.config.ts` for `/media/crawl/:path*` and `/generated/:path*`.
 - Review-desk per-image prompt regeneration should reuse `POST /api/images` with a single-image request, update only the selected `imageUrls[index]` in the local draft, and persist through the existing generated-post review save path.
-- Crawl-stage content safety filtering belongs in `src/lib/source-safety.ts`; API routes and simple-run workflow should call it before source tagging and content-pool ingest instead of embedding safety prompts or local rule lists inline.
+- Content-safety policy validation, shipped defaults, `app_meta` persistence, and local rule evaluation belong in `src/lib/content-safety-policy.ts`. Provider dispatch and item filtering belong in `src/lib/source-safety.ts`; routes and workflows must pass frozen policy snapshots instead of embedding prompts/rules or rereading mutable policy during execution.
 - Crawled content and visual AI tagging belongs in `src/lib/source-tagging.ts`; API routes should call it but not embed tag prompts or normalization rules.
 - For video/mixed source items with extracted `videoFrames`, visual tagging must use the frames instead of preview images or covers.
 - For video-like source items without extracted `videoFrames`, default production-task creation and simple automatic production must not fall back to source/downloaded/cover images; image-only sources may still use downloaded/source images.
@@ -69,7 +69,7 @@ Last updated: 2026-07-20
 - The Feishu/Lark IM task route is the narrow exception to browser-cookie workspace auth because it is a local CLI ingress. It must require `LARK_TASK_API_TOKEN`, enforce `LARK_TASK_CHAT_IDS`, map sender ids through `LARK_TASK_USER_MAP` to existing active workspace accounts, persist `lark_task_launches` idempotency before/after launch, and enqueue through `startSimpleRun(...)`. Do not let IM messages call provider workflows directly.
 - Do not wrap a task in the same pool that its nested HTTP request also needs, because that can deadlock when the outer fan-out fills the pool. Platform fan-out can be locally bounded while each TikHub HTTP request acquires the crawl pool.
 - Do not add broad catch-and-ignore behavior around external calls. Return or record actionable errors.
-- Crawl request parameters belong before provider calls. Do not add post-crawl local keyword relevance filters, Xiaohongshu image/video post-filters, all-type fallback searches, or cross-platform result drops in the ingest path; after crawling, only dedupe, slice, cache media, content safety assessment/filtering, tag, and persist. Content safety filtering is limited to profanity, insult, strong negative sentiment, and competitor bashing and must not become a keyword relevance filter.
+- Crawl request parameters belong before provider calls. Do not add post-crawl local keyword relevance filters, Xiaohongshu image/video post-filters, all-type fallback searches, or cross-platform result drops in the ingest path; after crawling, only dedupe, slice, cache media, workspace-configured content-safety assessment/filtering, tag, and persist. Content-safety categories are administrator-defined and must not become a hidden keyword relevance filter.
 - Link batch import is an exact-source ingest path, not keyword search. It should not mutate keyword crawl request mapping. Advanced `/api/crawl/links` persists imported items into the content pool, while simple-run link mode must enqueue through `/api/simple/runs`, resolve links server-side, skip keyword platform search/top-up, and then reuse the same media cache, source safety, source tagging, content-pool ingest, production, and publish boundaries as keyword simple runs.
 - Dongchedi link import must stay source-link/ID-only unless a separate verified keyword provider is added. Do not add `dongchedi` to `CrawlPlatform` or TikHub keyword crawl controls just because it is accepted by source-link import.
 - Feishu task-number simple import is a table-record ingest path, not a TikHub crawl platform. Simple-run Feishu mode must enqueue through `/api/simple/runs`, resolve records server-side through `src/lib/feishu-content-import.ts`, skip keyword platform search/top-up, then reuse source safety, source tagging, content-pool ingest, production, image generation, and Feishu publish boundaries. Imported `车型` values should determine the content-pool keyword/project; the fallback keyword is only for records without a vehicle value.
@@ -882,6 +882,65 @@ if (result.status === "pending") markNeedsReview(card);
 card.providerTaskId = result.providerTaskId;
 await persistSeries(card);
 await requeueOriginalBatchItem(item.id, 30_000);
+```
+
+## Scenario: Configurable workspace content safety policy
+
+### 1. Scope / Trigger
+
+- Crawl-stage content safety is a workspace policy, not an environment setting or keyword relevance filter. Administrators may configure or disable its categories, ordered local rules, model prompt/scope, and review/filter thresholds for future work.
+
+### 2. Signatures
+
+```typescript
+getContentSafetyPolicy(): Promise<ContentSafetyPolicy>;
+normalizeContentSafetyPolicySnapshot(policy?: ContentSafetyPolicy): ContentSafetyPolicy;
+filterUnsafeSourceItems(items, context?, policy?): Promise<SafetyFilterResult>;
+```
+
+- `GET|PUT /api/content-safety-policy`, `POST /api/content-safety-policy/test`, and `POST /api/content-safety-policy/reset` are the browser contracts.
+- The current versioned JSON document is stored in `app_meta.key="content_safety_policy_v1"`; writes use `compareAndSetAppMetaValue(...)` for PostgreSQL and SQLite without a schema migration.
+
+### 3. Contracts
+
+- Signed-in users may read. Only administrators may save, reset, or test. PUT/reset require `expectedRevision`; successful writes increment the revision and store sanitized actor metadata.
+- Enabled local rules run in array order and stop on the first match. Groups are AND-ed; each group selects title/body/author fields and uses `any`, `all`, or `at_least`. Actions are `allow`, `review`, or `filter`.
+- Local `filter` is final. Local `review` reaches the model when enabled. Local `allow` reaches it only for `model.scope="all_non_filtered"`. Master-off allows all content and never calls the model.
+- Model output is validated against the immutable JSON Schema for `riskScore`, configured category ids, and reasons. Scores below review allow, scores at/above review mark review, and scores at/above filter are filtered. Unknown string category ids are dropped; malformed output is a model failure.
+- Simple runs and crawl jobs persist `contentSafetyPolicy`; workers use that snapshot. Historical records without one use the shipped default. Synchronous link import reads the current policy once at request start and passes it explicitly.
+
+### 4. Validation & Error Matrix
+
+| Condition | Required result |
+| --- | --- |
+| Missing sign-in | `401` |
+| Non-admin save/reset/test | `403` |
+| Invalid ids, references, groups, sizes, prompt, or thresholds | `400` |
+| Stale expected revision or failed atomic compare-and-set | `409` with current revision |
+| Master or model disabled during model test | No provider call; sanitized skipped result/audit |
+| Provider request, invalid JSON/schema, or invalid score | Preserve local result and record failed status |
+
+### 5. Good/Base/Bad Cases
+
+- Good: an exception-first `allow` rule bypasses later local rules; a model call still occurs only when scope is `all_non_filtered`.
+- Base: shipped defaults filter explicit profanity/insults and repeated strong-negative terms, review one negative signal or strong competitor comparison, and use thresholds `40/80`. Note `6a52fe8300000000060235f2` enters review instead of local hard filtering.
+- Bad: rereading the mutable global policy inside a queued worker changes an existing task; counting case/whitespace-equivalent terms separately can falsely satisfy `at_least`.
+
+### 6. Tests Required
+
+- `content_safety_policy_check.mjs` covers rule order/scopes/modes, disabled rules, custom categories, threshold boundaries, atomic persistence contracts, API permissions/statuses, reset, and sanitized audits.
+- `source_safety_filter_check.mjs` covers shipped-default abuse and Xiaohongshu regressions plus provider, JSON, schema, and score fallback behavior.
+- `content_safety_policy_snapshot_check.mjs` covers simple-run, crawl-job, and link-import snapshots. Mocked Chromium covers desktop/mobile editing, sorting, validation, dry-run, explicit model test, save, reset, and no automatic model call.
+
+### 7. Wrong vs Correct
+
+```typescript
+// Wrong: a queued worker reads policy changes made after the task started.
+const result = await filterUnsafeSourceItems(items);
+
+// Correct: execution uses the policy frozen on the task.
+const policy = normalizeContentSafetyPolicySnapshot(run.contentSafetyPolicy);
+const result = await filterUnsafeSourceItems(items, context, policy);
 ```
 
 ## Trellis Rules
