@@ -7,7 +7,7 @@ import { detectPlatformFromSourceUrl, fetchTikHubItemBySourceLink } from "./tikh
 import { buildDongchediArticleUrl, extractDongchediArticleId, fetchDongchediItemBySource } from "./dongchedi";
 import { buildXiaopengBbsThreadUrl, extractXiaopengBbsThreadId, fetchXiaopengBbsItemBySource } from "./xiaopeng-bbs";
 import type { WorkspaceAccessActor } from "./workspace-ownership";
-import type { ContentProject, NormalizedSourceItem, Platform, SourceLinkPlatform } from "./types";
+import type { ContentProject, ContentSafetyPolicy, NormalizedSourceItem, Platform, SourceLinkPlatform } from "./types";
 
 export type SourceLinkImportStatus = "imported" | "filtered" | "duplicate" | "unsupported" | "failed";
 
@@ -51,6 +51,7 @@ export type SourceLinkImportInput = {
   videoFrameOriginalReference?: boolean;
   enableVideoTranscription?: boolean;
   owner?: WorkspaceAccessActor;
+  contentSafetyPolicy: ContentSafetyPolicy;
 };
 
 export type SourceLinkResolveInput = {
@@ -104,6 +105,7 @@ export async function importSourceLinks(input: SourceLinkImportInput): Promise<S
       valid: candidates.length,
       unsupported: initialResults.filter((result) => result.status === "unsupported").length,
       duplicates: initialResults.filter((result) => result.status === "duplicate").length,
+      contentSafetyPolicyRevision: input.contentSafetyPolicy.revision,
     },
   });
 
@@ -117,7 +119,7 @@ export async function importSourceLinks(input: SourceLinkImportInput): Promise<S
   const safetyResult = await filterUnsafeSourceItems(dedupedItems, {
     scope: "crawl/links",
     query: input.query,
-  });
+  }, input.contentSafetyPolicy);
   const filteredIds = new Set(safetyResult.filtered.map((item) => item.id));
   for (const result of results) {
     if (result.itemId && filteredIds.has(result.itemId)) {

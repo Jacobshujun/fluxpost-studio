@@ -2175,6 +2175,34 @@ export async function writeAppMetaValue(key: string, value: string) {
   setSqliteMeta(getSqliteDatabase(), key, value);
 }
 
+export async function compareAndSetAppMetaValue(key: string, expectedValue: string | undefined, value: string) {
+  await ensureDatabaseReady();
+  const updatedAt = new Date().toISOString();
+  if (getDatabaseBackend() === "postgres") {
+    if (expectedValue === undefined) {
+      const result = await getPostgresPool().query(
+        `INSERT INTO app_meta (key, value, updated_at) VALUES ($1, $2, $3) ON CONFLICT(key) DO NOTHING`,
+        [key, value, updatedAt],
+      );
+      return Number(result.rowCount || 0) === 1;
+    }
+    const result = await getPostgresPool().query(
+      `UPDATE app_meta SET value = $1, updated_at = $2 WHERE key = $3 AND value = $4`,
+      [value, updatedAt, key, expectedValue],
+    );
+    return Number(result.rowCount || 0) === 1;
+  }
+  const db = getSqliteDatabase();
+  if (expectedValue === undefined) {
+    const result = db.prepare(`INSERT OR IGNORE INTO app_meta (key, value, updated_at) VALUES (?, ?, ?)`)
+      .run(key, value, updatedAt) as { changes?: number };
+    return Number(result.changes || 0) === 1;
+  }
+  const result = db.prepare(`UPDATE app_meta SET value = ?, updated_at = ? WHERE key = ? AND value = ?`)
+    .run(value, updatedAt, key, expectedValue) as { changes?: number };
+  return Number(result.changes || 0) === 1;
+}
+
 export async function writeExecutionLogsToDb(entries: ExecutionLogEntry[]) {
   await replaceJsonRows("execution_logs", entries, (entry) => [
     entry.id,

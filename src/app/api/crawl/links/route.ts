@@ -1,5 +1,6 @@
 import { NextResponse } from "next/server";
 import { compactError, recordExecutionLog } from "@/lib/activity-log";
+import { getContentSafetyPolicy, normalizeContentSafetyPolicySnapshot } from "@/lib/content-safety-policy";
 import { importSourceLinks } from "@/lib/source-link-import";
 import { isWorkspaceSignInError, requireWorkspaceAccount } from "@/lib/workspace-accounts";
 import type { SourceLinkPlatform } from "@/lib/types";
@@ -19,7 +20,8 @@ export async function POST(request: Request) {
       enableVideoTranscription?: boolean;
     };
     const input = parseLinkImportInput(body);
-    const result = await importSourceLinks({ ...input, owner: account });
+    const contentSafetyPolicy = normalizeContentSafetyPolicySnapshot(await getContentSafetyPolicy());
+    const result = await importSourceLinks({ ...input, owner: account, contentSafetyPolicy });
     return NextResponse.json(result);
   } catch (error) {
     await recordExecutionLog({

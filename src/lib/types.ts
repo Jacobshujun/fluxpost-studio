@@ -118,11 +118,54 @@ export type SourceTaggingStatus = "pending" | "success" | "failed" | "skipped";
 
 export type SourceSafetyDecision = "allow" | "review" | "filter";
 
-export type SourceSafetyCategory =
-  | "profanity"
-  | "insult"
-  | "strong_negative_sentiment"
-  | "competitor_bashing";
+export type SourceSafetyCategory = string;
+
+export type ContentSafetyPolicyField = "title" | "body" | "author";
+
+export type ContentSafetyPolicyCategory = {
+  id: string;
+  label: string;
+  description?: string;
+};
+
+export type ContentSafetyPolicyConditionGroup = {
+  fields: ContentSafetyPolicyField[];
+  mode: "any" | "all" | "at_least";
+  atLeast?: number;
+  terms: string[];
+};
+
+export type ContentSafetyPolicyRule = {
+  id: string;
+  name: string;
+  enabled: boolean;
+  action: SourceSafetyDecision;
+  categoryIds: string[];
+  groups: ContentSafetyPolicyConditionGroup[];
+};
+
+export type ContentSafetyPolicy = {
+  schemaVersion: 1;
+  revision: number;
+  enabled: boolean;
+  categories: ContentSafetyPolicyCategory[];
+  local: {
+    enabled: boolean;
+    rules: ContentSafetyPolicyRule[];
+  };
+  model: {
+    enabled: boolean;
+    scope: "local_review" | "all_non_filtered";
+    prompt: string;
+    reviewThreshold: number;
+    filterThreshold: number;
+  };
+  updatedAt?: string;
+  updatedBy?: {
+    id: string;
+    displayName: string;
+  };
+};
 
 export type SourceSafetySeverity = "low" | "medium" | "high";
 
@@ -137,6 +180,9 @@ export type SourceSafetyAssessment = {
   source: "local" | "model" | "local_model";
   error?: string;
   assessedAt?: string;
+  riskScore?: number;
+  matchedRuleId?: string;
+  policyRevision?: number;
 };
 
 export type SourceContentTagging = {
@@ -400,6 +446,7 @@ export type CrawlJob = {
   ownerUserId?: string;
   ownerDisplayName?: string;
   input: CrawlInput;
+  contentSafetyPolicy?: ContentSafetyPolicy;
   createdAt: string;
   updatedAt: string;
   warning?: string;
@@ -824,6 +871,7 @@ export type SimpleRun = {
   ownerDisplayName?: string;
   status: SimpleRunStatus;
   input: SimpleRunInput;
+  contentSafetyPolicy?: ContentSafetyPolicy;
   createdAt: string;
   updatedAt: string;
   completedAt?: string;

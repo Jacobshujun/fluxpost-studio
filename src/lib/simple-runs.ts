@@ -3,6 +3,7 @@ import { appConfig } from "./config";
 import { buildDefaultImageTasks, hasSelectedImageTask } from "./creation-controls";
 import { concurrencyConfig, mapWithConcurrency, runWithConcurrencyPool } from "./concurrency";
 import { calculateHotScore, getSourceItemsByIds, ingestCrawlItems, markSourceRewritten } from "./content-pool";
+import { getContentSafetyPolicy, normalizeContentSafetyPolicySnapshot } from "./content-safety-policy";
 import {
   claimNextSimpleRunQueueItem,
   completeSimpleRunQueueItem,
@@ -45,6 +46,7 @@ import {
 import type {
   CrawlInput,
   CrawlPlatform,
+  ContentSafetyPolicy,
   GeneratedPost,
   NormalizedSourceItem,
   Platform,
@@ -191,8 +193,9 @@ export async function terminateSimpleRun(runId: string, reason = simpleRunForceT
 async function prepareSimpleRun(input: CreateSimpleRunInput) {
   const startedAt = Date.now();
   const normalizedInput = normalizeSimpleRunInput(input);
+  const contentSafetyPolicy = normalizeContentSafetyPolicySnapshot(await getContentSafetyPolicy());
   const settings = input.settings ? await saveWorkspacePromptSettings(input.settings) : await getWorkspacePromptSettings();
-  const run = makeInitialRun(normalizedInput, settings);
+  const run = makeInitialRun(normalizedInput, settings, contentSafetyPolicy);
   await saveSimpleRunToDb(run);
 
   await recordExecutionLog({
@@ -213,6 +216,7 @@ async function prepareSimpleRun(input: CreateSimpleRunInput) {
       hasCookie: Boolean(normalizedInput.cookie),
       materialCount: normalizedInput.materialPaths.length,
       generateImages: shouldGenerateImages(normalizedInput),
+      contentSafetyPolicyRevision: contentSafetyPolicy.revision,
       ownerUserId: normalizedInput.ownerUserId || "local",
     },
     ownerUserId: normalizedInput.ownerUserId,
@@ -391,6 +395,7 @@ async function runSimpleRunWorkflow(
   settings: WorkspacePromptSettings,
   startedAt: number,
 ) {
+  const contentSafetyPolicy = normalizeContentSafetyPolicySnapshot(run.contentSafetyPolicy);
   await assertSimpleRunNotForceTerminated(run.id);
   if (isSimpleRunOriginalMode(normalizedInput)) {
     return runSimpleOriginalWorkflow(run, normalizedInput, settings, startedAt);
@@ -411,7 +416,7 @@ async function runSimpleRunWorkflow(
     scope: "simple/run",
     query: normalizedInput.keyword,
     runId: run.id,
-  });
+  }, contentSafetyPolicy);
   await assertSimpleRunNotForceTerminated(run.id);
   run = await applyUnsafeFilterPlatformCounts(run, safetyResult.filtered);
   if (isSimpleRunLinkMode(normalizedInput)) {
@@ -2151,7 +2156,11 @@ function normalizeOptionalOwnerValue(input: unknown) {
   return value ? value.slice(0, 96) : undefined;
 }
 
-function makeInitialRun(input: SimpleRunInput, settings: WorkspacePromptSettings): SimpleRun {
+function makeInitialRun(
+  input: SimpleRunInput,
+  settings: WorkspacePromptSettings,
+  contentSafetyPolicy: ContentSafetyPolicy,
+): SimpleRun {
   const now = new Date().toISOString();
   return {
     id: `simple-${Date.now()}`,
@@ -2167,6 +2176,7 @@ function makeInitialRun(input: SimpleRunInput, settings: WorkspacePromptSettings
     imageSize: settings.imageSize,
     imageQuality: settings.imageQuality,
     platformCrawlSettings: settings.platformCrawlSettings,
+    contentSafetyPolicy,
     stages: (Object.keys(stageTitles) as SimpleRunStageId[]).map((id) =>
       makeStage(id, now, input.sourceMode === "original" ? makeOriginalStageTitles() : input.sourceMode === "pool" ? makePoolStageTitles() : stageTitles),
     ),

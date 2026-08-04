@@ -45,6 +45,8 @@ const nodeChecks = [
   ["Feishu vehicle options check", "feishu_vehicle_options_check.mjs"],
   ["Simple crawl top-up and media policy check", "simple_crawl_media_policy_check.mjs"],
   ["Source safety filter check", "source_safety_filter_check.mjs"],
+  ["Content safety policy check", "content_safety_policy_check.mjs"],
+  ["Content safety policy snapshot check", "content_safety_policy_snapshot_check.mjs"],
   ["Source import retirement check", "source_import_feishu_check.mjs"],
   ["Feishu content import check", "feishu_content_import_check.mjs"],
   ["Distribution check", "distribution_check.mjs"],

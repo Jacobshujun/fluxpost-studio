@@ -1,6 +1,7 @@
 import { NextResponse } from "next/server";
 import { compactError, recordExecutionLog } from "@/lib/activity-log";
 import { ingestCrawlItems } from "@/lib/content-pool";
+import { getContentSafetyPolicy, normalizeContentSafetyPolicySnapshot } from "@/lib/content-safety-policy";
 import { filterUnsafeSourceItems } from "@/lib/source-safety";
 import { tagSourceItems } from "@/lib/source-tagging";
 import { crawlTikHub } from "@/lib/tikhub";
@@ -33,6 +34,7 @@ export async function POST(request: Request) {
     const account = await requireWorkspaceAccount(request);
     const body = (await request.json()) as CrawlJobRequest;
     const input = parseCrawlInput(body);
+    const contentSafetyPolicy = normalizeContentSafetyPolicySnapshot(await getContentSafetyPolicy());
     await recordExecutionLog({
       scope: "crawl/jobs",
       action: "开始关键词采集",
@@ -44,6 +46,7 @@ export async function POST(request: Request) {
         targetCount: input.targetCount,
         sort: input.sort || null,
         hasCookie: Boolean(input.cookie),
+        contentSafetyPolicyRevision: contentSafetyPolicy.revision,
       },
     });
     const now = new Date().toISOString();
@@ -55,13 +58,14 @@ export async function POST(request: Request) {
       input,
       createdAt: now,
       updatedAt: now,
+      contentSafetyPolicy,
       items: [],
     }, account);
 
     try {
       let items = await crawlTikHub(input);
       const rawItemCount = items.length;
-      const safetyResult = await filterUnsafeSourceItems(items, { scope: "crawl/jobs", query: input.query });
+      const safetyResult = await filterUnsafeSourceItems(items, { scope: "crawl/jobs", query: input.query }, contentSafetyPolicy);
       items = safetyResult.items;
       const downloadedVideoCount = items.filter((item) => item.downloadedVideoUrl).length;
       const extractedFrameCount = items.reduce((sum, item) => sum + (item.videoFrames?.length || 0), 0);
