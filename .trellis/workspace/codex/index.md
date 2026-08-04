@@ -8,7 +8,7 @@
 
 <!-- @@@auto:current-status -->
 - **Active File**: `journal-1.md`
-- **Total Sessions**: 17
+- **Total Sessions**: 18
 - **Last Active**: 2026-08-04
 <!-- @@@/auto:current-status -->
 
@@ -19,7 +19,7 @@
 <!-- @@@auto:active-documents -->
 | File | Lines | Status |
 |------|-------|--------|
-| `journal-1.md` | ~578 | Active |
+| `journal-1.md` | ~612 | Active |
 <!-- @@@/auto:active-documents -->
 
 ---
@@ -29,6 +29,7 @@
 <!-- @@@auto:session-history -->
 | # | Date | Title | Commits | Branch |
 |---|------|-------|---------|--------|
+| 18 | 2026-08-04 | Canvas preview drag pan production release | `06a2d7b81dc491c2c4ce1a17f6d3584e3c5d4605`, `7905576` | `release/production-20260803` |
 | 17 | 2026-08-04 | Fix Canvas preview middle mouse conflict | `fedceccfda93401cc1539df034dbd1833647b4a3`, `5e19ba9` | `release/production-20260803` |
 | 16 | 2026-08-03 | Deploy Canvas text concatenate node | `e090bf683599e8075f3fa71781c7d39faf9e007a`, `6724eaaae15f3d9f950a1dd8b8368c7dd46e754d` | `release/production-20260803` |
 | 15 | 2026-08-03 | Deploy production release a657673 | `59db8ea` | `release/production-20260803` |

@@ -576,3 +576,37 @@ Fixed Canvas image preview wheel and middle-button gesture conflicts, added mock
 ### Next Steps
 
 - None - task complete
+
+
+## Session 18: Canvas preview drag pan production release
+
+**Date**: 2026-08-04
+**Task**: Canvas preview drag pan production release
+**Branch**: `release/production-20260803`
+
+### Summary
+
+Added captured left-button drag panning for enlarged Canvas image previews, preserved wheel/middle/touch boundaries, passed focused Chromium and complete local/VPS baselines, and deployed exact SHA 06a2d7b81dc491c2c4ce1a17f6d3584e3c5d4605 to production 38 as release 20260804-025759-06a2d7b81dc4 with backup and post-deploy checks.
+
+### Main Changes
+
+(Add details)
+
+### Git Commits
+
+| Hash | Message |
+|------|---------|
+| `06a2d7b81dc491c2c4ce1a17f6d3584e3c5d4605` | (see git log) |
+| `7905576` | (see git log) |
+
+### Testing
+
+- [OK] (Add test results)
+
+### Status
+
+[OK] **Completed**
+
+### Next Steps
+
+- None - task complete
