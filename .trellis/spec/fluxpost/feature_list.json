@@ -84,7 +84,7 @@
       ],
       "evidence": [
         "Source files present: src/app/api/review/route.ts, src/app/api/publish/feishu/route.ts, src/lib/feishu-cli.ts",
-        "2026-08-04 durable enqueue, serial preparation, ten-post chunks, structured failures, active-job restoration, and 1/10/11/50/51 checks passed offline",
+        "2026-08-04 durable enqueue, serial preparation, ten-post chunks, structured failures, active-job restoration, and 1/10/11/50/51 checks passed; exact SHA 39f99e2415fa93c08e8727bea30841e88d28a2a6 then passed isolated verification and production health/auth/queue/volume/rollback gates without a live Feishu write",
         "Detailed historical evidence archived at .trellis/spec/fluxpost/archive/feature-list-history-2026-06-17.json"
       ],
       "notes": "Keep ready_for_review until an operator-approved real publish validates the durable chunk path with final media. No real Base record creation was executed in this verification. Feishu IM notification requires FEISHU_NOTIFY_CHAT_ID or FEISHU_NOTIFY_USER_ID plus bot message permission."

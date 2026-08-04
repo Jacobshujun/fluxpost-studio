@@ -4,12 +4,12 @@ Last updated: 2026-08-04
 
 ## One-Line Status
 
-Local Feishu publishing is durable and 10-post batched; Canvas work is verified; production 38 remains at SHA `06a2d7b81dc491c2c4ce1a17f6d3584e3c5d4605`.
+Durable 10-post-batched Feishu publishing is deployed to production 38 at SHA `39f99e2415fa93c08e8727bea30841e88d28a2a6`.
 
 ## Current Focus
 
-- Local Feishu publishing creates one durable Job before worker preparation, then persists ordered 10-post chunks, isolated failures, and review progress. Verified offline; not deployed.
-- Local `/canvas` adds cursor-anchored preview zoom plus explicit V2 shared outputs: each main task freezes eligible `text/images/videos` upstream results once, then atomically fans out literalized child runs with guarded retry and legacy compatibility. These local changes are not deployed; production 38 remains on `06a2d7b81dc491c2c4ce1a17f6d3584e3c5d4605`.
+- Production Feishu publishing creates one durable Job before worker preparation, then persists ordered 10-post chunks, isolated failures, and review progress. The release was verified without a live Feishu write.
+- Cursor-anchored Canvas preview zoom is deployed in the current production lineage. V2 main-task shared outputs remain verified local work and are not deployed.
 - `/original` is deployed with durable owner-scoped 1-100 topic batches, cover-first card generation, QA/retry, review drafts, and resumable ToAPIs tasks. Its real provider smoke remains pending approval.
 - Canvas exact/range sampling, no-replacement parameter/copy pools, frozen-image preflight, cross-cursor selection, copy-pool bulk selection, guarded previews, distance-bounded three-layer edge pulses, native zoom, culling/detail tiers, stable media, and bounded queue concurrency are deployed.
 - Team image/copy libraries with server sorting, stable cursors, batch/range selection, and anchored preview are deployed. The local-path material domain remains retired; compact runs freeze validated vehicle-library URLs.
@@ -22,7 +22,7 @@ Local Feishu publishing is durable and 10-post batched; Canvas work is verified;
 
 ## Recent Verification
 
-- 2026-08-04: Feishu bulk queue/chunk/progress checks, full baseline, restart/HTTP, and desktop/mobile Chromium passed without live writes.
+- 2026-08-04: Exact SHA `39f99e2415fa93c08e8727bea30841e88d28a2a6` passed local and isolated production baselines, then deployed as `20260804-081822-39f99e2415fa` after zero-active-work preflight and a validated root-only backup. Identity, health, routes/auth, workers, JSONB queue storage, six volumes, logs, and rollback retention passed without a live Feishu write.
 - 2026-08-04: Cursor-anchored Canvas image-preview zoom passed focused mocked Chromium, TypeScript, lint, production build/restart, isolated HTTP smoke, SQLite validation, and the complete Trellis baseline without external calls.
 - 2026-08-04: Exact SHA `06a2d7b81dc491c2c4ce1a17f6d3584e3c5d4605` deployed as `20260804-025759-06a2d7b81dc4` after captured-drag Chromium coverage, local/VPS baselines, zero-active-work preflight, and a validated root-only backup. Manifest/image/container identity, routes/auth, services, six volumes, logs, and rollback retention passed.
 - 2026-08-04: Exact SHA `fedceccfda93401cc1539df034dbd1833647b4a3` deployed as `20260804-023054-fedceccfda93` after mocked Chromium, local/VPS baselines, zero-work preflight, and backup. Identity, services, routes/auth, workers, ten required tables, six volumes, logs, and rollback retention passed.
