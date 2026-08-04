@@ -610,3 +610,36 @@ Added captured left-button drag panning for enlarged Canvas image previews, pres
 ### Next Steps
 
 - None - task complete
+
+
+## Session 19: Fix cursor-anchored Canvas image preview zoom
+
+**Date**: 2026-08-04
+**Task**: Fix cursor-anchored Canvas image preview zoom
+**Branch**: `release/production-20260803`
+
+### Summary
+
+Anchored image-preview wheel zoom to the pointer using post-layout scroll correction, added deterministic Chromium coverage for zoom directions, consecutive events, bounds, drag, middle mouse, and underlying Canvas behavior, refreshed local production, and passed the complete Trellis baseline.
+
+### Main Changes
+
+(Add details)
+
+### Git Commits
+
+| Hash | Message |
+|------|---------|
+| `5c566ae` | (see git log) |
+
+### Testing
+
+- [OK] (Add test results)
+
+### Status
+
+[OK] **Completed**
+
+### Next Steps
+
+- None - task complete
