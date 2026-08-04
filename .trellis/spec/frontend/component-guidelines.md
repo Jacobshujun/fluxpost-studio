@@ -50,26 +50,24 @@ For viewport-height split workspaces, constrain the root and each intervening fl
 
 ## Exclusive Wheel Zoom In Scrollable Previews
 
-When an `overflow: auto` preview owns wheel zoom, a React `onWheel` handler is not sufficient to guarantee exclusive gesture ownership. Delegated wheel listeners can be passive, so the zoom state may update before the same wheel performs delayed native scrolling. Use a native non-passive listener with cleanup, and cancel middle-button default behavior to prevent Chromium auto-scroll.
+When an `overflow: auto` preview owns wheel zoom, use a native non-passive listener with cleanup; delegated React wheel listeners may allow delayed native scrolling. Cancel middle-button default behavior to prevent Chromium auto-scroll.
+
+Wheel zoom is pointer-anchored. Before changing zoom, capture the pointer relative to the stage plus its scroll offsets and dimensions. After React commits the new content size, adjust each axis so the same normalized content point remains under the pointer. Keep a synchronous zoom ref so consecutive events cannot read stale React state; if zoom is already clamped, do not move the viewport.
 
 ```tsx
-useEffect(() => {
-  const stage = stageRef.current;
-  if (!stage) return;
-  const handleWheel = (event: WheelEvent) => {
-    event.preventDefault();
-    updateZoom((current) => current + (event.deltaY < 0 ? zoomStep : -zoomStep));
-  };
-  stage.addEventListener("wheel", handleWheel, { passive: false });
-  return () => stage.removeEventListener("wheel", handleWheel);
-}, [updateZoom]);
+anchorRef.current = {
+  x: event.clientX - bounds.left, y: event.clientY - bounds.top,
+  left: stage.scrollLeft, top: stage.scrollTop,
+  width: stage.scrollWidth, height: stage.scrollHeight,
+};
+setZoom(nextZoom);
 
-<div ref={stageRef} onMouseDown={(event) => {
-  if (event.button === 1) event.preventDefault();
-}} />
+// In useLayoutEffect after the zoom render:
+stage.scrollLeft = (anchor.left + anchor.x) * (stage.scrollWidth / anchor.width) - anchor.x;
+stage.scrollTop = (anchor.top + anchor.y) * (stage.scrollHeight / anchor.height) - anchor.y;
 ```
 
-Browser checks must place scroll offsets away from their bounds, send a real wheel event, wait for default scrolling to settle, and assert that zoom changes while `scrollLeft`/`scrollTop` stay fixed. They must also press and move the middle button and assert that native auto-scroll does not start.
+Browser checks place the cursor off-center and compare `(scrollOffset + pointerOffset) / scrollSize` before and after zoom within rounding tolerance. Cover zoom-in, zoom-out, consecutive events, min/max clamping, drag pan, middle-button isolation, and the underlying Canvas wheel path.
 
 For drag-to-pan, capture the primary mouse pointer only after overflow. Map origin deltas to initial `scrollLeft`/`scrollTop`; release, cancel, and lost-capture clear state. Never capture touch.
 

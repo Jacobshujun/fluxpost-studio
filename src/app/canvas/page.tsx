@@ -3231,22 +3231,58 @@ function CanvasImagePreviewBody({ item, index, total, closeButtonRef, onClose }:
 }) {
   const stageRef = useRef<HTMLDivElement | null>(null);
   const panRef = useRef<{ pointerId: number; x: number; y: number; scrollLeft: number; scrollTop: number } | null>(null);
+  const zoomRef = useRef(1);
+  const zoomAnchorRef = useRef<{
+    x: number;
+    y: number;
+    scrollLeft: number;
+    scrollTop: number;
+    scrollWidth: number;
+    scrollHeight: number;
+  } | null>(null);
   const [zoom, setZoom] = useState(1);
   const [isPanning, setIsPanning] = useState(false);
   const [naturalSize, setNaturalSize] = useState(item.width && item.height ? { width: item.width, height: item.height } : undefined);
   const updateZoom = useCallback((next: number | ((current: number) => number)) => {
-    setZoom((current) => {
-      const value = typeof next === "function" ? next(current) : next;
-      return Math.min(imagePreviewMaxZoom, Math.max(imagePreviewMinZoom, value));
-    });
+    const current = zoomRef.current;
+    const value = typeof next === "function" ? next(current) : next;
+    const clamped = Math.min(imagePreviewMaxZoom, Math.max(imagePreviewMinZoom, value));
+    if (clamped === current) return current;
+    zoomRef.current = clamped;
+    setZoom(clamped);
+    return clamped;
   }, []);
+
+  useLayoutEffect(() => {
+    const stage = stageRef.current;
+    const anchor = zoomAnchorRef.current;
+    if (!stage || !anchor) return;
+    zoomAnchorRef.current = null;
+    stage.scrollLeft = (anchor.scrollLeft + anchor.x) * (stage.scrollWidth / anchor.scrollWidth) - anchor.x;
+    stage.scrollTop = (anchor.scrollTop + anchor.y) * (stage.scrollHeight / anchor.scrollHeight) - anchor.y;
+  }, [zoom]);
 
   useEffect(() => {
     const stage = stageRef.current;
     if (!stage) return;
     const handleWheel = (event: WheelEvent) => {
       event.preventDefault();
-      updateZoom((current) => current + (event.deltaY < 0 ? imagePreviewZoomStep : -imagePreviewZoomStep));
+      const current = zoomRef.current;
+      const next = Math.min(imagePreviewMaxZoom, Math.max(
+        imagePreviewMinZoom,
+        current + (event.deltaY < 0 ? imagePreviewZoomStep : -imagePreviewZoomStep),
+      ));
+      if (next === current) return;
+      const bounds = stage.getBoundingClientRect();
+      zoomAnchorRef.current = {
+        x: event.clientX - bounds.left,
+        y: event.clientY - bounds.top,
+        scrollLeft: stage.scrollLeft,
+        scrollTop: stage.scrollTop,
+        scrollWidth: stage.scrollWidth,
+        scrollHeight: stage.scrollHeight,
+      };
+      updateZoom(next);
     };
     stage.addEventListener("wheel", handleWheel, { passive: false });
     return () => stage.removeEventListener("wheel", handleWheel);
