@@ -542,3 +542,37 @@ Implemented and verified utility.text-concatenate@1, pushed the release branch, 
 ### Next Steps
 
 - None - task complete
+
+
+## Session 17: Fix Canvas preview middle mouse conflict
+
+**Date**: 2026-08-04
+**Task**: Fix Canvas preview middle mouse conflict
+**Branch**: `release/production-20260803`
+
+### Summary
+
+Fixed Canvas image preview wheel and middle-button gesture conflicts, added mocked Chromium coverage, passed local and isolated baselines, and deployed exact SHA fedceccfda93401cc1539df034dbd1833647b4a3 to production 38 as release 20260804-023054-fedceccfda93.
+
+### Main Changes
+
+(Add details)
+
+### Git Commits
+
+| Hash | Message |
+|------|---------|
+| `fedceccfda93401cc1539df034dbd1833647b4a3` | (see git log) |
+| `5e19ba9` | (see git log) |
+
+### Testing
+
+- [OK] (Add test results)
+
+### Status
+
+[OK] **Completed**
+
+### Next Steps
+
+- None - task complete
