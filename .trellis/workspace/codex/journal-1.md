@@ -677,3 +677,37 @@ Implemented durable id-only Feishu enqueue and ten-post worker chunks, verified 
 ### Next Steps
 
 - None - task complete
+
+
+## Session 21: Configurable content safety policy
+
+**Date**: 2026-08-04
+**Task**: Configurable content safety policy
+**Branch**: `release/production-20260803`
+
+### Summary
+
+Implemented and verified workspace-configurable content safety policies with ordered local rules, optional model review, optimistic API persistence, frozen task snapshots, responsive admin UI, and Xiaohongshu regression coverage; remote deployment was not performed.
+
+### Main Changes
+
+(Add details)
+
+### Git Commits
+
+| Hash | Message |
+|------|---------|
+| `91c6b04` | (see git log) |
+| `268c46d` | (see git log) |
+
+### Testing
+
+- [OK] (Add test results)
+
+### Status
+
+[OK] **Completed**
+
+### Next Steps
+
+- None - task complete
