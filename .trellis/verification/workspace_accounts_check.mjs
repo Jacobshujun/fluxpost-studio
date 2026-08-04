@@ -87,12 +87,12 @@ assertContains(files.simpleRuns, /if \(!isSimpleRunFeishuMode\(input\)\) \{[\s\S
 assertContains(files.simpleRuns, /ownerUserId:\s*run\.input\.ownerUserId \|\| "local"/, "Simple-run Feishu publish must use the run owner.");
 assertContains(files.simpleRuns, /ownerDisplayName:\s*run\.input\.ownerDisplayName/, "Simple-run Feishu publish must keep the run owner display name.");
 
-assertContains(files.publishRoute, /getGeneratedPost\(post\.id,\s*account\)/, "Manual Feishu publish must reload posts through account scope.");
+assertContains(files.publishRoute, /getGeneratedPostsByIds\(postIds,\s*account\)/, "Manual Feishu publish must bulk-load posts through account scope.");
 assertContains(files.publishRoute, /ownerUserId:\s*account\.id/, "Manual Feishu publish must use current account as owner.");
 assertContains(files.publishRoute, /ownerDisplayName:\s*account\.displayName/, "Manual Feishu publish must keep current account display name.");
 assertContains(files.publishQueue, /ownerDisplayName\?:\s*string/, "Feishu publish queue enqueue options must carry owner display name.");
 assertContains(files.publishQueue, /const ownerUserId = \(options\.ownerUserId \|\| defaultOwnerUserId\)\.trim\(\) \|\| defaultOwnerUserId/, "Feishu publish queue must use the current publisher as queue owner.");
-assertContains(files.publishQueue, /const publishPosts = normalizePosts\(await enrichPostsWithContentTags\(posts\)\)/, "Feishu publish queue must preserve each generated post owner when enqueueing.");
+assertContains(files.publishQueue, /const publishPosts = normalizePosts\(posts\)/, "Feishu publish queue must preserve each generated post owner when enqueueing.");
 assertNotContains(files.publishQueue, /applyWorkspaceOwner\(post,\s*ownerAccess,\s*post\)/, "Feishu publish queue must not rewrite post ownership to the queue owner.");
 assertContains(files.publishQueue, /listFeishuPublishJobs\(limit = 50,\s*account/, "Feishu publish job listing must filter by owner.");
 assertContains(files.publishQueue, /filterWorkspaceOwnedRecords\(await readFeishuPublishJobsFromDb\(limit\),\s*account\)/, "Feishu queue reads must apply owner filtering.");

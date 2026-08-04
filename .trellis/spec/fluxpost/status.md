@@ -4,10 +4,11 @@ Last updated: 2026-08-04
 
 ## One-Line Status
 
-Local `/canvas` has verified cursor-anchored preview zoom and V2 main-task shared outputs; production 38 remains at SHA `06a2d7b81dc491c2c4ce1a17f6d3584e3c5d4605`.
+Local Feishu publishing is durable and 10-post batched; Canvas work is verified; production 38 remains at SHA `06a2d7b81dc491c2c4ce1a17f6d3584e3c5d4605`.
 
 ## Current Focus
 
+- Local Feishu publishing creates one durable Job before worker preparation, then persists ordered 10-post chunks, isolated failures, and review progress. Verified offline; not deployed.
 - Local `/canvas` adds cursor-anchored preview zoom plus explicit V2 shared outputs: each main task freezes eligible `text/images/videos` upstream results once, then atomically fans out literalized child runs with guarded retry and legacy compatibility. These local changes are not deployed; production 38 remains on `06a2d7b81dc491c2c4ce1a17f6d3584e3c5d4605`.
 - `/original` is deployed with durable owner-scoped 1-100 topic batches, cover-first card generation, QA/retry, review drafts, and resumable ToAPIs tasks. Its real provider smoke remains pending approval.
 - Canvas exact/range sampling, no-replacement parameter/copy pools, frozen-image preflight, cross-cursor selection, copy-pool bulk selection, guarded previews, distance-bounded three-layer edge pulses, native zoom, culling/detail tiers, stable media, and bounded queue concurrency are deployed.
@@ -21,10 +22,10 @@ Local `/canvas` has verified cursor-anchored preview zoom and V2 main-task share
 
 ## Recent Verification
 
+- 2026-08-04: Feishu bulk queue/chunk/progress checks, full baseline, restart/HTTP, and desktop/mobile Chromium passed without live writes.
 - 2026-08-04: Cursor-anchored Canvas image-preview zoom passed focused mocked Chromium, TypeScript, lint, production build/restart, isolated HTTP smoke, SQLite validation, and the complete Trellis baseline without external calls.
 - 2026-08-04: Exact SHA `06a2d7b81dc491c2c4ce1a17f6d3584e3c5d4605` deployed as `20260804-025759-06a2d7b81dc4` after captured-drag Chromium coverage, local/VPS baselines, zero-active-work preflight, and a validated root-only backup. Manifest/image/container identity, routes/auth, services, six volumes, logs, and rollback retention passed.
 - 2026-08-04: Exact SHA `fedceccfda93401cc1539df034dbd1833647b4a3` deployed as `20260804-023054-fedceccfda93` after mocked Chromium, local/VPS baselines, zero-work preflight, and backup. Identity, services, routes/auth, workers, ten required tables, six volumes, logs, and rollback retention passed.
-- 2026-08-03: Exact SHA `e090bf683599e8075f3fa71781c7d39faf9e007a` deployed as `20260803-111421-e090bf683599` after local and isolated baselines, zero-active-work preflight, and validated root-only backup. Identity, app/PostgreSQL, Nginx/HTTPS, Open WebUI, routes/auth, schema, workers, six volumes, logs, and rollback retention passed without external writes.
 - 2026-08-04: Canvas V2 main-task shared outputs passed multi-target validation/literalization/fan-out/retry coverage, independent review, mocked desktop/mobile Chromium, TypeScript, lint, production build/restart, HTTP smoke, SQLite/PostgreSQL contracts, and the complete baseline without provider calls.
 - Older evidence is indexed in `verification.md` and preserved under `.trellis/spec/fluxpost/archive/`.
 

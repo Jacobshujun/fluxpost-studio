@@ -12,13 +12,17 @@ import {
   saveSimpleRunToDb,
 } from "./database";
 import { publishPostsToFeishu } from "./feishu-cli";
-import { getGeneratedPost, saveGeneratedPost } from "./generated-posts";
+import { listFeishuVehicleOptions, normalizeFeishuVehicleValue } from "./feishu-field-options";
+import { countFeishuPublishChunks, feishuRecordBatchSize } from "./feishu-publish-batching";
+import { getGeneratedPostsByIds, saveGeneratedPost } from "./generated-posts";
 import { resolveRuntimeMediaReference } from "./runtime-media-materializer";
 import { savePost } from "./store";
 import { accessActorFromOwner, filterWorkspaceOwnedRecords, type WorkspaceAccessActor } from "./workspace-ownership";
 import type {
   FeishuPublishJob,
+  FeishuPublishItemFailure,
   FeishuPublishJobResult,
+  FeishuPublishProgressStage,
   FeishuPublishJobSource,
   FeishuPublishQueueStatus,
   GeneratedPost,
@@ -56,7 +60,7 @@ const feishuPublishQueueState = ((globalThis as FeishuPublishQueueGlobalState)._
 
 export async function enqueueFeishuPublishJob(posts: GeneratedPost[], options: EnqueueFeishuPublishJobOptions = {}) {
   const ownerUserId = (options.ownerUserId || defaultOwnerUserId).trim() || defaultOwnerUserId;
-  const publishPosts = normalizePosts(await enrichPostsWithContentTags(posts));
+  const publishPosts = normalizePosts(posts);
   if (!publishPosts.length) throw new Error("At least one post is required to enqueue Feishu publishing.");
 
   const approvedPosts = publishPosts.map((post) => ({
@@ -64,8 +68,6 @@ export async function enqueueFeishuPublishJob(posts: GeneratedPost[], options: E
     status: "approved" as const,
     updatedAt: new Date().toISOString(),
   }));
-  await persistPostsForFeishuQueue(approvedPosts);
-
   const source = options.source || "manual";
   const postIds = approvedPosts.map((post) => post.id);
   const existingJob = await findEquivalentQueuedJob(ownerUserId, postIds);
@@ -89,6 +91,7 @@ export async function enqueueFeishuPublishJob(posts: GeneratedPost[], options: E
     updatedAt: now,
     postIds,
     posts: approvedPosts,
+    progress: buildPublishProgress("queued", postIds.length),
   };
 
   await saveFeishuPublishJobToDb(job);
@@ -124,6 +127,7 @@ export async function getFeishuPublishJob(jobId: string, account?: WorkspaceAcce
 }
 
 export function ensureFeishuPublishQueueWorker() {
+  if (process.env.FLUXPOST_DISABLE_BACKGROUND_WORKERS === "1") return;
   while (feishuPublishQueueState.activeWorkers < feishuPublishQueueWorkerConcurrency) {
     feishuPublishQueueState.activeWorkers += 1;
     feishuPublishQueueState.sequence += 1;
@@ -179,12 +183,18 @@ async function drainFeishuPublishQueue(workerId: string) {
     }, feishuPublishQueueHeartbeatMs);
 
     try {
-      const preparation = await prepareFeishuPublishJobMedia(runningJob);
+      const preparation = await prepareFeishuPublishJob(runningJob);
       runningJob = preparation.job;
-      await executeFeishuPublishJob(runningJob, preparation.mediaRepairCount);
+      await executeFeishuPublishJob(
+        runningJob,
+        preparation.mediaRepairCount,
+        preparation.publishablePosts,
+        preparation.itemFailures,
+      );
     } catch (error) {
       const message = compactError(error);
-      const failedJob = await saveTerminalFeishuJob(runningJob, {
+      const latestJob = (await getFeishuPublishJobFromDb(runningJob.id)) || runningJob;
+      const failedJob = await saveTerminalFeishuJob(latestJob, {
         status: "failed",
         result: {
           status: "failed",
@@ -210,7 +220,12 @@ async function drainFeishuPublishQueue(workerId: string) {
   }
 }
 
-async function executeFeishuPublishJob(job: FeishuPublishJob, mediaRepairCount: number) {
+async function executeFeishuPublishJob(
+  job: FeishuPublishJob,
+  mediaRepairCount: number,
+  publishablePosts: GeneratedPost[],
+  preparationFailures: FeishuPublishItemFailure[],
+) {
   const startedAt = Date.now();
   await recordExecutionLog({
     scope: "publish/feishu",
@@ -226,23 +241,99 @@ async function executeFeishuPublishJob(job: FeishuPublishJob, mediaRepairCount: 
     },
   });
 
-  const latestPosts = job.posts;
-  const publishResult = await publishPostsToFeishu(latestPosts, {
+  if (!publishablePosts.length) {
+    const message = `Feishu publish stopped before record creation because all ${job.postIds.length} post(s) failed validation.`;
+    const failedJob = await saveTerminalFeishuJob(job, {
+      status: "failed",
+      posts: job.posts,
+      result: {
+        status: "failed",
+        message,
+        requestedCount: job.postIds.length,
+        succeededCount: 0,
+        failedCount: job.postIds.length,
+        itemFailures: preparationFailures,
+      },
+      progress: {
+        ...buildPublishProgress("finalizing", job.postIds.length, 0),
+        processed: job.postIds.length,
+        failed: job.postIds.length,
+      },
+      error: message,
+    });
+    await syncSimpleRunPublishJob(failedJob);
+    return failedJob;
+  }
+
+  let progressJob = job;
+  const processedPostIds = new Set(preparationFailures.map((failure) => failure.postId));
+  const publishResult = await publishPostsToFeishu(publishablePosts, {
+    preflightFailures: preparationFailures,
+    onChunkComplete: async (chunk) => {
+      chunk.postIds.forEach((postId) => processedPostIds.add(postId));
+      const feishuByPostId = new Map(chunk.postStates.map((item) => [item.postId, item.feishu]));
+      const changedPosts = progressJob.posts
+        .filter((post) => feishuByPostId.has(post.id))
+        .map((post) => {
+          const feishu = feishuByPostId.get(post.id);
+          return {
+            ...post,
+            feishu,
+            status: isPostFullyPublished(post, feishu) ? ("published" as const) : ("approved" as const),
+            updatedAt: new Date().toISOString(),
+          };
+        });
+      await persistPostsSerially(changedPosts);
+      const changedById = new Map(changedPosts.map((post) => [post.id, post]));
+      const mergedPosts = progressJob.posts.map((post) => changedById.get(post.id) || post);
+      const succeeded = mergedPosts.filter((post) => processedPostIds.has(post.id) && post.status === "published").length;
+      progressJob = await saveFeishuPublishJobToDb({
+        ...progressJob,
+        posts: mergedPosts,
+        progress: {
+          ...buildPublishProgress("publishing", progressJob.postIds.length, publishablePosts.length),
+          processed: processedPostIds.size,
+          succeeded,
+          failed: Math.max(0, processedPostIds.size - succeeded),
+          chunkCount: chunk.chunkCount,
+          completedChunks: chunk.chunkIndex + 1,
+        },
+        updatedAt: new Date().toISOString(),
+      });
+    },
     notificationContext: {
       jobId: job.id,
       source: job.source,
       sourceRunId: job.sourceRunId,
       ownerUserId: job.ownerUserId,
-      ownerDisplayName: latestPosts.find((post) => post.ownerDisplayName?.trim())?.ownerDisplayName,
+      ownerDisplayName: job.posts.find((post) => post.ownerDisplayName?.trim())?.ownerDisplayName,
     },
   });
-  const finalPosts = await persistPublishedPosts(latestPosts, publishResult);
-  const jobResult = buildJobResult(publishResult, mediaRepairCount);
+  job = await saveFeishuPublishJobToDb({
+    ...progressJob,
+    progress: {
+      ...(progressJob.progress || buildPublishProgress("finalizing", progressJob.postIds.length)),
+      stage: "finalizing",
+    },
+    updatedAt: new Date().toISOString(),
+  });
+  const publishedPosts = await persistPublishedPosts(publishablePosts, publishResult);
+  const publishedById = new Map(publishedPosts.map((post) => [post.id, post]));
+  const finalPosts = job.posts.map((post) => publishedById.get(post.id) || post);
+  const jobResult = buildJobResult(publishResult, mediaRepairCount, preparationFailures, finalPosts);
   const terminalStatus = queueStatusFromPublishResult(jobResult.status);
   const completedJob = await saveTerminalFeishuJob(job, {
     status: terminalStatus,
     posts: finalPosts,
     result: jobResult,
+    progress: {
+      ...(job.progress || buildPublishProgress("finalizing", finalPosts.length)),
+      stage: "finalizing",
+      processed: finalPosts.length,
+      succeeded: jobResult.succeededCount || 0,
+      failed: jobResult.failedCount || 0,
+      completedChunks: job.progress?.completedChunks || 0,
+    },
   });
   await syncSimpleRunPublishJob(completedJob);
 
@@ -283,10 +374,6 @@ async function persistPublishedPosts(
 
   await persistPostsSerially(finalPosts);
   return finalPosts;
-}
-
-async function persistPostsForFeishuQueue(posts: GeneratedPost[]) {
-  await persistPostsSerially(posts);
 }
 
 async function persistPostsSerially(posts: GeneratedPost[]) {
@@ -331,26 +418,29 @@ function delayFeishuPublishPersistRetry(attempt: number) {
 
 async function loadLatestPostsForJob(job: FeishuPublishJob) {
   const simpleRun = job.sourceRunId ? await getSimpleRunFromDb(job.sourceRunId) : undefined;
-  const latestPosts = await Promise.all(
-    job.posts.map(async (post) => {
-      const latest = await getGeneratedPost(post.id);
-      return latest || post;
-    }),
-  );
-  return latestPosts.map((post) => ({
-    ...post,
+  const latestById = new Map((await getGeneratedPostsByIds(job.postIds)).map((post) => [post.id, post]));
+  return job.posts.map((post) => ({
+    ...(latestById.get(post.id) || post),
     taskKeyword: post.taskKeyword || simpleRun?.input.keyword,
     status: "approved" as const,
     updatedAt: new Date().toISOString(),
   }));
 }
 
-async function prepareFeishuPublishJobMedia(job: FeishuPublishJob) {
-  const latestPosts = await loadLatestPostsForJob(job);
+async function prepareFeishuPublishJob(job: FeishuPublishJob) {
+  let preparedJob = await saveFeishuPublishJobToDb({
+    ...job,
+    progress: buildPublishProgress("preparing", job.postIds.length),
+    updatedAt: new Date().toISOString(),
+  });
+  const latestPosts = await enrichPostsWithContentTags(await loadLatestPostsForJob(preparedJob));
+  const validation = await validatePostsForFeishuPublish(latestPosts);
+  await persistPostsSerially(validation.posts);
+
   let mediaRepairCount = 0;
   const repairedPosts: GeneratedPost[] = [];
 
-  for (const post of latestPosts) {
+  for (const post of validation.posts) {
     const repairedImages = await repairRuntimeMediaReferences(post.imageUrls, () => {
       mediaRepairCount += 1;
     });
@@ -364,13 +454,20 @@ async function prepareFeishuPublishJobMedia(job: FeishuPublishJob) {
     });
   }
 
-  const changedPosts = repairedPosts.filter((post, index) => post !== latestPosts[index] && hasMediaReferenceChanges(latestPosts[index], post));
+  const changedPosts = repairedPosts.filter((post, index) => post !== validation.posts[index] && hasMediaReferenceChanges(validation.posts[index], post));
   if (changedPosts.length) await persistRecoveredPostsSerially(changedPosts);
 
-  const preparedJob = await saveFeishuPublishJobToDb({
-    ...job,
+  const publishableIds = new Set(validation.publishablePosts.map((post) => post.id));
+  const publishablePosts = repairedPosts.filter((post) => publishableIds.has(post.id));
+  preparedJob = await saveFeishuPublishJobToDb({
+    ...preparedJob,
     posts: repairedPosts,
     postIds: repairedPosts.map((post) => post.id),
+    progress: {
+      ...buildPublishProgress("publishing", repairedPosts.length, publishablePosts.length),
+      processed: validation.itemFailures.length,
+      failed: validation.itemFailures.length,
+    },
     updatedAt: new Date().toISOString(),
   });
 
@@ -389,7 +486,7 @@ async function prepareFeishuPublishJobMedia(job: FeishuPublishJob) {
     });
   }
 
-  return { job: preparedJob, mediaRepairCount };
+  return { job: preparedJob, mediaRepairCount, publishablePosts, itemFailures: validation.itemFailures };
 }
 
 async function repairRuntimeMediaReferences(urls: string[], onRepair: () => void) {
@@ -420,16 +517,53 @@ function hasMediaReferenceChanges(previous: GeneratedPost, next: GeneratedPost) 
 }
 
 async function enrichPostsWithContentTags(posts: GeneratedPost[]) {
-  return Promise.all(
-    posts.map(async (post) => {
-      if (post.contentTags?.length) return post;
-      const source = (await getSourceItemsByIds([post.sourceItemId], accessActorFromOwner(post.ownerUserId, post.ownerDisplayName)))[0];
-      return {
-        ...post,
-        contentTags: source?.contentTagging?.tags || [],
-      };
-    }),
-  );
+  const missingByOwner = new Map<string, GeneratedPost[]>();
+  for (const post of posts) {
+    if (post.contentTags?.length) continue;
+    const key = `${post.ownerUserId || ""}\n${post.ownerDisplayName || ""}`;
+    missingByOwner.set(key, [...(missingByOwner.get(key) || []), post]);
+  }
+  const tagsByPostId = new Map<string, GeneratedPost["contentTags"]>();
+  for (const ownerPosts of missingByOwner.values()) {
+    const owner = ownerPosts[0];
+    const sourceItems = await getSourceItemsByIds(
+      ownerPosts.map((post) => post.sourceItemId),
+      accessActorFromOwner(owner.ownerUserId, owner.ownerDisplayName),
+    );
+    const tagsBySourceId = new Map(sourceItems.map((source) => [source.id, source.contentTagging?.tags || []]));
+    ownerPosts.forEach((post) => tagsByPostId.set(post.id, tagsBySourceId.get(post.sourceItemId) || []));
+  }
+  return posts.map((post) => (post.contentTags?.length ? post : { ...post, contentTags: tagsByPostId.get(post.id) || [] }));
+}
+
+async function validatePostsForFeishuPublish(posts: GeneratedPost[]) {
+  const vehicleOptions = await listFeishuVehicleOptions();
+  const itemFailures: FeishuPublishItemFailure[] = [];
+  const publishableIds = new Set<string>();
+  const normalizedPosts = posts.map((post) => {
+    if (!vehicleOptions.options.length) {
+      publishableIds.add(post.id);
+      return post;
+    }
+    const rawVehicle = post.feishuVehicle || post.taskKeyword || "";
+    const normalized = normalizeFeishuVehicleValue(rawVehicle, vehicleOptions.options);
+    if (!normalized.matched) {
+      itemFailures.push({
+        postId: post.id,
+        stage: "validation",
+        error: `Feishu ${vehicleOptions.fieldName} option not found: ${normalized.value}.`,
+        retrySafe: true,
+      });
+      return post;
+    }
+    publishableIds.add(post.id);
+    return { ...post, feishuVehicle: normalized.value || undefined };
+  });
+  return {
+    posts: normalizedPosts,
+    publishablePosts: normalizedPosts.filter((post) => publishableIds.has(post.id)),
+    itemFailures,
+  };
 }
 
 async function findEquivalentQueuedJob(ownerUserId: string, postIds: string[]) {
@@ -451,22 +585,74 @@ function normalizePosts(posts: GeneratedPost[]) {
   return Array.from(byId.values());
 }
 
+function buildPublishProgress(stage: FeishuPublishProgressStage, total: number, publishableCount = total) {
+  return {
+    stage,
+    total,
+    processed: 0,
+    succeeded: 0,
+    failed: 0,
+    chunkSize: feishuRecordBatchSize,
+    chunkCount: countFeishuPublishChunks(publishableCount),
+    completedChunks: 0,
+  };
+}
+
 function buildJobResult(
   publishResult: Awaited<ReturnType<typeof publishPostsToFeishu>>,
   mediaRepairCount: number,
+  preparationFailures: FeishuPublishItemFailure[],
+  finalPosts: GeneratedPost[],
 ): FeishuPublishJobResult {
+  const mediaFailurePostIds = new Set((publishResult.mediaFailures || []).map((failure) => failure.postId));
+  const itemFailures = mergeItemFailures([
+    ...preparationFailures,
+    ...(publishResult.mediaFailures || []).map((failure) => ({
+      postId: failure.postId,
+      stage: "media" as const,
+      error: `${failure.kind} ${failure.index + 1}: ${failure.error}`,
+      retrySafe: true,
+    })),
+    ...(publishResult.recordFailures || []).map((failure) => ({
+      postId: failure.postId,
+      stage: "record" as const,
+      error: failure.error,
+      retrySafe: Boolean(failure.recordId),
+    })),
+    ...(publishResult.attachmentFailures || [])
+      .filter((failure) => !mediaFailurePostIds.has(failure.postId))
+      .map((failure) => ({
+        postId: failure.postId,
+        stage: "attachment" as const,
+        error: failure.error,
+        retrySafe: Boolean(failure.recordId),
+      })),
+  ]);
+  const succeededCount = finalPosts.filter((post) => post.status === "published").length;
+  const failedCount = Math.max(0, finalPosts.length - succeededCount);
   return {
-    status: publishResult.status,
+    status: preparationFailures.length && publishResult.status === "published" ? "record_failed" : publishResult.status,
     payloadPath: publishResult.payloadPath,
     message: publishResult.message,
     notificationStatus: publishResult.notification?.status,
-    recordFailureCount: publishResult.recordFailures?.length || 0,
+    recordFailureCount:
+      (publishResult.recordFailures?.length || 0) + preparationFailures.filter((failure) => failure.stage === "validation").length,
     attachmentFailureCount: publishResult.attachmentFailures?.length || 0,
     recordCount: publishResult.recordMappings?.length || 0,
     mediaRepairCount,
     mediaFailureCount: publishResult.mediaFailures?.length || 0,
     mediaFailures: publishResult.mediaFailures,
+    requestedCount: finalPosts.length,
+    succeededCount,
+    failedCount,
+    itemFailures,
   };
+}
+
+function mergeItemFailures(failures: FeishuPublishItemFailure[]) {
+  const byKey = new Map<string, FeishuPublishItemFailure>();
+  failures.forEach((failure) => byKey.set(`${failure.postId}\n${failure.stage}`, failure));
+  return Array.from(byKey.values());
 }
 
 function queueStatusFromPublishResult(status: FeishuPublishJobResult["status"]): FeishuPublishQueueStatus {
@@ -479,7 +665,7 @@ function queueStatusFromPublishResult(status: FeishuPublishJobResult["status"]):
 
 async function saveTerminalFeishuJob(
   job: FeishuPublishJob,
-  patch: Partial<Pick<FeishuPublishJob, "status" | "posts" | "result" | "error">>,
+  patch: Partial<Pick<FeishuPublishJob, "status" | "posts" | "progress" | "result" | "error">>,
 ) {
   const now = new Date().toISOString();
   return saveFeishuPublishJobToDb({
@@ -564,13 +750,13 @@ function buildSimpleRunPublishStage(run: SimpleRun, job: FeishuPublishJob, now: 
   }
 
   if (publishStatus === "attachment_failed") {
-    const completed = job.posts.filter((post) => post.status === "published").length;
+    const completed = job.result?.succeededCount ?? job.posts.filter((post) => post.status === "published").length;
     return {
       ...base,
       status: "warning",
       total: job.postIds.length,
       completed,
-      failed: Math.max(1, job.postIds.length - completed),
+      failed: job.result?.failedCount ?? Math.max(1, job.postIds.length - completed),
       message,
       updatedAt: now,
     };
@@ -581,8 +767,8 @@ function buildSimpleRunPublishStage(run: SimpleRun, job: FeishuPublishJob, now: 
       ...base,
       status: "warning",
       total: job.postIds.length,
-      completed: Math.max(0, (job.result?.recordCount || job.postIds.length) - (job.result?.recordFailureCount || 1)),
-      failed: job.result?.recordFailureCount || 1,
+      completed: job.result?.succeededCount ?? Math.max(0, (job.result?.recordCount || job.postIds.length) - (job.result?.recordFailureCount || 1)),
+      failed: job.result?.failedCount ?? job.result?.recordFailureCount ?? 1,
       message,
       updatedAt: now,
     };

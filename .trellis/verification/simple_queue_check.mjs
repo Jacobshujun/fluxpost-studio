@@ -19,6 +19,7 @@ const simpleRuns = read("src/lib/simple-runs.ts");
 const database = read("src/lib/database.ts");
 const types = read("src/lib/types.ts");
 const feishu = read("src/lib/feishu-cli.ts");
+const feishuBatching = read("src/lib/feishu-publish-batching.ts");
 const schema = read("db/migrations/001_initial_postgres.sql");
 const page = read("src/app/page.tsx");
 const route = read("src/app/api/simple/runs/route.ts");
@@ -54,8 +55,8 @@ assertContains(database, /export async function enqueueSimpleRunQueueItem/, "Que
 assertContains(database, /export async function claimNextSimpleRunQueueItem/, "Queue claim helper is missing.");
 assertContains(database, /export async function heartbeatSimpleRunQueueItem/, "Queue heartbeat helper is missing.");
 
-assertContains(feishu, /export const feishuRecordBatchSize = 50/, "Feishu record batch size must be 50.");
-assertContains(feishu, /chunkPosts\(publishablePosts,\s*feishuRecordBatchSize\)/, "Feishu publish must split preflight-valid posts into 50-record chunks.");
+assertContains(feishuBatching, /feishuRecordBatchSize\s*=\s*10/, "Feishu record batch size must be 10.");
+assertContains(feishu, /processFeishuPublishChunks\(publishablePosts/, "Feishu publish must split preflight-valid posts into safe chunks.");
 assertContains(feishu, /recordPayloadPaths/, "Feishu publish should expose all chunk payload paths.");
 assertNotContains(feishu, /posts\.length\s*>\s*200/, "Feishu publish must not rely on the old 200-record request cap.");
 

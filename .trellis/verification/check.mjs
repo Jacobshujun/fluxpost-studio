@@ -40,6 +40,7 @@ const nodeChecks = [
   ["Concurrency integration check", "concurrency_check.mjs"],
   ["Feishu publish resume check", "feishu_publish_resume_check.mjs"],
   ["Feishu publish queue check", "feishu_publish_queue_check.mjs"],
+  ["Feishu publish batch check", "feishu_publish_batch_check.mjs"],
   ["Feishu publish media recovery check", "feishu_publish_media_recovery_check.mjs"],
   ["Feishu vehicle options check", "feishu_vehicle_options_check.mjs"],
   ["Simple crawl top-up and media policy check", "simple_crawl_media_policy_check.mjs"],

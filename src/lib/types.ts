@@ -33,6 +33,28 @@ export type FeishuPublishQueueStatus =
 
 export type FeishuPublishJobSource = "manual" | "simple";
 
+export type FeishuPublishProgressStage = "queued" | "preparing" | "publishing" | "finalizing";
+
+export type FeishuPublishItemFailureStage = "validation" | "media" | "record" | "attachment";
+
+export type FeishuPublishItemFailure = {
+  postId: string;
+  stage: FeishuPublishItemFailureStage;
+  error: string;
+  retrySafe: boolean;
+};
+
+export type FeishuPublishJobProgress = {
+  stage: FeishuPublishProgressStage;
+  total: number;
+  processed: number;
+  succeeded: number;
+  failed: number;
+  chunkSize: number;
+  chunkCount: number;
+  completedChunks: number;
+};
+
 export type DistributionDecision = "可分发" | "不可分发";
 
 export type DistributionCheckQueueStatus = "queued" | "running" | "completed" | "partial" | "failed" | "cancelled";
@@ -929,6 +951,10 @@ export type FeishuPublishJobResult = {
   recordCount?: number;
   mediaRepairCount?: number;
   mediaFailureCount?: number;
+  requestedCount?: number;
+  succeededCount?: number;
+  failedCount?: number;
+  itemFailures?: FeishuPublishItemFailure[];
   mediaFailures?: Array<{
     postId: string;
     kind: "image" | "video";
@@ -955,6 +981,7 @@ export type FeishuPublishJob = {
   completedAt?: string;
   postIds: string[];
   posts: GeneratedPost[];
+  progress?: FeishuPublishJobProgress;
   result?: FeishuPublishJobResult;
   error?: string;
 };

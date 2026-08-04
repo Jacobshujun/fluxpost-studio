@@ -79,14 +79,15 @@
       "definition_of_done": [
         "Users can manually patch or prompt-edit a generated post",
         "Approved posts can be staged as Feishu payloads",
-        "Configured Feishu CLI can publish using the project wrapper"
+        "Configured Feishu CLI can publish using the project wrapper",
+        "Bulk publishes use one durable job with worker preparation and persisted ten-post chunks"
       ],
       "evidence": [
         "Source files present: src/app/api/review/route.ts, src/app/api/publish/feishu/route.ts, src/lib/feishu-cli.ts",
-        "2026-06-12 verification passed for /review: npx --no-install tsc --noEmit; npm run lint with existing 3 warnings only; npm run build; powershell -ExecutionPolicy Bypass -File .trellis/verification/check.ps1; npm run local:restart",
+        "2026-08-04 durable enqueue, serial preparation, ten-post chunks, structured failures, active-job restoration, and 1/10/11/50/51 checks passed offline",
         "Detailed historical evidence archived at .trellis/spec/fluxpost/archive/feature-list-history-2026-06-17.json"
       ],
-      "notes": "Ready for a real publish test with one approved generated post that has final local images; no real Base record creation has been executed in this verification. Feishu IM notification requires FEISHU_NOTIFY_CHAT_ID or FEISHU_NOTIFY_USER_ID plus bot message permission."
+      "notes": "Keep ready_for_review until an operator-approved real publish validates the durable chunk path with final media. No real Base record creation was executed in this verification. Feishu IM notification requires FEISHU_NOTIFY_CHAT_ID or FEISHU_NOTIFY_USER_ID plus bot message permission."
     },
     {
       "id": "feishu-distribution-check",

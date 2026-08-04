@@ -31,8 +31,8 @@ assertContains(source.materializer, /imageDownloadTimeoutMs\s*=\s*120_000/, "Ima
 assertContains(source.materializer, /videoDownloadTimeoutMs\s*=\s*300_000/, "Video recovery must use a 300 second default timeout.");
 assertContains(source.storage, /buildTosObjectKey\(publicPath/, "TOS recovery must map the complete logical public path to the object key.");
 
-const prepareIndex = source.queue.indexOf("prepareFeishuPublishJobMedia(runningJob)");
-const publishIndex = source.queue.indexOf("publishPostsToFeishu(latestPosts");
+const prepareIndex = source.queue.indexOf("prepareFeishuPublishJob(runningJob)");
+const publishIndex = source.queue.indexOf("publishPostsToFeishu(publishablePosts");
 assertEqual(prepareIndex >= 0 && publishIndex > prepareIndex, true, "Recovered URLs must be persisted before Feishu publish starts.");
 assertContains(source.queue, /resolveRuntimeMediaReference\(url\)/, "The queue must reuse shared runtime media reference resolution.");
 assertContains(source.queue, /changedPosts\.length\) await persistRecoveredPostsSerially\(changedPosts\)/, "Recovered generated posts must be persisted.");
@@ -45,7 +45,7 @@ assertContains(source.queue, /isPostFullyPublished/, "Partial publish persistenc
 
 assertContains(source.cli, /preflightFailedPostIds/, "Feishu attachment preflight must track failed posts independently.");
 assertContains(source.cli, /publishablePosts\s*=\s*posts\.filter/, "Valid posts must be partitioned from media failures.");
-assertContains(source.cli, /chunkPosts\(publishablePosts,\s*feishuRecordBatchSize\)/, "Record creation must receive only preflight-valid posts.");
+assertContains(source.cli, /processFeishuPublishChunks\(publishablePosts/, "Record creation must receive only preflight-valid posts.");
 assertContains(source.cli, /!publishablePosts\.length[\s\S]*\("failed" as const\)/, "An all-invalid batch must fail before record creation.");
 assertContains(source.cli, /mediaFailures/, "Per-post media failures must be returned to the durable job.");
 assertNotContains(

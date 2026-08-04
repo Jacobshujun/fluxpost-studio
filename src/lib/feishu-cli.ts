@@ -8,6 +8,7 @@ import { promisify } from "node:util";
 import { recordExecutionLog } from "./activity-log";
 import { appConfig } from "./config";
 import { concurrencyConfig, mapWithConcurrency, runWithConcurrencyPool } from "./concurrency";
+import { feishuRecordBatchSize, processFeishuPublishChunks } from "./feishu-publish-batching";
 import { ensureFeishuCliIdentity } from "./feishu-cli-identity";
 import {
   verifyFeishuRecordFields,
@@ -15,11 +16,11 @@ import {
   type FeishuRecordFieldExpectation,
 } from "./feishu-record-verification";
 import { materializeRuntimeMedia } from "./runtime-media-materializer";
-import type { FeishuPostPublishState, FeishuPublishJobSource, GeneratedPost } from "./types";
+import type { FeishuPostPublishState, FeishuPublishItemFailure, FeishuPublishJobSource, GeneratedPost } from "./types";
 
 const execFileAsync = promisify(execFile);
 
-export const feishuRecordBatchSize = 50;
+export { feishuRecordBatchSize } from "./feishu-publish-batching";
 
 type CliInvocation = {
   file: string;
@@ -135,6 +136,19 @@ type FeishuPublishNotificationSummary = FeishuPublishNotificationContext & {
 
 type PublishPostsToFeishuOptions = {
   notificationContext?: FeishuPublishNotificationContext;
+  preflightFailures?: FeishuPublishItemFailure[];
+  onChunkComplete?: (progress: FeishuPublishChunkProgress) => Promise<void>;
+};
+
+type FeishuPublishChunkProgress = {
+  chunkIndex: number;
+  chunkCount: number;
+  postIds: string[];
+  postStates: FeishuPostStateUpdate[];
+  recordMappings: FeishuRecordMapping[];
+  recordFailures: FeishuRecordFailure[];
+  attachmentUploads: FeishuAttachmentUpload[];
+  attachmentFailures: FeishuAttachmentFailure[];
 };
 
 const maxFeishuAttachmentImageBytes = 30 * 1024 * 1024;
@@ -212,9 +226,10 @@ export async function publishPostsToFeishu(posts: GeneratedPost[], options: Publ
     error: `${failure.kind} ${failure.index + 1}: ${failure.error}`,
   }));
   const recordMappings: FeishuRecordMapping[] = [];
-  const chunks = chunkPosts(publishablePosts, feishuRecordBatchSize);
+  const chunkCount = Math.ceil(publishablePosts.length / feishuRecordBatchSize);
+  const externalPreflightFailures = options.preflightFailures || [];
 
-  for (const [chunkIndex, chunk] of chunks.entries()) {
+  await processFeishuPublishChunks(publishablePosts, async (chunk, chunkIndex) => {
     const existingMappings = useDefaultBaseCreate
       ? chunk
           .map((post) => {
@@ -231,37 +246,65 @@ export async function publishPostsToFeishu(posts: GeneratedPost[], options: Publ
       recordPayloadPaths.push(recordPayloadPath);
       await writeFile(recordPayloadPath, JSON.stringify(buildBitableRecordPayload(postsToCreate, fieldMap), null, 2), "utf8");
 
-      const args = buildCliArgs(payloadPath, recordPayloadPath);
-      const result = await runFeishuCli(args, {
-        timeout: 120_000,
-        maxBuffer: 1024 * 1024 * 8,
-        env: buildCliEnv({
-          ...process.env,
-          FEISHU_PAYLOAD_PATH: payloadPath,
-          FEISHU_RECORD_PAYLOAD_PATH: recordPayloadPath,
-          FEISHU_BITABLE_APP_TOKEN: appConfig.feishuBitableAppToken,
-          FEISHU_BITABLE_TABLE_ID: appConfig.feishuBitableTableId,
-        }),
-      });
-      stdoutParts.push(result.stdout);
-      stderrParts.push(result.stderr);
+      try {
+        const args = buildCliArgs(payloadPath, recordPayloadPath);
+        const result = await runFeishuCli(args, {
+          timeout: 120_000,
+          maxBuffer: 1024 * 1024 * 8,
+          env: buildCliEnv({
+            ...process.env,
+            FEISHU_PAYLOAD_PATH: payloadPath,
+            FEISHU_RECORD_PAYLOAD_PATH: recordPayloadPath,
+            FEISHU_BITABLE_APP_TOKEN: appConfig.feishuBitableAppToken,
+            FEISHU_BITABLE_TABLE_ID: appConfig.feishuBitableTableId,
+          }),
+        });
+        stdoutParts.push(result.stdout);
+        stderrParts.push(result.stderr);
 
-      const createdRecordIds = parseCreatedRecordIds(result.stdout);
-      if (createdRecordIds.length < postsToCreate.length) {
-        throw new Error("Feishu record creation did not return enough record IDs for attachment upload.");
+        const createdRecordIds = parseCreatedRecordIds(result.stdout);
+        recordMappings.push(
+          ...postsToCreate.slice(0, createdRecordIds.length).map((post, index) => ({
+            postId: post.id,
+            recordId: createdRecordIds[index],
+            created: true,
+          })),
+        );
+        if (createdRecordIds.length < postsToCreate.length) {
+          recordFailures.push(
+            ...postsToCreate.slice(createdRecordIds.length).map((post) => ({
+              postId: post.id,
+              recordId: "",
+              error: "Feishu record creation did not return a record ID for this post.",
+            })),
+          );
+        }
+      } catch (error) {
+        const message = compactCliError(error);
+        const stdout = getCliOutput(error, "stdout");
+        const stderr = getCliOutput(error, "stderr");
+        const returnedRecordIds = tryParseCreatedRecordIds(stdout || "");
+        recordMappings.push(
+          ...postsToCreate.slice(0, returnedRecordIds.length).map((post, index) => ({
+            postId: post.id,
+            recordId: returnedRecordIds[index],
+            created: true,
+          })),
+        );
+        recordFailures.push(
+          ...postsToCreate
+            .slice(returnedRecordIds.length)
+            .map((post) => ({ postId: post.id, recordId: "", error: message, stdout, stderr })),
+        );
+        if (stdout) stdoutParts.push(stdout);
+        if (stderr) stderrParts.push(stderr);
       }
-      recordMappings.push(
-        ...postsToCreate.map((post, index) => ({
-          postId: post.id,
-          recordId: createdRecordIds[index],
-          created: true,
-        })),
-      );
     }
 
     if (useDefaultBaseCreate) {
+      const failedRecordPostIds = new Set(recordFailures.map((item) => item.postId));
       const recordWriteResult = await writeAndVerifyGeneratedFieldsToFeishu(
-        chunk,
+        chunk.filter((post) => !failedRecordPostIds.has(post.id)),
         recordMappings,
         fieldMap,
         outboxDir,
@@ -283,8 +326,40 @@ export async function publishPostsToFeishu(posts: GeneratedPost[], options: Publ
       attachmentUploads.push(...uploadResult.uploads);
       attachmentFailures.push(...uploadResult.failures);
     }
-  }
-  const publishStatus = recordFailures.length ? "record_failed" : attachmentFailures.length ? "attachment_failed" : "published";
+
+  }, async ({ chunk, chunkIndex, chunkCount, error }) => {
+    if (error) {
+      const message = compactCliError(error);
+      const mappingByPostId = new Map(recordMappings.map((item) => [item.postId, item.recordId]));
+      const failedPostIds = new Set(recordFailures.map((item) => item.postId));
+      recordFailures.push(
+        ...chunk
+          .filter((post) => !failedPostIds.has(post.id))
+          .map((post) => ({ postId: post.id, recordId: mappingByPostId.get(post.id) || "", error: message })),
+      );
+    }
+    if (options.onChunkComplete) {
+      const chunkPostIds = new Set(chunk.map((post) => post.id));
+      await options.onChunkComplete({
+        chunkIndex,
+        chunkCount,
+        postIds: chunk.map((post) => post.id),
+        postStates: buildFeishuPostStateUpdates(
+          chunk,
+          recordMappings,
+          recordFailures,
+          attachmentUploads,
+          attachmentFailures,
+          payloadPath,
+        ),
+        recordMappings: recordMappings.filter((item) => chunkPostIds.has(item.postId)),
+        recordFailures: recordFailures.filter((item) => chunkPostIds.has(item.postId)),
+        attachmentUploads: attachmentUploads.filter((item) => chunkPostIds.has(item.postId)),
+        attachmentFailures: attachmentFailures.filter((item) => chunkPostIds.has(item.postId)),
+      });
+    }
+  });
+  const publishStatus = recordFailures.length || externalPreflightFailures.length ? "record_failed" : attachmentFailures.length ? "attachment_failed" : "published";
   const postStates = buildFeishuPostStateUpdates(
     posts,
     recordMappings,
@@ -298,7 +373,7 @@ export async function publishPostsToFeishu(posts: GeneratedPost[], options: Publ
         ...options.notificationContext,
         status: publishStatus,
         recordMappings,
-        recordFailureCount: recordFailures.length,
+        recordFailureCount: recordFailures.length + externalPreflightFailures.length,
         attachmentFailureCount: attachmentFailures.length,
       })
     : {
@@ -337,7 +412,7 @@ export async function publishPostsToFeishu(posts: GeneratedPost[], options: Publ
   return {
     status: !publishablePosts.length
       ? ("failed" as const)
-      : recordFailures.length
+      : recordFailures.length || externalPreflightFailures.length
       ? ("record_failed" as const)
       : attachmentFailures.length
         ? ("attachment_failed" as const)
@@ -346,14 +421,14 @@ export async function publishPostsToFeishu(posts: GeneratedPost[], options: Publ
     recordPayloadPath: recordPayloadPaths[0],
     recordPayloadPaths,
     batchSize: feishuRecordBatchSize,
-    chunkCount: chunks.length,
+    chunkCount,
     message: !publishablePosts.length
       ? `Feishu publish stopped before record creation because all ${posts.length} post(s) failed media preflight.${formatFirstMediaFailure(mediaFailures)}`
-      : recordFailures.length
-      ? `Feishu Base records were created or reused for ${recordMappings.length} posts, but ${recordFailures.length} record field write(s) failed verification. Retry will reuse existing record IDs and repair unfinished records.`
+      : recordFailures.length || externalPreflightFailures.length
+      ? `Feishu Base records were created or reused for ${recordMappings.length} posts, but ${recordFailures.length + externalPreflightFailures.length} post(s) failed validation or record verification. Retry will reuse known record IDs; unknown record-create outcomes require inspection.`
       : attachmentFailures.length
         ? `Feishu Base records were created or reused for ${recordMappings.length} posts, but ${attachmentFailures.length} attachment upload(s) failed.${formatFirstMediaFailure(mediaFailures)} Retry will reuse existing record IDs and upload only unfinished attachments.`
-        : `Feishu Base write completed and verified for ${posts.length} posts in ${chunks.length} chunk(s) of up to ${feishuRecordBatchSize}.`,
+        : `Feishu Base write completed and verified for ${posts.length} posts in ${chunkCount} chunk(s) of up to ${feishuRecordBatchSize}.`,
     recordMappings,
     postStates,
     recordFailures,
@@ -367,14 +442,6 @@ export async function publishPostsToFeishu(posts: GeneratedPost[], options: Publ
   } finally {
     await cleanupPreparedAttachmentFiles(attachmentFiles);
   }
-}
-
-function chunkPosts<T>(items: T[], size: number) {
-  const chunks: T[][] = [];
-  for (let index = 0; index < items.length; index += size) {
-    chunks.push(items.slice(index, index + size));
-  }
-  return chunks;
 }
 
 function buildCliArgs(payloadPath: string, recordPayloadPath: string) {
@@ -1381,6 +1448,14 @@ function parseCreatedRecordIds(stdout: string) {
   if (!stdout.trim()) return [];
   const parsed = JSON.parse(stdout) as unknown;
   return findStringArray(parsed, "record_id_list") || findRecordIds(parsed);
+}
+
+function tryParseCreatedRecordIds(stdout: string) {
+  try {
+    return parseCreatedRecordIds(stdout);
+  } catch {
+    return [];
+  }
 }
 
 function findStringArray(value: unknown, key: string): string[] | null {

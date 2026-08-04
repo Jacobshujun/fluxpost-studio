@@ -46,6 +46,7 @@ type FeishuPublishResponse = {
   queueAhead?: number;
   activeJobId?: string;
   job?: FeishuPublishJob;
+  jobs?: FeishuPublishJob[];
   payloadPath?: string;
   message?: string;
   error?: string;
@@ -215,6 +216,22 @@ export default function ReviewPage() {
   useEffect(() => {
     void loadPosts();
   }, [loadPosts]);
+
+  useEffect(() => {
+    async function restoreActivePublishJob() {
+      try {
+        const res = await fetch("/api/publish/feishu");
+        const data = (await res.json()) as FeishuPublishResponse;
+        if (!res.ok) return;
+        const job = data.jobs?.find((item) => item.source === "manual" && isFeishuPublishQueueLive(item.status));
+        if (!job) return;
+        setPublish(buildPublishSnapshot(job.posts, { status: job.status, queueStatus: job.status, jobId: job.id, job }));
+      } catch (error) {
+        setMessage(error instanceof Error ? error.message : "恢复飞书写入任务失败");
+      }
+    }
+    void restoreActivePublishJob();
+  }, []);
 
   useEffect(() => {
     document.documentElement.dataset.theme = theme;
@@ -617,11 +634,11 @@ export default function ReviewPage() {
       const res = await fetch("/api/publish/feishu", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ posts: payloadPosts }),
+        body: JSON.stringify({ postIds: payloadPosts.map((post) => post.id) }),
       });
       const data = (await res.json()) as FeishuPublishResponse;
       if (!res.ok) throw new Error(data.error || "写入飞书失败");
-      setPublish(buildPublishSnapshot(payloadPosts, data));
+      setPublish(buildPublishSnapshot(data.job?.posts?.length ? data.job.posts : payloadPosts, data));
       await loadPosts(payloadPosts[0]?.id);
       setMessage(buildPublishMessage(data));
     } catch (error) {
@@ -1377,6 +1394,12 @@ function buildPublishSnapshot(posts: GeneratedPost[], data: FeishuPublishRespons
   const queueStatus = data.queueStatus || job?.status;
   const status = data.status || (queueStatus === "completed" ? "published" : queueStatus);
   const notification = formatPublishNotification(data.notification);
+  const progress = job?.progress;
+  const progressDetail = progress
+    ? `已处理 ${progress.processed}/${progress.total}，成功 ${progress.succeeded}，失败 ${progress.failed}，批次 ${progress.completedChunks}/${progress.chunkCount}`
+    : "";
+  const firstFailure = job?.result?.itemFailures?.[0];
+  const failureDetail = firstFailure ? `首个失败 ${firstFailure.postId}：${firstFailure.error}` : "";
 
   if (status === "queued" || queueStatus === "queued") {
     return {
@@ -1390,20 +1413,27 @@ function buildPublishSnapshot(posts: GeneratedPost[], data: FeishuPublishRespons
         (data.queueAhead
           ? `前方还有 ${data.queueAhead} 个同用户任务${data.activeJobId ? `，当前任务 ${data.activeJobId}` : ""}。`
           : `已进入飞书写入队列，共 ${posts.length} 条内容。`),
-      progress: 55,
+      progress: 5,
       notification,
     };
   }
 
   if (status === "running" || queueStatus === "running") {
+    const progressPercent = progress
+      ? progress.stage === "preparing"
+        ? 15
+        : progress.stage === "finalizing"
+          ? 95
+          : Math.min(92, 20 + Math.round((progress.processed / Math.max(1, progress.total)) * 72))
+      : 35;
     return {
       jobId,
       queueStatus: queueStatus || "running",
       postIds: posts.map((post) => post.id),
       status: "running",
       title: "Feishu CLI 正在写入",
-      detail: data.message || `正在写入 ${posts.length} 条内容。`,
-      progress: 72,
+      detail: progressDetail || data.message || `正在写入 ${posts.length} 条内容。`,
+      progress: progressPercent,
       notification,
     };
   }
@@ -1415,7 +1445,7 @@ function buildPublishSnapshot(posts: GeneratedPost[], data: FeishuPublishRespons
       postIds: posts.map((post) => post.id),
       status: status === "failed" ? "error" : "warning",
       title: "飞书写入未完全完成",
-      detail: data.message || `发布流程返回 ${status || "unknown"}。`,
+      detail: [progressDetail, data.message || `发布流程返回 ${status || "unknown"}。`, failureDetail].filter(Boolean).join("。"),
       progress: 100,
       notification,
     };
@@ -1427,7 +1457,7 @@ function buildPublishSnapshot(posts: GeneratedPost[], data: FeishuPublishRespons
     postIds: posts.map((post) => post.id),
     status: data.notification?.status === "failed" ? "warning" : "success",
     title: data.notification?.status === "failed" ? "飞书写入完成，通知失败" : "飞书写入完成",
-    detail: `已写入 ${job?.result?.recordCount || posts.length} 条记录，处理 ${countPostMedia(posts)} 个素材。`,
+    detail: `已写入 ${job?.result?.succeededCount ?? job?.result?.recordCount ?? posts.length} 条记录，处理 ${countPostMedia(posts)} 个素材。`,
     progress: 100,
     notification,
   };

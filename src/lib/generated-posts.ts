@@ -29,6 +29,19 @@ export async function getGeneratedPost(postId: string, account?: WorkspaceAccess
   return store.posts.find((post) => post.id === postId && canReadGeneratedPost(account, post));
 }
 
+export async function getGeneratedPostsByIds(postIds: string[], account?: WorkspaceAccessActor) {
+  const ids = makeUniqueIds(postIds);
+  if (!ids.length) return [];
+  const selectedIds = new Set(ids);
+  const store = await readGeneratedPosts();
+  const postsById = new Map(
+    store.posts
+      .filter((post) => selectedIds.has(post.id) && canReadGeneratedPost(account, post))
+      .map((post) => [post.id, post]),
+  );
+  return ids.map((id) => postsById.get(id)).filter((post): post is GeneratedPost => Boolean(post));
+}
+
 export async function saveGeneratedPost(post: GeneratedPost, account?: WorkspaceAccessActor) {
   const store = await readGeneratedPosts();
   const previous = store.posts.find((item) => item.id === post.id);

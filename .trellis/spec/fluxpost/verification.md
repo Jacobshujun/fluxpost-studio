@@ -18,7 +18,7 @@ powershell -ExecutionPolicy Bypass -File .trellis/verification/check.ps1
 The baseline verifies:
 
 - Trellis file existence, context budgets, latest markers, JSON validity, and feature evidence limits.
-- PostgreSQL schema, accounts/ownership, libraries, configuration, TOS, deployment scripts, execution logs, platform mappings, media, video, concurrency, queues, Feishu boundaries, source imports, review flows, and row-level persistence.
+- PostgreSQL schema, accounts/ownership, libraries, configuration, TOS, deployment scripts, execution logs, platform mappings, media, video, concurrency, queues, Feishu enqueue/chunk/resume/media boundaries, source imports, review flows, and row-level persistence.
 - Infinite Canvas graph/workflow/API/DAG, common nodes, media helpers, provider resume, scheduler, frozen copy input, copy-library, and original-batch contracts without paid calls.
 - `npm run lint`, `npx --no-install tsc --noEmit`, and `npm run build`.
 - Isolated production HTTP smoke and SQLite store validation.
@@ -41,12 +41,11 @@ Do not deploy a dirty worktree, branch name, abbreviated SHA, local runtime rows
 
 ## Recent Verification
 
+- 2026-08-04: Feishu bulk publishing passed id-only durable enqueue checks, worker-side local preparation ordering, 10-post boundaries for 1/10/11/50/51 posts, third-chunk failure continuation with durable known ids and one notification, structured retry safety, review progress restoration, TypeScript, lint, build, local restart/HTTP smoke, and the complete baseline without live Feishu writes.
 - 2026-08-04: Exact SHA `06a2d7b81dc491c2c4ce1a17f6d3584e3c5d4605` passed captured-drag Chromium and local/VPS baselines, then deployed as `20260804-025759-06a2d7b81dc4` after zero-work preflight and validated backup. Identity, health, routes/auth, volumes, logs, and rollback retention passed.
 - 2026-08-04: Exact SHA `fedceccfda93401cc1539df034dbd1833647b4a3` passed mocked Chromium and complete local/VPS baselines, then deployed as `20260804-023054-fedceccfda93` after zero-work preflight and backup. Identity, services, routes/auth, schema, workers, six volumes, logs, and rollback retention passed.
 - 2026-08-03: Exact SHA `a65767384c1b1993c95c8c32d053edcd10c3fac6` passed the complete local baseline and commit-bound isolated VPS verifier, then deployed to production 38 as `20260803-075434-a65767384c1b` after a zero-active-work preflight and validated root-only PostgreSQL backup. Manifest/image/container identity, app/PostgreSQL health, Nginx/public HTTPS, Open WebUI identity, routes/auth boundaries, required schema, workers, six named volumes, and retained rollback passed without provider or external-write calls.
 - 2026-08-03: `release/production-20260803` restored wrapper/bootstrap v3, verifier v1, the shared operation lock, the Docker `verification` target, a Linux-complete dependency lock, and archive-safe deployment fixtures. Focused checks, candidate path and secret review, the complete local baseline, and the VPS clean-archive baseline passed without external provider calls or service activation.
-- 2026-07-31: The restored cross-platform baseline passed after the Canvas distance-bounded three-layer edge pulse update: context budgets, JSON and feature gates, all deterministic domain checks, lint with five existing Canvas warnings and no errors, TypeScript, production build, isolated HTTP smoke on port 45678, and SQLite validation passed without external provider calls. Mocked Chromium also verified dark/light rendering, 12-edge phase distribution, source-to-target offset interpolation, movement/reduced-motion suppression, and 390px overflow.
-- 2026-07-30: Batch original ToAPIs recovery passed executable pending-cover/resume orchestration, PostgreSQL `EXPLAIN`, isolated SQLite recovery, focused domain checks, TypeScript, scoped lint, two production builds, local restart/HTTP smoke, and mocked Chromium at 1440x960/390x844.
 Older evidence is preserved in `.trellis/spec/fluxpost/archive/verification-history.md`.
 
 ## Missing Coverage

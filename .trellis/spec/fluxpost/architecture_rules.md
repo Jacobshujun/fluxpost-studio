@@ -190,6 +190,41 @@ return NextResponse.json({ status: getConfigStatus(), advanced: getAdvancedConfi
 - Wrong: `lark-cli config init --app-secret <secret>`.
 - Correct: use `--app-secret-stdin`, write the secret to stdin, and sanitize subprocess failures.
 
+## Scenario: Durable Batched Feishu Publishing
+
+### 1. Scope / Trigger
+- Trigger: manual review publishing or an automatic simple run submits one or more generated posts to Feishu.
+
+### 2. Signatures
+- `POST /api/publish/feishu` accepts `{ postIds: string[] }` and returns one persisted `FeishuPublishJob` with HTTP `202`.
+- Job `progress` and structured per-post `result.itemFailures` remain in the existing queue `data_json`; no schema migration is required.
+
+### 3. Contracts
+- The API performs one owner-scoped bulk post read and durable enqueue only. Tag enrichment, vehicle lookup, approval/source updates, media preparation, Base writes, and notifications belong to the worker.
+- Before the first external write, the worker must finish tag/vehicle validation and serially persist every prepared local post with the bounded transient-database retry policy.
+- Every Feishu source uses ordered chunks of at most 10 posts. A settled chunk persists known record ids, verification and attachment state, item failures, and aggregate progress before the next chunk starts.
+- Per-post validation/media/record/attachment failures do not block valid siblings. Chunk errors do not block later chunks; unknown create outcomes remain `retrySafe=false` and are not automatically replayed.
+- One logical Job produces one terminal aggregate result and at most one summary notification. Known record ids and completed attachment uploads are authoritative on an explicit later retry.
+
+### 4. Validation & Error Matrix
+- All posts fail local validation or media preflight -> create zero Base records and preserve every failed post as `approved` with an actionable stage/error.
+- Record create times out with no returned id -> mark affected outcomes unsafe to retry automatically, persist the failed chunk, and continue later chunks.
+- A create response exposes only some record ids -> persist and reuse those ids; only posts without known ids retain unknown outcomes.
+- Local preparation persistence fails -> stop before any external write. Chunk-result persistence fails -> stop before starting another chunk.
+
+### 5. Good/Base/Bad Cases
+- Good: 50 posts create one Job, five internal chunks, durable progress after every chunk, and one final notification.
+- Base: 11 posts create two chunks; one invalid vehicle remains approved while valid posts publish.
+- Bad: the route invokes Feishu CLI, 50 posts become five Jobs/notifications, or an expired worker lease automatically replays an ambiguous record create.
+
+### 6. Tests Required
+- `feishu_publish_batch_check.mjs` covers 1/10/11/50/51 boundaries, third-chunk failure continuation, durable known-id snapshots, and one notification.
+- Queue, resume, media-recovery, vehicle-option, workspace-account, simple-queue, and review checks cover enqueue boundaries, ownership, local preparation ordering, retry safety, active-Job restoration, and progress without live Feishu calls.
+
+### 7. Wrong vs Correct
+- Wrong: prepare 50 posts and invoke Feishu from the request before a durable queue row exists.
+- Correct: save one Job, return `202`, prepare local state serially in the worker, then publish in durable 10-post chunks.
+
 ## Frontend Rules
 
 - Keep the first screen as the usable workspace, not a landing page.

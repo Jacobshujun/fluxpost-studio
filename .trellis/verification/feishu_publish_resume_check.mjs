@@ -57,8 +57,8 @@ assertContains(feishu, /failure\.reason === "not_found"/, "Missing persisted rec
 assertContains(feishu, /createdRecordIds[\s\S]*mapping\.recordId\s*=\s*createdRecordIds\[0\]/, "Replacement creation must update the persisted post mapping.");
 assertContains(feishu, /mapping\.recordId\s*=\s*createdRecordIds\[0\][\s\S]*mapping\.created\s*=\s*true/, "Replacement mappings must be persisted as newly created records.");
 assertReplacementCreateOmitsPersistedRecordId(feishu);
-assertContains(feishu, /recordFailures\.length\s*\?\s*\("record_failed" as const\)/, "Record field failures must return record_failed instead of published.");
-assertContains(feishu, /recordFailures\.length[\s\S]*attachmentFailures\.length\s*\?\s*\("attachment_failed" as const\)/, "Record failures must take priority while attachment failures still return attachment_failed.");
+assertContains(feishu, /recordFailures\.length\s*\|\|\s*externalPreflightFailures\.length[\s\S]*\("record_failed" as const\)/, "Record and validation failures must return record_failed instead of published.");
+assertContains(feishu, /recordFailures\.length\s*\|\|\s*externalPreflightFailures\.length[\s\S]*attachmentFailures\.length[\s\S]*\("attachment_failed" as const\)/, "Record failures must take priority while attachment failures still return attachment_failed.");
 assertContains(feishu, /postStates/, "Feishu publish must return postStates for persistence.");
 assertContains(feishu, /buildFeishuPostStateUpdates/, "Feishu publish must build per-post state updates.");
 assertContains(feishu, /buildStagedFeishuPostStateUpdates/, "Feishu config-missing staging must still return per-post state updates.");

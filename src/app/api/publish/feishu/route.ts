@@ -6,10 +6,8 @@ import {
   getFeishuPublishJob,
   listFeishuPublishJobs,
 } from "@/lib/feishu-publish-queue";
-import { listFeishuVehicleOptions, normalizeFeishuVehicleValue } from "@/lib/feishu-field-options";
-import { getGeneratedPost } from "@/lib/generated-posts";
+import { getGeneratedPostsByIds } from "@/lib/generated-posts";
 import { requireWorkspaceAccount } from "@/lib/workspace-accounts";
-import type { GeneratedPost } from "@/lib/types";
 
 export const runtime = "nodejs";
 
@@ -36,9 +34,9 @@ export async function POST(request: Request) {
   const startedAt = Date.now();
   try {
     const account = await requireWorkspaceAccount(request);
-    const body = (await request.json()) as { posts?: GeneratedPost[] };
-    const requestedPosts = Array.isArray(body.posts) ? body.posts : [];
-    if (!requestedPosts.length) {
+    const body = (await request.json()) as { postIds?: string[] };
+    const postIds = normalizePostIds(body.postIds);
+    if (!postIds.length) {
       await recordExecutionLog({
         scope: "publish/feishu",
         action: "Feishu publish enqueue validation failed",
@@ -48,21 +46,12 @@ export async function POST(request: Request) {
       });
       return NextResponse.json({ error: "At least one approved post is required" }, { status: 400 });
     }
-    const posts = (
-      await Promise.all(
-        requestedPosts.map(async (post) => {
-          if (!post?.id) return undefined;
-          return getGeneratedPost(post.id, account);
-        }),
-      )
-    ).filter((post): post is GeneratedPost => Boolean(post));
-    if (!posts.length || posts.length !== requestedPosts.length) {
+    const posts = await getGeneratedPostsByIds(postIds, account);
+    if (!posts.length || posts.length !== postIds.length) {
       return NextResponse.json({ error: "One or more posts were not found" }, { status: 404 });
     }
 
-    const postsForPublish = await normalizePostsForFeishuPublish(posts);
-
-    const job = await enqueueFeishuPublishJob(postsForPublish, {
+    const job = await enqueueFeishuPublishJob(posts, {
       source: "manual",
       ownerUserId: account.id,
       ownerDisplayName: account.displayName,
@@ -102,21 +91,7 @@ export async function POST(request: Request) {
   }
 }
 
-async function normalizePostsForFeishuPublish(posts: GeneratedPost[]) {
-  const vehicleOptions = await listFeishuVehicleOptions();
-  if (!vehicleOptions.options.length) return posts;
-
-  return posts.map((post) => {
-    const rawVehicle = post.feishuVehicle || post.taskKeyword || "";
-    const normalized = normalizeFeishuVehicleValue(rawVehicle, vehicleOptions.options);
-    if (!normalized.matched) {
-      throw new Error(
-        `Feishu ${vehicleOptions.fieldName} option not found: ${normalized.value}. Please select an existing ${vehicleOptions.fieldName} before publishing.`,
-      );
-    }
-    return {
-      ...post,
-      feishuVehicle: normalized.value || undefined,
-    };
-  });
+function normalizePostIds(value: unknown) {
+  if (!Array.isArray(value)) return [];
+  return Array.from(new Set(value.filter((item): item is string => typeof item === "string").map((item) => item.trim()).filter(Boolean)));
 }

@@ -52,6 +52,7 @@ const config = read("src/lib/config.ts");
 const feishu = read("src/lib/feishu-cli.ts");
 const reviewRoute = read("src/app/api/review/route.ts");
 const publishRoute = read("src/app/api/publish/feishu/route.ts");
+const publishQueue = read("src/lib/feishu-publish-queue.ts");
 const reviewPage = read("src/app/review/page.tsx");
 const check = read(".trellis/verification/check.mjs");
 
@@ -82,10 +83,11 @@ assertContains(
 );
 assertContains(vehicleRoute, /requireWorkspaceAccount\(request\)/, "Vehicle options API must require a workspace account.");
 assertContains(vehicleRoute, /listFeishuVehicleOptions/, "Vehicle options API must delegate to the helper.");
-assertContains(publishRoute, /normalizePostsForFeishuPublish/, "Manual Feishu publish route must preflight posts before enqueue.");
-assertContains(publishRoute, /normalizeFeishuVehicleValue/, "Manual Feishu publish route must normalize vehicle values against real Base options.");
-assertContains(publishRoute, /Feishu \$\{vehicleOptions\.fieldName\} option not found/, "Manual Feishu publish route must reject unknown vehicle options before queueing.");
-assertContains(publishRoute, /enqueueFeishuPublishJob\(postsForPublish/, "Manual Feishu publish route must enqueue normalized posts.");
+assertContains(publishRoute, /enqueueFeishuPublishJob\(posts,/, "Manual Feishu publish route must enqueue one durable job before worker preparation.");
+assertContains(publishQueue, /validatePostsForFeishuPublish/, "Feishu queue worker must own publish-time vehicle validation.");
+assertContains(publishQueue, /const vehicleOptions = await listFeishuVehicleOptions\(\)/, "Feishu queue worker must load Base vehicle options once per job.");
+assertContains(publishQueue, /normalizeFeishuVehicleValue\(rawVehicle,\s*vehicleOptions\.options\)/, "Feishu queue worker must normalize vehicle values against real Base options.");
+assertContains(publishQueue, /Feishu \$\{vehicleOptions\.fieldName\} option not found/, "Unknown vehicle options must become actionable per-post validation failures.");
 assertContains(reviewRoute, /manualPatch\?: Partial<Pick<GeneratedPost,[\s\S]*"feishuVehicle"/, "Review API manualPatch must allow feishuVehicle.");
 assertContains(reviewRoute, /if \("feishuVehicle" in body\.manualPatch\) allowedPatch\.feishuVehicle = body\.manualPatch\.feishuVehicle/, "Review API must preserve feishuVehicle in manual patches.");
 assertContains(reviewPage, /\/api\/publish\/feishu\/vehicle-options/, "Standalone review page must load Feishu vehicle options.");
