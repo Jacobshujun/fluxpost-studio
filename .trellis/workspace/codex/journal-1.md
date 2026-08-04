@@ -643,3 +643,37 @@ Anchored image-preview wheel zoom to the pointer using post-layout scroll correc
 ### Next Steps
 
 - None - task complete
+
+
+## Session 20: Deploy durable Feishu bulk publishing
+
+**Date**: 2026-08-04
+**Task**: Deploy durable Feishu bulk publishing
+**Branch**: `release/production-20260803`
+
+### Summary
+
+Implemented durable id-only Feishu enqueue and ten-post worker chunks, verified the exact candidate offline and on production 38, deployed release 20260804-081822-39f99e2415fa with zero active queues and a validated backup, and passed identity, health, auth, storage, log, and rollback checks without a live Feishu write.
+
+### Main Changes
+
+(Add details)
+
+### Git Commits
+
+| Hash | Message |
+|------|---------|
+| `39f99e2415fa93c08e8727bea30841e88d28a2a6` | (see git log) |
+| `4107864` | (see git log) |
+
+### Testing
+
+- [OK] (Add test results)
+
+### Status
+
+[OK] **Completed**
+
+### Next Steps
+
+- None - task complete
