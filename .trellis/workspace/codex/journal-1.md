@@ -711,3 +711,37 @@ Implemented and verified workspace-configurable content safety policies with ord
 ### Next Steps
 
 - None - task complete
+
+
+## Session 22: Deploy configurable content safety policy
+
+**Date**: 2026-08-04
+**Task**: Deploy configurable content safety policy
+**Branch**: `release/production-20260803`
+
+### Summary
+
+Pushed and isolated-verified exact SHA e6692c3d0cce807106e343c43a9804be2686ec3d, deployed it to production 38 as 20260804-102825-e6692c3d0cce after zero-active-work preflight and a validated root-only PostgreSQL backup, verified identity/health/auth/volumes/Nginx/Open WebUI/rollback, and fast-forwarded GitHub main with the deployment record.
+
+### Main Changes
+
+(Add details)
+
+### Git Commits
+
+| Hash | Message |
+|------|---------|
+| `e6692c3` | (see git log) |
+| `91db201` | (see git log) |
+
+### Testing
+
+- [OK] (Add test results)
+
+### Status
+
+[OK] **Completed**
+
+### Next Steps
+
+- None - task complete

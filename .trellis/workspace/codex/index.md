@@ -8,7 +8,7 @@
 
 <!-- @@@auto:current-status -->
 - **Active File**: `journal-1.md`
-- **Total Sessions**: 21
+- **Total Sessions**: 22
 - **Last Active**: 2026-08-04
 <!-- @@@/auto:current-status -->
 
@@ -19,7 +19,7 @@
 <!-- @@@auto:active-documents -->
 | File | Lines | Status |
 |------|-------|--------|
-| `journal-1.md` | ~713 | Active |
+| `journal-1.md` | ~747 | Active |
 <!-- @@@/auto:active-documents -->
 
 ---
@@ -29,6 +29,7 @@
 <!-- @@@auto:session-history -->
 | # | Date | Title | Commits | Branch |
 |---|------|-------|---------|--------|
+| 22 | 2026-08-04 | Deploy configurable content safety policy | `e6692c3`, `91db201` | `release/production-20260803` |
 | 21 | 2026-08-04 | Configurable content safety policy | `91c6b04`, `268c46d` | `release/production-20260803` |
 | 20 | 2026-08-04 | Deploy durable Feishu bulk publishing | `39f99e2415fa93c08e8727bea30841e88d28a2a6`, `4107864` | `release/production-20260803` |
 | 19 | 2026-08-04 | Fix cursor-anchored Canvas image preview zoom | `5c566ae` | `release/production-20260803` |
