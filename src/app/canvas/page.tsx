@@ -3230,7 +3230,9 @@ function CanvasImagePreviewBody({ item, index, total, closeButtonRef, onClose }:
   onClose: () => void;
 }) {
   const stageRef = useRef<HTMLDivElement | null>(null);
+  const panRef = useRef<{ pointerId: number; x: number; y: number; scrollLeft: number; scrollTop: number } | null>(null);
   const [zoom, setZoom] = useState(1);
+  const [isPanning, setIsPanning] = useState(false);
   const [naturalSize, setNaturalSize] = useState(item.width && item.height ? { width: item.width, height: item.height } : undefined);
   const updateZoom = useCallback((next: number | ((current: number) => number)) => {
     setZoom((current) => {
@@ -3253,15 +3255,47 @@ function CanvasImagePreviewBody({ item, index, total, closeButtonRef, onClose }:
   const zoomPercent = Math.round(zoom * 100);
   const canvasSize = `${Math.max(100, zoomPercent)}%`;
   const imageLimit = `${92 / Math.max(1, zoom)}%`;
+  const finishPan = (event: React.PointerEvent<HTMLDivElement>) => {
+    if (panRef.current?.pointerId !== event.pointerId) return;
+    panRef.current = null;
+    if (event.currentTarget.hasPointerCapture(event.pointerId)) event.currentTarget.releasePointerCapture(event.pointerId);
+    setIsPanning(false);
+  };
 
   return <>
       <header>
         <div><ImageIcon /><strong id="canvas-image-viewer-title">图片 {index + 1}{total > 1 ? ` / ${total}` : ""}</strong>{naturalSize ? <small>{naturalSize.width}×{naturalSize.height}</small> : null}</div>
         <button ref={closeButtonRef} type="button" onClick={onClose} aria-label="关闭图片预览" title="关闭"><X /></button>
       </header>
-      <div ref={stageRef} className="canvas-image-viewer-stage" onMouseDown={(event) => {
-        if (event.button === 1) event.preventDefault();
-      }}>
+      <div
+        ref={stageRef}
+        className={`canvas-image-viewer-stage${zoom > 1 ? " is-pannable" : ""}${isPanning ? " is-panning" : ""}`}
+        onPointerDown={(event) => {
+          if (event.pointerType !== "mouse" || event.button !== 0 || zoom <= 1) return;
+          panRef.current = {
+            pointerId: event.pointerId,
+            x: event.clientX,
+            y: event.clientY,
+            scrollLeft: event.currentTarget.scrollLeft,
+            scrollTop: event.currentTarget.scrollTop,
+          };
+          event.currentTarget.setPointerCapture(event.pointerId);
+          setIsPanning(true);
+          event.preventDefault();
+        }}
+        onPointerMove={(event) => {
+          const pan = panRef.current;
+          if (!pan || pan.pointerId !== event.pointerId) return;
+          event.currentTarget.scrollLeft = pan.scrollLeft - (event.clientX - pan.x);
+          event.currentTarget.scrollTop = pan.scrollTop - (event.clientY - pan.y);
+        }}
+        onPointerUp={finishPan}
+        onPointerCancel={finishPan}
+        onLostPointerCapture={finishPan}
+        onMouseDown={(event) => {
+          if (event.button === 1) event.preventDefault();
+        }}
+      >
         <div className="canvas-image-viewer-canvas" style={{ width: canvasSize, height: canvasSize }}>
           {/* eslint-disable-next-line @next/next/no-img-element */}
           <img
