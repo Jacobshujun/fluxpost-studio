@@ -48,6 +48,29 @@ Cursor-consuming commands must also validate the latest query identity and lates
 
 For viewport-height split workspaces, constrain the root and each intervening flex/grid child with an explicit height or `min-height: 0`. Put `overflow: auto` only on the intended list/editor panes; otherwise a Grid child keeps `min-height: auto`, expands the document, and scrolls fixed tools away. Browser checks should send a wheel event and assert pane `scrollTop` changes while `window.scrollY` and sibling pane coordinates do not.
 
+## Exclusive Wheel Zoom In Scrollable Previews
+
+When an `overflow: auto` preview owns wheel zoom, a React `onWheel` handler is not sufficient to guarantee exclusive gesture ownership. Delegated wheel listeners can be passive, so the zoom state may update before the same wheel performs delayed native scrolling. Use a native non-passive listener with cleanup, and cancel middle-button default behavior to prevent Chromium auto-scroll.
+
+```tsx
+useEffect(() => {
+  const stage = stageRef.current;
+  if (!stage) return;
+  const handleWheel = (event: WheelEvent) => {
+    event.preventDefault();
+    updateZoom((current) => current + (event.deltaY < 0 ? zoomStep : -zoomStep));
+  };
+  stage.addEventListener("wheel", handleWheel, { passive: false });
+  return () => stage.removeEventListener("wheel", handleWheel);
+}, [updateZoom]);
+
+<div ref={stageRef} onMouseDown={(event) => {
+  if (event.button === 1) event.preventDefault();
+}} />
+```
+
+Browser checks must place scroll offsets away from their bounds, send a real wheel event, wait for default scrolling to settle, and assert that zoom changes while `scrollLeft`/`scrollTop` stay fixed. They must also press and move the middle button and assert that native auto-scroll does not start.
+
 ## Interactive Controls Inside React Flow Nodes
 
 Desktop canvas panes use `panOnDrag={isMobile}` plus `selectionOnDrag={!isMobile}`: the idle desktop pane uses the arrow cursor, Space temporarily enables hand-cursor panning, and touch panning remains available on mobile.

@@ -3229,6 +3229,7 @@ function CanvasImagePreviewBody({ item, index, total, closeButtonRef, onClose }:
   closeButtonRef: React.RefObject<HTMLButtonElement | null>;
   onClose: () => void;
 }) {
+  const stageRef = useRef<HTMLDivElement | null>(null);
   const [zoom, setZoom] = useState(1);
   const [naturalSize, setNaturalSize] = useState(item.width && item.height ? { width: item.width, height: item.height } : undefined);
   const updateZoom = useCallback((next: number | ((current: number) => number)) => {
@@ -3237,6 +3238,17 @@ function CanvasImagePreviewBody({ item, index, total, closeButtonRef, onClose }:
       return Math.min(imagePreviewMaxZoom, Math.max(imagePreviewMinZoom, value));
     });
   }, []);
+
+  useEffect(() => {
+    const stage = stageRef.current;
+    if (!stage) return;
+    const handleWheel = (event: WheelEvent) => {
+      event.preventDefault();
+      updateZoom((current) => current + (event.deltaY < 0 ? imagePreviewZoomStep : -imagePreviewZoomStep));
+    };
+    stage.addEventListener("wheel", handleWheel, { passive: false });
+    return () => stage.removeEventListener("wheel", handleWheel);
+  }, [updateZoom]);
 
   const zoomPercent = Math.round(zoom * 100);
   const canvasSize = `${Math.max(100, zoomPercent)}%`;
@@ -3247,9 +3259,8 @@ function CanvasImagePreviewBody({ item, index, total, closeButtonRef, onClose }:
         <div><ImageIcon /><strong id="canvas-image-viewer-title">图片 {index + 1}{total > 1 ? ` / ${total}` : ""}</strong>{naturalSize ? <small>{naturalSize.width}×{naturalSize.height}</small> : null}</div>
         <button ref={closeButtonRef} type="button" onClick={onClose} aria-label="关闭图片预览" title="关闭"><X /></button>
       </header>
-      <div className="canvas-image-viewer-stage" onWheel={(event) => {
-        event.preventDefault();
-        updateZoom((current) => current + (event.deltaY < 0 ? imagePreviewZoomStep : -imagePreviewZoomStep));
+      <div ref={stageRef} className="canvas-image-viewer-stage" onMouseDown={(event) => {
+        if (event.button === 1) event.preventDefault();
       }}>
         <div className="canvas-image-viewer-canvas" style={{ width: canvasSize, height: canvasSize }}>
           {/* eslint-disable-next-line @next/next/no-img-element */}
