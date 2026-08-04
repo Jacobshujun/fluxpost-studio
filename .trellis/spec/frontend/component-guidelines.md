@@ -71,6 +71,15 @@ useEffect(() => {
 
 Browser checks must place scroll offsets away from their bounds, send a real wheel event, wait for default scrolling to settle, and assert that zoom changes while `scrollLeft`/`scrollTop` stay fixed. They must also press and move the middle button and assert that native auto-scroll does not start.
 
+For drag-to-pan, capture the primary mouse pointer only after overflow. Map origin deltas to initial `scrollLeft`/`scrollTop`; release, cancel, and lost-capture clear state. Never capture touch.
+
+```tsx
+if (event.pointerType === "mouse" && event.button === 0 && zoom > 1)
+  stage.setPointerCapture(event.pointerId);
+```
+
+Browser checks cover no-overflow, captured out-of-stage drag, release, wheel, and middle mouse.
+
 ## Interactive Controls Inside React Flow Nodes
 
 Desktop canvas panes use `panOnDrag={isMobile}` plus `selectionOnDrag={!isMobile}`: the idle desktop pane uses the arrow cursor, Space temporarily enables hand-cursor panning, and touch panning remains available on mobile.

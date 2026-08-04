@@ -332,7 +332,7 @@
         "Batch scheduler V2 lets users define typed main/child parameters, source filters, fixed/full/random expansion with exact or inclusive-range counts, main-once and child-per-main preview-frozen no-replacement selection, cartesian/zip composition, explicit node-field bindings, partial/strict aggregation, and custom names for same-type Canvas nodes"
       ],
       "evidence": [
-        "2026-08-04 Canvas image-preview wheel/middle-mouse isolation passed mocked Chromium, local/isolated baselines, and deployed as exact SHA fedceccfda93401cc1539df034dbd1833647b4a3; identity, routes/auth, schema, workers, services, six volumes, backup, logs, and rollback retention passed.",
+        "2026-08-04 Canvas image-preview wheel/middle isolation plus captured left-drag panning passed mocked Chromium and local/isolated baselines, then deployed as exact SHA 06a2d7b81dc491c2c4ce1a17f6d3584e3c5d4605; identity, routes/auth, services, six volumes, backup, logs, and rollback retention passed.",
         "2026-08-03 combined Canvas release a65767384c1b1993c95c8c32d053edcd10c3fac6 passed production identity, /canvas 200, API 401, schema, workers, zero queues, protected-service, six-volume, and rollback checks",
         "2026-07-27 to 2026-07-30 common nodes, resizing, text split/display-any, direct enqueue, task/history controls, shortcuts, bounded undo/redo, the 100-slot image pool, batch scheduler V1/V2, Prompt Switch, standard skeleton, binding editor, aggregate diagnostics, exact/range main-once/child-per-main sampling, Cartesian/zip, capacity/image-group/cumulative limits, legacy compatibility, draft preflight, TypeScript, lint, build/restart, HTTP/SQLite, and mocked responsive checks passed without paid calls"
       ],
