@@ -22,12 +22,12 @@ Ensure mouse-wheel input inside the infinite-canvas image preview performs only 
 
 ## Acceptance Criteria
 
-- [ ] Opening an image preview and sending a wheel gesture changes the preview zoom percentage by the existing step without changing existing scroll offsets.
-- [ ] Pressing and moving the middle mouse button inside the preview does not change the preview stage's `scrollLeft` or `scrollTop` and does not start native auto-scroll.
-- [ ] Closing the preview restores normal infinite-canvas wheel zoom and leaves preview navigation/toolbar behavior intact.
-- [ ] A focused deterministic browser regression check, TypeScript, changed-file lint, build, and the full Trellis baseline pass without live provider or Feishu calls.
-- [ ] `npm run local:restart` refreshes the local production server and `/canvas` responds successfully on `127.0.0.1:3001`.
-- [ ] The exact verified SHA is deployed to production 38; release identity, public `/canvas`, authenticated API boundary, app/PostgreSQL/Nginx health, protected services, and persistent volumes pass read-only post-deploy checks.
+- [x] Opening an image preview and sending a wheel gesture changes the preview zoom percentage by the existing step without changing existing scroll offsets.
+- [x] Pressing and moving the middle mouse button inside the preview does not change the preview stage's `scrollLeft` or `scrollTop` and does not start native auto-scroll.
+- [x] Closing the preview restores normal infinite-canvas wheel zoom and leaves preview navigation/toolbar behavior intact.
+- [x] A focused deterministic browser regression check, TypeScript, changed-file lint, build, and the full Trellis baseline pass without live provider or Feishu calls.
+- [x] `npm run local:restart` refreshes the local production server and `/canvas` responds successfully on `127.0.0.1:3001`.
+- [x] The exact verified SHA is deployed to production 38; release identity, public `/canvas`, authenticated API boundary, app/PostgreSQL/Nginx health, protected services, and persistent volumes pass read-only post-deploy checks.
 
 ## Out Of Scope
 

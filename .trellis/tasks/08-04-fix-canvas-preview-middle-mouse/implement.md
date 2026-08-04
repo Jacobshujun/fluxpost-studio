@@ -12,3 +12,11 @@
 - Stop before commit if the focused interaction check or full baseline fails.
 - Stop before production mutation if local/GitHub/candidate SHA identity is ambiguous or production has active Canvas queues that make restart unsafe.
 - Rely on wrapper rollback for activation failure; use the captured prior release for a Canvas-specific post-check failure.
+
+## Outcome
+
+- Candidate and deployed SHA: `fedceccfda93401cc1539df034dbd1833647b4a3`.
+- Production release: `20260804-023054-fedceccfda93`; retained rollback releases include `20260803-111421-e090bf683599`.
+- Focused mocked Chromium, local production restart, complete local baseline, and commit-bound isolated VPS verifier passed.
+- Production preflight had zero active queues. Post-deploy identity, routes/auth, services, schema, workers, six volumes, logs, and rollback retention passed without provider or Feishu writes.
+- One simple task created after activation was running with a healthy heartbeat; it was not interrupted or modified.

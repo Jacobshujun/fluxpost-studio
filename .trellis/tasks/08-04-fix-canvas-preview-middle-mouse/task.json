@@ -12,15 +12,15 @@
   "assignee": "codex",
   "createdAt": "2026-08-04",
   "completedAt": null,
-  "branch": null,
+  "branch": "release/production-20260803",
   "base_branch": "release/production-20260803",
   "worktree_path": null,
-  "commit": null,
+  "commit": "fedceccfda93401cc1539df034dbd1833647b4a3",
   "pr_url": null,
   "subtasks": [],
   "children": [],
   "parent": null,
   "relatedFiles": [],
-  "notes": "",
+  "notes": "Deployed to production 38 as release 20260804-023054-fedceccfda93.",
   "meta": {}
 }
