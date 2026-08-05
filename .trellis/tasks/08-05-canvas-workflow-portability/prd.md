@@ -31,7 +31,7 @@
 - [x] 导出包含自动保存窗口内的当前名称、图和视口，且不泄露工作流/用户/运行元数据。
 - [x] 合法文件导入为新画板；错误类型、版本、尺寸或图结构显示明确错误且不发创建请求。
 - [x] Canvas workflow、scheduler、TypeScript、lint、build、local restart、HTTP smoke 和完整 Trellis baseline 通过。
-- [ ] 完整远程 SHA 通过生产候选验证、零活动任务门禁、备份、部署和发布后身份/健康检查。
+- [x] 完整远程 SHA 通过生产候选验证、零活动任务门禁、备份、部署和发布后身份/健康检查。
 
 ## Out Of Scope
 

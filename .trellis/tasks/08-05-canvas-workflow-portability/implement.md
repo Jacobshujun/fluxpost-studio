@@ -8,8 +8,8 @@
 - [x] 增加 mocked Chromium 跨画板、权限回退、导出和导入回归。
 - [x] 运行 workflow/scheduler 专项检查、TypeScript、lint、build、local restart、HTTP smoke 和完整 baseline。
 - [x] 更新 FluxPost status、feature evidence 与 architecture rules 中稳定的新事实。
-- [ ] 完成生产发布证据写回并归档任务。
-- [ ] 提交并推送完整 SHA，运行生产候选验证、只读预检、root-only 备份、部署和发布后检查。
+- [x] 完成生产发布证据写回并归档任务。
+- [x] 提交并推送完整 SHA，运行生产候选验证、只读预检、root-only 备份、部署和发布后检查。
 
 ## Validation Commands
 

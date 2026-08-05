@@ -1,6 +1,6 @@
 # Verification
 
-Last updated: 2026-08-04
+Last updated: 2026-08-05
 
 ## Baseline Command
 
@@ -41,11 +41,10 @@ Do not deploy a dirty worktree, branch name, abbreviated SHA, local runtime rows
 
 ## Recent Verification
 
+- 2026-08-05: Canvas portability/V2 shared outputs passed focused checks, mocked Chromium, TypeScript, lint (five existing warnings), build/restart, local `200/401`, full baseline, and exact-SHA candidate verification. SHA `a887c158410124d969f608f7a0146e4345cc050a` deployed as `20260805-103357-a887c1584101` after zero-work preflight and validated root-only backup `pre-a887c1584101-20260805T103332Z.dump` (3,228,731 bytes, `0600`, `root:root`, `pg_restore -l` valid). Post-checks passed identity, zero-restart app/PostgreSQL, routes/auth, workers, 13 zero-activity tables, six volumes, HTTPS, protected containers, logs, and rollback `20260804-102825-e6692c3d0cce`. No production workflow, provider, or external write was triggered.
 - 2026-08-04: Configurable workspace content safety passed ordered-rule/match-mode/threshold/model-fallback/API/audit/snapshot checks, mocked Chromium, TypeScript, lint, build/restart, local HTTP, SQLite, and the complete baseline without live providers. Exact SHA `e6692c3d0cce807106e343c43a9804be2686ec3d` then passed the isolated VPS verifier and deployed as `20260804-102825-e6692c3d0cce` after zero-active-work preflight and a validated root-only backup; manifest/image/container identity, app/PostgreSQL, routes/auth, six volumes, Nginx, Open WebUI, logs, and rollback retention passed.
 - 2026-08-04: Feishu bulk publishing passed id-only durable enqueue checks, worker-side preparation, 1/10/11/50/51 chunk boundaries, partial continuation, retry safety, progress restoration, TypeScript, lint, build, local restart/HTTP, and the complete baseline. Exact SHA `39f99e2415fa93c08e8727bea30841e88d28a2a6` then passed the isolated VPS verifier and deployed as `20260804-081822-39f99e2415fa` after zero-active-work preflight and a validated root-only backup; identity, health, routes/auth, workers, JSONB queue storage, six volumes, logs, Open WebUI, and rollback retention passed without a live Feishu write.
 - 2026-08-04: Exact SHA `06a2d7b81dc491c2c4ce1a17f6d3584e3c5d4605` passed captured-drag Chromium and local/VPS baselines, then deployed as `20260804-025759-06a2d7b81dc4` after zero-work preflight and validated backup. Identity, health, routes/auth, volumes, logs, and rollback retention passed.
-- 2026-08-04: Exact SHA `fedceccfda93401cc1539df034dbd1833647b4a3` passed mocked Chromium and complete local/VPS baselines, then deployed as `20260804-023054-fedceccfda93` after zero-work preflight and backup. Identity, services, routes/auth, schema, workers, six volumes, logs, and rollback retention passed.
-- 2026-08-03: Exact SHA `a65767384c1b1993c95c8c32d053edcd10c3fac6` passed the complete local baseline and commit-bound isolated VPS verifier, then deployed to production 38 as `20260803-075434-a65767384c1b` after a zero-active-work preflight and validated root-only PostgreSQL backup. Manifest/image/container identity, app/PostgreSQL health, Nginx/public HTTPS, Open WebUI identity, routes/auth boundaries, required schema, workers, six named volumes, and retained rollback passed without provider or external-write calls.
 Older evidence is preserved in `.trellis/spec/fluxpost/archive/verification-history.md`.
 
 ## Missing Coverage

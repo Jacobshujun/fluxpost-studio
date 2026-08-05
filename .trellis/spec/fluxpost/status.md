@@ -4,13 +4,13 @@ Last updated: 2026-08-05
 
 ## One-Line Status
 
-Configurable content safety is deployed to production 38 at SHA `e6692c3d0cce807106e343c43a9804be2686ec3d`.
+Canvas workflow portability and V2 main-task shared outputs are deployed to production 38 at SHA `a887c158410124d969f608f7a0146e4345cc050a`.
 
 ## Current Focus
 
 - Configurable content safety is deployed: admin categories/rules, optional model review, thresholds, master-off, revisions, snapshots, and draft tests are available in `/config`.
 - Production Feishu publishing creates one durable Job before worker preparation, then persists ordered 10-post chunks, isolated failures, and review progress. The release was verified without a live Feishu write.
-- Cursor-anchored Canvas preview zoom is deployed. V2 main-task shared outputs plus cross-board clipboard and workflow file portability have passed local gates and are not yet deployed.
+- Cursor-anchored Canvas preview zoom, V2 main-task shared outputs, cross-board clipboard, and versioned workflow JSON import/export are deployed.
 - `/original` is deployed with durable owner-scoped 1-100 topic batches, cover-first card generation, QA/retry, review drafts, and resumable ToAPIs tasks. Its real provider smoke remains pending approval.
 - Canvas exact/range sampling, no-replacement parameter/copy pools, frozen-image preflight, cross-cursor selection, copy-pool bulk selection, guarded previews, distance-bounded three-layer edge pulses, native zoom, culling/detail tiers, stable media, and bounded queue concurrency are deployed.
 - Team image/copy libraries with server sorting, stable cursors, batch/range selection, and anchored preview are deployed. The local-path material domain remains retired; compact runs freeze validated vehicle-library URLs.
@@ -25,7 +25,7 @@ Configurable content safety is deployed to production 38 at SHA `e6692c3d0cce807
 
 - 2026-08-04: Safety policy SHA `e6692c3d0cce807106e343c43a9804be2686ec3d` passed isolated baseline and deployed as `20260804-102825-e6692c3d0cce`; identity, health, auth, zero queues, volumes, backup, and rollback passed offline.
 - 2026-08-04: Exact SHA `39f99e2415fa93c08e8727bea30841e88d28a2a6` passed local and isolated production baselines, then deployed as `20260804-081822-39f99e2415fa` after zero-active-work preflight and a validated root-only backup. Identity, health, routes/auth, workers, JSONB queue storage, six volumes, logs, and rollback retention passed without a live Feishu write.
-- 2026-08-05: Canvas portability and V2 shared outputs passed workflow/scheduler checks, mocked Chromium, TypeScript, lint, build/restart, local `200/401`, and the complete isolated baseline without external calls.
+- 2026-08-05: Canvas portability and V2 shared outputs passed local/candidate verification; exact SHA `a887c158410124d969f608f7a0146e4345cc050a` deployed as `20260805-103357-a887c1584101` after zero-work preflight and validated backup. Identity, health, auth, workers, 13 activity tables, six volumes, HTTPS, protected containers, logs, and rollback passed without external calls.
 - Older evidence is indexed in `verification.md` and preserved under `.trellis/spec/fluxpost/archive/`.
 
 ## Current Risks
