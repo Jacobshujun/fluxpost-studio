@@ -1,9 +1,7 @@
 import { getCanvasNodeDefinition, getCanvasNodeExecutionMode, validateCanvasNodeConfig } from "./registry";
-import { areCanvasPortKindsCompatible, CANVAS_NODE_SIZE_LIMITS, CANVAS_SCHEDULER_ROLES, isCanvasNodeSize } from "./types";
+import { areCanvasPortKindsCompatible, CANVAS_GRAPH_LIMITS, CANVAS_NODE_SIZE_LIMITS, CANVAS_SCHEDULER_ROLES, isCanvasNodeSize } from "./types";
 import type { CanvasEdge, CanvasGraph, CanvasGraphValidation, CanvasNodeCapability, CanvasRunPlan, CanvasSchedulerRole } from "./types";
 
-const maxGraphNodes = 200;
-const maxGraphEdges = 600;
 const schedulerRoles = new Set<CanvasSchedulerRole>(CANVAS_SCHEDULER_ROLES);
 
 export function validateCanvasGraph(graph: CanvasGraph): CanvasGraphValidation {
@@ -11,8 +9,8 @@ export function validateCanvasGraph(graph: CanvasGraph): CanvasGraphValidation {
   if (!graph || !Array.isArray(graph.nodes) || !Array.isArray(graph.edges)) {
     return { valid: false, errors: ["Canvas graph must contain nodes and edges."], order: [] };
   }
-  if (graph.nodes.length > maxGraphNodes) errors.push(`Canvas supports at most ${maxGraphNodes} nodes.`);
-  if (graph.edges.length > maxGraphEdges) errors.push(`Canvas supports at most ${maxGraphEdges} edges.`);
+  if (graph.nodes.length > CANVAS_GRAPH_LIMITS.maxNodes) errors.push(`Canvas supports at most ${CANVAS_GRAPH_LIMITS.maxNodes} nodes.`);
+  if (graph.edges.length > CANVAS_GRAPH_LIMITS.maxEdges) errors.push(`Canvas supports at most ${CANVAS_GRAPH_LIMITS.maxEdges} edges.`);
 
   const nodes = new Map<string, (typeof graph.nodes)[number]>();
   const schedulerRoleNodes = new Map<CanvasSchedulerRole, string>();

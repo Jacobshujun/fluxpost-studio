@@ -41,7 +41,9 @@ import {
   Combine,
   Copy,
   CopyPlus,
+  FileDown,
   FileText,
+  FileUp,
   ExternalLink,
   GitBranch,
   Home,
@@ -83,12 +85,18 @@ import { createContext, useCallback, useContext, useEffect, useLayoutEffect, use
 import {
   CANVAS_CLIPBOARD_MIME,
   createCanvasClipboardPayload,
-  instantiateCanvasClipboardPayload,
   parseCanvasClipboardPayload,
+  prepareCanvasClipboardPaste,
   type CanvasClipboardPayload,
 } from "@/lib/canvas/clipboard";
 import { canvasNodeDefinitions, createCanvasNode, getCanvasBatchBindableFields, getCanvasNodeDefinition, getCanvasNodeExecutionMode } from "@/lib/canvas/registry";
 import { createCanvasSchedulerSkeleton } from "@/lib/canvas/scheduler-skeleton";
+import {
+  CANVAS_WORKFLOW_FILE_MAX_BYTES,
+  canvasWorkflowFileName,
+  createCanvasWorkflowFile,
+  parseCanvasWorkflowFile,
+} from "@/lib/canvas/workflow-file";
 import {
   areCanvasPortKindsCompatible,
   CANVAS_NODE_SIZE_LIMITS,
@@ -202,6 +210,8 @@ export default function CanvasPage() {
   const stageRef = useRef<HTMLDivElement | null>(null);
   const canvasPointerRef = useRef<{ x: number; y: number } | null>(null);
   const pasteSequenceRef = useRef(0);
+  const canvasClipboardRef = useRef<CanvasClipboardPayload | undefined>(undefined);
+  const workflowFileInputRef = useRef<HTMLInputElement>(null);
   const activeWorkflowIdRef = useRef<string | undefined>(undefined);
   const loadRunsRequestRef = useRef(0);
   const selectedRunIdRef = useRef<string | undefined>(undefined);
@@ -586,26 +596,46 @@ export default function CanvasPage() {
 
   function pasteCanvasPayload(payload: CanvasClipboardPayload, position = getCanvasPastePosition()) {
     if (isMobile || !activeWorkflow) return;
-    const sequence = ++pasteSequenceRef.current;
-    const fragment = instantiateCanvasClipboardPayload(payload, position, (kind, index) => `${kind}-paste-${Date.now()}-${sequence}-${index}`);
-    const pastedNodes = fragment.nodes.map((node) => ({ ...toFlowNode(node, isMobile), selected: true }));
-    setNodes((current) => [...current.map((node) => ({ ...node, selected: false })), ...pastedNodes]);
-    setEdges((current) => [...current, ...toFlowEdges(fragment.edges, fragment.nodes)]);
-    setSelectedNodeId(fragment.nodes[0]?.id);
-    markDirty();
-    setMessage(`已粘贴 ${fragment.nodes.length} 个节点`);
+    try {
+      const sequence = ++pasteSequenceRef.current;
+      const fragment = prepareCanvasClipboardPaste(
+        currentGraph(nodes, edges, viewport),
+        payload,
+        position,
+        (kind, index) => `${kind}-paste-${Date.now()}-${sequence}-${index}`,
+      );
+      const pastedNodes = fragment.nodes.map((node) => ({ ...toFlowNode(node, isMobile), selected: true }));
+      setNodes((current) => [...current.map((node) => ({ ...node, selected: false })), ...pastedNodes]);
+      setEdges((current) => [...current, ...toFlowEdges(fragment.edges, fragment.nodes)]);
+      setSelectedNodeId(fragment.nodes[0]?.id);
+      markDirty();
+      const clearedRoles = fragment.clearedSchedulerRoles.map((role) => CANVAS_SCHEDULER_ROLE_LABELS[role]).join("、");
+      setMessage(clearedRoles
+        ? `已粘贴 ${fragment.nodes.length} 个节点；已清除冲突调度角色：${clearedRoles}`
+        : `已粘贴 ${fragment.nodes.length} 个节点`);
+    } catch (error) {
+      setMessage(errorMessage(error));
+    }
   }
 
   async function copySelectedNodes(removeAfterCopy = false) {
     const payload = getSelectionPayload();
     if (!payload) return;
+    canvasClipboardRef.current = payload;
+    let copiedToSystem = false;
     try {
-      await navigator.clipboard.writeText(JSON.stringify(payload));
-      if (removeAfterCopy) removeSelectedNodes();
-      else setMessage(`已复制 ${payload.nodes.length} 个节点`);
-    } catch (error) {
-      setMessage(errorMessage(error));
+      const writeText = navigator.clipboard?.writeText;
+      if (writeText) {
+        await writeText.call(navigator.clipboard, JSON.stringify(payload));
+        copiedToSystem = true;
+      }
+    } catch {
+      copiedToSystem = false;
     }
+    if (removeAfterCopy) removeSelectedNodes();
+    else setMessage(copiedToSystem
+      ? `已复制 ${payload.nodes.length} 个节点`
+      : `已复制 ${payload.nodes.length} 个节点到画布剪贴板`);
   }
 
   function duplicateSelectedNodes() {
@@ -676,21 +706,69 @@ export default function CanvasPage() {
   }
 
   async function pasteFromSystemClipboard(targetNodeId?: string) {
+    const readText = navigator.clipboard?.readText;
+    if (!readText) {
+      if (!targetNodeId && canvasClipboardRef.current) pasteCanvasPayload(canvasClipboardRef.current);
+      else setMessage("系统剪贴板不可访问");
+      return;
+    }
     try {
-      const clipboardItems = await navigator.clipboard.read();
-      const imageFiles = await clipboardImageFiles(clipboardItems);
-      if (imageFiles.length) {
-        await importImageFiles(imageFiles, targetNodeId);
-        return;
+      const read = navigator.clipboard?.read;
+      if (read) {
+        const clipboardItems = await read.call(navigator.clipboard);
+        const imageFiles = await clipboardImageFiles(clipboardItems);
+        if (imageFiles.length) {
+          await importImageFiles(imageFiles, targetNodeId);
+          return;
+        }
       }
-      const payload = parseCanvasClipboardPayload(await navigator.clipboard.readText());
+      const payload = parseCanvasClipboardPayload(await readText.call(navigator.clipboard));
       if (payload && !targetNodeId) {
         pasteCanvasPayload(payload);
         return;
       }
       setMessage("剪贴板中没有可导入的图片或画布节点");
     } catch (error) {
+      if (!targetNodeId && canvasClipboardRef.current) pasteCanvasPayload(canvasClipboardRef.current);
+      else setMessage(errorMessage(error));
+    }
+  }
+
+  function exportWorkflowFile() {
+    if (!activeWorkflow) return;
+    try {
+      const workflowFile = createCanvasWorkflowFile(activeWorkflow.name, currentGraph(nodes, edges, viewport));
+      const url = URL.createObjectURL(new Blob([`${JSON.stringify(workflowFile, null, 2)}\n`], { type: "application/json;charset=utf-8" }));
+      const link = document.createElement("a");
+      link.href = url;
+      link.download = canvasWorkflowFileName(workflowFile.name);
+      document.body.appendChild(link);
+      link.click();
+      link.remove();
+      window.setTimeout(() => URL.revokeObjectURL(url), 60_000);
+      setMessage(`已导出工作流：${workflowFile.name}`);
+    } catch (error) {
       setMessage(errorMessage(error));
+    }
+  }
+
+  async function importWorkflowFile(file: File) {
+    if (busy) return;
+    setBusy(true);
+    try {
+      if (file.size > CANVAS_WORKFLOW_FILE_MAX_BYTES) throw new Error("工作流文件不能超过 10 MB");
+      const workflowFile = parseCanvasWorkflowFile(await file.text());
+      const data = await api<{ workflow: CanvasWorkflow }>("/api/canvas/workflows", {
+        method: "POST",
+        body: JSON.stringify({ name: workflowFile.name, graph: workflowFile.graph }),
+      });
+      setWorkflows((current) => [data.workflow, ...current]);
+      selectWorkflow(data.workflow);
+      setMessage(`已导入工作流：${data.workflow.name}`);
+    } catch (error) {
+      setMessage(errorMessage(error));
+    } finally {
+      setBusy(false);
     }
   }
 
@@ -943,21 +1021,23 @@ export default function CanvasPage() {
     const handleCopy = (event: ClipboardEvent) => {
       if (isMobile || isEditableClipboardTarget(event.target)) return;
       const payload = getSelectionPayload();
-      if (!payload || !event.clipboardData) return;
+      if (!payload) return;
+      canvasClipboardRef.current = payload;
       const serialized = JSON.stringify(payload);
       event.preventDefault();
-      event.clipboardData.setData(CANVAS_CLIPBOARD_MIME, serialized);
-      event.clipboardData.setData("text/plain", serialized);
+      event.clipboardData?.setData(CANVAS_CLIPBOARD_MIME, serialized);
+      event.clipboardData?.setData("text/plain", serialized);
       setMessage(`已复制 ${payload.nodes.length} 个节点`);
     };
     const handleCut = (event: ClipboardEvent) => {
       if (isMobile || isEditableClipboardTarget(event.target)) return;
       const payload = getSelectionPayload();
-      if (!payload || !event.clipboardData) return;
+      if (!payload) return;
+      canvasClipboardRef.current = payload;
       const serialized = JSON.stringify(payload);
       event.preventDefault();
-      event.clipboardData.setData(CANVAS_CLIPBOARD_MIME, serialized);
-      event.clipboardData.setData("text/plain", serialized);
+      event.clipboardData?.setData(CANVAS_CLIPBOARD_MIME, serialized);
+      event.clipboardData?.setData("text/plain", serialized);
       removeSelectedNodes();
     };
     const handlePaste = (event: ClipboardEvent) => {
@@ -1075,9 +1155,23 @@ export default function CanvasPage() {
         <div className="canvas-toolbar-actions">
           <ToolbarButton label="新建" icon={<Plus />} onClick={createWorkflow} disabled={busy} />
           <ToolbarButton label="保存" icon={busy ? <LoaderCircle className="animate-spin" /> : <Save />} onClick={() => void saveWorkflow()} disabled={!activeWorkflow || busy} ariaKeyShortcuts="Control+S Meta+S" />
+          <ToolbarButton label="导入" ariaLabel="导入工作流" icon={<FileUp />} onClick={() => workflowFileInputRef.current?.click()} disabled={busy} />
+          <ToolbarButton label="导出" ariaLabel="导出工作流" icon={<FileDown />} onClick={exportWorkflowFile} disabled={!activeWorkflow || busy} />
           <ToolbarButton label="复制" icon={<Copy />} onClick={() => void duplicateWorkflow()} disabled={!activeWorkflow || busy} />
           <ToolbarButton label="存为模板" icon={<FileText />} onClick={() => void duplicateWorkflow(true)} disabled={!activeWorkflow || busy} />
           <ToolbarButton label="删除" icon={<Trash2 />} onClick={() => void removeWorkflow()} disabled={!activeWorkflow || busy} danger />
+          <input
+            ref={workflowFileInputRef}
+            hidden
+            type="file"
+            accept="application/json,.json,.fluxpost-workflow.json"
+            aria-label="导入工作流文件"
+            onChange={(event) => {
+              const file = event.currentTarget.files?.[0];
+              event.currentTarget.value = "";
+              if (file) void importWorkflowFile(file);
+            }}
+          />
         </div>
         <button className="canvas-icon-button canvas-mobile-menu" type="button" onClick={() => setMobilePalette(true)} aria-label="打开节点库"><Menu className="h-4 w-4" /></button>
       </header>
@@ -3404,8 +3498,8 @@ function CanvasImagePreviewBody({ item, index, total, closeButtonRef, onClose }:
   </>;
 }
 
-function ToolbarButton({ label, icon, onClick, disabled, danger, ariaKeyShortcuts }: { label: string; icon: React.ReactNode; onClick: () => void; disabled?: boolean; danger?: boolean; ariaKeyShortcuts?: string }) {
-  return <button className={danger ? "danger" : ""} type="button" onClick={onClick} disabled={disabled} title={label} aria-keyshortcuts={ariaKeyShortcuts}>{icon}<span>{label}</span></button>;
+function ToolbarButton({ label, ariaLabel, icon, onClick, disabled, danger, ariaKeyShortcuts }: { label: string; ariaLabel?: string; icon: React.ReactNode; onClick: () => void; disabled?: boolean; danger?: boolean; ariaKeyShortcuts?: string }) {
+  return <button className={danger ? "danger" : ""} type="button" onClick={onClick} disabled={disabled} title={ariaLabel || label} aria-label={ariaLabel || label} aria-keyshortcuts={ariaKeyShortcuts}>{icon}<span>{label}</span></button>;
 }
 
 function StatusIcon({ status }: { status: string }) {

@@ -71,6 +71,11 @@ export type CanvasPosition = { x: number; y: number };
 export type CanvasViewport = { x: number; y: number; zoom: number };
 export type CanvasNodeSize = { width: number; height: number };
 
+export const CANVAS_GRAPH_LIMITS = {
+  maxNodes: 200,
+  maxEdges: 600,
+} as const;
+
 export const CANVAS_NODE_SIZE_LIMITS = {
   minWidth: 190,
   minHeight: 120,

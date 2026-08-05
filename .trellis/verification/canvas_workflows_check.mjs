@@ -73,7 +73,7 @@ const areCanvasPortKindsCompatibleForUi = compileFunction(canvasTypes, "areCanva
 const temp = mkdtempSync(path.join(tmpdir(), "fluxpost-canvas-check-"));
 try {
   writeFileSync(path.join(temp, "toapis-image-api.js"), `exports.toApisImageRatios = ${JSON.stringify(["1:1", "3:2", "2:3", "4:3", "3:4", "5:4", "4:5", "16:9", "9:16", "2:1", "1:2", "21:9", "9:21"])}; exports.toApis4kImageRatios = ${JSON.stringify(["16:9", "9:16", "2:1", "1:2", "21:9", "9:21"])};`, "utf8");
-  for (const name of ["types", "node-utils", "registry", "graph", "clipboard"]) {
+  for (const name of ["types", "node-utils", "registry", "graph", "serialization", "clipboard", "workflow-file"]) {
     const source = read(`src/lib/canvas/${name}.ts`).replace('"../toapis-image-api"', '"./toapis-image-api"');
     const output = ts.transpileModule(source, {
       compilerOptions: { module: ts.ModuleKind.CommonJS, target: ts.ScriptTarget.ES2022 },
@@ -84,8 +84,9 @@ try {
   const require = createRequire(import.meta.url);
   const { getCanvasNodeDefinition, getCanvasNodeExecutionMode, upgradeCanvasGraph, upgradeCanvasNode, validateCanvasNodeConfig, normalizeUrlList } = require(path.join(temp, "registry.js"));
   const { validateCanvasGraph, buildCanvasRunPlan } = require(path.join(temp, "graph.js"));
-  const { createCanvasClipboardPayload, instantiateCanvasClipboardPayload, parseCanvasClipboardPayload } = require(path.join(temp, "clipboard.js"));
-  const { areCanvasPortKindsCompatible, CANVAS_NODE_SIZE_LIMITS } = require(path.join(temp, "types.js"));
+  const { createCanvasClipboardPayload, instantiateCanvasClipboardPayload, parseCanvasClipboardPayload, prepareCanvasClipboardPaste } = require(path.join(temp, "clipboard.js"));
+  const { createCanvasWorkflowFile, parseCanvasWorkflowFile, canvasWorkflowFileName, CANVAS_WORKFLOW_FILE_MAX_BYTES } = require(path.join(temp, "workflow-file.js"));
+  const { areCanvasPortKindsCompatible, CANVAS_GRAPH_LIMITS, CANVAS_NODE_SIZE_LIMITS } = require(path.join(temp, "types.js"));
   const nodeUtils = require(path.join(temp, "node-utils.js"));
   assert.equal(getCanvasNodeDefinition("input.images")?.label, "图片", "image input node should use the concise label");
   assert.equal(getCanvasNodeDefinition("model.gpt-image")?.version, 2, "new GPT image nodes must use v2");
@@ -373,6 +374,60 @@ try {
   assert.equal(parsedDisplayClipboard?.nodes.find((node) => node.type === "utility.display-any")?.id, "display-text", "display-any must round-trip through the version-1 clipboard envelope");
   assert.equal(parsedDisplayClipboard?.edges[0].targetPort, "value", "wildcard input edges must survive clipboard validation");
 
+  const roleGraph = structuredClone(validGraph);
+  roleGraph.nodes[0].schedulerRole = "prompt-switch";
+  const roleClipboard = createCanvasClipboardPayload(roleGraph.nodes, roleGraph.edges, roleGraph.nodes.map((node) => node.id));
+  const parsedRoleClipboard = parseCanvasClipboardPayload(JSON.stringify(roleClipboard));
+  assert.equal(parsedRoleClipboard?.nodes[0].schedulerRole, "prompt-switch", "clipboard version 1 must preserve scheduler roles");
+  const preparedPaste = prepareCanvasClipboardPaste(
+    { nodes: [{ ...structuredClone(roleGraph.nodes[0]), id: "occupied" }], edges: [], viewport: { x: 0, y: 0, zoom: 1 } },
+    parsedRoleClipboard,
+    { x: 100, y: 120 },
+    (kind, index) => `${kind}-prepared-${index}`,
+  );
+  assert.equal(preparedPaste.nodes[0].schedulerRole, undefined, "paste must clear only a scheduler role already occupied by the target graph");
+  assert.deepEqual(preparedPaste.clearedSchedulerRoles, ["prompt-switch"], "paste must report every cleared scheduler role");
+  assert.equal(preparedPaste.nodes[1].id, "node-prepared-1", "paste preparation must preserve fresh node ids");
+  assert.throws(
+    () => prepareCanvasClipboardPaste(
+      { nodes: Array.from({ length: CANVAS_GRAPH_LIMITS.maxNodes - 1 }, (_, index) => ({ ...structuredClone(textNode), id: `existing-${index}` })), edges: [], viewport: { x: 0, y: 0, zoom: 1 } },
+      parsedRoleClipboard,
+      { x: 0, y: 0 },
+      (kind, index) => `${kind}-overflow-${index}`,
+    ),
+    /at most 200 nodes/i,
+    "paste must reject the complete fragment before a merged graph exceeds the node limit",
+  );
+  const maximumClipboardNodes = Array.from({ length: CANVAS_GRAPH_LIMITS.maxNodes }, (_, index) => ({ ...structuredClone(textNode), id: `maximum-${index}` }));
+  assert.equal(createCanvasClipboardPayload(maximumClipboardNodes, [], maximumClipboardNodes.map((node) => node.id))?.nodes.length, CANVAS_GRAPH_LIMITS.maxNodes, "clipboard capacity must match the canvas node limit");
+  assert.equal(createCanvasClipboardPayload([...maximumClipboardNodes, { ...structuredClone(textNode), id: "too-many" }], [], [...maximumClipboardNodes.map((node) => node.id), "too-many"]), undefined, "clipboard must reject selections beyond the canvas node limit");
+
+  const workflowFile = createCanvasWorkflowFile("Portable workflow", roleGraph);
+  assert.equal(workflowFile.kind, "fluxpost.canvas.workflow");
+  assert.equal(workflowFile.version, 1);
+  assert.equal(CANVAS_WORKFLOW_FILE_MAX_BYTES, 10 * 1024 * 1024);
+  const parsedWorkflowFile = parseCanvasWorkflowFile(JSON.stringify({
+    ...workflowFile,
+    id: "must-not-import",
+    ownerUserId: "must-not-import",
+    revision: 99,
+    runs: [{ id: "must-not-import" }],
+  }));
+  assert.equal(parsedWorkflowFile.name, "Portable workflow");
+  assert.equal(parsedWorkflowFile.graph.nodes[0].schedulerRole, "prompt-switch", "workflow files must preserve scheduler roles");
+  assert.deepEqual(Object.keys(parsedWorkflowFile).sort(), ["graph", "kind", "name", "version"], "workflow parsing must project only the portable file contract");
+  assert.equal(JSON.stringify(createCanvasWorkflowFile("Portable workflow", roleGraph)).includes("ownerUserId"), false, "workflow export must exclude owner metadata");
+  assert.equal(canvasWorkflowFileName('  Demo: workflow/one  '), "Demo- workflow-one.fluxpost-workflow.json", "workflow filenames must remove platform-invalid characters");
+  assert.throws(() => parseCanvasWorkflowFile(JSON.stringify({ ...workflowFile, kind: "comfyui.workflow" })), /FluxPost Canvas workflow file/i);
+  assert.throws(() => parseCanvasWorkflowFile(JSON.stringify({ ...workflowFile, version: 2 })), /version 1/i);
+  assert.throws(() => parseCanvasWorkflowFile(JSON.stringify({ ...workflowFile, graph: { ...workflowFile.graph, viewport: { x: 0, y: 0, zoom: 0 } } })), /viewport/i);
+  const unknownVersionFile = structuredClone(workflowFile);
+  unknownVersionFile.graph.nodes[0].version = 99;
+  assert.throws(() => parseCanvasWorkflowFile(JSON.stringify(unknownVersionFile)), /unknown canvas node/i);
+  const cyclicWorkflowFile = structuredClone(workflowFile);
+  cyclicWorkflowFile.graph.edges.push({ id: "workflow-cycle", source: "gpt", sourcePort: "text", target: "gpt", targetPort: "prompt" });
+  assert.throws(() => parseCanvasWorkflowFile(JSON.stringify(cyclicWorkflowFile)), /cycles/i);
+
   const executorSource = read("src/lib/canvas/executors.ts");
   const executeDisplayAny = compileFunction(executorSource, "executeDisplayAny", { structuredClone });
   const displayArtifact = { kind: "socialPost", postId: "post-1", post: { title: "展示标题", imageUrls: [], videoUrls: [], platform: "xiaohongshu" } };
@@ -637,6 +692,23 @@ requireText(page, ["NodeResizer", "CANVAS_NODE_SIZE_LIMITS", "displayedNodes", "
 requireText(page, ["CanvasNodeTextEditor", "setDraft(nextValue)", "document.activeElement !== editorRef.current", "data-node-id={nodeId}"], "canvas text editor caret preservation");
 requireText(page, ["CanvasDisplayAnyNodeResult", "CanvasDisplayAnyArtifact", "getDisplayAnyArtifact", "outputs.preview", "等待上游结果", "没有图片内容", "没有视频内容", "飞书发布任务", "areCanvasPortKindsCompatible", "isQuickAddPortCompatible", "portKindLabel", "utility.display-any"], "display-any UI");
 requireText(page, ["ReactFlow", "onConnect", "wouldCreateCycle", "NodeInspector", "panOnDrag={isMobile}", "selectionOnDrag={!isMobile}", "nodesDraggable={!isMobile}", "RunSummary", "FlowingCanvasEdge", "canvas-port-row", "colorMode={flowColorMode}", "subscribeTheme", "CANVAS_CLIPBOARD_MIME", "clipboardDataImageFiles", "isEditableClipboardTarget", "pasteFromSystemClipboard", "canvas-image-file-input", "CanvasNodeInteractionContext", "latestNodeRuns", "latestSuccessfulNodeRuns", "useMemo(() => latestAttempts", "(result.get(nodeRun.nodeId)?.attempt || 0) < nodeRun.attempt", "const selectedRun = explicitRun || data.runs[0]", "await refreshRun(selectedRun.id, workflowId)", "runSelectionIsExplicitRef", "focusCanvasNode", "selectedNodeId", "if (selectedNode) setSelectedNodeId(selectedNode.id)", "interaction?.selectedNodeId === node.id", "canvas-node-text-editor nodrag nopan nowheel", "event.currentTarget.focus({ preventScroll: true })", "interaction?.onNodeFocus(node.id)", "onClick={(event) => {", "onKeyDown={(event) => event.stopPropagation()}", "CanvasModelNodeResult", "CanvasImagePreviewNodeResult", "updateNodeExecutionMode", "仅运行此节点", "运行到此节点", 'requestRun([selectedNodeId], "isolated")', "打开评审", "历史版本 r", "最近成功结果 · r", "definition?.outputs", "isPreviewableModelArtifact", "artifact.value.trim()", "artifact.items.length > 0", "showArtifact", "运行完成，但没有可预览内容", "CanvasTextPreviewDialog", "CanvasVideoPreviewDialog", "CanvasImagePreviewDialog", "canvas-node-result-gallery", "canvas-node-result-gallery-open", "canvas-node-result-gallery-meta", "canvas-image-preview-open", "图片{index + 1}", "imageUrls.length}/16", "moveListItem", 'form.append("mode", "gpt-reference")', "edgeAnimationDelay", "pathLength={100}", "canvas-flow-edge-trail", "canvas-flow-edge-body", "canvas-flow-edge-core", "打开原图", "缩小图片", "放大图片", "重置图片缩放"], "canvas UI");
+requireText(page, [
+  "prepareCanvasClipboardPaste",
+  "canvasClipboardRef",
+  "canvasClipboardRef.current = payload",
+  "navigator.clipboard?.readText",
+  "pasteCanvasPayload(canvasClipboardRef.current)",
+  "createCanvasWorkflowFile",
+  "parseCanvasWorkflowFile",
+  "canvasWorkflowFileName",
+  "CANVAS_WORKFLOW_FILE_MAX_BYTES",
+  "function exportWorkflowFile",
+  "async function importWorkflowFile",
+  'api<{ workflow: CanvasWorkflow }>("/api/canvas/workflows"',
+  'accept="application/json,.json,.fluxpost-workflow.json"',
+  'ariaLabel="导入工作流"',
+  'ariaLabel="导出工作流"',
+], "Canvas cross-workflow clipboard and portable file UI");
 requireText(page, ["ContentPoolSnapshotPicker", "LibraryImageSnapshotPicker", "contentPoolSnapshotConfig", "刷新快照", "刷新所选素材", "CanvasQuickAdd", "resolveQuickAddConnection", "quickAddChoices", "isQuickAddTargetOccupied", "eventPoint", "stageCenter", 'event.key === "Tab"', 'event.key === "ArrowDown"', 'event.key === "ArrowUp"', 'event.key === "Enter"', 'event.key === "Escape"', '.closest(".react-flow__pane")', "screenToFlowPosition", "isQuickAddPortCompatible", "该输入端口已连接"], "snapshot pickers and ComfyUI quick add");
 requireText(page, ["canvasHistoryLimit", "createCanvasHistory", "commitCanvasHistory", "stepCanvasHistory", "scheduleCanvasHistoryCommit", "restoreCanvasHistory", "event.altKey", 'event.key.toLowerCase() === "s"', 'event.key.toLowerCase() === "z"', 'event.key.toLowerCase() === "y"', 'event.key.toLowerCase() === "a"', 'aria-keyshortcuts="Control+Enter Meta+Enter"', 'aria-keyshortcuts="Control+Alt+Enter Meta+Alt+Enter"', 'ariaKeyShortcuts="Control+S Meta+S"', "aria-keyshortcuts={ariaKeyShortcuts}"], "canvas shortcuts and history");
 requireText(page, ["paletteVisible", "canvas-workspace-palette-hidden", "canvas-palette-collapsed", "PanelLeftClose", "PanelLeftOpen", "CanvasTaskCenter", "openTaskCenter", "loadTaskCenterRuns", 'api<{ runs: CanvasRun[] }>("/api/canvas/runs")', "loadTaskRun", "CanvasTaskFilter", "isActiveCanvasRun", "isFailedCanvasRun", "mergeTaskRunHistory", "canvas-task-center-button"], "collapsible node library and task center");

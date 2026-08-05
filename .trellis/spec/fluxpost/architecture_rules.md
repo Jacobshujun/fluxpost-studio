@@ -747,6 +747,58 @@ if (batchRunTerminal && batchRun?.batchContext) notifyCanvasScheduleRunTerminal(
 if (process.env.FLUXPOST_DISABLE_BACKGROUND_WORKERS === "1") return;
 ```
 
+## Scenario: Canvas Clipboard And Workflow Portability
+
+### 1. Scope / Trigger
+
+- Trigger: changing cross-workflow node copy/paste, Canvas JSON decoding, workflow file import/export, or the compact Canvas toolbar. This format is FluxPost-owned and does not accept ComfyUI workflow JSON.
+
+### 2. Signatures
+
+- Clipboard: `{ kind: "fluxpost.canvas.nodes", version: 1, nodes, edges }`.
+- File: `{ kind: "fluxpost.canvas.workflow", version: 1, name, graph: { nodes, edges, viewport } }`; the client imports through the existing `POST /api/canvas/workflows` with `{ name, graph }`.
+- `decodeCanvasGraph(unknown) -> CanvasGraph`; `decodeCanvasGraphFragment(nodes, edges) -> Pick<CanvasGraph, "nodes" | "edges">`; graph limits are `200` nodes and `600` edges.
+
+### 3. Contracts
+
+- Copy stores selected nodes plus only their internal edges in a page-session memory clipboard, then attempts the system clipboard. Cut removes source nodes after the memory payload exists. Toolbar paste falls back to memory only when the system API is absent or rejects; a successful non-Canvas system read must not reuse stale memory.
+- Paste creates fresh node/edge ids, anchors the fragment at the pointer or viewport center, preserves relative positions/config/size/mode/role, and applies the complete fragment atomically. A target role conflict clears only the pasted role and reports it.
+- Export reads the current React edit state, including changes inside the 900 ms autosave window. Files omit workflow/user/revision/template/time/schedule/run/result metadata and embed no media bytes.
+- Import accepts at most 10 MB, upgrades known node versions, validates in the browser, then relies on the existing owner-scoped service to upgrade and validate again before one revision-1 normal workflow is created and activated.
+
+### 4. Validation & Error Matrix
+
+- Wrong kind/file version, unknown node version, malformed config/viewport/id, missing or incompatible port, dangling edge, cycle, or graph over `200/600` -> reject before workflow POST.
+- Paste whose merged graph exceeds `200/600` or whose generated ids collide -> reject the whole fragment without changing the target graph.
+- Imported create failure -> show the API error and retain the current workflow; no client-side partial record exists.
+
+### 5. Good/Base/Bad Cases
+
+- Good: copy a connected fragment on A, switch to B with denied clipboard permission, paste from session memory, clear only conflicting pasted roles, export the unsaved edit, and import it as a new owner-scoped workflow.
+- Base: an old version-1 clipboard without `schedulerRole` remains valid; file import normalizes omitted execution modes to `enabled` through the existing graph upgrade.
+- Bad: fall back to stale memory after reading ordinary system text, export persisted server state instead of the visible edit, trust file identity/owner fields, or insert part of an over-limit fragment.
+
+### 6. Tests Required
+
+- `canvas_workflows_check.mjs` covers clipboard/file round trips, privacy projection, roles/conflicts, merged limits, filenames, upgrades, viewport/port/cycle/version rejection, and static UI wiring.
+- Mocked Chromium covers A-to-B paste, denied and changed system clipboards, fresh ids/internal edges/relative positions, current-state export, legal/illegal import, activation, and 1440x960 plus 1024x768 toolbar overflow. Scheduler, TypeScript, lint, build/restart, HTTP `200/401`, and the full isolated baseline remain required.
+
+### 7. Wrong vs Correct
+
+#### Wrong
+
+```typescript
+const payload = await navigator.clipboard.readText().catch(() => staleMemory);
+setNodes((current) => [...current, ...partialNodes]);
+```
+
+#### Correct
+
+```typescript
+const fragment = prepareCanvasClipboardPaste(currentGraph, payload, anchor, createId);
+setNodes((current) => [...current.map(clearSelection), ...fragment.nodes]);
+```
+
 ## Scenario: Flexible Canvas Batch Scheduling V2
 
 ### 1. Scope / Trigger
