@@ -1,0 +1,4 @@
+{"_example": "Fill with {\"file\": \"<path>\", \"reason\": \"<why>\"}. Put spec/research files only — no code paths. Run `python .trellis/scripts/get_context.py --mode packages` to list available specs. Delete this line once real entries are added."}
+{"file": ".trellis/spec/fluxpost/verification.md", "reason": "Authoritative baseline and no-live-provider policy"}
+{"file": ".trellis/spec/fluxpost/pitfalls.md", "reason": "Known Canvas integration and verification risks"}
+{"file": ".trellis/tasks/08-04-canvas-main-shared-results/prd.md", "reason": "Acceptance criteria for shared upstream results"}
