@@ -98,6 +98,92 @@ if (result.status === "imported") kickLibraryTaggingWorker();
 if (result.job) kickLibraryTaggingWorker();
 ```
 
+## Scenario: Canvas V2 main-task shared outputs
+
+### 1. Scope / Trigger
+
+- A V2 batch schedule may explicitly execute eligible upstream Canvas nodes once per main task, freeze selected `text`, `images`, or `videos` outputs, and inject those artifacts into every child task for that main task. Sharing is opt-in, scoped to one main task, and is never a cross-main-task or cross-schedule cache.
+
+### 2. Signatures
+
+```typescript
+type CanvasScheduleV2SharedOutput = {
+  nodeId: string;
+  outputPort: string;
+  artifactKind: "text" | "images" | "videos";
+};
+
+type CanvasScheduleV2Definition = {
+  // Existing fields remain unchanged; missing values normalize to [].
+  sharedOutputs?: CanvasScheduleV2SharedOutput[];
+};
+
+type CanvasScheduleV2MainTask = {
+  sharedRunId?: string;
+  sharedStatus?: CanvasScheduleTaskStatus;
+  sharedArtifacts?: Array<CanvasScheduleV2SharedOutput & { artifact: CanvasArtifact }>;
+  sharedError?: string;
+};
+
+retryCanvasScheduleV2SharedTask(
+  scheduleId: string,
+  account: WorkspaceAccessActor,
+  input: { mainTaskId: string },
+): Promise<CanvasSchedule>;
+```
+
+- `PATCH /api/canvas/schedules/:id` accepts `{ action: "retry-shared", mainTaskId: string }` and returns `{ schedule: CanvasSchedule }`.
+- V2 Canvas runs accept `batchContext.phase: "shared" | "child" | "aggregate"`; a shared run has `mainTaskId` and no `childTaskId`.
+- Persistence stays in the existing schedule/run JSON or JSONB columns at `schemaVersion: 2`; no database migration is required.
+
+### 3. Contracts
+
+- Preflight validates every shared target before provider execution. All selected targets for one main task are combined into one deterministic shared run whose graph applies main-scoped parameters only.
+- A shared target must be enabled, non-input, non-passive, non-`external_write`, strictly upstream of `childResult`, and have exactly one registry output whose id and kind match the configured `text`, `images`, or `videos` port. Its ancestor closure must contain no child-scoped parameter binding.
+- A missing historical `sharedOutputs` field normalizes to `[]`. With an empty list, launch keeps the legacy path that atomically creates all child runs immediately.
+- With shared outputs, launch creates only the shared run; child tasks remain pending. On completion, reconciliation extracts every configured artifact, replaces each shared node in every child graph with the matching text/image/video literal, removes its incoming edges, preserves and reconnects outgoing ports, then atomically persists the revised schedule plus every child run and queue item.
+- Shared failure starts no child runs. Retry targets the first failed shared node in the original run. Frozen artifacts are immutable after success; child retries reuse literalized graphs, and obtaining new shared output requires duplicating the schedule.
+- Pause, resume, cancel, process recovery, status derivation, and schedule run-id collection include `sharedRunId`. Aggregation begins only after the existing child terminal-state rules are satisfied.
+
+### 4. Validation & Error Matrix
+
+| Condition | Required result |
+| --- | --- |
+| Missing node id, port, or supported artifact kind | Reject preflight with `Each shared output must select a node, output port, and supported artifact type.` |
+| Duplicate `nodeId:outputPort` | Reject preflight with `Shared outputs cannot contain duplicate node ports.` |
+| Missing node or stale port/kind | Reject preflight before provider calls; report the missing node or registry mismatch. |
+| Input, passive display, disabled, external-write, multi-output, or unsupported-output node | Reject preflight with the matching shared-output eligibility error. |
+| Target is the child result or is not strictly upstream | Reject preflight with `Shared output nodes must be strictly upstream of the child result node.` |
+| Target ancestor depends on a child-scoped binding | Reject preflight with `Shared output dependencies cannot include child-scoped parameter bindings.` |
+| Shared run fails, is missing, or returns the wrong artifact | Mark the main/shared stage failed, persist `sharedError`, and launch zero child runs. |
+| `retry-shared` omits `mainTaskId` | HTTP `400` with `mainTaskId is required.` |
+| Retry is requested for a non-failed stage, frozen artifact, or started child fan-out | HTTP `400`; do not rerun the shared stage. |
+
+### 5. Good/Base/Bad Cases
+
+- Good: one main-task reference image feeds one shared GPT vision node and three child reference images feed an image node. The schedule creates one shared run, executes vision once, freezes its text, then atomically creates three child runs that each execute image generation once.
+- Good: multiple independent or upstream/downstream eligible shared targets execute in the same shared run and every configured port is replaced by a typed literal in each child graph.
+- Base: an old V2 definition or a new schedule with `sharedOutputs: []` creates child runs exactly as before; V1 scheduling is unchanged.
+- Bad: selecting a social-post assembler, display sink, publish/write node, disabled node, multi-output node, non-upstream node, or any node whose ancestors include a child binding fails preflight before provider or external calls.
+
+### 6. Tests Required
+
+- `canvas_scheduler_check.mjs` must assert one shared run plus three child runs, multi-target extraction, typed literal replacement, output-edge rewiring, identical frozen artifacts, atomic and idempotent fan-out, shared failure/retry guards, lifecycle run-id coverage, recovery, aggregation, and V1/legacy V2 compatibility.
+- The same check must reject duplicate/stale ports, unsupported artifacts, input/passive/disabled/external-write/multi-output/non-upstream nodes, and child-scoped ancestor dependencies before mocked provider execution.
+- `canvas_workflows_check.mjs` must assert the persisted V2 workflow/API contracts, including `retry-shared` and historical `sharedOutputs: []` normalization.
+- Mocked browser checks must assert legal candidate selection, stale-selection removal, preview/runtime shared stages, artifact previews, error/retry UI, and desktop/mobile overflow without live model or external-service calls.
+- TypeScript, lint, build, local production restart/HTTP smoke, and the complete Trellis baseline remain required.
+
+### 7. Wrong vs Correct
+
+```typescript
+// Wrong: bypass schedule state and retry a shared run from the generic node endpoint.
+await retryCanvasNode(sharedRunId, failedNodeId, account);
+
+// Correct: coordinate retry through the schedule so shared status and fan-out stay consistent.
+await retryCanvasScheduleV2SharedTask(scheduleId, account, { mainTaskId });
+```
+
 ## Stable Decisions
 
 - Compact/simple runs expose operator-controlled switches for `useComfyUiKlein`, `directOriginalReference`, `enableVideoTranscription`, and `writeFeishu`. All four default off in the UI and at the simple-run API/domain boundary; only an explicit `true` enables local Klein routing, direct original-image use, Ark video/audio transcription, or auto-approve-and-enqueue Feishu publishing. `writeFeishu=false` or omission skips Feishu enqueue, marks the publish stage skipped, and leaves generated drafts in the content review desk for explicit human approval.

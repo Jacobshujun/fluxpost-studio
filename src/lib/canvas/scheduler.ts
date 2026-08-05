@@ -3,6 +3,7 @@ import {
   createCanvasScheduleInDb,
   deferCanvasRunQueueItems,
   deleteCanvasScheduleFromDb,
+  fanOutCanvasScheduleV2ChildrenInDb,
   getCanvasRunFromDb,
   getCanvasScheduleFromDb,
   launchCanvasScheduleInDb,
@@ -34,12 +35,15 @@ import {
 import {
   applyCanvasScheduleV2Parameters,
   createCanvasScheduleV2AggregateGraph,
+  createCanvasScheduleV2ChildGraph,
   expandCanvasScheduleV2,
   extractCanvasScheduleV2Artifacts,
+  extractCanvasScheduleV2SharedArtifacts,
   type ResolvedCanvasScheduleParameter,
   validateCanvasScheduleV2AggregateGraph,
   validateCanvasScheduleV2Definition,
   validateCanvasScheduleV2ExpandedGraph,
+  validateCanvasScheduleV2SharedGraph,
 } from "./scheduler-v2";
 import type {
   CanvasArtifact,
@@ -61,6 +65,7 @@ import type {
   CanvasScheduleStatus,
   CanvasScheduleV2Definition,
   CanvasScheduleV2MainTask,
+  CanvasScheduleV2SharedArtifact,
   CanvasSchedulerRole,
 } from "./types";
 import { CANVAS_REQUIRED_SCHEDULER_ROLES, CANVAS_SCHEDULER_ROLES, CANVAS_SCHEDULER_ROLE_LABELS } from "./types";
@@ -426,6 +431,7 @@ export async function convertCanvasScheduleToV2(scheduleId: string, account: Wor
   const definition: CanvasScheduleV2Definition = {
     parameters,
     expansion: { main: batch.copyFilter ? "zip" : "cartesian", child: "cartesian" },
+    sharedOutputs: [],
     childResult: { nodeId: bindings["image-target"], outputPort: "images", artifactKind: "images" },
     mainTargetNodeId: bindings["content-target"],
     aggregationPolicy: "at-least-one",
@@ -504,6 +510,7 @@ export async function cancelCanvasSchedule(scheduleId: string, account: Workspac
     mainTasks: current.mainTasks?.map((main) => ({
       ...main,
       status: terminalRunStatuses.has(main.status) ? main.status : "cancelled",
+      sharedStatus: main.sharedStatus && !terminalRunStatuses.has(main.sharedStatus) ? "cancelled" : main.sharedStatus,
       childTasks: main.childTasks.map((child) => ({
         ...child,
         status: terminalRunStatuses.has(child.status) ? child.status : "cancelled",
@@ -620,6 +627,49 @@ export async function retryCanvasScheduleV2ChildTask(
   return next;
 }
 
+export async function retryCanvasScheduleV2SharedTask(
+  scheduleId: string,
+  account: WorkspaceAccessActor,
+  input: { mainTaskId: string },
+) {
+  const current = await requireSchedule(scheduleId, account);
+  if (!isCanvasScheduleV2(current)) throw new Error("V2 shared task not found");
+  const main = current.mainTasks.find((item) => item.id === input.mainTaskId);
+  if (!main?.sharedRunId) throw new Error("Shared task not found");
+  if (main.sharedStatus !== "failed") throw new Error("Only failed shared tasks can be retried.");
+  if ((main.sharedArtifacts || []).length || main.childTasks.some((child) => child.runId)) {
+    throw new Error("A completed shared result cannot be rerun.");
+  }
+  const run = await getCanvasRun(main.sharedRunId, account);
+  if (!run) throw new Error("Canvas shared run not found");
+  const latest = latestNodeAttempts(run.nodeRuns);
+  const failedNode = [
+    ...(run.run.steps || []).map((step) => latest.get(step.nodeId)).filter((nodeRun): nodeRun is NonNullable<typeof nodeRun> => Boolean(nodeRun)),
+    ...latest.values(),
+  ].find((nodeRun) => ["failed", "blocked", "needs_config"].includes(nodeRun.status));
+  if (!failedNode) throw new Error("No failed Canvas node is available to retry.");
+  await retryCanvasNode(run.run.id, failedNode.nodeId, account, { allowScheduledSharedRetry: true });
+  const now = new Date().toISOString();
+  const next: CanvasSchedule = {
+    ...current,
+    revision: current.revision + 1,
+    status: "running",
+    completedAt: undefined,
+    mainTasks: current.mainTasks.map((item) => item.id !== main.id ? item : {
+      ...item,
+      status: "queued",
+      sharedStatus: "queued",
+      sharedError: undefined,
+      error: undefined,
+      updatedAt: now,
+    }),
+    updatedAt: now,
+  };
+  await saveUpdatedSchedule(next, current.revision);
+  kickCanvasSchedulerWorker();
+  return next;
+}
+
 export async function acceptCanvasScheduleV2Candidates(
   scheduleId: string,
   account: WorkspaceAccessActor,
@@ -697,10 +747,15 @@ async function preflightCanvasScheduleV2(current: CanvasSchedule, account: Works
       definition.parameters.filter((parameter) => parameter.scope === "main"),
       main.parameterValues,
     );
+    validateCanvasScheduleV2SharedGraph(graphWithMainParameters, definition);
+    const sharedPreviewArtifacts = canvasScheduleV2SharedPreviewArtifacts(definition);
     validateCanvasScheduleV2AggregateGraph(graphWithMainParameters, definition);
     for (const child of main.childTasks) {
       validateCanvasScheduleV2ExpandedGraph(
-        applyCanvasScheduleV2Parameters(workflow.graph, definition.parameters, { ...main.parameterValues, ...child.parameterValues }),
+        createCanvasScheduleV2ChildGraph(
+          applyCanvasScheduleV2Parameters(workflow.graph, definition.parameters, { ...main.parameterValues, ...child.parameterValues }),
+          sharedPreviewArtifacts,
+        ),
         definition,
       );
     }
@@ -736,15 +791,21 @@ async function launchCanvasScheduleV2(current: CanvasSchedule, account: Workspac
   await assertFrozenCanvasScheduleV2AssetsStillAvailable(current, account);
   const now = new Date().toISOString();
   let sequence = 0;
+  const sharedOutputs = definition.sharedOutputs || [];
+  const hasSharedOutputs = sharedOutputs.length > 0;
   const mainTasks = current.mainTasks.map((main) => ({
     ...main,
     status: "queued" as const,
+    sharedRunId: hasSharedOutputs ? canvasScheduleV2SharedRunId(main.id) : undefined,
+    sharedStatus: hasSharedOutputs ? "queued" as const : undefined,
+    sharedArtifacts: hasSharedOutputs ? [] : undefined,
+    sharedError: undefined,
     resultArtifacts: [],
     mainRunId: undefined,
     childTasks: main.childTasks.map((child) => ({
       ...child,
-      status: "queued" as const,
-      runId: canvasScheduleV2ChildRunId(child.id),
+      status: hasSharedOutputs ? "pending" as const : "queued" as const,
+      runId: hasSharedOutputs ? undefined : canvasScheduleV2ChildRunId(child.id),
       resultArtifacts: [],
       error: undefined,
       updatedAt: now,
@@ -765,6 +826,27 @@ async function launchCanvasScheduleV2(current: CanvasSchedule, account: Workspac
   };
   const runs: CanvasRun[] = [];
   for (const main of mainTasks) {
+    if (hasSharedOutputs) {
+      const createdAt = new Date(Date.parse(now) + sequence++).toISOString();
+      runs.push(prepareCanvasRunFromGraph({
+        id: main.sharedRunId!,
+        workflow,
+        graph: applyCanvasScheduleV2Parameters(
+          workflow.graph,
+          definition.parameters.filter((parameter) => parameter.scope === "main"),
+          main.parameterValues,
+        ),
+        targetNodeIds: sharedOutputs.map((output) => output.nodeId),
+        batchContext: {
+          schemaVersion: 2,
+          scheduleId: next.id,
+          mainTaskId: main.id,
+          phase: "shared",
+        },
+        createdAt,
+      }));
+      continue;
+    }
     for (const child of main.childTasks) {
       const createdAt = new Date(Date.parse(now) + sequence++).toISOString();
       const graph = applyCanvasScheduleV2Parameters(workflow.graph, definition.parameters, {
@@ -1056,7 +1138,100 @@ async function reconcileCanvasScheduleV2(current: CanvasSchedule) {
   const now = new Date().toISOString();
   let changed = false;
   const aggregateRequests: CanvasScheduleV2MainTask[] = [];
+  const sharedOutputs = definition.sharedOutputs || [];
   for (const main of next.mainTasks!) {
+    if (sharedOutputs.length) {
+      if (!main.sharedRunId) {
+        if (main.sharedStatus !== "failed" || main.sharedError !== "Shared Canvas run is missing.") {
+          main.sharedStatus = "failed";
+          main.sharedError = "Shared Canvas run is missing.";
+          main.status = "failed";
+          main.error = main.sharedError;
+          main.updatedAt = now;
+          changed = true;
+        }
+        continue;
+      }
+      const sharedRun = await getCanvasRunFromDb(main.sharedRunId);
+      if (!sharedRun) {
+        if (main.sharedStatus !== "failed" || main.sharedError !== "Shared Canvas run was not found.") {
+          main.sharedStatus = "failed";
+          main.sharedArtifacts = [];
+          main.sharedError = "Shared Canvas run was not found.";
+          main.status = "failed";
+          main.error = main.sharedError;
+          main.updatedAt = now;
+          changed = true;
+        }
+        continue;
+      }
+      const sharedStatus = scheduleTaskStatusFromRun(sharedRun.status);
+      let sharedArtifacts = main.sharedArtifacts || [];
+      let sharedError = terminalRunStatuses.has(sharedRun.status) ? sharedRun.error : undefined;
+      if (sharedRun.status === "completed") {
+        try {
+          const latest = latestNodeAttempts(await listCanvasNodeRunsFromDb(sharedRun.id));
+          sharedArtifacts = extractCanvasScheduleV2SharedArtifacts(
+            Object.fromEntries(sharedOutputs.map((output) => [output.nodeId, latest.get(output.nodeId)?.outputs])),
+            sharedOutputs,
+          );
+          sharedError = undefined;
+        } catch (error) {
+          sharedArtifacts = [];
+          sharedError = error instanceof Error ? error.message : "Shared output extraction failed.";
+        }
+      }
+      const effectiveSharedStatus = sharedRun.status === "completed"
+        ? (sharedError ? "failed" : "completed")
+        : sharedStatus;
+      if (effectiveSharedStatus === "failed" && !sharedError) sharedError = "Shared Canvas run failed.";
+      if (main.sharedStatus !== effectiveSharedStatus
+        || stableSerialize(main.sharedArtifacts || []) !== stableSerialize(sharedArtifacts)
+        || main.sharedError !== sharedError) {
+        main.sharedStatus = effectiveSharedStatus;
+        main.sharedArtifacts = sharedArtifacts;
+        main.sharedError = sharedError;
+        main.updatedAt = now;
+        changed = true;
+      }
+      if (effectiveSharedStatus !== "completed") {
+        const status = effectiveSharedStatus === "cancelled"
+          ? "cancelled"
+          : terminalRunStatuses.has(effectiveSharedStatus) ? "failed" : effectiveSharedStatus;
+        if (main.status !== status || main.error !== sharedError) {
+          main.status = status;
+          main.error = sharedError;
+          main.updatedAt = now;
+          changed = true;
+        }
+        continue;
+      }
+      const childRunCount = main.childTasks.filter((child) => child.runId).length;
+      if (childRunCount && childRunCount !== main.childTasks.length) {
+        main.status = "failed";
+        main.error = "Shared child fan-out is incomplete.";
+        main.updatedAt = now;
+        changed = true;
+        continue;
+      }
+      if (!childRunCount) {
+        main.status = "queued";
+        main.error = undefined;
+        if (current.status === "paused") continue;
+        const runs = prepareCanvasScheduleV2ChildRuns(next, main, now);
+        next.status = deriveAggregateStatus(next.mainTasks!.map((item) => item.status), false);
+        next.revision = current.revision + 1;
+        next.updatedAt = now;
+        try {
+          await fanOutCanvasScheduleV2ChildrenInDb(next, current.revision, runs);
+        } catch (error) {
+          if (error instanceof Error && error.message === "Canvas schedule revision conflict") return;
+          throw error;
+        }
+        ensureCanvasRunWorker();
+        return;
+      }
+    }
     for (const child of main.childTasks) {
       if (!child.runId) continue;
       const run = await getCanvasRunFromDb(child.runId);
@@ -1551,8 +1726,44 @@ function scheduleRunIds(schedule: CanvasSchedule) {
     content.finalRunId || "",
     ...content.imageTasks.map((task) => task.runId || ""),
     ])),
-    ...(schedule.mainTasks || []).flatMap((main) => [main.mainRunId || "", ...main.childTasks.map((child) => child.runId || "")]),
+    ...(schedule.mainTasks || []).flatMap((main) => [main.sharedRunId || "", main.mainRunId || "", ...main.childTasks.map((child) => child.runId || "")]),
   ]);
+}
+
+function prepareCanvasScheduleV2ChildRuns(schedule: CanvasSchedule, main: CanvasScheduleV2MainTask, now: string) {
+  if (!schedule.definition || !schedule.workflowSnapshot) throw new Error("V2 schedule runtime snapshot is missing.");
+  const workflow = {
+    id: schedule.workflowId,
+    revision: schedule.workflowRevision,
+    ownerUserId: schedule.ownerUserId,
+    ownerDisplayName: schedule.ownerDisplayName,
+  };
+  return main.childTasks.map((child, index) => {
+    child.runId = canvasScheduleV2ChildRunId(child.id);
+    child.status = "queued";
+    child.resultArtifacts = [];
+    child.error = undefined;
+    child.updatedAt = now;
+    const graphWithParameters = applyCanvasScheduleV2Parameters(
+      schedule.workflowSnapshot!,
+      schedule.definition!.parameters,
+      { ...main.parameterValues, ...child.parameterValues },
+    );
+    return prepareCanvasRunFromGraph({
+      id: child.runId,
+      workflow,
+      graph: createCanvasScheduleV2ChildGraph(graphWithParameters, main.sharedArtifacts || []),
+      targetNodeIds: [schedule.definition!.childResult.nodeId],
+      batchContext: {
+        schemaVersion: 2,
+        scheduleId: schedule.id,
+        mainTaskId: main.id,
+        childTaskId: child.id,
+        phase: "child",
+      },
+      createdAt: new Date(Date.parse(now) + index).toISOString(),
+    });
+  });
 }
 
 function latestNodeAttempts(nodeRuns: Awaited<ReturnType<typeof listCanvasNodeRunsFromDb>>) {
@@ -1625,7 +1836,13 @@ function normalizeStoredSchedule(schedule: CanvasSchedule): CanvasSchedule {
       strategy: normalizeStrategy(String(batch.strategy)),
       copyFilter: batch.copyFilter === undefined ? undefined : normalizeCopyFilter(batch.copyFilter),
     })),
-    mainTasks: schedule.schemaVersion === 2 ? schedule.mainTasks || [] : undefined,
+    definition: schedule.schemaVersion === 2 && schedule.definition
+      ? { ...schedule.definition, sharedOutputs: schedule.definition.sharedOutputs || [] }
+      : schedule.definition,
+    mainTasks: schedule.schemaVersion === 2 ? (schedule.mainTasks || []).map((main) => ({
+      ...main,
+      sharedArtifacts: main.sharedArtifacts || [],
+    })) : undefined,
   };
 }
 
@@ -1645,6 +1862,7 @@ function defaultCanvasScheduleV2Definition(graph: CanvasGraph): CanvasScheduleV2
   return {
     parameters: [],
     expansion: { main: "cartesian", child: "cartesian" },
+    sharedOutputs: [],
     childResult: {
       nodeId: preferredChild?.id || "",
       outputPort: preferredOutput?.id || "",
@@ -1679,6 +1897,11 @@ function normalizeCanvasScheduleV2Definition(value: CanvasScheduleV2Definition):
       main: value.expansion?.main === "zip" ? "zip" : "cartesian",
       child: value.expansion?.child === "zip" ? "zip" : "cartesian",
     },
+    sharedOutputs: (Array.isArray(value.sharedOutputs) ? value.sharedOutputs : []).map((output) => ({
+      nodeId: String(output?.nodeId || "").trim(),
+      outputPort: String(output?.outputPort || "").trim(),
+      artifactKind: output.artifactKind,
+    })),
     childResult: {
       nodeId: String(value.childResult?.nodeId || "").trim(),
       outputPort: String(value.childResult?.outputPort || "").trim(),
@@ -1705,11 +1928,32 @@ function normalizeCanvasScheduleV2ParameterSource(parameter: CanvasScheduleParam
 }
 
 function canvasScheduleV2PreviewFingerprint(definition: CanvasScheduleV2Definition, mainTasks: CanvasScheduleV2MainTask[]) {
-  return hash(stableSerialize({ definition, mainTasks }));
+  const normalizedDefinition = definition.sharedOutputs?.length
+    ? definition
+    : Object.fromEntries(Object.entries(definition).filter(([key]) => key !== "sharedOutputs"));
+  const normalizedMainTasks = mainTasks.map((main) => main.sharedArtifacts?.length
+    ? main
+    : Object.fromEntries(Object.entries(main).filter(([key]) => key !== "sharedArtifacts")));
+  return hash(stableSerialize({ definition: normalizedDefinition, mainTasks: normalizedMainTasks }));
 }
 
 function canvasScheduleV2ChildRunId(childTaskId: string) {
   return `canvas-scheduler-v2-child-${childTaskId}`;
+}
+
+function canvasScheduleV2SharedRunId(mainTaskId: string) {
+  return `canvas-scheduler-v2-shared-${mainTaskId}`;
+}
+
+function canvasScheduleV2SharedPreviewArtifacts(definition: CanvasScheduleV2Definition): CanvasScheduleV2SharedArtifact[] {
+  return (definition.sharedOutputs || []).map((output) => ({
+    ...output,
+    artifact: output.artifactKind === "text"
+      ? { kind: "text", value: "Shared batch preview" }
+      : output.artifactKind === "images"
+        ? { kind: "images", items: [{ url: "/canvas-shared-preview.png" }] }
+        : { kind: "videos", items: [{ url: "/canvas-shared-preview.mp4" }] },
+  }));
 }
 
 function canvasScheduleV2AggregateRunId(mainTaskId: string, artifacts: CanvasArtifact[]) {

@@ -2528,6 +2528,66 @@ export async function launchCanvasScheduleInDb(schedule: CanvasSchedule, expecte
   return schedule;
 }
 
+export async function fanOutCanvasScheduleV2ChildrenInDb(schedule: CanvasSchedule, expectedRevision: number, runs: CanvasRun[]) {
+  await ensureDatabaseReady();
+  if (getDatabaseBackend() === "postgres") {
+    const client = await getPostgresPool().connect();
+    try {
+      await client.query("BEGIN");
+      const updated = await client.query(
+        `UPDATE canvas_schedules SET status = $1, revision = $2, updated_at = $3, data_json = $4::jsonb
+         WHERE id = $5 AND owner_user_id = $6 AND revision = $7`,
+        [schedule.status, schedule.revision, schedule.updatedAt, toJson(schedule), schedule.id, schedule.ownerUserId, expectedRevision],
+      );
+      if (Number(updated.rowCount || 0) !== 1) throw new Error("Canvas schedule revision conflict");
+      for (const run of runs) {
+        const item = canvasRunQueueItem(run);
+        await client.query(
+          `INSERT INTO canvas_runs (id, workflow_id, owner_user_id, status, created_at, updated_at, data_json)
+           VALUES ($1,$2,$3,$4,$5,$6,$7::jsonb)
+           ON CONFLICT(id) DO NOTHING`,
+          [run.id, run.workflowId, run.ownerUserId, run.status, run.createdAt, run.updatedAt, toJson(run)],
+        );
+        await client.query(
+          `INSERT INTO canvas_run_queue (id, run_id, status, priority, attempts, max_attempts, run_after, created_at, updated_at, data_json)
+           VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10::jsonb)
+           ON CONFLICT(run_id) DO NOTHING`,
+          [item.id, item.runId, item.status, item.priority, item.attempts, item.maxAttempts, item.runAfter, item.createdAt, item.updatedAt, toJson(item)],
+        );
+      }
+      await client.query("COMMIT");
+      return schedule;
+    } catch (error) {
+      await client.query("ROLLBACK");
+      throw error;
+    } finally {
+      client.release();
+    }
+  }
+  const db = getSqliteDatabase();
+  runSqliteTransaction(db, () => {
+    const updated = db.prepare(`
+      UPDATE canvas_schedules SET status = ?, revision = ?, updated_at = ?, data_json = ?
+      WHERE id = ? AND owner_user_id = ? AND revision = ?
+    `).run(schedule.status, schedule.revision, schedule.updatedAt, toJson(schedule), schedule.id, schedule.ownerUserId, expectedRevision) as { changes?: number };
+    if (Number(updated.changes || 0) !== 1) throw new Error("Canvas schedule revision conflict");
+    const insertRun = db.prepare(`
+      INSERT OR IGNORE INTO canvas_runs (id, workflow_id, owner_user_id, status, created_at, updated_at, data_json)
+      VALUES (?, ?, ?, ?, ?, ?, ?)
+    `);
+    const insertQueue = db.prepare(`
+      INSERT OR IGNORE INTO canvas_run_queue (id, run_id, status, priority, attempts, max_attempts, run_after, created_at, updated_at, data_json)
+      VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+    `);
+    for (const run of runs) {
+      const item = canvasRunQueueItem(run);
+      insertRun.run(run.id, run.workflowId, run.ownerUserId, run.status, run.createdAt, run.updatedAt, toJson(run));
+      insertQueue.run(item.id, item.runId, item.status, item.priority, item.attempts, item.maxAttempts, item.runAfter, item.createdAt, item.updatedAt, toJson(item));
+    }
+  });
+  return schedule;
+}
+
 export async function deferCanvasRunQueueItems(runIds: string[], deferred: boolean) {
   await ensureDatabaseReady();
   const ids = Array.from(new Set(runIds.filter(Boolean)));

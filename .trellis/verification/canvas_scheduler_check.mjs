@@ -22,6 +22,10 @@ let retriedNode;
 let createdSchedule;
 let launchedSchedule;
 let launchedRuns;
+let listedSchedules = [];
+let canvasRunsById = new Map();
+let nodeRunsByRunId = new Map();
+let fannedOutRuns;
 
 try {
   writeFileSync(path.join(temp, "toapis-image-api.js"), "exports.toApisImageRatios=['1:1'];exports.toApis4kImageRatios=['16:9'];", "utf8");
@@ -62,11 +66,23 @@ try {
         return structuredClone(schedule);
       },
       getCanvasScheduleFromDb: async () => structuredClone(storedSchedule),
+      getCanvasRunFromDb: async (runId) => {
+        const run = canvasRunsById.get(runId);
+        return run ? structuredClone(run) : undefined;
+      },
+      listCanvasNodeRunsFromDb: async (runId) => structuredClone(nodeRunsByRunId.get(runId) || []),
       launchCanvasScheduleInDb: async (schedule, _expectedRevision, runs) => {
         launchedSchedule = structuredClone(schedule);
         launchedRuns = structuredClone(runs);
       },
-      listCanvasSchedulesFromDb: async () => [],
+      fanOutCanvasScheduleV2ChildrenInDb: async (schedule, expectedRevision, runs) => {
+        if (!storedSchedule || storedSchedule.revision !== expectedRevision) throw new Error("Canvas schedule revision conflict");
+        fannedOutRuns = structuredClone(runs);
+        storedSchedule = structuredClone(schedule);
+        listedSchedules = [structuredClone(schedule)];
+        return structuredClone(schedule);
+      },
+      listCanvasSchedulesFromDb: async () => structuredClone(listedSchedules),
       updateCanvasScheduleInDb: async (schedule, expectedRevision) => {
         if (!storedSchedule || storedSchedule.revision !== expectedRevision) return false;
         savedSchedule = structuredClone(schedule);
@@ -257,6 +273,132 @@ try {
     "reference-group": imageGroupParameter.source.values[0],
   });
   assert.deepEqual(imageGroupGraph.nodes.find((item) => item.id === "scene").config.urls, ["/group-a.jpg", "/group-b.jpg"], "image groups must inject as one ordered value");
+  const sharedGraph = {
+    nodes: [
+      node("shared-main", "input.images"),
+      node("shared-child", "input.images"),
+      node("shared-vision", "model.gpt-vision"),
+      node("shared-select", "utility.image-select"),
+      node("shared-result", "model.gpt-image"),
+    ],
+    edges: [
+      edge("shared-main", "images", "shared-vision", "images"),
+      edge("shared-main", "images", "shared-select", "images"),
+      edge("shared-vision", "text", "shared-result", "prompt"),
+      edge("shared-select", "images", "shared-result", "references"),
+      edge("shared-child", "images", "shared-result", "references"),
+    ],
+    viewport: { x: 0, y: 0, zoom: 1 },
+  };
+  const sharedDefinition = {
+    parameters: [
+      {
+        id: "shared-main-parameter",
+        name: "Shared main image",
+        scope: "main",
+        valueType: "image",
+        source: { mode: "fixed", values: [{ id: "shared-main-asset", url: "/shared-main.jpg", name: "shared main" }] },
+        expansion: "fixed",
+        binding: { nodeId: "shared-main", fieldKey: "urls" },
+      },
+      {
+        id: "shared-child-parameter",
+        name: "Shared child image",
+        scope: "child",
+        valueType: "image",
+        source: { mode: "manual-list", values: ["front", "side", "rear"].map((id) => ({ id: `shared-child-${id}`, url: `/shared-child-${id}.jpg`, name: id })) },
+        expansion: "each",
+        binding: { nodeId: "shared-child", fieldKey: "urls" },
+      },
+    ],
+    expansion: { main: "cartesian", child: "cartesian" },
+    sharedOutputs: [
+      { nodeId: "shared-vision", outputPort: "text", artifactKind: "text" },
+      { nodeId: "shared-select", outputPort: "images", artifactKind: "images" },
+    ],
+    childResult: { nodeId: "shared-result", outputPort: "images", artifactKind: "images" },
+    aggregationPolicy: "at-least-one",
+  };
+  schedulerV2.validateCanvasScheduleV2Definition(sharedGraph, sharedDefinition);
+  schedulerV2.validateCanvasScheduleV2SharedGraph(sharedGraph, sharedDefinition);
+  schedulerV2.validateCanvasScheduleV2Definition(sharedGraph, { ...sharedDefinition, sharedOutputs: undefined });
+  assert.throws(
+    () => schedulerV2.validateCanvasScheduleV2Definition(sharedGraph, { ...sharedDefinition, sharedOutputs: [sharedDefinition.sharedOutputs[0], sharedDefinition.sharedOutputs[0]] }),
+    /duplicate node ports/,
+    "the same shared node port must not be selected twice",
+  );
+  for (const [selection, message, label, extraNode] of [
+    [{ nodeId: "shared-result", outputPort: "images", artifactKind: "images" }, /strictly upstream/, "child-result nodes"],
+    [{ nodeId: "shared-orphan", outputPort: "text", artifactKind: "text" }, /strictly upstream/, "non-upstream nodes", node("shared-orphan", "model.gpt-text")],
+    [{ nodeId: "shared-main", outputPort: "images", artifactKind: "images" }, /Input nodes/, "input nodes"],
+    [{ nodeId: "shared-display", outputPort: "preview", artifactKind: "text" }, /Passive display nodes/, "passive display nodes", node("shared-display", "utility.display-any")],
+    [{ nodeId: "shared-split", outputPort: "head", artifactKind: "text" }, /exactly one output/, "multi-output nodes", node("shared-split", "utility.text-split")],
+    [{ nodeId: "shared-publish", outputPort: "job", artifactKind: "text" }, /External-write nodes/, "external-write nodes", node("shared-publish", "publish.feishu")],
+    [{ nodeId: "shared-compose", outputPort: "post", artifactKind: "images" }, /must produce text, images, or videos/, "unsupported artifact nodes", node("shared-compose", "compose.social-post")],
+  ]) {
+    const validationGraph = extraNode ? { ...sharedGraph, nodes: [...sharedGraph.nodes, extraNode] } : sharedGraph;
+    assert.throws(
+      () => schedulerV2.validateCanvasScheduleV2Definition(validationGraph, { ...sharedDefinition, sharedOutputs: [selection] }),
+      message,
+      `${label} must not be accepted as shared outputs`,
+    );
+  }
+  const childDependentSharedGraph = structuredClone(sharedGraph);
+  childDependentSharedGraph.edges.push(edge("shared-child", "images", "shared-vision", "images"));
+  assert.throws(
+    () => schedulerV2.validateCanvasScheduleV2Definition(childDependentSharedGraph, sharedDefinition),
+    /cannot include child-scoped parameter bindings/,
+    "shared ancestors must not depend on child-scoped parameter bindings",
+  );
+  const disabledSharedGraph = structuredClone(sharedGraph);
+  disabledSharedGraph.nodes.find((item) => item.id === "shared-vision").executionMode = "disabled";
+  assert.throws(
+    () => schedulerV2.validateCanvasScheduleV2Definition(disabledSharedGraph, sharedDefinition),
+    /Disabled nodes cannot be shared outputs/,
+    "disabled targets must fail validation before a shared run can complete without an artifact",
+  );
+  const blockedSharedGraph = structuredClone(sharedGraph);
+  blockedSharedGraph.edges = blockedSharedGraph.edges.filter((item) => item.target !== "shared-vision");
+  assert.throws(
+    () => schedulerV2.validateCanvasScheduleV2SharedGraph(blockedSharedGraph, sharedDefinition),
+    /requires input/,
+    "shared-stage planning must fail before provider execution when a selected branch is blocked",
+  );
+  const sharedOutputArtifacts = {
+    "shared-vision": { text: { kind: "text", value: "frozen visual analysis" } },
+    "shared-select": { images: { kind: "images", items: [{ url: "/frozen-reference.jpg", width: 1200, height: 800 }] } },
+  };
+  const frozenSharedArtifacts = schedulerV2.extractCanvasScheduleV2SharedArtifacts(sharedOutputArtifacts, sharedDefinition.sharedOutputs);
+  assert.deepEqual(frozenSharedArtifacts, [
+    { ...sharedDefinition.sharedOutputs[0], artifact: sharedOutputArtifacts["shared-vision"].text },
+    { ...sharedDefinition.sharedOutputs[1], artifact: sharedOutputArtifacts["shared-select"].images },
+  ], "multiple shared outputs must retain their node, port, kind, and complete artifact identity");
+  assert.throws(
+    () => schedulerV2.extractCanvasScheduleV2SharedArtifacts({ ...sharedOutputArtifacts, "shared-select": {} }, sharedDefinition.sharedOutputs),
+    /shared-select:images did not produce images/,
+    "a missing selected output must fail shared-stage freezing",
+  );
+  assert.throws(
+    () => schedulerV2.extractCanvasScheduleV2SharedArtifacts({ ...sharedOutputArtifacts, "shared-vision": { text: { kind: "images", items: [] } } }, sharedDefinition.sharedOutputs),
+    /shared-vision:text did not produce text/,
+    "a selected output with the wrong artifact kind must fail shared-stage freezing",
+  );
+  const childGraphWithSharedLiterals = schedulerV2.createCanvasScheduleV2ChildGraph(sharedGraph, frozenSharedArtifacts);
+  assert.deepEqual(
+    { type: childGraphWithSharedLiterals.nodes.find((item) => item.id === "shared-vision").type, config: childGraphWithSharedLiterals.nodes.find((item) => item.id === "shared-vision").config },
+    { type: "input.text", config: { text: "frozen visual analysis" } },
+    "text shared outputs must become literal text inputs in every child graph",
+  );
+  assert.deepEqual(
+    { type: childGraphWithSharedLiterals.nodes.find((item) => item.id === "shared-select").type, config: childGraphWithSharedLiterals.nodes.find((item) => item.id === "shared-select").config },
+    { type: "input.images", config: { urls: ["/frozen-reference.jpg"] } },
+    "image shared outputs must become literal image inputs in every child graph",
+  );
+  assert.equal(childGraphWithSharedLiterals.edges.some((item) => item.target === "shared-vision" || item.target === "shared-select"), false, "literal replacement must prune every shared node incoming edge");
+  assert.equal(childGraphWithSharedLiterals.edges.find((item) => item.source === "shared-vision")?.sourcePort, "text", "text consumers must be rewired to the literal output port");
+  assert.equal(childGraphWithSharedLiterals.edges.find((item) => item.source === "shared-select")?.sourcePort, "images", "image consumers must be rewired to the literal output port");
+  assert.deepEqual(schedulerV2.createCanvasScheduleV2ChildGraph(sharedGraph, []), sharedGraph, "an empty shared-output list must preserve historical child graphs");
+  assert.equal(sharedGraph.nodes.find((item) => item.id === "shared-vision").type, "model.gpt-vision", "shared literalization must not mutate the workflow snapshot");
   const aggregateV2Graph = schedulerV2.createCanvasScheduleV2AggregateGraph(graph, v2Definition, [
     { kind: "images", items: [{ url: "/front-result.jpg" }] },
     { kind: "images", items: [{ url: "/side-result.jpg" }] },
@@ -506,6 +648,73 @@ try {
     vehicle: [{ id: "vehicle-1", role: "vehicle", publicUrl: "/vehicle-1.jpg", name: "vehicle 1", mimeType: "image/jpeg" }],
   };
   copyEntries = [{ id: "copy-1", title: "Only copy", body: "Only body", tags: ["ev"], updatedAt: createdAt }];
+  const sharedRuntimeExpansion = schedulerV2.expandCanvasScheduleV2(
+    sharedDefinition.parameters,
+    sharedDefinition,
+    createdAt,
+    (level) => `${level}-shared-runtime-${++v2Id}`,
+  );
+  workflowRecord = { id: "workflow-shared", name: "Shared workflow", revision: 1, ownerUserId: account.id, ownerDisplayName: account.displayName, graph: sharedGraph };
+  storedSchedule = {
+    id: "schedule-v2-shared",
+    schemaVersion: 2,
+    ownerUserId: account.id,
+    ownerDisplayName: account.displayName,
+    name: "V2 shared schedule",
+    revision: 1,
+    workflowId: workflowRecord.id,
+    workflowRevision: workflowRecord.revision,
+    status: "ready",
+    batches: [],
+    definition: structuredClone(sharedDefinition),
+    mainTasks: structuredClone(sharedRuntimeExpansion.mainTasks),
+    totalMainTasks: sharedRuntimeExpansion.totalMainTasks,
+    totalChildTasks: sharedRuntimeExpansion.totalChildTasks,
+    totalContentTasks: sharedRuntimeExpansion.totalChildTasks,
+    totalImageTasks: sharedRuntimeExpansion.totalChildTasks,
+    createdAt,
+    updatedAt: createdAt,
+  };
+  storedSchedule.previewRevision = v2PreviewFingerprint(storedSchedule.definition, storedSchedule.mainTasks);
+  launchedRuns = undefined;
+  const sharedLaunch = await scheduler.launchCanvasSchedule(storedSchedule.id, account, {
+    revision: storedSchedule.revision,
+    previewRevision: storedSchedule.previewRevision,
+  });
+  assert.equal(sharedLaunch.mainTasks[0].childTasks.length, 3, "the shared-stage fixture must retain all three child tasks");
+  assert.equal(launchedRuns.length, 1, "one main task with multiple shared outputs must launch one shared run and no child runs");
+  assert.equal(launchedRuns[0].id, `canvas-scheduler-v2-shared-${sharedLaunch.mainTasks[0].id}`);
+  assert.deepEqual(launchedRuns[0].targetNodeIds, ["shared-vision", "shared-select"], "one shared run must target every selected output");
+  assert.equal(launchedRuns[0].batchContext.phase, "shared");
+  assert.equal(sharedLaunch.mainTasks[0].sharedStatus, "queued");
+  assert.deepEqual(sharedLaunch.mainTasks[0].sharedArtifacts, []);
+  assert.ok(sharedLaunch.mainTasks[0].childTasks.every((child) => child.status === "pending" && !child.runId), "child runs must stay unlaunched until shared artifacts freeze");
+  storedSchedule = structuredClone(sharedLaunch);
+  listedSchedules = [structuredClone(sharedLaunch)];
+  const completedSharedRunId = sharedLaunch.mainTasks[0].sharedRunId;
+  canvasRunsById.set(completedSharedRunId, { id: completedSharedRunId, status: "completed" });
+  nodeRunsByRunId.set(completedSharedRunId, [
+    { id: "shared-vision-attempt", nodeId: "shared-vision", attempt: 1, outputs: structuredClone(sharedOutputArtifacts) ["shared-vision"] },
+    { id: "shared-select-attempt", nodeId: "shared-select", attempt: 1, outputs: structuredClone(sharedOutputArtifacts) ["shared-select"] },
+  ]);
+  const reconciledShared = await scheduler.getCanvasSchedule(storedSchedule.id, account);
+  assert.equal(fannedOutRuns.length, 3, "one completed shared run must fan out all three child runs together");
+  assert.ok(reconciledShared.mainTasks[0].childTasks.every((child) => child.status === "queued" && child.runId), "atomic fan-out must persist every child run id and queued state");
+  assert.deepEqual(reconciledShared.mainTasks[0].sharedArtifacts, frozenSharedArtifacts, "reconciliation must persist the complete frozen shared artifact records");
+  for (const childRun of fannedOutRuns) {
+    assert.equal(childRun.batchContext.phase, "child");
+    assert.deepEqual(
+      { type: childRun.graph.nodes.find((item) => item.id === "shared-vision").type, config: childRun.graph.nodes.find((item) => item.id === "shared-vision").config },
+      { type: "input.text", config: { text: "frozen visual analysis" } },
+      "every fanned-out child must consume the frozen shared text literal",
+    );
+    assert.deepEqual(
+      { type: childRun.graph.nodes.find((item) => item.id === "shared-select").type, config: childRun.graph.nodes.find((item) => item.id === "shared-select").config },
+      { type: "input.images", config: { urls: ["/frozen-reference.jpg"] } },
+      "every fanned-out child must consume the frozen shared image literal",
+    );
+  }
+  listedSchedules = [];
   workflowRecord = { id: "workflow-1", name: "Workflow", revision: 3, ownerUserId: account.id, ownerDisplayName: account.displayName, graph: copyGraph };
   storedSchedule = {
     id: "schedule-1",
@@ -708,6 +917,50 @@ try {
   assert.deepEqual(generatedPosts.get(postId).imageUrls, ["/new-result.jpg"], "accepting V2 candidates must update the existing review draft");
   assert.equal(acceptedV2.mainTasks[0].pendingCandidateSync, false);
   assert.ok(acceptedV2.mainTasks[0].candidateFingerprint);
+  canvasRunFixture = {
+    run: { id: "shared-run-failed", steps: [{ nodeId: "shared-vision" }, { nodeId: "shared-select" }] },
+    nodeRuns: [
+      { nodeId: "shared-vision", attempt: 1, status: "completed" },
+      { nodeId: "shared-select", attempt: 1, status: "failed" },
+    ],
+  };
+  storedSchedule = {
+    ...acceptedV2,
+    status: "failed",
+    mainTasks: [{
+      ...acceptedV2.mainTasks[0],
+      status: "failed",
+      sharedRunId: "shared-run-failed",
+      sharedStatus: "failed",
+      sharedArtifacts: [],
+      sharedError: "shared select failed",
+      mainRunId: undefined,
+      childTasks: acceptedV2.mainTasks[0].childTasks.map((child) => ({ ...child, status: "pending", runId: undefined, resultArtifacts: [] })),
+    }],
+  };
+  retriedNode = undefined;
+  const retriedShared = await scheduler.retryCanvasScheduleV2SharedTask(storedSchedule.id, account, { mainTaskId: "main-1" });
+  assert.deepEqual(retriedNode, { runId: "shared-run-failed", nodeId: "shared-select" }, "shared retry must reuse the first failed node attempt in the original shared run");
+  assert.equal(retriedShared.mainTasks[0].sharedStatus, "queued");
+  assert.equal(retriedShared.mainTasks[0].sharedError, undefined);
+  storedSchedule = {
+    ...storedSchedule,
+    mainTasks: [{ ...storedSchedule.mainTasks[0], sharedStatus: "failed", sharedArtifacts: [{ nodeId: "shared-select", outputPort: "images", artifactKind: "images", artifact: { kind: "images", items: [{ url: "/already-frozen.jpg" }] } }] }],
+  };
+  await assert.rejects(
+    scheduler.retryCanvasScheduleV2SharedTask(storedSchedule.id, account, { mainTaskId: "main-1" }),
+    /completed shared result cannot be rerun/,
+    "successful frozen shared artifacts must never be rerun",
+  );
+  storedSchedule = {
+    ...storedSchedule,
+    mainTasks: [{ ...storedSchedule.mainTasks[0], sharedStatus: "failed", sharedArtifacts: [], childTasks: [{ ...storedSchedule.mainTasks[0].childTasks[0], runId: "already-launched-child" }] }],
+  };
+  await assert.rejects(
+    scheduler.retryCanvasScheduleV2SharedTask(storedSchedule.id, account, { mainTaskId: "main-1" }),
+    /completed shared result cannot be rerun/,
+    "a shared stage must not rerun after child fan-out starts",
+  );
   assert.match(
     schedulerSource,
     /\(run\.run\.steps \|\| \[\]\)\.map\(\(step\) => latest\.get\(step\.nodeId\)\)/,
@@ -749,12 +1002,41 @@ try {
   for (const snippet of ["launchCanvasScheduleInDb", 'await client.query("BEGIN")', 'await client.query("ROLLBACK")', "deferCanvasRunQueueItems"]) {
     assert.ok(database.includes(snippet), `database is missing ${snippet}`);
   }
+  const sharedFanOutSource = database.slice(
+    database.indexOf("export async function fanOutCanvasScheduleV2ChildrenInDb"),
+    database.indexOf("export async function deferCanvasRunQueueItems"),
+  );
+  for (const snippet of ['await client.query("BEGIN")', 'await client.query("COMMIT")', 'await client.query("ROLLBACK")', "Canvas schedule revision conflict", "ON CONFLICT(id) DO NOTHING", "ON CONFLICT(run_id) DO NOTHING", "runSqliteTransaction", "INSERT OR IGNORE INTO canvas_runs", "INSERT OR IGNORE INTO canvas_run_queue"]) {
+    assert.ok(sharedFanOutSource.includes(snippet), `shared child fan-out must atomically preserve ${snippet}`);
+  }
+  assert.match(
+    schedulerSource,
+    /runs\.push\(prepareCanvasRunFromGraph\(\{[\s\S]*targetNodeIds: sharedOutputs\.map\(\(output\) => output\.nodeId\)[\s\S]*phase: "shared"/,
+    "each main task must combine every selected shared output into one shared Canvas run",
+  );
+  assert.match(
+    schedulerSource,
+    /await fanOutCanvasScheduleV2ChildrenInDb\(next, current\.revision, runs\)[\s\S]*ensureCanvasRunWorker\(\)[\s\S]*return;/,
+    "shared completion must persist the revised schedule and every child run before waking workers",
+  );
+  assert.match(
+    schedulerSource,
+    /flatMap\(\(main\) => \[main\.sharedRunId \|\| "", main\.mainRunId \|\| "", \.\.\.main\.childTasks/,
+    "pause, resume, and cancellation run-id collection must include the shared stage",
+  );
+  assert.match(
+    schedulerSource,
+    /sharedOutputs: \(Array\.isArray\(value\.sharedOutputs\) \? value\.sharedOutputs : \[\]\)/,
+    "historical V2 definitions must normalize missing shared outputs to an empty list",
+  );
+  assert.ok(schedulerSource.includes('return `canvas-scheduler-v2-shared-${mainTaskId}`'), "shared run ids must remain deterministic per main task");
   const collectionRoute = read("src/app/api/canvas/schedules/route.ts");
   const detailRoute = read("src/app/api/canvas/schedules/[id]/route.ts");
   assert.ok(collectionRoute.includes("requireWorkspaceAccount(request)"));
-  for (const action of ["preflight", "resample", "launch", "duplicate", "convert-v2", "pause", "resume", "cancel", "retry", "accept-candidates"]) {
+  for (const action of ["preflight", "resample", "launch", "duplicate", "convert-v2", "pause", "resume", "cancel", "retry", "retry-shared", "accept-candidates"]) {
     assert.ok(detailRoute.includes(`\"${action}\"`), `detail route is missing ${action}`);
   }
+  assert.match(detailRoute, /action === "retry-shared"[\s\S]*mainTaskId is required[\s\S]*retryCanvasScheduleV2SharedTask/);
   const page = read("src/app/canvas/page.tsx");
   const css = read("src/app/globals.css");
   for (const snippet of ["CanvasScheduleCenter", "CanvasScheduleV2Editor", "CanvasScheduleParameterEditor", "ScheduleV2RuntimeTree", "节点名称", "人物场景预设", "ScheduleAssetFilterEditor", "多个标签，AND", "条件随机", "条件匹配", "批次内随机去重", "随机抽取", "固定个数", "随机范围", "每个主任务随机抽取", "确认并启动", "接受新增候选图", "onBlur={commitLabel}", "onSchedulerRoleChange", "insertSchedulerSkeleton", "Switch 输入", "画布绑定", "onSaveBindings", "saveQueueRef.current = saveQueueRef.current.then", "current?.id === schedule.id ? current.revision : schedule.revision"]) {
@@ -771,17 +1053,37 @@ try {
   assert.match(page, /function canvasScheduleParameterImages\([\s\S]*"url" in value[\s\S]*seen\.has\(key\)/, "V2 preview must extract and deduplicate frozen image snapshots");
   assert.match(page, /function ScheduleV2PreviewImages\([\s\S]*onPreview\(\{ kind: "image"[\s\S]*sequence \}\)[\s\S]*<Image src=\{image\.url\}/, "V2 preview must render frozen images and open the existing sequence viewer");
   assert.match(page, /<ScheduleV2Preview schedule=\{schedule\} onPreview=\{onPreview\}/, "V2 schedule preview must receive the image preview command");
+  for (const snippet of ["canvasScheduleSharedOutputCandidates", "definition.sharedOutputs || []", "invalidSharedOutputs", "移除失效项", "getCanvasNodeExecutionMode(node) === \"disabled\"", "CanvasScheduleSharedStage", 'onAction("retry-shared", { mainTaskId: main.id })', "main.sharedArtifacts?.map"]) {
+    assert.ok(page.includes(snippet), `Canvas shared-stage UI is missing ${snippet}`);
+  }
   assert.ok(css.includes(".canvas-schedule-panel"));
   assert.ok(css.includes(".canvas-scheduler-bindings"));
   assert.match(css, /\.canvas-schedule-asset-results \{[^}]*max-block-size:[^}]*overflow-y: auto;[^}]*overscroll-behavior: contain;/, "scheduler image results must use a bounded independent scroll viewport");
   assert.ok(css.includes(".canvas-schedule-asset-preview"));
   assert.ok(css.includes(".canvas-schedule-v2-preview-images"));
+  assert.ok(css.includes(".canvas-schedule-shared-outputs"));
+  assert.ok(css.includes(".canvas-schedule-shared-stage"));
   assert.ok(css.includes(".canvas-image-viewer-sequence-button"));
   assert.ok(css.includes("@media (max-width: 520px)"));
   assert.ok(css.includes(".canvas-schedule-body { display: grid; grid-template-columns: 1fr"));
   assert.ok(read("src/lib/canvas/executors.ts").includes("executePromptSwitch"));
   const runs = read("src/lib/canvas/runs.ts");
   assert.ok(runs.includes("prepareCanvasRunFromGraph"));
+  assert.match(
+    runs,
+    /batchContext\?\.schemaVersion === 2[\s\S]*batchContext\.phase === "shared"[\s\S]*run\.status === "completed"[\s\S]*cannot be retried/,
+    "generic Canvas node retry must reject completed shared-stage results",
+  );
+  assert.match(
+    runs,
+    /batchContext\.phase === "shared"[\s\S]*!options\.allowScheduledSharedRetry[\s\S]*must be retried from the batch schedule/,
+    "generic Canvas node retry must not bypass shared-stage schedule reconciliation",
+  );
+  assert.match(
+    schedulerSource,
+    /retryCanvasNode\(run\.run\.id, failedNode\.nodeId, account, \{ allowScheduledSharedRetry: true \}\)/,
+    "the schedule-level shared retry path must explicitly authorize the coordinated run retry",
+  );
   assert.match(
     runs,
     /if \(batchRunTerminal && batchRun\?\.batchContext\) notifyCanvasScheduleRunTerminal\(batchRun\)/,

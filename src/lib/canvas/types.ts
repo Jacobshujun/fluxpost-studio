@@ -173,7 +173,7 @@ export type CanvasRun = {
     scheduleId: string;
     mainTaskId: string;
     childTaskId?: string;
-    phase: "child" | "aggregate";
+    phase: "shared" | "child" | "aggregate";
   };
   confirmation: CanvasRunConfirmation;
   cancelRequestedAt?: string;
@@ -376,6 +376,7 @@ export type CanvasScheduleParameter = {
 export type CanvasScheduleV2Definition = {
   parameters: CanvasScheduleParameter[];
   expansion: Record<CanvasScheduleParameterScope, CanvasScheduleExpansionMode>;
+  sharedOutputs?: CanvasScheduleV2SharedOutput[];
   childResult: {
     nodeId: string;
     outputPort: string;
@@ -386,6 +387,16 @@ export type CanvasScheduleV2Definition = {
 };
 
 export type CanvasScheduleAggregateArtifact = Extract<CanvasArtifact, { kind: "text" | "images" | "videos" }>;
+
+export type CanvasScheduleV2SharedOutput = {
+  nodeId: string;
+  outputPort: string;
+  artifactKind: CanvasScheduleAggregateArtifact["kind"];
+};
+
+export type CanvasScheduleV2SharedArtifact = CanvasScheduleV2SharedOutput & {
+  artifact: CanvasScheduleAggregateArtifact;
+};
 
 export type CanvasScheduleV2ChildTask = {
   id: string;
@@ -403,6 +414,10 @@ export type CanvasScheduleV2MainTask = {
   parameterValues: Record<string, CanvasScheduleParameterValue>;
   childTasks: CanvasScheduleV2ChildTask[];
   status: CanvasScheduleTaskStatus;
+  sharedRunId?: string;
+  sharedStatus?: CanvasScheduleTaskStatus;
+  sharedArtifacts?: CanvasScheduleV2SharedArtifact[];
+  sharedError?: string;
   mainRunId?: string;
   resultArtifacts: CanvasArtifact[];
   generatedPostId?: string;

@@ -59,6 +59,15 @@ assert.equal(packageJson.dependencies["@xyflow/react"], "^12.11.2");
 const canvasTypes = read("src/lib/canvas/types.ts");
 assert.ok(canvasTypes.includes('export type CanvasArtifactKind = "text" | "images" | "videos" | "socialPost" | "publishJobRef";'), "display-any must not add a wildcard artifact kind");
 assert.ok(canvasTypes.includes('export type CanvasPortKind = CanvasArtifactKind | "any";'), "wildcard compatibility must stay isolated to port definitions");
+requireText(canvasTypes, [
+  'phase: "shared" | "child" | "aggregate";',
+  "sharedOutputs?: CanvasScheduleV2SharedOutput[];",
+  "export type CanvasScheduleV2SharedArtifact = CanvasScheduleV2SharedOutput & {",
+  "sharedRunId?: string;",
+  "sharedStatus?: CanvasScheduleTaskStatus;",
+  "sharedArtifacts?: CanvasScheduleV2SharedArtifact[];",
+  "sharedError?: string;",
+], "Canvas shared-stage type contracts");
 const areCanvasPortKindsCompatibleForUi = compileFunction(canvasTypes, "areCanvasPortKindsCompatible");
 
 const temp = mkdtempSync(path.join(tmpdir(), "fluxpost-canvas-check-"));

@@ -65,6 +65,7 @@ import {
   RotateCcw,
   Save,
   Search,
+  Share2,
   Scissors,
   Send,
   Sparkles,
@@ -86,7 +87,7 @@ import {
   parseCanvasClipboardPayload,
   type CanvasClipboardPayload,
 } from "@/lib/canvas/clipboard";
-import { canvasNodeDefinitions, createCanvasNode, getCanvasBatchBindableFields, getCanvasNodeDefinition } from "@/lib/canvas/registry";
+import { canvasNodeDefinitions, createCanvasNode, getCanvasBatchBindableFields, getCanvasNodeDefinition, getCanvasNodeExecutionMode } from "@/lib/canvas/registry";
 import { createCanvasSchedulerSkeleton } from "@/lib/canvas/scheduler-skeleton";
 import {
   areCanvasPortKindsCompatible,
@@ -125,6 +126,7 @@ import type {
   CanvasScheduleParameterValue,
   CanvasScheduleSampleCount,
   CanvasScheduleV2Definition,
+  CanvasScheduleV2SharedOutput,
   CanvasSchedulerRole,
   CanvasWorkflow,
 } from "@/lib/canvas/types";
@@ -2470,6 +2472,12 @@ function CanvasScheduleV2Editor({ schedule, graph, busy, onDefinitionChange, onA
       label: `${canvasNodeDisplayName(node)} · ${port.label} · ${node.id.slice(-4)}`,
     }));
   });
+  const sharedOutputCandidates = canvasScheduleSharedOutputCandidates(graph, definition);
+  const sharedOutputs = definition.sharedOutputs || [];
+  const sharedOutputCandidateKinds = new Map(sharedOutputCandidates.map((candidate) => [`${candidate.node.id}:${candidate.port.id}`, candidate.artifactKind]));
+  const isValidSharedOutput = (output: CanvasScheduleV2SharedOutput) =>
+    sharedOutputCandidateKinds.get(`${output.nodeId}:${output.outputPort}`) === output.artifactKind;
+  const invalidSharedOutputs = sharedOutputs.filter((output) => !isValidSharedOutput(output));
   const mainTargets = graph.nodes.filter((node) => node.type !== "publish.feishu");
   const patchDefinition = (patch: Partial<CanvasScheduleV2Definition>) => onDefinitionChange({ ...definition, ...patch });
   const patchParameter = (parameterId: string, updater: (parameter: CanvasScheduleParameter) => CanvasScheduleParameter) => {
@@ -2516,6 +2524,23 @@ function CanvasScheduleV2Editor({ schedule, graph, busy, onDefinitionChange, onA
         }}><option value="::">未选择</option>{childOutputs.map((output) => <option key={`${output.node.id}-${output.port.id}`} value={`${output.node.id}::${output.port.id}`}>{output.label}</option>)}</select></label>
         <label><span>主任务目标（可选）</span><select value={definition.mainTargetNodeId || ""} onChange={(event) => patchDefinition({ mainTargetNodeId: event.target.value || undefined })}><option value="">仅汇总子任务结果</option>{mainTargets.map((node) => <option key={node.id} value={node.id}>{canvasNodeOptionLabel(node)}</option>)}</select></label>
         <label><span>失败聚合</span><select value={definition.aggregationPolicy} onChange={(event) => patchDefinition({ aggregationPolicy: event.target.value as CanvasScheduleV2Definition["aggregationPolicy"] })}><option value="at-least-one">至少一个成功</option><option value="all">必须全部成功</option></select></label>
+      </div>
+      <div className="canvas-schedule-shared-outputs">
+        <header><span><strong>主任务共享输出</strong><small>{invalidSharedOutputs.length ? `${invalidSharedOutputs.length} 项选择已失效，请移除后预演` : sharedOutputs.length ? `已选择 ${sharedOutputs.length} 项 · 每个主任务执行一次` : "未启用时保持现有子任务执行方式"}</small></span>{invalidSharedOutputs.length ? <button type="button" onClick={() => patchDefinition({ sharedOutputs: sharedOutputs.filter(isValidSharedOutput) })}><Trash2 />移除失效项</button> : <Share2 />}</header>
+        {sharedOutputCandidates.length ? <div role="group" aria-label="主任务共享输出">
+          {sharedOutputCandidates.map((candidate) => {
+            const selected = sharedOutputs.some((output) => output.nodeId === candidate.node.id && output.outputPort === candidate.port.id);
+            return <label key={`${candidate.node.id}-${candidate.port.id}`} className={selected ? "is-selected" : ""}>
+              <input type="checkbox" checked={selected} onChange={(event) => patchDefinition({
+                sharedOutputs: event.target.checked
+                  ? [...sharedOutputs, { nodeId: candidate.node.id, outputPort: candidate.port.id, artifactKind: candidate.artifactKind }]
+                  : sharedOutputs.filter((output) => output.nodeId !== candidate.node.id || output.outputPort !== candidate.port.id),
+              })} />
+              <span><strong>{canvasNodeDisplayName(candidate.node)}</strong><small>{candidate.port.label} · {portKindLabel(candidate.port.kind)} · 每个主任务 1 次</small></span>
+              <CheckCircle2 />
+            </label>;
+          })}
+        </div> : <p>当前画布没有可共享的严格上游单输出节点。</p>}
       </div>
     </section>
     {(["main", "child"] as const).map((scope) => <section className="canvas-schedule-parameter-section" key={scope}>
@@ -2639,7 +2664,8 @@ function ScheduleV2Preview({ schedule, onPreview }: {
   schedule: CanvasSchedule;
   onPreview: (preview: Extract<NonNullable<PreviewState>, { kind: "image" }>) => void;
 }) {
-  return <div className="canvas-schedule-preview canvas-schedule-v2-preview"><header><span>展开预览 · {schedule.totalMainTasks || 0} 主任务 · {schedule.totalChildTasks || 0} 子任务</span></header><div>{(schedule.mainTasks || []).map((main, index) => <article key={main.id}><div className="canvas-schedule-v2-main-task"><ScheduleV2PreviewImages values={main.parameterValues} label={`主任务 ${index + 1}`} onPreview={onPreview} /><span><strong>主任务 {index + 1} · {main.childTasks.length} 子任务</strong><small>{formatCanvasScheduleParameterValues(main.parameterValues)}</small></span></div><div>{main.childTasks.map((child, childIndex) => <span className="canvas-schedule-v2-child-task" key={child.id}><ScheduleV2PreviewImages values={child.parameterValues} label={`子任务 ${childIndex + 1}`} onPreview={onPreview} /><strong>子任务 {childIndex + 1}</strong><small>{formatCanvasScheduleParameterValues(child.parameterValues)}</small></span>)}</div></article>)}</div></div>;
+  const hasSharedOutputs = Boolean(schedule.definition?.sharedOutputs?.length);
+  return <div className="canvas-schedule-preview canvas-schedule-v2-preview"><header><span>展开预览 · {schedule.totalMainTasks || 0} 主任务 · {schedule.totalChildTasks || 0} 子任务</span></header><div>{(schedule.mainTasks || []).map((main, index) => <article key={main.id}><div className="canvas-schedule-v2-main-task"><ScheduleV2PreviewImages values={main.parameterValues} label={`主任务 ${index + 1}`} onPreview={onPreview} /><span><strong>主任务 {index + 1} · {main.childTasks.length} 子任务</strong><small>{formatCanvasScheduleParameterValues(main.parameterValues)}</small></span></div>{hasSharedOutputs ? <CanvasScheduleSharedStage main={main} preview /> : null}<div>{main.childTasks.map((child, childIndex) => <span className="canvas-schedule-v2-child-task" key={child.id}><ScheduleV2PreviewImages values={child.parameterValues} label={`子任务 ${childIndex + 1}`} onPreview={onPreview} /><strong>子任务 {childIndex + 1}</strong><small>{formatCanvasScheduleParameterValues(child.parameterValues)}</small></span>)}</div></article>)}</div></div>;
 }
 
 function ScheduleV2PreviewImages({ values, label, onPreview }: {
@@ -2673,12 +2699,29 @@ function ScheduleV2RuntimeTree({ schedule, busy, onAction }: { schedule: CanvasS
       <span>{completed}/{mainTasks.length} 主任务完成</span>
     </div>
     {mainTasks.map((main, index) => <details key={main.id} open><summary><StatusIcon status={main.status} /><strong>主任务 {index + 1} · {formatCanvasScheduleParameterValues(main.parameterValues)}</strong><span>{main.childTasks.filter((child) => child.status === "completed").length}/{main.childTasks.length}</span><em>{canvasScheduleStatusLabel(main.status)}</em></summary><div className="canvas-schedule-runtime-content">
+      {schedule.definition?.sharedOutputs?.length || main.sharedStatus ? <CanvasScheduleSharedStage main={main} busy={busy} onRetry={() => onAction("retry-shared", { mainTaskId: main.id })} /> : null}
       {main.resultArtifacts.length ? <CanvasScheduleArtifactSummary artifacts={main.resultArtifacts} /> : null}
       {main.pendingCandidateSync ? <button type="button" onClick={() => onAction("accept-candidates", { mainTaskId: main.id })} disabled={busy}>接受新增候选图</button> : null}
       {main.error ? <p>{main.error}</p> : null}
       <ul>{main.childTasks.map((child, childIndex) => <li key={child.id}><StatusIcon status={child.status} /><span>子任务 {childIndex + 1} · {formatCanvasScheduleParameterValues(child.parameterValues)}</span><em>{canvasScheduleStatusLabel(child.status)}</em>{child.error ? <small>{child.error}</small> : null}{child.status === "failed" ? <button type="button" onClick={() => onAction("retry", { mainTaskId: main.id, childTaskId: child.id })} disabled={busy}><RotateCcw />重试</button> : null}</li>)}</ul>
     </div></details>)}
   </div>;
+}
+
+function CanvasScheduleSharedStage({ main, preview = false, busy = false, onRetry }: {
+  main: NonNullable<CanvasSchedule["mainTasks"]>[number];
+  preview?: boolean;
+  busy?: boolean;
+  onRetry?: () => void;
+}) {
+  const status = main.sharedStatus || "pending";
+  const artifacts = main.sharedArtifacts?.map((entry) => entry.artifact) || [];
+  const canRetry = !preview && (status === "failed" || status === "partial") && onRetry;
+  return <section className={`canvas-schedule-shared-stage is-${status}`} aria-label="主任务共享阶段">
+    <header><Share2 /><span><strong>共享阶段</strong><small>{preview ? "每个主任务执行一次" : main.sharedRunId || "等待创建运行"}</small></span><em>{canvasScheduleStatusLabel(status)}</em>{canRetry ? <button type="button" onClick={onRetry} disabled={busy}><RotateCcw />重试共享阶段</button> : null}</header>
+    {artifacts.length ? <CanvasScheduleArtifactSummary artifacts={artifacts} /> : null}
+    {main.sharedError ? <p><AlertTriangle />{main.sharedError}</p> : null}
+  </section>;
 }
 
 function CanvasScheduleArtifactSummary({ artifacts }: { artifacts: CanvasArtifact[] }) {
@@ -3910,6 +3953,67 @@ function schedulerBindingNodeOptions(graph: CanvasGraph, role: CanvasSchedulerRo
       label: `${node.label?.trim() || assetNames[0]?.trim() || `${definition?.label || node.type} ${index + 1}`} · ${definition?.label || node.type} · ${node.id.slice(-4)}`,
     };
   });
+}
+
+function canvasScheduleSharedOutputCandidates(
+  graph: CanvasGraph,
+  definition: CanvasScheduleV2Definition,
+): Array<{ node: CanvasNode; port: CanvasPortDefinition; artifactKind: CanvasScheduleV2Definition["childResult"]["artifactKind"] }> {
+  const childBindingNodeIds = new Set(definition.parameters
+    .filter((parameter) => parameter.scope === "child")
+    .map((parameter) => parameter.binding.nodeId));
+  const candidates: Array<{ node: CanvasNode; port: CanvasPortDefinition; artifactKind: CanvasScheduleV2Definition["childResult"]["artifactKind"] }> = [];
+  for (const node of graph.nodes) {
+    const nodeDefinition = getCanvasNodeDefinition(node.type, node.version);
+    const port = nodeDefinition?.outputs[0];
+    if (!nodeDefinition
+      || nodeDefinition.category === "input"
+      || nodeDefinition.passiveSink
+      || nodeDefinition.capability === "external_write"
+      || getCanvasNodeExecutionMode(node) === "disabled"
+      || nodeDefinition.outputs.length !== 1
+      || !port
+      || !isCanvasScheduleArtifactKind(port.kind)
+      || node.id === definition.childResult.nodeId
+      || !hasCanvasGraphPath(graph, node.id, definition.childResult.nodeId)) continue;
+    const ancestors = collectCanvasGraphAncestors(graph, node.id);
+    if (Array.from(childBindingNodeIds).some((nodeId) => ancestors.has(nodeId))) continue;
+    candidates.push({ node, port, artifactKind: port.kind });
+  }
+  return candidates;
+}
+
+function isCanvasScheduleArtifactKind(kind: CanvasPortKind): kind is "text" | "images" | "videos" {
+  return kind === "text" || kind === "images" || kind === "videos";
+}
+
+function hasCanvasGraphPath(graph: CanvasGraph, sourceId: string, targetId: string) {
+  const outgoing = new Map<string, string[]>();
+  for (const edge of graph.edges) outgoing.set(edge.source, [...(outgoing.get(edge.source) || []), edge.target]);
+  const pending = [sourceId];
+  const visited = new Set<string>();
+  while (pending.length) {
+    const current = pending.pop()!;
+    if (current === targetId) return true;
+    if (visited.has(current)) continue;
+    visited.add(current);
+    pending.push(...(outgoing.get(current) || []));
+  }
+  return false;
+}
+
+function collectCanvasGraphAncestors(graph: CanvasGraph, targetId: string) {
+  const incoming = new Map<string, string[]>();
+  for (const edge of graph.edges) incoming.set(edge.target, [...(incoming.get(edge.target) || []), edge.source]);
+  const pending = [targetId];
+  const result = new Set<string>();
+  while (pending.length) {
+    const current = pending.pop()!;
+    if (result.has(current)) continue;
+    result.add(current);
+    pending.push(...(incoming.get(current) || []));
+  }
+  return result;
 }
 
 function emptyScheduleFilter(): CanvasScheduleAssetFilter {

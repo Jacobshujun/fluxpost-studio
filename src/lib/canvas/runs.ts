@@ -381,9 +381,22 @@ export async function cancelCanvasRun(runId: string, account: WorkspaceAccessAct
   return run;
 }
 
-export async function retryCanvasNode(runId: string, nodeId: string, account: WorkspaceAccessActor) {
+export async function retryCanvasNode(
+  runId: string,
+  nodeId: string,
+  account: WorkspaceAccessActor,
+  options: { allowScheduledSharedRetry?: boolean } = {},
+) {
   const current = await getCanvasRun(runId, account);
   if (!current) throw new Error("Canvas run not found");
+  if (current.run.batchContext?.schemaVersion === 2 && current.run.batchContext.phase === "shared") {
+    if (current.run.status === "completed") {
+      throw new Error("Completed shared Canvas results are frozen and cannot be retried.");
+    }
+    if (!options.allowScheduledSharedRetry) {
+      throw new Error("Shared Canvas failures must be retried from the batch schedule.");
+    }
+  }
   const plan = buildCanvasRunPlan(current.run.graphSnapshot, current.run.targetNodeIds);
   if (!plan.includedNodeIds.includes(nodeId)) throw new Error("Canvas node is not part of this run.");
   const retryNodeIds = Array.from(collectDescendants(current.run.graphSnapshot, [nodeId])).filter((id) => plan.includedNodeIds.includes(id));

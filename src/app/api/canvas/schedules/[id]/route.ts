@@ -13,6 +13,7 @@ import {
   resampleCanvasSchedule,
   retryCanvasScheduleImageTask,
   retryCanvasScheduleV2ChildTask,
+  retryCanvasScheduleV2SharedTask,
   setCanvasSchedulePaused,
   updateCanvasScheduleDraft,
 } from "@/lib/canvas/scheduler";
@@ -21,7 +22,7 @@ import { isWorkspaceSignInError, requireWorkspaceAccount } from "@/lib/workspace
 
 export const runtime = "nodejs";
 type RouteContext = { params: Promise<{ id: string }> };
-type ScheduleAction = "save" | "preflight" | "resample" | "launch" | "duplicate" | "convert-v2" | "pause" | "resume" | "cancel" | "retry" | "accept-candidates";
+type ScheduleAction = "save" | "preflight" | "resample" | "launch" | "duplicate" | "convert-v2" | "pause" | "resume" | "cancel" | "retry" | "retry-shared" | "accept-candidates";
 
 export async function GET(request: Request, context: RouteContext) {
   try {
@@ -95,6 +96,9 @@ export async function PATCH(request: Request, context: RouteContext) {
           imageTaskId: body.imageTaskId,
         });
       }
+    } else if (action === "retry-shared") {
+      if (!body.mainTaskId) return badRequest("mainTaskId is required.");
+      schedule = await retryCanvasScheduleV2SharedTask(scheduleId, account, { mainTaskId: body.mainTaskId });
     } else if (action === "accept-candidates") {
       if (body.mainTaskId) {
         schedule = await acceptCanvasScheduleV2Candidates(scheduleId, account, { mainTaskId: body.mainTaskId });

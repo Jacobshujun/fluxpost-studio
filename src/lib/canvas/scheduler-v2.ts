@@ -1,6 +1,6 @@
 import { randomUUID } from "node:crypto";
 import { buildCanvasRunPlan } from "./graph";
-import { getCanvasBatchBindableFields, getCanvasNodeDefinition } from "./registry";
+import { getCanvasBatchBindableFields, getCanvasNodeDefinition, getCanvasNodeExecutionMode } from "./registry";
 import type {
   CanvasArtifact,
   CanvasGraph,
@@ -14,6 +14,8 @@ import type {
   CanvasScheduleV2ChildTask,
   CanvasScheduleV2Definition,
   CanvasScheduleV2MainTask,
+  CanvasScheduleV2SharedArtifact,
+  CanvasScheduleV2SharedOutput,
 } from "./types";
 
 export type ResolvedCanvasScheduleParameter = CanvasScheduleParameter & {
@@ -59,6 +61,8 @@ export function validateCanvasScheduleV2Definition(graph: CanvasGraph, definitio
     validateCanvasScheduleParameterSource(parameter);
   }
 
+  validateCanvasScheduleV2SharedOutputs(graph, definition);
+
   const childNode = graph.nodes.find((node) => node.id === definition.childResult.nodeId);
   const childOutput = childNode && getCanvasNodeDefinition(childNode.type, childNode.version)?.outputs.find((port) => port.id === definition.childResult.outputPort);
   if (!childNode || !childOutput) throw new Error("The selected child result output no longer exists.");
@@ -76,6 +80,13 @@ export function validateCanvasScheduleV2Definition(graph: CanvasGraph, definitio
 export function validateCanvasScheduleV2ExpandedGraph(graph: CanvasGraph, definition: CanvasScheduleV2Definition) {
   const plan = buildCanvasRunPlan(graph, [definition.childResult.nodeId]);
   if (plan.blockers.length) throw new Error(plan.blockers[0].message || "A child task is blocked.");
+}
+
+export function validateCanvasScheduleV2SharedGraph(graph: CanvasGraph, definition: CanvasScheduleV2Definition) {
+  const targets = (definition.sharedOutputs || []).map((output) => output.nodeId);
+  if (!targets.length) return;
+  const plan = buildCanvasRunPlan(graph, targets);
+  if (plan.blockers.length) throw new Error(plan.blockers[0].message || "The shared stage is blocked.");
 }
 
 export function validateCanvasScheduleV2AggregateGraph(graph: CanvasGraph, definition: CanvasScheduleV2Definition) {
@@ -291,6 +302,39 @@ export function createCanvasScheduleV2AggregateGraph(
   return graph;
 }
 
+export function createCanvasScheduleV2ChildGraph(
+  source: CanvasGraph,
+  sharedArtifacts: CanvasScheduleV2SharedArtifact[],
+) {
+  if (!sharedArtifacts.length) return structuredClone(source);
+  const graph = structuredClone(source);
+  const byNode = new Map(sharedArtifacts.map((entry) => [entry.nodeId, entry]));
+  graph.nodes = graph.nodes.map((node) => {
+    const shared = byNode.get(node.id);
+    return shared ? sharedLiteralNode(node, shared.artifact) : node;
+  });
+  graph.edges = graph.edges
+    .filter((edge) => !byNode.has(edge.target))
+    .map((edge) => {
+      const shared = byNode.get(edge.source);
+      return shared ? { ...edge, sourcePort: shared.artifactKind } : edge;
+    });
+  return graph;
+}
+
+export function extractCanvasScheduleV2SharedArtifacts(
+  outputsByNode: Record<string, Record<string, CanvasArtifact> | undefined>,
+  sharedOutputs: CanvasScheduleV2SharedOutput[],
+) {
+  return sharedOutputs.map((output): CanvasScheduleV2SharedArtifact => {
+    const artifact = outputsByNode[output.nodeId]?.[output.outputPort];
+    if (!artifact || artifact.kind !== output.artifactKind) {
+      throw new Error(`Shared output ${output.nodeId}:${output.outputPort} did not produce ${output.artifactKind}.`);
+    }
+    return { ...output, artifact: structuredClone(artifact) as CanvasScheduleAggregateArtifact };
+  });
+}
+
 export function extractCanvasScheduleV2Artifacts(
   artifacts: Record<string, CanvasArtifact> | undefined,
   outputPort: string,
@@ -312,6 +356,44 @@ function validateCanvasScheduleParameterSource(parameter: CanvasScheduleParamete
   if (parameter.expansion === "random" && source.mode === "fixed") throw new Error(`${parameter.name}: random expansion requires multiple candidate values.`);
   if (source.mode === "copy-filter" && parameter.valueType !== "copy") throw new Error(`${parameter.name}: copy filters require a copy parameter.`);
   if (source.mode === "library-filter" && !['image', 'image-group'].includes(parameter.valueType)) throw new Error(`${parameter.name}: library filters require an image parameter.`);
+}
+
+function validateCanvasScheduleV2SharedOutputs(graph: CanvasGraph, definition: CanvasScheduleV2Definition) {
+  const sharedOutputs = definition.sharedOutputs || [];
+  if (!Array.isArray(sharedOutputs)) throw new Error("Shared outputs must be a list.");
+  const selected = new Set<string>();
+  const childBindings = new Set(definition.parameters
+    .filter((parameter) => parameter.scope === "child")
+    .map((parameter) => parameter.binding.nodeId));
+  for (const output of sharedOutputs) {
+    const nodeId = String(output?.nodeId || "").trim();
+    const outputPort = String(output?.outputPort || "").trim();
+    if (!nodeId || !outputPort || !["text", "images", "videos"].includes(output?.artifactKind)) {
+      throw new Error("Each shared output must select a node, output port, and supported artifact type.");
+    }
+    const key = `${nodeId}:${outputPort}`;
+    if (selected.has(key)) throw new Error("Shared outputs cannot contain duplicate node ports.");
+    selected.add(key);
+    const node = graph.nodes.find((candidate) => candidate.id === nodeId);
+    const registry = node && getCanvasNodeDefinition(node.type, node.version);
+    if (!node || !registry) throw new Error(`Shared output node ${nodeId} was not found.`);
+    if (registry.category === "input") throw new Error("Input nodes cannot be shared outputs.");
+    if (registry.passiveSink) throw new Error("Passive display nodes cannot be shared outputs.");
+    if (registry.capability === "external_write") throw new Error("External-write nodes cannot be shared outputs.");
+    if (getCanvasNodeExecutionMode(node) === "disabled") throw new Error("Disabled nodes cannot be shared outputs.");
+    if (registry.outputs.length !== 1) throw new Error("Shared output nodes must have exactly one output.");
+    const registryOutput = registry.outputs[0];
+    if (!["text", "images", "videos"].includes(registryOutput.kind)) throw new Error("Shared outputs must produce text, images, or videos.");
+    if (registryOutput.id !== outputPort || registryOutput.kind !== output.artifactKind) {
+      throw new Error(`Shared output ${nodeId}:${outputPort} no longer matches the node registry.`);
+    }
+    if (nodeId === definition.childResult.nodeId || !hasCanvasGraphPath(graph, nodeId, definition.childResult.nodeId)) {
+      throw new Error("Shared output nodes must be strictly upstream of the child result node.");
+    }
+    const ancestors = collectCanvasGraphAncestors(graph, nodeId);
+    const childDependency = Array.from(childBindings).find((bindingNodeId) => ancestors.has(bindingNodeId));
+    if (childDependency) throw new Error("Shared output dependencies cannot include child-scoped parameter bindings.");
+  }
 }
 
 function stableCanvasParameterValue(value: CanvasScheduleParameterValue) {
@@ -386,6 +468,16 @@ function aggregateLiteralNode(
     return { ...node, type: "input.images", version: 1, config: { urls: uniqueStrings(artifacts.flatMap((artifact) => artifact.kind === "images" ? artifact.items.map((item) => item.url) : [])) }, executionMode: "enabled", schedulerRole: undefined };
   }
   return { ...node, type: "input.videos", version: 1, config: { urls: uniqueStrings(artifacts.flatMap((artifact) => artifact.kind === "videos" ? artifact.items.map((item) => item.url) : [])) }, executionMode: "enabled", schedulerRole: undefined };
+}
+
+function sharedLiteralNode(node: CanvasNode, artifact: CanvasScheduleAggregateArtifact): CanvasNode {
+  if (artifact.kind === "text") {
+    return { ...node, type: "input.text", version: 1, config: { text: artifact.value }, executionMode: "enabled", schedulerRole: undefined };
+  }
+  if (artifact.kind === "images") {
+    return { ...node, type: "input.images", version: 1, config: { urls: artifact.items.map((item) => item.url) }, executionMode: "enabled", schedulerRole: undefined };
+  }
+  return { ...node, type: "input.videos", version: 1, config: { urls: artifact.items.map((item) => item.url) }, executionMode: "enabled", schedulerRole: undefined };
 }
 
 function hasCanvasGraphPath(graph: CanvasGraph, sourceId: string, targetId: string) {
