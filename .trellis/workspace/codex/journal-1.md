@@ -745,3 +745,37 @@ Pushed and isolated-verified exact SHA e6692c3d0cce807106e343c43a9804be2686ec3d,
 ### Next Steps
 
 - None - task complete
+
+
+## Session 23: Deploy Canvas workflow portability
+
+**Date**: 2026-08-05
+**Task**: Deploy Canvas workflow portability
+**Branch**: `release/canvas-workflow-portability-20260805`
+
+### Summary
+
+Implemented and verified cross-board Canvas clipboard plus versioned workflow import/export, deployed exact SHA a887c158410124d969f608f7a0146e4345cc050a to production 38 as 20260805-103357-a887c1584101, passed post-deploy identity/health/auth/worker/queue/volume/log/rollback checks without external writes, and archived the task.
+
+### Main Changes
+
+(Add details)
+
+### Git Commits
+
+| Hash | Message |
+|------|---------|
+| `a887c158410124d969f608f7a0146e4345cc050a` | (see git log) |
+| `3ad988adea8851be59142fdbaff4bc36eefb1395` | (see git log) |
+
+### Testing
+
+- [OK] (Add test results)
+
+### Status
+
+[OK] **Completed**
+
+### Next Steps
+
+- None - task complete

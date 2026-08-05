@@ -8,8 +8,8 @@
 
 <!-- @@@auto:current-status -->
 - **Active File**: `journal-1.md`
-- **Total Sessions**: 22
-- **Last Active**: 2026-08-04
+- **Total Sessions**: 23
+- **Last Active**: 2026-08-05
 <!-- @@@/auto:current-status -->
 
 ---
@@ -19,7 +19,7 @@
 <!-- @@@auto:active-documents -->
 | File | Lines | Status |
 |------|-------|--------|
-| `journal-1.md` | ~747 | Active |
+| `journal-1.md` | ~781 | Active |
 <!-- @@@/auto:active-documents -->
 
 ---
@@ -29,6 +29,7 @@
 <!-- @@@auto:session-history -->
 | # | Date | Title | Commits | Branch |
 |---|------|-------|---------|--------|
+| 23 | 2026-08-05 | Deploy Canvas workflow portability | `a887c158410124d969f608f7a0146e4345cc050a`, `3ad988adea8851be59142fdbaff4bc36eefb1395` | `release/canvas-workflow-portability-20260805` |
 | 22 | 2026-08-04 | Deploy configurable content safety policy | `e6692c3`, `91db201` | `release/production-20260803` |
 | 21 | 2026-08-04 | Configurable content safety policy | `91c6b04`, `268c46d` | `release/production-20260803` |
 | 20 | 2026-08-04 | Deploy durable Feishu bulk publishing | `39f99e2415fa93c08e8727bea30841e88d28a2a6`, `4107864` | `release/production-20260803` |
