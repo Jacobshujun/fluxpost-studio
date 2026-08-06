@@ -162,11 +162,11 @@
         "A fresh Ubuntu 24.04 VPS can bootstrap from GitHub with generated root-only base secrets",
         "Pre-domain deployment starts only app and PostgreSQL on a loopback port for SSH-tunnel access",
         "A validated DNS hostname can enable Caddy HTTPS through one command",
-        "Routine updates preserve PostgreSQL, advanced configuration, runtime data, media, and Caddy named volumes",
-        "Default verification covers Compose parsing, Bash syntax, destructive-command absence, and private/HTTPS/legacy deployment plans without live infrastructure changes"
+        "Routine updates preserve every named volume and retain current plus two rescue images",
+        "Offline checks cover Compose/Bash, exact-ref rollback, full-id retention, dry-run/failure ordering, timers, and destructive guards"
       ],
       "evidence": [
-        "2026-07-15 through 2026-07-16 deployment contracts, private bootstrap, loopback access, isolated Nginx HTTPS, and preservation of existing services passed repository and live-host checks.",
+        "2026-08-06 v4 production cleanup kept current plus two rescues, removed unused history, reclaimed about 17 GB, preserved five healthy containers/seven volumes, and enabled weekly prune.",
         "2026-08-03 exact SHA a65767384c1b1993c95c8c32d053edcd10c3fac6 passed local/isolated verification and deployed to production 38; identity, health, HTTPS, protected service, schema, six volumes, zero active queues, rollback, and root-only backup checks passed.",
         "Detailed evidence is indexed in .trellis/spec/fluxpost/verification.md and its archive."
       ],

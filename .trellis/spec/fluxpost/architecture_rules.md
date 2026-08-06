@@ -273,7 +273,7 @@ return NextResponse.json({ status: getConfigStatus(), advanced: getAdvancedConfi
 - Bootstrap must not change SSH daemon settings, host firewall rules, cloud security groups, or DNS. Those are operator/provider boundaries.
 - Do not add a new deployment path, process manager, service file, or server target without updating `project_brief.md`, `decisions.md`, `verification.md`, and `handoff.md`.
 - Local Windows plus `38.76.210.136` is the supported fix path. After local verification and operator approval, deploy an exact full SHA directly to 38 with the installed wrapper; 82 and 104 are retired FluxPost targets and must not be reintroduced as promotion gates.
-- Production candidates must preserve bootstrap/deploy wrapper v3, verifier v1, the shared `.operation.lock`, and the Docker `verification` target. The verifier and deploy wrapper may preserve newer installed domain/verifier versions, but candidate source and deterministic checks must never normalize a v3 production wrapper back to v2.
+- Production candidates must preserve bootstrap v3, retention-aware deploy wrapper v4, verifier v1, the shared `.operation.lock`, and the Docker `verification` target. The verifier and deploy wrapper may preserve newer installed wrapper versions, but candidate source and deterministic checks must never downgrade the installed production wrapper.
 
 ## Scenario: Direct Fixed-SHA Deployment To 38
 
@@ -286,6 +286,8 @@ return NextResponse.json({ status: getConfigStatus(), advanced: getAdvancedConfi
 - Isolated candidate verification: `/opt/fluxpost-studio/bin/verify-candidate.sh --ref <full-sha>`.
 - Deploy: `/opt/fluxpost-studio/bin/deploy.sh --ref <approved-full-sha>`.
 - Rollback: `/opt/fluxpost-studio/bin/deploy.sh --rollback <release-id>`.
+- Image-retention preview/apply: `/opt/fluxpost-studio/bin/deploy.sh --cleanup-images --check` then `/opt/fluxpost-studio/bin/deploy.sh --cleanup-images`.
+- Weekly cache service: `/usr/bin/docker builder prune -af --filter until=168h` through `fluxpost-builder-prune.timer`.
 - Fresh-host bootstrap remains `vps-bootstrap.sh --admin-user <user> --ref <sha>` and is not the routine 38 update path.
 
 ### 3. Contracts
@@ -293,6 +295,9 @@ return NextResponse.json({ status: getConfigStatus(), advanced: getAdvancedConfi
 - The requested ref resolves to a 40-hex commit; `release.manifest` records `commit=<sha>` and `image=fluxpost-app:<sha>`.
 - Local deterministic verification and isolated VPS candidate verification precede explicit operator approval and remote deploy; no 104 staging approval or branch is required.
 - Candidate verification builds `Dockerfile` target `verification` from a clean Git archive, writes a commit-bound success manifest only after the offline baseline passes, and must not read `env.production`, mount runtime volumes, or activate services.
+- Successful normal deploy switches `current`, then removes unused `fluxpost-verification:*`, unreferenced historical `fluxpost-app:<40-hex-sha>`, and `rescue-*` tags older than the newest two. Rescue retention must include legacy non-timestamp tags and rank tags by Docker `CreatedAt`; `latest`, all container-referenced image ids, unknown tags, volumes, and unrelated Docker objects remain untouched. Docker image ids must be listed with `--no-trunc` before comparison with `docker inspect ... {{.Image}}`.
+- Build or health failure runs no image cleanup or timer installation. Post-activation maintenance failure returns nonzero while leaving the healthy release active. Missing immutable rollback tags are rebuilt from retained release directories by the existing rollback path.
+- The root-owned persistent weekly timer prunes only unused BuildKit cache older than 168 hours. Successful deploys and applied standalone cleanups install it; cleanup preview remains non-mutating. It never performs a global image/system/volume prune and does not run immediately during deploy.
 - 38 preserves all named volumes, keeps app port 3101 loopback-only, and uses host Nginx for `https://flux.lightmoment.net`; FluxPost Caddy remains disabled there.
 - Older app commits must not replace newer installed deploy wrappers. Production secrets, runtime data, media, and volumes are never copied to another host.
 
@@ -302,18 +307,21 @@ return NextResponse.json({ status: getConfigStatus(), advanced: getAdvancedConfi
 - Local baseline failure or missing operator approval -> do not start the remote deploy.
 - Missing Docker `verification` target, verifier build failure, or verifier/deploy lock contention -> do not write a passing verification manifest and do not deploy.
 - Failed 38 app/PostgreSQL/public health -> restore the prior manifest/image and keep all volumes.
+- Docker image/container inventory failure -> refuse cleanup before any removal.
+- Referenced old verification/app/rescue image -> report `skip_referenced` and retain it as a temporary safety exception.
+- Image removal or systemd timer installation failure after health success -> keep the new release active, report partial maintenance failure, and exit nonzero.
 - Full bootstrap on 38's existing Ubuntu 22.04 host -> reject; use the installed deploy wrapper.
 
 ### 5. Good/Base/Bad Cases
 
-- Good: verify the clean full SHA in the isolated Docker target, then deploy that approved SHA directly to 38; manifest/image, app/PostgreSQL, loopback/public HTTPS, Nginx, and Open WebUI checks pass.
-- Base: read-only diagnosis changes no release; an approved deploy preserves volumes and retains automatic rollback.
-- Bad: require a 104 staging pass, accept wrapper v2 as a production candidate, remove the Docker verification target while keeping the verifier, deploy mutable `main`, copy production state, global-prune Docker, or change host swap/firewall/Docker service.
+- Good: verify the clean full SHA, deploy it to 38, then retain current plus two rescue images while unused verification/history tags are removed and the weekly cache timer is active.
+- Base: `deploy.sh --cleanup-images --check` reports exact keep/skip/remove choices without Docker or systemd mutation; an applied standalone cleanup also installs the weekly timer, while an approved deploy preserves volumes and automatic rollback.
+- Bad: accept a pre-v4 deploy wrapper, compare truncated `docker image ls` ids with full inspect ids, force image removal, global-prune Docker, delete storage files directly, or clean after a failed health check.
 
 ### 6. Tests Required
 
-- Automated: wrapper/bootstrap v3, verifier v1, lock, clean-archive verification, Docker target, ref/manifest/tag/rollback/domain-wrapper/memory/shell/destructive guards in `vps_deployment_check.mjs` plus the full Trellis baseline.
-- Live: release/manifest/image SHA equality, app/PostgreSQL health, loopback 3101, `https://flux.lightmoment.net` HTTP 200, Nginx validity, and unchanged healthy Open WebUI.
+- Automated: deploy wrapper v4/bootstrap v3/verifier v1, lock, clean-archive verification, full-id cleanup selection, dry-run immutability, referenced-image protection, success/failure ordering, timer units, ref/manifest/rollback/domain/memory/shell/destructive guards in `vps_deployment_check.mjs`, plus the full Trellis baseline.
+- Live: preview selections before apply; release/manifest/image SHA equality; app/PostgreSQL health; loopback 3101; `https://flux.lightmoment.net` HTTP 200; Nginx/Open WebUI; unchanged named volumes; current plus two rescue images; no unused verification tags; and an active weekly timer.
 
 ### 7. Wrong vs Correct
 
@@ -322,6 +330,7 @@ return NextResponse.json({ status: getConfigStatus(), advanced: getAdvancedConfi
 ```bash
 ssh root@104.243.21.233 /opt/fluxpost-studio/bin/deploy.sh
 ssh root@38.76.210.136 /opt/fluxpost-studio/bin/deploy.sh
+docker system prune -af --volumes
 ```
 
 #### Correct
@@ -329,6 +338,7 @@ ssh root@38.76.210.136 /opt/fluxpost-studio/bin/deploy.sh
 ```bash
 ssh root@38.76.210.136 "/opt/fluxpost-studio/bin/verify-candidate.sh --ref $APPROVED_FULL_SHA"
 ssh root@38.76.210.136 "/opt/fluxpost-studio/bin/deploy.sh --ref $APPROVED_FULL_SHA"
+ssh root@38.76.210.136 "/opt/fluxpost-studio/bin/deploy.sh --cleanup-images --check"
 ```
 
 ## Scenario: Local And Docker Next Build Output

@@ -98,6 +98,42 @@ The verifier builds the clean commit's isolated `verification` target without re
 
 Do not promote by copying `current`, `env.production`, Docker volumes, or runtime media between servers. The release contains a symlink to the server-local environment file, and each server must retain its own secrets and runtime state.
 
+### Docker Disk Retention
+
+Deploy wrapper version 4 applies FluxPost image retention only after the new release passes all health checks and `current` points to it. It removes unused `fluxpost-verification:*` tags and unreferenced historical `fluxpost-app:<40-hex-commit>` tags, keeps `fluxpost-app:latest` plus the two newest `fluxpost-app:rescue-*` tags, and removes older unreferenced rescue tags. Images referenced by any running or stopped container are skipped. Unrecognized app tags, unrelated images, containers, networks, and named volumes are not cleanup targets. A later manifest-aware rollback rebuilds its app image from the retained release directory when its immutable tag was cleaned.
+
+A build or health-check failure exits before retention runs, preserving its Docker evidence and BuildKit cache for diagnosis. If post-activation cleanup fails, the healthy release remains active but the deploy command returns an explicit maintenance error instead of rolling it back.
+
+Preview the same policy without removing images:
+
+```bash
+sudo /opt/fluxpost-studio/bin/deploy.sh --cleanup-images --check
+```
+
+Apply it immediately:
+
+```bash
+sudo /opt/fluxpost-studio/bin/deploy.sh --cleanup-images
+```
+
+Both operations use the deployment/verification lock. Cleanup delegates layer and overlay snapshot reclamation to `docker image rm`; never delete files below Docker or containerd storage directories directly.
+
+Successful deployments and an applied standalone image cleanup both install and enable `fluxpost-builder-prune.timer`. It runs weekly and removes only unused BuildKit cache older than seven days. A cleanup preview does not alter the schedule. Inspect the schedule and recent result with:
+
+```bash
+sudo systemctl list-timers fluxpost-builder-prune.timer
+sudo systemctl status fluxpost-builder-prune.service
+```
+
+To run the same cache policy immediately after reviewing current Docker usage:
+
+```bash
+sudo docker system df
+sudo docker builder prune -af --filter until=168h
+```
+
+Build cache cleanup does not affect running containers or named volumes; it can make the next image build slower. Do not replace these scoped commands with `docker system prune`, `docker image prune`, or `docker volume prune` on a shared host.
+
 ### Rebuild An Existing Host As Private Staging
 
 Before removing an old FluxPost deployment from a host that runs other services:

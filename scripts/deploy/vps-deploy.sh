@@ -1,12 +1,13 @@
 #!/usr/bin/env bash
 set -euo pipefail
 
-DEPLOY_SCRIPT_VERSION="3"
+DEPLOY_SCRIPT_VERSION="4"
 APP_ROOT="${APP_ROOT:-/opt/fluxpost-studio}"
 REPO_URL="${REPO_URL:-https://github.com/Jacobshujun/fluxpost-studio.git}"
 BRANCH="${BRANCH:-main}"
 PROJECT_NAME="${COMPOSE_PROJECT_NAME:-fluxpost}"
 KEEP_RELEASES="${KEEP_RELEASES:-3}"
+KEEP_RESCUE_IMAGES=2
 
 REPO_DIR="$APP_ROOT/repo"
 RELEASES_DIR="$APP_ROOT/releases"
@@ -17,6 +18,8 @@ TIMESTAMP="$(date +%Y%m%d-%H%M%S)"
 REQUESTED_REF="${DEPLOY_REF:-$BRANCH}"
 CHECK_ONLY="false"
 ROLLBACK_RELEASE=""
+CLEANUP_IMAGES_ONLY="false"
+CONTAINER_IMAGE_IDS=""
 
 log() {
   printf '[deploy] %s\n' "$*"
@@ -28,7 +31,7 @@ fail() {
 }
 
 usage() {
-  printf 'usage: %s [--check] [--ref <branch|tag|commit>] [--rollback <release-id>]\n' "$0"
+  printf 'usage: %s [--check] [--ref <branch|tag|commit>] [--rollback <release-id>] [--cleanup-images]\n' "$0"
 }
 
 require_cmd() {
@@ -89,11 +92,162 @@ is_valid_image_tag() {
   [[ "$1" =~ ^[a-z0-9][a-z0-9._/-]*:[A-Za-z0-9_.-]+$ ]]
 }
 
+acquire_operation_lock() {
+  mkdir -p "$APP_ROOT"
+  exec 9>"$APP_ROOT/.operation.lock"
+  flock -n 9 || fail "another FluxPost deployment or verification operation is active"
+}
+
+container_image_ids() {
+  local container_ids
+  if ! container_ids="$(docker ps -aq)"; then
+    return 1
+  fi
+  [ -n "$container_ids" ] || return 0
+  docker inspect --format '{{.Image}}' $container_ids
+}
+
+image_is_referenced() {
+  local image_id="$1"
+  local referenced_image_id
+  while IFS= read -r referenced_image_id; do
+    [ "$referenced_image_id" = "$image_id" ] && return 0
+  done <<< "$CONTAINER_IMAGE_IDS"
+  return 1
+}
+
+remove_image_tag() {
+  local image_ref="$1"
+  local image_id="$2"
+  local check_only="$3"
+
+  if image_is_referenced "$image_id"; then
+    printf 'skip_referenced=%s\n' "$image_ref"
+    return 0
+  fi
+  if [ "$check_only" = "true" ]; then
+    printf 'would_remove=%s\n' "$image_ref"
+    return 0
+  fi
+  if docker image rm "$image_ref" >/dev/null; then
+    printf 'removed=%s\n' "$image_ref"
+    return 0
+  fi
+  printf '[deploy] failed to remove image tag %s\n' "$image_ref" >&2
+  return 1
+}
+
+cleanup_fluxpost_images() {
+  local check_only="$1"
+  local created_at image_ref image_id verification_rows app_rows
+  local kept_rescue_count=0
+  local cleanup_failed="false"
+  local verification_repository="${PROJECT_NAME}-verification"
+  local app_repository="${PROJECT_NAME}-app"
+  local verification_pattern="^${verification_repository}:[A-Za-z0-9_.-]+$"
+  local rescue_pattern="^${app_repository}:rescue-[A-Za-z0-9_.-]+$"
+  local immutable_pattern="^${app_repository}:[0-9a-f]{40}$"
+
+  if ! CONTAINER_IMAGE_IDS="$(container_image_ids)"; then
+    log "could not inspect container image references; refusing image cleanup"
+    return 1
+  fi
+  if ! verification_rows="$(docker image ls --no-trunc --format '{{.Repository}}:{{.Tag}} {{.ID}}' "$verification_repository")"; then
+    log "could not list $verification_repository images; refusing image cleanup"
+    return 1
+  fi
+  if ! app_rows="$(docker image ls --no-trunc --format '{{.CreatedAt}}\t{{.Repository}}:{{.Tag}}\t{{.ID}}' "$app_repository" | sort -r)"; then
+    log "could not list $app_repository images; refusing image cleanup"
+    return 1
+  fi
+  log "$([ "$check_only" = "true" ] && printf 'previewing' || printf 'applying') Docker image retention"
+
+  while read -r image_ref image_id; do
+    [ -n "$image_ref" ] || continue
+    if [[ "$image_ref" =~ $verification_pattern ]] && ! remove_image_tag "$image_ref" "$image_id" "$check_only"; then
+      cleanup_failed="true"
+    fi
+  done <<< "$verification_rows"
+
+  while IFS=$'\t' read -r created_at image_ref image_id; do
+    [ -n "$image_ref" ] || continue
+    if [[ "$image_ref" =~ $rescue_pattern ]]; then
+      if [ "$kept_rescue_count" -lt "$KEEP_RESCUE_IMAGES" ]; then
+        printf 'keep=%s\n' "$image_ref"
+        kept_rescue_count=$((kept_rescue_count + 1))
+      elif ! remove_image_tag "$image_ref" "$image_id" "$check_only"; then
+        cleanup_failed="true"
+      fi
+    elif [ "$image_ref" = "${app_repository}:latest" ]; then
+      printf 'keep=%s\n' "$image_ref"
+    elif [[ "$image_ref" =~ $immutable_pattern ]] && ! remove_image_tag "$image_ref" "$image_id" "$check_only"; then
+      cleanup_failed="true"
+    fi
+  done <<< "$app_rows"
+
+  [ "$cleanup_failed" = "false" ]
+}
+
+install_builder_prune_timer() {
+  local service_temp timer_temp
+  if ! service_temp="$(mktemp "$APP_ROOT/.builder-prune.service.XXXXXX")"; then
+    return 1
+  fi
+  if ! timer_temp="$(mktemp "$APP_ROOT/.builder-prune.timer.XXXXXX")"; then
+    rm -f -- "$service_temp"
+    return 1
+  fi
+
+  if ! cat > "$service_temp" <<'EOF'
+[Unit]
+Description=Prune unused Docker BuildKit cache older than seven days
+After=docker.service
+Requires=docker.service
+
+[Service]
+Type=oneshot
+ExecStart=/usr/bin/docker builder prune -af --filter until=168h
+EOF
+  then
+    rm -f -- "$service_temp" "$timer_temp"
+    return 1
+  fi
+  if ! cat > "$timer_temp" <<'EOF'
+[Unit]
+Description=Weekly FluxPost Docker BuildKit cache cleanup
+
+[Timer]
+OnCalendar=weekly
+Persistent=true
+Unit=fluxpost-builder-prune.service
+
+[Install]
+WantedBy=timers.target
+EOF
+  then
+    rm -f -- "$service_temp" "$timer_temp"
+    return 1
+  fi
+
+  if ! install -m 0644 "$service_temp" /etc/systemd/system/fluxpost-builder-prune.service ||
+    ! install -m 0644 "$timer_temp" /etc/systemd/system/fluxpost-builder-prune.timer ||
+    ! systemctl daemon-reload ||
+    ! systemctl enable --now fluxpost-builder-prune.timer; then
+    rm -f -- "$service_temp" "$timer_temp"
+    return 1
+  fi
+  if ! rm -f -- "$service_temp" "$timer_temp"; then
+    return 1
+  fi
+  log "enabled weekly BuildKit cache cleanup for unused cache older than seven days"
+}
+
 while [ "$#" -gt 0 ]; do
   case "$1" in
     --check) CHECK_ONLY="true"; shift ;;
     --ref) [ "$#" -ge 2 ] || fail "--ref requires a value"; REQUESTED_REF="$2"; shift 2 ;;
     --rollback) [ "$#" -ge 2 ] || fail "--rollback requires a release id"; ROLLBACK_RELEASE="$2"; shift 2 ;;
+    --cleanup-images) CLEANUP_IMAGES_ONLY="true"; shift ;;
     --help) usage; exit 0 ;;
     *) usage >&2; fail "unknown option: $1" ;;
   esac
@@ -103,6 +257,9 @@ is_valid_requested_ref "$REQUESTED_REF" || fail "invalid deployment ref: $REQUES
 if [ -n "$ROLLBACK_RELEASE" ] && ! is_valid_release_id "$ROLLBACK_RELEASE"; then
   fail "invalid release id: $ROLLBACK_RELEASE"
 fi
+if [ -n "$ROLLBACK_RELEASE" ] && [ "$CLEANUP_IMAGES_ONLY" = "true" ]; then
+  fail "--rollback and --cleanup-images cannot be combined"
+fi
 [[ "$PROJECT_NAME" =~ ^[a-z0-9][a-z0-9_-]*$ ]] || fail "COMPOSE_PROJECT_NAME contains unsupported characters"
 [[ "$KEEP_RELEASES" =~ ^[1-9][0-9]*$ ]] || fail "KEEP_RELEASES must be a positive integer"
 
@@ -111,6 +268,23 @@ case "$APP_ROOT" in
   /*) ;;
   *) fail "APP_ROOT must be an absolute path" ;;
 esac
+
+if [ "$CLEANUP_IMAGES_ONLY" = "true" ]; then
+  require_cmd docker
+  require_cmd flock
+  require_cmd sort
+  if [ "$CHECK_ONLY" = "false" ]; then
+    require_cmd install
+    require_cmd mktemp
+    require_cmd systemctl
+  fi
+  acquire_operation_lock
+  cleanup_fluxpost_images "$CHECK_ONLY"
+  if [ "$CHECK_ONLY" = "false" ] && ! install_builder_prune_timer; then
+    fail "Docker image cleanup completed, but weekly BuildKit cleanup installation failed"
+  fi
+  exit 0
+fi
 
 require_cmd awk
 
@@ -159,11 +333,12 @@ require_cmd git
 require_cmd docker
 require_cmd curl
 require_cmd flock
+require_cmd sort
+require_cmd systemctl
 require_cmd tar
 
 mkdir -p "$APP_ROOT" "$RELEASES_DIR" "$SHARED_DIR" "$BIN_DIR"
-exec 9>"$APP_ROOT/.operation.lock"
-flock -n 9 || fail "another FluxPost deployment or verification operation is active"
+acquire_operation_lock
 
 COMPOSE_APP_IMAGE="${PROJECT_NAME}-app:latest"
 
@@ -350,6 +525,16 @@ fi
 
 ln -sfn "$RELEASE_DIR" "$APP_ROOT/current"
 
+MAINTENANCE_FAILED="false"
+if ! cleanup_fluxpost_images "false"; then
+  log "Docker image retention failed after the new release became active"
+  MAINTENANCE_FAILED="true"
+fi
+if ! install_builder_prune_timer; then
+  log "weekly BuildKit cleanup installation failed after the new release became active"
+  MAINTENANCE_FAILED="true"
+fi
+
 candidate_version="$(awk -F'"' '/^DEPLOY_SCRIPT_VERSION="[0-9]+"$/ { print $2; exit }' "$REPO_DIR/scripts/deploy/vps-deploy.sh")"
 if [[ "$candidate_version" =~ ^[0-9]+$ ]] && [ "$candidate_version" -ge "$DEPLOY_SCRIPT_VERSION" ]; then
   install -m 0755 "$REPO_DIR/scripts/deploy/vps-deploy.sh" "$BIN_DIR/deploy.sh"
@@ -390,6 +575,10 @@ find "$RELEASES_DIR" -mindepth 1 -maxdepth 1 -type d -printf '%f\n' \
       [ -n "$old_release" ] || continue
       rm -rf "$RELEASES_DIR/$old_release"
     done
+
+if [ "$MAINTENANCE_FAILED" = "true" ]; then
+  fail "release $COMMIT is active at $RELEASE_DIR, but post-deployment Docker maintenance failed"
+fi
 
 log "deployed $COMMIT to $RELEASE_DIR"
 if [ "$PROXY_ENABLED" = "false" ]; then

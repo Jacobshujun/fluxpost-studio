@@ -55,7 +55,7 @@ for (const volume of [
 assertContains(files.deploy, /PROXY_ENABLED="\$\(normalize_bool "\$\{PROXY_VALUE:-true\}"\)"/, "Existing installations must default HTTPS proxy mode on.");
 assertContains(files.deploy, /PUBLIC_HOST="\$\{PUBLIC_HOST:-bbs\.vollov1\.xyz\}"/, "Existing installations must retain the current public host default.");
 assertContains(files.deploy, /APP_PORT="\$\{APP_PORT:-3101\}"/, "Existing installations must retain app port 3101.");
-assertContains(files.deploy, /DEPLOY_SCRIPT_VERSION="3"/, "Deploy must preserve the production wrapper v3 contract.");
+assertContains(files.deploy, /DEPLOY_SCRIPT_VERSION="4"/, "Deploy must expose the retention-aware production wrapper v4 contract.");
 assertContains(files.deploy, /--ref\)\s*\[ "\$#" -ge 2 \][\s\S]*REQUESTED_REF="\$2"/, "Deploy must accept an explicit Git ref.");
 assertContains(files.deploy, /git -C "\$REPO_DIR" rev-parse --verify "FETCH_HEAD\^\{commit\}"/, "Deploy must resolve the fetched ref to a full commit.");
 assertContains(files.deploy, /git -C "\$REPO_DIR" archive "\$COMMIT"/, "Release archives must use the resolved commit, not a moving branch.");
@@ -74,6 +74,20 @@ assertContains(files.deploy, /install -m 0755 .*vps-deploy\.sh.*"\$BIN_DIR\/depl
 assertContains(files.deploy, /installed_domain_version[\s\S]*candidate_domain_version[\s\S]*keeping domain wrapper version/, "Deploy must preserve a newer domain wrapper when deploying an older target commit.");
 assertContains(files.deploy, /install -m 0755 .*vps-verify-candidate\.sh.*"\$BIN_DIR\/verify-candidate\.sh"/, "Deploy must install the versioned candidate verifier.");
 assertContains(files.deploy, /flock -n 9 \|\| fail "another FluxPost deployment or verification operation is active"/, "Deploy and verification must share an exclusive operation lock.");
+assertContains(files.deploy, /--cleanup-images\)\s*CLEANUP_IMAGES_ONLY="true"/, "Deploy must expose explicit image cleanup and preview through the existing wrapper.");
+assertContains(files.deploy, /CLEANUP_IMAGES_ONLY[\s\S]*cleanup_fluxpost_images "\$CHECK_ONLY"[\s\S]*install_builder_prune_timer/, "Applied standalone cleanup must also install the weekly BuildKit schedule.");
+assertContains(files.deploy, /KEEP_RESCUE_IMAGES=2/, "Deploy must retain exactly two recent rescue tags by default.");
+assertContains(files.deploy, /rescue_pattern=.*rescue-\[A-Za-z0-9_\.\-\]\+/, "Deploy must apply retention to timestamped and legacy rescue tags.");
+assertContains(files.deploy, /\{\{\.CreatedAt\}\}\\t\{\{\.Repository\}\}:\{\{\.Tag\}\}\\t\{\{\.ID\}\}[\s\S]*sort -r/, "Deploy must rank rescue tags by Docker image creation time.");
+assertContains(files.deploy, /immutable_pattern=.*\[0-9a-f\]\{40\}/, "Deploy must limit historical immutable app cleanup to exact full commit tags.");
+assertContains(files.deploy, /docker ps -aq[\s\S]*docker inspect --format '\{\{\.Image\}\}'/, "Image cleanup must protect images referenced by running or stopped containers.");
+assertContains(files.deploy, /docker image ls --no-trunc --format[^\n]*"\$verification_repository"[\s\S]*docker image ls --no-trunc --format[^\n]*"\$app_repository"/, "Image cleanup must compare full Docker image ids from only FluxPost verification and app repositories.");
+assertContains(files.deploy, /docker image rm "\$image_ref"/, "Image cleanup must remove exact validated tags through Docker.");
+assertNotContains(files.deploy, /docker image rm[^\n]*--force/, "Image cleanup must never force removal of a referenced image.");
+assertContains(files.deploy, /ln -sfn "\$RELEASE_DIR" "\$APP_ROOT\/current"[\s\S]*cleanup_fluxpost_images "false"[\s\S]*install_builder_prune_timer/, "Automatic cleanup must start only after health success and the current-release switch.");
+assertContains(files.deploy, /ExecStart=\/usr\/bin\/docker builder prune -af --filter until=168h/, "The weekly service must prune only unused BuildKit cache older than seven days.");
+assertContains(files.deploy, /OnCalendar=weekly[\s\S]*Persistent=true[\s\S]*systemctl enable --now fluxpost-builder-prune\.timer/, "Deploy must install and enable the persistent weekly BuildKit timer.");
+assertContains(files.deploy, /release \$COMMIT is active[\s\S]*post-deployment Docker maintenance failed/, "Post-activation maintenance failure must report that the release remains active.");
 assertNotContains(files.deploy, /(?:source|\.)\s+"?\$ENV_FILE/, "Deploy must not execute the application environment file as shell code.");
 
 assertContains(files.bootstrap, /BOOTSTRAP_SCRIPT_VERSION="3"/, "Bootstrap must preserve the production wrapper v3 contract.");
@@ -123,6 +137,7 @@ assertContains(files.dockerfile, /FROM node:24-bookworm-slim AS builder[\s\S]*EN
 for (const [name, source] of Object.entries({ deploy: files.deploy, bootstrap: files.bootstrap, domain: files.domain, verifier: files.verifier })) {
   assertNotContains(source, /docker(?:\s+compose| compose)[^\n]*(?:down\s+-v|down\s+--volumes)/, `${name} script must never remove Docker volumes.`);
   assertNotContains(source, /docker\s+(?:system|volume|image|container)\s+prune/, `${name} script must never run a global Docker prune.`);
+  assertNotContains(source, /\/var\/lib\/(?:docker|containerd)/, `${name} script must never manipulate Docker or containerd storage directly.`);
   assertNotContains(source, /systemctl\s+(?:restart|stop)\s+docker/, `${name} script must not interrupt unrelated Docker workloads.`);
   assertNotContains(source, /\b(?:ufw|iptables|nft|firewall-cmd)\b/, `${name} script must not modify firewall rules.`);
   assertNotContains(source, /sshd_config|systemctl\s+(?:restart|reload)\s+ssh/, `${name} script must not modify SSH.`);
@@ -139,6 +154,9 @@ assertContains(files.docs, /enable-domain\.sh/, "Deployment docs must explain la
 assertContains(files.docs, /verify-candidate\.sh --ref FULL_40_CHARACTER_COMMIT[\s\S]*deploy\.sh --ref FULL_40_CHARACTER_COMMIT/, "Deployment docs must verify the exact commit before direct production activation.");
 assertContains(files.docs, /docker compose down -v/, "Deployment docs must explicitly warn against deleting volumes.");
 assertContains(files.docs, /up -d postgres app[\s\S]*preserves private mode/, "Rollback docs must not accidentally expose a private deployment through Caddy.");
+assertContains(files.docs, /deploy\.sh --cleanup-images --check[\s\S]*deploy\.sh --cleanup-images/, "Deployment docs must show preview and apply commands for image retention.");
+assertContains(files.docs, /fluxpost-builder-prune\.timer[\s\S]*docker builder prune -af --filter until=168h/, "Deployment docs must explain the weekly and immediate BuildKit cache policy.");
+assertContains(files.docs, /Build cache cleanup does not affect running containers or named volumes[\s\S]*next image build slower/, "Deployment docs must state the cache cleanup impact and volume boundary.");
 
 checkBashSyntax([
   "scripts/deploy/vps-deploy.sh",
@@ -147,6 +165,7 @@ checkBashSyntax([
   "scripts/deploy/vps-verify-candidate.sh",
 ]);
 checkDeployModes();
+checkImageCleanup();
 checkPinnedReleaseAndAutomaticRollback();
 checkCandidateVerification();
 
@@ -238,6 +257,149 @@ function checkDeployModes() {
   }
 }
 
+function checkImageCleanup() {
+  const bash = findBash();
+  if (!bash) throw new Error("Bash is required for deployment image cleanup verification.");
+  const tempRoot = mkdtempSync(path.join(os.tmpdir(), "fluxpost-image-cleanup-"));
+  const appRoot = path.join(tempRoot, "app");
+  const fakeBin = path.join(tempRoot, "fake-bin");
+  const fakeState = path.join(tempRoot, "fake-state");
+  mkdirSync(fakeBin, { recursive: true });
+  mkdirSync(fakeState, { recursive: true });
+
+  writeExecutable(path.join(fakeBin, "docker"), `#!/usr/bin/env bash
+set -euo pipefail
+printf '%s\\n' "$*" >> "$FAKE_DOCKER_STATE/docker.log"
+if [ "\${1:-}" = ps ] && [ "\${2:-}" = -aq ]; then
+  printf 'running-app\\nstopped-verifier\\nstopped-rescue\\n'
+  exit 0
+fi
+if [ "\${1:-}" = inspect ] && [ "\${2:-}" = --format ]; then
+  printf 'sha256:current-app\\nsha256:referenced-verification\\nsha256:referenced-rescue\\n'
+  exit 0
+fi
+if [ "\${1:-}" = image ] && [ "\${2:-}" = ls ]; then
+  case " $* " in
+    *" fluxpost-verification "*)
+      printf 'fluxpost-verification:unused-old sha256:unused-verification\\n'
+      printf 'fluxpost-verification:referenced sha256:referenced-verification\\n'
+      ;;
+    *" fluxpost-app "*)
+      printf '2026-08-05 12:00:00 +0000 UTC\\tfluxpost-app:latest\\tsha256:current-app\\n'
+      printf '2026-08-05 12:00:00 +0000 UTC\\tfluxpost-app:rescue-20260805-120000\\tsha256:newest-rescue\\n'
+      printf '2026-08-05 12:00:00 +0000 UTC\\tfluxpost-app:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa\\tsha256:current-app\\n'
+      printf '2026-08-04 12:00:00 +0000 UTC\\tfluxpost-app:rescue-20260804-120000\\tsha256:second-rescue\\n'
+      printf '2026-08-03 12:00:00 +0000 UTC\\tfluxpost-app:rescue-20260803-120000\\tsha256:unused-old-rescue\\n'
+      printf '2026-08-02 12:00:00 +0000 UTC\\tfluxpost-app:rescue-20260802-120000\\tsha256:referenced-rescue\\n'
+      printf '2026-07-22 03:00:00 +0000 UTC\\tfluxpost-app:rescue-prod-before-211aa65\\tsha256:legacy-rescue\\n'
+      printf '2026-07-20 12:00:00 +0000 UTC\\tfluxpost-app:0123456789abcdef0123456789abcdef01234567\\tsha256:immutable-app\\n'
+      ;;
+    *) exit 19 ;;
+  esac
+  exit 0
+fi
+if [ "\${1:-}" = image ] && [ "\${2:-}" = rm ]; then
+  exit 0
+fi
+exit 20
+`);
+  writeExecutable(path.join(fakeBin, "flock"), `#!/usr/bin/env bash
+printf '%s\\n' "$*" >> "$FAKE_DOCKER_STATE/flock.log"
+exit 0
+`);
+  writeExecutable(path.join(fakeBin, "install"), `#!/usr/bin/env bash
+set -euo pipefail
+if [[ "\${4:-}" == /etc/systemd/system/* ]]; then
+  cp "\${3:-}" "$FAKE_DOCKER_STATE/$(basename "\${4:-}")"
+  exit 0
+fi
+exec /usr/bin/install "$@"
+`);
+  writeExecutable(path.join(fakeBin, "systemctl"), `#!/usr/bin/env bash
+printf '%s\\n' "$*" >> "$FAKE_DOCKER_STATE/systemctl.log"
+exit 0
+`);
+  const runner = path.join(tempRoot, "run-cleanup.sh");
+  writeExecutable(runner, `#!/usr/bin/env bash
+set -euo pipefail
+export PATH="$FAKE_BIN:$PATH"
+exec "$DEPLOY_SCRIPT" "$@"
+`);
+  const baseEnv = {
+    ...process.env,
+    APP_ROOT: toGitBashPath(appRoot),
+    COMPOSE_PROJECT_NAME: "fluxpost",
+    FAKE_BIN: toGitBashPath(fakeBin),
+    FAKE_DOCKER_STATE: toGitBashPath(fakeState),
+    DEPLOY_SCRIPT: toGitBashPath(path.join(projectRoot, "scripts/deploy/vps-deploy.sh")),
+  };
+
+  try {
+    const preview = spawnSync(bash, [toGitBashPath(runner), "--cleanup-images", "--check"], {
+      cwd: projectRoot,
+      env: baseEnv,
+      encoding: "utf8",
+    });
+    if (preview.error) throw preview.error;
+    if (preview.status !== 0) throw new Error(`Image cleanup preview failed: ${(preview.stderr || preview.stdout).trim()}`);
+    for (const expected of [
+      "would_remove=fluxpost-verification:unused-old",
+      "skip_referenced=fluxpost-verification:referenced",
+      "keep=fluxpost-app:rescue-20260805-120000",
+      "keep=fluxpost-app:rescue-20260804-120000",
+      "would_remove=fluxpost-app:rescue-20260803-120000",
+      "skip_referenced=fluxpost-app:rescue-20260802-120000",
+      "would_remove=fluxpost-app:rescue-prod-before-211aa65",
+      "skip_referenced=fluxpost-app:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+      "would_remove=fluxpost-app:0123456789abcdef0123456789abcdef01234567",
+    ]) {
+      if (!preview.stdout.includes(expected)) throw new Error(`Image cleanup preview omitted ${expected}.`);
+    }
+    let dockerLog = readFileSync(path.join(fakeState, "docker.log"), "utf8");
+    if (/^image rm /m.test(dockerLog)) throw new Error("Image cleanup preview mutated Docker state.");
+    if (existsSync(path.join(fakeState, "systemctl.log"))) throw new Error("Image cleanup preview changed the BuildKit schedule.");
+
+    const apply = spawnSync(bash, [toGitBashPath(runner), "--cleanup-images"], {
+      cwd: projectRoot,
+      env: baseEnv,
+      encoding: "utf8",
+    });
+    if (apply.error) throw apply.error;
+    if (apply.status !== 0) throw new Error(`Image cleanup apply failed: ${(apply.stderr || apply.stdout).trim()}`);
+    dockerLog = readFileSync(path.join(fakeState, "docker.log"), "utf8");
+    const removals = dockerLog.split(/\r?\n/).filter((line) => line.startsWith("image rm "));
+    const expectedRemovals = [
+      "image rm fluxpost-verification:unused-old",
+      "image rm fluxpost-app:rescue-20260803-120000",
+      "image rm fluxpost-app:rescue-prod-before-211aa65",
+      "image rm fluxpost-app:0123456789abcdef0123456789abcdef01234567",
+    ];
+    if (removals.join("\n") !== expectedRemovals.join("\n")) {
+      throw new Error(`Image cleanup removed unexpected tags: ${removals.join(", ")}.`);
+    }
+    if (!existsSync(path.join(appRoot, ".operation.lock"))) throw new Error("Image cleanup did not use the shared operation lock.");
+    if (!existsSync(path.join(fakeState, "flock.log"))) throw new Error("Image cleanup did not acquire the operation lock.");
+    const serviceUnit = readFileSync(path.join(fakeState, "fluxpost-builder-prune.service"), "utf8");
+    const timerUnit = readFileSync(path.join(fakeState, "fluxpost-builder-prune.timer"), "utf8");
+    const systemctlLog = readFileSync(path.join(fakeState, "systemctl.log"), "utf8");
+    if (!serviceUnit.includes("ExecStart=/usr/bin/docker builder prune -af --filter until=168h\n")) {
+      throw new Error("Applied image cleanup did not install the scoped BuildKit service.");
+    }
+    if (!timerUnit.includes("OnCalendar=weekly\n") || !systemctlLog.includes("enable --now fluxpost-builder-prune.timer")) {
+      throw new Error("Applied image cleanup did not enable the weekly BuildKit timer.");
+    }
+
+    const invalid = spawnSync(bash, [toGitBashPath(runner), "--cleanup-images", "--check"], {
+      cwd: projectRoot,
+      env: { ...baseEnv, COMPOSE_PROJECT_NAME: "../other" },
+      encoding: "utf8",
+    });
+    if (invalid.status === 0) throw new Error("Image cleanup accepted an unsafe Compose project name.");
+  } finally {
+    rmSync(tempRoot, { recursive: true, force: true });
+  }
+}
+
 function checkPinnedReleaseAndAutomaticRollback() {
   const bash = findBash();
   if (!bash) throw new Error("Bash is required for deployment execution verification.");
@@ -275,6 +437,15 @@ if [ "\${1:-}" = image ] && [ "\${2:-}" = inspect ]; then
   fi
   exit 0
 fi
+if [ "\${1:-}" = image ] && [ "\${2:-}" = ls ]; then
+  if [[ " $* " == *" fluxpost-verification "* ]]; then
+    printf 'fluxpost-verification:verified-candidate sha256:unused-verification\\n'
+  fi
+  exit 0
+fi
+if [ "\${1:-}" = image ] && [ "\${2:-}" = rm ]; then
+  exit 0
+fi
 if [ "\${1:-}" = image ] && [ "\${2:-}" = tag ]; then
   if [[ "\${4:-}" == *:latest ]]; then
     printf '%s\\n' "\${3:-}" > "$FAKE_DOCKER_STATE/current-image"
@@ -300,6 +471,18 @@ exit 0
 `);
   writeExecutable(path.join(fakeBin, "sleep"), "#!/usr/bin/env bash\nexit 0\n");
   writeExecutable(path.join(fakeBin, "flock"), "#!/usr/bin/env bash\nexit 0\n");
+  writeExecutable(path.join(fakeBin, "install"), `#!/usr/bin/env bash
+set -euo pipefail
+if [[ "\${4:-}" == /etc/systemd/system/* ]]; then
+  cp "\${3:-}" "$FAKE_DOCKER_STATE/$(basename "\${4:-}")"
+  exit 0
+fi
+exec /usr/bin/install "$@"
+`);
+  writeExecutable(path.join(fakeBin, "systemctl"), `#!/usr/bin/env bash
+printf '%s\\n' "$*" >> "$FAKE_DOCKER_STATE/systemctl.log"
+exit 0
+`);
 
   const runner = path.join(tempRoot, "run-deploy.sh");
   writeExecutable(runner, `#!/usr/bin/env bash
@@ -333,9 +516,18 @@ exec "$DEPLOY_SCRIPT" "$@"
       throw new Error("Pinned deploy release manifest does not bind the commit and immutable image.");
     }
 
-    // Git Bash on Windows cannot reliably expose its emulated symlink to Node;
-    // the full activation/rollback path is exercised on the Linux staging host.
-    if (process.platform === "win32") return;
+    const serviceUnit = readFileSync(path.join(fakeState, "fluxpost-builder-prune.service"), "utf8");
+    const timerUnit = readFileSync(path.join(fakeState, "fluxpost-builder-prune.timer"), "utf8");
+    if (!serviceUnit.includes("ExecStart=/usr/bin/docker builder prune -af --filter until=168h\n")) {
+      throw new Error("Successful deploy did not install the scoped BuildKit prune service.");
+    }
+    if (!timerUnit.includes("OnCalendar=weekly\n") || !timerUnit.includes("Persistent=true\n")) {
+      throw new Error("Successful deploy did not install the persistent weekly BuildKit timer.");
+    }
+    const firstSystemctlLog = readFileSync(path.join(fakeState, "systemctl.log"), "utf8");
+    if (!firstSystemctlLog.includes("daemon-reload") || !firstSystemctlLog.includes("enable --now fluxpost-builder-prune.timer")) {
+      throw new Error("Successful deploy did not enable the BuildKit prune timer.");
+    }
 
     Atomics.wait(new Int32Array(new SharedArrayBuffer(4)), 0, 0, 1100);
     const second = spawnSync(bash, [toGitBashPath(runner), "--ref", parent], {
@@ -344,13 +536,22 @@ exec "$DEPLOY_SCRIPT" "$@"
       encoding: "utf8",
     });
     if (second.status === 0) throw new Error("A release with failing health unexpectedly succeeded.");
+    const dockerLog = readFileSync(path.join(fakeState, "docker.log"), "utf8");
+    const cleanupRemovals = dockerLog.split(/\r?\n/).filter((line) => line === "image rm fluxpost-verification:verified-candidate");
+    if (cleanupRemovals.length !== 1) throw new Error("Failed activation invoked post-success image cleanup.");
+    const secondSystemctlLog = readFileSync(path.join(fakeState, "systemctl.log"), "utf8");
+    if (secondSystemctlLog !== firstSystemctlLog) throw new Error("Failed activation changed the BuildKit cleanup schedule.");
+
+    // Git Bash on Windows cannot reliably expose its emulated symlink to Node;
+    // the full activation/rollback path is exercised on the Linux staging host.
+    if (process.platform === "win32") return;
+
     const currentResult = spawnSync(bash, ["-c", 'readlink -f "$1"', "_", toGitBashPath(path.join(appRoot, "current"))], { encoding: "utf8" });
     if (currentResult.status !== 0) throw new Error(`Cannot resolve current release: ${currentResult.stderr.trim()}`);
     const currentTarget = path.posix.basename(currentResult.stdout.trim());
     if (currentTarget !== firstRelease) {
       throw new Error(`Failed activation changed current from ${firstRelease} to ${currentTarget}.`);
     }
-    const dockerLog = readFileSync(path.join(fakeState, "docker.log"), "utf8");
     if (!dockerLog.includes(`image tag fluxpost-app:${head} fluxpost-app:latest`) || !dockerLog.includes("rescue-")) {
       throw new Error("Automatic rollback did not reactivate the previous immutable image.");
     }
