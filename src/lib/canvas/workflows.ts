@@ -16,6 +16,7 @@ import {
 import { validateCanvasGraph } from "./graph";
 import { upgradeCanvasGraph } from "./registry";
 import type { CanvasGraph, CanvasWorkflow } from "./types";
+import { createCanvasWorkflowTemplateGraph, type CanvasWorkflowTemplateKey } from "./templates";
 
 export class CanvasRevisionConflictError extends Error {
   constructor() {
@@ -38,15 +39,16 @@ export async function getCanvasWorkflow(workflowId: string, account: WorkspaceAc
 
 export async function createCanvasWorkflow(
   account: WorkspaceAccessActor,
-  input: { name?: string; graph?: CanvasGraph; isTemplate?: boolean; sourceWorkflowId?: string } = {},
+  input: { name?: string; graph?: CanvasGraph; isTemplate?: boolean; sourceWorkflowId?: string; templateKey?: CanvasWorkflowTemplateKey } = {},
 ) {
-  const graph = input.graph ? upgradeCanvasGraph(input.graph) : emptyCanvasGraph();
+  const template = input.templateKey ? createCanvasWorkflowTemplateGraph(input.templateKey) : undefined;
+  const graph = input.graph ? upgradeCanvasGraph(input.graph) : template?.graph || emptyCanvasGraph();
   assertValidGraph(graph);
   const now = new Date().toISOString();
   const workflow: CanvasWorkflow = {
     id: `canvas-${Date.now()}-${randomUUID().slice(0, 8)}`,
     ...scopeWorkspaceOwner(account),
-    name: normalizeWorkflowName(input.name),
+    name: normalizeWorkflowName(input.name || template?.name),
     revision: 1,
     graph: structuredClone(graph),
     isTemplate: input.isTemplate === true,

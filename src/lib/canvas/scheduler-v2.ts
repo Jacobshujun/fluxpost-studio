@@ -1,11 +1,13 @@
 import { randomUUID } from "node:crypto";
 import { buildCanvasRunPlan } from "./graph";
 import { getCanvasBatchBindableFields, getCanvasNodeDefinition, getCanvasNodeExecutionMode } from "./registry";
+import { canvasSourceVideoSnapshotConfig, isCanvasSourceVideoSnapshot } from "./source-video-contract";
 import type {
   CanvasArtifact,
   CanvasGraph,
   CanvasNode,
   CanvasScheduleAggregateArtifact,
+  CanvasScheduleAssetSnapshot,
   CanvasScheduleExpansionMode,
   CanvasScheduleParameter,
   CanvasScheduleParameterScope,
@@ -346,7 +348,7 @@ export function extractCanvasScheduleV2Artifacts(
 
 function validateCanvasScheduleParameterSource(parameter: CanvasScheduleParameter) {
   const source = parameter.source;
-  if (!source || !['fixed', 'manual-list', 'library-filter', 'copy-filter'].includes(source.mode)) throw new Error(`${parameter.name}: parameter source is invalid.`);
+  if (!source || !['fixed', 'manual-list', 'library-filter', 'copy-filter', 'source-video-links'].includes(source.mode)) throw new Error(`${parameter.name}: parameter source is invalid.`);
   if (source.mode === "fixed" || source.mode === "manual-list") {
     if (!Array.isArray(source.values)) throw new Error(`${parameter.name}: parameter values must be a list.`);
     if (source.mode === "fixed" && source.values.length !== 1) throw new Error(`${parameter.name}: fixed source requires exactly one value.`);
@@ -356,6 +358,15 @@ function validateCanvasScheduleParameterSource(parameter: CanvasScheduleParamete
   if (parameter.expansion === "random" && source.mode === "fixed") throw new Error(`${parameter.name}: random expansion requires multiple candidate values.`);
   if (source.mode === "copy-filter" && parameter.valueType !== "copy") throw new Error(`${parameter.name}: copy filters require a copy parameter.`);
   if (source.mode === "library-filter" && !['image', 'image-group'].includes(parameter.valueType)) throw new Error(`${parameter.name}: library filters require an image parameter.`);
+  if (source.mode === "source-video-links") {
+    if (parameter.valueType !== "source-video") throw new Error(`${parameter.name}: source video links require a source-video parameter.`);
+    if (!Array.isArray(source.links) || !source.links.length || source.links.length > 200) throw new Error(`${parameter.name}: source video links must contain 1-200 entries.`);
+    if (!source.projectName?.trim()) throw new Error(`${parameter.name}: source video project name is required.`);
+    if (parameter.expansion === "fixed" && source.links.length !== 1) throw new Error(`${parameter.name}: fixed source video parameters require exactly one link.`);
+  }
+  if (parameter.valueType === "source-video" && source.mode !== "source-video-links" && source.mode !== "fixed" && source.mode !== "manual-list") {
+    throw new Error(`${parameter.name}: source-video parameters require frozen values or source video links.`);
+  }
 }
 
 function validateCanvasScheduleV2SharedOutputs(graph: CanvasGraph, definition: CanvasScheduleV2Definition) {
@@ -416,6 +427,7 @@ function isCanvasScheduleParameterValue(type: CanvasScheduleParameter["valueType
   if (type === "image") return isAssetSnapshot(value);
   if (type === "image-group") return Array.isArray(value) && value.length > 0 && value.every(isAssetSnapshot);
   if (type === "copy") return isCopySnapshot(value);
+  if (type === "source-video") return isCanvasSourceVideoSnapshot(value);
   if (type === "number") return typeof value === "number" && Number.isFinite(value);
   if (type === "boolean") return typeof value === "boolean";
   return typeof value === "string";
@@ -450,6 +462,14 @@ function applyCanvasParameterValue(node: CanvasNode, parameter: CanvasSchedulePa
         snapshotTags: value.tags,
         snapshotAt: value.updatedAt,
       },
+    };
+  }
+  if (field.adapter === "source-video-input") {
+    if (!isCanvasSourceVideoSnapshot(value)) throw new Error(`${parameter.name}: expected a frozen source video snapshot.`);
+    return {
+      ...node,
+      config: { ...node.config, ...canvasSourceVideoSnapshotConfig(value) },
+      executionMode: "enabled",
     };
   }
   if (typeof value === "object") throw new Error(`${parameter.name}: scalar binding received a structured value.`);
@@ -509,8 +529,8 @@ function collectCanvasGraphAncestors(graph: CanvasGraph, targetId: string) {
   return result;
 }
 
-function isAssetSnapshot(value: CanvasScheduleParameterValue): value is Extract<CanvasScheduleParameterValue, { url: string }> {
-  return Boolean(value && typeof value === "object" && !Array.isArray(value) && "id" in value && "url" in value);
+function isAssetSnapshot(value: CanvasScheduleParameterValue): value is CanvasScheduleAssetSnapshot {
+  return Boolean(value && typeof value === "object" && !Array.isArray(value) && "id" in value && "url" in value && !("projectName" in value));
 }
 
 function isCopySnapshot(value: CanvasScheduleParameterValue): value is Extract<CanvasScheduleParameterValue, { body: string }> {

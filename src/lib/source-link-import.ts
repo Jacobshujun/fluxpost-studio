@@ -389,7 +389,7 @@ function normalizeDongchediInput(value: string) {
   return articleId ? buildDongchediArticleUrl(articleId) : extractFirstHttpUrl(value);
 }
 
-function detectSourceLinkPlatform(value: string): SourceLinkPlatform | undefined {
+export function detectSourceLinkPlatform(value: string): SourceLinkPlatform | undefined {
   if (extractXiaopengBbsThreadId(value)) return "xiaopeng_bbs";
   if (extractDongchediArticleId(value)) return "dongchedi";
   return detectPlatformFromSourceUrl(value);

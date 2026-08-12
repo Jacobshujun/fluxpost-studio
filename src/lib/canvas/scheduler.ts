@@ -14,6 +14,7 @@ import {
 import { getGeneratedPost, updateGeneratedPost } from "../generated-posts";
 import { listCopyLibraryEntries } from "../copy-library";
 import { listLibraryAssets } from "../library-assets";
+import { getSourceItemsByIds } from "../content-pool";
 import type { CopyLibraryEntry, LibraryAsset, LibraryAssetRole } from "../types";
 import {
   assertCanAccessWorkspaceRecord,
@@ -24,6 +25,8 @@ import {
 } from "../workspace-ownership";
 import { buildCanvasRunPlan } from "./graph";
 import { getCanvasBatchBindableFields, getCanvasNodeDefinition, getCanvasNodeExecutionMode } from "./registry";
+import { isCanvasSourceVideoSnapshot } from "./source-video-contract";
+import { resolveCanvasSourceVideos } from "./source-video-service";
 import {
   cancelCanvasRun,
   createCanvasRunFromGraph,
@@ -1476,6 +1479,10 @@ async function resolveCanvasScheduleV2Parameter(
     const values: CanvasScheduleParameterValue[] = parameter.valueType === "image-group" ? [assets] : assets;
     return resolvedCanvasScheduleV2Parameter(parameter, "manual-list", values);
   }
+  if (source.mode === "source-video-links") {
+    const values = await resolveCanvasSourceVideos({ links: source.links, projectName: source.projectName, account });
+    return resolvedCanvasScheduleV2Parameter(parameter, "manual-list", values);
+  }
   throw new Error(`${parameter.name}: parameter source is invalid.`);
 }
 
@@ -1491,6 +1498,7 @@ async function assertFrozenCanvasScheduleV2AssetsStillAvailable(schedule: Canvas
   const definition = schedule.definition;
   if (!definition || !schedule.mainTasks) return;
   const required = new Map<LibraryAssetRole, Set<string>>([["reference", new Set()], ["vehicle", new Set()]]);
+  const requiredSourceVideos = new Set<string>();
   const parameters = new Map(definition.parameters.map((parameter) => [parameter.id, parameter]));
   for (const main of schedule.mainTasks) {
     collectFrozenCanvasScheduleV2Assets(main.parameterValues);
@@ -1502,10 +1510,20 @@ async function assertFrozenCanvasScheduleV2AssetsStillAvailable(schedule: Canvas
     const missing = Array.from(required.get(role)!).find((id) => !visible.has(id));
     if (missing) throw new Error(`Frozen batch asset was deleted or is no longer accessible: ${missing}`);
   }
+  if (requiredSourceVideos.size) {
+    const ids = Array.from(requiredSourceVideos);
+    const visible = new Set((await getSourceItemsByIds(ids, account)).map((item) => item.id));
+    const missing = ids.find((id) => !visible.has(id));
+    if (missing) throw new Error(`Frozen source video was deleted or is no longer accessible: ${missing}`);
+  }
 
   function collectFrozenCanvasScheduleV2Assets(values: Record<string, CanvasScheduleParameterValue>) {
     for (const [parameterId, value] of Object.entries(values)) {
       const parameter = parameters.get(parameterId);
+      if (parameter?.valueType === "source-video") {
+        if (isCanvasSourceVideoSnapshot(value)) requiredSourceVideos.add(value.id);
+        continue;
+      }
       if (parameter?.source.mode !== "library-filter") continue;
       const snapshots = Array.isArray(value) ? value : [value];
       for (const snapshot of snapshots) {
@@ -1924,6 +1942,11 @@ function normalizeCanvasScheduleV2ParameterSource(parameter: CanvasScheduleParam
   if (source.mode === "fixed" || source.mode === "manual-list") return { mode: source.mode, values: structuredClone(source.values || []) };
   if (source.mode === "copy-filter") return { mode: "copy-filter", filter: normalizeCopyFilter(source.filter) };
   if (source.mode === "library-filter") return { mode: "library-filter", role: source.role === "vehicle" ? "vehicle" : "reference", filter: normalizeAssetFilter(source.filter) };
+  if (source.mode === "source-video-links") return {
+    mode: "source-video-links",
+    links: (Array.isArray(source.links) ? source.links : []).map((link) => String(link || "").trim()).filter(Boolean).slice(0, 200),
+    projectName: String(source.projectName || "").trim(),
+  };
   throw new Error(`${parameter.name}: parameter source is invalid.`);
 }
 

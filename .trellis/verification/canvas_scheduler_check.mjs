@@ -26,10 +26,13 @@ let listedSchedules = [];
 let canvasRunsById = new Map();
 let nodeRunsByRunId = new Map();
 let fannedOutRuns;
+let sourceVideoResolveCalls = 0;
+let sourceVideoSnapshots = [];
+let visibleSourceVideoIds;
 
 try {
   writeFileSync(path.join(temp, "toapis-image-api.js"), "exports.toApisImageRatios=['1:1'];exports.toApis4kImageRatios=['16:9'];", "utf8");
-  for (const name of ["types", "node-utils", "registry", "graph", "scheduler-skeleton", "scheduler-v2"]) {
+  for (const name of ["types", "node-utils", "source-video-contract", "registry", "graph", "scheduler-skeleton", "scheduler-v2"]) {
     const source = read(`src/lib/canvas/${name}.ts`).replace('"../toapis-image-api"', '"./toapis-image-api"');
     writeFileSync(path.join(temp, `${name}.js`), ts.transpileModule(source, {
       compilerOptions: { module: ts.ModuleKind.CommonJS, target: ts.ScriptTarget.ES2022 },
@@ -103,6 +106,9 @@ try {
     "../library-assets": new Proxy({
       listLibraryAssets: async (_account, options) => ({ assets: structuredClone(libraryAssetsByRole[options.role] || []), nextCursor: undefined }),
     }, { get: (target, key) => target[key] || emptyAsync }),
+    "../content-pool": new Proxy({
+      getSourceItemsByIds: async (ids) => ids.filter((id) => !visibleSourceVideoIds || visibleSourceVideoIds.has(id)).map((id) => ({ id })),
+    }, { get: (target, key) => target[key] || emptyAsync }),
     "../workspace-ownership": {
       assertCanAccessWorkspaceRecord: () => undefined,
       canAccessWorkspaceOwner: () => true,
@@ -123,6 +129,13 @@ try {
       retryCanvasNode: async (runId, nodeId) => { retriedNode = { runId, nodeId }; },
     }, { get: (target, key) => target[key] || emptyAsync }),
     "./scheduler-v2": schedulerV2,
+    "./source-video-contract": require(path.join(temp, "source-video-contract.js")),
+    "./source-video-service": {
+      resolveCanvasSourceVideos: async () => {
+        sourceVideoResolveCalls += 1;
+        return structuredClone(sourceVideoSnapshots);
+      },
+    },
     "./types": require(path.join(temp, "types.js")),
     "./workflows": new Proxy({
       getCanvasWorkflow: async () => structuredClone(workflowRecord),
@@ -640,6 +653,108 @@ try {
 
   const account = { id: "owner", displayName: "Owner", role: "operator" };
   const createdAt = "2026-07-29T00:00:00.000Z";
+  const sourceVideoGraph = {
+    nodes: [
+      { ...node("source-video", "input.source-video"), executionMode: "disabled" },
+      node("replacement-prompt", "input.text"),
+      node("replacement-image", "model.gpt-image"),
+      node("video-reconstruct", "utility.video-reconstruct"),
+    ],
+    edges: [
+      edge("source-video", "videos", "video-reconstruct", "source"),
+      edge("replacement-prompt", "text", "replacement-image", "prompt"),
+      edge("replacement-image", "images", "video-reconstruct", "replacement"),
+    ],
+    viewport: { x: 0, y: 0, zoom: 1 },
+  };
+  const sourceVideoDefinition = {
+    parameters: [
+      {
+        id: "source-video-parameter",
+        name: "Source video",
+        scope: "main",
+        valueType: "source-video",
+        source: { mode: "source-video-links", links: ["https://video.example/one.mp4", "https://video.example/two.mp4"], projectName: "Video rebuild" },
+        expansion: "each",
+        binding: { nodeId: "source-video", fieldKey: "sourceUrl" },
+      },
+      {
+        id: "replacement-prompt-parameter",
+        name: "Replacement prompt",
+        scope: "main",
+        valueType: "text",
+        source: { mode: "manual-list", values: ["Prompt one", "Prompt two"] },
+        expansion: "each",
+        binding: { nodeId: "replacement-prompt", fieldKey: "text" },
+      },
+    ],
+    expansion: { main: "zip", child: "cartesian" },
+    sharedOutputs: [],
+    childResult: { nodeId: "video-reconstruct", outputPort: "videos", artifactKind: "videos" },
+    aggregationPolicy: "all",
+  };
+  sourceVideoSnapshots = sourceVideoDefinition.parameters[0].source.links.map((sourceUrl, index) => ({
+    id: `source-video-${index + 1}`,
+    projectName: "Video rebuild",
+    sourceUrl,
+    platform: "original",
+    title: `Source ${index + 1}`,
+    url: `/generated/canvas-tools/source-${index + 1}.mp4`,
+    durationSeconds: 8 + index,
+    width: 1280,
+    height: 720,
+    resolvedAt: "2026-08-11T00:00:00.000Z",
+  }));
+  sourceVideoResolveCalls = 0;
+  visibleSourceVideoIds = new Set(sourceVideoSnapshots.map((snapshot) => snapshot.id));
+  workflowRecord = { id: "workflow-source-video", name: "Video rebuild", revision: 1, ownerUserId: account.id, ownerDisplayName: account.displayName, graph: sourceVideoGraph };
+  storedSchedule = {
+    id: "schedule-source-video",
+    schemaVersion: 2,
+    ownerUserId: account.id,
+    ownerDisplayName: account.displayName,
+    name: "Video rebuild batch",
+    revision: 1,
+    workflowId: workflowRecord.id,
+    workflowRevision: workflowRecord.revision,
+    status: "draft",
+    batches: [],
+    definition: sourceVideoDefinition,
+    mainTasks: [],
+    totalMainTasks: 0,
+    totalChildTasks: 0,
+    totalContentTasks: 0,
+    totalImageTasks: 0,
+    createdAt,
+    updatedAt: createdAt,
+  };
+  const sourceVideoPreview = await scheduler.preflightCanvasSchedule(storedSchedule.id, account, storedSchedule.revision);
+  assert.equal(sourceVideoResolveCalls, 1, "source links must resolve exactly once during explicit preflight");
+  assert.equal(sourceVideoPreview.mainTasks.length, 2, "default zip must pair two source videos with two prompts");
+  assert.deepEqual(sourceVideoPreview.mainTasks.map((main) => main.parameterValues["replacement-prompt-parameter"]), ["Prompt one", "Prompt two"]);
+  assert.deepEqual(sourceVideoPreview.mainTasks.map((main) => main.parameterValues["source-video-parameter"].id), ["source-video-1", "source-video-2"]);
+  storedSchedule = structuredClone(sourceVideoPreview);
+  launchedRuns = undefined;
+  const sourceVideoLaunch = await scheduler.launchCanvasSchedule(storedSchedule.id, account, {
+    revision: storedSchedule.revision,
+    previewRevision: storedSchedule.previewRevision,
+  });
+  assert.equal(sourceVideoResolveCalls, 1, "launch must consume frozen source snapshots without resolving links again");
+  assert.equal(launchedRuns.length, 2);
+  assert.deepEqual(launchedRuns.map((run) => run.graph.nodes.find((item) => item.id === "source-video").config.sourceItemId), ["source-video-1", "source-video-2"]);
+  assert.ok(launchedRuns.every((run) => run.graph.nodes.find((item) => item.id === "source-video").executionMode === "enabled"));
+  assert.equal(sourceVideoLaunch.status, "queued");
+
+  storedSchedule = structuredClone(sourceVideoPreview);
+  visibleSourceVideoIds = new Set(["source-video-1"]);
+  launchedRuns = undefined;
+  await assert.rejects(
+    scheduler.launchCanvasSchedule(storedSchedule.id, account, { revision: storedSchedule.revision, previewRevision: storedSchedule.previewRevision }),
+    /Frozen source video was deleted or is no longer accessible: source-video-2/,
+  );
+  assert.equal(launchedRuns, undefined, "owner visibility failure must reject before creating any Canvas runs");
+  visibleSourceVideoIds = undefined;
+
   libraryAssetsByRole = {
     reference: [
       { id: "scene-1", role: "reference", publicUrl: "/scene-1.jpg", name: "scene 1", mimeType: "image/jpeg" },

@@ -6,10 +6,11 @@ import { callOpenAIForText, callOpenAIForVisionText } from "../openai";
 import type { GeneratedPost, SourceImageTask } from "../types";
 import type { WorkspaceAccessActor } from "../workspace-ownership";
 import { DreaminaNeedsConfigError, queryDreaminaVideo, submitDreaminaVideo } from "./dreamina";
-import { CanvasMediaNeedsConfigError, extractCanvasVideoFrames, transformCanvasImages } from "./media-tools";
+import { CanvasMediaNeedsConfigError, extractCanvasVideoFrames, reconstructCanvasVideo, transformCanvasImages } from "./media-tools";
 import { canvasVisionPresets, concatenateCanvasText, parseCanvasImageSelection, renderCanvasPromptTemplate, splitCanvasText } from "./node-utils";
 import { normalizeUrlList } from "./registry";
-import type { CanvasArtifact, CanvasNode, CanvasNodeRun } from "./types";
+import { canvasSourceVideoSnapshotFromConfig, isCanvasSourceVideoSnapshotCurrent } from "./source-video-contract";
+import type { CanvasArtifact, CanvasMediaReference, CanvasNode, CanvasNodeRun } from "./types";
 
 export class CanvasNeedsConfigError extends Error {
   constructor(message: string) {
@@ -46,6 +47,7 @@ const executors: Record<CanvasNode["type"], CanvasNodeExecutor> = {
   "input.text": executeLiteralNode,
   "input.images": executeLiteralNode,
   "input.videos": executeLiteralNode,
+  "input.source-video": executeLiteralNode,
   "input.content-pool": executeLiteralNode,
   "input.library-images": executeLiteralNode,
   "input.copy-library": executeLiteralNode,
@@ -55,6 +57,7 @@ const executors: Record<CanvasNode["type"], CanvasNodeExecutor> = {
   "model.seedance": executeSeedance,
   "utility.image-preview": executeImagePreview,
   "utility.display-any": executeDisplayAny,
+  "utility.video-reconstruct": executeVideoReconstruct,
   "utility.prompt-template": executePromptTemplate,
   "utility.text-concatenate": executeTextConcatenate,
   "utility.prompt-switch": executePromptSwitch,
@@ -80,6 +83,11 @@ export function resolveCanvasLiteralOutputs(node: CanvasNode): Record<string, Ca
   if (node.type === "input.text") return { text: { kind: "text", value: String(node.config.text || "").trim() } };
   if (node.type === "input.images") return { images: imageArtifact(normalizeUrlList(node.config.urls)) };
   if (node.type === "input.videos") return { videos: videoArtifact(normalizeUrlList(node.config.urls)) };
+  if (node.type === "input.source-video") {
+    const source = canvasSourceVideoSnapshotFromConfig(node.config);
+    if (!source || !isCanvasSourceVideoSnapshotCurrent(node.config)) throw new Error("Source video snapshot is missing or stale. Resolve the source link again.");
+    return { videos: { kind: "videos", items: [{ url: source.url, name: source.title, width: source.width, height: source.height, durationSeconds: source.durationSeconds }] } };
+  }
   if (node.type === "input.library-images") {
     const names = stringList(node.config.assetNames);
     return { images: { kind: "images", items: normalizeUrlList(node.config.urls).map((url, index) => ({ url, name: names[index] })) } };
@@ -117,6 +125,20 @@ async function executeDisplayAny({ inputs }: CanvasNodeExecutionContext) {
   const artifacts = inputs.value || [];
   if (artifacts.length !== 1) throw new Error("展示任何需要且仅允许一个上游结果。");
   return { outputs: { preview: structuredClone(artifacts[0]) } };
+}
+
+async function executeVideoReconstruct({ inputs }: CanvasNodeExecutionContext) {
+  const sourceItems = (inputs.source || []).flatMap((artifact) => artifact.kind === "videos" ? artifact.items : []);
+  const replacements: Array<{ item: CanvasMediaReference; kind: "image" | "video" }> = [];
+  for (const artifact of inputs.replacement || []) {
+    if (artifact.kind === "images") replacements.push(...artifact.items.map((item) => ({ item, kind: "image" as const })));
+    if (artifact.kind === "videos") replacements.push(...artifact.items.map((item) => ({ item, kind: "video" as const })));
+  }
+  if (sourceItems.length !== 1) throw new Error(`Video reconstruction requires exactly one source video; resolved ${sourceItems.length}.`);
+  if (replacements.length !== 1) throw new Error(`Video reconstruction requires exactly one replacement image or video; resolved ${replacements.length}.`);
+  const replacement = replacements[0];
+  const output = await reconstructCanvasVideo({ source: sourceItems[0], replacement: replacement.item, replacementKind: replacement.kind });
+  return { outputs: { videos: { kind: "videos" as const, items: [output] } } };
 }
 
 async function executePromptTemplate({ node, inputs }: CanvasNodeExecutionContext) {

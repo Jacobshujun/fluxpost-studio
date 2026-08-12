@@ -1,11 +1,27 @@
-import type { GeneratedPost } from "../types";
+import type { GeneratedPost, Platform } from "../types";
 
 export type CanvasArtifactKind = "text" | "images" | "videos" | "socialPost" | "publishJobRef";
-export type CanvasPortKind = CanvasArtifactKind | "any";
+export type CanvasPortKind = CanvasArtifactKind | "any" | "visual";
 
 export function areCanvasPortKindsCompatible(outputKind: CanvasPortKind, inputKind: CanvasPortKind) {
-  return outputKind !== "any" && (inputKind === "any" || outputKind === inputKind);
+  if (outputKind === "any" || outputKind === "visual") return false;
+  return inputKind === "any"
+    || outputKind === inputKind
+    || (inputKind === "visual" && (outputKind === "images" || outputKind === "videos"));
 }
+
+export type CanvasSourceVideoSnapshot = {
+  id: string;
+  projectName: string;
+  sourceUrl: string;
+  platform: Platform;
+  title?: string;
+  url: string;
+  durationSeconds: number;
+  width: number;
+  height: number;
+  resolvedAt: string;
+};
 
 export type CanvasMediaReference = {
   url: string;
@@ -27,6 +43,7 @@ export type CanvasNodeType =
   | "input.text"
   | "input.images"
   | "input.videos"
+  | "input.source-video"
   | "input.content-pool"
   | "input.library-images"
   | "input.copy-library"
@@ -36,6 +53,7 @@ export type CanvasNodeType =
   | "model.seedance"
   | "utility.image-preview"
   | "utility.display-any"
+  | "utility.video-reconstruct"
   | "utility.prompt-template"
   | "utility.text-concatenate"
   | "utility.prompt-switch"
@@ -338,7 +356,7 @@ export type CanvasScheduleCopySnapshot = {
   updatedAt: string;
 };
 
-export type CanvasScheduleParameterType = "image" | "image-group" | "text" | "copy" | "number" | "boolean" | "enum";
+export type CanvasScheduleParameterType = "image" | "image-group" | "source-video" | "text" | "copy" | "number" | "boolean" | "enum";
 export type CanvasScheduleParameterScope = "main" | "child";
 export type CanvasScheduleExpansionMode = "cartesian" | "zip";
 export type CanvasScheduleAggregationPolicy = "at-least-one" | "all";
@@ -349,12 +367,14 @@ export type CanvasScheduleParameterValue =
   | boolean
   | CanvasScheduleAssetSnapshot
   | CanvasScheduleAssetSnapshot[]
-  | CanvasScheduleCopySnapshot;
+  | CanvasScheduleCopySnapshot
+  | CanvasSourceVideoSnapshot;
 
 export type CanvasScheduleParameterSource =
   | { mode: "fixed" | "manual-list"; values: CanvasScheduleParameterValue[] }
   | { mode: "library-filter"; role: "reference" | "vehicle"; filter: CanvasScheduleAssetFilter }
-  | { mode: "copy-filter"; filter: CanvasScheduleCopyFilter };
+  | { mode: "copy-filter"; filter: CanvasScheduleCopyFilter }
+  | { mode: "source-video-links"; links: string[]; projectName: string };
 
 export type CanvasScheduleParameterBinding = {
   nodeId: string;
@@ -434,7 +454,7 @@ export type CanvasScheduleV2MainTask = {
   updatedAt: string;
 };
 
-export type CanvasBatchBindingAdapter = "config-value" | "image-input" | "copy-input";
+export type CanvasBatchBindingAdapter = "config-value" | "image-input" | "copy-input" | "source-video-input";
 
 export type CanvasBatchBindableField = {
   key: string;

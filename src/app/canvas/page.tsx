@@ -44,6 +44,7 @@ import {
   FileDown,
   FileText,
   FileUp,
+  FileVideo2,
   ExternalLink,
   GitBranch,
   Home,
@@ -91,6 +92,8 @@ import {
 } from "@/lib/canvas/clipboard";
 import { canvasNodeDefinitions, createCanvasNode, getCanvasBatchBindableFields, getCanvasNodeDefinition, getCanvasNodeExecutionMode } from "@/lib/canvas/registry";
 import { createCanvasSchedulerSkeleton } from "@/lib/canvas/scheduler-skeleton";
+import { canvasSourceVideoSnapshotConfig, canvasSourceVideoSnapshotFromConfig, clearCanvasSourceVideoSnapshot, isCanvasSourceVideoSnapshotCurrent } from "@/lib/canvas/source-video-contract";
+import type { CanvasWorkflowTemplateKey } from "@/lib/canvas/templates";
 import {
   CANVAS_WORKFLOW_FILE_MAX_BYTES,
   canvasWorkflowFileName,
@@ -135,6 +138,7 @@ import type {
   CanvasScheduleSampleCount,
   CanvasScheduleV2Definition,
   CanvasScheduleV2SharedOutput,
+  CanvasSourceVideoSnapshot,
   CanvasSchedulerRole,
   CanvasWorkflow,
 } from "@/lib/canvas/types";
@@ -177,7 +181,7 @@ const canvasHistoryCommitDelayMs = 350;
 const canvasViewportDetailZoom = { reduced: 0.65, overview: 0.35 } as const;
 const canvasEdgeAnimationDuration = { idle: 3.6, active: 1.8 } as const;
 let canvasScheduleParameterSequence = 0;
-const canvasScheduleParameterTypes = ["image", "image-group", "text", "copy", "number", "boolean", "enum"] as const satisfies readonly CanvasScheduleParameterType[];
+const canvasScheduleParameterTypes = ["image", "image-group", "source-video", "text", "copy", "number", "boolean", "enum"] as const satisfies readonly CanvasScheduleParameterType[];
 
 export default function CanvasPage() {
   const [workflows, setWorkflows] = useState<CanvasWorkflow[]>([]);
@@ -188,6 +192,7 @@ export default function CanvasPage() {
   const [selectedNodeId, setSelectedNodeId] = useState<string>();
   const [activeRun, setActiveRun] = useState<CanvasRunWithNodes>();
   const [latestSuccessfulNodeRuns, setLatestSuccessfulNodeRuns] = useState<Map<string, CanvasLatestSuccessfulNodeRun>>(new Map());
+  const [sourceVideoBusyNodeId, setSourceVideoBusyNodeId] = useState<string>();
   const [message, setMessage] = useState("正在载入画布...");
   const [busy, setBusy] = useState(false);
   const [dirty, setDirty] = useState(false);
@@ -238,9 +243,14 @@ export default function CanvasPage() {
     setDirty(true);
   }, []);
   const updateNodeConfig = useCallback((nodeId: string, key: string, value: CanvasEditableConfigValue) => {
-    setNodes((current) => current.map((node) => node.id !== nodeId ? node : {
-      ...node,
-      data: { canvasNode: { ...node.data.canvasNode, config: { ...node.data.canvasNode.config, [key]: value } } },
+    setNodes((current) => current.map((node) => {
+      if (node.id !== nodeId) return node;
+      const currentNode = node.data.canvasNode;
+      const nextConfig = { ...currentNode.config, [key]: value };
+      const config = currentNode.type === "input.source-video" && (key === "sourceUrl" || key === "projectName")
+        ? clearCanvasSourceVideoSnapshot(nextConfig)
+        : nextConfig;
+      return { ...node, data: { canvasNode: { ...currentNode, config } } };
     }));
     markDirty();
   }, [markDirty]);
@@ -414,6 +424,42 @@ export default function CanvasPage() {
       setBusy(false);
     }
   }
+  async function createWorkflowFromTemplate(templateKey: CanvasWorkflowTemplateKey) {
+    setBusy(true);
+    try {
+      const data = await api<{ workflow: CanvasWorkflow }>("/api/canvas/workflows", {
+        method: "POST",
+        body: JSON.stringify({ templateKey }),
+      });
+      setWorkflows((current) => [data.workflow, ...current]);
+      selectWorkflow(data.workflow);
+      setMessage(`已创建模板：${data.workflow.name}`);
+    } catch (error) {
+      setMessage(errorMessage(error));
+    } finally {
+      setBusy(false);
+    }
+  }
+
+  async function resolveSourceVideoNode(nodeId: string) {
+    const node = nodes.find((candidate) => candidate.id === nodeId)?.data.canvasNode;
+    if (!node || node.type !== "input.source-video" || sourceVideoBusyNodeId) return;
+    setSourceVideoBusyNodeId(nodeId);
+    try {
+      const data = await api<{ source: CanvasSourceVideoSnapshot }>("/api/canvas/source-video", {
+        method: "POST",
+        body: JSON.stringify({ sourceUrl: String(node.config.sourceUrl || ""), projectName: String(node.config.projectName || "") }),
+      });
+      updateNodeConfigPatch(nodeId, canvasSourceVideoSnapshotConfig(data.source));
+      updateNodeExecutionMode(nodeId, "enabled");
+      setMessage(`源视频已解析并入库：${data.source.title || data.source.id}`);
+    } catch (error) {
+      setMessage(errorMessage(error));
+    } finally {
+      setSourceVideoBusyNodeId(undefined);
+    }
+  }
+
 
   async function saveWorkflow(automatic = false) {
     if (!activeWorkflow || busy) return false;
@@ -1139,6 +1185,14 @@ export default function CanvasPage() {
         }}>
           <option value="">选择画布</option>
           {workflows.map((workflow) => <option key={workflow.id} value={workflow.id}>{workflow.name}{workflow.isTemplate ? " · 模板" : ""}</option>)}
+        <select className="canvas-template-select" value="" disabled={busy} aria-label="创建画布模板" onChange={(event) => {
+          const templateKey = event.target.value as CanvasWorkflowTemplateKey;
+          if (templateKey) void createWorkflowFromTemplate(templateKey);
+        }}>
+          <option value="">模板</option>
+          <option value="video-reconstruct-seedance">视频重构 · Seedance</option>
+          <option value="video-reconstruct-gpt-image">视频重构 · GPT 图片</option>
+        </select>
         </select>
         <input className="canvas-name-input" value={activeWorkflow?.name || ""} disabled={!activeWorkflow} aria-label="画布名称" onChange={(event) => {
           setActiveWorkflow((current) => current ? { ...current, name: event.target.value } : current);
@@ -1256,6 +1310,8 @@ export default function CanvasPage() {
             onSchedulerRoleChange={(role) => updateNodeSchedulerRole(selectedCanvasNode.id, role)}
             onImportImages={(files) => importImageFiles(files, selectedCanvasNode.id)}
             onPasteImages={() => pasteFromSystemClipboard(selectedCanvasNode.id)}
+            onResolveSourceVideo={() => resolveSourceVideoNode(selectedCanvasNode.id)}
+            sourceVideoBusy={sourceVideoBusyNodeId === selectedCanvasNode.id}
             onPreviewImage={openImagePreview}
             mediaBusy={mediaBusy}
           /> : <div className="canvas-inspector-empty">选择节点查看参数与端口</div>}
@@ -1366,6 +1422,7 @@ function CanvasFlowNode({ data, selected }: NodeProps<FlowNode>) {
       onChange={(value) => interaction?.onConfigChange(node.id, "text", value)}
       onFocus={() => interaction?.onNodeFocus(node.id)}
     /> : null}
+    {node.type === "input.source-video" ? <div className="canvas-node-source-video-summary"><FileVideo2 /><div><strong>{String(node.config.sourceTitle || "等待解析源视频")}</strong><small>{isCanvasSourceVideoSnapshotCurrent(node.config) ? `${Number(node.config.sourceDurationSeconds || 0).toFixed(1)} 秒 · ${node.config.sourceWidth}×${node.config.sourceHeight}` : "快照未就绪"}</small></div></div> : null}
     {node.type === "input.copy-library" ? <div className="canvas-node-copy-summary"><BookOpenText /><div><strong>{String(node.config.entryTitle || node.config.snapshotTitle || "未选择文案")}</strong><small>{configStringList(node.config.snapshotTags).slice(0, 3).join(" · ") || "无标签"}</small></div></div> : null}
     {node.type === "utility.text-split" && node.version >= 2 ? <CanvasTextSplitControls
       node={node}
@@ -1387,7 +1444,7 @@ function CanvasFlowNode({ data, selected }: NodeProps<FlowNode>) {
       </button>)}
     </div> : null}
     {node.type === "utility.text-split" ? <CanvasTextSplitNodeResult nodeRun={nodeRun} latestSuccessful={latestSuccessful} historicalRevision={historicalRevision} onPreview={(next) => interaction?.onPreview(next)} />
-      : node.type.startsWith("model.") || ["utility.prompt-template", "utility.text-concatenate", "utility.image-select", "utility.image-transform", "utility.video-frames"].includes(node.type)
+      : node.type.startsWith("model.") || ["utility.prompt-template", "utility.text-concatenate", "utility.image-select", "utility.image-transform", "utility.video-frames", "utility.video-reconstruct"].includes(node.type)
         ? <CanvasModelNodeResult node={node} nodeRun={nodeRun} latestSuccessful={latestSuccessful} historicalRevision={historicalRevision} onPreview={(next) => interaction?.onPreview(next)} />
         : null}
     {node.type === "utility.image-preview" ? <CanvasImagePreviewNodeResult nodeRun={nodeRun} latestSuccessful={latestSuccessful} onPreview={(next) => interaction?.onPreview(next)} /> : null}
@@ -1813,6 +1870,8 @@ function NodeInspector({
   onSchedulerRoleChange,
   onImportImages,
   onPasteImages,
+  onResolveSourceVideo,
+  sourceVideoBusy,
   onPreviewImage,
   mediaBusy,
 }: {
@@ -1824,6 +1883,8 @@ function NodeInspector({
   onSchedulerRoleChange: (role?: CanvasSchedulerRole) => void;
   onImportImages: (files: File[]) => Promise<void>;
   onPasteImages: () => Promise<void>;
+  onResolveSourceVideo: () => Promise<void>;
+  sourceVideoBusy: boolean;
   onPreviewImage: (url: string, index: number) => void;
   mediaBusy: boolean;
 }) {
@@ -1838,6 +1899,8 @@ function NodeInspector({
   const isGptImageV2 = node.type === "model.gpt-image" && node.version >= 2;
   const imageConfigKey = isGptImageV2 ? "referenceUrls" : "urls";
   const imageUrls = node.type === "input.images" || isGptImageV2 ? normalizeConfigUrls(node.config[imageConfigKey]) : [];
+  const sourceVideoSnapshot = node.type === "input.source-video" ? canvasSourceVideoSnapshotFromConfig(node.config) : undefined;
+  const sourceVideoCurrent = node.type === "input.source-video" && isCanvasSourceVideoSnapshotCurrent(node.config);
   const executionMode = node.executionMode === "bypass" || node.executionMode === "disabled" ? node.executionMode : "enabled";
   const commitLabel = () => {
     const normalized = labelDraft.trim().slice(0, 80) || defaultLabel;
@@ -1855,6 +1918,15 @@ function NodeInspector({
     <label><span>调度角色</span><select value={node.schedulerRole || ""} onChange={(event) => onSchedulerRoleChange((event.target.value || undefined) as CanvasSchedulerRole | undefined)}>
       <option value="">未绑定</option>
       {schedulerRolesForNode(node).map((role) => <option key={role} value={role}>{schedulerRoleLabel(role)}</option>)}
+    {node.type === "input.source-video" ? <div className="canvas-source-video-resolver">
+      <div className={`canvas-source-video-status ${sourceVideoCurrent ? "is-ready" : "is-stale"}`}>
+        {sourceVideoCurrent ? <CheckCircle2 /> : <AlertTriangle />}
+        <span><strong>{sourceVideoCurrent ? "快照已冻结" : sourceVideoSnapshot ? "快照已失效" : "等待解析"}</strong><small>{sourceVideoCurrent && sourceVideoSnapshot ? `${sourceVideoSnapshot.platform} · ${sourceVideoSnapshot.durationSeconds.toFixed(1)} 秒 · ${sourceVideoSnapshot.width}×${sourceVideoSnapshot.height}` : "修改链接或项目名后需要重新解析"}</small></span>
+      </div>
+      <button type="button" onClick={() => void onResolveSourceVideo()} disabled={sourceVideoBusy || !String(node.config.sourceUrl || "").trim() || !String(node.config.projectName || "").trim()}>
+        {sourceVideoBusy ? <LoaderCircle className="animate-spin" /> : <RefreshCw />}<span>{sourceVideoBusy ? "解析中" : "解析并入库"}</span>
+      </button>
+    </div> : null}
     </select></label>
     {node.type === "input.images" || isGptImageV2 ? <div className="canvas-image-import">
       {isGptImageV2 ? <div className="canvas-image-import-count"><strong>参考图片</strong><span>{imageUrls.length}/16</span></div> : null}
@@ -2608,9 +2680,36 @@ function CanvasScheduleV2Editor({ schedule, graph, busy, onDefinitionChange, onA
     }));
     patchDefinition({ parameters, expansion: { main: "cartesian", child: "cartesian" }, aggregationPolicy: "at-least-one" });
   };
+  const sourceVideoNode = graph.nodes.find((node) => getCanvasBatchBindableFields(node).some((field) => field.parameterTypes.includes("source-video")));
+  const promptNode = graph.nodes.find((node) => node.type === "input.text");
+  const reconstructNode = graph.nodes.find((node) => node.type === "utility.video-reconstruct");
+  const applyVideoReconstructPreset = () => {
+    if (!sourceVideoNode || !promptNode || !reconstructNode) return;
+    const sourceField = getCanvasBatchBindableFields(sourceVideoNode).find((field) => field.parameterTypes.includes("source-video"));
+    const promptField = getCanvasBatchBindableFields(promptNode).find((field) => field.parameterTypes.includes("text"));
+    if (!sourceField || !promptField) return;
+    const parameters: CanvasScheduleParameter[] = [
+      {
+        id: nextCanvasScheduleParameterId(), name: "源视频", scope: "main", valueType: "source-video",
+        source: { mode: "source-video-links", links: [], projectName: "视频内容重构" }, expansion: "each",
+        binding: { nodeId: sourceVideoNode.id, fieldKey: sourceField.key },
+      },
+      {
+        id: nextCanvasScheduleParameterId(), name: "画面提示词", scope: "main", valueType: "text",
+        source: { mode: "manual-list", values: [""] }, expansion: "each",
+        binding: { nodeId: promptNode.id, fieldKey: promptField.key },
+      },
+    ];
+    patchDefinition({
+      parameters,
+      expansion: { main: "zip", child: "cartesian" },
+      childResult: { nodeId: reconstructNode.id, outputPort: "videos", artifactKind: "videos" },
+      aggregationPolicy: "all",
+    });
+  };
   return <div className="canvas-schedule-v2">
     <section className="canvas-scheduler-bindings">
-      <header><span><strong>执行节点</strong><small>子任务输出会在主任务阶段替换为冻结结果</small></span><button type="button" disabled={graph.nodes.filter((node) => getCanvasBatchBindableFields(node).some((field) => field.parameterTypes.includes("image"))).length < 3} onClick={applyPeopleSceneVehiclePreset}><Images />人物场景预设</button></header>
+      <header><span><strong>执行节点</strong><small>子任务输出会在主任务阶段替换为冻结结果</small></span><button type="button" disabled={!sourceVideoNode || !promptNode || !reconstructNode} onClick={applyVideoReconstructPreset}><Video />视频重构预设</button><button type="button" disabled={graph.nodes.filter((node) => getCanvasBatchBindableFields(node).some((field) => field.parameterTypes.includes("image"))).length < 3} onClick={applyPeopleSceneVehiclePreset}><Images />人物场景预设</button></header>
       <div>
         <label><span>子任务结果</span><select value={`${definition.childResult.nodeId}::${definition.childResult.outputPort}`} onChange={(event) => {
           const output = childOutputs.find((candidate) => `${candidate.node.id}::${candidate.port.id}` === event.target.value);
@@ -2737,6 +2836,15 @@ function CanvasScheduleSampleCountEditor({ parameter, sampleCount, onChange }: {
 }
 
 function CanvasScheduleParameterSourceEditor({ parameter, onChange, onPreview }: { parameter: CanvasScheduleParameter; onChange: (parameter: CanvasScheduleParameter) => void; onPreview: (preview: Extract<NonNullable<PreviewState>, { kind: "image" }>) => void }) {
+  if (parameter.valueType === "source-video") {
+    const source = parameter.source.mode === "source-video-links"
+      ? parameter.source
+      : defaultCanvasScheduleParameterSource("source-video") as Extract<CanvasScheduleParameterSource, { mode: "source-video-links" }>;
+    return <div className="canvas-schedule-parameter-source canvas-schedule-parameter-values">
+      <label><span>内容池项目</span><input value={source.projectName} maxLength={80} onChange={(event) => onChange({ ...parameter, source: { ...source, projectName: event.target.value } })} /></label>
+      <label><span>源链接（每行一个，最多 200 条）</span><textarea value={source.links.join("\n")} onChange={(event) => onChange({ ...parameter, expansion: "each", source: { ...source, links: event.target.value.split(/\r?\n/).map((link) => link.trim()).filter(Boolean).slice(0, 200) } })} /></label>
+    </div>;
+  }
   if (parameter.valueType === "image" || parameter.valueType === "image-group") {
     const source = parameter.source.mode === "library-filter" ? parameter.source : defaultCanvasScheduleParameterSource(parameter.valueType) as Extract<CanvasScheduleParameterSource, { mode: "library-filter" }>;
     return <div className="canvas-schedule-parameter-source"><label><span>图库</span><select value={source.role} onChange={(event) => onChange({ ...parameter, source: { ...source, role: event.target.value as "reference" | "vehicle" } })}><option value="reference">参考图库</option><option value="vehicle">车型图库</option></select></label><ScheduleAssetFilterEditor title={parameter.valueType === "image-group" ? "图片组来源" : "图片来源"} role={source.role} filter={source.filter} singleSelection={parameter.valueType === "image" && parameter.expansion === "fixed"} filterMatchLabel onChange={(filter) => onChange({ ...parameter, source: { ...source, filter } })} onPreview={onPreview} /></div>;
@@ -3943,6 +4051,7 @@ function nextCanvasScheduleParameterId() {
 }
 
 function defaultCanvasScheduleParameterSource(valueType: CanvasScheduleParameterType): CanvasScheduleParameterSource {
+  if (valueType === "source-video") return { mode: "source-video-links", links: [], projectName: "视频内容重构" };
   if (valueType === "image" || valueType === "image-group") return { mode: "library-filter", role: "reference", filter: emptyScheduleFilter() };
   if (valueType === "copy") return { mode: "copy-filter", filter: emptyScheduleCopyFilter() };
   return { mode: "fixed", values: [defaultCanvasScheduleScalarValue(valueType)] };
@@ -3984,13 +4093,14 @@ function parseCanvasScheduleScalarValues(valueType: CanvasScheduleParameterType,
 }
 
 function canvasScheduleParameterTypeLabel(value: CanvasScheduleParameterType) {
-  return ({ image: "图片", "image-group": "图片组", text: "文本", copy: "文案记录", number: "数字", boolean: "布尔值", enum: "枚举" } as const)[value];
+  return ({ image: "图片", "image-group": "图片组", "source-video": "源视频", text: "文本", copy: "文案记录", number: "数字", boolean: "布尔值", enum: "枚举" } as const)[value];
 }
 
 function formatCanvasScheduleParameterValues(values: Record<string, CanvasScheduleParameterValue>) {
   const labels = Object.values(values).map((value) => {
     if (Array.isArray(value)) return `${value.length} 张图片`;
     if (value && typeof value === "object") {
+      if ("projectName" in value) return value.title || value.id;
       if ("url" in value) return value.name || value.id;
       if ("body" in value) return value.title;
     }
@@ -4009,7 +4119,8 @@ function canvasScheduleParameterImages(values: Record<string, CanvasSchedulePara
       && typeof value.id === "string"
       && "url" in value
       && typeof value.url === "string"
-      && value.url,
+      && value.url
+      && !("projectName" in value),
     ))
     .filter((image) => {
       const key = `${image.id}\u0000${image.url}`;
@@ -4146,11 +4257,12 @@ async function api<T = { ok: boolean }>(url: string, init?: RequestInit): Promis
 
 function errorMessage(error: unknown) { return error instanceof Error ? error.message : "操作失败"; }
 function categoryLabel(category: string) { return ({ input: "输入", model: "模型", utility: "工具", compose: "组装", publish: "发布" } as Record<string, string>)[category] || category; }
-function portKindLabel(kind: CanvasPortKind) { return ({ any: "任意", text: "文字", images: "图片", videos: "视频", socialPost: "内容", publishJobRef: "发布任务" } as Record<CanvasPortKind, string>)[kind]; }
+function portKindLabel(kind: CanvasPortKind) { return ({ any: "任意", visual: "图片或视频", text: "文字", images: "图片", videos: "视频", socialPost: "内容", publishJobRef: "发布任务" } as Record<CanvasPortKind, string>)[kind]; }
 function iconForNode(type: CanvasNodeType) {
   const props = { className: "h-4 w-4" };
   if (type === "input.text") return <Type {...props} />;
   if (type === "input.images") return <ImageIcon {...props} />;
+  if (type === "input.source-video") return <FileVideo2 {...props} />;
   if (type === "input.videos") return <Video {...props} />;
   if (type === "input.content-pool") return <Layers3 {...props} />;
   if (type === "input.library-images") return <Images {...props} />;
@@ -4160,6 +4272,7 @@ function iconForNode(type: CanvasNodeType) {
   if (type === "model.gpt-vision") return <Search {...props} />;
   if (type === "model.seedance") return <Clapperboard {...props} />;
   if (type === "utility.image-preview") return <Images {...props} />;
+  if (type === "utility.video-reconstruct") return <RefreshCw {...props} />;
   if (type === "utility.display-any") return <Eye {...props} />;
   if (type === "utility.prompt-template") return <FileText {...props} />;
   if (type === "utility.text-concatenate") return <Combine {...props} />;

@@ -58,7 +58,7 @@ const packageJson = JSON.parse(read("package.json"));
 assert.equal(packageJson.dependencies["@xyflow/react"], "^12.11.2");
 const canvasTypes = read("src/lib/canvas/types.ts");
 assert.ok(canvasTypes.includes('export type CanvasArtifactKind = "text" | "images" | "videos" | "socialPost" | "publishJobRef";'), "display-any must not add a wildcard artifact kind");
-assert.ok(canvasTypes.includes('export type CanvasPortKind = CanvasArtifactKind | "any";'), "wildcard compatibility must stay isolated to port definitions");
+assert.ok(canvasTypes.includes('export type CanvasPortKind = CanvasArtifactKind | "any" | "visual";'), "wildcard and visual compatibility must stay isolated to port definitions");
 requireText(canvasTypes, [
   'phase: "shared" | "child" | "aggregate";',
   "sharedOutputs?: CanvasScheduleV2SharedOutput[];",
@@ -73,7 +73,7 @@ const areCanvasPortKindsCompatibleForUi = compileFunction(canvasTypes, "areCanva
 const temp = mkdtempSync(path.join(tmpdir(), "fluxpost-canvas-check-"));
 try {
   writeFileSync(path.join(temp, "toapis-image-api.js"), `exports.toApisImageRatios = ${JSON.stringify(["1:1", "3:2", "2:3", "4:3", "3:4", "5:4", "4:5", "16:9", "9:16", "2:1", "1:2", "21:9", "9:21"])}; exports.toApis4kImageRatios = ${JSON.stringify(["16:9", "9:16", "2:1", "1:2", "21:9", "9:21"])};`, "utf8");
-  for (const name of ["types", "node-utils", "registry", "graph", "serialization", "clipboard", "workflow-file"]) {
+  for (const name of ["types", "node-utils", "source-video-contract", "registry", "graph", "serialization", "clipboard", "workflow-file"]) {
     const source = read(`src/lib/canvas/${name}.ts`).replace('"../toapis-image-api"', '"./toapis-image-api"');
     const output = ts.transpileModule(source, {
       compilerOptions: { module: ts.ModuleKind.CommonJS, target: ts.ScriptTarget.ES2022 },
@@ -145,6 +145,10 @@ try {
     assert.equal(areCanvasPortKindsCompatible(kind, kind), true, `${kind} must retain exact compatibility`);
   }
   assert.equal(areCanvasPortKindsCompatible("any", "text"), false, "wildcard outputs must not connect to typed inputs");
+  assert.equal(areCanvasPortKindsCompatible("images", "visual"), true, "image outputs must connect to visual inputs");
+  assert.equal(areCanvasPortKindsCompatible("videos", "visual"), true, "video outputs must connect to visual inputs");
+  assert.equal(areCanvasPortKindsCompatible("text", "visual"), false, "text outputs must not connect to visual inputs");
+  assert.equal(areCanvasPortKindsCompatible("visual", "videos"), false, "visual must remain input-only");
   assert.equal(areCanvasPortKindsCompatible("text", "images"), false, "existing mismatched types must stay incompatible");
   const commonNodeContracts = {
     "input.content-pool": { inputs: [], outputs: ["title:text", "body:text", "source:text", "images:images", "videos:videos"] },
@@ -157,6 +161,8 @@ try {
     "utility.image-transform": { inputs: ["images:images"], outputs: ["images:images"] },
     "utility.video-frames": { inputs: ["videos:videos"], outputs: ["images:images"] },
     "utility.display-any": { inputs: ["value:any"], outputs: [] },
+    "input.source-video": { inputs: [], outputs: ["videos:videos"] },
+    "utility.video-reconstruct": { inputs: ["source:videos", "replacement:visual"], outputs: ["videos:videos"] },
   };
   for (const [type, contract] of Object.entries(commonNodeContracts)) {
     const definition = getCanvasNodeDefinition(type);
@@ -621,11 +627,21 @@ const mediaTools = loadTsModule("src/lib/canvas/media-tools.ts", {
   "node:child_process": {
     execFile: (command, args, _options, callback) => {
       mediaCommands.push({ command, args });
-      callback(null, command === "ffprobe" ? JSON.stringify({ format: { duration: "8" }, streams: [{ width: 3840, height: 2160 }] }) : "", "");
+      callback(null, command === "ffprobe" ? JSON.stringify({ format: { duration: "8", format_name: "mov,mp4" }, streams: [{ codec_type: "video", width: 3840, height: 2160 }] }) : "", "");
       return { on: () => undefined };
     },
   },
-  "node:fs/promises": { mkdir: async () => undefined, stat: async () => { throw new Error("missing"); } },
+  "node:fs/promises": {
+    mkdir: async () => undefined,
+    copyFile: async () => undefined,
+    rename: async () => undefined,
+    rm: async () => undefined,
+    stat: async (filePath) => {
+      if (String(filePath).includes("canvas-tools")) throw new Error("missing");
+      return { size: 1024, isFile: () => true };
+    },
+  },
+  "../concurrency": { runWithConcurrencyPool: async (_name, task) => task() },
   "../runtime-media-materializer": {
     materializeRuntimeMedia: async (url, options) => {
       materializedMedia.push({ url, options });
@@ -664,6 +680,7 @@ const missingMediaTools = loadTsModule("src/lib/canvas/media-tools.ts", {
     },
   },
   "node:fs/promises": { mkdir: async () => undefined, stat: async () => { throw new Error("missing"); } },
+  "../concurrency": { runWithConcurrencyPool: async (_name, task) => task() },
   "../runtime-media-materializer": { materializeRuntimeMedia: async () => ({ filePath: "C:/tmp/a.jpg", cleanup: async () => undefined }) },
   "../runtime-media-storage": { findExistingRuntimeMedia: async () => undefined, persistRuntimeMedia: async () => "unused" },
   "./node-utils": nodeUtilsModule,

@@ -1,6 +1,7 @@
 import type { CanvasBatchBindableField, CanvasGraph, CanvasNode, CanvasNodeConfig, CanvasNodeDefinition, CanvasNodeExecutionMode, CanvasNodeType } from "./types";
 import { toApis4kImageRatios, toApisImageRatios } from "../toapis-image-api";
 import { canvasPromptPresets, canvasVisionPresets, parseCanvasImageSelection, parseCanvasVideoTimestamps, resolveCanvasImageDimensions } from "./node-utils";
+import { defaultCanvasSourceVideoProjectName, isCanvasSourceVideoSnapshotCurrent } from "./source-video-contract";
 
 const canvasNodeDefinitionVersions: CanvasNodeDefinition[] = [
   {
@@ -41,6 +42,22 @@ const canvasNodeDefinitionVersions: CanvasNodeDefinition[] = [
     outputs: [{ id: "videos", label: "视频", kind: "videos" }],
     fields: [{ key: "urls", label: "视频 URL", kind: "url-list", placeholder: "每行一个视频 URL" }],
     defaultConfig: { urls: [] },
+  },
+  {
+    type: "input.source-video",
+    version: 1,
+    label: "源视频",
+    description: "解析链接、写入内容池并冻结可运行的视频快照。",
+    category: "input",
+    icon: "FileVideo2",
+    color: "#c2410c",
+    inputs: [],
+    outputs: [{ id: "videos", label: "源视频", kind: "videos" }],
+    fields: [
+      { key: "sourceUrl", label: "源链接", kind: "text", placeholder: "粘贴平台分享链接或直接视频 URL" },
+      { key: "projectName", label: "内容池项目", kind: "text", placeholder: defaultCanvasSourceVideoProjectName },
+    ],
+    defaultConfig: { sourceUrl: "", projectName: defaultCanvasSourceVideoProjectName },
   },
   {
     type: "input.content-pool",
@@ -250,6 +267,23 @@ const canvasNodeDefinitionVersions: CanvasNodeDefinition[] = [
     fields: [],
     defaultConfig: {},
     passiveSink: true,
+  },
+  {
+    type: "utility.video-reconstruct",
+    version: 1,
+    label: "视频内容重构",
+    description: "保留源视频第一音轨，以单图或循环视频替换画面。",
+    category: "utility",
+    icon: "RefreshCw",
+    color: "#0891b2",
+    inputs: [
+      { id: "source", label: "源视频", kind: "videos", required: true },
+      { id: "replacement", label: "替代画面", kind: "visual", required: true },
+    ],
+    outputs: [{ id: "videos", label: "重构视频", kind: "videos" }],
+    fields: [],
+    defaultConfig: {},
+    bypass: { inputPort: "source", outputPort: "videos" },
   },
   {
     type: "utility.prompt-template",
@@ -523,6 +557,9 @@ export function getCanvasBatchBindableFields(node: Pick<CanvasNode, "type" | "ve
   const definition = getCanvasNodeDefinition(node.type, node.version);
   if (!definition) return [];
   return definition.fields.flatMap((field): CanvasBatchBindableField[] => {
+    if (node.type === "input.source-video" && field.key === "sourceUrl") {
+      return [{ key: field.key, label: field.label, parameterTypes: ["source-video"], adapter: "source-video-input" }];
+    }
     if (node.type === "input.library-images" && field.key === "assetIds") {
       return [{ key: field.key, label: field.label, parameterTypes: ["image", "image-group"], adapter: "image-input" }];
     }
@@ -591,6 +628,11 @@ export function validateCanvasNodeConfig(type: CanvasNodeType, config: CanvasNod
   if (type === "input.text" && !String(config.text || "").trim()) errors.push("文字节点内容不能为空。");
   if ((type === "input.images" || type === "input.videos") && !normalizeUrlList(config.urls).length) {
     errors.push(`${definition.label}至少需要一个 URL。`);
+  }
+  if (type === "input.source-video") {
+    if (!String(config.sourceUrl || "").trim()) errors.push("源视频链接不能为空。");
+    if (!String(config.projectName || "").trim()) errors.push("源视频内容池项目不能为空。");
+    if (!isCanvasSourceVideoSnapshotCurrent(config)) errors.push("源视频尚未解析，或冻结快照已失效。");
   }
   if (type === "model.gpt-text" && !String(config.instruction || "").trim()) errors.push("GPT 文本节点指令不能为空。");
   if (type === "input.content-pool") {

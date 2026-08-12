@@ -2,6 +2,7 @@ import { NextResponse } from "next/server";
 import { createCanvasWorkflow, listCanvasWorkflows } from "@/lib/canvas/workflows";
 import type { CanvasGraph } from "@/lib/canvas/types";
 import { isWorkspaceSignInError, requireWorkspaceAccount } from "@/lib/workspace-accounts";
+import { isCanvasWorkflowTemplateKey, type CanvasWorkflowTemplateKey } from "@/lib/canvas/templates";
 
 export const runtime = "nodejs";
 
@@ -17,7 +18,8 @@ export async function GET(request: Request) {
 export async function POST(request: Request) {
   try {
     const account = await requireWorkspaceAccount(request);
-    const body = (await request.json()) as { name?: string; graph?: CanvasGraph; isTemplate?: boolean };
+    const body = (await request.json()) as { name?: string; graph?: CanvasGraph; isTemplate?: boolean; templateKey?: CanvasWorkflowTemplateKey };
+    if (body.templateKey !== undefined && !isCanvasWorkflowTemplateKey(body.templateKey)) throw new Error("Unsupported Canvas template key.");
     const workflow = await createCanvasWorkflow(account, body);
     return NextResponse.json({ workflow }, { status: 201 });
   } catch (error) {

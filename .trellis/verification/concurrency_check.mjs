@@ -37,6 +37,11 @@ assertContains(
 );
 assertContains(
   concurrency,
+  /localVideo:\s*readConcurrencyEnv\("WORKER_LOCAL_VIDEO_CONCURRENCY",\s*1,\s*4\)/,
+  "Local video encoding must default to one worker and have a hard cap of four.",
+);
+assertContains(
+  concurrency,
   /feishu:\s*readConcurrencyEnv\("WORKER_FEISHU_CONCURRENCY",\s*50,\s*50\)/,
   "Feishu pool must default to 50 and cap at 50.",
 );
@@ -61,6 +66,7 @@ assertContains(sourceTagging, /mapWithConcurrency\(items,\s*concurrencyConfig\.g
 assertContains(imageGeneration, /runWithConcurrencyPool\("image"/, "Image generation calls must use the image concurrency pool.");
 assertContains(imageGeneration, /runComfyUiKleinImageTask/, "Klein-routed image tasks must use the local ComfyUI image path.");
 assertContains(read("src/lib/comfyui-klein.ts"), /runWithConcurrencyPool\("localImage"/, "ComfyUI Klein must use the serialized local image pool.");
+assertContains(read("src/lib/canvas/media-tools.ts"), /runWithConcurrencyPool\("localVideo"/, "Canvas FFmpeg reconstruction must use the local video pool.");
 assertContains(
   imageGeneration,
   /Math\.min\(Math\.max\(Math\.floor\(candidate\),\s*1\),\s*concurrencyConfig\.image\)/,
