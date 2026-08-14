@@ -32,16 +32,16 @@ Produce a clean, fully verified production candidate that reconciles the current
 
 ## Acceptance Criteria
 
-- [ ] AC1: The approved candidate scope maps every included commit and working-tree file to a feature or required integration fix, with unrelated changes excluded. (R1-R4)
-- [ ] AC2: The candidate is based on the latest fetched GitHub `main`, retains required remote fixes, and contains no secrets, runtime state, generated media, or debug artifacts. (R2-R4)
-- [ ] AC3: Focused checks and the complete deterministic baseline pass for the exact candidate SHA, or deployment remains blocked with the failure reported. (R5)
-- [ ] AC4: A dedicated GitHub branch exposes the exact verified full SHA, and local/remote SHA equality is recorded. (R6)
-- [ ] AC5: Read-only production preflight passes and records a usable rollback release before any production mutation. (R7)
-- [ ] AC6: The user explicitly approves the evidenced full SHA after local verification and production preflight. (R8)
-- [ ] AC7: Production deploys the approved full SHA through the installed release wrapper without replacing environment files or deleting named volumes. (R9)
-- [ ] AC8: Post-deploy identity, route, auth, schema, worker, database, volume, Nginx, public HTTPS, and protected-service checks pass. (R10)
-- [ ] AC9: The previous production release remains available, and any failed activation or post-deploy gate restores it without data-volume deletion. (R11)
-- [ ] AC10: The release inventory contains only the approved feature groups in R12 and their required checks/spec facts; every R13 exclusion remains outside the candidate. (R12-R13)
+- [x] AC1: The approved candidate scope maps every included commit and working-tree file to a feature or required integration fix, with unrelated changes excluded. (R1-R4)
+- [x] AC2: The candidate is based on the latest fetched GitHub `main`, retains required remote fixes, and contains no secrets, runtime state, generated media, or debug artifacts. (R2-R4)
+- [x] AC3: Focused checks and the complete deterministic baseline pass for the exact candidate SHA, or deployment remains blocked with the failure reported. (R5)
+- [x] AC4: A dedicated GitHub branch exposes the exact verified full SHA, and local/remote SHA equality is recorded. (R6)
+- [x] AC5: Read-only production preflight passes and records a usable rollback release before any production mutation. (R7)
+- [x] AC6: The user explicitly approves the evidenced full SHA after local verification and production preflight. (R8)
+- [x] AC7: Production deploys the approved full SHA through the installed release wrapper without replacing environment files or deleting named volumes. (R9)
+- [x] AC8: Post-deploy identity, route, auth, schema, worker, database, volume, Nginx, public HTTPS, and protected-service checks pass. (R10)
+- [x] AC9: The previous production release remains available, and any failed activation or post-deploy gate restores it without data-volume deletion. (R11)
+- [x] AC10: The release inventory contains only the approved feature groups in R12 and their required checks/spec facts; every R13 exclusion remains outside the candidate. (R12-R13)
 - [ ] AC11: After production verification, GitHub `main` contains the deployed candidate SHA without force-push, while the original local dirty worktree and its branch remain intact. (R14)
 
 ## Out Of Scope

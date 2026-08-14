@@ -304,6 +304,7 @@ return NextResponse.json({ status: getConfigStatus(), advanced: getAdvancedConfi
 ### 4. Validation & Error Matrix
 
 - Bad or non-resolving ref -> exit before release/build.
+- Windows PowerShell multi-line SSH input adds a carriage return to the ref -> the wrapper rejects the ref before mutation; rerun `--check --ref` and pass the approved 40-hex SHA as a direct remote command or transmit an explicitly UTF-8/base64-encoded LF script.
 - Local baseline failure or missing operator approval -> do not start the remote deploy.
 - Missing Docker `verification` target, verifier build failure, or verifier/deploy lock contention -> do not write a passing verification manifest and do not deploy.
 - Failed 38 app/PostgreSQL/public health -> restore the prior manifest/image and keep all volumes.
@@ -321,7 +322,7 @@ return NextResponse.json({ status: getConfigStatus(), advanced: getAdvancedConfi
 ### 6. Tests Required
 
 - Automated: deploy wrapper v4/bootstrap v3/verifier v1, lock, clean-archive verification, full-id cleanup selection, dry-run immutability, referenced-image protection, success/failure ordering, timer units, ref/manifest/rollback/domain/memory/shell/destructive guards in `vps_deployment_check.mjs`, plus the full Trellis baseline.
-- Live: preview selections before apply; release/manifest/image SHA equality; app/PostgreSQL health; loopback 3101; `https://flux.lightmoment.net` HTTP 200; Nginx/Open WebUI; unchanged named volumes; current plus two rescue images; no unused verification tags; and an active weekly timer.
+- Live: preview selections before apply; direct-command `--check --ref` equality on Windows; release/manifest/image SHA equality; app/PostgreSQL health; loopback 3101; `https://flux.lightmoment.net` HTTP 200; Nginx/Open WebUI; unchanged named volumes; current plus two rescue images; no unused verification tags; and an active weekly timer.
 
 ### 7. Wrong vs Correct
 
