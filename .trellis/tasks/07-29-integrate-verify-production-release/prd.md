@@ -42,7 +42,7 @@ Produce a clean, fully verified production candidate that reconciles the current
 - [x] AC8: Post-deploy identity, route, auth, schema, worker, database, volume, Nginx, public HTTPS, and protected-service checks pass. (R10)
 - [x] AC9: The previous production release remains available, and any failed activation or post-deploy gate restores it without data-volume deletion. (R11)
 - [x] AC10: The release inventory contains only the approved feature groups in R12 and their required checks/spec facts; every R13 exclusion remains outside the candidate. (R12-R13)
-- [ ] AC11: After production verification, GitHub `main` contains the deployed candidate SHA without force-push, while the original local dirty worktree and its branch remain intact. (R14)
+- [x] AC11: After production verification, GitHub `main` contains the deployed candidate SHA without force-push, while the original local dirty worktree and its branch remain intact. (R14)
 
 ## Out Of Scope
 

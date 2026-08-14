@@ -34,8 +34,8 @@
 - [x] Deploy with `/opt/fluxpost-studio/bin/deploy.sh --ref <approved-full-sha>` only.
 - [x] Verify deployed identity, app/PostgreSQL, `/library`, `/copy-library`, `/canvas`, unsigned API auth, required tables/workers, named volumes, loopback/public HTTPS, Nginx, rollback retention, and protected services.
 - [x] On any failed post-deploy gate, roll back to the captured release and verify restoration; no rollback was required because every gate passed.
-- [ ] Re-fetch `origin/main`, prove it remains an ancestor of the deployed candidate, then fast-forward GitHub `main` without force-push.
-- [ ] Confirm remote `main` contains the deployed SHA, update final Trellis evidence, validate the task, and finish the task workflow.
+- [x] Re-fetch `origin/main`, prove it remains an ancestor of the deployed candidate, then fast-forward GitHub `main` without force-push.
+- [x] Confirm remote `main` contains the deployed SHA, update final Trellis evidence, validate the task, and finish the task workflow.
 
 ## Stop Conditions
 

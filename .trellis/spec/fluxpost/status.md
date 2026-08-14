@@ -4,7 +4,7 @@ Last updated: 2026-08-14
 
 ## One-Line Status
 
-Production runs exact SHA `5be0cb988580149037655d4213be6faa835c820d` as release `20260814-025955-5be0cb988580`; the release branch is pushed, verified, and awaiting evidence-commit baseline plus non-force GitHub `main` promotion.
+Production runs exact SHA `5be0cb988580149037655d4213be6faa835c820d` as release `20260814-025955-5be0cb988580`; the verified release history and deployment evidence are on GitHub `main`.
 
 ## Current Focus
 
@@ -16,9 +16,8 @@ Production runs exact SHA `5be0cb988580149037655d4213be6faa835c820d` as release 
 
 ## Next Entry
 
-1. Run the complete baseline on the post-deploy evidence commit and push it to the dedicated release branch.
-2. Re-fetch `origin/main`, require `150f75d479be9461063474cb2302c7ff439fa202` or its unchanged proven ancestry, then advance GitHub `main` by normal non-force push.
-3. Keep provider smokes, authenticated production workflows, and external writes behind separate operator approval.
+1. Treat release `20260814-025955-5be0cb988580` as the rollback baseline for the next production change.
+2. Keep provider smokes, authenticated production workflows, and external writes behind separate operator approval.
 
 ## Recent Verification
 
@@ -38,7 +37,7 @@ Production runs exact SHA `5be0cb988580149037655d4213be6faa835c820d` as release 
 - TOS/provider credentials, database values, environment files, local accounts, runtime rows, generated media, and debug artifacts must never enter Git or Trellis context.
 - `@volcengine/tos-sdk@2.9.1` retains published Axios advisories without an upstream SDK fix.
 - Never remove `fluxpost-config`, PostgreSQL, data, media, generated, or node-home volumes during deploy or rollback.
-- GitHub `main` promotion remains pending until the post-deploy evidence commit passes the full baseline and the remote ancestry guard is rechecked.
+- GitHub `main` contains the deployed SHA through normal fast-forward history; future deploys still require a newly verified exact SHA.
 
 ## Necessary History Paths
 
