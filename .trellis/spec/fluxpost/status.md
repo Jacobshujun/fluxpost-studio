@@ -4,7 +4,7 @@ Last updated: 2026-08-14
 
 ## One-Line Status
 
-Production runs exact SHA `5be0cb988580149037655d4213be6faa835c820d` as release `20260814-025955-5be0cb988580`; the Canvas batch-schedule copy-name fix is locally verified in an isolated candidate worktree and pending fixed-SHA production gates.
+Production runs `5be0cb988580149037655d4213be6faa835c820d` as `20260814-025955-5be0cb988580`; the locally verified batch-copy naming fix awaits fixed-SHA production gates.
 
 ## Current Focus
 
@@ -13,11 +13,11 @@ Production runs exact SHA `5be0cb988580149037655d4213be6faa835c820d` as release 
 - Release `20260814-025955-5be0cb988580` has healthy app/PostgreSQL, enabled workers, HTTP 200 on the key workspaces, expected 401/405 auth and method boundaries, unchanged seven-volume inventory, zero active work, two rescue images, and an active BuildKit cleanup timer.
 - The original dirty root worktree and its unfinished visual-node/shared-library artifacts remain unchanged and outside the candidate.
 - No provider or external write was used as release verification.
-- Batch-schedule duplication now normalizes legacy/stacked/time-stamped copy suffixes to one `副本 YYYYMMDD-HHmmss` marker using the duplicate `createdAt` instant in `Asia/Shanghai`; valid 80-character source names remain copyable by truncating only the base portion.
+- Batch-schedule copies normalize trailing markers to `副本 YYYYMMDD-HHmmss` from `createdAt` in `Asia/Shanghai`; only the base is truncated at the 80-character limit.
 
 ## Next Entry
 
-1. Commit and push the clean batch-schedule copy-name candidate, verify its remote full SHA, then run isolated VPS verification and read-only production preflight.
+1. Push the clean candidate, verify its remote full SHA, then run isolated VPS verification and production preflight.
 2. Obtain exact-SHA approval before deploying through the installed release wrapper; keep provider smokes, authenticated production workflows, and external writes out of this release.
 
 ## Recent Verification
