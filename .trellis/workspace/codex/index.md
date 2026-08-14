@@ -8,8 +8,8 @@
 
 <!-- @@@auto:current-status -->
 - **Active File**: `journal-1.md`
-- **Total Sessions**: 22
-- **Last Active**: 2026-08-04
+- **Total Sessions**: 23
+- **Last Active**: 2026-08-14
 <!-- @@@/auto:current-status -->
 
 ---
@@ -19,7 +19,7 @@
 <!-- @@@auto:active-documents -->
 | File | Lines | Status |
 |------|-------|--------|
-| `journal-1.md` | ~747 | Active |
+| `journal-1.md` | ~781 | Active |
 <!-- @@@/auto:active-documents -->
 
 ---
@@ -29,6 +29,7 @@
 <!-- @@@auto:session-history -->
 | # | Date | Title | Commits | Branch |
 |---|------|-------|---------|--------|
+| 23 | 2026-08-14 | Deploy production candidate and converge main | `c3c3c4e451840ba6f7dcd74b7fd95c2e1afb69e4`, `8c3e8e37d4204f8ec1bcc7ab8dc6c02a12a982d0` | `release/production-candidate-20260814` |
 | 22 | 2026-08-04 | Deploy configurable content safety policy | `e6692c3`, `91db201` | `release/production-20260803` |
 | 21 | 2026-08-04 | Configurable content safety policy | `91c6b04`, `268c46d` | `release/production-20260803` |
 | 20 | 2026-08-04 | Deploy durable Feishu bulk publishing | `39f99e2415fa93c08e8727bea30841e88d28a2a6`, `4107864` | `release/production-20260803` |

@@ -745,3 +745,37 @@ Pushed and isolated-verified exact SHA e6692c3d0cce807106e343c43a9804be2686ec3d,
 ### Next Steps
 
 - None - task complete
+
+
+## Session 23: Deploy production candidate and converge main
+
+**Date**: 2026-08-14
+**Task**: Deploy production candidate and converge main
+**Branch**: `release/production-candidate-20260814`
+
+### Summary
+
+Deployed exact SHA 5be0cb988580149037655d4213be6faa835c820d as release 20260814-025955-5be0cb988580 after zero-work preflight and validated backup; post-deploy gates passed, evidence was committed, GitHub main converged without force, and the release task was archived.
+
+### Main Changes
+
+(Add details)
+
+### Git Commits
+
+| Hash | Message |
+|------|---------|
+| `c3c3c4e451840ba6f7dcd74b7fd95c2e1afb69e4` | (see git log) |
+| `8c3e8e37d4204f8ec1bcc7ab8dc6c02a12a982d0` | (see git log) |
+
+### Testing
+
+- [OK] (Add test results)
+
+### Status
+
+[OK] **Completed**
+
+### Next Steps
+
+- None - task complete
