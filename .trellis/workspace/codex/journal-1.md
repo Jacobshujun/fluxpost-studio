@@ -814,3 +814,37 @@ Normalized Canvas batch schedule duplicate names with Beijing-time task numbers,
 ### Next Steps
 
 - None - task complete
+
+
+## Session 25: Deploy Canvas save-images
+
+**Date**: 2026-08-14
+**Task**: Deploy Canvas save-images
+**Branch**: `feature/canvas-save-images-20260814`
+
+### Summary
+
+Implemented and verified the passive Canvas save-images node and authenticated streaming download route, deployed exact SHA 39a35f8dd869d50df9008ba708e14b92eeefc761 as release 20260814-085108-39a35f8dd869 after explicit approval and zero-work backup gates, validated health/auth/workers/schema/volumes/logs/rollback, and fast-forwarded GitHub main.
+
+### Main Changes
+
+(Add details)
+
+### Git Commits
+
+| Hash | Message |
+|------|---------|
+| `39a35f8dd869d50df9008ba708e14b92eeefc761` | (see git log) |
+| `3404851` | (see git log) |
+
+### Testing
+
+- [OK] (Add test results)
+
+### Status
+
+[OK] **Completed**
+
+### Next Steps
+
+- None - task complete
