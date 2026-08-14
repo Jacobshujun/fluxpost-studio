@@ -29,8 +29,8 @@ const types = read("src/lib/types.ts");
 const globals = read("src/app/globals.css");
 const approveDraftSource = reviewPage.match(/async function approveDraft\(\) \{[\s\S]*?\n  \}/)?.[0];
 const uploadAdditionSource = reviewPage.match(/async function uploadDraftImageAddition\(file: File\) \{[\s\S]*?\n  \}/)?.[0];
-const addTileSource = reviewPage.match(/function ReviewImageAddTile\([\s\S]*?\n}\n\nfunction /)?.[0];
-const uploadPanelSource = reviewPage.match(/function ReviewImageUploadPanel\([\s\S]*?\n}\n\nfunction /)?.[0];
+const addTileSource = reviewPage.match(/function ReviewImageAddTile\([\s\S]*?\r?\n}\r?\n\r?\nfunction /)?.[0];
+const uploadPanelSource = reviewPage.match(/function ReviewImageUploadPanel\([\s\S]*?\r?\n}\r?\n\r?\nfunction /)?.[0];
 
 if (!approveDraftSource) {
   throw new Error("Review desk should define an approveDraft action.");
