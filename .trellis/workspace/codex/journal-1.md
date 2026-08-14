@@ -779,3 +779,38 @@ Deployed exact SHA 5be0cb988580149037655d4213be6faa835c820d as release 20260814-
 ### Next Steps
 
 - None - task complete
+
+
+## Session 24: Deploy batch schedule copy naming fix
+
+**Date**: 2026-08-14
+**Task**: Deploy batch schedule copy naming fix
+**Branch**: `fix/canvas-schedule-copy-name-20260814`
+
+### Summary
+
+Normalized Canvas batch schedule duplicate names with Beijing-time task numbers, verified exact SHA 669a3272f764a05f994b87875ff6a9fc8df78675 locally and on VPS, deployed release 20260814-055428-669a3272f764, and passed post-deploy identity, health, auth, schema, queue, volume, protected-service, and rollback gates.
+
+### Main Changes
+
+(Add details)
+
+### Git Commits
+
+| Hash | Message |
+|------|---------|
+| `c265aa5560bfd76be580d6b7d8e375d117fca5ef` | (see git log) |
+| `669a3272f764a05f994b87875ff6a9fc8df78675` | (see git log) |
+| `9999d22` | (see git log) |
+
+### Testing
+
+- [OK] (Add test results)
+
+### Status
+
+[OK] **Completed**
+
+### Next Steps
+
+- None - task complete
