@@ -9,6 +9,7 @@ import { DreaminaNeedsConfigError, queryDreaminaVideo, submitDreaminaVideo } fro
 import { CanvasMediaNeedsConfigError, extractCanvasVideoFrames, reconstructCanvasVideo, transformCanvasImages } from "./media-tools";
 import { canvasVisionPresets, concatenateCanvasText, parseCanvasImageSelection, renderCanvasPromptTemplate, splitCanvasText } from "./node-utils";
 import { normalizeUrlList } from "./registry";
+import { CANVAS_SAVE_IMAGE_MAX_ITEMS } from "./save-images";
 import { canvasSourceVideoSnapshotFromConfig, isCanvasSourceVideoSnapshotCurrent } from "./source-video-contract";
 import type { CanvasArtifact, CanvasMediaReference, CanvasNode, CanvasNodeRun } from "./types";
 
@@ -56,6 +57,7 @@ const executors: Record<CanvasNode["type"], CanvasNodeExecutor> = {
   "model.gpt-vision": executeGptVision,
   "model.seedance": executeSeedance,
   "utility.image-preview": executeImagePreview,
+  "utility.save-images": executeSaveImages,
   "utility.display-any": executeDisplayAny,
   "utility.video-reconstruct": executeVideoReconstruct,
   "utility.prompt-template": executePromptTemplate,
@@ -119,6 +121,14 @@ async function executeImagePreview({ inputs }: CanvasNodeExecutionContext) {
   const items = (inputs.images || []).flatMap((artifact) => artifact.kind === "images" ? artifact.items : []);
   if (!items.length) throw new Error("Image preview requires a successful upstream image result.");
   return { outputs: { images: { kind: "images" as const, items: structuredClone(items) } } };
+}
+
+async function executeSaveImages({ inputs }: CanvasNodeExecutionContext) {
+  const items = imageItems(inputs.images);
+  if (!items.length || items.length > CANVAS_SAVE_IMAGE_MAX_ITEMS) {
+    throw new Error(`Save images requires 1 to ${CANVAS_SAVE_IMAGE_MAX_ITEMS} images.`);
+  }
+  return { outputs: { downloads: { kind: "images" as const, items: structuredClone(items) } } };
 }
 
 async function executeDisplayAny({ inputs }: CanvasNodeExecutionContext) {

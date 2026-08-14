@@ -601,6 +601,7 @@ throw new ImageProviderError("accepted task timed out", {
 
 - `GET|POST /api/canvas/workflows`; `GET|PATCH|DELETE /api/canvas/workflows/:id`.
 - `POST /api/canvas/runs` accepts `{ workflowId, targetNodeIds?, runMode?: "with-upstream" | "isolated", confirmed?, confirmationNodeIds? }`; omission keeps `with-upstream`. `GET /api/canvas/runs?workflowId=...` returns recent runs plus durable latest-success projections; `GET|PATCH /api/canvas/runs/:id` reads/cancels/retries.
+- `GET /api/canvas/runs/:runId/downloads/images?nodeRunId=<id>&index=<zero-based>` streams one frozen save-node image to the signed-in run owner/admin; callers never submit a media URL or filename.
 - `POST /api/canvas/media` accepts authenticated multipart `files` and returns `{ images: [{ imageUrl, bytes, mimeType }] }`.
 - `GET|POST /api/canvas/schedules`; `GET|PATCH|DELETE /api/canvas/schedules/:id`. PATCH actions are `save|preflight|resample|launch|duplicate|pause|resume|cancel|retry|accept-candidates` and carry the current revision plus action-specific ids.
 - `GET|POST /api/copy-library`; `GET|PATCH|DELETE /api/copy-library/:id`. Copy entries store `title`, `body`, normalized manual `tags`, `visibility`, owner, and timestamps in `copy_library_entries` for both database backends.
@@ -631,6 +632,8 @@ throw new ImageProviderError("accepted task timed out", {
 - `compose.social-post@1` accepts optional single text input `vehicle`, trims it into `GeneratedPost.feishuVehicle`, and no longer exposes vehicle as new-node config. Connected text takes precedence; persisted `config.vehicle` remains a read-only fallback for historical nodes.
 - `utility.image-preview` copies URL/metadata-only image artifacts into node runs. Direct sinks run passively after an included image producer; failed, cancelled, blocked, or empty attempts never replace the last output-bearing success. Durable lookup joins all workflow runs rather than scanning the recent-run limit.
 - `utility.display-any@1` is an outputless passive sink with one required, single-connection `value:any` input. Its executor requires exactly one upstream `CanvasArtifact` and clones it to the non-connectable `nodeRun.outputs.preview`; the node UI renders all five existing artifact kinds and uses the ordinary input fingerprint for reuse. It adds no capability or confirmation.
+- `utility.save-images@1` is an outputless, non-bypassable passive sink with one required, multi-connection `images` input and config `{ filenamePrefix: string }`, default `FluxPost`. Its executor clones 1-30 ordered image references into non-connectable `nodeRun.outputs.downloads`; it creates no artifact kind, table, ZIP/TXT, permanent media copy, automatic download, provider capability, or external write. The desktop UI serially fetches current or latest-success results, releases each Blob URL after the click, continues after per-image failure, and synchronously guards duplicate batches.
+- Save-image prefixes allow 1-80 Unicode code points but reject C0/C1 controls, `< > : " / \\ | ? *`, empty/whitespace-only values, and a trailing space or period. The route re-reads the owner-visible immutable run snapshot, requires a matching successful/reused `utility.save-images` node run, materializes only its persisted URL with a 30 MB limit, sniffs bytes through `sniffImageFormat`, and returns `<prefix>_0001.<real-extension>` with `Content-Type`, `Content-Length`, RFC 5987 `Content-Disposition`, `private, no-store`, and `nosniff`. Stream close/error/cancel cleans temporary media.
 - `isolated` requires one target: literal inputs execute from current config, other ancestors reuse compatible success, and missing reuse blocks before enqueue. Ordinary compatibility covers node id/type/version/config/mode plus normalized resolved inputs; preview compatibility uses incoming-edge identity. It never silently reruns a model/write ancestor.
 - Planning propagates output-port availability. Missing required input blocks only that branch; optional input does not. Confirmation includes only `execute` steps, excluding reuse/bypass/disabled/blocked. With-upstream branch blockers are non-fatal so independent branches run; isolated blockers are fatal preflight errors.
 - The `/canvas` client immediately acknowledges and enqueues every successful capability plan, including billable models and `external_write`; it shows no confirmation dialog. The server still validates `confirmed` plus exact `confirmationNodeIds`, so stale or non-planned callers fail closed.
@@ -657,6 +660,7 @@ throw new ImageProviderError("accepted task timed out", {
 - Missing/invalid node type, node config, port, owner, or graph cycle -> domain error/HTTP `400`.
 - Missing size -> legacy default layout. Non-finite, partial, below-`190x120`, or above-`720x900` persisted size -> graph validation error/HTTP `400`; the same malformed size in a clipboard envelope invalidates the envelope.
 - Member access to another owner's workflow/run -> not found behavior; admins follow existing owner access rules.
+- Save-image download without a session -> HTTP `401`; missing/inaccessible run or mismatched/non-save node run -> `404`; malformed index, incomplete result, invalid frozen prefix, empty/over-30 result, out-of-range item, over-30-MB media, or unrecognized image bytes -> `400`.
 - Stale workflow revision -> HTTP `409`.
 - Isolated mode without exactly one target or compatible required reuse -> HTTP `400` before enqueue, identifying the blocked node.
 - Missing required artifact in with-upstream -> node `blocked`; independent branches continue and the run may become `partial`. Missing optional artifacts are omitted.
@@ -686,16 +690,19 @@ throw new ImageProviderError("accepted task timed out", {
 - Good: a selected node is resized freely, autosaves `{ size: { width, height } }`, reloads and pastes at the same size, while mobile remains compact and non-resizable.
 - Good: one typed output connects to “展示任何”, running that producer passively refreshes the sink, and text/image/video/social-post/publish-job results use the existing viewers without exposing a wildcard downstream port.
 - Good: three text nodes contain independently editable prompts, two batches select inputs 1 and 3, and their frozen Switch snapshots use those exact ordinals while variable vehicle counts queue round-robin.
+- Good: two image producers feed one save sink; the run freezes three references, and one Edge click downloads `car_0001.png`, skips a failed second response, then downloads `car_0003.png` while reporting `2` successes and `1` failure.
 - Good: ToAPIs accepts up to 100 ready image tasks, each id is saved before the Canvas executor returns pending, image slots are released, and later worker GETs resume the same ids without a second paid POST.
 - Good: content task A writes its review draft while sibling B is still running, and a server restart reconciles stale completed image runs without opening the Canvas schedule drawer.
 - Good: five matching copy snapshots are shuffled without replacement for five content tasks; each task freezes a unique source and runs title GPT plus body GPT before `compose.social-post` creates the existing review draft.
 - Base: a V2 boundary miss emits no `head` artifact and sends the original copy through `tail`; omitted execution/run modes and node size preserve legacy enabled/content-driven behavior.
 - Base: text A containing only spaces remains present when cleanup is disabled; four absent or empty inputs still emit a successful empty text artifact.
+- Base: a batch run completes unattended with only `outputs.downloads`; an operator later opens its latest-success result and explicitly downloads the frozen images to the browser-configured directory.
 - Bad: adding `any` to `CanvasArtifactKind`, declaring a wildcard output, duplicating compatibility conditions in graph/clipboard/UI, persisting ResizeObserver measurements as user size, allowing mobile resize handles, emitting an empty title on fallback, rerunning a paid isolated ancestor, embedding Base64, passing shell strings to ffmpeg, or resubmitting accepted Seedance/ToAPIs work after timeout.
 - Bad: editing prompt bodies in the scheduler, giving Switch ports semantic scene/person meanings, silently shrinking an insufficient sample, launching only valid batches, mutating a launched sample, or overwriting an edited draft when retry images arrive.
 - Bad: waiting for aggregate batch completion before creating review drafts, relying on `GET /api/canvas/schedules` as the only recovery trigger, or allowing a baseline smoke server to advance real persisted work.
 - Bad: wrapping a short copy pool with modulo assignment, rereading the copy library during single-content resampling or finalization, mutating saved Canvas snapshots after a source edit, treating `copy-input` as a sixth mandatory role for legacy schedules, or combining title/body into one model call in the standard skeleton.
 - Bad: sorting concatenation inputs by edge creation order, treating whitespace-only text as empty while cleanup is disabled, requiring any A-D port, or adding a bypass/provider capability to the local utility.
+- Bad: accepting a caller media URL, trusting a URL suffix as the image format, writing a node-configured server path, downloading automatically, buffering all 30 images together, or stopping the batch after one failed image.
 
 ### 6. Tests Required
 
@@ -707,6 +714,7 @@ throw new ImageProviderError("accepted task timed out", {
 - `canvas_scheduler_check.mjs` plus the task browser check must cover ordinal Prompt Switch execution and V1 migration, the standard skeleton and duplicate-role guard, distinct sampling, transaction/ownership wiring, sequential autosave revisions, preflight/runtime controls, contrast, and 1440x960/390x844 overflow without live calls.
 - `canvas_scheduler_check.mjs` must also assert per-content finalization inside the content loop, terminal batch-run scheduler wakeup without a static circular import, Node startup worker bootstrap, and the baseline smoke disable contract. A user-approved local restart may separately verify drafts appear while sibling tasks remain active.
 - `copy_library_check.mjs` must cover both schemas, row-level helpers, authentication, visibility/edit permissions, tag normalization/AND filtering, page/navigation contracts, node registration/config validation, and literal frozen outputs. Scheduler checks must cover legacy five-role compatibility, copy binding/path enforcement, deterministic injected-random no-replacement assignment, insufficient capacity, whole-batch copy resampling, single-content snapshot preservation, final graph injection, and the two-GPT skeleton.
+- `canvas_workflows_check.mjs` must cover save-node registration, passive planning, prefix validation, 1/30/31 boundaries, empty input, deep cloning, reuse, old graphs, serial UI requests, partial continuation, duplicate-click guards, Blob cleanup, and history results. `canvas_image_download_check.mjs` must cover auth/ownership, forged records/URL exclusion, indices/prefixes, local/TOS-recovered/remote materialization, true byte-sniffed extensions, response headers, size/non-image rejection, and complete/cancelled stream cleanup. Mocked Edge must verify real single/multi/history download events and filenames without external calls.
 
 ### 7. Wrong vs Correct
 
@@ -714,6 +722,7 @@ throw new ImageProviderError("accepted task timed out", {
 
 ```typescript
 await executeCanvasNode(ancestor); // isolated run silently spends again
+await writeFile(node.config.directory, imageBytes); // a Canvas node must not choose a server path
 ```
 
 #### Correct
@@ -756,6 +765,10 @@ if (batchRunTerminal && batchRun?.batchContext) notifyCanvasScheduleRunTerminal(
 
 // Keep deterministic smoke servers from advancing real persisted work.
 if (process.env.FLUXPOST_DISABLE_BACKGROUND_WORKERS === "1") return;
+
+// Freeze references during execution; authorize and materialize one image only on a later user click.
+return { outputs: { downloads: { kind: "images", items: structuredClone(items) } } };
+const selected = resolveCanvasImageDownload(ownerVisibleRun, nodeRunId, index);
 ```
 
 ## Scenario: Canvas Clipboard And Workflow Portability

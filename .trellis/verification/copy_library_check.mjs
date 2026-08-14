@@ -163,7 +163,7 @@ try {
   assert.match(css, /\.list\{[^}]*flex:1[^}]*min-height:0[^}]*overflow:auto/);
 
   writeFileSync(path.join(temp, "toapis-image-api.js"), "exports.toApisImageRatios=['1:1'];exports.toApis4kImageRatios=['16:9'];", "utf8");
-  for (const name of ["types", "node-utils", "source-video-contract", "registry"]) {
+  for (const name of ["types", "node-utils", "source-video-contract", "save-images", "registry"]) {
     const source = read(`src/lib/canvas/${name}.ts`).replace('"../toapis-image-api"', '"./toapis-image-api"');
     writeFileSync(path.join(temp, `${name}.js`), transpile(source, `${name}.ts`), "utf8");
   }
@@ -182,6 +182,7 @@ try {
     "./media-tools": {},
     "./node-utils": require(path.join(temp, "node-utils.js")),
     "./registry": registry,
+    "./save-images": require(path.join(temp, "save-images.js")),
     "./source-video-contract": require(path.join(temp, "source-video-contract.js")),
   });
 

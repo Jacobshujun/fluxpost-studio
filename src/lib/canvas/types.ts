@@ -52,6 +52,7 @@ export type CanvasNodeType =
   | "model.gpt-vision"
   | "model.seedance"
   | "utility.image-preview"
+  | "utility.save-images"
   | "utility.display-any"
   | "utility.video-reconstruct"
   | "utility.prompt-template"

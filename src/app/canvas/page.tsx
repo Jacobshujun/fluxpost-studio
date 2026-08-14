@@ -41,6 +41,7 @@ import {
   Combine,
   Copy,
   CopyPlus,
+  Download,
   FileDown,
   FileText,
   FileUp,
@@ -91,6 +92,7 @@ import {
   type CanvasClipboardPayload,
 } from "@/lib/canvas/clipboard";
 import { canvasNodeDefinitions, createCanvasNode, getCanvasBatchBindableFields, getCanvasNodeDefinition, getCanvasNodeExecutionMode } from "@/lib/canvas/registry";
+import { CANVAS_SAVE_IMAGE_MAX_ITEMS } from "@/lib/canvas/save-images";
 import { createCanvasSchedulerSkeleton } from "@/lib/canvas/scheduler-skeleton";
 import { canvasSourceVideoSnapshotConfig, canvasSourceVideoSnapshotFromConfig, clearCanvasSourceVideoSnapshot, isCanvasSourceVideoSnapshotCurrent } from "@/lib/canvas/source-video-contract";
 import type { CanvasWorkflowTemplateKey } from "@/lib/canvas/templates";
@@ -1448,6 +1450,7 @@ function CanvasFlowNode({ data, selected }: NodeProps<FlowNode>) {
         ? <CanvasModelNodeResult node={node} nodeRun={nodeRun} latestSuccessful={latestSuccessful} historicalRevision={historicalRevision} onPreview={(next) => interaction?.onPreview(next)} />
         : null}
     {node.type === "utility.image-preview" ? <CanvasImagePreviewNodeResult nodeRun={nodeRun} latestSuccessful={latestSuccessful} onPreview={(next) => interaction?.onPreview(next)} /> : null}
+    {node.type === "utility.save-images" ? <CanvasSaveImagesNodeResult nodeRun={nodeRun} latestSuccessful={latestSuccessful} /> : null}
     {node.type === "utility.display-any" ? <CanvasDisplayAnyNodeResult nodeRun={nodeRun} latestSuccessful={latestSuccessful} historicalRevision={historicalRevision} onPreview={(next) => interaction?.onPreview(next)} /> : null}
     {node.type === "compose.social-post" ? <CanvasCompositionNodeResult nodeRun={nodeRun} latestSuccessful={latestSuccessful} /> : null}
     </div>
@@ -1613,6 +1616,63 @@ function CanvasImagePreviewNodeResult({
     <div className="canvas-node-result-status"><span><CheckCircle2 />{canvasNodeRunStatusLabel(result.status)}</span><small>{artifact.items.length} 张</small></div>
     {latestSuccessful && result.id === latestSuccessful.nodeRun.id ? <div className="canvas-node-result-history">最近成功结果 · r{latestSuccessful.workflowRevision} · {new Date(latestSuccessful.runCreatedAt).toLocaleString()}</div> : null}
     <CanvasResultImageGallery items={artifact.items} onPreview={onPreview} />
+  </div>;
+}
+
+function CanvasSaveImagesNodeResult({
+  nodeRun,
+  latestSuccessful,
+}: {
+  nodeRun?: CanvasNodeRun;
+  latestSuccessful?: CanvasLatestSuccessfulNodeRun;
+}) {
+  const currentArtifact = nodeRun ? getSaveImagesArtifact(nodeRun) : undefined;
+  const result = currentArtifact ? nodeRun : latestSuccessful?.nodeRun;
+  const artifact = result ? getSaveImagesArtifact(result) : undefined;
+  const status = nodeRun?.status || result?.status;
+  const [busy, setBusy] = useState(false);
+  const [feedback, setFeedback] = useState("");
+  const downloadBusyRef = useRef(false);
+
+  async function downloadAll() {
+    if (downloadBusyRef.current || !result || !artifact) return;
+    downloadBusyRef.current = true;
+    setBusy(true);
+    setFeedback("");
+    try {
+      const counts = await downloadCanvasSaveImages(result.runId, result.id, artifact.items.length);
+      setFeedback(`下载成功 ${counts.success} 张，下载失败 ${counts.failed} 张`);
+    } finally {
+      downloadBusyRef.current = false;
+      setBusy(false);
+    }
+  }
+
+  if (!status) return <div className="canvas-node-result is-idle"><small>等待上游图片结果</small></div>;
+  const isPending = status === "queued" || status === "running";
+  const isFailure = ["failed", "blocked", "needs_config", "cancelled"].includes(status);
+  return <div
+    className={`canvas-node-result is-${status} nodrag nopan nowheel`}
+    onPointerDown={(event) => event.stopPropagation()}
+    onClick={(event) => event.stopPropagation()}
+    onDoubleClick={(event) => event.stopPropagation()}
+    onKeyDown={(event) => event.stopPropagation()}
+    onKeyUp={(event) => event.stopPropagation()}
+    onWheel={(event) => event.stopPropagation()}
+  >
+    <div className="canvas-node-result-status">
+      <span>{isPending ? <LoaderCircle className={status === "running" ? "animate-spin" : ""} /> : isFailure ? <AlertTriangle /> : <CheckCircle2 />}{canvasNodeRunStatusLabel(status)}</span>
+      <small>{artifact ? `${artifact.items.length} 张` : `attempt ${nodeRun?.attempt || result?.attempt || 1}`}</small>
+    </div>
+    {latestSuccessful && result?.id === latestSuccessful.nodeRun.id ? <div className="canvas-node-result-history">最近成功结果 · r{latestSuccessful.workflowRevision} · {new Date(latestSuccessful.runCreatedAt).toLocaleString()}</div> : null}
+    {artifact ? <div className="canvas-save-images-actions">
+      <button type="button" disabled={busy} onClick={() => void downloadAll()}>
+        {busy ? <LoaderCircle className="animate-spin" /> : <Download />}
+        {busy ? "下载中" : "下载全部"}
+      </button>
+      {feedback ? <small className="canvas-save-images-feedback" role="status">{feedback}</small> : null}
+    </div> : null}
+    {!artifact && isFailure ? <p>{nodeRun?.error || "没有可下载的图片结果"}</p> : null}
   </div>;
 }
 
@@ -3906,6 +3966,58 @@ function getImagesArtifact(nodeRun: CanvasNodeRun) {
   return Object.values(nodeRun.outputs).find((artifact): artifact is Extract<CanvasArtifact, { kind: "images" }> => artifact.kind === "images" && artifact.items.length > 0);
 }
 
+function getSaveImagesArtifact(nodeRun: CanvasNodeRun) {
+  const artifact = nodeRun.outputs.downloads;
+  return artifact?.kind === "images" && artifact.items.length > 0 && artifact.items.length <= CANVAS_SAVE_IMAGE_MAX_ITEMS ? artifact : undefined;
+}
+
+function parseCanvasDownloadFilename(contentDisposition: string | null) {
+  if (!contentDisposition) return undefined;
+  const encoded = contentDisposition.match(/filename\*\s*=\s*UTF-8''([^;]+)/iu)?.[1]?.trim();
+  if (encoded) {
+    try {
+      const filename = decodeURIComponent(encoded);
+      if (filename && !/[\u0000-\u001f\u007f/\\]/u.test(filename)) return filename;
+    } catch {
+      // Fall through to the ASCII filename supplied by the same response.
+    }
+  }
+  const quoted = contentDisposition.match(/filename\s*=\s*"([^"]+)"/iu)?.[1]?.trim();
+  return quoted && !/[\u0000-\u001f\u007f/\\]/u.test(quoted) ? quoted : undefined;
+}
+
+async function downloadCanvasSaveImages(runId: string, nodeRunId: string, count: number) {
+  let success = 0;
+  let failed = 0;
+  for (let index = 0; index < count; index += 1) {
+    try {
+      const response = await fetch(`/api/canvas/runs/${encodeURIComponent(runId)}/downloads/images?nodeRunId=${encodeURIComponent(nodeRunId)}&index=${index}`);
+      if (!response.ok) {
+        await response.text();
+        throw new Error(`Image download failed (${response.status})`);
+      }
+      const filename = parseCanvasDownloadFilename(response.headers.get("Content-Disposition"));
+      if (!filename) throw new Error("Image download filename is missing.");
+      const objectUrl = URL.createObjectURL(await response.blob());
+      const link = document.createElement("a");
+      try {
+        link.href = objectUrl;
+        link.download = filename;
+        link.hidden = true;
+        document.body.append(link);
+        link.click();
+        success += 1;
+      } finally {
+        link.remove();
+        URL.revokeObjectURL(objectUrl);
+      }
+    } catch {
+      failed += 1;
+    }
+  }
+  return { success, failed };
+}
+
 function getDisplayAnyArtifact(nodeRun: CanvasNodeRun) {
   return nodeRun.outputs.preview;
 }
@@ -4272,6 +4384,7 @@ function iconForNode(type: CanvasNodeType) {
   if (type === "model.gpt-vision") return <Search {...props} />;
   if (type === "model.seedance") return <Clapperboard {...props} />;
   if (type === "utility.image-preview") return <Images {...props} />;
+  if (type === "utility.save-images") return <Download {...props} />;
   if (type === "utility.video-reconstruct") return <RefreshCw {...props} />;
   if (type === "utility.display-any") return <Eye {...props} />;
   if (type === "utility.prompt-template") return <FileText {...props} />;

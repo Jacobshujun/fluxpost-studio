@@ -73,7 +73,7 @@ const areCanvasPortKindsCompatibleForUi = compileFunction(canvasTypes, "areCanva
 const temp = mkdtempSync(path.join(tmpdir(), "fluxpost-canvas-check-"));
 try {
   writeFileSync(path.join(temp, "toapis-image-api.js"), `exports.toApisImageRatios = ${JSON.stringify(["1:1", "3:2", "2:3", "4:3", "3:4", "5:4", "4:5", "16:9", "9:16", "2:1", "1:2", "21:9", "9:21"])}; exports.toApis4kImageRatios = ${JSON.stringify(["16:9", "9:16", "2:1", "1:2", "21:9", "9:21"])};`, "utf8");
-  for (const name of ["types", "node-utils", "source-video-contract", "registry", "graph", "serialization", "clipboard", "workflow-file"]) {
+  for (const name of ["types", "node-utils", "source-video-contract", "save-images", "registry", "graph", "serialization", "clipboard", "workflow-file"]) {
     const source = read(`src/lib/canvas/${name}.ts`).replace('"../toapis-image-api"', '"./toapis-image-api"');
     const output = ts.transpileModule(source, {
       compilerOptions: { module: ts.ModuleKind.CommonJS, target: ts.ScriptTarget.ES2022 },
@@ -122,6 +122,15 @@ try {
   }, "text concatenate must retain the WAS-compatible v1 contract");
   assert.deepEqual(getCanvasNodeDefinition("utility.image-preview")?.bypass, { inputPort: "images", outputPort: "images" }, "image preview must declare explicit image passthrough");
   assert.equal(getCanvasNodeDefinition("utility.image-preview")?.passiveSink, true, "image preview must retain passive sink behavior");
+  const saveImagesDefinition = getCanvasNodeDefinition("utility.save-images");
+  assert.equal(saveImagesDefinition?.version, 1, "save-images must use the additive v1 contract");
+  assert.equal(saveImagesDefinition?.label, "保存图片");
+  assert.deepEqual(saveImagesDefinition?.inputs, [{ id: "images", label: "图片", kind: "images", required: true, multiple: true }]);
+  assert.deepEqual(saveImagesDefinition?.outputs, [], "save-images must remain a terminal node");
+  assert.deepEqual(saveImagesDefinition?.fields, [{ key: "filenamePrefix", label: "文件名前缀", kind: "text", placeholder: "FluxPost" }]);
+  assert.deepEqual(saveImagesDefinition?.defaultConfig, { filenamePrefix: "FluxPost" });
+  assert.equal(saveImagesDefinition?.passiveSink, true, "save-images must follow selected image producers automatically");
+  assert.equal(saveImagesDefinition?.bypass, undefined, "save-images cannot bypass an outputless side-effect boundary");
   assert.deepEqual(getCanvasNodeDefinition("utility.prompt-switch")?.inputs.map((port) => port.id), ["input1", "input2", "input3"], "prompt switch must expose three ordinal inputs");
   assert.deepEqual(getCanvasNodeDefinition("utility.prompt-switch")?.inputs.map((port) => port.label), ["输入 1", "输入 2", "输入 3"]);
   assert.deepEqual(getCanvasNodeDefinition("utility.prompt-switch")?.defaultConfig, { selectedInput: "1" });
@@ -160,6 +169,7 @@ try {
     "utility.image-select": { inputs: ["images:images"], outputs: ["images:images"] },
     "utility.image-transform": { inputs: ["images:images"], outputs: ["images:images"] },
     "utility.video-frames": { inputs: ["videos:videos"], outputs: ["images:images"] },
+    "utility.save-images": { inputs: ["images:images"], outputs: [] },
     "utility.display-any": { inputs: ["value:any"], outputs: [] },
     "input.source-video": { inputs: [], outputs: ["videos:videos"] },
     "utility.video-reconstruct": { inputs: ["source:videos", "replacement:visual"], outputs: ["videos:videos"] },
@@ -188,6 +198,22 @@ try {
   assert.equal(validateCanvasNodeConfig("utility.text-split", { mode: "first-line", delimiter: "", delimiterIndex: 0 }, 2).length, 0, "first-line mode must ignore delimiter settings");
   assert.equal(validateCanvasNodeConfig("utility.text-concatenate", { delimiter: ", ", clean_whitespace: false }, 1).length, 0);
   assert.match(validateCanvasNodeConfig("utility.text-concatenate", { delimiter: ", ", clean_whitespace: "false" }, 1).join(" "), /must be a boolean/i);
+  assert.equal(validateCanvasNodeConfig("utility.save-images", { filenamePrefix: "车型图" }, 1).length, 0);
+  for (const invalidPrefix of ["", " ", "a/b", "a\\b", "a:b", "bad.", "bad ", "x".repeat(81), "bad\u0000name"]) {
+    assert.match(validateCanvasNodeConfig("utility.save-images", { filenamePrefix: invalidPrefix }, 1).join(" "), /filename prefix/i, `save-images must reject ${JSON.stringify(invalidPrefix)}`);
+  }
+
+  const saveSinkGraph = {
+    nodes: [
+      { id: "save-source", type: "input.images", version: 1, position: { x: 0, y: 0 }, config: { urls: ["https://example.test/image.png"] } },
+      { id: "save-target", type: "utility.save-images", version: 1, position: { x: 220, y: 0 }, config: { filenamePrefix: "car" } },
+    ],
+    edges: [{ id: "save-edge", source: "save-source", sourcePort: "images", target: "save-target", targetPort: "images" }],
+    viewport: { x: 0, y: 0, zoom: 1 },
+  };
+  assert.equal(validateCanvasGraph(saveSinkGraph).valid, true, "save-images must accept image producers");
+  assert.deepEqual(buildCanvasRunPlan(saveSinkGraph, ["save-source"]).includedNodeIds, ["save-source", "save-target"], "selected image producers must include the passive save sink");
+  assert.deepEqual(buildCanvasRunPlan(saveSinkGraph, ["save-source"]).capabilities, [], "browser downloads must not add a paid or external-write capability");
 
   assert.equal(nodeUtils.renderCanvasPromptTemplate({ preset: "custom", template: "二={{input2}}\n一={{input1}}\n全部={{input}}" }, ["A", "B"]), "二=B\n一=A\n全部=A\n\nB");
   assert.throws(() => nodeUtils.renderCanvasPromptTemplate({ preset: "custom", template: "{{input3}}" }, ["A", "B"]), /missing input3/i);
@@ -442,6 +468,15 @@ try {
   assert.notEqual(displayResult.outputs.preview, displayArtifact, "display-any must clone the upstream artifact");
   await assert.rejects(() => executeDisplayAny({ inputs: {} }), /一个上游结果/, "display-any must reject a missing upstream artifact");
   await assert.rejects(() => executeDisplayAny({ inputs: { value: [{ kind: "text", value: "A" }, { kind: "text", value: "B" }] } }), /一个上游结果/, "display-any must reject multiple upstream artifacts");
+  const executeSaveImages = compileFunctions(executorSource, ["executeSaveImages", "imageItems"], "executeSaveImages", { structuredClone, CANVAS_SAVE_IMAGE_MAX_ITEMS: 30 });
+  const oneSaveImage = { kind: "images", items: [{ url: "/generated/one.png", name: "one" }] };
+  const oneSaveResult = await executeSaveImages({ inputs: { images: [oneSaveImage] } });
+  assert.deepEqual(oneSaveResult.outputs.downloads, oneSaveImage, "save-images must persist the ordered image artifact");
+  assert.notEqual(oneSaveResult.outputs.downloads, oneSaveImage, "save-images must clone the upstream artifact");
+  assert.notEqual(oneSaveResult.outputs.downloads.items, oneSaveImage.items, "save-images must clone image items");
+  await assert.rejects(() => executeSaveImages({ inputs: {} }), /1 to 30 images/i, "save-images must reject an empty input");
+  assert.equal((await executeSaveImages({ inputs: { images: [{ kind: "images", items: Array.from({ length: 30 }, (_, index) => ({ url: `/generated/${index}.png` })) }] } })).outputs.downloads.items.length, 30);
+  await assert.rejects(() => executeSaveImages({ inputs: { images: [{ kind: "images", items: Array.from({ length: 31 }, (_, index) => ({ url: `/generated/${index}.png` })) }] } }), /1 to 30 images/i, "save-images must reject oversized batches");
   const executePromptSwitch = compileFunctions(
     executorSource,
     ["executePromptSwitch", "textValues"],
@@ -542,7 +577,7 @@ requireText(dreamina, ["user_credit", "totalCredit < 100", "query_result", "--su
 assert.ok(!dreamina.includes("exec("), "Dreamina adapter must not use a shell command string");
 
 const executors = read("src/lib/canvas/executors.ts");
-requireText(executors, ["callOpenAIForText", "callOpenAIForVisionText", "generateCanvasGptImages", "directReferences", "resolveCanvasGptImageReferences", "references.length > 16", "resolvedInputs", "resumeTaskId", "resumeTaskRoute", "onTaskUpdate", "result.status === \"pending\"", "providerTaskRoute", "utility.image-preview", "executeImagePreview", "utility.display-any", "executeDisplayAny", "executePromptTemplate", "executeTextSplit", "executeGptVision", "executeImageSelect", "executeImageTransform", "executeVideoFrames", "CanvasMediaNeedsConfigError", "generateImagesFromPrompt", "saveGeneratedPost", "enqueueFeishuPublishJob", "queryDreaminaVideo(previousSubmitId)"], "node executors");
+requireText(executors, ["callOpenAIForText", "callOpenAIForVisionText", "generateCanvasGptImages", "directReferences", "resolveCanvasGptImageReferences", "references.length > 16", "resolvedInputs", "resumeTaskId", "resumeTaskRoute", "onTaskUpdate", "result.status === \"pending\"", "providerTaskRoute", "utility.image-preview", "executeImagePreview", "utility.save-images", "executeSaveImages", "utility.display-any", "executeDisplayAny", "executePromptTemplate", "executeTextSplit", "executeGptVision", "executeImageSelect", "executeImageTransform", "executeVideoFrames", "CanvasMediaNeedsConfigError", "generateImagesFromPrompt", "saveGeneratedPost", "enqueueFeishuPublishJob", "queryDreaminaVideo(previousSubmitId)"], "node executors");
 const resolveCanvasVisionInstruction = compileFunctions(executors, ["resolveCanvasVisionInstruction", "textValues"], "resolveCanvasVisionInstruction", { canvasVisionPresets: { describe: "默认图片描述" } });
 const visionNode = { config: { preset: "describe", instruction: "默认节点指令" } };
 assert.equal(resolveCanvasVisionInstruction(visionNode, [{ kind: "text", value: "  用户提示词  " }]), "用户提示词", "connected user text must fully replace the vision preset and node instruction");
@@ -708,6 +743,52 @@ requireText(page, ["CanvasTextConcatenateControls", "文本拼接分隔符", "�
 requireText(page, ["NodeResizer", "CANVAS_NODE_SIZE_LIMITS", "displayedNodes", "applyCanvasNodeChanges", "change.setAttributes", "applyFlowNodeSize", "canvas-node-resize-handle", "canvas-node-resize-line"], "canvas node resizing UI");
 requireText(page, ["CanvasNodeTextEditor", "setDraft(nextValue)", "document.activeElement !== editorRef.current", "data-node-id={nodeId}"], "canvas text editor caret preservation");
 requireText(page, ["CanvasDisplayAnyNodeResult", "CanvasDisplayAnyArtifact", "getDisplayAnyArtifact", "outputs.preview", "等待上游结果", "没有图片内容", "没有视频内容", "飞书发布任务", "areCanvasPortKindsCompatible", "isQuickAddPortCompatible", "portKindLabel", "utility.display-any"], "display-any UI");
+requireText(page, ["CanvasSaveImagesNodeResult", "getSaveImagesArtifact", "utility.save-images", "下载全部", "downloadCanvasSaveImages", "parseCanvasDownloadFilename", "URL.createObjectURL", "URL.revokeObjectURL", "下载成功", "下载失败", "Download", "downloadBusyRef.current", "disabled={busy}", "latestSuccessful?.nodeRun"], "save-images UI");
+const requestedDownloadIndices = [];
+const browserDownloads = [];
+const revokedDownloadUrls = [];
+let activeDownloads = 0;
+let maxActiveDownloads = 0;
+const canvasDownloadUrl = {
+  createObjectURL: () => `blob:canvas-${browserDownloads.length}`,
+  revokeObjectURL: (url) => revokedDownloadUrls.push(url),
+};
+const canvasDownloadDocument = {
+  body: { append: () => undefined },
+  createElement: () => ({
+    hidden: false,
+    href: "",
+    download: "",
+    click() { browserDownloads.push(this.download); },
+    remove() {},
+  }),
+};
+const canvasDownloadFetch = async (url) => {
+  activeDownloads += 1;
+  maxActiveDownloads = Math.max(maxActiveDownloads, activeDownloads);
+  const index = Number(new URL(url, "http://localhost").searchParams.get("index"));
+  requestedDownloadIndices.push(index);
+  await Promise.resolve();
+  activeDownloads -= 1;
+  if (index === 1) return new Response("failed", { status: 500 });
+  return new Response("image", {
+    headers: { "Content-Disposition": `attachment; filename="car_000${index + 1}.png"; filename*=UTF-8''car_000${index + 1}.png` },
+  });
+};
+const canvasDownloadFunctions = compileFunctions(
+  page,
+  ["parseCanvasDownloadFilename", "downloadCanvasSaveImages"],
+  "{ parseCanvasDownloadFilename, downloadCanvasSaveImages }",
+  { fetch: canvasDownloadFetch, URL: canvasDownloadUrl, document: canvasDownloadDocument },
+);
+assert.equal(canvasDownloadFunctions.parseCanvasDownloadFilename("attachment; filename=\"FluxPost_0001.png\"; filename*=UTF-8''%E8%BD%A6%E5%9E%8B%E5%9B%BE_0001.png"), "车型图_0001.png");
+assert.equal(canvasDownloadFunctions.parseCanvasDownloadFilename("attachment; filename=\"car_0001.jpg\""), "car_0001.jpg");
+assert.equal(canvasDownloadFunctions.parseCanvasDownloadFilename("attachment; filename*=UTF-8''..%2Fsecret.png"), undefined, "download filenames must reject path separators");
+assert.deepEqual(await canvasDownloadFunctions.downloadCanvasSaveImages("run-1", "node-run-1", 3), { success: 2, failed: 1 }, "one failed image must not stop later downloads");
+assert.deepEqual(requestedDownloadIndices, [0, 1, 2], "downloads must be requested in source order");
+assert.equal(maxActiveDownloads, 1, "downloads must remain serial");
+assert.deepEqual(browserDownloads, ["car_0001.png", "car_0003.png"]);
+assert.equal(revokedDownloadUrls.length, 2, "every successful Blob URL must be released");
 requireText(page, ["ReactFlow", "onConnect", "wouldCreateCycle", "NodeInspector", "panOnDrag={isMobile}", "selectionOnDrag={!isMobile}", "nodesDraggable={!isMobile}", "RunSummary", "FlowingCanvasEdge", "canvas-port-row", "colorMode={flowColorMode}", "subscribeTheme", "CANVAS_CLIPBOARD_MIME", "clipboardDataImageFiles", "isEditableClipboardTarget", "pasteFromSystemClipboard", "canvas-image-file-input", "CanvasNodeInteractionContext", "latestNodeRuns", "latestSuccessfulNodeRuns", "useMemo(() => latestAttempts", "(result.get(nodeRun.nodeId)?.attempt || 0) < nodeRun.attempt", "const selectedRun = explicitRun || data.runs[0]", "await refreshRun(selectedRun.id, workflowId)", "runSelectionIsExplicitRef", "focusCanvasNode", "selectedNodeId", "if (selectedNode) setSelectedNodeId(selectedNode.id)", "interaction?.selectedNodeId === node.id", "canvas-node-text-editor nodrag nopan nowheel", "event.currentTarget.focus({ preventScroll: true })", "interaction?.onNodeFocus(node.id)", "onClick={(event) => {", "onKeyDown={(event) => event.stopPropagation()}", "CanvasModelNodeResult", "CanvasImagePreviewNodeResult", "updateNodeExecutionMode", "仅运行此节点", "运行到此节点", 'requestRun([selectedNodeId], "isolated")', "打开评审", "历史版本 r", "最近成功结果 · r", "definition?.outputs", "isPreviewableModelArtifact", "artifact.value.trim()", "artifact.items.length > 0", "showArtifact", "运行完成，但没有可预览内容", "CanvasTextPreviewDialog", "CanvasVideoPreviewDialog", "CanvasImagePreviewDialog", "canvas-node-result-gallery", "canvas-node-result-gallery-open", "canvas-node-result-gallery-meta", "canvas-image-preview-open", "图片{index + 1}", "imageUrls.length}/16", "moveListItem", 'form.append("mode", "gpt-reference")', "edgeAnimationDelay", "pathLength={100}", "canvas-flow-edge-trail", "canvas-flow-edge-body", "canvas-flow-edge-core", "打开原图", "缩小图片", "放大图片", "重置图片缩放"], "canvas UI");
 requireText(page, [
   "prepareCanvasClipboardPaste",
@@ -886,6 +967,7 @@ requireText(styles, [".canvas-stage .react-flow__viewport { will-change: transfo
 assert.ok(!styles.includes(".canvas-confirm-dialog"), "removed canvas confirmation UI must not leave dead styles");
 assert.ok(!styles.includes(".canvas-confirm-detail"), "removed canvas confirmation details must not leave dead styles");
 requireText(styles, [".canvas-node-resized", ".canvas-node-content", ".canvas-node-resize-handle", ".canvas-node-resize-line"], "canvas node resizing styles");
+requireText(styles, [".canvas-save-images-actions", ".canvas-save-images-feedback"], "save-images result styles");
 requireText(styles, [".canvas-workspace-palette-hidden", ".canvas-palette-collapsed", ".canvas-palette-dismiss", ".canvas-task-center", ".canvas-task-center-panel", ".canvas-task-center-tools", ".canvas-task-filters", ".canvas-task-center-body", ".canvas-task-list", ".canvas-task-detail", ".canvas-task-center-button"], "collapsible palette and task-center styles");
 requireText(styles, ["--canvas-stage:", ".canvas-port-input .react-flow__handle-left", ".canvas-port-output .react-flow__handle-right", ".canvas-flow-edge-base", ".canvas-flow-edge-trail", ".canvas-flow-edge-body", ".canvas-flow-edge-core", "--canvas-edge-peak-opacity", "--canvas-edge-duration", "--canvas-edge-layer-start", "--canvas-edge-layer-end", "var(--canvas-edge-duration, 3.6s)", "@keyframes canvas-edge-beam", "prefers-reduced-motion", ".canvas-flow-edge-trail, .canvas-flow-edge-body, .canvas-flow-edge-core { display: none;", ".canvas-selection-actions", ".canvas-node-text-editor", ".canvas-node-result", ".canvas-node-result-gallery", ".canvas-node-result-gallery-open", ".canvas-node-result-gallery-meta", ".canvas-node-video-result", ".canvas-node-bypassed", ".canvas-node-disabled", ".canvas-node-mode-menu", ".canvas-result-viewer-backdrop", ".canvas-image-preview-list", ".canvas-image-preview-list.is-ordered", "background-size: contain", ".canvas-image-viewer-backdrop", ".canvas-image-viewer-stage", ".canvas-image-viewer-image", ".canvas-snapshot-picker", ".canvas-picker-results", ".canvas-picker-selected", ".canvas-quick-add", ".canvas-quick-add-search", ".canvas-quick-add-list", ".canvas-quick-add-group", ".canvas-quick-add-empty"], "canvas theme, edge, result preview, picker, and quick-add styles");
 requireText(styles, [".canvas-stage .react-flow__pane.draggable { cursor: grab; }", ".canvas-stage .react-flow__pane.dragging { cursor: grabbing; }", ".canvas-stage .react-flow__pane.selection { cursor: default; }"], "canvas selection and pan cursors");

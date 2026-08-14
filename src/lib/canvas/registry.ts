@@ -1,5 +1,6 @@
 import type { CanvasBatchBindableField, CanvasGraph, CanvasNode, CanvasNodeConfig, CanvasNodeDefinition, CanvasNodeExecutionMode, CanvasNodeType } from "./types";
 import { toApis4kImageRatios, toApisImageRatios } from "../toapis-image-api";
+import { validateCanvasImageFilenamePrefix } from "./save-images";
 import { canvasPromptPresets, canvasVisionPresets, parseCanvasImageSelection, parseCanvasVideoTimestamps, resolveCanvasImageDimensions } from "./node-utils";
 import { defaultCanvasSourceVideoProjectName, isCanvasSourceVideoSnapshotCurrent } from "./source-video-contract";
 
@@ -252,6 +253,20 @@ const canvasNodeDefinitionVersions: CanvasNodeDefinition[] = [
     fields: [],
     defaultConfig: {},
     bypass: { inputPort: "images", outputPort: "images" },
+    passiveSink: true,
+  },
+  {
+    type: "utility.save-images",
+    version: 1,
+    label: "保存图片",
+    description: "将上游图片保留为可逐张下载的浏览器结果。",
+    category: "utility",
+    icon: "Download",
+    color: "#0f766e",
+    inputs: [{ id: "images", label: "图片", kind: "images", required: true, multiple: true }],
+    outputs: [],
+    fields: [{ key: "filenamePrefix", label: "文件名前缀", kind: "text", placeholder: "FluxPost" }],
+    defaultConfig: { filenamePrefix: "FluxPost" },
     passiveSink: true,
   },
   {
@@ -677,6 +692,10 @@ export function validateCanvasNodeConfig(type: CanvasNodeType, config: CanvasNod
   }
   if (type === "utility.video-frames") {
     try { parseCanvasVideoTimestamps(config); } catch (error) { errors.push(error instanceof Error ? error.message : "Video frame settings are invalid."); }
+  }
+  if (type === "utility.save-images") {
+    const prefixError = validateCanvasImageFilenamePrefix(config.filenamePrefix);
+    if (prefixError) errors.push(prefixError);
   }
   if (type === "model.gpt-image" && definition.version === 2) {
     const referenceUrls = normalizeUrlList(config.referenceUrls);
