@@ -6,15 +6,16 @@ This file is an on-demand history library. Current state belongs in `.trellis/sp
 
 ## 最近一条
 <!-- TRELLIS-LATEST-START -->
-2026-07-29 Canvas batch concurrency repair:
+2026-08-14 production candidate integration:
 
 Done:
-- Replaced the single Canvas durable-run queue consumer with a bounded consumer group controlled by `WORKER_CANVAS_RUN_CONCURRENCY` (default 8, cap 20).
-- Confirmed focused Canvas/concurrency checks, TypeScript, scoped lint, and production build without live provider calls.
+- Based the isolated candidate on deployed SHA `a887c158...` and preserved the original dirty worktree.
+- Added retention v4, Canvas video reconstruction, library role-entry time filters, and a CRLF-safe review regression check in four scoped commits.
+- Passed focused checks and the complete baseline through code SHA `011c15e` without live providers or external writes.
 
 Next:
-- Leave the current local server running while `simple-1785314521332` is active; after it reaches a terminal status, run `npm run local:restart` to activate the repair.
-- The full Trellis wrapper remains externally blocked by absent `.trellis/verification/check.mjs`; do not treat that as an implementation failure for this repair.
+- Commit current evidence and repeat the full baseline on the exact final local SHA.
+- Push/remote verification and production deployment remain unperformed approval gates.
 <!-- TRELLIS-LATEST-END -->
 
 ## 历史记录

@@ -6,19 +6,16 @@ This file is an on-demand history library. Do not read it during default startup
 
 ## 最近一条
 <!-- TRELLIS-LATEST-START -->
-2026-07-29 local Canvas batch concurrency repair is ready but not loaded.
+2026-08-14 production-based candidate is committed locally and not pushed or deployed.
 
 Completed:
-- Root cause: `ensureCanvasRunWorker()` had one global consumer, so Canvas image child runs were claimed serially despite the shared image pool allowing concurrent provider work.
-- Added `WORKER_CANVAS_RUN_CONCURRENCY` (default 8, cap 20) in `src/lib/concurrency.ts`; `src/lib/canvas/runs.ts` now starts enough short-lived consumers to fill missing worker slots. Provider image and one-slot Klein limits are unchanged.
-- Focused concurrency/Canvas checks, TypeScript, changed-file lint, and `npm run build` passed without live providers.
-
-Blocked before local refresh:
-- Read-only `npm run db:diagnose` found `simple-1785314521332` still running at 2026-07-29T08:45Z. Do not run `npm run local:restart` until it is terminal because restart can interrupt a simple run.
-- The required wrapper cannot start because `.trellis/verification/check.ps1` references missing `.trellis/verification/check.mjs`; repository-wide lint also scans existing `.tmp-*` artifacts. Do not repair either unrelated issue as part of this task.
+- Created `release/production-candidate-20260814` from deployed SHA `a887c158410124d969f608f7a0146e4345cc050a` in an isolated worktree; the dirty root worktree is unchanged.
+- Integrated retention v4, Canvas video reconstruction, and library role-entry time filters; excluded unfinished visual-node/shared-library artifacts, screenshots, runtime state, and secrets.
+- Fixed CRLF-sensitive review verification without weakening assertions. Candidate code through `011c15e` passed the complete Trellis baseline without external calls.
 
 Next:
-- Recheck `npm run db:diagnose`; when no simple run is running, run `npm run local:restart` and confirm the Canvas worker concurrency repair is live.
+- Commit these evidence updates, re-run the complete baseline on that exact SHA, and report it.
+- Do not push, run VPS candidate verification/preflight, or deploy without the corresponding explicit authorization; deployment requires a separate approval.
 <!-- TRELLIS-LATEST-END -->
 
 ## 历史记录

@@ -1,6 +1,6 @@
 # Verification
 
-Last updated: 2026-08-04
+Last updated: 2026-08-14
 
 ## Baseline Command
 
@@ -41,6 +41,7 @@ Do not deploy a dirty worktree, branch name, abbreviated SHA, local runtime rows
 
 ## Recent Verification
 
+- 2026-08-14: Production-based candidate code through `011c15e` passed retention, Canvas workflow/video/scheduler, library role-time, review, and all remaining deterministic checks plus lint, TypeScript, production build, isolated HTTP smoke, and SQLite without live providers or external writes. A final evidence-only commit still requires the same complete baseline before its SHA can be proposed for push.
 - 2026-08-06: Retention v4 passed fake-Docker checks and the full baseline. Authorized production 38 previews then removed 8 verification tags and old app/rescues while keeping current plus 2 rescues; BuildKit reclaimed `8.998GB` and disk fell from `52GB/69%` to `36GB/47%`. Five containers, 7 volumes, local/public health, final preview, and weekly timer passed.
 - 2026-08-04: Configurable workspace content safety passed ordered-rule/match-mode/threshold/model-fallback/API/audit/snapshot checks, mocked Chromium, TypeScript, lint, build/restart, local HTTP, SQLite, and the complete baseline without live providers. Exact SHA `e6692c3d0cce807106e343c43a9804be2686ec3d` then passed the isolated VPS verifier and deployed as `20260804-102825-e6692c3d0cce` after zero-active-work preflight and a validated root-only backup; manifest/image/container identity, app/PostgreSQL, routes/auth, six volumes, Nginx, Open WebUI, logs, and rollback retention passed.
 - 2026-08-04: Feishu bulk publishing passed id-only durable enqueue checks, worker-side preparation, 1/10/11/50/51 chunk boundaries, partial continuation, retry safety, progress restoration, TypeScript, lint, build, local restart/HTTP, and the complete baseline. Exact SHA `39f99e2415fa93c08e8727bea30841e88d28a2a6` then passed the isolated VPS verifier and deployed as `20260804-081822-39f99e2415fa` after zero-active-work preflight and a validated root-only backup; identity, health, routes/auth, workers, JSONB queue storage, six volumes, logs, Open WebUI, and rollback retention passed without a live Feishu write.
@@ -52,7 +53,6 @@ Older evidence is preserved in `.trellis/spec/fluxpost/archive/verification-hist
 - No live paid Seedance, GPT image/text, TikHub, ComfyUI, Feishu, or Lark action is part of the default baseline.
 - No local Canvas history, media, account, or configuration migration was performed.
 - No authenticated production Canvas create/save/run walkthrough or multi-user PostgreSQL concurrency test was run during this release.
-- The unchanged `origin/main` review-desk source/check mismatch remains a separate integration issue; do not weaken the check to hide it.
 - No default check changes DNS, firewall, Nginx routing, Docker volumes, or external production services.
 - No production image cleanup or systemd timer change is performed by the default baseline; the 2026-08-06 live maintenance evidence was an explicitly authorized operator action.
 - The package audit reports eight high-severity transitive advisories; do not run automatic `npm audit fix --force` as part of release verification.
@@ -64,3 +64,4 @@ Older evidence is preserved in `.trellis/spec/fluxpost/archive/verification-hist
 - A candidate SHA change invalidates previous release evidence.
 - Keep recent verification to five entries and archive older detail.
 - Never weaken a failing check to make the baseline pass; isolate a demonstrably unchanged blocker and run the remaining checks explicitly.
+- Source-text checks that match function boundaries must accept both LF and CRLF so fresh Windows worktrees exercise the same assertions as Git archives and Linux candidates.

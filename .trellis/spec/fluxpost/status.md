@@ -1,31 +1,31 @@
 # Trellis Status
 
-Last updated: 2026-08-05
+Last updated: 2026-08-14
 
 ## One-Line Status
 
-Configurable content safety is deployed to production 38 at SHA `e6692c3d0cce807106e343c43a9804be2686ec3d`.
+Production remains at `a887c158410124d969f608f7a0146e4345cc050a`; local branch `release/production-candidate-20260814` integrates retention v4, Canvas video reconstruction, and library role-entry time filters and has not been pushed or deployed.
 
 ## Current Focus
 
-- Configurable content safety is deployed: admin categories/rules, optional model review, thresholds, master-off, revisions, snapshots, and draft tests are available in `/config`.
-- Production Feishu publishing creates one durable Job before worker preparation, then persists ordered 10-post chunks, isolated failures, and review progress. The release was verified without a live Feishu write.
-- Cursor-anchored Canvas preview zoom is deployed. V2 main-task shared outputs plus cross-board clipboard and workflow file portability have passed local gates and are not yet deployed.
-- `/original` is deployed with durable owner-scoped 1-100 topic batches, cover-first card generation, QA/retry, review drafts, and resumable ToAPIs tasks. Its real provider smoke remains pending approval.
-- Canvas exact/range sampling, no-replacement parameter/copy pools, frozen-image preflight, cross-cursor selection, copy-pool bulk selection, guarded previews, distance-bounded three-layer edge pulses, native zoom, culling/detail tiers, stable media, and bounded queue concurrency are deployed.
-- Team image/copy libraries with server sorting, stable cursors, batch/range selection, and anchored preview are deployed. The local-path material domain remains retired; compact runs freeze validated vehicle-library URLs.
+- Production includes content safety, durable Feishu publishing, Canvas shared outputs and workflow portability, `/original`, bounded Canvas scheduling, and team image/copy libraries.
+- The isolated candidate preserves production SHA `a887c158...` as its base and adds Docker retention v4, owner-scoped source-video reconstruction with frozen V2 inputs, and role-specific library entry timestamps/date filters.
+- The candidate also fixes a Windows-only verification defect by accepting CRLF function boundaries without weakening review-desk behavior assertions.
+- The original dirty root worktree and its unfinished visual-node/shared-library artifacts remain unchanged and outside the candidate.
+- No candidate push, VPS verification, production preflight, provider smoke, or deployment has occurred.
 
 ## Next Entry
 
-1. Run an operator-approved real `/original` smoke with 2 topics and 3 cards each; verify ratio, consistency, QA, regeneration, review, and billing.
-2. Use a small authenticated non-paid Canvas workflow before any operator-approved provider batch.
-3. Keep Seedance, GPT image/text, TikHub, ComfyUI, Feishu writes, and Lark actions behind explicit operator approval.
+1. Re-run the complete baseline on the final evidence commit and report its full local SHA.
+2. Push only after explicit authorization, then require remote SHA equality, isolated VPS candidate verification, and read-only production preflight.
+3. Production deployment remains a separate explicit approval; keep all paid providers and external writes behind operator approval.
 
 ## Recent Verification
 
-- 2026-08-04: Safety policy SHA `e6692c3d0cce807106e343c43a9804be2686ec3d` passed isolated baseline and deployed as `20260804-102825-e6692c3d0cce`; identity, health, auth, zero queues, volumes, backup, and rollback passed offline.
-- 2026-08-04: Exact SHA `39f99e2415fa93c08e8727bea30841e88d28a2a6` passed local and isolated production baselines, then deployed as `20260804-081822-39f99e2415fa` after zero-active-work preflight and a validated root-only backup. Identity, health, routes/auth, workers, JSONB queue storage, six volumes, logs, and rollback retention passed without a live Feishu write.
-- 2026-08-05: Canvas portability and V2 shared outputs passed workflow/scheduler checks, mocked Chromium, TypeScript, lint, build/restart, local `200/401`, and the complete isolated baseline without external calls.
+- 2026-08-14: Candidate code through `011c15e` passed Canvas workflow/video/scheduler, library, review, deployment, and all other deterministic checks plus lint, TypeScript, production build, isolated HTTP smoke, and SQLite without external calls.
+- 2026-08-11: Canvas video reconstruction passed focused source/service/FFmpeg/workflow/scheduler/concurrency checks, lint, TypeScript, build, full baseline, restart/HTTP smoke, and mocked desktop/mobile Chromium locally.
+- 2026-08-10: Library role-entry times and date filters passed focused checks, the full baseline, restart, and mocked desktop/mobile Chromium locally.
+- 2026-08-05: Canvas portability and V2 shared outputs deployed at exact SHA `a887c158410124d969f608f7a0146e4345cc050a` after local, isolated, identity, health, auth, worker, volume, log, and rollback checks.
 - Older evidence is indexed in `verification.md` and preserved under `.trellis/spec/fluxpost/archive/`.
 
 ## Current Risks
@@ -37,6 +37,7 @@ Configurable content safety is deployed to production 38 at SHA `e6692c3d0cce807
 - TOS/provider credentials, database values, environment files, local accounts, runtime rows, generated media, and debug artifacts must never enter Git or Trellis context.
 - `@volcengine/tos-sdk@2.9.1` retains published Axios advisories without an upstream SDK fix.
 - Never remove `fluxpost-config`, PostgreSQL, data, media, generated, or node-home volumes during deploy or rollback.
+- The candidate is local-only until a remote full-SHA equality check and isolated VPS verifier succeed.
 
 ## Necessary History Paths
 

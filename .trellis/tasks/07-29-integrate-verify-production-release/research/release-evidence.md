@@ -42,3 +42,11 @@
 - Deploy only with `/opt/fluxpost-studio/bin/deploy.sh --ref <full-sha>`.
 - Promote GitHub `main` only after production verification. Use a normal fast-forward push; abort and rebuild if remote `main` moved.
 - The deployed release wrapper preserves named volumes and restores the prior release on activation failure. Post-deploy failure requires manifest-aware rollback before main promotion.
+
+## 2026-08-14 Candidate
+
+- Branch: `release/production-candidate-20260814`; isolated worktree base: deployed SHA `a887c158410124d969f608f7a0146e4345cc050a`.
+- Integrated commits before evidence: `ef8520f` retention v4, `b021783` Canvas video reconstruction plus frozen-source scheduler coverage, `0b8be36` library role-entry time filters, and `011c15e` CRLF-safe review verification.
+- The root `release/production-20260803` worktree, its 28 status entries, unfinished visual-node/shared-library artifacts, screenshots, local data, media, `.env*`, and secrets were not copied into the candidate.
+- Candidate code through `011c15e` passed focused Canvas/library/review checks and the complete Trellis baseline: lint had zero errors and five established warnings; TypeScript, production build, isolated HTTP smoke, and SQLite passed without external calls.
+- This evidence update changes the SHA, so the complete baseline must pass once more on the final local commit before it can be proposed for push. No push, VPS verification, preflight, or deployment has occurred.
