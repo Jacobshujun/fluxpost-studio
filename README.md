@@ -9,7 +9,7 @@ The cross-platform offline baseline entry is:
 npm run trellis:check
 ```
 
-Code fixes use 104-first promotion: edit and commit in a clean worktree, run the complete candidate verifier and bug scenario on staging `104.243.21.233`, then deploy the unchanged full SHA to production `38.76.210.136`. Local application/build/test/browser runs are not promotion evidence.
+Code fixes start from current GitHub `main` in a clean worktree. Run the complete local baseline, push the unchanged full SHA, run the isolated candidate verifier and read-only production preflight, then deploy to production `38.76.210.136` only after separate approval. Host `104.243.21.233` is retired and is not a promotion gate.
 
 `.trellis/` is the active persistent project context and task/spec system. The old `docs/harness.disabled/` and `scripts/harness.disabled/` directories are disabled migration archives; do not use them for normal work.
 
@@ -51,21 +51,28 @@ npm run dev
 
 打开 `http://localhost:3000`。
 
-### Local production server on LAN
+### Development and local production mirror
 
-For development, prefer hot reload:
+Development uses port `3000`. Background workers are disabled by default so development does not consume the same queues as the local production mirror. Set `FLUXPOST_DEVELOPMENT_WORKERS=1` only for an intentional worker test.
 
 ```powershell
 npm run dev:lan
 ```
 
-For the local production server used at `http://127.0.0.1:3001/`, always rebuild and restart after frontend or API changes:
+Port `3001` is reserved for a clean, SHA-specific worktree that mirrors the commit deployed at `https://flux.lightmoment.net`. Do not use it to preview uncommitted feature work. After production exposes `/api/version`, synchronize and verify the mirror with:
 
 ```powershell
 npm run local:restart
+npm run local:parity
 ```
 
-`next start` does not hot reload. Running only `npm run build` updates the bundle on disk, but an already-running `next start` process can still serve the old frontend until it is restarted.
+An explicit full SHA is available for an identity-enabled release when endpoint-based resolution is temporarily unavailable:
+
+```powershell
+powershell -ExecutionPolicy Bypass -File scripts/local/sync-production-mirror.ps1 -TargetSha FULL_40_CHARACTER_SHA
+```
+
+The current pre-identity production release cannot be made version-proven by this override. Deploy the first identity-enabled candidate before synchronizing port `3001`. Mirror synchronization fetches `origin/main`, requires the target SHA to be its ancestor, builds before replacing the listener, and verifies runtime identity. It synchronizes code only; environment files, credentials, accounts, databases, queues, generated media, and provider state remain environment-specific.
 
 ## PostgreSQL Runtime Storage
 

@@ -37,12 +37,11 @@ Last updated: 2026-06-25
 - Database driver: `pg` is installed for optional PostgreSQL runtime storage.
 - Package manager: npm, confirmed by `package-lock.json`.
 - Scripts from `package.json`:
-  - `npm run dev`: Next development server.
-  - `npm run dev:lan`: Next development server on `0.0.0.0:3001` with hot reload for LAN testing.
+  - `npm run dev` / `npm run dev:lan`: hot-reload development on port `3000`; workers default off and require `FLUXPOST_DEVELOPMENT_WORKERS=1` to opt in.
   - `npm run build`: Next production build.
   - `npm run start`: Next production server.
-  - `npm run start:lan`: Next production server on `0.0.0.0:3001`.
-  - `npm run local:restart`: build, stop any process on port `3001`, restart `next start` on `0.0.0.0:3001`, and run local HTTP smoke.
+  - `npm run start:lan` / `npm run local:restart`: synchronize the deployed SHA into a clean sibling mirror on port `3001`; identity-enabled releases also support explicit-SHA resolution.
+  - `npm run local:parity`: compare local/remote identity, mirror Git state, and `origin/main` ancestry.
   - `npm run lark:tasks`: poll configured Feishu/Lark chats through `lark-cli` and submit explicit task commands to the local app.
   - `npm run lark:events`: consume real-time Feishu/Lark `im.message.receive_v1` events through `lark-cli event consume` and submit explicit task commands to the local app.
   - `npm run db:diagnose`: run read-only local PostgreSQL diagnostics through `FLUXPOST_DIAG_DATABASE_URL`, showing queue state, recent logs, active sessions, lock blockers, and key PostgreSQL settings without printing the connection string.
@@ -63,6 +62,7 @@ Last updated: 2026-06-25
   - `GET|POST /api/accounts`
   - `GET|POST|DELETE /api/accounts/session`
   - `GET /api/config`
+  - `GET /api/version`
   - `GET /api/content-pool`
   - `GET|POST|PATCH|DELETE /api/content/items`
   - `GET|POST /api/crawl/jobs`
@@ -136,9 +136,9 @@ Last updated: 2026-06-25
 
 ## Deployment Facts
 
-- Confirmed local dev entry: `npm run dev`.
+- Local development uses port `3000`; workers default off.
 - Confirmed production entry: `npm run build` followed by `npm run start`.
-- Confirmed local LAN production refresh entry: `npm run local:restart`.
+- Port `3001` uses clean SHA-specific sibling worktrees through `npm run local:restart`, then `npm run local:parity`; only code is synchronized, never configuration or runtime data.
 - `next.config.ts` sets Turbopack root to `process.cwd()`.
 - GitHub-driven Ubuntu 24.04 deployment is owned by `scripts/deploy/vps-bootstrap.sh`, `scripts/deploy/vps-deploy.sh`, `scripts/deploy/vps-enable-domain.sh`, `compose.yaml`, and `docs/deployment/ubuntu-docker.md`.
 - Fresh bootstrap enforces the RAM minimum, installs official Docker/Compose, generates secrets, and creates the root-only repo/releases/current/bin layout. Existing `--app-only` hosts may count enabled swap toward a 1.5 GB combined minimum but never change swap.

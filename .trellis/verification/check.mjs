@@ -19,6 +19,7 @@ const nodeChecks = [
   ["TOS runtime media storage check", "tos_runtime_media_check.mjs"],
   ["Feishu CLI identity auto-init check", "feishu_cli_identity_check.mjs"],
   ["Local Next build output check", "local_build_output_check.mjs"],
+  ["Runtime production parity check", "runtime_parity_check.mjs"],
   ["Ubuntu VPS deployment check", "vps_deployment_check.mjs"],
   ["Execution log append check", "execution_log_append_check.mjs"],
   ["Keyword relevance check", "keyword_relevance_check.mjs"],
@@ -226,7 +227,12 @@ async function runHttpSmoke(port) {
   const errFd = openSync(errPath, "w");
   const child = spawn(nodeCommand, [nextBin, "start", "-H", "127.0.0.1", "-p", String(port)], {
     cwd: projectRoot,
-    env: { ...process.env, FLUXPOST_DISABLE_BACKGROUND_WORKERS: "1" },
+    env: {
+      ...process.env,
+      FLUXPOST_DISABLE_BACKGROUND_WORKERS: "1",
+      FLUXPOST_RUNTIME_MODE: "development",
+      FLUXPOST_RELEASE_SHA: "",
+    },
     stdio: ["ignore", outFd, errFd],
   });
 

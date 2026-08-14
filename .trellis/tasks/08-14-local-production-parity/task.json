@@ -1,0 +1,33 @@
+{
+  "id": "local-production-parity",
+  "name": "local-production-parity",
+  "title": "保持本地生产镜像与远程生产一致",
+  "description": "",
+  "status": "in_progress",
+  "dev_type": "feature",
+  "scope": "local production mirror, runtime release identity, parity verification, and legacy worktree convergence",
+  "package": "fluxpost",
+  "priority": "P2",
+  "creator": "codex",
+  "assignee": "codex",
+  "createdAt": "2026-08-14",
+  "completedAt": null,
+  "branch": null,
+  "base_branch": "feature/local-production-parity-20260814",
+  "worktree_path": null,
+  "commit": null,
+  "pr_url": null,
+  "subtasks": [],
+  "children": [],
+  "parent": null,
+  "relatedFiles": [
+    "package.json",
+    "scripts/local/restart.ps1",
+    "scripts/deploy/vps-deploy.sh",
+    "compose.yaml",
+    "src/app/api/version/route.ts",
+    ".trellis/verification/check.mjs"
+  ],
+  "notes": "",
+  "meta": {}
+}

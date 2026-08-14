@@ -46,7 +46,7 @@ At the start of a new session:
 - Do not do unrelated refactors, formatting churn, or metadata cleanup.
 - Do not invent checks or commands. Use commands that exist in this project.
 - For code or deployment changes, use `.trellis/spec/fluxpost/rules.md` first, then read targeted sections of `.trellis/spec/fluxpost/pitfalls.md`, `.trellis/spec/fluxpost/architecture_rules.md`, or `.trellis/spec/fluxpost/decisions.md` only when the task touches those boundaries.
-- If frontend or API code changes must be visible on the local production server at `http://127.0.0.1:3001/`, run `npm run local:restart`; `npm run build` alone does not refresh an already-running `next start` process.
+- Preview frontend and API feature work on the development server at `http://127.0.0.1:3000/`. Port `3001` is reserved for the clean local mirror of the exact deployed production SHA; refresh it with `npm run local:restart` only after deployment or during an explicit-SHA bootstrap.
 - Record only facts that can be confirmed from the repository or from an explicit user instruction. Mark unknowns as `pending confirmation`.
 
 ## Completion Protocol
@@ -63,7 +63,7 @@ After development, debugging, deployment work, or important analysis:
 
 - Do not commit or expose secrets, production config, `.env.local`, `.env*`, API keys, local user data, uploaded materials, generated outputs, cached media, or auth logs.
 - Runtime data and generated media live under `data/`, `public/generated/`, `public/media/`, and local debug artifacts such as `.tmp-*.json` or `test-artifacts/`; treat them as local state, not Trellis context.
-- Deployment must use the confirmed project entry points until a dedicated deployment document is added: `npm run dev`, `npm run dev:lan`, `npm run build`, `npm run start`, `npm run start:lan`, and `npm run local:restart`.
+- Confirmed local entries are `npm run dev`/`npm run dev:lan` for port-3000 development, `npm run local:restart`/`npm run start:lan` for the port-3001 production mirror, and `npm run local:parity` for read-only drift verification. Remote deployment remains commit-based through the installed VPS wrapper.
 - Do not create another memory, TODO, planning, handoff, or agent-context system outside `.trellis/`.
 
 ## Quality Rules

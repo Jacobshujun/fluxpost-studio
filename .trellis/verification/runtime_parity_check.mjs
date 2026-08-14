@@ -1,0 +1,132 @@
+import assert from "node:assert/strict";
+import { readFileSync } from "node:fs";
+import path from "node:path";
+import vm from "node:vm";
+import ts from "typescript";
+
+const projectRoot = process.cwd();
+const fullSha = "1234567890abcdef1234567890abcdef12345678";
+
+function read(relativePath) {
+  return readFileSync(path.join(projectRoot, relativePath), "utf8");
+}
+
+function loadTsModule(relativePath) {
+  const sourcePath = path.join(projectRoot, relativePath);
+  const output = ts.transpileModule(read(relativePath), {
+    compilerOptions: {
+      module: ts.ModuleKind.CommonJS,
+      target: ts.ScriptTarget.ES2022,
+    },
+    fileName: sourcePath,
+  });
+  const cjsModule = { exports: {} };
+  vm.runInNewContext(output.outputText, {
+    module: cjsModule,
+    exports: cjsModule.exports,
+    process: { env: {} },
+  }, { filename: sourcePath });
+  return cjsModule.exports;
+}
+
+const release = loadTsModule("src/lib/runtime-release.ts");
+
+assert.deepEqual(
+  project(release.resolveRuntimeReleaseIdentity({ FLUXPOST_RUNTIME_MODE: "production", FLUXPOST_RELEASE_SHA: fullSha })),
+  { commit: fullSha, mode: "production", versioned: true },
+);
+assert.deepEqual(
+  project(release.resolveRuntimeReleaseIdentity({ FLUXPOST_RUNTIME_MODE: "local-production", FLUXPOST_RELEASE_SHA: fullSha })),
+  { commit: fullSha, mode: "local-production", versioned: true },
+);
+assert.deepEqual(
+  project(release.resolveRuntimeReleaseIdentity({})),
+  { commit: null, mode: "development", versioned: false },
+);
+assert.deepEqual(
+  project(release.resolveRuntimeReleaseIdentity({ FLUXPOST_RUNTIME_MODE: "development", FLUXPOST_RELEASE_SHA: fullSha })),
+  { commit: fullSha, mode: "development", versioned: true },
+);
+
+for (const environment of [
+  { FLUXPOST_RUNTIME_MODE: "production" },
+  { FLUXPOST_RUNTIME_MODE: "local-production" },
+  { FLUXPOST_RUNTIME_MODE: "preview", FLUXPOST_RELEASE_SHA: fullSha },
+  { FLUXPOST_RUNTIME_MODE: "production", FLUXPOST_RELEASE_SHA: fullSha.toUpperCase() },
+  { FLUXPOST_RUNTIME_MODE: "production", FLUXPOST_RELEASE_SHA: fullSha.slice(1) },
+  { FLUXPOST_RUNTIME_MODE: "production", FLUXPOST_RELEASE_SHA: `${fullSha}0` },
+]) {
+  assert.throws(() => release.resolveRuntimeReleaseIdentity(environment), release.RuntimeReleaseIdentityError);
+}
+
+const route = read("src/app/api/version/route.ts");
+assert.match(route, /resolveRuntimeReleaseIdentity/);
+assert.match(route, /Cache-Control["']?\s*:\s*["'](?:private,\s*)?no-store["']/);
+assert.match(route, /X-Content-Type-Options["']?\s*:\s*["']nosniff["']/);
+assert.doesNotMatch(route, /getConfigStatus|process\.cwd|branch|hostname|env\.local/i);
+
+const packageJson = JSON.parse(read("package.json"));
+assert.equal(packageJson.scripts.dev, "node scripts/local/start-dev.mjs");
+assert.match(packageJson.scripts["dev:lan"], /start-dev\.mjs --host 0\.0\.0\.0 --port 3000/);
+assert.match(packageJson.scripts["local:restart"], /sync-production-mirror\.ps1/);
+assert.match(packageJson.scripts["local:parity"], /check-production-parity\.ps1/);
+assert.match(packageJson.scripts["start:lan"], /sync-production-mirror\.ps1/);
+
+const development = read("scripts/local/start-dev.mjs");
+assert.match(development, /FLUXPOST_RUNTIME_MODE:\s*"development"/);
+assert.match(development, /FLUXPOST_RELEASE_SHA:\s*""/);
+assert.match(development, /FLUXPOST_DISABLE_BACKGROUND_WORKERS/);
+assert.match(development, /FLUXPOST_DEVELOPMENT_WORKERS/);
+
+const restart = read("scripts/local/restart.ps1");
+assert.match(restart, /FLUXPOST_RUNTIME_MODE\s*=\s*"local-production"/);
+assert.match(restart, /FLUXPOST_RELEASE_SHA\s*=\s*\$ReleaseSha/);
+assert.match(restart, /ProjectRoot/);
+assert.match(restart, /git\.exe[\s\S]*status --porcelain/);
+assertOrder(restart, "npm.cmd run build", "Stop existing server");
+assertOrder(restart, "Mirror worktree became dirty during build", "Stop existing server");
+assertOrder(restart, "Start-Process", "/api/version");
+assert.match(restart, /http_smoke\.js[\s\S]*"local-production"[\s\S]*\$ReleaseSha/);
+
+const mirror = read("scripts/local/sync-production-mirror.ps1");
+assert.match(mirror, /api\/version/);
+assert.match(mirror, /merge-base --is-ancestor/);
+assert.match(mirror, /worktree add --detach/);
+assert.match(mirror, /releases[\\/].*\$TargetSha|Join-Path \$releasesRoot \$TargetSha/);
+assert.match(mirror, /current\.json/);
+assert.match(mirror, /Target release predates runtime identity/);
+assert.match(mirror, /Join-Path \$sourceRoot "scripts\\local\\restart\.ps1"/);
+assert.match(mirror, /ProjectRoot\s*=\s*\$releasePath/);
+assertOrder(mirror, "npm.cmd ci", "restart.ps1");
+assert.match(mirror, /previousRelease[\s\S]*SkipBuild\s*=\s*\$true/);
+
+const parity = read("scripts/local/check-production-parity.ps1");
+assert.match(parity, /api\/version/);
+assert.match(parity, /local-production/);
+assert.match(parity, /production/);
+assert.match(parity, /status --porcelain/);
+assert.match(parity, /rev-parse HEAD/);
+assert.match(parity, /merge-base --is-ancestor/);
+assert.match(parity, /origin\/main/);
+
+const baseline = read(".trellis/verification/check.mjs");
+assert.match(baseline, /\["Runtime production parity check",\s*"runtime_parity_check\.mjs"\]/);
+assert.match(baseline, /FLUXPOST_RUNTIME_MODE:\s*"development"[\s\S]*FLUXPOST_RELEASE_SHA:\s*""/);
+const httpSmoke = read(".trellis/verification/http_smoke.js");
+assert.match(httpSmoke, /expectJson\("\/api\/version"/);
+assert.match(httpSmoke, /expectedRuntimeMode[\s\S]*development/);
+assert.match(httpSmoke, /version\.mode[\s\S]*expectedRuntimeMode/);
+assert.match(httpSmoke, /version\.commit[\s\S]*expectedReleaseSha/);
+
+console.log("Runtime release identity and parity contract check passed.");
+
+function project(value) {
+  return JSON.parse(JSON.stringify(value));
+}
+
+function assertOrder(source, first, second) {
+  const firstIndex = source.indexOf(first);
+  const secondIndex = source.indexOf(second);
+  assert.ok(firstIndex >= 0, `Missing ordered marker: ${first}`);
+  assert.ok(secondIndex > firstIndex, `${second} must appear after ${first}`);
+}

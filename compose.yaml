@@ -29,6 +29,8 @@ services:
       PORT: 3000
       HOSTNAME: 0.0.0.0
       FLUXPOST_CONFIG_FILE: /app/config/.env.local
+      FLUXPOST_RUNTIME_MODE: production
+      FLUXPOST_RELEASE_SHA: ${FLUXPOST_RELEASE_SHA:-}
     ports:
       - "127.0.0.1:${FLUXPOST_APP_PORT:-3101}:3000"
     volumes:

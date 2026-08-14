@@ -38,6 +38,8 @@ assertContains(files.compose, /127\.0\.0\.1:\$\{FLUXPOST_APP_PORT:-3101\}:3000/,
 assertNotContains(files.compose, /0\.0\.0\.0:\$\{FLUXPOST_APP_PORT/, "Configurable app port must never bind publicly.");
 assertContains(files.compose, /\$\{FLUXPOST_PUBLIC_HOST:-bbs\.vollov1\.xyz\}/, "Caddy host must be configurable with the existing production default.");
 assertContains(files.compose, /"80:80"[\s\S]*"443:443"/, "Caddy must keep HTTP/HTTPS ports for domain mode.");
+assertContains(files.compose, /FLUXPOST_RUNTIME_MODE:\s*production/, "Production Compose must identify the app runtime mode.");
+assertContains(files.compose, /FLUXPOST_RELEASE_SHA:\s*\$\{FLUXPOST_RELEASE_SHA:-\}/, "Production Compose must forward the activated release commit without storing it in env.production.");
 
 for (const volume of [
   "fluxpost-postgres-data",
@@ -62,6 +64,8 @@ assertContains(files.deploy, /git -C "\$REPO_DIR" archive "\$COMMIT"/, "Release 
 assertContains(files.deploy, /IMMUTABLE_IMAGE=.*\$\{COMMIT\}/, "Deploy must tag each app image with its full commit.");
 assertContains(files.deploy, /docker image inspect --format '\{\{\.Id\}\}' "\$COMPOSE_APP_IMAGE"/, "Deploy must resolve the freshly built canonical image instead of the current container image.");
 assertContains(files.deploy, /release\.manifest/, "Deploy must persist a non-secret release manifest.");
+assertContains(files.deploy, /activate_release\(\)[\s\S]*release\.manifest[\s\S]*read_manifest_value[\s\S]*commit[\s\S]*is_valid_commit[\s\S]*export FLUXPOST_RELEASE_SHA/, "Activation must validate and export the target release manifest commit.");
+assertContains(files.deploy, /compose\(\)[\s\S]*FLUXPOST_RELEASE_SHA="\$\{FLUXPOST_RELEASE_SHA:-\}"[\s\S]*docker compose/, "Every Compose invocation must forward the selected release identity without sourcing production config.");
 assertContains(files.deploy, /--rollback\)\s*\[ "\$#" -ge 2 \][\s\S]*ROLLBACK_RELEASE="\$2"/, "Deploy must accept an explicit release rollback.");
 assertContains(files.deploy, /if ! activate_release[\s\S]*rollback_release/, "A failed activation must restore the previous release.");
 assertContains(files.deploy, /else[\s\S]*compose stop app postgres proxy[\s\S]*new release failed health checks/, "A first-release health failure must stop the incomplete services without deleting volumes.");

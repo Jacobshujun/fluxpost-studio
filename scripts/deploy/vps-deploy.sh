@@ -343,7 +343,8 @@ acquire_operation_lock
 COMPOSE_APP_IMAGE="${PROJECT_NAME}-app:latest"
 
 compose() {
-  COMPOSE_PROJECT_NAME="$PROJECT_NAME" docker compose --env-file "$ENV_FILE" "$@"
+  FLUXPOST_RELEASE_SHA="${FLUXPOST_RELEASE_SHA:-}" \
+    COMPOSE_PROJECT_NAME="$PROJECT_NAME" docker compose --env-file "$ENV_FILE" "$@"
 }
 
 current_release_path() {
@@ -390,9 +391,15 @@ wait_for_health() {
 activate_release() {
   local release_dir="$1"
   local immutable_image="$2"
+  local manifest="$release_dir/release.manifest"
+  local commit
   [ -f "$release_dir/compose.yaml" ] || return 1
+  [ -f "$manifest" ] || return 1
   is_valid_image_tag "$immutable_image" || return 1
   docker image inspect "$immutable_image" >/dev/null 2>&1 || return 1
+  commit="$(read_manifest_value "$manifest" commit)"
+  is_valid_commit "$commit" || return 1
+  export FLUXPOST_RELEASE_SHA="$commit"
 
   docker image tag "$immutable_image" "$COMPOSE_APP_IMAGE"
   cd "$release_dir"

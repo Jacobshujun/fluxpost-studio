@@ -262,10 +262,11 @@ return NextResponse.json({ status: getConfigStatus(), advanced: getAdvancedConfi
 
 ## Deployment Rules
 
-- Confirmed entries are `npm run dev`, `npm run build`, and `npm run start`.
-- For the local LAN production server on port `3001`, use `npm run local:restart` after frontend or API code changes. Do not rely on `npm run build` alone to refresh an already-running `next start` process.
+- Confirmed entries are `npm run dev`/`npm run dev:lan` for port-3000 development, `npm run build`/`npm run start` for direct production-mode execution, and `npm run local:restart`/`npm run local:parity` for the port-3001 mirror.
+- Port `3001` must run only a clean SHA-specific sibling worktree at the exact deployed production commit. Feature work stays on port `3000`; do not refresh the mirror from a dirty or ahead-of-production development worktree.
+- Local mirror synchronization must build before stopping the existing listener, inject `FLUXPOST_RUNTIME_MODE=local-production` plus the full SHA, verify `/api/version`, and retain a bounded previous-release restart path. It synchronizes code only, never configuration or runtime data.
 - Keep standalone output opt-in through `FLUXPOST_STANDALONE_BUILD=1` for Docker builds. Default local builds must remain compatible with `next start` without creating `.next/standalone`, and standalone tracing must not package runtime data, generated media, crawled media, or test artifacts.
-- Use `npm run dev:lan` when hot reload is desired during active frontend development.
+- Development wrappers use port `3000` and disable background workers by default. `FLUXPOST_DEVELOPMENT_WORKERS=1` is the explicit opt-in for worker testing.
 - GitHub-driven Ubuntu production is owned by `scripts/deploy/vps-bootstrap.sh`, `scripts/deploy/vps-deploy.sh`, `scripts/deploy/vps-enable-domain.sh`, root `compose.yaml`, and `docs/deployment/ubuntu-docker.md`; do not add a second server layout or competing update script.
 - New pre-domain installs must keep the app on `127.0.0.1:${FLUXPOST_APP_PORT:-3101}`, start only `postgres app`, and use SSH tunneling. Caddy ports 80/443 start only when `FLUXPOST_PROXY_ENABLED=true` and `FLUXPOST_PUBLIC_HOST` is a validated DNS hostname.
 - Deployment code may read only explicit deployment controls from `shared/env.production`; it must not source the file as shell code. The file is root-only mode `0600`, while admin UI overrides remain in the `fluxpost-config` volume.

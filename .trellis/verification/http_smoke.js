@@ -1,4 +1,16 @@
 const baseUrl = normalizeBaseUrl(process.argv[2] || process.env.TRELLIS_BASE_URL || "http://127.0.0.1:3310");
+const expectedRuntimeMode = process.argv[3] || process.env.TRELLIS_EXPECTED_RUNTIME_MODE || "development";
+const expectedReleaseSha = process.argv[4] || process.env.TRELLIS_EXPECTED_RELEASE_SHA || null;
+
+if (!["development", "local-production", "production"].includes(expectedRuntimeMode)) {
+  throw new Error(`Unsupported expected runtime mode: ${expectedRuntimeMode}`);
+}
+if (expectedReleaseSha !== null && !/^[0-9a-f]{40}$/.test(expectedReleaseSha)) {
+  throw new Error("Expected release SHA must be a full lowercase Git commit");
+}
+if (expectedRuntimeMode !== "development" && expectedReleaseSha === null) {
+  throw new Error(`Expected release SHA is required for ${expectedRuntimeMode} smoke`);
+}
 
 async function main() {
   await expectHtml("/");
@@ -8,6 +20,13 @@ async function main() {
     assertType(data.openaiConfigured, "boolean", "config.openaiConfigured");
     assertType(data.openaiImageConfigured, "boolean", "config.openaiImageConfigured");
     assertType(data.feishuConfigured, "boolean", "config.feishuConfigured");
+  });
+  await expectJson("/api/version", (version) => {
+    assertType(version, "object", "version response");
+    const expectedVersioned = expectedReleaseSha !== null;
+    if (version.mode !== expectedRuntimeMode || version.versioned !== expectedVersioned || version.commit !== expectedReleaseSha) {
+      throw new Error(`Runtime identity does not match expected ${expectedRuntimeMode} release`);
+    }
   });
   await expectJson("/api/accounts/session", (data) => {
     assertType(data, "object", "accounts session response");

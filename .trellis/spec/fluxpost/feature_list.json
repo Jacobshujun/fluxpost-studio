@@ -359,6 +359,21 @@
       "notes": "Keep ready_for_review until authenticated multi-user PostgreSQL use and an operator-approved real two-call text-model batch prove the live path. Default checks must not invoke paid models."
     },
     {
+      "id": "local-production-parity",
+      "title": "Local and remote production code parity",
+      "status": "ready_for_review",
+      "definition_of_done": [
+        "Port 3000 is development with workers default-off; port 3001 runs only a clean worktree at the deployed SHA",
+        "Versioned runtimes expose a minimal full-SHA identity derived from the activated release",
+        "Mirror sync and drift checks enforce identity, Git cleanliness, and origin/main ancestry without syncing runtime data",
+        "Push, candidate verification, and deployment remain separate approvals"
+      ],
+      "evidence": [
+        "2026-08-14 focused contracts, PowerShell parsing, lint, TypeScript, build, isolated HTTP identity smoke, and the full deterministic baseline passed"
+      ],
+      "notes": "Final local/remote equality awaits an approved identity-enabled production deployment and mirror synchronization."
+    },
+    {
       "id": "original-xhs-batch-workspace",
       "title": "Batch original Xiaohongshu card workspace",
       "status": "ready_for_review",
