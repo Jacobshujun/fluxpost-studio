@@ -1,0 +1,8 @@
+# Release Evidence
+
+- Candidate branch `fix/canvas-schedule-copy-name-20260814` matched local and remote SHA `669a3272f764a05f994b87875ff6a9fc8df78675` on top of GitHub `main`.
+- The focused scheduler check and complete local baseline passed for the committed SHA. The installed VPS verifier independently passed the same SHA and wrote `/opt/fluxpost-studio/verifications/669a3272f764a05f994b87875ff6a9fc8df78675.manifest` without production configuration or runtime mounts.
+- Read-only preflight confirmed production release `20260814-025955-5be0cb988580`, healthy app/PostgreSQL/Nginx/protected services, public and loopback HTTP 200, zero queued/running work, seven named volumes, two rescue images, and 36 GB free disk.
+- After explicit exact-SHA approval, preflight again found zero active work. Root-only backup `predeploy-20260814T055418Z-669a3272f764.pgcustom` was validated with `pg_restore -l`, measured 5,472,393 bytes, and retained mode `0600`.
+- Installed wrapper v4 deployed the SHA as `20260814-055428-669a3272f764`. Post-deploy checks proved manifest/image/container identity, healthy app/PostgreSQL, enabled workers, workspace HTTP 200, unsigned scheduler API 401, source-video GET 405, 15 required tables, zero active work, unchanged seven-volume inventory, valid Nginx/public HTTPS, healthy protected services, two rescue images, active BuildKit timer, clean fatal-log scan, and rollback readiness.
+- Rollback release `20260814-025955-5be0cb988580` remains retained and passed `deploy.sh --check --rollback`. No rollback, provider call, Feishu/Lark write, DNS, firewall, Nginx, SSH, or volume mutation was required beyond normal application activation and documented image retention.
