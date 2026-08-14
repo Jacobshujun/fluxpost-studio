@@ -835,6 +835,7 @@ setNodes((current) => [...current.map(clearSelection), ...fragment.nodes]);
 - The child result must be `text`, `images`, or `videos`. Without a main target, successful child artifacts are the main result. With one, the frozen child-result node is replaced by a matching literal input and only its downstream path executes; `external_write` ancestors are forbidden.
 - Default aggregation succeeds with at least one artifact-producing child; strict mode requires every child. Failed children retry independently. Image retries for an existing social-post main target preserve the original aggregate run and use the existing draft guard: unchanged drafts sync automatically, edited/reviewed drafts expose explicit candidate acceptance.
 - Schedules without `schemaVersion: 2` remain V1. Conversion creates a separate V2 draft and discovers image binding keys from the registry (`urls` or `assetIds`) instead of guessing by node type.
+- Duplicating either schedule version derives `<base> 副本 YYYYMMDD-HHmmss` from the source name and the duplicate's single `now` value in `Asia/Shanghai`. It removes only repeated recognized trailing old/new copy markers, preserves `副本` elsewhere, and truncates only the base portion when the complete suffix must fit the 80-character name limit.
 
 ### 4. Validation & Error Matrix
 
@@ -857,7 +858,7 @@ setNodes((current) => [...current.map(clearSelection), ...fragment.nodes]);
 
 ### 6. Tests Required
 
-- `canvas_scheduler_check.mjs` must cover exact/range boundaries, main-once and child-per-main sampling, Cartesian independent counts, zip range intersection, fixed/list/image-group values, deterministic random-source injection, scalar/stable-record/image-group deduplication, no source mutation, insufficient maximum capacity before preview save, cumulative 2,000-child rejection, legacy `randomCount` direct launch and duplicate normalization, typed injection, aggregate ancestor pruning, main-target planning, conversion field discovery, social-post retry preservation, and explicit candidate acceptance.
+- `canvas_scheduler_check.mjs` must cover exact/range boundaries, main-once and child-per-main sampling, Cartesian independent counts, zip range intersection, fixed/list/image-group values, deterministic random-source injection, scalar/stable-record/image-group deduplication, no source mutation, insufficient maximum capacity before preview save, cumulative 2,000-child rejection, legacy `randomCount` direct launch and duplicate normalization, copy-name suffix/time/80-character normalization, typed injection, aggregate ancestor pruning, main-target planning, conversion field discovery, social-post retry preservation, and explicit candidate acceptance.
 - `canvas_workflows_check.mjs`, TypeScript, scoped lint, and production build must remain green without provider calls.
 - Mocked 1440x960 and 390x844 browser checks must cover two renamed same-type nodes, ID-disambiguated binding choices, random-mode selection and an editable random-count input, a one-main/three-child preview, decoded frozen main/child thumbnails, task-local full-screen preview, both aggregation policies, and zero horizontal overflow or sticky-action overlap.
 

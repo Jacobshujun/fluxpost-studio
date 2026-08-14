@@ -950,7 +950,30 @@ try {
 
   storedSchedule = legacyReady;
   createdSchedule = undefined;
+  const copyNameSources = [
+    "V2 random schedule",
+    "V2 random schedule 副本",
+    "V2 random schedule 副本 副本",
+    "V2 random schedule 副本 20260814-153045",
+  ];
+  const duplicatedNames = [];
+  for (const name of copyNameSources) {
+    storedSchedule = { ...legacyReady, name };
+    const duplicated = await scheduler.duplicateCanvasSchedule(storedSchedule.id, account);
+    const beijing = new Date(Date.parse(duplicated.createdAt) + 8 * 60 * 60 * 1000).toISOString();
+    const taskNumber = `${beijing.slice(0, 10).replaceAll("-", "")}-${beijing.slice(11, 19).replaceAll(":", "")}`;
+    assert.equal(duplicated.name, `V2 random schedule 副本 ${taskNumber}`, `duplicate name must normalize ${name}`);
+    assert.equal(duplicated.name.match(/副本/g)?.length, 1, "duplicate name must contain one copy marker");
+    duplicatedNames.push(duplicated);
+  }
+  storedSchedule = duplicatedNames[0];
   const duplicatedLegacyV2 = await scheduler.duplicateCanvasSchedule(storedSchedule.id, account);
+  assert.match(duplicatedLegacyV2.name, /^V2 random schedule 副本 \d{8}-\d{6}$/);
+  assert.equal(duplicatedLegacyV2.name.match(/副本/g)?.length, 1, "copying a new-style duplicate must not stack copy markers");
+  storedSchedule = { ...legacyReady, name: "A".repeat(80) };
+  const duplicatedLongName = await scheduler.duplicateCanvasSchedule(storedSchedule.id, account);
+  assert.equal(duplicatedLongName.name.length, 80, "copy suffix must fit without rejecting a valid 80-character source name");
+  assert.match(duplicatedLongName.name, /^A+ 副本 \d{8}-\d{6}$/);
   const duplicatedRandomParameter = duplicatedLegacyV2.definition.parameters.find((parameter) => parameter.id === "angle");
   assert.deepEqual(duplicatedRandomParameter.sampleCount, { mode: "exact", value: 2 }, "new V2 copies must normalize legacy randomCount");
   assert.equal("randomCount" in duplicatedRandomParameter, false, "new V2 copies must persist only sampleCount");

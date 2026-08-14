@@ -4,7 +4,7 @@ Last updated: 2026-08-14
 
 ## One-Line Status
 
-Production runs exact SHA `5be0cb988580149037655d4213be6faa835c820d` as release `20260814-025955-5be0cb988580`; the verified release history and deployment evidence are on GitHub `main`.
+Production runs exact SHA `5be0cb988580149037655d4213be6faa835c820d` as release `20260814-025955-5be0cb988580`; the Canvas batch-schedule copy-name fix is locally verified in an isolated candidate worktree and pending fixed-SHA production gates.
 
 ## Current Focus
 
@@ -13,19 +13,20 @@ Production runs exact SHA `5be0cb988580149037655d4213be6faa835c820d` as release 
 - Release `20260814-025955-5be0cb988580` has healthy app/PostgreSQL, enabled workers, HTTP 200 on the key workspaces, expected 401/405 auth and method boundaries, unchanged seven-volume inventory, zero active work, two rescue images, and an active BuildKit cleanup timer.
 - The original dirty root worktree and its unfinished visual-node/shared-library artifacts remain unchanged and outside the candidate.
 - No provider or external write was used as release verification.
+- Batch-schedule duplication now normalizes legacy/stacked/time-stamped copy suffixes to one `副本 YYYYMMDD-HHmmss` marker using the duplicate `createdAt` instant in `Asia/Shanghai`; valid 80-character source names remain copyable by truncating only the base portion.
 
 ## Next Entry
 
-1. Treat release `20260814-025955-5be0cb988580` as the rollback baseline for the next production change.
-2. Keep provider smokes, authenticated production workflows, and external writes behind separate operator approval.
+1. Commit and push the clean batch-schedule copy-name candidate, verify its remote full SHA, then run isolated VPS verification and read-only production preflight.
+2. Obtain exact-SHA approval before deploying through the installed release wrapper; keep provider smokes, authenticated production workflows, and external writes out of this release.
 
 ## Recent Verification
 
+- 2026-08-14: Batch-schedule copy naming passed base/legacy/stacked/time-stamped/80-character regression coverage, the focused scheduler check, TypeScript, lint, production build, complete isolated baseline, HTTP smoke, and SQLite without external calls.
 - 2026-08-14: Exact SHA `5be0cb988580149037655d4213be6faa835c820d` passed the complete local and isolated VPS baselines, zero-work preflight, validated 5,438,693-byte root-only PostgreSQL backup, and production activation as `20260814-025955-5be0cb988580`; identity, health, routes/auth, workers, 13 required tables, seven volumes, protected services, retention, timer, logs, and rollback readiness passed.
 - 2026-08-14: Candidate code through `011c15e` passed Canvas workflow/video/scheduler, library, review, deployment, and all other deterministic checks plus lint, TypeScript, production build, isolated HTTP smoke, and SQLite without external calls.
 - 2026-08-11: Canvas video reconstruction passed focused source/service/FFmpeg/workflow/scheduler/concurrency checks, lint, TypeScript, build, full baseline, restart/HTTP smoke, and mocked desktop/mobile Chromium locally.
 - 2026-08-10: Library role-entry times and date filters passed focused checks, the full baseline, restart, and mocked desktop/mobile Chromium locally.
-- 2026-08-05: Canvas portability and V2 shared outputs deployed at exact SHA `a887c158410124d969f608f7a0146e4345cc050a` after local, isolated, identity, health, auth, worker, volume, log, and rollback checks.
 - Older evidence is indexed in `verification.md` and preserved under `.trellis/spec/fluxpost/archive/`.
 
 ## Current Risks

@@ -356,7 +356,7 @@ export async function duplicateCanvasSchedule(scheduleId: string, account: Works
   const schedule: CanvasSchedule = {
     id: `canvas-schedule-${Date.now()}-${randomUUID().slice(0, 8)}`,
     ...scopeWorkspaceOwner(account),
-    name: normalizeName(`${source.name} 副本`, "批量任务副本"),
+    name: scheduleDuplicateName(source.name, now),
     revision: 1,
     workflowId: workflow.id,
     workflowRevision: workflow.revision,
@@ -1994,6 +1994,25 @@ function normalizeName(value: string | undefined, fallback: string) {
   if (!name) throw new Error("Name is required.");
   if (name.length > 80) throw new Error("Name must be 80 characters or fewer.");
   return name;
+}
+
+const scheduleCopyTimeFormatter = new Intl.DateTimeFormat("en-CA", {
+  timeZone: "Asia/Shanghai",
+  year: "numeric",
+  month: "2-digit",
+  day: "2-digit",
+  hour: "2-digit",
+  minute: "2-digit",
+  second: "2-digit",
+  hourCycle: "h23",
+});
+
+function scheduleDuplicateName(sourceName: string, now: string) {
+  const baseName = sourceName.replace(/(?:\s+副本(?:\s+\d{8}-\d{6})?)+$/u, "").trim();
+  const parts = Object.fromEntries(scheduleCopyTimeFormatter.formatToParts(new Date(now)).map((part) => [part.type, part.value]));
+  const taskNumber = `${parts.year}${parts.month}${parts.day}-${parts.hour}${parts.minute}${parts.second}`;
+  const suffix = ` 副本 ${taskNumber}`;
+  return normalizeName(`${baseName.slice(0, 80 - suffix.length).trimEnd()}${suffix}`, "批量任务副本");
 }
 
 function ownerActor(schedule: CanvasSchedule): WorkspaceAccessActor {
