@@ -1148,6 +1148,7 @@ export type LibraryAsset = {
   height?: number;
   sha256: string;
   roles: LibraryAssetRole[];
+  roleAddedAt: Partial<Record<LibraryAssetRole, string>>;
   collectionIds: string[];
   visibility: LibraryVisibility;
   aiTags: LibraryTagProfile;

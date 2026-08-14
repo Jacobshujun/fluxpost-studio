@@ -23,7 +23,7 @@ import {
   normalizeLibraryManualOverrides,
   normalizeStringList,
 } from "./library-tags";
-import { compareLibraryText, libraryListSortDirection, normalizeLibraryListSort } from "./library-sort";
+import { compareLibraryText, getLibraryAssetAddedAt, libraryListSortDirection, normalizeLibraryListSort } from "./library-sort";
 import { deleteRuntimeMediaObject, persistLibraryObject } from "./runtime-media-storage";
 import type {
   LibraryAsset,
@@ -64,6 +64,8 @@ export type LibraryAssetFilters = {
   customTags?: string[];
   tags?: string[];
   sort?: LibraryListSort;
+  addedFrom?: string;
+  addedBefore?: string;
 };
 
 export type PatchLibraryAssetInput = Partial<Pick<LibraryAsset, "name" | "roles" | "visibility" | "collectionIds">> & {
@@ -87,11 +89,13 @@ export async function listLibraryAssets(account: WorkspaceAccessActor, filters: 
   const collections = await listLibraryCollectionsFromDb();
   const visibleCollections = collections.filter((item) => isWorkspaceAdmin(account) || item.ownerUserId === account.id);
   const sort = normalizeLibraryListSort(filters.sort);
-  const cursor = decodeCursor(filters.cursor, sort);
+  const cursor = decodeCursor(filters.cursor, sort, filters.role);
   const query = normalizeSearch(filters.search);
   const assets = (await listLibraryAssetsFromDb())
     .filter((asset) => canReadAsset(account, asset))
     .filter((asset) => !filters.role || asset.roles.includes(filters.role))
+    .filter((asset) => !filters.addedFrom || getLibraryAssetAddedAt(asset, filters.role) >= filters.addedFrom)
+    .filter((asset) => !filters.addedBefore || getLibraryAssetAddedAt(asset, filters.role) < filters.addedBefore)
     .map((asset) => ({ asset, tagProfile: filters.role ? getLibraryTagProfileForRole(asset, filters.role) : asset.effectiveTags }))
     .filter(({ asset }) => !filters.collectionId || asset.collectionIds.includes(filters.collectionId))
     .filter(({ asset }) => !filters.visibility || asset.visibility === filters.visibility)
@@ -105,17 +109,17 @@ export async function listLibraryAssets(account: WorkspaceAccessActor, filters: 
     .filter(({ tagProfile }) => matchDimension([tagProfile.people], filters.people))
     .filter(({ tagProfile }) => matchDimension(tagProfile.customTags, filters.customTags))
     .filter(({ tagProfile }) => matchesAllLibraryTags(tagProfile, filters.tags))
-    .sort((left, right) => compareAssets(left.asset, right.asset, sort))
+    .sort((left, right) => compareAssets(left.asset, right.asset, sort, filters.role))
     .map(({ asset }) => asset);
   const total = assets.length;
-  const afterCursor = cursor ? assets.filter((asset) => compareAssetToCursor(asset, cursor, sort) > 0) : assets;
+  const afterCursor = cursor ? assets.filter((asset) => compareAssetToCursor(asset, cursor, sort, filters.role) > 0) : assets;
   const limit = Math.max(1, Math.min(pageLimitMax, Math.floor(filters.limit || 60)));
   const page = afterCursor.slice(0, limit);
   return {
     assets: page.map((asset) => ({ ...asset, canEdit: canEditAsset(account, asset) })),
     collections: visibleCollections,
     total,
-    nextCursor: afterCursor.length > limit && page.length ? encodeCursor(page[page.length - 1], sort) : undefined,
+    nextCursor: afterCursor.length > limit && page.length ? encodeCursor(page[page.length - 1], sort, filters.role) : undefined,
   };
 }
 
@@ -277,6 +281,7 @@ export async function importLibraryAsset(account: WorkspaceAccessActor, input: I
     ...dimensions,
     sha256,
     roles: [role],
+    roleAddedAt: { [role]: now },
     collectionIds: collectionId ? [collectionId] : [],
     visibility,
     aiTags,
@@ -340,6 +345,7 @@ export async function patchLibraryAssetWithResult(account: WorkspaceAccessActor,
     ...asset,
     name: patch.name === undefined ? asset.name : normalizeAssetName(patch.name),
     roles,
+    roleAddedAt: reconcileLibraryRoleAddedAt(asset, roles, now),
     collectionIds,
     visibility: patch.visibility === undefined ? asset.visibility : requireVisibility(patch.visibility),
     manualOverrides: overrides,
@@ -395,6 +401,7 @@ async function reuseLibraryAssetForRole(
   const next: LibraryAsset = {
     ...asset,
     roles: [...asset.roles, role],
+    roleAddedAt: reconcileLibraryRoleAddedAt(asset, [...asset.roles, role], now),
     collectionIds: input.collectionId && !asset.collectionIds.includes(input.collectionId)
       ? [...asset.collectionIds, input.collectionId]
       : asset.collectionIds,
@@ -526,26 +533,26 @@ function searchAsset(asset: LibraryAsset, tags: LibraryTagProfile, query: string
     .some((value) => normalizeSearch(value).includes(query));
 }
 
-type LibraryAssetCursor = { version: 1; sort: LibraryListSort; value: string; id: string };
+type LibraryAssetCursor = { version: 2; sort: LibraryListSort; role?: LibraryAssetRole; value: string; id: string };
 
-export function compareAssets(left: LibraryAsset, right: LibraryAsset, sort: LibraryListSort = "newest") {
-  return compareAssetSortValues(assetSortValue(left, sort), left.id, assetSortValue(right, sort), right.id, sort);
+export function compareAssets(left: LibraryAsset, right: LibraryAsset, sort: LibraryListSort = "newest", role?: LibraryAssetRole) {
+  return compareAssetSortValues(assetSortValue(left, sort, role), left.id, assetSortValue(right, sort, role), right.id, sort);
 }
 
-function compareAssetToCursor(asset: LibraryAsset, cursor: LibraryAssetCursor, sort: LibraryListSort) {
-  return compareAssetSortValues(assetSortValue(asset, sort), asset.id, cursor.value, cursor.id, sort);
+function compareAssetToCursor(asset: LibraryAsset, cursor: LibraryAssetCursor, sort: LibraryListSort, role?: LibraryAssetRole) {
+  return compareAssetSortValues(assetSortValue(asset, sort, role), asset.id, cursor.value, cursor.id, sort);
 }
 
-function encodeCursor(asset: LibraryAsset, sort: LibraryListSort) {
-  const cursor: LibraryAssetCursor = { version: 1, sort, value: assetSortValue(asset, sort), id: asset.id };
+function encodeCursor(asset: LibraryAsset, sort: LibraryListSort, role?: LibraryAssetRole) {
+  const cursor: LibraryAssetCursor = { version: 2, sort, role, value: assetSortValue(asset, sort, role), id: asset.id };
   return Buffer.from(JSON.stringify(cursor)).toString("base64url");
 }
 
-function decodeCursor(value: string | undefined, sort: LibraryListSort) {
+function decodeCursor(value: string | undefined, sort: LibraryListSort, role?: LibraryAssetRole) {
   if (!value) return undefined;
   try {
     const decoded = JSON.parse(Buffer.from(value, "base64url").toString("utf8")) as Partial<LibraryAssetCursor>;
-    if (decoded.version === 1 && decoded.sort === sort && typeof decoded.value === "string" && typeof decoded.id === "string") {
+    if (decoded.version === 2 && decoded.sort === sort && decoded.role === role && typeof decoded.value === "string" && typeof decoded.id === "string") {
       return decoded as LibraryAssetCursor;
     }
   } catch {
@@ -554,8 +561,8 @@ function decodeCursor(value: string | undefined, sort: LibraryListSort) {
   throw new Error("Invalid library cursor.");
 }
 
-function assetSortValue(asset: LibraryAsset, sort: LibraryListSort) {
-  if (sort === "newest" || sort === "oldest") return asset.createdAt;
+function assetSortValue(asset: LibraryAsset, sort: LibraryListSort, role?: LibraryAssetRole) {
+  if (sort === "newest" || sort === "oldest") return getLibraryAssetAddedAt(asset, role);
   if (sort === "name-asc" || sort === "name-desc") return asset.name;
   return asset.ownerDisplayName;
 }
@@ -600,11 +607,16 @@ export function parseLibraryAssetFilters(url: URL): LibraryAssetFilters {
   const role = url.searchParams.get("role") as LibraryAssetRole | null;
   const visibility = url.searchParams.get("visibility") as LibraryVisibility | null;
   const taggingStatus = url.searchParams.get("taggingStatus") as LibraryTaggingStatus | null;
+  const resolvedRole = role && validRoles.has(role) ? role : undefined;
+  const addedFrom = parseLibraryDateFilter(url.searchParams.get("addedFrom"), "addedFrom");
+  const addedBefore = parseLibraryDateFilter(url.searchParams.get("addedBefore"), "addedBefore");
+  if ((addedFrom || addedBefore) && !resolvedRole) throw new Error("Library role is required for added-time filtering.");
+  if (addedFrom && addedBefore && addedFrom >= addedBefore) throw new Error("Library added-time range must start before it ends.");
   return {
     cursor: url.searchParams.get("cursor") || undefined,
     limit: Number(url.searchParams.get("limit") || 60),
     search: url.searchParams.get("search") || undefined,
-    role: role && validRoles.has(role) ? role : undefined,
+    role: resolvedRole,
     collectionId: url.searchParams.get("collectionId") || undefined,
     visibility: visibility && validVisibility.has(visibility) ? visibility : undefined,
     taggingStatus: taggingStatus && validTaggingStatuses.has(taggingStatus) ? taggingStatus : undefined,
@@ -612,5 +624,20 @@ export function parseLibraryAssetFilters(url: URL): LibraryAssetFilters {
     vehicleColors: list("vehicleColor"), angles: list("angle"), people: list("people"), customTags: list("customTag"),
     tags: list("tag"),
     sort: normalizeLibraryListSort(url.searchParams.get("sort")),
+    addedFrom,
+    addedBefore,
   };
+}
+
+function reconcileLibraryRoleAddedAt(asset: LibraryAsset, roles: LibraryAssetRole[], addedAt: string) {
+  const result: LibraryAsset["roleAddedAt"] = {};
+  for (const role of roles) result[role] = asset.roles.includes(role) ? getLibraryAssetAddedAt(asset, role) : addedAt;
+  return result;
+}
+
+function parseLibraryDateFilter(value: string | null, name: "addedFrom" | "addedBefore") {
+  if (value === null) return undefined;
+  const timestamp = Date.parse(value);
+  if (!value.trim() || !Number.isFinite(timestamp)) throw new Error(`Invalid library ${name} timestamp.`);
+  return new Date(timestamp).toISOString();
 }

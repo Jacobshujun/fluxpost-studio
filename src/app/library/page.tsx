@@ -2,12 +2,13 @@
 /* eslint-disable @next/next/no-img-element */
 
 import {
-  ArrowLeft, ChevronLeft, ChevronRight, Download, Eye, FileImage, FolderInput, Images, Info, LoaderCircle,
+  ArrowLeft, CalendarClock, ChevronLeft, ChevronRight, Download, Eye, FileImage, FolderInput, Images, Info, LoaderCircle,
   Maximize2, Minus, Moon, Plus, RefreshCw, RotateCcw, Save, Search, Share2, SortAsc, Sparkles, Sun, Tag, Tags, Trash2,
   Upload, UserRound, UsersRound, X, ZoomIn,
 } from "lucide-react";
 import Link from "next/link";
 import { useCallback, useEffect, useId, useMemo, useRef, useState, useSyncExternalStore, type DragEvent, type KeyboardEvent as ReactKeyboardEvent, type PointerEvent as ReactPointerEvent, type ReactNode } from "react";
+import { getLibraryAssetAddedAt } from "@/lib/library-sort";
 import { getLibraryUnifiedTagsForRole } from "@/lib/library-tags";
 import { getStoredTheme, setStoredTheme, subscribeTheme, type ThemeMode } from "@/lib/theme";
 import { useLibraryListSort } from "@/lib/use-library-list-sort";
@@ -20,6 +21,8 @@ import styles from "./library.module.css";
 
 type ImportItem = { id: string; name: string; status: "uploading" | "imported" | "duplicate" | "error"; message?: string };
 type DeleteMode = "menu" | "permanent" | null;
+type LibraryTimePreset = "all" | "today" | "7d" | "30d" | "custom";
+type LibraryTimeRange = { addedFrom: string; addedBefore: string };
 const libraryPageSize = 60;
 const librarySortStorageKey = "fluxpost-image-library-sort";
 const manualTagKeys = ["imageType", "scenes", "vehicleModels", "vehicleColors", "angles", "people", "customTags"] as const;
@@ -38,6 +41,10 @@ export default function LibraryPage() {
   const [sort, setSort] = useLibraryListSort(librarySortStorageKey);
   const [taggingStatus, setTaggingStatus] = useState("");
   const [filterTags, setFilterTags] = useState<string[]>([]);
+  const [timePreset, setTimePreset] = useState<LibraryTimePreset>("all");
+  const [customDateFrom, setCustomDateFrom] = useState("");
+  const [customDateTo, setCustomDateTo] = useState("");
+  const [customTimeRange, setCustomTimeRange] = useState<LibraryTimeRange>();
   const [collectionId, setCollectionId] = useState("");
   const [selected, setSelected] = useState<Set<string>>(new Set());
   const [detailId, setDetailId] = useState<string>();
@@ -58,6 +65,11 @@ export default function LibraryPage() {
   const loadMorePromiseRef = useRef<Promise<LibraryAsset[]> | null>(null);
   const selectingAllRef = useRef(false);
   const { selectionRect, marqueeProps } = useMarqueeSelection({ containerRef: gridRef, selectedIds: selected, onSelectionChange: setSelected });
+  const activeTimeRange = useMemo(
+    () => timePreset === "custom" ? customTimeRange : buildLibraryPresetRange(timePreset),
+    [customTimeRange, timePreset],
+  );
+  const customRangeValid = Boolean(customDateFrom && customDateTo && customDateFrom <= customDateTo);
 
   const queryString = useMemo(() => {
     const params = new URLSearchParams({ role, limit: String(libraryPageSize) });
@@ -66,9 +78,13 @@ export default function LibraryPage() {
     params.set("sort", sort);
     if (role === "reference" && taggingStatus) params.set("taggingStatus", taggingStatus);
     filterTags.forEach((tag) => params.append("tag", tag));
+    if (activeTimeRange) {
+      params.set("addedFrom", activeTimeRange.addedFrom);
+      params.set("addedBefore", activeTimeRange.addedBefore);
+    }
     if (collectionId) params.set("collectionId", collectionId);
     return params.toString();
-  }, [collectionId, filterTags, role, search, sort, taggingStatus, visibility]);
+  }, [activeTimeRange, collectionId, filterTags, role, search, sort, taggingStatus, visibility]);
 
   useEffect(() => { document.documentElement.dataset.theme = theme; }, [theme]);
   useEffect(() => {
@@ -375,6 +391,28 @@ export default function LibraryPage() {
     setPreview(undefined);
   }
 
+  function changeTimePreset(value: string) {
+    setTimePreset(value as LibraryTimePreset);
+    setPreview(undefined);
+  }
+
+  function applyCustomTimeRange() {
+    if (!customRangeValid) return;
+    setCustomTimeRange(buildCustomLibraryTimeRange(customDateFrom, customDateTo));
+    setPreview(undefined);
+  }
+
+  function clearFilters() {
+    setSearch("");
+    setVisibility("");
+    setTaggingStatus("");
+    setFilterTags([]);
+    setTimePreset("all");
+    setCustomDateFrom("");
+    setCustomDateTo("");
+    setCustomTimeRange(undefined);
+  }
+
   const activeCollections = data.collections.filter((collection) => collection.role === role);
   const detail = data.assets.find((asset) => asset.id === detailId);
   const importedCount = imports.filter((item) => item.status === "imported").length;
@@ -420,10 +458,12 @@ export default function LibraryPage() {
             <label className={styles.search}><Search size={16} /><input value={search} onChange={(event) => setSearch(event.target.value)} placeholder={isVehicle ? "搜索名称、文件名或人工标签" : "搜索名称、文件名或标签"} /></label>
             <div className={styles.filterTags}><UnifiedTagPicker tags={filterTags.map((label) => ({ label }))} role={role} placeholder="按标签筛选" onAdd={(label) => setFilterTags((current) => current.some((item) => sameTag(item, label)) ? current : [...current, label])} onRemove={(label) => setFilterTags((current) => current.filter((item) => !sameTag(item, label)))} /></div>
             <select value={visibility} onChange={(event) => setVisibility(event.target.value)} aria-label="共享范围"><option value="">全部范围</option><option value="private">个人</option><option value="team">团队共享</option></select>
+            <label className={styles.timeFilterControl}><CalendarClock size={14} /><select value={timePreset} onChange={(event) => changeTimePreset(event.target.value)} aria-label="入库时间筛选"><option value="all">全部时间</option><option value="today">今天</option><option value="7d">近 7 天</option><option value="30d">近 30 天</option><option value="custom">自定义</option></select></label>
             <label className={styles.sortControl}><SortAsc size={14} /><select value={sort} onChange={(event) => changeSort(event.target.value)} aria-label="图片排序"><option value="newest">最新导入</option><option value="oldest">最早导入</option><option value="name-asc">名称 A-Z</option><option value="name-desc">名称 Z-A</option><option value="owner-asc">提交人 A-Z</option><option value="owner-desc">提交人 Z-A</option></select></label>
             {!isVehicle ? <select value={taggingStatus} onChange={(event) => setTaggingStatus(event.target.value)} aria-label="打标状态"><option value="">全部状态</option><option value="queued">等待打标</option><option value="running">打标中</option><option value="completed">已完成</option><option value="failed">失败</option></select> : null}
             <label className={styles.selectAllControl} title="全选当前筛选结果（Ctrl/Cmd+A）"><input type="checkbox" aria-label="全选当前筛选结果" aria-keyshortcuts="Control+A Meta+A" checked={allSelected} disabled={loading || loadingMore || selectingAll || !data.assets.length} onChange={(event) => { if (event.target.checked) void selectAllAssets(); else { setSelected(new Set()); setBatchTagsOpen(false); } }} />{selectingAll ? "全选中..." : "全选"}</label>
-            {(search || visibility || taggingStatus || filterTags.length) ? <button className={styles.clearButton} onClick={() => { setSearch(""); setVisibility(""); setTaggingStatus(""); setFilterTags([]); }}><X size={14} />清除</button> : null}
+            {timePreset === "custom" ? <div className={styles.customDateRange}><label><span>开始</span><input type="date" value={customDateFrom} max={customDateTo || undefined} onChange={(event) => setCustomDateFrom(event.target.value)} /></label><span className={styles.dateRangeSeparator}>至</span><label><span>结束</span><input type="date" value={customDateTo} min={customDateFrom || undefined} onChange={(event) => setCustomDateTo(event.target.value)} /></label><button type="button" disabled={!customRangeValid} onClick={applyCustomTimeRange}>应用</button></div> : null}
+            {(search || visibility || taggingStatus || filterTags.length || timePreset !== "all") ? <button className={styles.clearButton} onClick={clearFilters}><X size={14} />清除</button> : null}
             {!isVehicle ? <button className={styles.clearButton} onClick={() => void batchRetag("failed")}><RefreshCw size={14} />重试失败</button> : null}
           </div>
 
@@ -450,11 +490,12 @@ export default function LibraryPage() {
 
 function AssetCard({ asset, activeRole, selected, onSelect, onOpen, onDetail }: { asset: LibraryAsset; activeRole: LibraryAssetRole; selected: boolean; onSelect(value: boolean): void; onOpen(asset: LibraryAsset): void; onDetail(): void }) {
   const tags = getLibraryUnifiedTagsForRole(asset, activeRole).slice(0, 3);
+  const addedAt = getLibraryAssetAddedAt(asset, activeRole);
   return <article data-marquee-id={asset.id} className={`${styles.card} ${selected ? styles.cardSelected : ""}`}>
     <button className={styles.cardImage} data-preview-asset={asset.id} onClick={() => onOpen(asset)} aria-label={`预览 ${asset.name}`}><img src={asset.publicUrl} alt="" loading="lazy" /><span className={styles.imageShade} /><span className={styles.previewHint}><Eye size={15} />预览</span></button>
     <label className={styles.selectBox} title="选择图片"><input type="checkbox" checked={selected} onChange={(event) => onSelect(event.target.checked)} /><span /></label>
     <div className={styles.cardBadges}><span className={asset.visibility === "team" ? styles.sharedBadge : styles.privateBadge}>{asset.visibility === "team" ? <UsersRound size={11} /> : <UserRound size={11} />}{asset.visibility === "team" ? "共享" : "个人"}</span>{activeRole === "reference" ? <TaggingBadge status={asset.taggingStatus} /> : null}</div>
-    <button className={styles.cardBody} onClick={onDetail}><strong title={asset.name}>{asset.name}</strong><div className={styles.tags}>{tags.length ? tags.map((tag) => <span key={tag.label} title={activeRole === "vehicle" ? "人工标签" : tagSourceTitle(tag.source)}>{tag.label}</span>) : <span className={styles.mutedTag}>{activeRole === "vehicle" ? "暂无人工标签" : "等待标签"}</span>}</div></button>
+    <button className={styles.cardBody} onClick={onDetail}><strong title={asset.name}>{asset.name}</strong><time className={styles.cardAddedAt} dateTime={addedAt}><CalendarClock size={11} />入库 {formatLibraryDateTime(addedAt)}</time><div className={styles.tags}>{tags.length ? tags.map((tag) => <span key={tag.label} title={activeRole === "vehicle" ? "人工标签" : tagSourceTitle(tag.source)}>{tag.label}</span>) : <span className={styles.mutedTag}>{activeRole === "vehicle" ? "暂无人工标签" : "等待标签"}</span>}</div></button>
   </article>;
 }
 
@@ -470,7 +511,8 @@ function AssetEditor({ asset, activeRole, onClose, onSaved }: { asset: LibraryAs
     try { const result = await apiJson<{ asset: LibraryAsset }>(`/api/library/assets/${asset.id}`, { method: "PATCH", body: JSON.stringify({ name, visibility, roles }) }); onSaved(result.asset); }
     catch (reason) { setError(reason instanceof Error ? reason.message : "保存失败"); } finally { setSaving(false); }
   }
-  return <aside className={styles.editor}><div className={styles.panelHeader}><div><h2>图片详情</h2><p>{formatBytes(asset.byteSize)} · {asset.width || "?"} × {asset.height || "?"}</p></div><button className={styles.iconButton} title="关闭详情" onClick={onClose}><X size={17} /></button></div><label className={styles.fieldLabel}>名称<input value={name} onChange={(event) => setName(event.target.value)} disabled={!asset.canEdit} /></label><label className={styles.fieldLabel}>共享范围<select value={visibility} onChange={(event) => setVisibility(event.target.value as LibraryVisibility)} disabled={!asset.canEdit}><option value="private">仅自己</option><option value="team">团队共享</option></select></label><div className={styles.fieldLabel}>图库角色<div className={styles.segmented}>{(["reference", "vehicle"] as LibraryAssetRole[]).map((value) => <button key={value} disabled={!asset.canEdit} className={roles.includes(value) ? styles.segmentActive : ""} onClick={() => setRoles((items) => items.includes(value) ? items.filter((item) => item !== value) : [...items, value])}>{value === "reference" ? "参考图" : "车型"}</button>)}</div></div><TagEditor asset={asset} activeRole={activeRole} onSaved={onSaved} disabled={!asset.canEdit} />{asset.cleanupStatus === "failed" ? <p className={styles.errorText}>对象清理失败：{asset.cleanupError}</p> : null}{error ? <p className={styles.errorText}>{error}</p> : null}<button className={styles.primaryButton} disabled={!asset.canEdit || saving} onClick={() => void save()}>{saving ? <LoaderCircle className={styles.spin} size={15} /> : <Save size={15} />}{saving ? "保存中" : "保存名称与权限"}</button>{!asset.canEdit ? <p className={styles.readonly}>团队共享资产为只读，仅所有者或管理员可编辑。</p> : null}</aside>;
+  const addedAt = getLibraryAssetAddedAt(asset, activeRole);
+  return <aside className={styles.editor}><div className={styles.panelHeader}><div><h2>图片详情</h2><p>{formatBytes(asset.byteSize)} · {asset.width || "?"} × {asset.height || "?"}</p><p className={styles.detailAddedAt}><CalendarClock size={12} />加入当前图库 <time dateTime={addedAt}>{formatLibraryDateTime(addedAt)}</time></p></div><button className={styles.iconButton} title="关闭详情" onClick={onClose}><X size={17} /></button></div><label className={styles.fieldLabel}>名称<input value={name} onChange={(event) => setName(event.target.value)} disabled={!asset.canEdit} /></label><label className={styles.fieldLabel}>共享范围<select value={visibility} onChange={(event) => setVisibility(event.target.value as LibraryVisibility)} disabled={!asset.canEdit}><option value="private">仅自己</option><option value="team">团队共享</option></select></label><div className={styles.fieldLabel}>图库角色<div className={styles.segmented}>{(["reference", "vehicle"] as LibraryAssetRole[]).map((value) => <button key={value} disabled={!asset.canEdit} className={roles.includes(value) ? styles.segmentActive : ""} onClick={() => setRoles((items) => items.includes(value) ? items.filter((item) => item !== value) : [...items, value])}>{value === "reference" ? "参考图" : "车型"}</button>)}</div></div><TagEditor asset={asset} activeRole={activeRole} onSaved={onSaved} disabled={!asset.canEdit} />{asset.cleanupStatus === "failed" ? <p className={styles.errorText}>对象清理失败：{asset.cleanupError}</p> : null}{error ? <p className={styles.errorText}>{error}</p> : null}<button className={styles.primaryButton} disabled={!asset.canEdit || saving} onClick={() => void save()}>{saving ? <LoaderCircle className={styles.spin} size={15} /> : <Save size={15} />}{saving ? "保存中" : "保存名称与权限"}</button>{!asset.canEdit ? <p className={styles.readonly}>团队共享资产为只读，仅所有者或管理员可编辑。</p> : null}</aside>;
 }
 
 function TagEditor({ asset, activeRole, onSaved, disabled }: { asset: LibraryAsset; activeRole: LibraryAssetRole; onSaved(asset: LibraryAsset): void; disabled?: boolean }) {
@@ -643,7 +685,7 @@ function PreviewDialog({ sequence, initialIndex, activeRole, collectionId, hasMo
         <img ref={imageRef} src={asset.publicUrl} alt={asset.name} draggable={false} onLoad={calculateFit} onError={() => setLoadState("error")} style={{ transform: `translate(calc(-50% + ${pan.x}px), calc(-50% + ${pan.y}px)) scale(${scale})`, opacity: loadState === "ready" ? 1 : 0 }} />
         <button className={styles.stagePrev} disabled={index === 0} aria-label="上一张" onClick={() => navigate(-1)}><ChevronLeft /></button><button className={styles.stageNext} disabled={index === assets.length - 1} aria-label="下一张" onClick={() => navigate(1)}><ChevronRight /></button>
       </div>
-      <div className={`${styles.previewInfo} ${infoOpen ? styles.previewInfoOpen : ""}`}><div className={styles.previewInfoHead}><div><span className={asset.visibility === "team" ? styles.sharedBadge : styles.privateBadge}>{asset.visibility === "team" ? "团队共享" : "仅自己"}</span>{activeRole === "reference" ? <TaggingBadge status={asset.taggingStatus} /> : null}</div><p>{asset.originalName}</p><p>{formatBytes(asset.byteSize)} · {asset.width || "?"} × {asset.height || "?"} · {asset.extension.replace(".", "").toUpperCase()}</p></div><AssetEditor key={asset.id} asset={asset} activeRole={activeRole} onClose={() => setInfoOpen(false)} onSaved={(next) => { setAssets((items) => items.map((item) => item.id === next.id ? next : item)); onChanged(next, false); }} /></div>
+      <div className={`${styles.previewInfo} ${infoOpen ? styles.previewInfoOpen : ""}`}><div className={styles.previewInfoHead}><div><span className={asset.visibility === "team" ? styles.sharedBadge : styles.privateBadge}>{asset.visibility === "team" ? "团队共享" : "仅自己"}</span>{activeRole === "reference" ? <TaggingBadge status={asset.taggingStatus} /> : null}</div><p>{asset.originalName}</p><p>{formatBytes(asset.byteSize)} · {asset.width || "?"} × {asset.height || "?"} · {asset.extension.replace(".", "").toUpperCase()}</p><p className={styles.detailAddedAt}><CalendarClock size={12} />加入当前图库 <time dateTime={getLibraryAssetAddedAt(asset, activeRole)}>{formatLibraryDateTime(getLibraryAssetAddedAt(asset, activeRole))}</time></p></div><AssetEditor key={asset.id} asset={asset} activeRole={activeRole} onClose={() => setInfoOpen(false)} onSaved={(next) => { setAssets((items) => items.map((item) => item.id === next.id ? next : item)); onChanged(next, false); }} /></div>
     </div>
     <div className={styles.thumbnailRail}>{assets.map((item, itemIndex) => <button key={item.id} className={itemIndex === index ? styles.thumbnailActive : ""} onClick={() => { setIndex(itemIndex); setLoadState("loading"); setPan({ x: 0, y: 0 }); }} aria-label={`打开第 ${itemIndex + 1} 张`}><img src={item.publicUrl} alt="" /></button>)}</div>
     {deleteMode ? <div className={styles.deleteScrim} role="alertdialog" aria-modal="true" aria-labelledby="delete-title"><div className={styles.deletePanel}><div className={styles.deleteIcon}><Trash2 /></div><h2 id="delete-title">{deleteMode === "permanent" ? "确认永久删除？" : "如何处理这张图片？"}</h2><p>{deleteMode === "permanent" ? "将删除全部角色、集合关系和对象存储原图。此操作无法撤销。" : "移出当前视图会保留资产和标签；永久删除会清理原图。"}</p>{deleteMode === "menu" ? <><button disabled={busy} className={styles.secondaryAction} onClick={() => void removeFromView()}>移出当前{collectionId ? "集合" : "视图"}</button><button disabled={busy} className={styles.dangerAction} onClick={() => setDeleteMode("permanent")}>永久删除资产</button></> : <button disabled={busy} className={styles.dangerAction} onClick={() => void permanentDelete()}>{busy ? "正在删除..." : "确认永久删除"}</button>}<button disabled={busy} className={styles.cancelAction} autoFocus onClick={() => setDeleteMode(null)}>取消</button></div></div> : null}
@@ -655,6 +697,29 @@ function ImportDropZone({ dragging, onFiles }: { dragging: boolean; onFiles(file
 function Tool({ title, disabled, danger, onClick, children }: { title: string; disabled?: boolean; danger?: boolean; onClick(): void; children: React.ReactNode }) { return <button className={`${styles.toolButton} ${danger ? styles.toolDanger : ""}`} title={title} aria-label={title} disabled={disabled} onClick={onClick}>{children}</button>; }
 function TaggingBadge({ status }: { status: LibraryAsset["taggingStatus"] }) { const labels = { queued: "等待打标", running: "打标中", completed: "已打标", failed: "打标失败" }; return <span className={`${styles.statusBadge} ${styles[`status_${status}`]}`}>{status === "running" ? <LoaderCircle className={styles.spin} size={11} /> : null}{labels[status]}</span>; }
 function StatusIcon({ status }: { status: ImportItem["status"] }) { if (status === "uploading") return <LoaderCircle className={styles.spin} size={17} />; if (status === "error") return <X className={styles.importError} size={17} />; if (status === "duplicate") return <RefreshCw size={17} />; return <Tag className={styles.importSuccess} size={17} />; }
+function buildLibraryPresetRange(preset: LibraryTimePreset): LibraryTimeRange | undefined {
+  const days = preset === "today" ? 1 : preset === "7d" ? 7 : preset === "30d" ? 30 : 0;
+  if (!days) return undefined;
+  const end = new Date();
+  end.setHours(0, 0, 0, 0);
+  end.setDate(end.getDate() + 1);
+  const start = new Date(end);
+  start.setDate(start.getDate() - days);
+  return { addedFrom: start.toISOString(), addedBefore: end.toISOString() };
+}
+function buildCustomLibraryTimeRange(from: string, to: string): LibraryTimeRange {
+  return { addedFrom: localDateBoundary(from).toISOString(), addedBefore: localDateBoundary(to, 1).toISOString() };
+}
+function localDateBoundary(value: string, dayOffset = 0) {
+  const [year, month, day] = value.split("-").map(Number);
+  return new Date(year, month - 1, day + dayOffset);
+}
+function formatLibraryDateTime(value: string) {
+  const date = new Date(value);
+  if (!Number.isFinite(date.getTime())) return "时间无效";
+  const pad = (part: number) => String(part).padStart(2, "0");
+  return `${date.getFullYear()}-${pad(date.getMonth() + 1)}-${pad(date.getDate())} ${pad(date.getHours())}:${pad(date.getMinutes())}`;
+}
 function sameTag(left: string, right: string) { return left.trim().toLocaleLowerCase() === right.trim().toLocaleLowerCase(); }
 function readLibraryRoleFromUrl(): LibraryAssetRole { return new URL(window.location.href).searchParams.get("role") === "vehicle" ? "vehicle" : "reference"; }
 function writeLibraryRoleToUrl(role: LibraryAssetRole, mode: "push" | "replace") { const url = new URL(window.location.href); url.searchParams.set("role", role); const href = `${url.pathname}${url.search}${url.hash}`; if (mode === "push") window.history.pushState(null, "", href); else window.history.replaceState(null, "", href); }

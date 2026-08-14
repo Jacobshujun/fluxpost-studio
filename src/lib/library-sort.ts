@@ -1,4 +1,4 @@
-import type { LibraryListSort } from "./types";
+import type { LibraryAsset, LibraryAssetRole, LibraryListSort } from "./types";
 
 export const defaultLibraryListSort: LibraryListSort = "newest";
 
@@ -25,4 +25,11 @@ export function compareLibraryText(left: string, right: string) {
 
 export function libraryListSortDirection(sort: LibraryListSort) {
   return sort === "newest" || sort === "name-desc" || sort === "owner-desc" ? -1 : 1;
+}
+
+export function getLibraryAssetAddedAt(
+  asset: Pick<LibraryAsset, "createdAt" | "roleAddedAt">,
+  role?: LibraryAssetRole,
+) {
+  return role ? asset.roleAddedAt?.[role] || asset.createdAt : asset.createdAt;
 }

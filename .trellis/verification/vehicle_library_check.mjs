@@ -50,15 +50,17 @@ const directAssetSaves = [];
 const atomicAssetJobSaves = [];
 let assetsInDb = [];
 let duplicateAsset;
+let editableAsset;
 let objectWrites = 0;
 const assetModule = { exports: {} };
 const assetRequire = (specifier) => {
   if (specifier === "./database") return {
     findLibraryAssetByOwnerHashFromDb: async () => duplicateAsset,
+    getLibraryAssetFromDb: async () => editableAsset,
     listLibraryAssetsFromDb: async () => assetsInDb,
     listLibraryCollectionsFromDb: async () => [],
-    saveLibraryAssetToDb: async (asset) => { directAssetSaves.push(asset); return asset; },
-    saveLibraryAssetAndTaggingJobToDb: async (asset, job) => { atomicAssetJobSaves.push({ asset, job }); return { asset, job }; },
+    saveLibraryAssetToDb: async (asset) => { editableAsset = asset; directAssetSaves.push(asset); return asset; },
+    saveLibraryAssetAndTaggingJobToDb: async (asset, job) => { editableAsset = asset; atomicAssetJobSaves.push({ asset, job }); return { asset, job }; },
   };
   if (specifier === "./library-image") return { readLibraryImageDimensions: () => ({ width: 1, height: 1 }) };
   if (specifier === "./library-tags") return tagModule.exports;
@@ -74,7 +76,7 @@ const assetRequire = (specifier) => {
   return nativeRequire(specifier);
 };
 new Function("exports", "module", "require", compiledAssets)(assetModule.exports, assetModule, assetRequire);
-const { importLibraryAsset, listLibraryAssets, parseLibraryAssetFilters, resolveLibraryAssetSelections } = assetModule.exports;
+const { importLibraryAsset, listLibraryAssets, parseLibraryAssetFilters, patchLibraryAsset, resolveLibraryAssetSelections, updateLibraryAssetTags } = assetModule.exports;
 
 const actor = { id: "vehicle-owner", displayName: "Vehicle Owner" };
 const vehicleImport = await importLibraryAsset(actor, {
@@ -84,6 +86,7 @@ const vehicleImport = await importLibraryAsset(actor, {
 });
 assert(vehicleImport.status === "imported", "A new pure vehicle image must import successfully.");
 assert(vehicleImport.asset.visibility === "team", "A new image import must default to team visibility.");
+assert(vehicleImport.asset.roleAddedAt.vehicle === vehicleImport.asset.createdAt, "A new vehicle import must record its vehicle-library entry time.");
 assert(directAssetSaves.length === 1, "A pure vehicle import must persist exactly one asset.");
 assert(atomicAssetJobSaves.length === 0 && !("job" in vehicleImport), "A pure vehicle import must not persist or return a tagging job.");
 assert(objectWrites === 1, "A new pure vehicle import must persist one image object.");
@@ -105,8 +108,30 @@ const referenceReuse = await importLibraryAsset(actor, {
 assert(referenceReuse.status === "imported", "A cross-role duplicate must reuse the canonical asset.");
 assert(atomicAssetJobSaves.length === 1 && referenceReuse.job, "Adding the reference role must atomically persist its tagging job.");
 assert(referenceReuse.asset.roles.includes("vehicle") && referenceReuse.asset.roles.includes("reference"), "Cross-role reuse must retain both library roles.");
+assert(referenceReuse.asset.roleAddedAt.vehicle === vehicleImport.asset.roleAddedAt.vehicle, "Cross-role reuse must preserve the existing role entry time.");
+assert(typeof referenceReuse.asset.roleAddedAt.reference === "string", "Cross-role reuse must record the new role entry time.");
 assert(referenceReuse.asset.visibility === "team", "Cross-role reuse must preserve the canonical asset visibility.");
 assert(objectWrites === 1, "Cross-role reuse must not persist a second image object.");
+
+editableAsset = {
+  ...editableAsset,
+  roleAddedAt: {
+    vehicle: "2026-01-01T00:00:00.000Z",
+    reference: "2026-01-02T00:00:00.000Z",
+  },
+};
+const roleTimesBeforeEdit = { ...editableAsset.roleAddedAt };
+const renamedAsset = await patchLibraryAsset(actor, editableAsset.id, { name: "Renamed vehicle" });
+assert(JSON.stringify(renamedAsset.roleAddedAt) === JSON.stringify(roleTimesBeforeEdit), "Renaming an asset must preserve every role entry time.");
+const taggedAsset = await updateLibraryAssetTags(actor, { role: "vehicle", assetIds: [editableAsset.id], add: ["验证标签"] });
+assert(taggedAsset.failures.length === 0, "Tagging the editable vehicle asset must succeed.");
+assert(JSON.stringify(taggedAsset.assets[0].roleAddedAt) === JSON.stringify(roleTimesBeforeEdit), "Tagging an asset must preserve every role entry time.");
+const removedVehicleRole = await patchLibraryAsset(actor, editableAsset.id, { removeRole: "vehicle" });
+assert(!("vehicle" in removedVehicleRole.roleAddedAt), "Removing a role must remove that role's entry time.");
+assert(removedVehicleRole.roleAddedAt.reference === roleTimesBeforeEdit.reference, "Removing one role must preserve another role's entry time.");
+const readdedVehicleRole = await patchLibraryAsset(actor, editableAsset.id, { roles: ["reference", "vehicle"] });
+assert(readdedVehicleRole.roleAddedAt.vehicle !== roleTimesBeforeEdit.vehicle, "Re-adding a removed role must record a new entry time.");
+assert(readdedVehicleRole.roleAddedAt.reference === roleTimesBeforeEdit.reference, "Re-adding one role must preserve another role's entry time.");
 
 duplicateAsset = undefined;
 const privateImport = await importLibraryAsset(actor, {
@@ -118,7 +143,7 @@ const privateImport = await importLibraryAsset(actor, {
 assert(privateImport.asset.visibility === "private", "An explicit private image import must remain private.");
 
 const emptyTags = tagModule.exports.emptyLibraryTagProfile();
-const makeAsset = ({ id, name, ownerDisplayName, createdAt }) => ({
+const makeAsset = ({ id, name, ownerDisplayName, createdAt, addedAt = createdAt }) => ({
   id,
   ownerUserId: actor.id,
   ownerDisplayName,
@@ -131,6 +156,7 @@ const makeAsset = ({ id, name, ownerDisplayName, createdAt }) => ({
   byteSize: 4,
   sha256: id.padEnd(64, "0"),
   roles: ["vehicle"],
+  roleAddedAt: { vehicle: addedAt },
   collectionIds: [],
   visibility: "team",
   aiTags: emptyTags,
@@ -142,9 +168,9 @@ const makeAsset = ({ id, name, ownerDisplayName, createdAt }) => ({
   updatedAt: createdAt,
 });
 assetsInDb = [
-  makeAsset({ id: "asset-alpha", name: "Alpha", ownerDisplayName: "张三", createdAt: "2026-01-02T00:00:00.000Z" }),
-  makeAsset({ id: "asset-beta", name: "Beta", ownerDisplayName: "李四", createdAt: "2026-01-01T00:00:00.000Z" }),
-  makeAsset({ id: "asset-gamma", name: "Gamma", ownerDisplayName: "王五", createdAt: "2026-01-03T00:00:00.000Z" }),
+  makeAsset({ id: "asset-alpha", name: "Alpha", ownerDisplayName: "张三", createdAt: "2026-01-02T00:00:00.000Z", addedAt: "2026-01-03T00:00:00.000Z" }),
+  makeAsset({ id: "asset-beta", name: "Beta", ownerDisplayName: "李四", createdAt: "2026-01-01T00:00:00.000Z", addedAt: "2026-01-02T00:00:00.000Z" }),
+  makeAsset({ id: "asset-gamma", name: "Gamma", ownerDisplayName: "王五", createdAt: "2026-01-03T00:00:00.000Z", addedAt: "2026-01-01T00:00:00.000Z" }),
 ];
 const resolvedVehicleAssets = await resolveLibraryAssetSelections(actor, ["asset-beta", "asset-alpha", "asset-beta"], "vehicle");
 assert(JSON.stringify(resolvedVehicleAssets.map((asset) => asset.id)) === JSON.stringify(["asset-beta", "asset-alpha"]), "Vehicle selection resolution must preserve submitted order and remove duplicate ids.");
@@ -176,6 +202,16 @@ assert(JSON.stringify(await sortedNames("name-asc")) === JSON.stringify(["Alpha"
 assert(JSON.stringify(await sortedNames("name-desc")) === JSON.stringify(["Gamma", "Beta", "Alpha"]), "Descending image-name sorting is incorrect.");
 assert(JSON.stringify(await sortedNames("owner-asc")) === JSON.stringify(["Beta", "Gamma", "Alpha"]), "Ascending submitter sorting is incorrect.");
 assert(JSON.stringify(await sortedNames("owner-desc")) === JSON.stringify(["Alpha", "Gamma", "Beta"]), "Descending submitter sorting is incorrect.");
+const roleSortedNames = async (sort) => (await listLibraryAssets(actor, { role: "vehicle", sort, limit: 10 })).assets.map((asset) => asset.name);
+assert(JSON.stringify(await roleSortedNames("newest")) === JSON.stringify(["Alpha", "Beta", "Gamma"]), "Role-aware newest sorting must use the current library entry time.");
+assert(JSON.stringify(await roleSortedNames("oldest")) === JSON.stringify(["Gamma", "Beta", "Alpha"]), "Role-aware oldest sorting must use the current library entry time.");
+const addedRange = await listLibraryAssets(actor, {
+  role: "vehicle",
+  addedFrom: "2026-01-02T00:00:00.000Z",
+  addedBefore: "2026-01-03T00:00:00.000Z",
+  limit: 10,
+});
+assert(JSON.stringify(addedRange.assets.map((asset) => asset.name)) === JSON.stringify(["Beta"]), "Added-time filtering must include the lower boundary and exclude the upper boundary.");
 
 const firstOwnerPage = await listLibraryAssets(actor, { sort: "owner-asc", limit: 2 });
 const secondOwnerPage = await listLibraryAssets(actor, { sort: "owner-asc", limit: 2, cursor: firstOwnerPage.nextCursor });
@@ -187,8 +223,27 @@ try {
   rejectedMismatchedCursor = /Invalid library cursor/.test(String(error));
 }
 assert(rejectedMismatchedCursor, "A cursor from another sort order must be rejected.");
+const firstVehiclePage = await listLibraryAssets(actor, { role: "vehicle", sort: "newest", limit: 1 });
+let rejectedCrossRoleCursor = false;
+try {
+  await listLibraryAssets(actor, { role: "reference", sort: "newest", limit: 1, cursor: firstVehiclePage.nextCursor });
+} catch (error) {
+  rejectedCrossRoleCursor = /Invalid library cursor/.test(String(error));
+}
+assert(rejectedCrossRoleCursor, "A cursor from another library role must be rejected.");
 assert(parseLibraryAssetFilters(new URL("http://local/api/library/assets?sort=owner-desc")).sort === "owner-desc", "Image sort query parsing is missing.");
 assert(parseLibraryAssetFilters(new URL("http://local/api/library/assets?sort=bad")).sort === "newest", "Invalid image sort values must use the default.");
+const parsedAddedRange = parseLibraryAssetFilters(new URL("http://local/api/library/assets?role=vehicle&addedFrom=2026-01-02T08:00:00%2B08:00&addedBefore=2026-01-03T00:00:00.000Z"));
+assert(parsedAddedRange.addedFrom === "2026-01-02T00:00:00.000Z" && parsedAddedRange.addedBefore === "2026-01-03T00:00:00.000Z", "Added-time query parsing must normalize ISO timestamps.");
+for (const [url, message] of [
+  ["http://local/api/library/assets?addedFrom=2026-01-01T00:00:00.000Z", "Added-time filters without a role must fail."],
+  ["http://local/api/library/assets?role=vehicle&addedFrom=not-a-date", "Invalid added-time timestamps must fail."],
+  ["http://local/api/library/assets?role=vehicle&addedFrom=2026-01-03T00:00:00.000Z&addedBefore=2026-01-02T00:00:00.000Z", "Reversed added-time ranges must fail."],
+]) {
+  let rejected = false;
+  try { parseLibraryAssetFilters(new URL(url)); } catch { rejected = true; }
+  assert(rejected, message);
+}
 
 const aiTags = {
   imageType: "exterior",

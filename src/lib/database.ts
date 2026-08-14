@@ -2,6 +2,7 @@ import { existsSync, mkdirSync, readFileSync } from "node:fs";
 import path from "node:path";
 import { Pool, type PoolClient } from "pg";
 import type { CanvasNodeRun, CanvasRun, CanvasRunQueueItem, CanvasSchedule, CanvasWorkflow } from "./canvas/types";
+import { getLibraryAssetAddedAt } from "./library-sort";
 import type {
   ContentProject,
   CopyLibraryEntry,
@@ -258,10 +259,10 @@ export async function listLibraryAssetsFromDb(): Promise<LibraryAsset[]> {
   await ensureDatabaseReady();
   if (getDatabaseBackend() === "postgres") {
     const result = await getPostgresPool().query<JsonRow>("SELECT data_json FROM library_assets WHERE deleted_at IS NULL ORDER BY created_at DESC, id DESC");
-    return result.rows.map((row) => fromJson<LibraryAsset>(row.data_json));
+    return result.rows.map((row) => fromLibraryAssetJson(row.data_json));
   }
   const rows = getSqliteDatabase().prepare("SELECT data_json FROM library_assets WHERE deleted_at IS NULL ORDER BY created_at DESC, id DESC").all() as JsonRow[];
-  return rows.map((row) => fromJson<LibraryAsset>(row.data_json));
+  return rows.map((row) => fromLibraryAssetJson(row.data_json));
 }
 
 export async function getLibraryAssetFromDb(assetId: string, includeDeleted = false) {
@@ -269,10 +270,10 @@ export async function getLibraryAssetFromDb(assetId: string, includeDeleted = fa
   const deletedClause = includeDeleted ? "" : " AND deleted_at IS NULL";
   if (getDatabaseBackend() === "postgres") {
     const result = await getPostgresPool().query<JsonRow>(`SELECT data_json FROM library_assets WHERE id = $1${deletedClause}`, [assetId]);
-    return result.rows[0] ? fromJson<LibraryAsset>(result.rows[0].data_json) : undefined;
+    return result.rows[0] ? fromLibraryAssetJson(result.rows[0].data_json) : undefined;
   }
   const row = getSqliteDatabase().prepare(`SELECT data_json FROM library_assets WHERE id = ?${deletedClause}`).get(assetId) as JsonRow | undefined;
-  return row ? fromJson<LibraryAsset>(row.data_json) : undefined;
+  return row ? fromLibraryAssetJson(row.data_json) : undefined;
 }
 
 export async function findLibraryAssetByOwnerHashFromDb(ownerUserId: string, sha256: string) {
@@ -282,12 +283,19 @@ export async function findLibraryAssetByOwnerHashFromDb(ownerUserId: string, sha
       "SELECT data_json FROM library_assets WHERE owner_user_id = $1 AND sha256 = $2 AND deleted_at IS NULL LIMIT 1",
       [ownerUserId, sha256],
     );
-    return result.rows[0] ? fromJson<LibraryAsset>(result.rows[0].data_json) : undefined;
+    return result.rows[0] ? fromLibraryAssetJson(result.rows[0].data_json) : undefined;
   }
   const row = getSqliteDatabase().prepare(
     "SELECT data_json FROM library_assets WHERE owner_user_id = ? AND sha256 = ? AND deleted_at IS NULL LIMIT 1",
   ).get(ownerUserId, sha256) as JsonRow | undefined;
-  return row ? fromJson<LibraryAsset>(row.data_json) : undefined;
+  return row ? fromLibraryAssetJson(row.data_json) : undefined;
+}
+
+function fromLibraryAssetJson(value: unknown): LibraryAsset {
+  const asset = fromJson<LibraryAsset>(value);
+  const roleAddedAt: LibraryAsset["roleAddedAt"] = {};
+  for (const role of asset.roles) roleAddedAt[role] = getLibraryAssetAddedAt(asset, role);
+  return { ...asset, roleAddedAt };
 }
 
 export async function saveLibraryAssetToDb(asset: LibraryAsset) {

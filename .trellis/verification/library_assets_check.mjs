@@ -14,6 +14,7 @@ const types = read("src/lib/types.ts");
 const database = read("src/lib/database.ts");
 const postgres = read("db/migrations/001_initial_postgres.sql");
 const assets = read("src/lib/library-assets.ts");
+const sort = read("src/lib/library-sort.ts");
 const tagging = read("src/lib/library-tagging.ts");
 const tags = read("src/lib/library-tags.ts");
 const storage = read("src/lib/runtime-media-storage.ts");
@@ -60,8 +61,17 @@ contains(tagging, /isTransientTaggingError/, "Transient tagging failures must be
 contains(tagging, /mergeLibraryTagProfile\(aiTags, current\.manualOverrides\)/, "Retagging must preserve manual overrides.");
 contains(assets, /cleanupStatus: "failed"/, "Object cleanup failures must remain visible.");
 contains(assets, /requireVisibility\(input\.visibility \|\| "team"\)/, "New library imports must default to team visibility.");
-contains(assets, /type LibraryAssetCursor = \{ version: 1; sort: LibraryListSort; value: string; id: string \}/, "Sorted image cursors must carry their sort contract.");
-contains(assets, /compareAssets\(left\.asset, right\.asset, sort\)[\s\S]*compareAssetToCursor\(asset, cursor, sort\)/, "Image list and cursor pagination must use the same sort contract.");
+contains(types, /roleAddedAt: Partial<Record<LibraryAssetRole, string>>/, "Library assets must expose role-specific entry timestamps.");
+contains(sort, /getLibraryAssetAddedAt[\s\S]*asset\.roleAddedAt\?\.\[role\] \|\| asset\.createdAt/, "Historical assets must fall back to their original creation time per existing role.");
+contains(database, /fromLibraryAssetJson[\s\S]*for \(const role of asset\.roles\)[\s\S]*getLibraryAssetAddedAt\(asset, role\)/, "Database reads must normalize historical role entry timestamps.");
+contains(assets, /roleAddedAt: \{ \[role\]: now \}/, "New imports must record their initial role entry time.");
+contains(assets, /roleAddedAt: reconcileLibraryRoleAddedAt\(asset, roles, now\)/, "Role edits must reconcile role entry timestamps.");
+contains(assets, /roles: \[\.\.\.asset\.roles, role\],[\s\S]*roleAddedAt: reconcileLibraryRoleAddedAt/, "Cross-role reuse must record the newly added role time.");
+contains(assets, /type LibraryAssetCursor = \{ version: 2; sort: LibraryListSort; role\?: LibraryAssetRole; value: string; id: string \}/, "Sorted image cursors must carry their role-aware sort contract.");
+contains(assets, /compareAssets\(left\.asset, right\.asset, sort, filters\.role\)[\s\S]*compareAssetToCursor\(asset, cursor, sort, filters\.role\)/, "Image list and cursor pagination must use the same role-aware sort contract.");
+contains(assets, /decoded\.version === 2[\s\S]*decoded\.role === role/, "Image cursors must reject another library role.");
+contains(assets, /getLibraryAssetAddedAt\(asset, filters\.role\) >= filters\.addedFrom[\s\S]*getLibraryAssetAddedAt\(asset, filters\.role\) < filters\.addedBefore/, "Added-time filtering must include the lower bound and exclude the upper bound.");
+contains(assets, /Library role is required for added-time filtering\.[\s\S]*Library added-time range must start before it ends\./, "Added-time query validation is incomplete.");
 
 const routeFiles = [
   "src/app/api/library/assets/route.ts",
@@ -103,6 +113,14 @@ contains(assets, /if \(patch\.roles && removeRole\)[\s\S]*if \(patch\.roles && !
 contains(page, /role="combobox"[\s\S]*aria-autocomplete="list"[\s\S]*aria-activedescendant/, "Unified tag picker must expose combobox semantics.");
 for (const key of ["ArrowDown", "ArrowUp", "Enter", "Escape", "Backspace"]) assert(page.includes(`event.key === "${key}"`), `Tag combobox keyboard contract missing ${key}.`);
 contains(page, /filterTags\.forEach\(\(tag\) => params\.append\("tag", tag\)\)/, "Library UI must submit repeated unified tag filters.");
+contains(page, /params\.set\("addedFrom", activeTimeRange\.addedFrom\)[\s\S]*params\.set\("addedBefore", activeTimeRange\.addedBefore\)/, "Library UI must submit the applied entry-time range through every query-string consumer.");
+for (const label of ["全部时间", "今天", "近 7 天", "近 30 天", "自定义"]) assert(page.includes(label), `Entry-time filter option missing ${label}.`);
+contains(page, /type="date"[\s\S]*max=\{customDateTo \|\| undefined\}[\s\S]*type="date"[\s\S]*min=\{customDateFrom \|\| undefined\}[\s\S]*disabled=\{!customRangeValid\}[\s\S]*applyCustomTimeRange/, "Custom entry-time range validation and apply control are incomplete.");
+contains(page, /setTimePreset\("all"\)[\s\S]*setCustomTimeRange\(undefined\)/, "Clearing library filters must reset the entry-time range.");
+contains(page, /className=\{styles\.cardAddedAt\} dateTime=\{addedAt\}[\s\S]*入库 \{formatLibraryDateTime\(addedAt\)\}/, "Library cards must display the exact role entry time semantically.");
+assert((page.match(/加入当前图库/g) || []).length >= 2, "Library detail and fullscreen preview must both display the current-role entry time.");
+contains(page, /buildLibraryPresetRange[\s\S]*end\.setHours\(0, 0, 0, 0\)[\s\S]*end\.setDate\(end\.getDate\(\) \+ 1\)/, "Quick entry-time ranges must use local calendar-day boundaries.");
+contains(page, /buildCustomLibraryTimeRange[\s\S]*localDateBoundary\(to, 1\)/, "Custom entry-time ranges must include the complete end date.");
 for (const label of ["最新导入", "最早导入", "名称 A-Z", "名称 Z-A", "提交人 A-Z", "提交人 Z-A"]) assert(page.includes(label), `Image sort option missing ${label}.`);
 contains(page, /useLibraryListSort\(librarySortStorageKey\)/, "Image sort preference must persist in browser storage.");
 contains(page, /useMarqueeSelection[\s\S]*data-marquee-id=\{asset\.id\}/, "Image grid marquee selection is missing.");
@@ -129,6 +147,9 @@ contains(css, /\.previewInfo\{background:var\(--library-panel\)/, "Preview detai
 contains(css, /\.marquee\{[^}]*position:fixed/, "Image marquee styling is missing.");
 contains(css, /\.page\{[^}]*height:100dvh[^}]*overflow:hidden/, "Library page must stay viewport-bound so its navigation remains fixed.");
 contains(css, /\.workspace\{[^}]*min-height:0[^}]*overflow:hidden/, "Library assets must scroll inside the bounded workspace.");
+contains(css, /\.filterBar\{flex-wrap:wrap\}/, "Library filters must wrap after adding time controls.");
+contains(css, /\.customDateRange\{[^}]*flex:1 1 100%/, "Custom date controls must use a stable full-width row.");
+contains(css, /@media\(max-width:700px\)[\s\S]*\.customDateRange\{grid-column:1\/-1/, "Custom date controls must remain bounded on mobile.");
 contains(home, /href="\/library\?role=reference"/, "Content desk reference-library entry is missing.");
 
 console.log("Reference library assets, unified tags, themes, permissions, and preview contract check ok");

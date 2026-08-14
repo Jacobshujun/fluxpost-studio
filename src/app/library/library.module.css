@@ -153,3 +153,26 @@
   .sidebar{flex:0 0 auto}
   .content{flex:1 1 auto}
 }
+
+.filterBar{flex-wrap:wrap}
+.timeFilterControl{height:36px;min-width:126px;border:1px solid var(--library-line-strong);border-radius:6px;background:var(--library-panel);color:var(--library-text-muted);display:flex;align-items:center;gap:5px;padding-left:8px}
+.timeFilterControl select{min-width:0;width:100%;height:34px!important;border:0!important;background:transparent!important;color:var(--library-text)!important;padding:0 6px 0 0!important;outline:0}
+.customDateRange{flex:1 1 100%;display:flex;align-items:center;gap:7px;min-width:0;padding:2px 0 0}
+.customDateRange label{height:34px;display:flex;align-items:center;gap:6px;border:1px solid var(--library-line-strong);border-radius:6px;background:var(--library-panel);padding:0 8px;color:var(--library-text-muted);font-size:10px;white-space:nowrap}
+.customDateRange input{width:124px;min-width:0;border:0;outline:0;background:transparent;color:var(--library-text);font-size:11px}
+.customDateRange button{height:34px;border:1px solid var(--library-line-strong);border-radius:6px;background:var(--library-raised);color:var(--library-text-soft);padding:0 12px;font-size:11px}
+.customDateRange button:hover:not(:disabled){background:var(--library-subtle);color:var(--library-text)}
+.customDateRange button:disabled{opacity:.45;cursor:not-allowed}
+.dateRangeSeparator{color:var(--library-text-muted);font-size:10px}
+.cardAddedAt,.detailAddedAt{display:flex;align-items:center;gap:4px;color:var(--library-text-muted);font-size:10px;font-weight:500;line-height:1.35}
+.cardAddedAt{margin-top:5px;white-space:nowrap}
+.detailAddedAt{margin-top:5px!important;flex-wrap:wrap}
+.detailAddedAt time{color:var(--library-text-soft)}
+
+@media(max-width:700px){
+  .timeFilterControl{min-width:0;width:100%}
+  .customDateRange{grid-column:1/-1;display:grid;grid-template-columns:minmax(0,1fr) auto minmax(0,1fr) auto;gap:5px;padding-top:0}
+  .customDateRange label{min-width:0;padding:0 6px}
+  .customDateRange input{width:100%;font-size:10px}
+  .customDateRange button{padding:0 9px}
+}
