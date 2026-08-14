@@ -1,0 +1,10 @@
+# Release Evidence
+
+- Candidate branch `feature/canvas-save-images-20260814` matched local and remote SHA `39a35f8dd869d50df9008ba708e14b92eeefc761` on top of GitHub `main`; the original dirty root worktree remained untouched.
+- Focused Canvas/download checks, TypeScript, lint, production build, complete local baseline, local restart, unauthenticated 401, and mocked Microsoft Edge single/multi/partial/history downloads passed without provider calls or external writes.
+- The installed VPS verifier independently passed the exact SHA and wrote `/opt/fluxpost-studio/verifications/39a35f8dd869d50df9008ba708e14b92eeefc761.manifest` without production configuration, runtime mounts, or service activation.
+- Read-only preflight confirmed production release `20260814-055428-669a3272f764`, zero queued/running work, healthy app/PostgreSQL/Nginx/protected services, public and loopback HTTP 200, seven named volumes, two rescue images, rollback readiness, and sufficient disk headroom.
+- After explicit exact-SHA approval, the zero-work gate passed again. Root-only backup `predeploy-20260814T085054Z-39a35f8dd869.pgcustom` was validated with `pg_restore -l`, measured 5,522,879 bytes, and retained mode `0600`.
+- The installed v4 wrapper deployed the SHA as `20260814-085108-39a35f8dd869`. Manifest, immutable image tag, and running container identity match the approved commit.
+- Post-deploy checks proved healthy app/PostgreSQL with zero restarts, enabled background workers, public and loopback Canvas HTTP 200, unauthenticated image-download 401, 15 required tables, zero active work, unchanged seven-volume inventory, valid Nginx, healthy protected services, two rescue images, active BuildKit timer, zero fatal-log matches, and unset `NODE_TLS_REJECT_UNAUTHORIZED`.
+- Rollback release `20260814-055428-669a3272f764` remains retained and passed `deploy.sh --check --rollback`. GitHub `main` was normally fast-forwarded to the deployed SHA; no rollback, paid provider call, Feishu/Lark write, DNS, firewall, Nginx, SSH, or volume mutation was performed outside the documented release wrapper.

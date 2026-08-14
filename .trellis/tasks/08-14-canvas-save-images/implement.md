@@ -23,9 +23,9 @@
 - [x] Run focused Canvas/download checks, changed-file lint and TypeScript.
 - [x] Run the complete baseline with `TRELLIS_SMOKE_PORT=45678`.
 - [x] Run `npm run local:restart` and perform desktop Chrome/Edge single/multi/partial-failure/history download checks without providers.
-- [ ] Update stable Canvas spec/status/feature evidence only with confirmed results, run `trellis-check`, review scope/secrets/runtime files, commit and push the exact candidate.
-- [ ] Verify remote SHA equality, run VPS fixed-SHA candidate verification and read-only preflight, then present evidence for separate production approval.
-- [ ] After approval only, deploy the exact SHA, verify identity/health/auth/workers/volumes/Nginx/logs/rollback, and fast-forward `main` normally.
+- [x] Update stable Canvas spec/status/feature evidence only with confirmed results, run `trellis-check`, review scope/secrets/runtime files, commit and push the exact candidate.
+- [x] Verify remote SHA equality, run VPS fixed-SHA candidate verification and read-only preflight, then present evidence for separate production approval.
+- [x] After approval only, deploy the exact SHA, verify identity/health/auth/workers/volumes/Nginx/logs/rollback, and fast-forward `main` normally.
 
 ## Stop Conditions
 

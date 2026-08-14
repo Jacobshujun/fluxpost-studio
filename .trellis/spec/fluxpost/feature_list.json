@@ -334,7 +334,7 @@
         "Batch scheduler V2 lets users define typed main/child parameters, source filters, fixed/full/random expansion with exact or inclusive-range counts, main-once and child-per-main preview-frozen no-replacement selection, cartesian/zip composition, explicit node-field bindings, partial/strict aggregation, custom names for same-type Canvas nodes, and explicit main-task shared upstream results"
       ],
       "evidence": [
-        "2026-08-14 save-images contracts, full baseline/build/restart, unauthenticated 401, and mocked Edge single/multi/partial/history downloads passed without external writes.",
+        "2026-08-14 save-images contracts, full local/VPS baselines, mocked Edge single/multi/partial/history downloads, fixed-SHA production activation, unauthenticated download 401, and rollback checks passed without external provider writes.",
         "2026-08-05 Canvas portability plus V2 shared outputs passed workflow/scheduler checks, mocked Chromium, TypeScript, lint, build/restart, local 200/401, and the complete isolated baseline without external calls.",
         "2026-08-04 V2 main-task shared text/image/video outputs passed deterministic multi-target execution, validation rejection, literal child fan-out, lifecycle/retry, legacy compatibility, API/UI, mocked desktop/mobile Chromium, TypeScript, lint, build/restart, HTTP smoke, and the complete baseline without provider calls."
       ],
