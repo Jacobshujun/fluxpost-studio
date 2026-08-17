@@ -17,9 +17,9 @@
 ## 3. Verification
 
 - [x] Run PowerShell parsing and focused runtime/deployment checks.
-- [ ] Commit the candidate, then run `npm run local:restart` on port `3001`.
+- [x] Commit the candidate, then run `npm run local:restart` on port `3001`.
 - [x] Run the complete deterministic baseline, lint, TypeScript, and build.
-- [ ] Verify local `/api/version`, health, and auth boundaries.
+- [x] Verify local `/api/version`, health, and auth boundaries.
 
 ## 4. Promotion and deployment
 

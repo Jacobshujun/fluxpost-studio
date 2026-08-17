@@ -370,7 +370,7 @@
         "Final parity requires exact local runtime/HEAD, GitHub main, and production SHA equality without syncing runtime data"
       ],
       "evidence": [
-        "2026-08-14 focused contracts, PowerShell parsing, lint, TypeScript, build, isolated HTTP identity smoke, and the full deterministic baseline passed"
+        "2026-08-17 single-port candidate contracts, PowerShell parsing, lint, TypeScript, build, full deterministic baseline, and a clean versioned candidate startup on port 3001 passed without external calls"
       ],
       "notes": "Final local/GitHub/production equality awaits the identity-enabled exact-SHA deployment."
     },
