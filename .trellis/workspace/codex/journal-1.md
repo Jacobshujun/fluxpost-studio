@@ -918,3 +918,37 @@ Upgraded the external 0814 FFmpeg batch workflow to adaptive non-looping audio d
 ### Next Steps
 
 - None - task complete
+
+
+## Session 28: Commit Dongchedi category batch rewrite
+
+**Date**: 2026-08-17
+**Task**: Commit Dongchedi category batch rewrite
+**Branch**: `main`
+
+### Summary
+
+Implemented and verified current-page Dongchedi category serial rewriting with encrypted Cookie handling, pause/resume, partial drafts, no-Feishu publishing, and deterministic offline coverage. Passed focused checks, lint, TypeScript, build, full Trellis baseline, HTTP smoke, and SQLite validation; committed locally without push or deployment.
+
+### Main Changes
+
+(Add details)
+
+### Git Commits
+
+| Hash | Message |
+|------|---------|
+| `a74bf42` | (see git log) |
+| `eb441c4` | (see git log) |
+
+### Testing
+
+- [OK] (Add test results)
+
+### Status
+
+[OK] **Completed**
+
+### Next Steps
+
+- None - task complete
