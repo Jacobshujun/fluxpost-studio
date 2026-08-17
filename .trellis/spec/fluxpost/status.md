@@ -4,35 +4,29 @@ Last updated: 2026-08-17
 
 ## One-Line Status
 
-Unique historical root WIP is preserved at archive commit 3ba42a9 and excluded from the release; the single-port candidate workflow is implemented and locally verified but remains unpushed and undeployed.
+The single port-3001 candidate workflow is deployed: local clean main, GitHub main, and production use one exact SHA; historical unique WIP remains locally archived.
 
 ## Current Focus
 
-- Port 3001 is the only local application environment for development preview and committed candidate testing.
-- The candidate keeps public runtime identity and manifest-derived production deploy/rollback identity, but removes SHA-specific local mirror worktrees and state files.
-- A clean versioned candidate is running on port 3001; the final documentation commit must be retested before unchanged promotion.
+- Port 3001 is the only local application environment and runs from D:/FluxPost/social-content-studio.
+- Production exposes versioned identity and preserves its PostgreSQL/config/data/media volumes and unrelated services.
+- Only main plus the local WIP archive branch remain locally; merged GitHub branches and extra worktrees were removed.
 
 ## Next Entry
 
-1. Commit the final candidate record, rerun the complete deterministic baseline, and restart that exact clean SHA on port 3001.
-2. Push the exact tested SHA to the candidate branch and GitHub main.
-3. Run isolated VPS verification, read-only preflight, exact-SHA deployment, and production safety checks.
-4. Remove other local worktrees and redundant branches, then require local/GitHub/production SHA equality.
+Start new work from current main, preview only on port 3001, commit before candidate restart, then promote the unchanged verified SHA.
 
 ## Recent Verification
 
-- 2026-08-17: archive branch and annotated tag resolve to 3ba42a920bd8dec466ec721870dd1e1e6869fe5e and preserve only unique root WIP/task evidence.
-- 2026-08-17: single-port candidate contracts, PowerShell parsing, lint, TypeScript, build, full deterministic baseline, and clean port-3001 identity/health/auth smoke passed without external calls.
-- 2026-08-17: revised runtime parity and VPS deployment contract checks passed locally.
-- 2026-08-14: production release 20260814-085108-39a35f8dd869 passed health, auth, workers, schema, volumes, retention, logs, and rollback checks.
+- 2026-08-17: full local and isolated VPS baselines, exact-SHA deployment, identity, health, 30-table PostgreSQL schema, six unchanged FluxPost volumes, protected services, empty recent error log, two rescue tags, active weekly timer, and three-way parity passed.
+- 2026-08-17: three extra worktrees and four stale records were removed; root runtime data/media/config were preserved; unique WIP is recoverable from archive/root-wip-20260817 and archive-root-wip-20260817.
 
 ## Risks And Unknowns
 
-- Current production predates /api/version; its exact live SHA cannot be publicly proven until the identity-enabled candidate is deployed.
-- The archive branch/tag is local until intentionally pushed; local cleanup must preserve these refs.
-- Secrets, environment files, accounts, runtime rows, queues, media, volumes, and debug artifacts must never enter Git or be synchronized as code.
-- The package audit reports nine high-severity transitive advisories; do not run npm audit fix --force during this release.
+- Nine high-severity transitive package advisories remain; do not run npm audit fix --force during routine releases.
+- Local builds over the large retained media tree emit known Turbopack dynamic-path tracing warnings.
+- Archive refs are local only and intentionally not pushed because they include local task screenshots/evidence.
 
 ## History
 
-Detailed earlier evidence remains under .trellis/spec/fluxpost/archive/ and the latest bounded handoff/progress marker blocks.
+Earlier evidence remains under .trellis/spec/fluxpost/archive/ and bounded handoff/progress marker blocks.

@@ -267,6 +267,16 @@ return NextResponse.json({ status: getConfigStatus(), advanced: getAdvancedConfi
 - Candidate preparation must install locked dependencies before activation. Candidate restart builds before stopping the existing listener, injects `FLUXPOST_RUNTIME_MODE=candidate` plus the full SHA, and verifies `/api/version` and HTTP behavior. It selects configuration by path and never copies configuration or runtime data.
 - Keep standalone output opt-in through `FLUXPOST_STANDALONE_BUILD=1` for Docker builds. Default local builds must remain compatible with `next start` without creating `.next/standalone`, and standalone tracing must not package runtime data, generated media, crawled media, or test artifacts.
 - Development wrappers use port `3001` and disable background workers by default. `FLUXPOST_DEVELOPMENT_WORKERS=1` is the explicit opt-in for worker testing.
+
+### Scenario: Single Candidate Promotion
+
+1. **Scope / Trigger**: Any code release tested locally and promoted to production.
+2. **Signatures**: `npm run local:restart`; `npm run local:parity`; `verify-candidate.sh --ref <40-hex>`; `deploy.sh --ref <40-hex>`; `GET /api/version`.
+3. **Contracts**: Port `3001` runs clean HEAD as mode `candidate`; production runs the same SHA as mode `production`; the endpoint returns only `commit`, `mode`, and `versioned`; data, media, volumes, credentials, and configuration never move with code.
+4. **Validation / Errors**: Dirty local tree -> restart/parity fail; missing or malformed candidate/production SHA -> identity fails; local/runtime/GitHub/production mismatch -> parity fails; first rollout from a pre-identity wrapper with an empty container SHA -> rerun the updated wrapper for the same SHA and recheck identity.
+5. **Cases**: Good = all four identities equal; base = development on `3001` is unversioned; bad = branch-name deploy, dirty candidate, or copying `.env*`/runtime state.
+6. **Tests Required**: Runtime/parity and VPS deployment contract checks, complete deterministic baseline, real `3001` smoke, isolated VPS verifier, production identity/health/schema/volume/service/log/rollback checks, then `local:parity`.
+7. **Wrong / Correct**: Wrong: push before local candidate proof or accept `/api/config` health alone. Correct: test clean HEAD, push/deploy the unchanged full SHA, and require `/api/version` equality.
 - GitHub-driven Ubuntu production is owned by `scripts/deploy/vps-bootstrap.sh`, `scripts/deploy/vps-deploy.sh`, `scripts/deploy/vps-enable-domain.sh`, root `compose.yaml`, and `docs/deployment/ubuntu-docker.md`; do not add a second server layout or competing update script.
 - New pre-domain installs must keep the app on `127.0.0.1:${FLUXPOST_APP_PORT:-3101}`, start only `postgres app`, and use SSH tunneling. Caddy ports 80/443 start only when `FLUXPOST_PROXY_ENABLED=true` and `FLUXPOST_PUBLIC_HOST` is a validated DNS hostname.
 - Deployment code may read only explicit deployment controls from `shared/env.production`; it must not source the file as shell code. The file is root-only mode `0600`, while admin UI overrides remain in the `fluxpost-config` volume.

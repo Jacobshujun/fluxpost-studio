@@ -37,12 +37,12 @@ Use port `3001` as the only local application environment. A clean committed can
 
 ## Acceptance Criteria
 
-- [ ] Port `3001` runs a clean candidate whose runtime SHA equals its worktree HEAD.
-- [ ] Focused checks, lint, TypeScript, build, and the complete deterministic baseline pass.
-- [ ] GitHub `main` and production deploy the unchanged tested SHA.
-- [ ] Final parity reports one identical SHA for local, GitHub, and production.
-- [ ] Unique root WIP remains recoverable from the archive branch and tag.
-- [ ] Other manual worktrees and stale records are removed without deleting runtime state.
+- [x] Port `3001` runs a clean candidate whose runtime SHA equals its worktree HEAD.
+- [x] Focused checks, lint, TypeScript, build, and the complete deterministic baseline pass.
+- [x] GitHub `main` and production deploy the unchanged tested SHA.
+- [x] Final parity reports one identical SHA for local, GitHub, and production.
+- [x] Unique root WIP remains recoverable from the archive branch and tag.
+- [x] Other manual worktrees and stale records are removed without deleting runtime state.
 
 ## Out Of Scope
 

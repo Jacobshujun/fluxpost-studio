@@ -23,16 +23,16 @@
 
 ## 4. Promotion and deployment
 
-- [ ] Push the tested candidate branch and fast-forward GitHub `main` to the exact SHA.
-- [ ] Run the VPS isolated candidate verifier and read-only preflight.
-- [ ] Deploy the exact SHA through the installed wrapper.
-- [ ] Verify production identity, health, auth, workers, schema, volumes, services, logs, and rollback readiness.
+- [x] Push the tested candidate branch and fast-forward GitHub `main` to the exact SHA.
+- [x] Run the VPS isolated candidate verifier and read-only preflight.
+- [x] Deploy the exact SHA through the installed wrapper.
+- [x] Verify production identity, health, auth, workers, schema, volumes, services, logs, and rollback readiness.
 
 ## 5. Consolidation
 
-- [ ] Retain one local repository/environment on port `3001`.
-- [ ] Remove other clean worktrees and prune stale records.
-- [ ] Remove merged or superseded local branches while preserving archive refs.
-- [ ] Run final parity and update Trellis current state.
+- [x] Retain one local repository/environment on port `3001`.
+- [x] Remove other clean worktrees and prune stale records.
+- [x] Remove merged or superseded local branches while preserving archive refs.
+- [x] Run final parity and update Trellis current state.
 
 No paid providers, Feishu/Lark writes, runtime-data migration, volume removal, or secret/config synchronization is included.
