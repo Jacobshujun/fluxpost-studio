@@ -84,12 +84,12 @@ assert.match(restart, /FLUXPOST_RELEASE_SHA\s*=\s*\$ReleaseSha/);
 assert.match(restart, /ProjectRoot/);
 assert.match(restart, /rev-parse HEAD/);
 assert.match(restart, /git\.exe[\s\S]*status --porcelain/);
-assertOrder(restart, "npm.cmd ci", "npm.cmd run build");
 assertOrder(restart, "npm.cmd run build", "Stop existing server");
 assertOrder(restart, "Candidate worktree became dirty during build", "Stop existing server");
 assertOrder(restart, "Start-Process", "/api/version");
 assert.match(restart, /http_smoke\.js[\s\S]*"candidate"[\s\S]*\$ReleaseSha/);
 assert.doesNotMatch(restart, /MirrorRoot|current\.json|worktree add/);
+assert.doesNotMatch(restart, /npm\.cmd ci/);
 
 const parity = read("scripts/local/check-production-parity.ps1");
 assert.match(parity, /api\/version/);

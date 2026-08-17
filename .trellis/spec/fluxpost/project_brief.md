@@ -40,7 +40,7 @@ Last updated: 2026-06-25
   - `npm run dev` / `npm run dev:lan`: hot-reload development on the only local application port, `3001`; workers default off and require `FLUXPOST_DEVELOPMENT_WORKERS=1` to opt in.
   - `npm run build`: Next production build.
   - `npm run start`: Next production server.
-  - `npm run start:lan` / `npm run local:restart`: install, build, and run the clean current HEAD as a versioned candidate on port `3001` before push.
+  - `npm run start:lan` / `npm run local:restart`: build and run the clean current HEAD as a versioned candidate on port `3001` before push; dependency installation is a separate pre-activation gate.
   - `npm run local:parity`: require exact equality among clean local HEAD/runtime, GitHub `origin/main`, and production identity.
   - `npm run lark:tasks`: poll configured Feishu/Lark chats through `lark-cli` and submit explicit task commands to the local app.
   - `npm run lark:events`: consume real-time Feishu/Lark `im.message.receive_v1` events through `lark-cli event consume` and submit explicit task commands to the local app.

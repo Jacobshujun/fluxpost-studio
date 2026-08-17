@@ -71,7 +71,7 @@ After the exact tested SHA is pushed to GitHub `main` and deployed unchanged, ve
 npm run local:parity
 ```
 
-`local:restart` runs `npm ci` and the production build before replacing the listener, injects the current full HEAD as runtime identity, and refuses a dirty worktree. A configuration file outside the worktree can be selected with `-ConfigFile` or the user-level `FLUXPOST_LOCAL_CONFIG_FILE`. Code promotion never copies environment files, credentials, accounts, databases, queues, generated media, or provider state.
+Run `npm ci` while no server from that worktree is active whenever dependencies change. `local:restart` runs the production build before replacing the listener, injects the current full HEAD as runtime identity, and refuses a dirty worktree. A configuration file outside the worktree can be selected with `-ConfigFile` or the user-level `FLUXPOST_LOCAL_CONFIG_FILE`. Code promotion never copies environment files, credentials, accounts, databases, queues, generated media, or provider state.
 
 ## PostgreSQL Runtime Storage
 

@@ -3,7 +3,6 @@ param(
   [string]$HostName = "0.0.0.0",
   [string]$ConfigFile = "",
   [string]$ProjectRoot = "",
-  [switch]$SkipInstall,
   [switch]$SkipBuild
 )
 
@@ -67,14 +66,6 @@ function Get-ListeningProcessIds {
   }
 
   return @($ids | Select-Object -Unique)
-}
-
-if (-not $SkipInstall) {
-  Write-Host "== Install exact locked dependencies"
-  & npm.cmd ci
-  if ($LASTEXITCODE -ne 0) {
-    throw "Dependency installation failed with exit code $LASTEXITCODE"
-  }
 }
 
 if (-not $SkipBuild) {

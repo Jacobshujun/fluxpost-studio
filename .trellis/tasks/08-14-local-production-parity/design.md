@@ -2,7 +2,7 @@
 
 ## Local lifecycle
 
-Port `3001` has one active role at a time. `npm run dev` provides an unversioned development preview with background workers disabled by default. After changes are committed, `npm run local:restart` uses the current worktree directly, requires it to be clean, runs `npm ci` and the production build before replacing the listener, injects mode `candidate` plus HEAD, and validates `/api/version` and the HTTP smoke.
+Port `3001` has one active role at a time. `npm run dev` provides an unversioned development preview with background workers disabled by default. Candidate preparation runs `npm ci` before activation. After changes are committed, `npm run local:restart` uses the current worktree directly, requires it to be clean, runs the production build before replacing the listener, injects mode `candidate` plus HEAD, and validates `/api/version` and the HTTP smoke.
 
 No release worktree hierarchy or `current.json` pointer is created. Local configuration can be selected by an explicit path or the user-level `FLUXPOST_LOCAL_CONFIG_FILE`; its contents are neither copied nor printed.
 
@@ -26,4 +26,4 @@ The historical dirty root is preserved by Git branch and annotated tag before cl
 
 ## Failure behavior
 
-A dirty or invalid local HEAD fails before dependency installation or listener replacement. Install/build failures leave the existing listener intact. Identity or smoke failures fail activation explicitly. A parity mismatch identifies whether local runtime, local HEAD, GitHub `main`, or production differs.
+A dirty or invalid local HEAD fails before build or listener replacement. Dependency installation is a pre-activation gate because Windows locks the running Next SWC binary in the active worktree. Build failures leave the existing listener intact. Identity or smoke failures fail activation explicitly. A parity mismatch identifies whether local runtime, local HEAD, GitHub `main`, or production differs.

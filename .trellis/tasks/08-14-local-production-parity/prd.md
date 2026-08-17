@@ -15,7 +15,7 @@ Use port `3001` as the only local application environment. A clean committed can
 ### R2. Candidate identity
 
 - A committed candidate runs with mode `candidate` and its full lowercase Git SHA.
-- `npm run local:restart` refuses a dirty worktree, installs locked dependencies, builds before stopping the old listener, starts on `3001`, and verifies its public identity and HTTP behavior.
+- Candidate preparation installs locked dependencies before activation. `npm run local:restart` refuses a dirty worktree, builds before stopping the old listener, starts on `3001`, and verifies its public identity and HTTP behavior.
 - Development mode may be unversioned and uses the same port with workers disabled by default.
 
 ### R3. Promotion
