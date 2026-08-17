@@ -23,7 +23,7 @@ Last updated: 2026-06-25
 
 1. Configure environment values in `.env.local` from the README Environment section.
 2. Start the local web app.
-3. Search/crawl content by platform and keyword through `/content` and `/api/crawl/jobs`, batch-import supported source links into the content pool through `/content` and `/api/crawl/links`, or use `/api/simple/runs` for one-click production from keywords, exact source links, Feishu task numbers, one viral source link, original prompts, or selected content-pool samples.
+3. Search/crawl content by platform and keyword through `/content` and `/api/crawl/jobs`, batch-import supported source links into the content pool through `/content` and `/api/crawl/links`, or use `/api/simple/runs` for one-click production from keywords, exact source links, one current Dongchedi category page, Feishu task numbers, one viral source link, original prompts, or selected content-pool samples.
 4. Assess harvested items with the crawl-stage content safety gate, then persist retained items into the runtime database-backed content pool.
 5. Optionally scan local image material folders through `/api/materials/scan`.
 6. Generate post drafts through `/api/generate` or through the simple-run one-click workflow, including text and optional image generation.
@@ -129,6 +129,7 @@ Last updated: 2026-06-25
 - V1/V2 Feishu/Lark conversation task launch is configured by `LARK_TASK_CHAT_IDS`, `LARK_TASK_USER_MAP`, `LARK_TASK_API_TOKEN`, `LARK_TASK_DEFAULT_PLATFORMS`, `LARK_TASK_DEFAULT_COUNT`, and `LARK_TASK_CONFIRM_ABOVE`. The local polling runner reads configured chats through bot identity, while the real-time event runner consumes `im.message.receive_v1` events; both post explicit commands to local `/api/lark/tasks`. Sender open ids must map to existing workspace account ids before a simple run is enqueued.
 - The confirmed default Feishu command shape is `lark-cli base +record-batch-create --as bot --base-token {appToken} --table-id {tableId} --json @{recordPayload}`.
 - Simple-mode throughput knobs include `SIMPLE_RUN_MAX_ITEMS` (fallback `500`, hard ceiling `2000`) and `SIMPLE_RUN_WORKER_CONCURRENCY` (fallback `4`, hard ceiling `10`).
+- Dongchedi category Simple Runs accept exact HTTPS `/news/...` pages, cap at 30 serial drafts, disable Feishu, and use `DONGCHEDI_COOKIE_ENCRYPTION_KEY` plus `DONGCHEDI_PAGE_TASK_TIMEOUT_MS`.
 - Canvas run and batch-schedule workers wake automatically on normal Node server startup. `FLUXPOST_DISABLE_BACKGROUND_WORKERS=1` disables that instrumentation bootstrap for deterministic local smoke servers; normal production/local starts must leave it unset so persisted operator-launched work resumes.
 - Feishu publish queue throughput is controlled by `FEISHU_PUBLISH_WORKER_CONCURRENCY` (fallback `1`, hard ceiling `5`), with a per-owner running-job guard so Feishu CLI writes are serialized per user/owner.
 - Feishu attachment-upload throughput is controlled separately by `WORKER_FEISHU_ATTACHMENT_CONCURRENCY` (fallback `3`, hard ceiling `10`) so large attachment batches do not use the same high concurrency as record creation.

@@ -44,7 +44,8 @@ assertContains(simpleRuns, /pickupRecord:\s*hasSimpleProductionPickupRecordTag\(
 assertContains(simpleRuns, /noMediaItems/, "Simple production must track no-media skipped items.");
 assertContains(simpleRuns, /Simple production source skipped/, "No-media skips must be logged.");
 assertContains(simpleRuns, /total:\s*productionItems\.length \+ noMediaItems\.length/, "Produce stage total must include skipped no-media candidates.");
-assertContains(simpleRuns, /mapWithConcurrency\(productionItems,\s*concurrencyConfig\.production/, "Only selected production items should enter generation.");
+assertContains(simpleRuns, /const productionConcurrency = isSimpleRunDongchediPageMode\(normalizedInput\) \? 1 : concurrencyConfig\.production/, "Dongchedi page production must be serial without changing ordinary production concurrency.");
+assertContains(simpleRuns, /mapWithConcurrency\(productionItems,\s*productionConcurrency/, "Only selected production items should enter generation.");
 assertNotContains(
   simpleRuns,
   /\.sort\(\(a, b\) => b\.score - a\.score\)\s*\.slice\(0,\s*normalizedInput\.targetCount\)\s*\.map\(\(\{ item \}\) => item\)/,

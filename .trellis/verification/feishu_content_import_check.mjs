@@ -75,7 +75,8 @@ assertContains(simpleRuns, /raw\.feishu\?\.vehicle\?\.trim\(\)/, "Feishu vehicle
 assertContains(route, /sourceMode\?:\s*"keyword"\s*\|\s*"links"\s*\|\s*"feishu"[\s\S]*"pool"/, "Simple run API must accept Feishu source mode.");
 assertContains(route, /feishuTaskNumbers\?:\s*string\[\]\s*\|\s*string/, "Simple run API must accept Feishu task numbers.");
 assertContains(route, /baseSourceMode\s*=\s*body\.sourceMode === "feishu" \? "feishu" : body\.sourceMode === "links" \? "links" : body\.sourceMode === "pool" \? "pool" : "keyword"/, "Simple run API must preserve Feishu/link/pool/keyword source mode mapping.");
-assertContains(route, /sourceMode:\s*body\.sourceMode === "original" \? "original" : body\.sourceMode === "viral" \? "viral" : baseSourceMode/, "Simple run API must forward the resolved source mode.");
+assertContains(route, /resolvedSourceMode\s*=\s*body\.sourceMode === "original" \? "original" : body\.sourceMode === "viral" \? "viral" : body\.sourceMode === "dongchedi_page" \? "dongchedi_page" : baseSourceMode/, "Simple run API must preserve explicit modes and fall back to the existing source-mode mapping.");
+assertContains(route, /sourceMode:\s*resolvedSourceMode/, "Simple run API must forward the resolved source mode.");
 assertContains(route, /feishuTaskNumbers:\s*body\.feishuTaskNumbers/, "Simple run API must forward Feishu task numbers.");
 
 assertContains(page, /type SimpleSourceMode = "keyword" \| "links" \| "feishu"/, "Simple UI must define Feishu source mode.");

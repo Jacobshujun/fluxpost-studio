@@ -102,6 +102,8 @@ The database stores metadata, state, logs, paths, and JSON payloads. Crawled med
 ```env
 TIKHUB_BASE_URL=https://api.tikhub.io
 TIKHUB_API_KEY=
+DONGCHEDI_COOKIE_ENCRYPTION_KEY=
+DONGCHEDI_PAGE_TASK_TIMEOUT_MS=7200000
 
 DATABASE_URL=
 DATABASE_POOL_MAX=10
@@ -167,6 +169,8 @@ LARK_TASK_DEFAULT_PLATFORMS=douyin,xiaohongshu
 LARK_TASK_DEFAULT_COUNT=3
 LARK_TASK_CONFIRM_ABOVE=20
 ```
+
+`DONGCHEDI_COOKIE_ENCRYPTION_KEY` must be a base64-encoded 32-byte key when a Dongchedi category task includes a Cookie. Category tasks retain only the AES-256-GCM envelope while active and clear it on terminal completion.
 
 For a small local team, keep `WORKSPACE_AUTH_MODE=whitelist`. `WORKSPACE_ALLOWED_USERS` is the allow-list for account usernames, and `WORKSPACE_ADMIN_USERS` marks usernames that may bootstrap or always receive admin access. Use `WORKSPACE_ACCESS_PASSWORD` only as the setup key when creating the first admin from the login screen. After that, admins create, reset, enable, disable, or promote accounts from the account menu, and every member signs in with their own password. Normal members see only their own content, generated posts, material library entries, activity logs, simple runs, crawl jobs, and publish jobs; admins can see and manage all workspace records. Set `WORKSPACE_AUTH_MODE=accounts` only if you want to use the older local account-table mode.
 

@@ -266,18 +266,19 @@
       "status": "ready_for_review",
       "definition_of_done": [
         "Signed-in users enter the compact task workspace directly without simple or advanced mode switching",
-        "The compact workspace accepts keyword crawl, exact links, Feishu task numbers, one viral source link, or one original prompt with scoped controls",
+        "The compact workspace accepts keyword crawl, exact links, one Dongchedi category page, Feishu task numbers, one viral source link, or one original prompt with scoped controls",
         "Compact tasks run crawl, AI tagging, content production, optional image processing, review staging, and optional Feishu publishing through /api/simple/runs",
         "Prompt, image-policy, media, material, and Feishu settings remain editable from the compact workspace",
         "Polling, multi-run progress, and operator force termination remain available",
+        "Dongchedi category tasks process at most 30 current-page articles serially, support pause/resume, redact encrypted Cookie state, and never auto-publish",
         "Generated posts publish content tags to the Feishu Base 内容标签 multi-select field"
       ],
       "evidence": [
         "Source files present: src/lib/simple-runs.ts, src/lib/workspace-settings.ts, src/lib/viral-replication.ts, src/app/api/simple/runs/route.ts, src/app/api/workspace/settings/route.ts",
         "2026-07-22 compact-only static checks, source-mode/config/material/queue checks, full baseline, local restart, mocked desktop/mobile multi-run validation, and fixed-SHA 104 staging deployment passed",
-        "Detailed historical evidence archived at .trellis/spec/fluxpost/archive/feature-list-history-2026-06-17.json"
+        "2026-08-17 Dongchedi category guards, serial drafts, pause/resume, Cookie secrecy, partial completion, full offline baseline, and desktop/mobile smoke passed"
       ],
-      "notes": "External provider calls are excluded from default verification; internal SimpleRun and simple_runs contracts remain unchanged."
+      "notes": "External calls are excluded from default verification. Dongchedi status fields are additive; live authorized providers and authenticated UI remain pending manual review."
     },
     {
       "id": "reference-image-library",

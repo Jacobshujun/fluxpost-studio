@@ -6,16 +6,14 @@ This file is an on-demand history library. Current state belongs in `.trellis/sp
 
 ## 最近一条
 <!-- TRELLIS-LATEST-START -->
-2026-08-14 production candidate integration:
+2026-08-17 Dongchedi category batch rewrite:
 
 Done:
-- Based the isolated candidate on deployed SHA `a887c158...` and preserved the original dirty worktree.
-- Added retention v4, Canvas video reconstruction, library role-entry time filters, and a CRLF-safe review regression check in four scoped commits.
-- Passed focused checks and the complete baseline through code SHA `011c15e` without live providers or external writes.
+- Implemented safe category discovery, strict per-article serial processing, encrypted Cookie handling, pause/resume, partial drafts, workbench controls, and offline regression coverage.
+- Passed lint, TypeScript, build, complete deterministic baseline, isolated HTTP/SQLite, and unauthenticated desktop/mobile smoke without external calls.
 
 Next:
-- Commit current evidence and repeat the full baseline on the exact final local SHA.
-- Push/remote verification and production deployment remain unperformed approval gates.
+- Scoped local commits are complete; authenticated/live-provider validation and any push/deployment remain separate gates.
 <!-- TRELLIS-LATEST-END -->
 
 ## 历史记录

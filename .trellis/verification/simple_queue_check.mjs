@@ -41,7 +41,7 @@ assertContains(route, /export async function DELETE/, "Simple run API must expos
 assertContains(route, /terminateSimpleRun\(runId/, "Simple run DELETE endpoint must close the run through the domain helper.");
 assertContains(page, /onTerminateRun=\{terminateSimpleRunFromUi\}/, "Simple UI must wire the force-terminate action.");
 assertContains(page, /强制终止/, "Simple UI must expose a force-terminate button.");
-assertContains(page, /type="number" min=\{1\} max=\{500\}[\s\S]*value=\{sourceMode === "viral" \|\| sourceMode === "original" \? 1 : targetCount\}[\s\S]*disabled=\{sourceMode === "viral" \|\| sourceMode === "original" \|\| busy \|\| settingsBusy\}/, "Keyword-mode target count input must still allow more than 100 items while viral/original mode stays single-post.");
+assertContains(page, /type="number" min=\{1\} max=\{sourceMode === "dongchedi_page" \? 30 : 500\}[\s\S]*value=\{sourceMode === "viral" \|\| sourceMode === "original" \? 1 : targetCount\}[\s\S]*disabled=\{sourceMode === "viral" \|\| sourceMode === "original" \|\| busy \|\| settingsBusy\}/, "Keyword mode must retain the 500-item input, Dongchedi page mode must cap at 30, and viral/original mode must stay single-post.");
 assertContains(page, /<SimpleOverallProgressBar[\s\S]*runs=\{runs\}[\s\S]*activeRun=\{activeRun\}/, "Compact progress must receive the simple-run list, not only one active run.");
 assertContains(page, /buildSimpleOverallProgressRuns\(runs,\s*activeRun\)/, "Compact progress must derive multiple visible runs from current simple runs.");
 assertContains(page, /simple-overall-run-list/, "Compact progress must render a multi-run progress list.");

@@ -17,8 +17,14 @@ const check = read(".trellis/verification/check.mjs");
 
 assertContains(
   simpleRuns,
-  /await saveGeneratedPost\(post,\s*access\);[\s\S]*await produceRunUpdates\.update\(async \(latestRun\) => \{[\s\S]*const withPost = await addPostResult\(latestRun,\s*post\);[\s\S]*return incrementStage\(withPost,\s*"produce",\s*\{ completed: 1 \}\);[\s\S]*await syncSimpleSourceStatus\(post,\s*access,\s*run\.id,\s*"draft"\)/,
-  "Simple production must persist and record the generated post before non-fatal source-status sync.",
+  /await savePost\(post,\s*access\);[\s\S]*await saveGeneratedPost\(post,\s*access\);[\s\S]*return \{ post, publishReady:/,
+  "Single-source production must persist both generated-post stores before returning the draft.",
+);
+
+assertContains(
+  simpleRuns,
+  /await produceSimpleSourceDraft\(source,[\s\S]*await produceRunUpdates\.update\(async \(latestRun\) => \{[\s\S]*const withPost = await addPostResult\(latestRun,\s*post\);[\s\S]*return incrementStage\(withPost,\s*"produce",\s*\{ completed: 1 \}\);[\s\S]*await syncSimpleSourceStatus\(post,[\s\S]*run\.id,\s*"draft"\)/,
+  "Simple production must record the persisted post before non-fatal source-status sync.",
 );
 
 assertContains(

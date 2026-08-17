@@ -110,7 +110,8 @@ assertContains(imageGeneration, /recordKeepTaskNeedsReview/, "Keep-mode normaliz
 assertContains(imageGeneration, /materializeRemoteSourceImage/, "Remote keep-mode images should be inspected before being returned.");
 assertContains(imageGeneration, /persistRemoteSourceImage\(buffer,\s*url/, "Verified remote keep-mode images should be persisted instead of retaining platform URLs.");
 const simpleRuns = read("src/lib/simple-runs.ts");
-assertContains(simpleRuns, /imageResult\.status !== "needs_review"[\s\S]*publishReadyPosts\.push\(post\)/, "Needs-review image drafts should be kept out of automatic publishing.");
+assertContains(simpleRuns, /publishReady:\s*imageResult\.status !== "needs_review"/, "Single-source production must mark needs-review image drafts as not publish-ready.");
+assertContains(simpleRuns, /if \(publishReady\) publishReadyPosts\.push\(post\)/, "Only publish-ready drafts should enter automatic publishing.");
 assertContains(simpleRuns, /if \(!publishReadyPosts\.length\)[\s\S]*status: "skipped"/, "An all-needs-review batch should remain in the review desk without Feishu publishing.");
 
 const firstTos = "https://bucket.tos-cn-guangzhou.volces.com/fluxpost/media/crawl/weibo/source-1/image-1.jpg?v=one";

@@ -1031,6 +1031,66 @@ const policy = normalizeContentSafetyPolicySnapshot(run.contentSafetyPolicy);
 const result = await filterUnsafeSourceItems(items, context, policy);
 ```
 
+## Scenario: Dongchedi Category Page Serial Rewrite
+
+### 1. Scope / Trigger
+
+- Trigger: changing `dongchedi_page` Simple Run input, Dongchedi category/article HTTP guards, serial execution, pause/resume, per-link state, or encrypted Cookie handling.
+- The integration is static HTTP parsing only. Browser automation, CAPTCHA solving, proxy rotation, fingerprint spoofing, and signature bypass are forbidden.
+
+### 2. Signatures
+
+- `POST /api/simple/runs` accepts `{ sourceMode: "dongchedi_page", pageUrl, keyword, targetCount?, cookie?, generateImages?, writeFeishu? }`; `targetCount` defaults to 30 and is bounded to 1-30.
+- `PATCH /api/simple/runs` accepts `{ runId, action: "pause" | "resume", cookie? }`; pause/resume are valid only for non-terminal Dongchedi page runs.
+- `SimpleRun.status` and `SimpleRunQueueItem.status` include `paused`; per-link status includes `queued`, `running`, `paused`, `filtered`, `draft`, and failure/duplicate variants.
+- `DONGCHEDI_COOKIE_ENCRYPTION_KEY` is required only when a Cookie is supplied and must decode to 32 bytes. `DONGCHEDI_PAGE_TASK_TIMEOUT_MS` defaults to two hours and is bounded to one minute through six hours.
+
+### 3. Contracts
+
+- Category URLs require HTTPS, exact host `dongchedi.com` or `www.dongchedi.com`, and a `/news/...` path. Discovery parses only the submitted HTML and returns at most 30 same-host `/ugc/article/{id}` links; it never follows pagination.
+- One loop owns the complete article sequence: resolve/cache media -> safety filter -> tag/ingest -> text/image rewrite -> save independent `draft` -> persist per-link result. The next article cannot start before that sequence finishes or fails. Image task concurrency is 1 for this mode; ordinary Simple Run concurrency remains unchanged.
+- Redirects are revalidated against the exact HTTPS host allowlist. HTML requests have bounded timeout, bytes, and redirect count; only transient transport errors receive one retry. `403`, `429`, login/challenge pages, or repeated timeout pause later work. A parsed `Retry-After` sets `resumeAfter` and rejects early resume.
+- Optional Cookie plaintext exists only in the worker-local hydrated input. The stored run contains an AES-256-GCM envelope, all browser responses clear both Cookie fields, and terminal completion/failure/termination clears the envelope. Paused work retains only the envelope so an authorized resume can continue.
+- Completed drafts survive later article failure. Fewer discovered links, filtered/failed links, or other incomplete per-link results produce `partial` when at least one draft exists. `writeFeishu` is forced false in the domain layer.
+
+### 4. Validation & Error Matrix
+
+| Condition | Required result |
+| --- | --- |
+| Missing session | HTTP `401` |
+| Invalid/missing category URL, target, or encryption key | HTTP `400`, no queue work |
+| External/non-HTTPS redirect | Reject the source; never follow it |
+| `403`, `429`, login/challenge, repeated timeout | Persist visible pause reason, stop before the next article |
+| Resume before `Retry-After` | HTTP `400`, queue remains paused |
+| One non-stop article failure | Record the link error; keep prior drafts and continue |
+| No successful draft | Terminal `failed`; never fabricate content |
+| User termination while paused/running | Run and queue become terminal; Cookie envelope is cleared |
+
+### 5. Good/Base/Bad Cases
+
+- Good: discover 30 links, process each end to end in order, save 30 review drafts, and never enqueue Feishu.
+- Base: discover 18 for a target of 30, save the usable drafts, and finish `partial` with discovered/target counts.
+- Good: article 7 returns `429; Retry-After 30`; keep drafts 1-6, pause article 7 and all later starts, then resume the same persisted list after the allowed time.
+- Bad: fetch all 30 first and only then tag/generate, expose Cookie/ciphertext in API JSON, immediately retry challenges, rotate proxies, or synthesize a draft when source content is unavailable.
+
+### 6. Tests Required
+
+- `.trellis/verification/dongchedi_page_check.mjs` covers URL/category extraction, 1/10/30 limits, external redirect rejection, stop classifications, AES-GCM round trip/redaction, one-loop operation order, task/image serialization, partial status, queue controls, and UI wiring without network/provider calls.
+- Existing link, Feishu, content-pool, persistence, HEIC review, concurrency, review, queue, lint, TypeScript, build, isolated HTTP, and SQLite checks must remain green. Browser smoke covers 1440x960 and 390x844 without real credentials or external work.
+
+### 7. Wrong vs Correct
+
+```typescript
+// Wrong: fetch every source, then fan out rewrite work.
+await Promise.all(links.map(fetchAndRewrite));
+
+// Correct: finish and persist one article before starting the next.
+for (const link of links) {
+  await resolveFilterTagRewriteAndSave(link);
+  if (await pauseRequested()) break;
+}
+```
+
 ## Trellis Rules
 
 - `.trellis/` is the only active persistent AI collaboration system. `.trellis/spec/fluxpost/` is the FluxPost project-memory layer inside that system.

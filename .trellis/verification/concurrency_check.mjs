@@ -84,9 +84,10 @@ assertContains(
 );
 
 assertContains(simpleRuns, /mapWithConcurrency\(normalizedInput\.platforms,\s*concurrencyConfig\.crawl/, "Simple-mode platform crawling must be concurrent and bounded.");
-assertContains(simpleRuns, /mapWithConcurrency\(productionItems,\s*concurrencyConfig\.production/, "Simple-mode production must be concurrent and bounded.");
+assertContains(simpleRuns, /const productionConcurrency = isSimpleRunDongchediPageMode\(normalizedInput\) \? 1 : concurrencyConfig\.production/, "Simple-mode production must keep global concurrency while Dongchedi page tasks remain serial.");
+assertContains(simpleRuns, /mapWithConcurrency\(productionItems,\s*productionConcurrency/, "Simple-mode production must use the selected bounded concurrency.");
 assertContains(simpleRuns, /runWithConcurrencyPool\("production"/, "Simple-mode post production must use the production pool.");
-assertContains(simpleRuns, /taskConcurrency:\s*concurrencyConfig\.image/, "Simple-mode image tasks must use the global image concurrency cap.");
+assertContains(simpleRuns, /taskConcurrency:\s*isSimpleRunDongchediPageMode\(normalizedInput\) \? 1 : concurrencyConfig\.image/, "Simple-mode image tasks must retain the global cap while Dongchedi page image work remains serial.");
 assertContains(simpleRuns, /createRunUpdateQueue/, "Simple-mode concurrent progress writes must use a serialized run update queue.");
 
 const canvasRuns = read("src/lib/canvas/runs.ts");

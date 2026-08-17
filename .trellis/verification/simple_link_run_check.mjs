@@ -38,7 +38,8 @@ assertContains(route, /directOriginalReference\?:\s*boolean/, "Simple run API sh
 assertContains(route, /enableVideoTranscription\?:\s*boolean/, "Simple run API should accept the video transcription switch.");
 assertContains(route, /cookie\?:\s*string/, "Simple run API should accept a request-only link cookie.");
 assertContains(route, /baseSourceMode\s*=\s*body\.sourceMode === "feishu" \? "feishu" : body\.sourceMode === "links" \? "links"(?: : body\.sourceMode === "pool" \? "pool")? : "keyword"/, "Simple run API must preserve link-mode source mapping.");
-assertContains(route, /sourceMode:\s*body\.sourceMode === "original" \? "original" : body\.sourceMode === "viral" \? "viral" : baseSourceMode/, "Simple run API must forward the resolved source mode.");
+assertContains(route, /resolvedSourceMode\s*=\s*body\.sourceMode === "original" \? "original" : body\.sourceMode === "viral" \? "viral" : body\.sourceMode === "dongchedi_page" \? "dongchedi_page" : baseSourceMode/, "Simple run API must preserve explicit modes without changing link-mode fallback mapping.");
+assertContains(route, /sourceMode:\s*resolvedSourceMode/, "Simple run API must forward the resolved source mode.");
 assertContains(route, /links:\s*body\.links/, "Simple run API must forward source links.");
 assertContains(route, /videoFrameOriginalReference:\s*body\.videoFrameOriginalReference !== false/, "Simple run API must default the video-frame original-reference switch on.");
 assertContains(route, /useComfyUiKlein:\s*body\.useComfyUiKlein === true/, "Simple run API must default Klein routing off unless explicitly enabled.");
@@ -78,11 +79,11 @@ assertContains(page, /const \[simpleWriteFeishu,\s*setSimpleWriteFeishu\] = useS
 assertContains(page, /批量导入链接/, "Simple and compact UI should expose the batch-link entry.");
 assertContains(page, /sourceMode,\s*\n\s*keyword:/, "Simple start request must send source mode and keyword.");
 assertContains(page, /links:\s*sourceMode === "links" \? links : undefined/, "Simple start request must send link-mode payload.");
-assertContains(page, /videoFrameOriginalReference:\s*sourceMode === "links" \? simpleVideoFrameOriginalReference : undefined/, "Simple start request must send the video-frame original-reference switch for link mode.");
+assertContains(page, /videoFrameOriginalReference:\s*sourceMode === "links" \|\| sourceMode === "dongchedi_page" \? simpleVideoFrameOriginalReference : undefined/, "Simple start request must send the video-frame original-reference switch for link and Dongchedi page modes.");
 assertContains(page, /useComfyUiKlein:\s*simpleUseComfyUiKlein/, "Simple start request must send the Klein routing switch.");
 assertContains(page, /directOriginalReference:\s*sourceMode === "viral" \|\| sourceMode === "original" \? undefined : simpleDirectOriginalReference/, "Simple start request must send the direct-original switch for non-viral/original runs.");
 assertContains(page, /enableVideoTranscription:\s*simpleEnableVideoTranscription/, "Simple start request must send the video transcription switch.");
-assertContains(page, /cookie:\s*sourceMode === "links" && simpleLinkPlatform === "dongchedi" \? cookie : undefined/, "Simple start request must send Cookie only for Dongchedi link mode.");
+assertContains(page, /cookie:\s*sourceMode === "dongchedi_page" \|\| \(sourceMode === "links" && simpleLinkPlatform === "dongchedi"\) \? cookie : undefined/, "Simple start request must send Cookie only for Dongchedi link or page modes.");
 assertContains(contentPage, /linkImportPlatform === "douyin" \|\| linkImportPlatform === "dongchedi"/, "Content desk source-link import should expose Cookie for Douyin and Dongchedi.");
 assertContains(contentPage, /cookie:\s*linkImportPlatform === "douyin" \|\| linkImportPlatform === "dongchedi" \? cookie : undefined/, "Content desk source-link import must send Cookie for Douyin and Dongchedi.");
 assertContains(page, /linkPlatform === "dongchedi"[\s\S]*placeholder="Cookie"/, "Compact link-mode UI should expose Cookie for Dongchedi.");

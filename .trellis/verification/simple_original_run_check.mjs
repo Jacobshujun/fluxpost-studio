@@ -28,7 +28,8 @@ has(types, /originalResult\?:\s*SimpleRunOriginalResult/, "SimpleRun must persis
 has(route, /originalPrompt\?:\s*string/, "Simple run API must accept originalPrompt.");
 has(route, /originalUseWebSearch\?:\s*boolean/, "Simple run API must accept originalUseWebSearch.");
 has(route, /import \{ appConfig \} from "@\/lib\/config"/, "Simple run API must read server text-endpoint config for original web-search validation.");
-has(route, /sourceMode:\s*body\.sourceMode === "original" \? "original" : body\.sourceMode === "viral" \? "viral" : baseSourceMode/, "Simple run API must forward original source mode.");
+has(route, /resolvedSourceMode\s*=\s*body\.sourceMode === "original" \? "original"/, "Simple run API must preserve original source mode.");
+has(route, /sourceMode:\s*resolvedSourceMode/, "Simple run API must forward original source mode.");
 has(route, /originalPrompt:\s*body\.originalPrompt/, "Simple run API must forward originalPrompt.");
 has(route, /originalUseWebSearch:\s*body\.originalUseWebSearch === true/, "Simple run API must default original web search off.");
 has(route, /if \(body\.sourceMode === "original" && body\.originalUseWebSearch === true && appConfig\.openaiTextEndpoint !== "responses"\)[\s\S]*Original-mode web search requires OPENAI_TEXT_ENDPOINT=responses/, "Simple run API must reject unsupported original web search before enqueueing a failed run.");

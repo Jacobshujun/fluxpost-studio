@@ -57,6 +57,7 @@ const nodeChecks = [
   ["Crawl strategy save check", "crawl_strategy_save_check.mjs"],
   ["Xiaopeng BBS import check", "xiaopeng_bbs_import_check.mjs"],
   ["Dongchedi import check", "dongchedi_import_check.mjs"],
+  ["Dongchedi page check", "dongchedi_page_check.mjs"],
   ["Link import check", "link_import_check.mjs"],
   ["Content desk check", "content_desk_check.mjs"],
   ["Simple link run check", "simple_link_run_check.mjs"],
