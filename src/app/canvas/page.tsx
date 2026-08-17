@@ -2963,10 +2963,45 @@ function ScheduleV2RuntimeTree({ schedule, busy, onAction }: { schedule: CanvasS
     {mainTasks.map((main, index) => <details key={main.id} open><summary><StatusIcon status={main.status} /><strong>主任务 {index + 1} · {formatCanvasScheduleParameterValues(main.parameterValues)}</strong><span>{main.childTasks.filter((child) => child.status === "completed").length}/{main.childTasks.length}</span><em>{canvasScheduleStatusLabel(main.status)}</em></summary><div className="canvas-schedule-runtime-content">
       {schedule.definition?.sharedOutputs?.length || main.sharedStatus ? <CanvasScheduleSharedStage main={main} busy={busy} onRetry={() => onAction("retry-shared", { mainTaskId: main.id })} /> : null}
       {main.resultArtifacts.length ? <CanvasScheduleArtifactSummary artifacts={main.resultArtifacts} /> : null}
+      {["completed", "partial"].includes(main.status) && main.mainRunId ? <CanvasScheduleMainImageDownload runId={main.mainRunId} /> : null}
       {main.pendingCandidateSync ? <button type="button" onClick={() => onAction("accept-candidates", { mainTaskId: main.id })} disabled={busy}>接受新增候选图</button> : null}
       {main.error ? <p>{main.error}</p> : null}
       <ul>{main.childTasks.map((child, childIndex) => <li key={child.id}><StatusIcon status={child.status} /><span>子任务 {childIndex + 1} · {formatCanvasScheduleParameterValues(child.parameterValues)}</span><em>{canvasScheduleStatusLabel(child.status)}</em>{child.error ? <small>{child.error}</small> : null}{child.status === "failed" ? <button type="button" onClick={() => onAction("retry", { mainTaskId: main.id, childTaskId: child.id })} disabled={busy}><RotateCcw />重试</button> : null}</li>)}</ul>
     </div></details>)}
+  </div>;
+}
+
+function CanvasScheduleMainImageDownload({ runId }: { runId: string }) {
+  const [busy, setBusy] = useState(false);
+  const [feedback, setFeedback] = useState("");
+  const [hasFailures, setHasFailures] = useState(false);
+  const busyRef = useRef(false);
+
+  async function download() {
+    if (busyRef.current) return;
+    busyRef.current = true;
+    setBusy(true);
+    setFeedback("");
+    setHasFailures(false);
+    try {
+      const counts = await downloadCanvasRunSaveImages(runId);
+      setHasFailures(counts.failed > 0);
+      setFeedback(`下载成功 ${counts.success} 张，下载失败 ${counts.failed} 张`);
+    } catch (error) {
+      setHasFailures(true);
+      setFeedback(errorMessage(error));
+    } finally {
+      busyRef.current = false;
+      setBusy(false);
+    }
+  }
+
+  return <div className="canvas-schedule-main-download">
+    <button type="button" disabled={busy} onClick={() => void download()}>
+      {busy ? <LoaderCircle className="animate-spin" /> : <Download />}
+      {busy ? "下载中" : "下载图片"}
+    </button>
+    {feedback ? <small className={hasFailures ? "is-error" : ""} role="status">{feedback}</small> : null}
   </div>;
 }
 
@@ -4016,6 +4051,28 @@ async function downloadCanvasSaveImages(runId: string, nodeRunId: string, count:
     }
   }
   return { success, failed };
+}
+
+async function downloadCanvasRunSaveImages(runId: string) {
+  const data = await api<CanvasRunWithNodes>(`/api/canvas/runs/${encodeURIComponent(runId)}`);
+  const latest = latestAttempts(data.nodeRuns);
+  const results = data.run.graphSnapshot.nodes.flatMap((node) => {
+    if (node.type !== "utility.save-images") return [];
+    const nodeRun = latest.get(node.id);
+    const artifact = nodeRun && (nodeRun.status === "completed" || nodeRun.status === "reused")
+      ? getSaveImagesArtifact(nodeRun)
+      : undefined;
+    return nodeRun && artifact ? [{ nodeRunId: nodeRun.id, count: artifact.items.length }] : [];
+  });
+  if (!results.length) throw new Error("该主任务没有可下载的保存图片结果。");
+
+  const total = { success: 0, failed: 0 };
+  for (const result of results) {
+    const counts = await downloadCanvasSaveImages(runId, result.nodeRunId, result.count);
+    total.success += counts.success;
+    total.failed += counts.failed;
+  }
+  return total;
 }
 
 function getDisplayAnyArtifact(nodeRun: CanvasNodeRun) {

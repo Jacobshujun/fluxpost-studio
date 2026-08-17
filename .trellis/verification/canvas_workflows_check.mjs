@@ -744,6 +744,7 @@ requireText(page, ["NodeResizer", "CANVAS_NODE_SIZE_LIMITS", "displayedNodes", "
 requireText(page, ["CanvasNodeTextEditor", "setDraft(nextValue)", "document.activeElement !== editorRef.current", "data-node-id={nodeId}"], "canvas text editor caret preservation");
 requireText(page, ["CanvasDisplayAnyNodeResult", "CanvasDisplayAnyArtifact", "getDisplayAnyArtifact", "outputs.preview", "等待上游结果", "没有图片内容", "没有视频内容", "飞书发布任务", "areCanvasPortKindsCompatible", "isQuickAddPortCompatible", "portKindLabel", "utility.display-any"], "display-any UI");
 requireText(page, ["CanvasSaveImagesNodeResult", "getSaveImagesArtifact", "utility.save-images", "下载全部", "downloadCanvasSaveImages", "parseCanvasDownloadFilename", "URL.createObjectURL", "URL.revokeObjectURL", "下载成功", "下载失败", "Download", "downloadBusyRef.current", "disabled={busy}", "latestSuccessful?.nodeRun"], "save-images UI");
+requireText(page, ["CanvasScheduleMainImageDownload", "downloadCanvasRunSaveImages", '["completed", "partial"].includes(main.status)', "main.mainRunId", "下载图片", "该主任务没有可下载的保存图片结果", "canvas-schedule-main-download"], "batch schedule save-images UI");
 const requestedDownloadIndices = [];
 const browserDownloads = [];
 const revokedDownloadUrls = [];
@@ -789,6 +790,48 @@ assert.deepEqual(requestedDownloadIndices, [0, 1, 2], "downloads must be request
 assert.equal(maxActiveDownloads, 1, "downloads must remain serial");
 assert.deepEqual(browserDownloads, ["car_0001.png", "car_0003.png"]);
 assert.equal(revokedDownloadUrls.length, 2, "every successful Blob URL must be released");
+const scheduleDownloadCalls = [];
+const scheduleDownloadFunctions = compileFunctions(
+  page,
+  ["getSaveImagesArtifact", "latestAttempts", "downloadCanvasRunSaveImages"],
+  "{ downloadCanvasRunSaveImages }",
+  {
+    CANVAS_SAVE_IMAGE_MAX_ITEMS: 30,
+    api: async (url) => url.includes("main-run-empty") ? ({
+      run: { graphSnapshot: { nodes: [{ id: "save-empty", type: "utility.save-images" }] } },
+      nodeRuns: [],
+    }) : ({
+      run: {
+        graphSnapshot: {
+          nodes: [
+            { id: "save-b", type: "utility.save-images" },
+            { id: "other", type: "utility.image-preview" },
+            { id: "save-a", type: "utility.save-images" },
+          ],
+        },
+      },
+      nodeRuns: [
+        { id: "save-a-old", nodeId: "save-a", status: "completed", attempt: 1, outputs: {} },
+        { id: "save-a-new", nodeId: "save-a", status: "reused", attempt: 2, outputs: { downloads: { kind: "images", items: [{ url: "/a-1.png" }, { url: "/a-2.png" }] } } },
+        { id: "save-b-run", nodeId: "save-b", status: "completed", attempt: 1, outputs: { downloads: { kind: "images", items: [{ url: "/b.png" }] } } },
+      ],
+    }),
+    downloadCanvasSaveImages: async (runId, nodeRunId, count) => {
+      scheduleDownloadCalls.push({ runId, nodeRunId, count });
+      return nodeRunId === "save-b-run" ? { success: 1, failed: 0 } : { success: 1, failed: 1 };
+    },
+  },
+);
+assert.deepEqual(await scheduleDownloadFunctions.downloadCanvasRunSaveImages("main-run-1"), { success: 2, failed: 1 }, "batch downloads must combine every successful save node result");
+assert.deepEqual(scheduleDownloadCalls, [
+  { runId: "main-run-1", nodeRunId: "save-b-run", count: 1 },
+  { runId: "main-run-1", nodeRunId: "save-a-new", count: 2 },
+], "batch downloads must use latest attempts in immutable graph order");
+await assert.rejects(
+  () => scheduleDownloadFunctions.downloadCanvasRunSaveImages("main-run-empty"),
+  /没有可下载的保存图片结果/u,
+  "batch downloads must fail clearly when a main run has no save result",
+);
 requireText(page, ["ReactFlow", "onConnect", "wouldCreateCycle", "NodeInspector", "panOnDrag={isMobile}", "selectionOnDrag={!isMobile}", "nodesDraggable={!isMobile}", "RunSummary", "FlowingCanvasEdge", "canvas-port-row", "colorMode={flowColorMode}", "subscribeTheme", "CANVAS_CLIPBOARD_MIME", "clipboardDataImageFiles", "isEditableClipboardTarget", "pasteFromSystemClipboard", "canvas-image-file-input", "CanvasNodeInteractionContext", "latestNodeRuns", "latestSuccessfulNodeRuns", "useMemo(() => latestAttempts", "(result.get(nodeRun.nodeId)?.attempt || 0) < nodeRun.attempt", "const selectedRun = explicitRun || data.runs[0]", "await refreshRun(selectedRun.id, workflowId)", "runSelectionIsExplicitRef", "focusCanvasNode", "selectedNodeId", "if (selectedNode) setSelectedNodeId(selectedNode.id)", "interaction?.selectedNodeId === node.id", "canvas-node-text-editor nodrag nopan nowheel", "event.currentTarget.focus({ preventScroll: true })", "interaction?.onNodeFocus(node.id)", "onClick={(event) => {", "onKeyDown={(event) => event.stopPropagation()}", "CanvasModelNodeResult", "CanvasImagePreviewNodeResult", "updateNodeExecutionMode", "仅运行此节点", "运行到此节点", 'requestRun([selectedNodeId], "isolated")', "打开评审", "历史版本 r", "最近成功结果 · r", "definition?.outputs", "isPreviewableModelArtifact", "artifact.value.trim()", "artifact.items.length > 0", "showArtifact", "运行完成，但没有可预览内容", "CanvasTextPreviewDialog", "CanvasVideoPreviewDialog", "CanvasImagePreviewDialog", "canvas-node-result-gallery", "canvas-node-result-gallery-open", "canvas-node-result-gallery-meta", "canvas-image-preview-open", "图片{index + 1}", "imageUrls.length}/16", "moveListItem", 'form.append("mode", "gpt-reference")', "edgeAnimationDelay", "pathLength={100}", "canvas-flow-edge-trail", "canvas-flow-edge-body", "canvas-flow-edge-core", "打开原图", "缩小图片", "放大图片", "重置图片缩放"], "canvas UI");
 requireText(page, [
   "prepareCanvasClipboardPaste",
