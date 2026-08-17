@@ -885,3 +885,36 @@ Archived unique root WIP, implemented the single port-3001 candidate workflow, v
 ### Next Steps
 
 - None - task complete
+
+
+## Session 27: Smooth beat-synced video transitions
+
+**Date**: 2026-08-17
+**Task**: Smooth beat-synced video transitions
+**Branch**: `main`
+
+### Summary
+
+Upgraded the external 0814 FFmpeg batch workflow to adaptive non-looping audio durations, robust globally selected beat cuts, deterministic smooth transitions, and light Ken Burns motion; rebuilt and validated all 18 processable outputs and passed the full repository baseline.
+
+### Main Changes
+
+(Add details)
+
+### Git Commits
+
+| Hash | Message |
+|------|---------|
+| `37da896` | (see git log) |
+
+### Testing
+
+- [OK] (Add test results)
+
+### Status
+
+[OK] **Completed**
+
+### Next Steps
+
+- None - task complete
