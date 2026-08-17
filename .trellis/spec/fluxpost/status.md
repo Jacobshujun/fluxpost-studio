@@ -20,6 +20,7 @@ Start new work from current main, preview only on port 3001, commit before candi
 
 - 2026-08-17: full local and isolated VPS baselines, exact-SHA deployment, identity, health, 30-table PostgreSQL schema, six unchanged FluxPost volumes, protected services, empty recent error log, two rescue tags, active weekly timer, and three-way parity passed.
 - 2026-08-17: three extra worktrees and four stale records were removed; root runtime data/media/config were preserved; unique WIP is recoverable from archive/root-wip-20260817 and archive-root-wip-20260817.
+- 2026-08-17: external 0814 FFmpeg batch script upgraded to smooth-beat-v2; all 18 processable outputs rebuilt with adaptive duration, non-looping audio, smooth transitions, and deterministic light motion; media and repository baselines passed.
 
 ## Risks And Unknowns
 
