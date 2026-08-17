@@ -1,16 +1,18 @@
 param(
   [string]$LocalUrl = "http://127.0.0.1:3001",
   [string]$ProductionUrl = "https://flux.lightmoment.net",
-  [string]$MirrorRoot = ""
+  [string]$ProjectRoot = ""
 )
 
 $ErrorActionPreference = "Stop"
-$sourceRoot = [IO.Path]::GetFullPath((Join-Path $PSScriptRoot "..\.."))
-if (-not $MirrorRoot) {
-  $MirrorRoot = Join-Path (Split-Path $sourceRoot -Parent) "social-content-studio-production-mirror"
+$controllerRoot = [IO.Path]::GetFullPath((Join-Path $PSScriptRoot "..\.."))
+if (-not $ProjectRoot) {
+  $ProjectRoot = $controllerRoot
 }
-$MirrorRoot = [IO.Path]::GetFullPath($MirrorRoot)
-$statePath = Join-Path $MirrorRoot "current.json"
+$ProjectRoot = [IO.Path]::GetFullPath($ProjectRoot)
+if (-not (Test-Path -LiteralPath $ProjectRoot -PathType Container)) {
+  throw "Candidate project root does not exist"
+}
 
 function Read-Identity {
   param([string]$BaseUrl, [string]$ExpectedMode)
@@ -26,44 +28,36 @@ function Read-Identity {
   return $identity
 }
 
-if (-not (Test-Path -LiteralPath $statePath -PathType Leaf)) {
-  throw "Local mirror state is missing: $statePath"
+$head = (& git.exe -C $ProjectRoot rev-parse HEAD).Trim()
+if ($LASTEXITCODE -ne 0 -or $head -notmatch '^[0-9a-f]{40}$') {
+  throw "Candidate worktree HEAD is invalid"
 }
-$state = Get-Content -Raw -LiteralPath $statePath | ConvertFrom-Json
-if ($state.commit -notmatch '^[0-9a-f]{40}$' -or -not $state.releasePath) {
-  throw "Local mirror state is invalid"
-}
-$releasePath = [IO.Path]::GetFullPath([string]$state.releasePath)
-$mirrorPrefix = $MirrorRoot.TrimEnd('\', '/') + [IO.Path]::DirectorySeparatorChar
-if (-not $releasePath.StartsWith($mirrorPrefix, [StringComparison]::OrdinalIgnoreCase)) {
-  throw "Local mirror state points outside MirrorRoot"
-}
-if (-not (Test-Path -LiteralPath $releasePath -PathType Container)) {
-  throw "Local mirror release worktree is missing"
-}
+$dirty = @(& git.exe -C $ProjectRoot status --porcelain)
+if ($LASTEXITCODE -ne 0) { throw "Could not inspect candidate worktree" }
+if ($dirty.Count) { throw "Candidate worktree is dirty" }
 
-$localIdentity = Read-Identity -BaseUrl $LocalUrl -ExpectedMode "local-production"
+$localIdentity = Read-Identity -BaseUrl $LocalUrl -ExpectedMode "candidate"
 $productionIdentity = Read-Identity -BaseUrl $ProductionUrl -ExpectedMode "production"
+if ($head -ne $localIdentity.commit) {
+  throw "Candidate worktree HEAD differs from its runtime"
+}
 if ($localIdentity.commit -ne $productionIdentity.commit) {
-  throw "Local mirror SHA differs from remote production"
-}
-if ($state.commit -ne $localIdentity.commit) {
-  throw "Local mirror state SHA differs from its runtime"
+  throw "Local candidate SHA differs from remote production"
 }
 
-$head = (& git.exe -C $releasePath rev-parse HEAD).Trim()
-if ($LASTEXITCODE -ne 0 -or $head -ne $localIdentity.commit) {
-  throw "Local mirror worktree HEAD differs from its runtime"
-}
-$dirty = @(& git.exe -C $releasePath status --porcelain)
-if ($LASTEXITCODE -ne 0) { throw "Could not inspect local mirror worktree" }
-if ($dirty.Count) { throw "Local mirror worktree is dirty" }
-
-& git.exe -C $sourceRoot fetch origin main | Out-Null
+& git.exe -C $ProjectRoot fetch origin main | Out-Null
 if ($LASTEXITCODE -ne 0) { throw "Could not refresh origin/main" }
-& git.exe -C $sourceRoot merge-base --is-ancestor $productionIdentity.commit origin/main
-if ($LASTEXITCODE -ne 0) { throw "Remote production commit is not an ancestor of origin/main" }
+$remoteMain = (& git.exe -C $ProjectRoot rev-parse origin/main).Trim()
+if ($LASTEXITCODE -ne 0 -or $remoteMain -notmatch '^[0-9a-f]{40}$') {
+  throw "GitHub main SHA is invalid"
+}
+if ($remoteMain -ne $productionIdentity.commit) {
+  throw "GitHub main SHA differs from remote production"
+}
+if ($head -ne $remoteMain) {
+  throw "Local candidate HEAD differs from GitHub main"
+}
 
-Write-Host "Production parity verified."
+Write-Host "Local, GitHub, and production parity verified."
 Write-Host "SHA=$($productionIdentity.commit)"
-Write-Host "Local=$LocalUrl Remote=$ProductionUrl Mirror=$releasePath"
+Write-Host "Local=$LocalUrl Remote=$ProductionUrl Worktree=$ProjectRoot"

@@ -1,4 +1,4 @@
-export const fluxpostRuntimeModes = ["development", "local-production", "production"] as const;
+export const fluxpostRuntimeModes = ["development", "candidate", "production"] as const;
 
 export type FluxPostRuntimeMode = (typeof fluxpostRuntimeModes)[number];
 

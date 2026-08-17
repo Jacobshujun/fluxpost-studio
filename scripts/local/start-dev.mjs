@@ -27,7 +27,7 @@ child.on("exit", (code, signal) => {
 });
 
 function parseArguments(args) {
-  const result = { host: "127.0.0.1", port: 3000 };
+  const result = { host: "127.0.0.1", port: 3001 };
   for (let index = 0; index < args.length; index += 1) {
     const option = args[index];
     const value = args[index + 1];

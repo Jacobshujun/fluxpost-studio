@@ -11,7 +11,7 @@ $env:TRELLIS_SMOKE_PORT = "45678"
 powershell -ExecutionPolicy Bypass -File .trellis/verification/check.ps1
 ```
 
-`.trellis/verification/check.ps1` wraps `.trellis/verification/check.mjs`. Its isolated smoke server and port-3000 development disable workers by default; versioned runtimes retain normal worker behavior.
+`.trellis/verification/check.ps1` wraps `.trellis/verification/check.mjs`. Its isolated smoke server and port-3001 development disable workers by default; versioned runtimes retain normal worker behavior.
 
 ## Current Automated Checks
 
@@ -20,7 +20,7 @@ The baseline verifies:
 - Trellis file existence, context budgets, latest markers, JSON validity, and feature evidence limits.
 - PostgreSQL schema, accounts/ownership, libraries, configuration, TOS, v4 deployment/image-retention/timer scripts, execution logs, platform mappings, media, video, concurrency, queues, Feishu boundaries, source imports, review flows, and row-level persistence.
 - Infinite Canvas graph/workflow/API/DAG, common nodes, media helpers, provider resume, scheduler, frozen copy input, copy-library, and original-batch contracts without paid calls.
-- Runtime identity/secrecy, manifest-derived activation identity, development defaults, mirror synchronization, and parity command contracts.
+- Runtime identity/secrecy, manifest-derived activation identity, single-candidate startup, development defaults, and parity command contracts.
 - `npm run lint`, `npx --no-install tsc --noEmit`, and `npm run build`.
 - Isolated production HTTP smoke and SQLite store validation.
 
@@ -37,16 +37,16 @@ For a production candidate:
 5. Run read-only production preflight.
 6. Deploy only through `/opt/fluxpost-studio/bin/deploy.sh --ref FULL_40_CHARACTER_SHA` after separate explicit approval.
 7. Verify identity, health, protected services, schema/auth, unchanged volumes, image-retention preview/results, two rescue tags, and the weekly BuildKit timer.
-8. Synchronize the mirror from `/api/version`; require `npm run local:parity`.
+8. Require `npm run local:parity` to prove the clean local candidate, GitHub `main`, and production all use the deployed SHA.
 
 Do not deploy a dirty worktree, branch name, abbreviated SHA, local runtime rows, or unpushed commit.
 
 ## Recent Verification
 
+- 2026-08-17: Single-port candidate contracts, PowerShell parsing, runtime/deployment checks, lint, TypeScript, build, isolated HTTP/SQLite smoke, and the complete deterministic baseline passed without external calls; exact candidate startup and rollout remain pending.
 - 2026-08-14: Local-production parity contracts, PowerShell parsing, lint, TypeScript, build, isolated identity HTTP smoke, SQLite, and the complete deterministic baseline passed without external calls; production rollout remains pending approval.
 - 2026-08-14: SHA `39a35f8dd869d50df9008ba708e14b92eeefc761` passed approved local/VPS/deploy gates and runs as `20260814-085108-39a35f8dd869`; health, auth, workers, schema, volumes, retention, logs, and rollback passed without external writes.
 - 2026-08-14: SHA `669a3272f764a05f994b87875ff6a9fc8df78675` passed approved gates and ran as `20260814-055428-669a3272f764`; health, auth, workers, schema, volumes, logs, and rollback passed without external writes.
-- 2026-08-06: Retention v4 passed deterministic checks; authorized production cleanup reclaimed `8.998GB` while preserving services, seven volumes, current plus two rescues, health, and the weekly timer.
 - 2026-08-04: Content safety passed deterministic/model-fallback/API/audit/snapshot checks and deployed as `20260804-102825-e6692c3d0cce` after approved candidate/preflight gates; production health and rollback passed.
 Older evidence is preserved in `.trellis/spec/fluxpost/archive/verification-history.md`.
 

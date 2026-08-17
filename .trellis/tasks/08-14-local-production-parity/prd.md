@@ -1,80 +1,51 @@
-# 保持本地生产镜像与远程生产一致
+# Single Local Candidate And Production Parity
 
 ## Goal
 
-Keep the local production mirror and remote production on the same verified application commit while preserving an independent local development environment.
-
-## Background
-
-- Production runs `39a35f8dd869d50df9008ba708e14b92eeefc761`; GitHub `main` contains it.
-- The historical root worktree is dirty and cannot safely represent either `main` or production.
-- Port `3001` currently starts from that root and lacks a route present in production, so health alone does not prove parity.
-- The user approved port `3001` as the local production mirror and port `3000` as development.
+Use port `3001` as the only local application environment. A clean committed candidate is tested there before it is pushed to GitHub, and production deploys that unchanged full SHA.
 
 ## Requirements
 
-### R1. Environment roles
+### R1. One local environment
 
-- Port `3001` runs only a clean dedicated worktree at the exact remote production commit.
-- Port `3000` remains development and disables background workers by default when sharing local state.
-- Code and schema contracts are synchronized; secrets, accounts, database rows, queues, media, and provider state are not.
+- Port `3001` is the only local application port.
+- Development preview and committed candidate execution are mutually exclusive on the same port.
+- No SHA-specific mirror directory, mirror state file, or port-`3000` environment remains.
 
-### R2. Release identity
+### R2. Candidate identity
 
-- Production and local-mirror processes receive a validated full lowercase Git SHA and bounded runtime mode.
-- A public no-store endpoint returns only the commit, mode, and whether the runtime is versioned.
-- Development may be unversioned, but an unversioned process can never satisfy mirror parity.
+- A committed candidate runs with mode `candidate` and its full lowercase Git SHA.
+- `npm run local:restart` refuses a dirty worktree, installs locked dependencies, builds before stopping the old listener, starts on `3001`, and verifies its public identity and HTTP behavior.
+- Development mode may be unversioned and uses the same port with workers disabled by default.
 
-### R3. Production activation
+### R3. Promotion
 
-- Deploy and rollback inject the commit from the target `release.manifest` into the app container.
-- Rollback reports the rollback release commit, not a newer failed deployment commit.
-- Existing exact-SHA, image, health, volume, retention, and approval gates remain intact.
+- GitHub receives only the exact candidate SHA that passed on `3001`.
+- GitHub `main` is fast-forwarded to that SHA before production deployment.
+- Production deploys only that same full SHA through the installed exact-SHA wrapper.
 
-### R4. Local mirror
+### R4. Final parity
 
-- A sibling Git worktree holds the mirror; the dirty root never supplies port `3001`.
-- Synchronization supports explicit-SHA resolution for identity-enabled releases and normal production-endpoint resolution; it clearly rejects pre-identity commits.
-- It verifies full SHA, `origin/main` ancestry, mirror cleanliness, and builds before stopping the old listener.
-- It injects local-production mode/SHA, verifies startup identity, preserves pre-activation availability, and reports a bounded rollback path.
-- Local configuration is selected by path without copying, printing, committing, or uploading its contents.
+- The read-only parity command proves equality among the clean local HEAD, the local candidate runtime, GitHub `origin/main`, and remote production.
+- Runtime data, databases, queues, media, credentials, configuration, and volumes are never synchronized as code.
 
-### R5. Drift check
+### R5. Historical cleanup
 
-- One read-only command compares local/remote runtime identities, mirror HEAD/cleanliness, and production ancestry in `origin/main`.
-- Local and remote commits must match; `main` may be ahead but must contain production.
-- Failures distinguish invalid/missing identity, wrong mode, dirty/missing mirror, HEAD mismatch, unreachable endpoints, SHA divergence, and non-main production.
-- Default verification uses fixtures only and never calls production or GitHub.
-
-### R6. Historical root convergence
-
-- Preserve the existing dirty files until local-only items are reviewed.
-- Do not recommit exact-main duplicates, superseded production versions, or archived task duplicates.
-- Review the vision-node plan, library-time evidence, selection screenshots, and four root-only tracked files separately.
-- No destructive reset/checkout or secret/runtime/user-data inclusion is allowed.
-
-### R7. Operating policy
-
-- New work starts from current `origin/main`; historical release branches and stale local `main` are not development bases.
-- Production still deploys only an approved full SHA.
-- Every activation or rollback is followed by local mirror synchronization and a passing parity check.
-- Trellis and project startup/deployment guidance record the dual-local model without adding another context system.
+- Preserve unique root WIP in `archive/root-wip-20260817` and tag `archive-root-wip-20260817`; exclude it from this release.
+- After production verification, retain one local repository/environment and remove other clean worktrees, stale worktree records, and merged or superseded branches.
+- Never delete local or production runtime data, generated media, credentials, `.env*`, or Docker volumes.
 
 ## Acceptance Criteria
 
-- [ ] Remote production and local `3001` report the same valid full SHA with no sensitive fields.
-- [ ] The reported production SHA is an ancestor of current `origin/main`.
-- [ ] The mirror worktree is clean, its HEAD matches its runtime SHA, and port `3001` runs from it.
-- [ ] Port `3000` remains available for development with shared-state workers disabled by default.
-- [ ] Drift verification succeeds on parity and returns specific failures for every tested mismatch.
-- [ ] Deployment tests prove manifest-derived identity for deploy and rollback.
-- [ ] Mirror tests prove validation, ancestry, cleanliness refusal, build-before-stop ordering, injection, and startup equality.
-- [ ] Historical dirty files remain preserved and classified; no bulk commit or destructive reset occurs.
+- [ ] Port `3001` runs a clean candidate whose runtime SHA equals its worktree HEAD.
 - [ ] Focused checks, lint, TypeScript, build, and the complete deterministic baseline pass.
-- [ ] Production rollout remains behind a separate operator approval and verifies identity plus existing safety gates.
+- [ ] GitHub `main` and production deploy the unchanged tested SHA.
+- [ ] Final parity reports one identical SHA for local, GitHub, and production.
+- [ ] Unique root WIP remains recoverable from the archive branch and tag.
+- [ ] Other manual worktrees and stale records are removed without deleting runtime state.
 
 ## Out Of Scope
 
-- Synchronizing `.env*`, credentials, accounts, runtime rows, queues, or media.
-- Automatically deploying each `main` commit or treating undeployed `main` as production.
-- Implementing the unfinished Canvas vision-node behavior or invoking paid/external workflows.
+- Shipping the archived Canvas and library WIP in this release.
+- Synchronizing environment files, credentials, accounts, database rows, queues, media, or provider state.
+- Paid provider calls or Feishu/Lark writes.

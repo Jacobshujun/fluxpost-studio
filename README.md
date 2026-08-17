@@ -49,30 +49,29 @@ Windows PowerShell:
 npm run dev
 ```
 
-打开 `http://localhost:3000`。
+打开 `http://localhost:3001`。
 
-### Development and local production mirror
+### Single local candidate environment
 
-Development uses port `3000`. Background workers are disabled by default so development does not consume the same queues as the local production mirror. Set `FLUXPOST_DEVELOPMENT_WORKERS=1` only for an intentional worker test.
+Port `3001` is the only local application environment. Development preview uses the same port with background workers disabled by default; set `FLUXPOST_DEVELOPMENT_WORKERS=1` only for an intentional worker test.
 
 ```powershell
 npm run dev:lan
 ```
 
-Port `3001` is reserved for a clean, SHA-specific worktree that mirrors the commit deployed at `https://flux.lightmoment.net`. Do not use it to preview uncommitted feature work. After production exposes `/api/version`, synchronize and verify the mirror with:
+A production candidate must be committed and its worktree must be clean. Restart the current HEAD as a production-mode candidate on port `3001`, then verify it before pushing:
 
 ```powershell
 npm run local:restart
+```
+
+After the exact tested SHA is pushed to GitHub `main` and deployed unchanged, verify local, GitHub, and production equality with:
+
+```powershell
 npm run local:parity
 ```
 
-An explicit full SHA is available for an identity-enabled release when endpoint-based resolution is temporarily unavailable:
-
-```powershell
-powershell -ExecutionPolicy Bypass -File scripts/local/sync-production-mirror.ps1 -TargetSha FULL_40_CHARACTER_SHA
-```
-
-The current pre-identity production release cannot be made version-proven by this override. Deploy the first identity-enabled candidate before synchronizing port `3001`. Mirror synchronization fetches `origin/main`, requires the target SHA to be its ancestor, builds before replacing the listener, and verifies runtime identity. It synchronizes code only; environment files, credentials, accounts, databases, queues, generated media, and provider state remain environment-specific.
+`local:restart` runs `npm ci` and the production build before replacing the listener, injects the current full HEAD as runtime identity, and refuses a dirty worktree. A configuration file outside the worktree can be selected with `-ConfigFile` or the user-level `FLUXPOST_LOCAL_CONFIG_FILE`. Code promotion never copies environment files, credentials, accounts, databases, queues, generated media, or provider state.
 
 ## PostgreSQL Runtime Storage
 

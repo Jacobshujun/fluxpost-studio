@@ -1,11 +1,9 @@
 param(
   [int]$Port = 3001,
   [string]$HostName = "0.0.0.0",
-  [Parameter(Mandatory = $true)]
-  [ValidatePattern("^[0-9a-f]{40}$")]
-  [string]$ReleaseSha,
   [string]$ConfigFile = "",
   [string]$ProjectRoot = "",
+  [switch]$SkipInstall,
   [switch]$SkipBuild
 )
 
@@ -17,33 +15,33 @@ if (-not $ProjectRoot) {
 }
 $projectRoot = [IO.Path]::GetFullPath($ProjectRoot)
 if (-not (Test-Path -LiteralPath $projectRoot -PathType Container)) {
-  throw "Mirror project root does not exist"
+  throw "Candidate project root does not exist"
 }
 Set-Location $projectRoot
 
-$head = (& git.exe -C $projectRoot rev-parse HEAD).Trim()
-if ($LASTEXITCODE -ne 0 -or $head -ne $ReleaseSha) {
-  throw "Mirror worktree HEAD does not match release $ReleaseSha"
+$ReleaseSha = (& git.exe -C $projectRoot rev-parse HEAD).Trim()
+if ($LASTEXITCODE -ne 0 -or $ReleaseSha -notmatch '^[0-9a-f]{40}$') {
+  throw "Candidate HEAD is not a full lowercase Git commit"
 }
 $dirty = @(& git.exe -C $projectRoot status --porcelain)
 if ($LASTEXITCODE -ne 0) {
-  throw "Could not inspect mirror worktree status"
+  throw "Could not inspect candidate worktree status"
 }
 if ($dirty.Count) {
-  throw "Mirror worktree must be clean before restart"
+  throw "Candidate worktree must be clean before restart"
 }
 
 if (-not $ConfigFile) {
-  $ConfigFile = [Environment]::GetEnvironmentVariable("FLUXPOST_LOCAL_MIRROR_CONFIG_FILE", "User")
+  $ConfigFile = [Environment]::GetEnvironmentVariable("FLUXPOST_LOCAL_CONFIG_FILE", "User")
 }
 if ($ConfigFile) {
   $ConfigFile = [IO.Path]::GetFullPath($ConfigFile)
   if (-not (Test-Path -LiteralPath $ConfigFile -PathType Leaf)) {
-    throw "Local mirror config file does not exist"
+    throw "Local candidate config file does not exist"
   }
   $env:FLUXPOST_CONFIG_FILE = $ConfigFile
 }
-$env:FLUXPOST_RUNTIME_MODE = "local-production"
+$env:FLUXPOST_RUNTIME_MODE = "candidate"
 $env:FLUXPOST_RELEASE_SHA = $ReleaseSha
 
 function Get-ListeningProcessIds {
@@ -71,6 +69,14 @@ function Get-ListeningProcessIds {
   return @($ids | Select-Object -Unique)
 }
 
+if (-not $SkipInstall) {
+  Write-Host "== Install exact locked dependencies"
+  & npm.cmd ci
+  if ($LASTEXITCODE -ne 0) {
+    throw "Dependency installation failed with exit code $LASTEXITCODE"
+  }
+}
+
 if (-not $SkipBuild) {
   Write-Host "== Build latest app bundle"
   & npm.cmd run build
@@ -79,10 +85,10 @@ if (-not $SkipBuild) {
   }
   $postBuildDirty = @(& git.exe -C $projectRoot status --porcelain)
   if ($LASTEXITCODE -ne 0) {
-    throw "Could not inspect mirror worktree after build"
+    throw "Could not inspect candidate worktree after build"
   }
   if ($postBuildDirty.Count) {
-    throw "Mirror worktree became dirty during build"
+    throw "Candidate worktree became dirty during build"
   }
 }
 
@@ -136,17 +142,17 @@ $versionUrl = "http://127.0.0.1:$Port/api/version"
 try {
   $version = Invoke-RestMethod -Uri $versionUrl -TimeoutSec 5
 } catch {
-  throw "Local mirror did not expose release identity at $versionUrl"
+  throw "Local candidate did not expose release identity at $versionUrl"
 }
-if ($version.mode -ne "local-production" -or $version.commit -ne $ReleaseSha -or $version.versioned -ne $true) {
-  throw "Local mirror runtime identity does not match release $ReleaseSha"
+if ($version.mode -ne "candidate" -or $version.commit -ne $ReleaseSha -or $version.versioned -ne $true) {
+  throw "Local candidate runtime identity does not match release $ReleaseSha"
 }
 
 Write-Host "== Local HTTP smoke"
-& node (Join-Path $controllerRoot ".trellis\verification\http_smoke.js") "http://127.0.0.1:$Port" "local-production" $ReleaseSha
+& node (Join-Path $controllerRoot ".trellis\verification\http_smoke.js") "http://127.0.0.1:$Port" "candidate" $ReleaseSha
 if ($LASTEXITCODE -ne 0) {
   throw "HTTP smoke failed with exit code $LASTEXITCODE"
 }
 
 $listenerProcessIds = @(Get-ListeningProcessIds -Port $Port)
-Write-Host "Local server restarted. PID=$($server.Id) ListenerPID=$($listenerProcessIds -join ',') URL=http://127.0.0.1:$Port/"
+Write-Host "Local candidate restarted. SHA=$ReleaseSha PID=$($server.Id) ListenerPID=$($listenerProcessIds -join ',') URL=http://127.0.0.1:$Port/"

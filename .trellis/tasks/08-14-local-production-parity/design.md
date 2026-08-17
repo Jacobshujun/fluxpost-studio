@@ -1,49 +1,29 @@
-# Local And Remote Production Parity Design
+# Single Candidate Environment Design
 
-## Architecture
+## Local lifecycle
 
-GitHub `main` is the integration history. Remote production and a sibling local mirror worktree run one exact deployed commit from that history. The root worktree is development-only and never supplies port `3001`. Runtime configuration and data remain environment-specific.
+Port `3001` has one active role at a time. `npm run dev` provides an unversioned development preview with background workers disabled by default. After changes are committed, `npm run local:restart` uses the current worktree directly, requires it to be clean, runs `npm ci` and the production build before replacing the listener, injects mode `candidate` plus HEAD, and validates `/api/version` and the HTTP smoke.
 
-## Runtime Identity
+No release worktree hierarchy or `current.json` pointer is created. Local configuration can be selected by an explicit path or the user-level `FLUXPOST_LOCAL_CONFIG_FILE`; its contents are neither copied nor printed.
 
-Add a server-only identity owner and `GET /api/version`.
+## Runtime identity
 
-- `FLUXPOST_RELEASE_SHA`: optional for development, mandatory full lowercase SHA for versioned runtimes.
-- `FLUXPOST_RUNTIME_MODE`: `development`, `local-production`, or `production`.
-- Response: `{ commit: string | null, mode, versioned }` with no-store/nosniff headers.
-- The route never reads Git or local paths. Identity is immutable for the process lifetime.
+`GET /api/version` returns only `commit`, `mode`, and `versioned`. Valid modes are `development`, `candidate`, and `production`. Candidate and production require a full lowercase SHA.
 
-The endpoint is public because commit hashes are public identifiers and automation must not require an account. It returns no configuration or host information.
+## Promotion data flow
 
-## Production Injection
+```text
+clean local HEAD -> port 3001 candidate tests -> GitHub branch/main
+                 -> VPS isolated candidate verifier -> exact-SHA deploy
+                 -> local/GitHub/production parity check
+```
 
-`release.manifest` stays authoritative. `activate_release` reads and validates the target manifest commit and passes it to Compose with mode `production`. Deploy, automatic rollback, and manual rollback therefore identify the release actually activated rather than a global candidate variable.
+The deployed SHA is derived from the target release manifest, including rollback, so production reports the activated release rather than a mutable branch.
 
-## Local Mirror
+## Cleanup and recovery
 
-Use a configurable sibling mirror root, defaulting beside the repository, with immutable release worktrees under `releases/<full-sha>`. Synchronization resolves an explicit SHA or the production endpoint, fetches refs, proves ancestry in `origin/main`, creates or validates the target release worktree, installs/builds before stopping port `3001`, starts with mirror identity, then requires HTTP and identity equality. A sibling `current.json` stores only the active commit, release path, and update time so an activation failure can restart the previous release without mutating either worktree.
+The historical dirty root is preserved by Git branch and annotated tag before cleanup. The archive contains only unique tracked WIP and task evidence, not dependencies, build output, data, media, configuration, or secrets. Cleanup happens only after production and rollback readiness are verified.
 
-The configuration file path is explicit or supplied through a local user environment value. Its contents are never copied or displayed.
+## Failure behavior
 
-## Development Runtime
-
-Port `3000` uses a wrapper that sets development mode and disables background workers by default, preventing simultaneous development and mirror processes from consuming the same queues. `dev:lan` also uses `3000`; `3001` is reserved.
-
-## Parity Checker
-
-A read-only command validates structured `/api/version` responses, local/remote mode and SHA equality, mirror HEAD and cleanliness, and production ancestry in `origin/main`. Deterministic tests use temporary Git repositories and local HTTP fixtures.
-
-## Dirty Root Migration
-
-The historical root is never merged wholesale. Inventory remains classified as exact-main duplicates, superseded production files, archived-task duplicates, and local-only review items. Approved local-only behavior is reapplied onto separate branches from `origin/main`; cleanup waits for an explicit retain/discard decision.
-
-## Rollout And Rollback
-
-Implement and verify on the clean branch, push the unchanged full SHA, run candidate verification/preflight, and request separate deployment approval. After activation, verify production identity and synchronize the mirror. Existing remote rollback restores the prior manifest-derived identity; local activation failure leaves remote production unchanged and reports the previous local SHA.
-
-## Compatibility And Security
-
-- `/api/config`, production volumes, configuration mounts, and health behavior remain unchanged.
-- Identity contains no secret or path.
-- Baseline checks never access production or external providers.
-- Explicit-SHA resolution is only valid for identity-enabled releases. The current pre-identity production commit cannot be version-proven; the first mirror synchronization follows deployment of this feature.
+A dirty or invalid local HEAD fails before dependency installation or listener replacement. Install/build failures leave the existing listener intact. Identity or smoke failures fail activation explicitly. A parity mismatch identifies whether local runtime, local HEAD, GitHub `main`, or production differs.

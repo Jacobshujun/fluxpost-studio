@@ -1,44 +1,38 @@
-# Trellis Status
+# FluxPost Current Status
 
-Last updated: 2026-08-14
+Last updated: 2026-08-17
 
 ## One-Line Status
 
-Production runs `39a35f8dd869d50df9008ba708e14b92eeefc761` as `20260814-085108-39a35f8dd869`; the local-production parity candidate is committed locally but is not pushed or deployed.
+Unique historical root WIP is preserved at archive commit 3ba42a9 and excluded from the release; the single-port candidate workflow is being revised and remains unpushed and undeployed.
 
 ## Current Focus
 
-- Production is healthy on release `20260814-085108-39a35f8dd869`; GitHub `main` contains its exact SHA.
-- The parity candidate adds public runtime identity, manifest-derived deploy/rollback identity, port-3000 development with workers default-off, SHA-specific port-3001 mirror releases, and a read-only drift check.
-- The historical dirty root and its unfinished visual-node/shared-library artifacts remain unchanged and outside the candidate.
+- Port 3001 is the only local application environment for development preview and committed candidate testing.
+- The candidate keeps public runtime identity and manifest-derived production deploy/rollback identity, but removes SHA-specific local mirror worktrees and state files.
+- The tested candidate must be pushed unchanged to GitHub main and deployed by full SHA before final parity.
 
 ## Next Entry
 
-1. Request approval to push the exact candidate commit and verify the remote SHA.
-2. Request separate approval for VPS candidate verification/preflight and production deployment.
-3. After deployment, synchronize port `3001` from production `/api/version` and require `npm run local:parity`.
+1. Complete focused and full deterministic verification, commit the revised candidate, and start that clean SHA on port 3001.
+2. Push the exact tested SHA to the candidate branch and GitHub main.
+3. Run isolated VPS verification, read-only preflight, exact-SHA deployment, and production safety checks.
+4. Remove other local worktrees and redundant branches, then require local/GitHub/production SHA equality.
 
 ## Recent Verification
 
-- 2026-08-14: Parity contracts, PowerShell parsing, TypeScript, lint, build, isolated identity HTTP smoke, SQLite, and the complete deterministic baseline passed; the candidate was committed locally without push or deployment.
-- 2026-08-14: Production SHA `39a35f8dd869d50df9008ba708e14b92eeefc761` passed its approved local/VPS/deploy/post-deploy gates and activated as `20260814-085108-39a35f8dd869` without external provider writes.
-- Older evidence is indexed in `verification.md` and preserved under `.trellis/spec/fluxpost/archive/`.
+- 2026-08-17: archive branch and annotated tag resolve to 3ba42a920bd8dec466ec721870dd1e1e6869fe5e and preserve only unique root WIP/task evidence.
+- 2026-08-17: revised runtime parity and VPS deployment contract checks passed locally before full baseline.
+- 2026-08-14: original dual-local parity candidate passed the complete deterministic baseline but was not pushed or deployed.
+- 2026-08-14: production release 20260814-085108-39a35f8dd869 passed health, auth, workers, schema, volumes, retention, logs, and rollback checks.
 
-## Current Risks
+## Risks And Unknowns
 
-- Current production predates `/api/version`; end-to-end mirror equality cannot be proven until an identity-enabled candidate is approved and deployed.
-- Paid-provider behavior, operator-scale Canvas timing, multi-user PostgreSQL concurrency, and local-history import remain pending confirmation.
-- Four historical media matches remain unchanged: three exceed the 12 MB cache limit and one reports `HEIF image not found`.
-- Production uses Ubuntu 22.04; routine changes must use its installed exact-SHA release wrapper. Retired host 104 is not a promotion target.
-- Secrets, environment files, accounts, runtime rows, queues, media, volumes, and debug artifacts must never enter Git or Trellis context or be synchronized by the mirror.
-- `@volcengine/tos-sdk@2.9.1` retains published Axios advisories without an upstream SDK fix.
+- Current production predates /api/version; its exact live SHA cannot be publicly proven until the identity-enabled candidate is deployed.
+- The archive branch/tag is local until intentionally pushed; local cleanup must preserve these refs.
+- Secrets, environment files, accounts, runtime rows, queues, media, volumes, and debug artifacts must never enter Git or be synchronized as code.
+- The package audit reports eight high-severity transitive advisories; do not run npm audit fix --force during this release.
 
-## Necessary History Paths
+## History
 
-- `.trellis/spec/fluxpost/archive/handoff-history-2026-06-17.md`
-- `.trellis/spec/fluxpost/archive/progress-history-2026-06-17.md`
-- `.trellis/spec/fluxpost/archive/verification-history.md`
-
-## Handoff Minimum Standard
-
-Startup context must identify the production release, local-only work, next verification/deployment gate, and prohibited actions. Read archive history only when lightweight files do not answer the task.
+Detailed earlier evidence remains under .trellis/spec/fluxpost/archive/ and the latest bounded handoff/progress marker blocks.

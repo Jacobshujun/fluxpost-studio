@@ -2,7 +2,7 @@ const baseUrl = normalizeBaseUrl(process.argv[2] || process.env.TRELLIS_BASE_URL
 const expectedRuntimeMode = process.argv[3] || process.env.TRELLIS_EXPECTED_RUNTIME_MODE || "development";
 const expectedReleaseSha = process.argv[4] || process.env.TRELLIS_EXPECTED_RELEASE_SHA || null;
 
-if (!["development", "local-production", "production"].includes(expectedRuntimeMode)) {
+if (!["development", "candidate", "production"].includes(expectedRuntimeMode)) {
   throw new Error(`Unsupported expected runtime mode: ${expectedRuntimeMode}`);
 }
 if (expectedReleaseSha !== null && !/^[0-9a-f]{40}$/.test(expectedReleaseSha)) {

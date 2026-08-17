@@ -363,15 +363,16 @@
       "title": "Local and remote production code parity",
       "status": "ready_for_review",
       "definition_of_done": [
-        "Port 3000 is development with workers default-off; port 3001 runs only a clean worktree at the deployed SHA",
+        "Port 3001 is the only local application environment; preview and clean candidate execution are mutually exclusive",
         "Versioned runtimes expose a minimal full-SHA identity derived from the activated release",
-        "Mirror sync and drift checks enforce identity, Git cleanliness, and origin/main ancestry without syncing runtime data",
-        "Push, candidate verification, and deployment remain separate approvals"
+        "Candidate startup enforces clean HEAD identity and builds before replacing the listener without creating mirror worktrees",
+        "Push and exact-SHA deployment promote only the candidate tested on port 3001",
+        "Final parity requires exact local runtime/HEAD, GitHub main, and production SHA equality without syncing runtime data"
       ],
       "evidence": [
         "2026-08-14 focused contracts, PowerShell parsing, lint, TypeScript, build, isolated HTTP identity smoke, and the full deterministic baseline passed"
       ],
-      "notes": "Final local/remote equality awaits an approved identity-enabled production deployment and mirror synchronization."
+      "notes": "Final local/GitHub/production equality awaits the identity-enabled exact-SHA deployment."
     },
     {
       "id": "original-xhs-batch-workspace",

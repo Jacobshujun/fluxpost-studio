@@ -36,8 +36,8 @@ assert.deepEqual(
   { commit: fullSha, mode: "production", versioned: true },
 );
 assert.deepEqual(
-  project(release.resolveRuntimeReleaseIdentity({ FLUXPOST_RUNTIME_MODE: "local-production", FLUXPOST_RELEASE_SHA: fullSha })),
-  { commit: fullSha, mode: "local-production", versioned: true },
+  project(release.resolveRuntimeReleaseIdentity({ FLUXPOST_RUNTIME_MODE: "candidate", FLUXPOST_RELEASE_SHA: fullSha })),
+  { commit: fullSha, mode: "candidate", versioned: true },
 );
 assert.deepEqual(
   project(release.resolveRuntimeReleaseIdentity({})),
@@ -50,7 +50,7 @@ assert.deepEqual(
 
 for (const environment of [
   { FLUXPOST_RUNTIME_MODE: "production" },
-  { FLUXPOST_RUNTIME_MODE: "local-production" },
+  { FLUXPOST_RUNTIME_MODE: "candidate" },
   { FLUXPOST_RUNTIME_MODE: "preview", FLUXPOST_RELEASE_SHA: fullSha },
   { FLUXPOST_RUNTIME_MODE: "production", FLUXPOST_RELEASE_SHA: fullSha.toUpperCase() },
   { FLUXPOST_RUNTIME_MODE: "production", FLUXPOST_RELEASE_SHA: fullSha.slice(1) },
@@ -67,10 +67,10 @@ assert.doesNotMatch(route, /getConfigStatus|process\.cwd|branch|hostname|env\.lo
 
 const packageJson = JSON.parse(read("package.json"));
 assert.equal(packageJson.scripts.dev, "node scripts/local/start-dev.mjs");
-assert.match(packageJson.scripts["dev:lan"], /start-dev\.mjs --host 0\.0\.0\.0 --port 3000/);
-assert.match(packageJson.scripts["local:restart"], /sync-production-mirror\.ps1/);
+assert.match(packageJson.scripts["dev:lan"], /start-dev\.mjs --host 0\.0\.0\.0 --port 3001/);
+assert.match(packageJson.scripts["local:restart"], /scripts\/local\/restart\.ps1/);
 assert.match(packageJson.scripts["local:parity"], /check-production-parity\.ps1/);
-assert.match(packageJson.scripts["start:lan"], /sync-production-mirror\.ps1/);
+assert.match(packageJson.scripts["start:lan"], /scripts\/local\/restart\.ps1/);
 
 const development = read("scripts/local/start-dev.mjs");
 assert.match(development, /FLUXPOST_RUNTIME_MODE:\s*"development"/);
@@ -79,35 +79,28 @@ assert.match(development, /FLUXPOST_DISABLE_BACKGROUND_WORKERS/);
 assert.match(development, /FLUXPOST_DEVELOPMENT_WORKERS/);
 
 const restart = read("scripts/local/restart.ps1");
-assert.match(restart, /FLUXPOST_RUNTIME_MODE\s*=\s*"local-production"/);
+assert.match(restart, /FLUXPOST_RUNTIME_MODE\s*=\s*"candidate"/);
 assert.match(restart, /FLUXPOST_RELEASE_SHA\s*=\s*\$ReleaseSha/);
 assert.match(restart, /ProjectRoot/);
+assert.match(restart, /rev-parse HEAD/);
 assert.match(restart, /git\.exe[\s\S]*status --porcelain/);
+assertOrder(restart, "npm.cmd ci", "npm.cmd run build");
 assertOrder(restart, "npm.cmd run build", "Stop existing server");
-assertOrder(restart, "Mirror worktree became dirty during build", "Stop existing server");
+assertOrder(restart, "Candidate worktree became dirty during build", "Stop existing server");
 assertOrder(restart, "Start-Process", "/api/version");
-assert.match(restart, /http_smoke\.js[\s\S]*"local-production"[\s\S]*\$ReleaseSha/);
-
-const mirror = read("scripts/local/sync-production-mirror.ps1");
-assert.match(mirror, /api\/version/);
-assert.match(mirror, /merge-base --is-ancestor/);
-assert.match(mirror, /worktree add --detach/);
-assert.match(mirror, /releases[\\/].*\$TargetSha|Join-Path \$releasesRoot \$TargetSha/);
-assert.match(mirror, /current\.json/);
-assert.match(mirror, /Target release predates runtime identity/);
-assert.match(mirror, /Join-Path \$sourceRoot "scripts\\local\\restart\.ps1"/);
-assert.match(mirror, /ProjectRoot\s*=\s*\$releasePath/);
-assertOrder(mirror, "npm.cmd ci", "restart.ps1");
-assert.match(mirror, /previousRelease[\s\S]*SkipBuild\s*=\s*\$true/);
+assert.match(restart, /http_smoke\.js[\s\S]*"candidate"[\s\S]*\$ReleaseSha/);
+assert.doesNotMatch(restart, /MirrorRoot|current\.json|worktree add/);
 
 const parity = read("scripts/local/check-production-parity.ps1");
 assert.match(parity, /api\/version/);
-assert.match(parity, /local-production/);
+assert.match(parity, /candidate/);
 assert.match(parity, /production/);
 assert.match(parity, /status --porcelain/);
 assert.match(parity, /rev-parse HEAD/);
-assert.match(parity, /merge-base --is-ancestor/);
 assert.match(parity, /origin\/main/);
+assert.match(parity, /GitHub main SHA differs from remote production/);
+assert.match(parity, /Local candidate HEAD differs from GitHub main/);
+assert.doesNotMatch(parity, /MirrorRoot|current\.json|releasePath/);
 
 const baseline = read(".trellis/verification/check.mjs");
 assert.match(baseline, /\["Runtime production parity check",\s*"runtime_parity_check\.mjs"\]/);
