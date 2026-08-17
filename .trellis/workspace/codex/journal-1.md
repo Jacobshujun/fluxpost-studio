@@ -848,3 +848,40 @@ Implemented and verified the passive Canvas save-images node and authenticated s
 ### Next Steps
 
 - None - task complete
+
+
+## Session 26: Single candidate production parity and cleanup
+
+**Date**: 2026-08-17
+**Task**: Single candidate production parity and cleanup
+**Branch**: `main`
+
+### Summary
+
+Archived unique root WIP, implemented the single port-3001 candidate workflow, verified and deployed exact-SHA identity, preserved runtime state, and removed extra worktrees and merged branches.
+
+### Main Changes
+
+(Add details)
+
+### Git Commits
+
+| Hash | Message |
+|------|---------|
+| `cac73fe8e3b96b0ef7bd998f6cf9c2075fa3b65b` | (see git log) |
+| `e0fe7b7d22407e81e0ee91c6eb7ace84764eee8e` | (see git log) |
+| `b8404a19a5f95c17bf1cb85835700a65b1e4a901` | (see git log) |
+| `e0eeb3e1ef408b38dbb164befdecf24c952b6e51` | (see git log) |
+| `ee1e99b39cc6faa89d062297f59dd65bf7e6f219` | (see git log) |
+
+### Testing
+
+- [OK] (Add test results)
+
+### Status
+
+[OK] **Completed**
+
+### Next Steps
+
+- None - task complete

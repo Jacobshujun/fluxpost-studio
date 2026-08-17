@@ -8,8 +8,8 @@
 
 <!-- @@@auto:current-status -->
 - **Active File**: `journal-1.md`
-- **Total Sessions**: 25
-- **Last Active**: 2026-08-14
+- **Total Sessions**: 26
+- **Last Active**: 2026-08-17
 <!-- @@@/auto:current-status -->
 
 ---
@@ -19,7 +19,7 @@
 <!-- @@@auto:active-documents -->
 | File | Lines | Status |
 |------|-------|--------|
-| `journal-1.md` | ~850 | Active |
+| `journal-1.md` | ~887 | Active |
 <!-- @@@/auto:active-documents -->
 
 ---
@@ -29,6 +29,7 @@
 <!-- @@@auto:session-history -->
 | # | Date | Title | Commits | Branch |
 |---|------|-------|---------|--------|
+| 26 | 2026-08-17 | Single candidate production parity and cleanup | `cac73fe8e3b96b0ef7bd998f6cf9c2075fa3b65b`, `e0fe7b7d22407e81e0ee91c6eb7ace84764eee8e`, `b8404a19a5f95c17bf1cb85835700a65b1e4a901`, `e0eeb3e1ef408b38dbb164befdecf24c952b6e51`, `ee1e99b39cc6faa89d062297f59dd65bf7e6f219` | `main` |
 | 25 | 2026-08-14 | Deploy Canvas save-images | `39a35f8dd869d50df9008ba708e14b92eeefc761`, `3404851` | `feature/canvas-save-images-20260814` |
 | 24 | 2026-08-14 | Deploy batch schedule copy naming fix | `c265aa5560bfd76be580d6b7d8e375d117fca5ef`, `669a3272f764a05f994b87875ff6a9fc8df78675`, `9999d22` | `fix/canvas-schedule-copy-name-20260814` |
 | 23 | 2026-08-14 | Deploy production candidate and converge main | `c3c3c4e451840ba6f7dcd74b7fd95c2e1afb69e4`, `8c3e8e37d4204f8ec1bcc7ab8dc6c02a12a982d0` | `release/production-candidate-20260814` |
