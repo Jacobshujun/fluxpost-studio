@@ -952,3 +952,36 @@ Implemented and verified current-page Dongchedi category serial rewriting with e
 ### Next Steps
 
 - None - task complete
+
+
+## Session 29: Canvas batch result downloads
+
+**Date**: 2026-08-17
+**Task**: Canvas batch result downloads
+**Branch**: `main`
+
+### Summary
+
+Added direct image downloads to completed or partial Canvas V2 batch main-task results, with multi-sink ordering, aggregate feedback, regression coverage, and responsive browser verification.
+
+### Main Changes
+
+(Add details)
+
+### Git Commits
+
+| Hash | Message |
+|------|---------|
+| `3a7aefb` | (see git log) |
+
+### Testing
+
+- [OK] (Add test results)
+
+### Status
+
+[OK] **Completed**
+
+### Next Steps
+
+- None - task complete

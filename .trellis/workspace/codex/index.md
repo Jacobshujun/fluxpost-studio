@@ -8,7 +8,7 @@
 
 <!-- @@@auto:current-status -->
 - **Active File**: `journal-1.md`
-- **Total Sessions**: 28
+- **Total Sessions**: 29
 - **Last Active**: 2026-08-17
 <!-- @@@/auto:current-status -->
 
@@ -19,7 +19,7 @@
 <!-- @@@auto:active-documents -->
 | File | Lines | Status |
 |------|-------|--------|
-| `journal-1.md` | ~954 | Active |
+| `journal-1.md` | ~987 | Active |
 <!-- @@@/auto:active-documents -->
 
 ---
@@ -29,6 +29,7 @@
 <!-- @@@auto:session-history -->
 | # | Date | Title | Commits | Branch |
 |---|------|-------|---------|--------|
+| 29 | 2026-08-17 | Canvas batch result downloads | `3a7aefb` | `main` |
 | 28 | 2026-08-17 | Commit Dongchedi category batch rewrite | `a74bf42`, `eb441c4` | `main` |
 | 27 | 2026-08-17 | Smooth beat-synced video transitions | `37da896` | `main` |
 | 26 | 2026-08-17 | Single candidate production parity and cleanup | `cac73fe8e3b96b0ef7bd998f6cf9c2075fa3b65b`, `e0fe7b7d22407e81e0ee91c6eb7ace84764eee8e`, `b8404a19a5f95c17bf1cb85835700a65b1e4a901`, `e0eeb3e1ef408b38dbb164befdecf24c952b6e51`, `ee1e99b39cc6faa89d062297f59dd65bf7e6f219` | `main` |
