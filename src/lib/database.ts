@@ -899,7 +899,7 @@ export async function failSimpleRunQueueItemByRunId(runId: string, error: string
             completed_at = $1,
             updated_at = $1,
             error = $2
-        WHERE run_id = $3 AND status IN ('queued', 'running')
+        WHERE run_id = $3 AND status IN ('queued', 'running', 'paused')
       `,
       [now, error, runId],
     );
@@ -914,8 +914,53 @@ export async function failSimpleRunQueueItemByRunId(runId: string, error: string
         completed_at = ?,
         updated_at = ?,
         error = ?
-    WHERE run_id = ? AND status IN ('queued', 'running')
+    WHERE run_id = ? AND status IN ('queued', 'running', 'paused')
   `).run(now, now, error, runId);
+}
+
+export async function pauseQueuedSimpleRunQueueItemByRunId(runId: string) {
+  await ensureDatabaseReady();
+  const now = new Date().toISOString();
+  if (getDatabaseBackend() === "postgres") {
+    await getPostgresPool().query(
+      `UPDATE simple_run_queue SET status='paused',updated_at=$1 WHERE run_id=$2 AND status='queued'`,
+      [now, runId],
+    );
+    return;
+  }
+  getSqliteDatabase().prepare("UPDATE simple_run_queue SET status='paused',updated_at=? WHERE run_id=? AND status='queued'").run(now, runId);
+}
+
+export async function pauseClaimedSimpleRunQueueItem(queueId: string, workerId: string) {
+  await ensureDatabaseReady();
+  const now = new Date().toISOString();
+  if (getDatabaseBackend() === "postgres") {
+    await getPostgresPool().query(
+      `UPDATE simple_run_queue SET status='paused',locked_by=NULL,locked_until=NULL,updated_at=$1 WHERE id=$2 AND locked_by=$3 AND status='running'`,
+      [now, queueId, workerId],
+    );
+    return;
+  }
+  getSqliteDatabase().prepare(
+    "UPDATE simple_run_queue SET status='paused',locked_by=NULL,locked_until=NULL,updated_at=? WHERE id=? AND locked_by=? AND status='running'",
+  ).run(now, queueId, workerId);
+}
+
+export async function resumeSimpleRunQueueItemByRunId(runId: string) {
+  await ensureDatabaseReady();
+  const now = new Date().toISOString();
+  if (getDatabaseBackend() === "postgres") {
+    const result = await getPostgresPool().query(
+      `UPDATE simple_run_queue SET status='queued',attempts=0,run_after=$1,locked_by=NULL,locked_until=NULL,completed_at=NULL,error=NULL,updated_at=$1 WHERE run_id=$2 AND status='paused'`,
+      [now, runId],
+    );
+    if (!result.rowCount) throw new Error(`Simple run ${runId} does not have paused queue work.`);
+    return;
+  }
+  const result = getSqliteDatabase().prepare(
+    "UPDATE simple_run_queue SET status='queued',attempts=0,run_after=?,locked_by=NULL,locked_until=NULL,completed_at=NULL,error=NULL,updated_at=? WHERE run_id=? AND status='paused'",
+  ).run(now, now, runId) as { changes: number };
+  if (!result.changes) throw new Error(`Simple run ${runId} does not have paused queue work.`);
 }
 
 export async function createOriginalBatchRecords(batch: OriginalBatch, items: OriginalBatchItem[], queueItems: OriginalBatchQueueItem[]) {

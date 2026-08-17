@@ -2571,6 +2571,7 @@ function getPlatformLabel(value: Platform) {
 function formatSimpleRunStatus(value: SimpleRun["status"]) {
   if (value === "queued") return "排队中";
   if (value === "running") return "运行中";
+  if (value === "paused") return "已暂停";
   if (value === "completed") return "已完成";
   if (value === "partial") return "部分完成";
   return "失败";

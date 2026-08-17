@@ -2,7 +2,7 @@ import { NextResponse } from "next/server";
 import { compactError, recordExecutionLog } from "@/lib/activity-log";
 import { appConfig } from "@/lib/config";
 import { resolveLibraryAssetSelections } from "@/lib/library-assets";
-import { listSimpleRuns, startSimpleRun, terminateSimpleRun } from "@/lib/simple-runs";
+import { listSimpleRuns, pauseSimpleRun, resumeSimpleRun, startSimpleRun, terminateSimpleRun } from "@/lib/simple-runs";
 import { requireWorkspaceAccount } from "@/lib/workspace-accounts";
 import type { CrawlPlatform, SourceLinkPlatform, WorkspacePromptSettings } from "@/lib/types";
 
@@ -23,11 +23,12 @@ export async function POST(request: Request) {
   try {
     const account = await requireWorkspaceAccount(request);
     const body = (await request.json()) as {
-      sourceMode?: "keyword" | "links" | "feishu" | "viral" | "original" | "pool";
+      sourceMode?: "keyword" | "links" | "feishu" | "viral" | "original" | "pool" | "dongchedi_page";
       keyword?: string;
       targetCount?: number;
       platforms?: CrawlPlatform[];
       links?: string[] | string;
+      pageUrl?: string;
       sourceItemIds?: string[];
       linkPlatform?: SourceLinkPlatform | "auto";
       cookie?: string;
@@ -52,6 +53,8 @@ export async function POST(request: Request) {
     }
     const baseSourceMode =
       body.sourceMode === "feishu" ? "feishu" : body.sourceMode === "links" ? "links" : body.sourceMode === "pool" ? "pool" : "keyword";
+    const resolvedSourceMode =
+      body.sourceMode === "original" ? "original" : body.sourceMode === "viral" ? "viral" : body.sourceMode === "dongchedi_page" ? "dongchedi_page" : baseSourceMode;
     const materialAssets = await resolveLibraryAssetSelections(
       account,
       Array.isArray(body.materialAssetIds) ? body.materialAssetIds : [],
@@ -63,11 +66,12 @@ export async function POST(request: Request) {
       "vehicle",
     );
     const run = await startSimpleRun({
-      sourceMode: body.sourceMode === "original" ? "original" : body.sourceMode === "viral" ? "viral" : baseSourceMode,
+      sourceMode: resolvedSourceMode,
       keyword: body.keyword || "",
       targetCount: body.targetCount === undefined ? undefined : Number(body.targetCount),
       platforms: Array.isArray(body.platforms) ? body.platforms : [],
       links: body.links,
+      pageUrl: body.pageUrl,
       sourceItemIds: Array.isArray(body.sourceItemIds) ? body.sourceItemIds : [],
       linkPlatform: body.linkPlatform,
       cookie: body.cookie,
@@ -99,7 +103,7 @@ export async function POST(request: Request) {
       message: compactError(error),
       durationMs: Date.now() - startedAt,
     });
-    const status = /sign-in/i.test(message) ? 401 : /requires|required|platform/i.test(message) ? 400 : /library asset/i.test(message) ? 400 : 500;
+    const status = /sign-in/i.test(message) ? 401 : /requires|required|platform/i.test(message) ? 400 : /dongchedi category|dongchedi cookie|encryption key/i.test(message) ? 400 : /library asset/i.test(message) ? 400 : 500;
     return NextResponse.json({ error: message }, { status });
   }
 }
@@ -133,6 +137,22 @@ export async function DELETE(request: Request) {
       durationMs: Date.now() - startedAt,
     });
     const status = /sign-in/i.test(message) ? 401 : /required/i.test(message) ? 400 : /not found/i.test(message) ? 404 : 500;
+    return NextResponse.json({ error: message }, { status });
+  }
+}
+
+export async function PATCH(request: Request) {
+  try {
+    const account = await requireWorkspaceAccount(request);
+    const body = (await request.json()) as { runId?: string; action?: "pause" | "resume"; reason?: string; cookie?: string };
+    const runId = (body.runId || "").trim();
+    if (!runId) return NextResponse.json({ error: "Simple run id is required" }, { status: 400 });
+    if (body.action === "pause") return NextResponse.json({ run: await pauseSimpleRun(runId, body.reason, account) });
+    if (body.action === "resume") return NextResponse.json({ run: await resumeSimpleRun(runId, body.cookie, account) });
+    return NextResponse.json({ error: "Simple run action must be pause or resume" }, { status: 400 });
+  } catch (error) {
+    const message = error instanceof Error ? error.message : "Simple run control failed";
+    const status = /sign-in/i.test(message) ? 401 : /not found/i.test(message) ? 404 : /required|only|cannot|available/i.test(message) ? 400 : 500;
     return NextResponse.json({ error: message }, { status });
   }
 }

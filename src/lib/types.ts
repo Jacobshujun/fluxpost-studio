@@ -14,9 +14,9 @@ export type SourceUsageStatus = "new" | "analyzed" | "rewritten" | "approved" | 
 
 export type ExecutionLogStatus = "running" | "success" | "error" | "info";
 
-export type SimpleRunStatus = "queued" | "running" | "completed" | "partial" | "failed";
+export type SimpleRunStatus = "queued" | "running" | "paused" | "completed" | "partial" | "failed";
 
-export type SimpleRunQueueStatus = "queued" | "running" | "completed" | "failed";
+export type SimpleRunQueueStatus = "queued" | "running" | "paused" | "completed" | "failed";
 
 export type ImageGenerationQueueStatus = "queued" | "running" | "completed" | "failed" | "cancelled";
 
@@ -581,6 +581,8 @@ export type GeneratedPost = {
   taskKeyword?: string;
   feishuVehicle?: string;
   platform: Platform;
+  sourceUrl?: string;
+  sourceSafetyAssessment?: SourceSafetyAssessment;
   imagePrompt: string;
   imageUrls: string[];
   videoUrls?: string[];
@@ -748,15 +750,17 @@ export type OriginalBatchQueueItem = {
 };
 
 export type SimpleRunInput = {
-  sourceMode?: "keyword" | "links" | "feishu" | "viral" | "original" | "pool";
+  sourceMode?: "keyword" | "links" | "feishu" | "viral" | "original" | "pool" | "dongchedi_page";
   keyword: string;
   targetCount: number;
   platforms: CrawlPlatform[];
   materialPaths: string[];
   links?: string[];
+  pageUrl?: string;
   sourceItemIds?: string[];
   linkPlatform?: SourceLinkPlatform | "auto";
   cookie?: string;
+  cookieCiphertext?: string;
   videoFrameOriginalReference?: boolean;
   useComfyUiKlein?: boolean;
   directOriginalReference?: boolean;
@@ -777,10 +781,12 @@ export type SimpleRunInput = {
 export type SimpleRunLinkResult = {
   url: string;
   platform?: Platform;
-  status: "imported" | "filtered" | "duplicate" | "unsupported" | "failed";
+  status: "queued" | "running" | "paused" | "imported" | "filtered" | "duplicate" | "unsupported" | "draft" | "failed";
   sourceId?: string;
   itemId?: string;
   title?: string;
+  postId?: string;
+  draftStatus?: ReviewStatus;
   error?: string;
 };
 
@@ -875,6 +881,9 @@ export type SimpleRun = {
   createdAt: string;
   updatedAt: string;
   completedAt?: string;
+  pauseRequestedAt?: string;
+  pauseReason?: string;
+  resumeAfter?: string;
   textInstruction: string;
   imageWashPrompt: string;
   imageStrategyPrompts?: ImageStrategyPrompts;
@@ -884,6 +893,7 @@ export type SimpleRun = {
   stages: SimpleRunStage[];
   platformResults: SimpleRunPlatformResult[];
   linkResults?: SimpleRunLinkResult[];
+  discoveredCount?: number;
   feishuResults?: SimpleRunFeishuResult[];
   viralResult?: SimpleRunViralResult;
   originalResult?: SimpleRunOriginalResult;

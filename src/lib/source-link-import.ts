@@ -67,6 +67,8 @@ export type SourceLinkResolveResponse = {
   valid: number;
   items: NormalizedSourceItem[];
   results: SourceLinkImportResult[];
+  stopped?: boolean;
+  stopReason?: string;
 };
 
 type ParsedSourceLink = {
@@ -171,6 +173,55 @@ export async function resolveSourceLinks(input: SourceLinkResolveInput): Promise
     videoFrameOriginalReference: input.videoFrameOriginalReference !== false,
     enableVideoTranscription: input.enableVideoTranscription === true,
   });
+}
+
+export async function resolveSourceLinksSerial(
+  input: SourceLinkResolveInput & { onResult?: (result: SourceLinkImportResult) => Promise<void> | void },
+): Promise<SourceLinkResolveResponse> {
+  const parsedLinks = parseSourceLinks(input.links, input.platform);
+  const results: SourceLinkImportResult[] = [];
+  const items: NormalizedSourceItem[] = [];
+  let stopped = false;
+  let stopReason = "";
+
+  for (let index = 0; index < parsedLinks.length; index += 1) {
+    const link = parsedLinks[index];
+    const resolved = await resolveParsedSourceLinks([link], {
+      cookie: input.cookie,
+      videoFrameOriginalReference: input.videoFrameOriginalReference !== false,
+      enableVideoTranscription: input.enableVideoTranscription === true,
+    });
+    const result = resolved.results[0];
+    if (result) {
+      results.push(result);
+      if (result.status === "imported" && resolved.items[0]) items.push(resolved.items[0]);
+      await input.onResult?.(result);
+      if (result.status === "failed" && /HTTP (?:403|429)|login|anti-bot challenge|challenge/i.test(result.error || "")) {
+        stopped = true;
+        stopReason = result.error || "Dongchedi access challenge";
+        for (const remaining of parsedLinks.slice(index + 1)) {
+          const skipped: SourceLinkImportResult = {
+            url: remaining.url || remaining.raw,
+            platform: remaining.platform,
+            status: "failed",
+            error: `Stopped after source access failure: ${stopReason}`,
+          };
+          results.push(skipped);
+          await input.onResult?.(skipped);
+        }
+        break;
+      }
+    }
+  }
+
+  return {
+    total: parsedLinks.length,
+    valid: parsedLinks.filter((link) => Boolean(link.url && link.platform && !link.duplicateInput)).length,
+    items,
+    results,
+    stopped,
+    stopReason: stopReason || undefined,
+  };
 }
 
 async function resolveParsedSourceLinks(

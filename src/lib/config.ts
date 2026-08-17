@@ -131,6 +131,7 @@ function readAppConfig() {
   tosRegion: process.env.TOS_REGION || "cn-guangzhou",
   tosPublicBaseUrl: process.env.TOS_PUBLIC_BASE_URL || "",
   tosObjectPrefix: process.env.TOS_OBJECT_PREFIX || "fluxpost/flux-lightmoment",
+  dongchediCookieEncryptionKey: process.env.DONGCHEDI_COOKIE_ENCRYPTION_KEY || "",
   };
 }
 

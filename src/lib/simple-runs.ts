@@ -13,12 +13,17 @@ import {
   getSimpleRunFromDb,
   getSimpleRunQueueItemByRunId,
   heartbeatSimpleRunQueueItem,
+  pauseClaimedSimpleRunQueueItem,
+  pauseQueuedSimpleRunQueueItemByRunId,
   readSimpleRunsFromDb,
+  resumeSimpleRunQueueItemByRunId,
   saveSimpleRunToDb,
 } from "./database";
 import { enqueueFeishuPublishJob, ensureFeishuPublishQueueWorker } from "./feishu-publish-queue";
 import { importFeishuContentByTaskNumbers, normalizeFeishuTaskNumberInput } from "./feishu-content-import";
 import { saveGeneratedPost } from "./generated-posts";
+import { decryptDongchediCookie, encryptDongchediCookie } from "./dongchedi-cookie";
+import { discoverDongchediCategory, isDongchediCategoryStopError, normalizeDongchediCategoryUrl } from "./dongchedi-page";
 import { generateImagesFromPrompt, generateImagesFromPromptList } from "./image-generation";
 import { generatePost } from "./openai";
 import { buildOriginalGeneratedPost, extractOriginalTopic } from "./original-creation";
@@ -26,7 +31,7 @@ import { isComfyUiKleinConfigured } from "./comfyui-klein";
 import { buildProductionPlan } from "./production-plan";
 import { savePost } from "./store";
 import { hasSourceVideoReference, isSourceVideoLike } from "./source-video-reference";
-import { resolveSourceLinks, type SourceLinkImportResult } from "./source-link-import";
+import { resolveSourceLinks, resolveSourceLinksSerial, type SourceLinkImportResult } from "./source-link-import";
 import { filterUnsafeSourceItems } from "./source-safety";
 import { tagSourceItems } from "./source-tagging";
 import { crawlTikHub } from "./tikhub";
@@ -70,6 +75,7 @@ type CreateSimpleRunInput = Omit<
   platforms?: CrawlPlatform[];
   materialPaths?: string[];
   links?: string[] | string;
+  pageUrl?: string;
   sourceItemIds?: string[];
   linkPlatform?: SimpleRunInput["linkPlatform"];
   cookie?: string;
@@ -97,6 +103,8 @@ const simpleRunQueueHeartbeatMs = 30_000;
 const simpleRunForceTerminateMessage = "用户已强制终止该任务。";
 const simpleRunPublishPersistMaxAttempts = 3;
 const simpleRunPublishPersistRetryDelayMs = 60;
+const dongchediPageTaskTimeoutMs = readBoundedIntegerEnv("DONGCHEDI_PAGE_TASK_TIMEOUT_MS", 2 * 60 * 60_000, 60_000, 6 * 60 * 60_000);
+const maxDongchediCookieBytes = 16 * 1024;
 
 const stageTitles: Record<SimpleRunStageId, string> = {
   crawl: "采集内容",
@@ -127,14 +135,14 @@ export async function listSimpleRuns(limit = 20, account?: WorkspaceAccessActor)
   await reconcileInterruptedSimpleRuns(limit);
   ensureSimpleRunQueueWorker();
   ensureFeishuPublishQueueWorker();
-  return filterWorkspaceOwnedRecords((await readSimpleRunsFromDb(limit)).map(ensureSimpleRunOwner), account);
+  return filterWorkspaceOwnedRecords((await readSimpleRunsFromDb(limit)).map(ensureSimpleRunOwner), account).map(toPublicSimpleRun);
 }
 
 export async function getSimpleRun(runId: string, account?: WorkspaceAccessActor) {
   const storedRun = await getSimpleRunFromDb(runId);
   const run = storedRun ? ensureSimpleRunOwner(storedRun) : undefined;
   if (!run || (account && !filterWorkspaceOwnedRecords([run], account).length)) return undefined;
-  return run;
+  return toPublicSimpleRun(run);
 }
 
 export async function createAndRunSimpleRun(input: CreateSimpleRunInput) {
@@ -148,7 +156,7 @@ export async function startSimpleRun(input: CreateSimpleRunInput) {
   const context = await prepareSimpleRun(input);
   await enqueueSimpleRunQueueItem(context.run);
   ensureSimpleRunQueueWorker();
-  return context.run;
+  return toPublicSimpleRun(context.run);
 }
 
 export async function terminateSimpleRun(runId: string, reason = simpleRunForceTerminateMessage, account?: WorkspaceAccessActor) {
@@ -172,7 +180,7 @@ export async function terminateSimpleRun(runId: string, reason = simpleRunForceT
           updatedAt: new Date().toISOString(),
         };
 
-  await saveSimpleRunToDb(nextRun);
+  await saveSimpleRunToDb(clearSimpleRunCookieEnvelope(nextRun));
   await recordExecutionLog({
     scope: "simple/run",
     action: "Simple run force terminated",
@@ -187,7 +195,56 @@ export async function terminateSimpleRun(runId: string, reason = simpleRunForceT
   });
 
   ensureSimpleRunQueueWorker();
-  return nextRun;
+  return toPublicSimpleRun(nextRun);
+}
+
+export async function pauseSimpleRun(runId: string, reason = "Paused by user.", account?: WorkspaceAccessActor) {
+  const run = await requireMutableDongchediPageRun(runId, account);
+  if (run.status === "paused" || run.pauseRequestedAt) return toPublicSimpleRun(run);
+  const now = new Date().toISOString();
+  const nextRun: SimpleRun = run.status === "queued"
+    ? { ...run, status: "paused", pauseReason: reason, updatedAt: now }
+    : { ...run, pauseRequestedAt: now, pauseReason: reason, updatedAt: now };
+  await saveSimpleRunToDb(nextRun);
+  if (run.status === "queued") await pauseQueuedSimpleRunQueueItemByRunId(run.id);
+  return toPublicSimpleRun(nextRun);
+}
+
+export async function resumeSimpleRun(runId: string, cookie: string | undefined, account?: WorkspaceAccessActor) {
+  const run = await requireMutableDongchediPageRun(runId, account);
+  if (run.status !== "paused") throw new Error("Only a paused Dongchedi page run can be resumed.");
+  if (run.resumeAfter && Date.parse(run.resumeAfter) > Date.now()) {
+    throw new Error(`Dongchedi requested Retry-After; resume is available after ${run.resumeAfter}.`);
+  }
+  const nextCiphertext = cookie === undefined ? run.input.cookieCiphertext : encryptDongchediCookie(normalizeDongchediRequestCookie(cookie) || "");
+  const nextRun: SimpleRun = {
+    ...run,
+    status: "queued",
+    pauseRequestedAt: undefined,
+    pauseReason: undefined,
+    resumeAfter: undefined,
+    input: { ...run.input, cookieCiphertext: nextCiphertext },
+    updatedAt: new Date().toISOString(),
+  };
+  await saveSimpleRunToDb(nextRun);
+  try {
+    await resumeSimpleRunQueueItemByRunId(run.id);
+  } catch (error) {
+    await saveSimpleRunToDb(run);
+    throw error;
+  }
+  ensureSimpleRunQueueWorker();
+  return toPublicSimpleRun(nextRun);
+}
+
+async function requireMutableDongchediPageRun(runId: string, account?: WorkspaceAccessActor) {
+  const trimmedRunId = runId.trim();
+  if (!trimmedRunId) throw new Error("Simple run id is required");
+  const run = await getSimpleRunFromDb(trimmedRunId);
+  if (!run || (account && !filterWorkspaceOwnedRecords([run], account).length)) throw new Error(`Simple run ${trimmedRunId} was not found.`);
+  if (!isSimpleRunDongchediPageMode(run.input)) throw new Error("Pause and resume are only available for Dongchedi page runs.");
+  if (["completed", "partial", "failed"].includes(run.status)) throw new Error("A terminal Dongchedi page run cannot be changed.");
+  return run;
 }
 
 async function prepareSimpleRun(input: CreateSimpleRunInput) {
@@ -202,7 +259,9 @@ async function prepareSimpleRun(input: CreateSimpleRunInput) {
     scope: "simple/run",
     action: "开始精简版全自动流程",
     status: "running",
-    message: isSimpleRunLinkMode(normalizedInput)
+    message: isSimpleRunDongchediPageMode(normalizedInput)
+      ? `关键词 ${normalizedInput.keyword}，懂车帝栏目页目标 ${normalizedInput.targetCount} 条`
+      : isSimpleRunLinkMode(normalizedInput)
       ? `关键词 ${normalizedInput.keyword}，导入链接 ${normalizedInput.links?.length || 0} 条，目标 ${normalizedInput.targetCount} 条`
       : `关键词 ${normalizedInput.keyword}，目标 ${normalizedInput.targetCount} 条，平台 ${normalizedInput.platforms.length} 个`,
     details: {
@@ -212,8 +271,9 @@ async function prepareSimpleRun(input: CreateSimpleRunInput) {
       targetCount: normalizedInput.targetCount,
       platforms: normalizedInput.platforms.join(","),
       linkCount: normalizedInput.links?.length || 0,
+      pageUrl: normalizedInput.pageUrl || "",
       linkPlatform: normalizedInput.linkPlatform || "",
-      hasCookie: Boolean(normalizedInput.cookie),
+      hasCookie: Boolean(normalizedInput.cookie || normalizedInput.cookieCiphertext),
       materialCount: normalizedInput.materialPaths.length,
       generateImages: shouldGenerateImages(normalizedInput),
       contentSafetyPolicyRevision: contentSafetyPolicy.revision,
@@ -272,8 +332,10 @@ async function drainSimpleRunQueue(workerId: string) {
       if (!run) {
         throw new Error(`Simple run ${item.runId} no longer exists.`);
       }
-      await runWithSimpleRunOwner(run.input, () => runSimpleRunWorkflow(run, run.input, settingsFromRun(run), startedAt));
-      await completeSimpleRunQueueItem(item.id, workerId);
+      const hydratedInput = hydrateSimpleRunInput(run.input);
+      const finalRun = await runWithSimpleRunOwner(hydratedInput, () => runSimpleRunWorkflow(run, hydratedInput, settingsFromRun(run), startedAt));
+      if (finalRun.status === "paused") await pauseClaimedSimpleRunQueueItem(item.id, workerId);
+      else await completeSimpleRunQueueItem(item.id, workerId);
     } catch (error) {
       const message = compactError(error);
       await failInterruptedRun(item.runId, message, startedAt);
@@ -307,6 +369,10 @@ function settingsFromRun(run: SimpleRun): WorkspacePromptSettings {
 
 function isSimpleRunLinkMode(input: SimpleRunInput) {
   return input.sourceMode === "links";
+}
+
+function isSimpleRunDongchediPageMode(input: SimpleRunInput) {
+  return input.sourceMode === "dongchedi_page";
 }
 
 function isSimpleRunFeishuMode(input: SimpleRunInput) {
@@ -384,6 +450,26 @@ function ensureSimpleRunOwner(run: SimpleRun): SimpleRun {
   };
 }
 
+function hydrateSimpleRunInput(input: SimpleRunInput): SimpleRunInput {
+  if (!input.cookieCiphertext) return input;
+  return {
+    ...input,
+    cookie: decryptDongchediCookie(input.cookieCiphertext),
+  };
+}
+
+function toPublicSimpleRun(run: SimpleRun): SimpleRun {
+  if (!run.input.cookie && !run.input.cookieCiphertext) return run;
+  return {
+    ...run,
+    input: {
+      ...run.input,
+      cookie: undefined,
+      cookieCiphertext: undefined,
+    },
+  };
+}
+
 function runWithSimpleRunOwner<T>(input: SimpleRunInput, operation: () => Promise<T>) {
   const access = simpleRunAccessActor(input);
   return access ? runWithExecutionLogOwner(access, operation) : operation();
@@ -402,6 +488,9 @@ async function runSimpleRunWorkflow(
   }
   if (isSimpleRunViralMode(normalizedInput)) {
     return runSimpleViralWorkflow(run, normalizedInput, settings, startedAt);
+  }
+  if (isSimpleRunDongchediPageMode(normalizedInput)) {
+    return runSimpleDongchediPageWorkflow(run, normalizedInput, settings, startedAt, contentSafetyPolicy);
   }
   const crawledItems: NormalizedSourceItem[] = [];
   run = isSimpleRunFeishuMode(normalizedInput)
@@ -527,7 +616,8 @@ async function runSimpleRunWorkflow(
       details: buildSimpleProductionMediaSkipDetails(run.id, source),
     });
   }
-  await mapWithConcurrency(productionItems, concurrencyConfig.production, async (source) =>
+  const productionConcurrency = isSimpleRunDongchediPageMode(normalizedInput) ? 1 : concurrencyConfig.production;
+  await mapWithConcurrency(productionItems, productionConcurrency, async (source) =>
     runWithConcurrencyPool("production", async () => {
     const plan = source.productionPlan || buildProductionPlan(source);
     if (plan.decision === "observe_only") {
@@ -536,69 +626,14 @@ async function runSimpleRunWorkflow(
     }
 
     try {
-      const imageTasks = buildSimpleImageTasks(source, settings, normalizedInput);
-      const draft = await generatePost({
-        source,
-        materialPaths: normalizedInput.materialPaths,
-        instruction: settings.textInstruction,
-        productionPlanOverride: {
-          ...plan,
-          promptGuidance: {
-            ...plan.promptGuidance,
-            textBrief: settings.textInstruction,
-            imageBrief: [
-              `汽车外观: ${settings.imageStrategyPrompts.carExterior}`,
-              `车型美图: ${settings.imageStrategyPrompts.carExterior}`,
-              `带文字图: ${settings.imageStrategyPrompts.textImage}`,
-              `人车美图: ${settings.imageStrategyPrompts.peopleWithCar}`,
-              "APP: 原图引用，不调用图片模型",
-              "内饰空间: 原图引用，不调用图片模型",
-            ].join("\n"),
-          },
-        },
-        imageTasks,
-        includeSourceVideo: normalizedInput.includeSourceVideo === true,
-      });
-
-      const imagePrompt = resolveSimpleImagePrompt(draft, source);
-      const canRunImageTasks = generateImages && hasSelectedImageTask(draft.imageTasks);
-      const imageResult = canRunImageTasks
-        ? await generateImagesFromPrompt(imagePrompt, 1, draft.imageTasks, {
-            size: settings.imageSize,
-            quality: settings.imageQuality,
-            taskConcurrency: concurrencyConfig.image,
-          })
-        : makeImageGenerationSkippedResult(resolveSimpleImageSkipMessage(generateImages, "simple run"));
-      const access = simpleRunAccessActor(normalizedInput);
-      const post: GeneratedPost = applyWorkspaceOwner({
-        ...draft,
-        imagePrompt,
-        imageUrls: imageResult.imageUrls,
-        taskKeyword: resolveSimplePostTaskKeyword(normalizedInput, source),
-        contentTags: source.contentTagging?.tags || [],
-        imageTasks,
-        aiNotes: [
-          ...draft.aiNotes,
-          !generateImages
-            ? "Only text was generated; image generation is disabled for this simple run."
-            : !canRunImageTasks
-              ? "Only text was generated; no image task was selected for this simple run."
-            : imageResult.status === "completed"
-            ? `精简版自动生成 ${imageResult.imageUrls.length} 张配图。`
-            : imageResult.message || "图片模型未返回配图。",
-        ],
-        status: "draft",
-        updatedAt: new Date().toISOString(),
-      }, access, source);
-      await savePost(post, access);
-      await saveGeneratedPost(post, access);
+      const { post, publishReady } = await produceSimpleSourceDraft(source, normalizedInput, settings, generateImages);
       await produceRunUpdates.update(async (latestRun) => {
         const withPost = await addPostResult(latestRun, post);
         return incrementStage(withPost, "produce", { completed: 1 });
       });
       completedPosts.push(post);
-      if (imageResult.status !== "needs_review") publishReadyPosts.push(post);
-      const sourceStatusWarning = await syncSimpleSourceStatus(post, access, run.id, "draft");
+      if (publishReady) publishReadyPosts.push(post);
+      const sourceStatusWarning = await syncSimpleSourceStatus(post, simpleRunAccessActor(normalizedInput), run.id, "draft");
       if (sourceStatusWarning) {
         await produceRunUpdates.update((latestRun) => updatePostResultWarning(latestRun, post.id, sourceStatusWarning));
       }
@@ -743,6 +778,341 @@ async function runSimpleRunWorkflow(
   }
 
   return finishSimpleRun(run, startedAt);
+}
+
+async function runSimpleDongchediPageWorkflow(
+  initialRun: SimpleRun,
+  normalizedInput: SimpleRunInput,
+  settings: WorkspacePromptSettings,
+  startedAt: number,
+  contentSafetyPolicy: ContentSafetyPolicy,
+) {
+  let run = initialRun;
+  const cookie = normalizedInput.cookie || decryptDongchediCookie(normalizedInput.cookieCiphertext);
+  const existingResults = run.linkResults || [];
+  let articles: Array<{ sourceId: string; url: string; title?: string }> = existingResults.map((result) => ({
+    sourceId: result.sourceId || "",
+    url: result.url,
+    title: result.title,
+  }));
+
+  const pauseBeforeDiscovery = await getSimpleRunPauseReason(run.id);
+  if (pauseBeforeDiscovery) return pauseDongchediPageRun(run, pauseBeforeDiscovery);
+
+  if (!articles.length) {
+    try {
+      const discovery = await discoverDongchediCategory(normalizedInput.pageUrl || "", { cookie, limit: 30 });
+      articles = discovery.articles.slice(0, normalizedInput.targetCount);
+      run = await saveRun({
+        ...run,
+        discoveredCount: discovery.articles.length,
+        linkResults: articles.map((article) => ({
+          url: article.url,
+          platform: "dongchedi" as const,
+          status: "queued" as const,
+          sourceId: article.sourceId,
+          title: article.title,
+        })),
+        platformResults: [{
+          platform: "dongchedi",
+          requested: normalizedInput.targetCount,
+          crawled: 0,
+          taggedContent: 0,
+          taggedVisual: 0,
+        }],
+        updatedAt: new Date().toISOString(),
+      });
+    } catch (error) {
+      const message = compactError(error);
+      if (isDongchediCategoryStopError(error)) return pauseDongchediPageRun(run, message);
+      run = await failRun(run, message);
+      return finishSimpleRun(run, startedAt);
+    }
+  }
+
+  run = await setStage(run, "crawl", {
+    status: "running",
+    total: articles.length,
+    message: `Found ${articles.length} Dongchedi articles; processing serially.`,
+  });
+  run = await setStage(run, "tag", { total: articles.length, message: "Waiting for each article to pass safety checks." });
+  run = await setStage(run, "produce", { total: articles.length, message: "Waiting for each tagged article." });
+
+  for (const article of articles) {
+    const previous = run.linkResults?.find((result) => result.url === article.url);
+    if (previous && ["draft", "filtered", "duplicate", "unsupported", "failed"].includes(previous.status)) continue;
+
+    const pauseReason = await getSimpleRunPauseReason(run.id);
+    if (pauseReason) return pauseDongchediPageRun(run, pauseReason);
+    if (Date.now() - startedAt >= dongchediPageTaskTimeoutMs) {
+      return pauseDongchediPageRun(run, "Dongchedi page task time limit reached; resume to continue remaining articles.");
+    }
+    await assertSimpleRunNotForceTerminated(run.id);
+    run = await updateDongchediLinkResult(run, article.url, {
+      status: "running",
+      title: article.title || previous?.title,
+      error: undefined,
+    });
+    run = await setStage(run, "crawl", { message: `Fetching: ${article.title || article.url}` });
+
+    const resolved = await resolveSourceLinksSerial({
+      links: [article.url],
+      platform: "dongchedi",
+      cookie,
+      videoFrameOriginalReference: normalizedInput.videoFrameOriginalReference !== false,
+      enableVideoTranscription: normalizedInput.enableVideoTranscription === true,
+    });
+    const sourceResult = resolved.results[0];
+    const source = resolved.items[0];
+    if (!sourceResult || sourceResult.status !== "imported" || !source) {
+      const message = sourceResult?.error || "Dongchedi article could not be resolved.";
+      if (isDongchediCategoryStopError(message)) {
+        run = await updateDongchediLinkResult(run, article.url, { status: "paused", error: message });
+        return pauseDongchediPageRun(run, message);
+      }
+      run = await updateDongchediLinkResult(run, article.url, {
+        status: sourceResult?.status === "imported" ? "failed" : sourceResult?.status || "failed",
+        error: message,
+      });
+      run = await incrementStage(run, "crawl", sourceResult?.status === "duplicate" || sourceResult?.status === "unsupported" ? { skipped: 1 } : { failed: 1 }, message);
+      run = await incrementStage(run, "tag", { skipped: 1 });
+      run = await incrementStage(run, "produce", { skipped: 1 });
+      run = await addRunErrorOnce(run, `${article.url}: ${message}`);
+      continue;
+    }
+
+    run = await updateDongchediLinkResult(run, article.url, {
+      status: "imported",
+      sourceId: sourceResult.sourceId,
+      itemId: sourceResult.itemId,
+      title: sourceResult.title || source.title,
+    });
+    run = await incrementStage(run, "crawl", { completed: 1 }, `Fetched: ${sourceResult.title || source.title}`);
+    run = await incrementDongchediPlatformCrawled(run);
+
+    const safetyResult = await filterUnsafeSourceItems([source], {
+      scope: "simple/run",
+      query: normalizedInput.keyword,
+      runId: run.id,
+    }, contentSafetyPolicy);
+    if (!safetyResult.items.length) {
+      const reason = safetyResult.filtered[0]?.safetyAssessment?.reasons.join("; ") || "Filtered by content safety policy.";
+      run = await updateDongchediLinkResult(run, article.url, { status: "filtered", error: reason });
+      run = await incrementStage(run, "tag", { skipped: 1 }, reason);
+      run = await incrementStage(run, "produce", { skipped: 1 });
+      continue;
+    }
+
+    run = await setStage(run, "tag", { status: "running", message: `Tagging: ${source.title}` });
+    let taggedSource: NormalizedSourceItem;
+    try {
+      const tagged = await tagSourceItems(safetyResult.items);
+      taggedSource = tagged[0];
+      if (!taggedSource) throw new Error("Dongchedi article tagging returned no item.");
+      await ingestSimpleTaggedItems(normalizedInput, [taggedSource], simpleRunAccessActor(normalizedInput));
+      run = await incrementStage(run, "tag", { completed: 1 }, `Tagged: ${taggedSource.title}`);
+      run = await updateDongchediPlatformTagCounts(run, taggedSource);
+    } catch (error) {
+      const message = compactError(error);
+      run = await updateDongchediLinkResult(run, article.url, { status: "failed", error: message });
+      run = await incrementStage(run, "tag", { failed: 1 }, message);
+      run = await incrementStage(run, "produce", { skipped: 1 });
+      run = await addRunErrorOnce(run, `${article.url}: ${message}`);
+      continue;
+    }
+
+    const sourceWithPlan = { ...taggedSource, productionPlan: taggedSource.productionPlan || buildProductionPlan(taggedSource) };
+    const selection = selectSimpleProductionItems([{ item: sourceWithPlan, score: sourceWithPlan.hotScore || calculateHotScore(sourceWithPlan) }], 1, {
+      requireVisualSource: shouldGenerateImages(normalizedInput),
+    });
+    if (!selection.productionItems.length) {
+      const message = describeSimpleProductionMediaSkip(sourceWithPlan);
+      run = await updateDongchediLinkResult(run, article.url, { status: "filtered", error: message });
+      run = await incrementStage(run, "produce", { skipped: 1 }, message);
+      continue;
+    }
+
+    run = await setStage(run, "produce", { status: "running", message: `Rewriting: ${sourceWithPlan.title}` });
+    try {
+      const { post } = await produceSimpleSourceDraft(
+        sourceWithPlan,
+        normalizedInput,
+        settings,
+        shouldGenerateImages(normalizedInput),
+      );
+      run = await addPostResult(run, post);
+      run = await incrementStage(run, "produce", { completed: 1 }, `Draft saved: ${post.title}`);
+      const sourceStatusWarning = await syncSimpleSourceStatus(post, simpleRunAccessActor(normalizedInput), run.id, "draft");
+      if (sourceStatusWarning) run = await updatePostResultWarning(run, post.id, sourceStatusWarning);
+      run = await updateDongchediLinkResult(run, article.url, {
+        status: "draft",
+        postId: post.id,
+        draftStatus: post.status,
+        title: sourceResult.title || source.title,
+        error: sourceStatusWarning,
+      });
+    } catch (error) {
+      const message = compactError(error);
+      run = await updateDongchediLinkResult(run, article.url, { status: "failed", error: message });
+      run = await incrementStage(run, "produce", { failed: 1 }, message);
+      run = await addRunErrorOnce(run, `${article.url}: ${message}`);
+    }
+  }
+
+  run = await setStage(run, "crawl", { status: resolveStageTerminalStatus(run, "crawl"), message: `Processed ${articles.length} discovered articles.` });
+  run = await setStage(run, "tag", { status: resolveStageTerminalStatus(run, "tag") });
+  run = await setStage(run, "produce", { status: resolveStageTerminalStatus(run, "produce") });
+  run = await setStage(run, "publish", {
+    status: "skipped",
+    total: run.posts.length,
+    skipped: run.posts.length,
+    message: "Dongchedi page drafts are saved for review and are not published automatically.",
+  });
+  run = await saveRun({
+    ...run,
+    publish: {
+      status: "skipped",
+      postCount: run.posts.length,
+      message: "Drafts saved for review; Feishu publishing is disabled for Dongchedi page runs.",
+    },
+    updatedAt: new Date().toISOString(),
+  });
+  if (articles.length < normalizedInput.targetCount) {
+    run = await addRunErrorOnce(run, `Current page contained ${articles.length} valid articles, below target ${normalizedInput.targetCount}.`);
+  }
+  if (!run.posts.length) run = await failRun(run, "No Dongchedi article produced a review draft.");
+  return finishSimpleRun(run, startedAt);
+}
+
+async function produceSimpleSourceDraft(
+  source: NormalizedSourceItem,
+  normalizedInput: SimpleRunInput,
+  settings: WorkspacePromptSettings,
+  generateImages: boolean,
+) {
+  const plan = source.productionPlan || buildProductionPlan(source);
+  const imageTasks = buildSimpleImageTasks(source, settings, normalizedInput);
+  const draft = await generatePost({
+    source,
+    materialPaths: normalizedInput.materialPaths,
+    instruction: settings.textInstruction,
+    productionPlanOverride: {
+      ...plan,
+      promptGuidance: {
+        ...plan.promptGuidance,
+        textBrief: settings.textInstruction,
+        imageBrief: [
+          `汽车外观: ${settings.imageStrategyPrompts.carExterior}`,
+          `车型美图: ${settings.imageStrategyPrompts.carExterior}`,
+          `带文字图: ${settings.imageStrategyPrompts.textImage}`,
+          `人车美图: ${settings.imageStrategyPrompts.peopleWithCar}`,
+          "APP: 原图引用，不调用图片模型",
+          "内饰空间: 原图引用，不调用图片模型",
+        ].join("\n"),
+      },
+    },
+    imageTasks,
+    includeSourceVideo: normalizedInput.includeSourceVideo === true,
+  });
+  const imagePrompt = resolveSimpleImagePrompt(draft, source);
+  const canRunImageTasks = generateImages && hasSelectedImageTask(draft.imageTasks);
+  const imageResult = canRunImageTasks
+    ? await generateImagesFromPrompt(imagePrompt, 1, draft.imageTasks, {
+        size: settings.imageSize,
+        quality: settings.imageQuality,
+        taskConcurrency: isSimpleRunDongchediPageMode(normalizedInput) ? 1 : concurrencyConfig.image,
+      })
+    : makeImageGenerationSkippedResult(resolveSimpleImageSkipMessage(generateImages, "simple run"));
+  const access = simpleRunAccessActor(normalizedInput);
+  const post: GeneratedPost = applyWorkspaceOwner({
+    ...draft,
+    sourceUrl: source.sourceUrl,
+    sourceSafetyAssessment: source.safetyAssessment,
+    imagePrompt,
+    imageUrls: imageResult.imageUrls,
+    taskKeyword: resolveSimplePostTaskKeyword(normalizedInput, source),
+    contentTags: source.contentTagging?.tags || [],
+    imageTasks,
+    aiNotes: [
+      ...draft.aiNotes,
+      !generateImages
+        ? "Only text was generated; image generation is disabled for this simple run."
+        : !canRunImageTasks
+          ? "Only text was generated; no image task was selected for this simple run."
+          : imageResult.status === "completed"
+            ? `精简版自动生成 ${imageResult.imageUrls.length} 张配图。`
+            : imageResult.message || "图片模型未返回配图。",
+    ],
+    status: "draft",
+    updatedAt: new Date().toISOString(),
+  }, access, source);
+  await savePost(post, access);
+  await saveGeneratedPost(post, access);
+  return { post, publishReady: imageResult.status !== "needs_review" };
+}
+
+async function updateDongchediLinkResult(run: SimpleRun, url: string, patch: Partial<SimpleRunLinkResult>) {
+  return saveRun({
+    ...run,
+    linkResults: (run.linkResults || []).map((result) => result.url === url ? { ...result, ...patch } : result),
+    updatedAt: new Date().toISOString(),
+  });
+}
+
+async function updateDongchediPlatformTagCounts(run: SimpleRun, source: NormalizedSourceItem) {
+  return saveRun({
+    ...run,
+    platformResults: run.platformResults.map((result) => result.platform === "dongchedi" ? {
+      ...result,
+      taggedContent: result.taggedContent + (source.contentTagging?.status === "success" ? 1 : 0),
+      taggedVisual: result.taggedVisual + (source.visualTagging?.assets.length || 0),
+    } : result),
+    updatedAt: new Date().toISOString(),
+  });
+}
+
+async function incrementDongchediPlatformCrawled(run: SimpleRun) {
+  return saveRun({
+    ...run,
+    platformResults: run.platformResults.map((result) => result.platform === "dongchedi" ? { ...result, crawled: result.crawled + 1 } : result),
+    updatedAt: new Date().toISOString(),
+  });
+}
+
+async function getSimpleRunPauseReason(runId: string) {
+  const current = await getSimpleRunFromDb(runId);
+  return current?.pauseRequestedAt || current?.status === "paused" ? current.pauseReason || "Paused by user." : undefined;
+}
+
+async function pauseDongchediPageRun(run: SimpleRun, reason: string) {
+  const now = new Date().toISOString();
+  const stages = run.stages.map((stage) => stage.status === "running" ? {
+    ...stage,
+    status: "warning" as const,
+    message: reason,
+    updatedAt: now,
+  } : stage);
+  return saveRun({
+    ...run,
+    status: "paused",
+    stages,
+    pauseRequestedAt: undefined,
+    pauseReason: reason,
+    resumeAfter: resolveDongchediRetryAfter(reason),
+    updatedAt: now,
+  });
+}
+
+function resolveDongchediRetryAfter(reason: string) {
+  const value = reason.match(/Retry-After\s+([^;]+)/i)?.[1]?.trim();
+  if (!value) return undefined;
+  if (/^\d+$/.test(value)) return new Date(Date.now() + Number(value) * 1000).toISOString();
+  const parsed = Date.parse(value);
+  return Number.isNaN(parsed) ? undefined : new Date(parsed).toISOString();
+}
+
+async function addRunErrorOnce(run: SimpleRun, message: string) {
+  return run.errors.includes(message) ? run : addRunError(run, message);
 }
 
 async function runSimpleViralWorkflow(
@@ -1283,7 +1653,7 @@ async function reconcileInterruptedSimpleRuns(limit: number) {
 
     const message = `Interrupted simple run: the local server process restarted at ${serverStartedAt} after this run was last updated. Please start a new run to retry.`;
     const nextRun = buildInterruptedRun(run, message);
-    await saveSimpleRunToDb(nextRun);
+    await saveSimpleRunToDb(clearSimpleRunCookieEnvelope(nextRun));
     await failSimpleRunQueueItemByRunId(run.id, message);
     await recordExecutionLog({
       scope: "simple/run",
@@ -1301,9 +1671,9 @@ async function reconcileInterruptedSimpleRuns(limit: number) {
 
 async function failInterruptedRun(runId: string, message: string, startedAt: number) {
   const run = await getSimpleRunFromDb(runId);
-  if (!run || (run.status !== "running" && run.status !== "queued")) return;
+  if (!run || (run.status !== "running" && run.status !== "queued" && run.status !== "paused")) return;
   const nextRun = buildInterruptedRun(run, message);
-  await saveSimpleRunToDb(nextRun);
+  await saveSimpleRunToDb(clearSimpleRunCookieEnvelope(nextRun));
   await recordExecutionLog({
     scope: "simple/run",
     action: "Simple run background failure",
@@ -1345,7 +1715,11 @@ function buildInterruptedRun(run: SimpleRun, message: string): SimpleRun {
   const now = new Date().toISOString();
   let markedStage = false;
   const stages = run.stages.map((stage) => {
-    if (stage.status === "running" || (!markedStage && run.status === "queued" && stage.status === "queued")) {
+    if (
+      stage.status === "running" ||
+      (run.status === "paused" && stage.status === "warning") ||
+      (!markedStage && (run.status === "queued" || run.status === "paused") && stage.status === "queued")
+    ) {
       markedStage = true;
       const total = Number(stage.total || 0);
       const remaining = Math.max(total - Number(stage.completed || 0) - Number(stage.skipped || 0), 0);
@@ -2017,6 +2391,8 @@ function normalizeSimpleRunInput(input: CreateSimpleRunInput): SimpleRunInput {
           ? "feishu"
           : input.sourceMode === "links"
             ? "links"
+          : input.sourceMode === "dongchedi_page"
+            ? "dongchedi_page"
             : input.sourceMode === "pool"
               ? "pool"
             : "keyword";
@@ -2034,6 +2410,8 @@ function normalizeSimpleRunInput(input: CreateSimpleRunInput): SimpleRunInput {
   if (sourceMode === "pool" && !sourceItemIds.length) throw new Error("At least one content pool item is required");
   if (sourceMode === "feishu" && !feishuTaskNumbers.length) throw new Error("At least one Feishu task number is required");
   if (sourceMode === "viral" && !viralUrl) throw new Error("Viral source URL is required");
+  const pageUrl = sourceMode === "dongchedi_page" ? normalizeDongchediCategoryUrl(typeof input.pageUrl === "string" ? input.pageUrl : "") : undefined;
+  const dongchediCookie = sourceMode === "dongchedi_page" ? normalizeDongchediRequestCookie(input.cookie) : undefined;
   if (sourceMode === "viral" && input.generateImages !== false && input.viralImitateImages === true && !normalizeMaterialPaths(input.viralMaterialPaths).length) {
     throw new Error("请选择至少 1 张车型图用于图片模仿");
   }
@@ -2045,10 +2423,15 @@ function normalizeSimpleRunInput(input: CreateSimpleRunInput): SimpleRunInput {
         ? links.length
         : sourceMode === "pool"
           ? sourceItemIds.length
-          : sourceMode === "original"
+      : sourceMode === "original"
             ? 1
+            : sourceMode === "dongchedi_page"
+              ? 30
             : 10;
-  const targetCount = Math.min(Math.max(Number(input.targetCount || targetCountFallback), 1), maxSimpleRunItems);
+  const requestedTargetCount = Number(input.targetCount ?? targetCountFallback);
+  const targetCount = Number.isFinite(requestedTargetCount)
+    ? Math.min(Math.max(Math.floor(requestedTargetCount), 1), sourceMode === "dongchedi_page" ? 30 : maxSimpleRunItems)
+    : targetCountFallback;
   const normalizedInput: SimpleRunInput = {
     sourceMode,
     keyword: keyword || "飞书导入",
@@ -2062,13 +2445,17 @@ function normalizeSimpleRunInput(input: CreateSimpleRunInput): SimpleRunInput {
             ? Math.min(targetCount, sourceItemIds.length)
           : sourceMode === "viral"
             ? 1
+          : sourceMode === "dongchedi_page"
+            ? targetCount
           : targetCount,
     materialPaths: normalizeMaterialPaths(input.materialPaths),
     links: sourceMode === "links" ? links : undefined,
+    pageUrl,
     sourceItemIds: sourceMode === "pool" ? sourceItemIds : undefined,
     linkPlatform: sourceMode === "links" ? normalizeLinkPlatform(input.linkPlatform) : undefined,
     cookie: sourceMode === "links" ? normalizeRequestCookie(input.cookie) : undefined,
-    videoFrameOriginalReference: sourceMode === "links" ? input.videoFrameOriginalReference !== false : undefined,
+    cookieCiphertext: sourceMode === "dongchedi_page" ? encryptDongchediCookie(dongchediCookie || "") : undefined,
+    videoFrameOriginalReference: sourceMode === "links" || sourceMode === "dongchedi_page" ? input.videoFrameOriginalReference !== false : undefined,
     useComfyUiKlein: input.useComfyUiKlein === true,
     directOriginalReference: sourceMode === "viral" ? undefined : input.directOriginalReference === true,
     includeSourceVideo: sourceMode === "viral" || sourceMode === "original" ? undefined : input.includeSourceVideo === true,
@@ -2082,6 +2469,7 @@ function normalizeSimpleRunInput(input: CreateSimpleRunInput): SimpleRunInput {
     ownerUserId: normalizeOptionalOwnerValue(input.ownerUserId),
     ownerDisplayName: normalizeOptionalOwnerValue(input.ownerDisplayName),
   };
+  if (sourceMode === "dongchedi_page") return { ...normalizedInput, writeFeishu: false };
   return sourceMode === "original"
     ? {
         ...normalizedInput,
@@ -2120,6 +2508,14 @@ function normalizeSourceItemIdInput(input: unknown) {
 
 function normalizeRequestCookie(input: unknown) {
   return typeof input === "string" ? input.trim() || undefined : undefined;
+}
+
+function normalizeDongchediRequestCookie(input: unknown) {
+  const cookie = normalizeRequestCookie(input);
+  if (cookie && Buffer.byteLength(cookie) > maxDongchediCookieBytes) {
+    throw new Error(`Dongchedi Cookie must not exceed ${maxDongchediCookieBytes} bytes.`);
+  }
+  return cookie;
 }
 
 function normalizeLinkPlatform(value: unknown): SourceLinkPlatform | "auto" {
@@ -2370,6 +2766,9 @@ async function finishSimpleRun(run: SimpleRun, startedAt: number) {
   const finalRun = await saveRun({
     ...run,
     status,
+    pauseRequestedAt: undefined,
+    pauseReason: undefined,
+    resumeAfter: undefined,
     completedAt: new Date().toISOString(),
     updatedAt: new Date().toISOString(),
   });
@@ -2391,6 +2790,7 @@ async function finishSimpleRun(run: SimpleRun, startedAt: number) {
 
 function resolveRunStatus(run: SimpleRun): SimpleRun["status"] {
   if (!run.posts.length) return "failed";
+  if (isSimpleRunDongchediPageMode(run.input) && run.linkResults?.some((result) => result.status !== "draft")) return "partial";
   if ((run.publish?.status === "queued" || run.publish?.status === "running") && !run.errors.length) return "completed";
   if (run.publish?.status === "published" && !run.errors.length) return "completed";
   if (run.publish?.status === "skipped" && !run.errors.length) return "completed";
@@ -2401,8 +2801,26 @@ async function saveRun(run: SimpleRun) {
   const terminatedRun = await getForceTerminatedSimpleRun(run.id);
   if (terminatedRun) return terminatedRun;
 
-  await saveSimpleRunToDb(run);
-  return run;
+  const storedRun = await getSimpleRunFromDb(run.id);
+  const controlledRun = storedRun?.pauseRequestedAt && (run.status === "queued" || run.status === "running")
+    ? { ...run, pauseRequestedAt: storedRun.pauseRequestedAt, pauseReason: storedRun.pauseReason }
+    : run;
+  const nextRun = controlledRun.completedAt || ["completed", "partial", "failed"].includes(controlledRun.status)
+    ? clearSimpleRunCookieEnvelope(controlledRun)
+    : controlledRun;
+  await saveSimpleRunToDb(nextRun);
+  return nextRun;
+}
+
+function clearSimpleRunCookieEnvelope(run: SimpleRun): SimpleRun {
+  if (!run.input.cookieCiphertext) return run;
+  return {
+    ...run,
+    input: {
+      ...run.input,
+      cookieCiphertext: undefined,
+    },
+  };
 }
 
 function createRunUpdateQueue(initialRun: SimpleRun) {

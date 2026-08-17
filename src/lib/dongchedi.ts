@@ -12,19 +12,53 @@ type SourceFetchOptions = {
 };
 
 const dongchediBaseUrl = "https://www.dongchedi.com";
+const allowedDongchediHosts = new Set(["dongchedi.com", "www.dongchedi.com"]);
 
 export async function fetchDongchediItemBySource(value: string, options: SourceFetchOptions = {}): Promise<NormalizedSourceItem[]> {
   const sourceId = extractDongchediArticleId(value);
   if (!sourceId) throw new Error("Unsupported Dongchedi article id or URL");
 
   const sourceUrl = buildDongchediArticleUrl(sourceId);
-  const html = await requestText(sourceUrl, { cookie: options.cookie });
+  const html = await fetchDongchediHtml(sourceUrl, { cookie: options.cookie });
   const item = normalizeDongchediArticle(sourceId, sourceUrl, html);
   return cacheCrawledMedia([item], { enableVideoTranscription: options.enableVideoTranscription === true });
 }
 
 export function buildDongchediArticleUrl(sourceId: string) {
   return `${dongchediBaseUrl}/ugc/article/${sourceId}`;
+}
+
+export function isDongchediAccessChallenge(html: string) {
+  return /byted_acrawler|__ac_signature|window\.location\.reload|login-required|<title[^>]*>\s*(?:登录|用户登录|安全验证)[^<]*<\/title>|<(?:form|main)[^>]+(?:id|class)=["'][^"']*(?:login-page|passport-login)/i.test(html);
+}
+
+export async function fetchDongchediHtml(url: string, options: { cookie?: string; maxBytes?: number } = {}) {
+  const parsed = validateDongchediRequestUrl(url);
+  for (let attempt = 1; attempt <= 2; attempt += 1) {
+    try {
+      return await requestText(parsed.toString(), options);
+    } catch (error) {
+      if (attempt === 2 || !isTransientDongchediNetworkError(error)) throw error;
+    }
+  }
+  throw new Error("Dongchedi request failed after bounded retries.");
+}
+
+export function validateDongchediRequestUrl(url: string) {
+  const parsed = new URL(url);
+  if (parsed.protocol !== "https:" || !allowedDongchediHosts.has(parsed.hostname.toLowerCase())) {
+    throw new Error("Dongchedi request host is not allowed.");
+  }
+  return parsed;
+}
+
+export function resolveDongchediRedirectUrl(location: string, baseUrl: string) {
+  const redirectUrl = new URL(location, baseUrl).toString();
+  return validateDongchediRequestUrl(redirectUrl).toString();
+}
+
+function isTransientDongchediNetworkError(error: unknown) {
+  return /request timeout|ECONNRESET|ETIMEDOUT|EAI_AGAIN|socket hang up/i.test(error instanceof Error ? error.message : String(error));
 }
 
 export function extractDongchediArticleId(value: string) {
@@ -304,7 +338,7 @@ function resolvePublishedAt(record: JsonRecord) {
   return Number.isNaN(parsed) ? undefined : new Date(parsed).toISOString();
 }
 
-function requestText(url: string, options: { cookie?: string } = {}, redirectCount = 0): Promise<string> {
+function requestText(url: string, options: { cookie?: string; maxBytes?: number } = {}, redirectCount = 0): Promise<string> {
   return new Promise((resolve, reject) => {
     if (redirectCount > 4) {
       reject(new Error("too many redirects"));
@@ -326,21 +360,31 @@ function requestText(url: string, options: { cookie?: string } = {}, redirectCou
       (res) => {
         const status = res.statusCode || 0;
         if (status >= 300 && status < 400 && res.headers.location) {
-          const redirectUrl = new URL(res.headers.location, parsedUrl).toString();
+          let redirectUrl: string;
+          try {
+            redirectUrl = resolveDongchediRedirectUrl(res.headers.location, parsedUrl.toString());
+          } catch (error) {
+            res.resume();
+            reject(error);
+            return;
+          }
           res.resume();
           requestText(redirectUrl, options, redirectCount + 1).then(resolve).catch(reject);
           return;
         }
         if (status < 200 || status >= 300) {
+          const retryAfter = typeof res.headers["retry-after"] === "string" ? `; Retry-After ${res.headers["retry-after"]}` : "";
           res.resume();
-          reject(new Error(`HTTP ${status}`));
+          reject(new Error(`HTTP ${status}${retryAfter}`));
           return;
         }
         res.setEncoding("utf8");
         let body = "";
+        let bodyBytes = 0;
         res.on("data", (chunk: string) => {
           body += chunk;
-          if (body.length > 12 * 1024 * 1024) req.destroy(new Error("response too large"));
+          bodyBytes += Buffer.byteLength(chunk);
+          if (bodyBytes > (options.maxBytes || 12 * 1024 * 1024)) req.destroy(new Error("response too large"));
         });
         res.on("end", () => resolve(body));
         res.on("error", reject);
@@ -446,7 +490,7 @@ function isLikelyVideoUrl(url: string) {
 }
 
 function isDongchediAntiBotChallenge(html: string) {
-  return /byted_acrawler|__ac_signature|window\.location\.reload/i.test(html);
+  return isDongchediAccessChallenge(html);
 }
 
 function htmlDecode(value: string) {

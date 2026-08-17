@@ -20,6 +20,8 @@ import {
   Maximize2,
   Moon,
   Network,
+  Pause,
+  Play,
   RefreshCw,
   Search,
   Send,
@@ -59,7 +61,7 @@ import {
   type WorkspacePromptSettings,
 } from "@/lib/types";
 
-type SimpleSourceMode = "keyword" | "links" | "feishu" | "viral" | "original";
+type SimpleSourceMode = "keyword" | "links" | "feishu" | "viral" | "original" | "dongchedi_page";
 type LinkImportPlatform = SourceLinkPlatform | "auto";
 
 type AccountSessionResponse = {
@@ -170,6 +172,7 @@ export default function Home() {
   const [simplePlatforms, setSimplePlatforms] = useState<CrawlPlatform[]>(crawlPlatforms.map((item) => item.value));
   const [simpleLinkPlatform, setSimpleLinkPlatform] = useState<LinkImportPlatform>("auto");
   const [simpleLinkText, setSimpleLinkText] = useState("");
+  const [simplePageUrl, setSimplePageUrl] = useState("https://www.dongchedi.com/news/industry/2");
   const [cookie, setCookie] = useState("");
   const [simpleVideoFrameOriginalReference, setSimpleVideoFrameOriginalReference] = useState(true);
   const [simpleUseComfyUiKlein, setSimpleUseComfyUiKlein] = useState(defaultSimpleRunMediaSettings.useComfyUiKlein);
@@ -191,6 +194,7 @@ export default function Home() {
   const [message, setMessage] = useState("");
   const [busy, setBusy] = useState<"settings" | "simpleRun" | null>(null);
   const [terminatingSimpleRunId, setTerminatingSimpleRunId] = useState("");
+  const [controllingSimpleRunId, setControllingSimpleRunId] = useState("");
   const [preview, setPreview] = useState<PreviewState>(null);
 
   const activeSimpleRun = useMemo(
@@ -420,6 +424,10 @@ export default function Home() {
     if (value === "links") setSimpleTargetCount(Math.max(1, Math.min(splitLines(simpleLinkText).length || 20, 500)));
     if (value === "feishu") setSimpleTargetCount(Math.max(1, Math.min(splitFeishuTaskNumbers(simpleFeishuTaskText).length || 20, 500)));
     if (value === "viral" || value === "original") setSimpleTargetCount(1);
+    if (value === "dongchedi_page") {
+      setSimpleTargetCount(30);
+      setSimpleWriteFeishu(false);
+    }
   }
 
   function updateSimpleKeyword(value: string) {
@@ -478,6 +486,8 @@ export default function Home() {
     const links = splitLines(simpleLinkText);
     const feishuTaskNumbers = splitFeishuTaskNumbers(simpleFeishuTaskText);
     const keyword = simpleKeyword.trim();
+    const pageUrl = simplePageUrl.trim();
+    if (sourceMode === "dongchedi_page" && !pageUrl) return setMessage("Please enter a Dongchedi category URL");
     const viralUrl = simpleViralUrl.trim();
     const originalPrompt = simpleOriginalPrompt.trim();
     if (sourceMode !== "feishu" && !keyword) return setMessage("请先输入关键词");
@@ -523,12 +533,13 @@ export default function Home() {
         body: JSON.stringify({
           sourceMode,
           keyword: sourceMode === "feishu" ? "飞书导入" : keyword,
-          targetCount: sourceMode === "feishu" ? Math.min(simpleTargetCount, feishuTaskNumbers.length) : sourceMode === "viral" || sourceMode === "original" ? 1 : sourceMode === "links" ? Math.min(simpleTargetCount, links.length) : simpleTargetCount,
+          targetCount: sourceMode === "feishu" ? Math.min(simpleTargetCount, feishuTaskNumbers.length) : sourceMode === "viral" || sourceMode === "original" ? 1 : sourceMode === "links" ? Math.min(simpleTargetCount, links.length) : sourceMode === "dongchedi_page" ? Math.min(simpleTargetCount, 30) : simpleTargetCount,
           platforms: sourceMode === "keyword" ? simplePlatforms : [],
           links: sourceMode === "links" ? links : undefined,
+          pageUrl: sourceMode === "dongchedi_page" ? pageUrl : undefined,
           linkPlatform: sourceMode === "links" ? simpleLinkPlatform : undefined,
-          cookie: sourceMode === "links" && simpleLinkPlatform === "dongchedi" ? cookie : undefined,
-          videoFrameOriginalReference: sourceMode === "links" ? simpleVideoFrameOriginalReference : undefined,
+          cookie: sourceMode === "dongchedi_page" || (sourceMode === "links" && simpleLinkPlatform === "dongchedi") ? cookie : undefined,
+          videoFrameOriginalReference: sourceMode === "links" || sourceMode === "dongchedi_page" ? simpleVideoFrameOriginalReference : undefined,
           useComfyUiKlein: simpleUseComfyUiKlein,
           directOriginalReference: sourceMode === "viral" || sourceMode === "original" ? undefined : simpleDirectOriginalReference,
           includeSourceVideo: simpleIncludeSourceVideo,
@@ -578,6 +589,28 @@ export default function Home() {
       setMessage(error instanceof Error ? error.message : "强制终止任务失败");
     } finally {
       setTerminatingSimpleRunId("");
+      await loadSimpleRuns(runId);
+    }
+  }
+
+  async function controlSimpleRunFromUi(runId: string, action: "pause" | "resume") {
+    if (!runId || controllingSimpleRunId) return;
+    setControllingSimpleRunId(runId);
+    try {
+      const res = await fetch("/api/simple/runs", {
+        method: "PATCH",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ runId, action, cookie: action === "resume" && cookie.trim() ? cookie : undefined }),
+      });
+      const data = (await res.json()) as { run?: SimpleRun; error?: string };
+      if (!res.ok || !data.run) throw new Error(data.error || `Simple run ${action} failed`);
+      setSimpleRuns((current) => [data.run!, ...current.filter((item) => item.id !== data.run!.id)]);
+      setActiveSimpleRunId(data.run.id);
+      setMessage(action === "pause" ? "已请求在当前文章完成后暂停。" : "任务已继续执行。");
+    } catch (error) {
+      setMessage(error instanceof Error ? error.message : `Simple run ${action} failed`);
+    } finally {
+      setControllingSimpleRunId("");
       await loadSimpleRuns(runId);
     }
   }
@@ -650,6 +683,7 @@ export default function Home() {
             selectedPlatforms={simplePlatforms}
             linkText={simpleLinkText}
             linkPlatform={simpleLinkPlatform}
+            pageUrl={simplePageUrl}
             cookie={cookie}
             videoFrameOriginalReference={simpleVideoFrameOriginalReference}
             useComfyUiKlein={simpleUseComfyUiKlein}
@@ -676,6 +710,7 @@ export default function Home() {
             activeRun={activeSimpleRun}
             busy={busy === "simpleRun"}
             terminatingRunId={terminatingSimpleRunId}
+            controllingRunId={controllingSimpleRunId}
             settingsBusy={busy === "settings"}
             onSourceModeChange={changeSimpleSourceMode}
             onKeywordChange={updateSimpleKeyword}
@@ -683,6 +718,7 @@ export default function Home() {
             onTogglePlatform={toggleSimplePlatform}
             onLinkTextChange={updateSimpleLinkText}
             onLinkPlatformChange={setSimpleLinkPlatform}
+            onPageUrlChange={setSimplePageUrl}
             onCookieChange={setCookie}
             onVideoFrameOriginalReferenceChange={setSimpleVideoFrameOriginalReference}
             onUseComfyUiKleinChange={(value) => updateSimpleRunMediaSettingsDraft({ useComfyUiKlein: value })}
@@ -704,6 +740,7 @@ export default function Home() {
             onSaveSettings={() => saveWorkspaceSettingsPatch(workspaceSettings)}
             onStart={startSimpleRun}
             onTerminateRun={terminateSimpleRunFromUi}
+            onControlRun={controlSimpleRunFromUi}
             onSelectRun={setActiveSimpleRunId}
           />
         </div>
@@ -725,6 +762,7 @@ function CompactWorkspace(props: {
   selectedPlatforms: CrawlPlatform[];
   linkText: string;
   linkPlatform: LinkImportPlatform;
+  pageUrl: string;
   cookie: string;
   videoFrameOriginalReference: boolean;
   useComfyUiKlein: boolean;
@@ -751,6 +789,7 @@ function CompactWorkspace(props: {
   activeRun: SimpleRun | null;
   busy: boolean;
   terminatingRunId: string;
+  controllingRunId: string;
   settingsBusy: boolean;
   onSourceModeChange: (value: SimpleSourceMode) => void;
   onKeywordChange: (value: string) => void;
@@ -758,6 +797,7 @@ function CompactWorkspace(props: {
   onTogglePlatform: (value: CrawlPlatform) => void;
   onLinkTextChange: (value: string) => void;
   onLinkPlatformChange: (value: LinkImportPlatform) => void;
+  onPageUrlChange: (value: string) => void;
   onCookieChange: (value: string) => void;
   onVideoFrameOriginalReferenceChange: (value: boolean) => void;
   onUseComfyUiKleinChange: (value: boolean) => void;
@@ -779,11 +819,12 @@ function CompactWorkspace(props: {
   onSaveSettings: () => void;
   onStart: () => void;
   onTerminateRun: (runId: string) => void;
+  onControlRun: (runId: string, action: "pause" | "resume") => void;
   onSelectRun: (runId: string) => void;
 }) {
-  const { sourceMode, keyword, targetCount, selectedPlatforms, linkText, linkPlatform, cookie, videoFrameOriginalReference, useComfyUiKlein, directOriginalReference, includeSourceVideo, enableVideoTranscription, generateImages, writeFeishu, viralImitateImages, viralMaterialFolders, activeViralMaterialFolderId, viralMaterialCandidates, selectedViralMaterialAssetIds, linkCount, feishuTaskText, feishuTaskCount, viralUrl, originalPrompt, originalUseWebSearch, config, materialPaths, settings, runs, activeRun, busy, terminatingRunId, settingsBusy } = props;
-  const sourceDetail = sourceMode === "links" ? `链接 ${linkCount} 条` : sourceMode === "feishu" ? `飞书 ${feishuTaskCount} 条` : sourceMode === "viral" ? "爆款仿写 1 条" : sourceMode === "original" ? "原创 1 条" : `平台 ${selectedPlatforms.length} 个`;
-  const canStart = sourceMode === "feishu" ? feishuTaskCount > 0 : sourceMode === "links" ? Boolean(keyword.trim()) && linkCount > 0 : sourceMode === "viral" ? Boolean(keyword.trim() && viralUrl.trim()) && (!generateImages || !viralImitateImages || selectedViralMaterialAssetIds.length > 0) : sourceMode === "original" ? Boolean(keyword.trim() && originalPrompt.trim()) && (!originalUseWebSearch || config?.openaiTextEndpoint === "responses") : Boolean(keyword.trim() && selectedPlatforms.length);
+  const { sourceMode, keyword, targetCount, selectedPlatforms, linkText, linkPlatform, pageUrl, cookie, videoFrameOriginalReference, useComfyUiKlein, directOriginalReference, includeSourceVideo, enableVideoTranscription, generateImages, writeFeishu, viralImitateImages, viralMaterialFolders, activeViralMaterialFolderId, viralMaterialCandidates, selectedViralMaterialAssetIds, linkCount, feishuTaskText, feishuTaskCount, viralUrl, originalPrompt, originalUseWebSearch, config, materialPaths, settings, runs, activeRun, busy, terminatingRunId, controllingRunId, settingsBusy } = props;
+  const sourceDetail = sourceMode === "dongchedi_page" ? `懂车帝栏目 · ${targetCount} 条` : sourceMode === "links" ? `链接 ${linkCount} 条` : sourceMode === "feishu" ? `飞书 ${feishuTaskCount} 条` : sourceMode === "viral" ? "爆款仿写 1 条" : sourceMode === "original" ? "原创 1 条" : `平台 ${selectedPlatforms.length} 个`;
+  const canStart = sourceMode === "dongchedi_page" ? Boolean(keyword.trim() && pageUrl.trim()) : sourceMode === "feishu" ? feishuTaskCount > 0 : sourceMode === "links" ? Boolean(keyword.trim()) && linkCount > 0 : sourceMode === "viral" ? Boolean(keyword.trim() && viralUrl.trim()) && (!generateImages || !viralImitateImages || selectedViralMaterialAssetIds.length > 0) : sourceMode === "original" ? Boolean(keyword.trim() && originalPrompt.trim()) && (!originalUseWebSearch || config?.openaiTextEndpoint === "responses") : Boolean(keyword.trim() && selectedPlatforms.length);
 
   return (
     <section className="simple-workspace simple-workspace-compact">
@@ -800,12 +841,15 @@ function CompactWorkspace(props: {
             ] as Array<[SimpleSourceMode, string, ReactNode]>).map(([value, label, icon]) => (
               <button key={value} className={`soft-button flex h-10 items-center justify-center gap-2 text-xs font-semibold ${sourceMode === value ? "platform-card-active" : ""}`} type="button" aria-pressed={sourceMode === value} onClick={() => props.onSourceModeChange(value)} disabled={busy || settingsBusy}>{icon}{label}</button>
             ))}
+            <button className={`soft-button flex h-10 items-center justify-center gap-2 text-xs font-semibold ${sourceMode === "dongchedi_page" ? "platform-card-active" : ""}`} type="button" aria-pressed={sourceMode === "dongchedi_page"} onClick={() => props.onSourceModeChange("dongchedi_page")} disabled={busy || settingsBusy}><FileText className="h-3.5 w-3.5" />懂车帝栏目页</button>
           </div>
 
           {sourceMode !== "feishu" ? <label><FieldLabel label={sourceMode === "original" ? "写入飞书车型 / 关键词" : "关键词 / 内容池项目"} /><input className="field" value={keyword} onChange={(event) => props.onKeywordChange(event.target.value)} disabled={busy || settingsBusy} /></label> : null}
-          <label><FieldLabel label={sourceMode === "keyword" ? "抓取数量" : "生产上限"} /><input className="field" type="number" min={1} max={500} value={sourceMode === "viral" || sourceMode === "original" ? 1 : targetCount} onChange={(event) => props.onTargetCountChange(Number(event.target.value))} disabled={sourceMode === "viral" || sourceMode === "original" || busy || settingsBusy} /></label>
+          <label><FieldLabel label={sourceMode === "keyword" ? "抓取数量" : "生产上限"} /><input className="field" type="number" min={1} max={sourceMode === "dongchedi_page" ? 30 : 500} value={sourceMode === "viral" || sourceMode === "original" ? 1 : targetCount} onChange={(event) => props.onTargetCountChange(Number(event.target.value))} disabled={sourceMode === "viral" || sourceMode === "original" || busy || settingsBusy} /></label>
 
-          {sourceMode === "keyword" ? (
+          {sourceMode === "dongchedi_page" ? (
+            <div className="simple-link-panel"><FieldLabel label="懂车帝栏目页 URL" /><input className="field" value={pageUrl} onChange={(event) => props.onPageUrlChange(event.target.value)} placeholder="https://www.dongchedi.com/news/industry/2" disabled={busy || settingsBusy} /><FieldLabel label="Cookie（可选）" /><textarea className="field mt-2 min-h-16" value={cookie} onChange={(event) => props.onCookieChange(event.target.value)} placeholder="仅加密用于当前任务" disabled={busy || settingsBusy} /><p className="mt-2 text-[11px] text-white/45">当前页最多 30 篇，文章按顺序逐篇抓取和重构。</p></div>
+          ) : sourceMode === "keyword" ? (
             <div><FieldLabel label="采集平台" /><div className="grid grid-cols-2 gap-2">{crawlPlatforms.map((item) => <button key={item.value} className={`platform-card soft-button flex h-12 items-center gap-2 px-3 ${selectedPlatforms.includes(item.value) ? "platform-card-active" : ""}`} type="button" onClick={() => props.onTogglePlatform(item.value)} disabled={busy || settingsBusy}><span className={`h-2.5 w-2.5 rounded-full ${item.accent}`} /><span className="truncate text-xs font-semibold">{item.label}</span></button>)}</div></div>
           ) : sourceMode === "links" ? (
             <div className="simple-link-panel"><FieldLabel label={`批量链接 · ${linkCount} 条`} /><textarea className="field simple-link-textarea" value={linkText} onChange={(event) => props.onLinkTextChange(event.target.value)} disabled={busy || settingsBusy} /><select className="field mt-3" value={linkPlatform} onChange={(event) => props.onLinkPlatformChange(event.target.value as LinkImportPlatform)} disabled={busy || settingsBusy}><option value="auto">自动识别</option>{linkImportPlatforms.map((item) => <option key={item.value} value={item.value}>{item.label}</option>)}</select>{linkPlatform === "dongchedi" ? <textarea className="field mt-3 min-h-16" value={cookie} onChange={(event) => props.onCookieChange(event.target.value)} placeholder="Cookie" /> : null}<CheckRow checked={videoFrameOriginalReference} disabled={busy || settingsBusy} onChange={props.onVideoFrameOriginalReferenceChange}>视频高光帧原图引用</CheckRow></div>
@@ -822,29 +866,43 @@ function CompactWorkspace(props: {
             {sourceMode !== "viral" && sourceMode !== "original" ? <><CheckRow checked={useComfyUiKlein} disabled={busy || settingsBusy} onChange={props.onUseComfyUiKleinChange}>启用本地 Klein 模型</CheckRow><CheckRow checked={directOriginalReference} disabled={busy || settingsBusy} onChange={props.onDirectOriginalReferenceChange}>直接引用原图</CheckRow><CheckRow checked={includeSourceVideo} disabled={busy || settingsBusy} onChange={props.onIncludeSourceVideoChange}>引用源视频素材</CheckRow><CheckRow checked={enableVideoTranscription} disabled={busy || settingsBusy} onChange={props.onEnableVideoTranscriptionChange}>启用视频音频转文字</CheckRow></> : null}
           </div>
 
-          <label className="simple-write-feishu-row"><input className="mt-1 h-4 w-4 accent-[var(--mint)]" type="checkbox" checked={writeFeishu} onChange={(event) => props.onWriteFeishuChange(event.target.checked)} disabled={busy || settingsBusy} /><span><span className="block text-xs font-black text-white">写入飞书</span><span className="mt-1 block text-[11px] text-white/50">{writeFeishu ? "生成后自动审查并排队写入。" : "只生成本地草稿。"}</span></span></label>
+          {sourceMode !== "dongchedi_page" ? <label className="simple-write-feishu-row"><input className="mt-1 h-4 w-4 accent-[var(--mint)]" type="checkbox" checked={writeFeishu} onChange={(event) => props.onWriteFeishuChange(event.target.checked)} disabled={busy || settingsBusy} /><span><span className="block text-xs font-black text-white">写入飞书</span><span className="mt-1 block text-[11px] text-white/50">{writeFeishu ? "生成后自动审查并排队写入。" : "只生成本地草稿。"}</span></span></label> : null}
 
           <div className="simple-policy-preview"><div className="flex items-center justify-between gap-3"><PanelTitle icon={<Lightbulb className="h-4 w-4" />} title="提示词与图片策略" /><span className="status-badge text-[10px] text-[var(--mint)]">可自定义</span></div><div className="simple-prompt-stack mt-3"><label><FieldLabel label="文字内容提示词" /><textarea className="field simple-prompt-textarea" aria-label="精简版文字内容提示词" value={settings.textInstruction} onChange={(event) => props.onSettingsChange({ textInstruction: event.target.value })} disabled={busy || settingsBusy} /></label><ImageStrategyPromptEditor settings={settings} disabled={busy || settingsBusy} onChange={props.onSettingsChange} /><label><FieldLabel label="图片生成尺寸" /><ImageSizeInput className="field" value={settings.imageSize} onChange={(value) => props.onSettingsChange({ imageSize: value })} disabled={busy || settingsBusy} ariaLabel="精简版图片生成尺寸" listId="compact-image-size-presets" /></label></div><div className="mt-3 flex flex-wrap gap-2"><span className="status-badge text-[10px] text-white/52">素材 {materialPaths.length} 个</span><span className="status-badge text-[10px] text-white/52">{settings.imageQuality}</span></div><button className="soft-button mt-3 flex h-10 w-full items-center justify-center gap-2 text-xs" type="button" onClick={props.onSaveSettings} disabled={busy || settingsBusy}>{settingsBusy ? <Loader2 className="h-4 w-4 animate-spin" /> : <Check className="h-4 w-4" />}保存当前策略</button></div>
 
           <button className="primary-button flex h-12 w-full items-center justify-center gap-2" type="button" onClick={props.onStart} disabled={busy || settingsBusy || !canStart}>{busy ? <Loader2 className="h-4 w-4 animate-spin" /> : <Send className="h-4 w-4" />}{busy ? "正在自动执行" : writeFeishu ? "开始生产并写入飞书" : "开始生产待审查内容"}</button>
         </div>
       </aside>
-      <SimpleOverallProgressBar runs={runs} activeRun={activeRun} busy={busy} terminatingRunId={terminatingRunId} sourceDetail={sourceDetail} targetCount={targetCount} onTerminateRun={props.onTerminateRun} onSelectRun={props.onSelectRun} />
+      <div className="min-w-0 space-y-3"><SimpleOverallProgressBar runs={runs} activeRun={activeRun} busy={busy} terminatingRunId={terminatingRunId} controllingRunId={controllingRunId} sourceDetail={sourceDetail} targetCount={targetCount} onTerminateRun={props.onTerminateRun} onControlRun={props.onControlRun} onSelectRun={props.onSelectRun} /><DongchediPageRunResults run={activeRun} /></div>
     </section>
   );
+}
+
+function DongchediPageRunResults({ run }: { run: SimpleRun | null }) {
+  if (run?.input.sourceMode !== "dongchedi_page" || !run.linkResults?.length) return null;
+  const counts = run.linkResults.reduce((result, item) => ({ ...result, [item.status]: (result[item.status] || 0) + 1 }), {} as Record<string, number>);
+  const current = run.linkResults.find((item) => item.status === "running");
+  return <section className="glass ops-panel rounded-[8px] p-3"><div className="flex items-center justify-between gap-3"><div className="min-w-0"><p className="text-xs font-black">逐篇处理结果</p>{current ? <p className="mt-1 truncate text-[10px] text-white/50">当前：{current.title || current.url}</p> : null}</div><span className="status-badge text-[10px] text-white/55">发现 {run.discoveredCount || run.linkResults.length} · 目标 {run.input.targetCount}</span></div><div className="mt-2 flex flex-wrap gap-1"><span className="status-badge text-[10px] text-[var(--mint)]">草稿 {counts.draft || 0}</span><span className="status-badge text-[10px] text-white/55">过滤 {counts.filtered || 0}</span><span className="status-badge text-[10px] text-white/55">重复 {counts.duplicate || 0}</span><span className="status-badge text-[10px] text-[var(--rose)]">失败 {counts.failed || 0}</span>{run.pauseReason ? <span className="status-badge text-[10px] text-[var(--amber)]">{run.pauseReason}</span> : null}</div><div className="thin-scrollbar mt-3 max-h-56 space-y-2 overflow-y-auto">{run.linkResults.map((result) => <div key={result.url} className="border-b border-white/8 pb-2 last:border-0"><div className="flex items-center justify-between gap-2"><a className="min-w-0 truncate text-[11px] font-semibold hover:text-[var(--cyan)]" href={result.url} target="_blank" rel="noreferrer">{result.title || result.sourceId || result.url}</a><span className="status-badge shrink-0 text-[10px] text-white/55">{result.draftStatus || result.status}</span></div>{result.error ? <p className="mt-1 line-clamp-2 text-[10px] text-[var(--rose)]">{result.error}</p> : null}</div>)}</div></section>;
 }
 
 function ViralMaterialPicker({ folders, activeFolderId, candidates, selectedAssetIds, disabled, onToggleFolder, onToggleAsset, onPreview, onClear }: { folders: ViralMaterialFolderCandidate[]; activeFolderId: string; candidates: ViralMaterialCandidate[]; selectedAssetIds: string[]; disabled: boolean; onToggleFolder: (id: string) => void; onToggleAsset: (assetId: string) => void; onPreview: (assetId: string) => void; onClear: () => void }) {
   return <div className="mt-3"><div className="flex items-center justify-between gap-2"><FieldLabel label={`车型素材 ${selectedAssetIds.length}/${maxSimpleImageTasksPerPost}`} /><button className="soft-button h-8 px-2 text-[10px]" type="button" onClick={onClear} disabled={disabled || !selectedAssetIds.length}>清空</button></div><div className="grid grid-cols-2 gap-2">{folders.map((folder) => <button key={folder.id} className={`soft-button h-10 px-2 text-xs ${activeFolderId === folder.id ? "platform-card-active" : ""}`} type="button" onClick={() => onToggleFolder(folder.id)} disabled={disabled}><FolderOpen className="mr-1 inline h-3.5 w-3.5" />{folder.name} {folder.selectedCount}/{folder.imageCount}</button>)}</div><div className="thin-scrollbar mt-3 max-h-56 space-y-2 overflow-y-auto">{candidates.length ? candidates.map((asset) => { const selected = selectedAssetIds.includes(asset.id); return <div key={asset.id} className={`flex items-center gap-2 rounded-[8px] border p-2 ${selected ? "border-[var(--mint)] bg-[var(--mint)]/10" : "border-white/10 bg-white/[0.035]"}`}><button className="min-w-0 flex-1 text-left" type="button" onClick={() => onToggleAsset(asset.id)} disabled={disabled}><span className="flex items-center gap-2"><ImageIcon className="h-3.5 w-3.5" /><span className="truncate text-xs font-black">{asset.name}</span></span></button><button className="soft-button grid h-8 w-8 place-items-center" type="button" onClick={() => onPreview(asset.id)} aria-label="预览车型图"><Maximize2 className="h-3.5 w-3.5" /></button></div>; }) : <div className="empty-state min-h-0 p-4 text-xs text-white/50">暂无可选图片，请到车型图库导入。</div>}</div></div>;
 }
 
-function SimpleOverallProgressBar({ runs, activeRun, busy, terminatingRunId, sourceDetail, targetCount, onTerminateRun, onSelectRun }: { runs: SimpleRun[]; activeRun: SimpleRun | null; busy: boolean; terminatingRunId: string; sourceDetail: string; targetCount: number; onTerminateRun: (runId: string) => void; onSelectRun: (runId: string) => void }) {
+function SimpleOverallProgressBar({ runs, activeRun, busy, terminatingRunId, controllingRunId, sourceDetail, targetCount, onTerminateRun, onControlRun, onSelectRun }: { runs: SimpleRun[]; activeRun: SimpleRun | null; busy: boolean; terminatingRunId: string; controllingRunId: string; sourceDetail: string; targetCount: number; onTerminateRun: (runId: string) => void; onControlRun: (runId: string, action: "pause" | "resume") => void; onSelectRun: (runId: string) => void }) {
   const progressRuns = buildSimpleOverallProgressRuns(runs, activeRun);
   const singleRun = progressRuns[0] || activeRun;
   const isMultiRun = progressRuns.length > 1;
   const summaries = progressRuns.map((run) => buildSimpleOverallProgressSummary(run, false, sourceDetail, run.input.targetCount));
   const summary = isMultiRun ? { title: `${progressRuns.length} 个任务进度`, label: summaries.some((item) => item.tone === "running") ? "队列正在执行" : "最近任务", detail: summaries[0]?.detail || sourceDetail, value: summaries.length ? Math.round(summaries.reduce((sum, item) => sum + item.value, 0) / summaries.length) : 0, tone: summaries.some((item) => item.tone === "error") ? "error" : summaries.some((item) => item.tone === "running") ? "running" : "success", crawled: summaries.reduce((sum, item) => sum + item.crawled, 0), produced: summaries.reduce((sum, item) => sum + item.produced, 0), published: summaries.reduce((sum, item) => sum + item.published, 0) } : buildSimpleOverallProgressSummary(singleRun, busy, sourceDetail, targetCount);
-  return <section className={`simple-overall-progress glass-strong simple-overall-progress-${summary.tone} ${isMultiRun ? "simple-overall-progress-multi" : ""}`} aria-label="精简版整体进度"><div className="simple-overall-progress-head"><div className="flex min-w-0 items-center gap-3"><span className="simple-overall-progress-icon">{summary.tone === "running" ? <Loader2 className="h-4 w-4 animate-spin" /> : summary.tone === "error" ? <X className="h-4 w-4" /> : summary.tone === "success" ? <Check className="h-4 w-4" /> : <Clock3 className="h-4 w-4" />}</span><div className="min-w-0"><p className="truncate text-sm font-black text-white">{summary.title}</p><p className="mt-1 truncate text-[11px] text-white/52">{summary.label}</p></div></div><div className="simple-overall-side">{!isMultiRun && singleRun && canForceTerminateSimpleRun(singleRun) ? <button className="simple-force-terminate-button" type="button" onClick={() => onTerminateRun(singleRun.id)} disabled={terminatingRunId === singleRun.id}><X className="h-3.5 w-3.5" />强制终止</button> : null}<div className="simple-overall-metrics"><span><strong>{summary.crawled}</strong><em>抓取</em></span><span><strong>{summary.produced}</strong><em>生成</em></span><span><strong>{summary.published}</strong><em>发布</em></span></div></div></div>{isMultiRun ? <div className="simple-overall-run-list thin-scrollbar">{progressRuns.map((run) => { const item = buildSimpleOverallProgressSummary(run, false, sourceDetail, run.input.targetCount); return <article key={run.id} className={`simple-overall-run-row ${run.id === activeRun?.id ? "simple-overall-run-row-active" : ""}`}><button className="simple-overall-run-select" type="button" onClick={() => onSelectRun(run.id)}><span className="simple-overall-run-heading"><span className="simple-overall-run-title">{run.input.keyword || run.id}</span><span className={`status-badge text-[10px] ${getSimpleRunStatusClass(run.status)}`}>{formatSimpleRunStatus(run.status)}</span></span><span className="simple-overall-run-track"><span style={{ width: `${item.value}%` }} /></span></button><span className="simple-overall-run-percent">{item.value}%</span>{canForceTerminateSimpleRun(run) ? <button className="simple-overall-run-stop" type="button" onClick={() => onTerminateRun(run.id)} aria-label={`强制终止 ${run.input.keyword || run.id}`}><X className="h-3.5 w-3.5" /></button> : null}</article>; })}</div> : null}<div className="simple-overall-track" role="progressbar" aria-valuemin={0} aria-valuemax={100} aria-valuenow={summary.value}><span style={{ width: `${summary.value}%` }} /></div><div className="simple-overall-progress-foot"><span className="truncate">{summary.detail}</span><span className="font-black">{summary.value}%</span></div></section>;
+  return <section className={`simple-overall-progress glass-strong simple-overall-progress-${summary.tone} ${isMultiRun ? "simple-overall-progress-multi" : ""}`} aria-label="精简版整体进度"><div className="simple-overall-progress-head"><div className="flex min-w-0 items-center gap-3"><span className="simple-overall-progress-icon">{summary.tone === "running" ? <Loader2 className="h-4 w-4 animate-spin" /> : summary.tone === "error" ? <X className="h-4 w-4" /> : summary.tone === "success" ? <Check className="h-4 w-4" /> : <Clock3 className="h-4 w-4" />}</span><div className="min-w-0"><p className="truncate text-sm font-black text-white">{summary.title}</p><p className="mt-1 truncate text-[11px] text-white/52">{summary.label}</p></div></div><div className="simple-overall-side">{!isMultiRun && singleRun ? <SimpleRunPauseControl run={singleRun} busy={controllingRunId === singleRun.id} onControl={onControlRun} /> : null}{!isMultiRun && singleRun && canForceTerminateSimpleRun(singleRun) ? <button className="simple-force-terminate-button" type="button" onClick={() => onTerminateRun(singleRun.id)} disabled={terminatingRunId === singleRun.id}><X className="h-3.5 w-3.5" />强制终止</button> : null}<div className="simple-overall-metrics"><span><strong>{summary.crawled}</strong><em>抓取</em></span><span><strong>{summary.produced}</strong><em>生成</em></span><span><strong>{summary.published}</strong><em>发布</em></span></div></div></div>{isMultiRun ? <div className="simple-overall-run-list thin-scrollbar">{progressRuns.map((run) => { const item = buildSimpleOverallProgressSummary(run, false, sourceDetail, run.input.targetCount); return <article key={run.id} className={`simple-overall-run-row ${run.id === activeRun?.id ? "simple-overall-run-row-active" : ""}`}><button className="simple-overall-run-select" type="button" onClick={() => onSelectRun(run.id)}><span className="simple-overall-run-heading"><span className="simple-overall-run-title">{run.input.keyword || run.id}</span><span className={`status-badge text-[10px] ${getSimpleRunStatusClass(run.status)}`}>{formatSimpleRunStatus(run.status)}</span></span><span className="simple-overall-run-track"><span style={{ width: `${item.value}%` }} /></span></button><span className="simple-overall-run-percent">{item.value}%</span><SimpleRunPauseControl run={run} busy={controllingRunId === run.id} compact onControl={onControlRun} />{canForceTerminateSimpleRun(run) ? <button className="simple-overall-run-stop" type="button" onClick={() => onTerminateRun(run.id)} aria-label={`强制终止 ${run.input.keyword || run.id}`}><X className="h-3.5 w-3.5" /></button> : null}</article>; })}</div> : null}<div className="simple-overall-track" role="progressbar" aria-valuemin={0} aria-valuemax={100} aria-valuenow={summary.value}><span style={{ width: `${summary.value}%` }} /></div><div className="simple-overall-progress-foot"><span className="truncate">{summary.detail}</span><span className="font-black">{summary.value}%</span></div></section>;
+}
+
+function SimpleRunPauseControl({ run, busy, compact = false, onControl }: { run: SimpleRun; busy: boolean; compact?: boolean; onControl: (runId: string, action: "pause" | "resume") => void }) {
+  if (run.input.sourceMode !== "dongchedi_page" || !["queued", "running", "paused"].includes(run.status)) return null;
+  const resume = run.status === "paused";
+  const pending = Boolean(run.pauseRequestedAt);
+  return <button className={compact ? "simple-overall-run-stop" : "soft-button flex h-8 items-center gap-1 px-2 text-[10px]"} type="button" onClick={() => onControl(run.id, resume ? "resume" : "pause")} disabled={busy || pending} aria-label={resume ? `继续 ${run.input.keyword}` : `暂停 ${run.input.keyword}`}>{busy ? <Loader2 className="h-3.5 w-3.5 animate-spin" /> : resume ? <Play className="h-3.5 w-3.5" /> : <Pause className="h-3.5 w-3.5" />}{compact ? null : pending ? "暂停中" : resume ? "继续" : "暂停"}</button>;
 }
 
 function ImageStrategyPromptEditor({ settings, disabled, onChange }: { settings: WorkspacePromptSettings; disabled: boolean; onChange: (patch: Partial<WorkspacePromptSettings>) => void }) {
@@ -903,10 +961,10 @@ function trimImageStrategyPrompts(prompts: ImageStrategyPrompts): ImageStrategyP
 function getMissingImageStrategyPrompt(settings: WorkspacePromptSettings) { return imageStrategyPromptOptions.find((option) => !settings.imageStrategyPrompts[option.key].trim())?.title || ""; }
 function normalizeImageSizeInput(value: string) { const trimmed = value.trim(); if (isImageGenerationSize(trimmed)) return normalizeImageGenerationSize(trimmed); return ""; }
 function isSimpleRunLive(run: SimpleRun) { return run.status === "queued" || run.status === "running"; }
-function canForceTerminateSimpleRun(run: SimpleRun | null | undefined) { return Boolean(run && isSimpleRunLive(run)); }
-function buildSimpleOverallProgressRuns(runs: SimpleRun[], activeRun: SimpleRun | null) { const liveRuns = runs.filter(isSimpleRunLive); if (liveRuns.length) return liveRuns.slice(0, 8); return activeRun ? [activeRun] : runs.slice(0, 1); }
-function buildSimpleOverallProgressSummary(run: SimpleRun | null | undefined, busy: boolean, sourceDetail: string, targetCount: number) { if (!run) return { title: "整体进度", label: busy ? "正在提交任务" : "等待任务发起", detail: `${sourceDetail} · 目标 ${targetCount} 条`, value: busy ? 8 : 0, tone: busy ? "running" : "idle", crawled: 0, produced: 0, published: 0 }; const stages = run.stages || []; const total = stages.reduce((sum, stage) => sum + stage.total, 0); const finished = stages.reduce((sum, stage) => sum + stage.completed + stage.failed + stage.skipped, 0); const value = run.status === "completed" ? 100 : run.status === "failed" ? 100 : total ? Math.max(4, Math.min(98, Math.round((finished / total) * 100))) : 8; return { title: run.input.keyword || "自动任务", label: formatSimpleRunStatus(run.status), detail: stages.find((stage) => stage.status === "running")?.message || stages.find((stage) => stage.status === "queued")?.message || buildSimpleRunMessage(run), value, tone: run.status === "failed" ? "error" : isSimpleRunLive(run) ? "running" : "success", crawled: run.platformResults.reduce((sum, item) => sum + item.crawled, 0), produced: run.posts.length, published: run.posts.filter((post) => post.status === "published").length }; }
+function canForceTerminateSimpleRun(run: SimpleRun | null | undefined) { return Boolean(run && (isSimpleRunLive(run) || run.status === "paused")); }
+function buildSimpleOverallProgressRuns(runs: SimpleRun[], activeRun: SimpleRun | null) { const liveRuns = runs.filter((run) => isSimpleRunLive(run) || run.status === "paused"); if (liveRuns.length) return liveRuns.slice(0, 8); return activeRun ? [activeRun] : runs.slice(0, 1); }
+function buildSimpleOverallProgressSummary(run: SimpleRun | null | undefined, busy: boolean, sourceDetail: string, targetCount: number) { if (!run) return { title: "整体进度", label: busy ? "正在提交任务" : "等待任务发起", detail: `${sourceDetail} · 目标 ${targetCount} 条`, value: busy ? 8 : 0, tone: busy ? "running" : "idle", crawled: 0, produced: 0, published: 0 }; const stages = run.stages || []; const total = stages.reduce((sum, stage) => sum + stage.total, 0); const finished = stages.reduce((sum, stage) => sum + stage.completed + stage.failed + stage.skipped, 0); const value = run.status === "completed" ? 100 : run.status === "failed" ? 100 : total ? Math.max(4, Math.min(98, Math.round((finished / total) * 100))) : 8; return { title: run.input.keyword || "自动任务", label: formatSimpleRunStatus(run.status), detail: run.pauseReason || stages.find((stage) => stage.status === "running")?.message || stages.find((stage) => stage.status === "queued")?.message || buildSimpleRunMessage(run), value, tone: run.status === "failed" ? "error" : isSimpleRunLive(run) ? "running" : run.status === "paused" ? "idle" : "success", crawled: run.platformResults.reduce((sum, item) => sum + item.crawled, 0), produced: run.posts.length, published: run.posts.filter((post) => post.status === "published").length }; }
 function buildSimpleRunMessage(run: SimpleRun) { const crawled = run.platformResults.reduce((sum, item) => sum + item.crawled, 0); return `任务完成：抓取 ${crawled} 条，生成 ${run.posts.length} 条`; }
-function formatSimpleRunStatus(value: SimpleRun["status"]) { return { queued: "排队中", running: "执行中", completed: "已完成", partial: "部分完成", failed: "失败" }[value]; }
+function formatSimpleRunStatus(value: SimpleRun["status"]) { return { queued: "排队中", running: "执行中", paused: "已暂停", completed: "已完成", partial: "部分完成", failed: "失败" }[value]; }
 function getSimpleRunStatusClass(value: SimpleRun["status"]) { return value === "completed" ? "text-[var(--mint)]" : value === "failed" ? "text-[var(--rose)]" : value === "running" ? "text-[var(--cyan)]" : "text-[var(--amber)]"; }
 function toDisplayImageSrc(url: string) { return /^https?:\/\//i.test(url) ? toRemoteImagePreviewSrc(url) : url; }
