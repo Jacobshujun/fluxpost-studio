@@ -1,5 +1,5 @@
 import assert from "node:assert/strict";
-import { readFileSync } from "node:fs";
+import { existsSync, readFileSync } from "node:fs";
 import path from "node:path";
 import vm from "node:vm";
 import ts from "typescript";
@@ -66,26 +66,19 @@ assert.match(route, /X-Content-Type-Options["']?\s*:\s*["']nosniff["']/);
 assert.doesNotMatch(route, /getConfigStatus|process\.cwd|branch|hostname|env\.local/i);
 
 const packageJson = JSON.parse(read("package.json"));
-assert.equal(packageJson.scripts.dev, "node scripts/local/start-dev.mjs");
-assert.match(packageJson.scripts["dev:lan"], /start-dev\.mjs --host 0\.0\.0\.0 --port 3001/);
-assert.match(packageJson.scripts.local, /scripts\/local\/restart-dev\.ps1/);
-assert.match(packageJson.scripts["local:restart"], /scripts\/local\/restart\.ps1/);
+assert.equal(packageJson.scripts.dev, undefined);
+assert.equal(packageJson.scripts["dev:lan"], undefined);
+assert.match(packageJson.scripts.local, /scripts\/local\/restart\.ps1/);
+assert.doesNotMatch(packageJson.scripts.local, /HostName/);
+assert.match(packageJson.scripts["local:lan"], /scripts\/local\/restart\.ps1 -HostName 0\.0\.0\.0/);
+assert.equal(packageJson.scripts["local:restart"], "npm run local");
 assert.match(packageJson.scripts["local:parity"], /check-production-parity\.ps1/);
-assert.match(packageJson.scripts["start:lan"], /scripts\/local\/restart\.ps1/);
-
-const development = read("scripts/local/start-dev.mjs");
-assert.match(development, /FLUXPOST_RUNTIME_MODE:\s*"development"/);
-assert.match(development, /FLUXPOST_RELEASE_SHA:\s*""/);
-assert.match(development, /FLUXPOST_DISABLE_BACKGROUND_WORKERS/);
-assert.match(development, /FLUXPOST_DEVELOPMENT_WORKERS/);
-
-const developmentRestart = read("scripts/local/restart-dev.ps1");
-assert.match(developmentRestart, /Get-ListeningProcessIds/);
-assert.match(developmentRestart, /Stop-Process/);
-assert.match(developmentRestart, /scripts\\local\\start-dev\.mjs/);
-assert.doesNotMatch(developmentRestart, /status --porcelain|FLUXPOST_RUNTIME_MODE\s*=\s*"candidate"/);
+assert.equal(packageJson.scripts["start:lan"], "npm run local:lan");
+assert.equal(existsSync(path.join(projectRoot, "scripts/local/start-dev.mjs")), false);
+assert.equal(existsSync(path.join(projectRoot, "scripts/local/restart-dev.ps1")), false);
 
 const restart = read("scripts/local/restart.ps1");
+assert.match(restart, /\[string\]\$HostName\s*=\s*"127\.0\.0\.1"/);
 assert.match(restart, /FLUXPOST_RUNTIME_MODE\s*=\s*"candidate"/);
 assert.match(restart, /FLUXPOST_RELEASE_SHA\s*=\s*\$ReleaseSha/);
 assert.match(restart, /ProjectRoot/);
@@ -97,6 +90,7 @@ assertOrder(restart, "Start-Process", "/api/version");
 assert.match(restart, /http_smoke\.js[\s\S]*"candidate"[\s\S]*\$ReleaseSha/);
 assert.doesNotMatch(restart, /MirrorRoot|current\.json|worktree add/);
 assert.doesNotMatch(restart, /npm\.cmd ci/);
+assert.doesNotMatch(restart, /FLUXPOST_DISABLE_BACKGROUND_WORKERS|FLUXPOST_DEVELOPMENT_WORKERS/);
 
 const parity = read("scripts/local/check-production-parity.ps1");
 assert.match(parity, /api\/version/);

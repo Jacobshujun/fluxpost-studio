@@ -46,7 +46,7 @@ At the start of a new session:
 - Do not do unrelated refactors, formatting churn, or metadata cleanup.
 - Do not invent checks or commands. Use commands that exist in this project.
 - For code or deployment changes, use `.trellis/spec/fluxpost/rules.md` first, then read targeted sections of `.trellis/spec/fluxpost/pitfalls.md`, `.trellis/spec/fluxpost/architecture_rules.md`, or `.trellis/spec/fluxpost/decisions.md` only when the task touches those boundaries.
-- Port `3001` is the only local application environment. Use `npm run dev` for uncommitted preview, then commit and use `npm run local:restart` to test the clean current HEAD as a versioned candidate before any push.
+- Port `3001` is the only local application environment. Fixes must be verified and committed before `npm run local` replaces the listener with the clean current HEAD as a versioned candidate.
 - Record only facts that can be confirmed from the repository or from an explicit user instruction. Mark unknowns as `pending confirmation`.
 
 ## Completion Protocol
@@ -63,7 +63,7 @@ After development, debugging, deployment work, or important analysis:
 
 - Do not commit or expose secrets, production config, `.env.local`, `.env*`, API keys, local user data, uploaded materials, generated outputs, cached media, or auth logs.
 - Runtime data and generated media live under `data/`, `public/generated/`, `public/media/`, and local debug artifacts such as `.tmp-*.json` or `test-artifacts/`; treat them as local state, not Trellis context.
-- Confirmed local entries are `npm run dev`/`npm run dev:lan` for port-3001 preview, `npm run local:restart`/`npm run start:lan` for the clean port-3001 candidate, and `npm run local:parity` for read-only local/GitHub/production equality. Remote deployment remains exact-SHA based through the installed VPS wrapper.
+- Confirmed local entries are `npm run local` for the loopback port-3001 candidate, `npm run local:lan` for the same candidate on the LAN, compatibility aliases `npm run local:restart`/`npm run start:lan`, and `npm run local:parity` for read-only local/GitHub/production equality. Remote deployment remains exact-SHA based through the installed VPS wrapper.
 - Do not create another memory, TODO, planning, handoff, or agent-context system outside `.trellis/`.
 
 ## Quality Rules

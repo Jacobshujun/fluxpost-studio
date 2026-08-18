@@ -1,6 +1,6 @@
 param(
   [int]$Port = 3001,
-  [string]$HostName = "0.0.0.0",
+  [string]$HostName = "127.0.0.1",
   [string]$ConfigFile = "",
   [string]$ProjectRoot = "",
   [switch]$SkipBuild

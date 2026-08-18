@@ -262,19 +262,19 @@ return NextResponse.json({ status: getConfigStatus(), advanced: getAdvancedConfi
 
 ## Deployment Rules
 
-- Confirmed entries are `npm run dev`/`npm run dev:lan` for port-3001 development preview, `npm run build`/`npm run start` for direct production-mode execution, and `npm run local:restart`/`npm run local:parity` for the clean port-3001 candidate and final equality check.
-- Port `3001` is the only local application environment. Development preview and committed candidate execution are mutually exclusive; candidate restart must refuse a dirty worktree and use its current full HEAD without creating a mirror worktree or state file.
+- Confirmed entries are `npm run local` for the loopback port-3001 candidate, `npm run local:lan` for the same candidate on the LAN, `npm run build`/`npm run start` as internal production-mode primitives, and `npm run local:parity` for the final equality check.
+- Port `3001` is the only local application environment and runs only the committed candidate; candidate restart must refuse a dirty worktree and use its current full HEAD without creating a mirror worktree or state file.
 - Candidate preparation must install locked dependencies before activation. Candidate restart builds before stopping the existing listener, injects `FLUXPOST_RUNTIME_MODE=candidate` plus the full SHA, and verifies `/api/version` and HTTP behavior. It selects configuration by path and never copies configuration or runtime data.
 - Keep standalone output opt-in through `FLUXPOST_STANDALONE_BUILD=1` for Docker builds. Default local builds must remain compatible with `next start` without creating `.next/standalone`, and standalone tracing must not package runtime data, generated media, crawled media, or test artifacts.
-- Development wrappers use port `3001` and disable background workers by default. `FLUXPOST_DEVELOPMENT_WORKERS=1` is the explicit opt-in for worker testing.
+- The candidate uses normal background-worker behavior on both loopback and LAN bindings. Only isolated deterministic smoke servers may disable workers on their private test ports.
 
 ### Scenario: Single Candidate Promotion
 
 1. **Scope / Trigger**: Any code release tested locally and promoted to production.
-2. **Signatures**: `npm run local:restart`; `npm run local:parity`; `verify-candidate.sh --ref <40-hex>`; `deploy.sh --ref <40-hex>`; `GET /api/version`.
+2. **Signatures**: `npm run local`; optional `npm run local:lan`; `npm run local:parity`; `verify-candidate.sh --ref <40-hex>`; `deploy.sh --ref <40-hex>`; `GET /api/version`.
 3. **Contracts**: Port `3001` runs clean HEAD as mode `candidate`; production runs the same SHA as mode `production`; the endpoint returns only `commit`, `mode`, and `versioned`; data, media, volumes, credentials, and configuration never move with code.
 4. **Validation / Errors**: Dirty local tree -> restart/parity fail; missing or malformed candidate/production SHA -> identity fails; local/runtime/GitHub/production mismatch -> parity fails; first rollout from a pre-identity wrapper with an empty container SHA -> rerun the updated wrapper for the same SHA and recheck identity.
-5. **Cases**: Good = all four identities equal; base = development on `3001` is unversioned; bad = branch-name deploy, dirty candidate, or copying `.env*`/runtime state.
+5. **Cases**: Good = all four identities equal and loopback/LAN entries use the same candidate implementation; bad = unversioned port-3001 runtime, branch-name deploy, dirty candidate, or copying `.env*`/runtime state.
 6. **Tests Required**: Runtime/parity and VPS deployment contract checks, complete deterministic baseline, real `3001` smoke, isolated VPS verifier, production identity/health/schema/volume/service/log/rollback checks, then `local:parity`.
 7. **Wrong / Correct**: Wrong: push before local candidate proof or accept `/api/config` health alone. Correct: test clean HEAD, push/deploy the unchanged full SHA, and require `/api/version` equality.
 - GitHub-driven Ubuntu production is owned by `scripts/deploy/vps-bootstrap.sh`, `scripts/deploy/vps-deploy.sh`, `scripts/deploy/vps-enable-domain.sh`, root `compose.yaml`, and `docs/deployment/ubuntu-docker.md`; do not add a second server layout or competing update script.
@@ -361,7 +361,7 @@ ssh root@38.76.210.136 "/opt/fluxpost-studio/bin/deploy.sh --cleanup-images --ch
 
 ### 2. Signatures
 
-- Local: `npm run build` followed by `npm run start` or `npm run local:restart`.
+- Local: `npm run local` (or `npm run local:lan` for the same LAN-bound candidate); `npm run build` and `npm run start` remain internal primitives.
 - Docker builder: `FLUXPOST_STANDALONE_BUILD=1 npm run build`.
 - Build-time environment key: optional `FLUXPOST_STANDALONE_BUILD`; only exact value `1` enables standalone output.
 
