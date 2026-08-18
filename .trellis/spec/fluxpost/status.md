@@ -1,16 +1,16 @@
 # FluxPost Current Status
 
-Last updated: 2026-08-17
+Last updated: 2026-08-18
 
 ## One-Line Status
 
-The deployed exact-SHA baseline remains unchanged; the Dongchedi category-page serial rewrite feature is verified and committed locally but not pushed or deployed.
+The deployed exact-SHA baseline remains unchanged; selective Feishu content publishing and the Dongchedi fixes are verified locally, not pushed or deployed.
 
 ## Current Focus
 
-- Completed/partial Canvas V2 main tasks now expose a direct result-panel image download action that resolves the immutable `mainRunId` and all successful save-image sinks without requiring Task Center selection.
-- Dongchedi category tasks process up to 30 current-page articles serially into review drafts; optional Cookie state stays encrypted and Feishu is disabled.
-- Port 3001 is the only local application environment and runs from D:/FluxPost/social-content-studio.
+- Homepage automatic runs, review single/batch actions, and Canvas `publish.feishu@2` support complete, title/body-only, or image/video-only writes through one persisted queue contract; compatibility defaults remain complete writes.
+- Dongchedi category tasks discover current `/article/{id}` links (with legacy `/ugc/article/{id}` compatibility), process up to 30 current-page articles serially into review drafts, and fail clearly when authenticated markup is unavailable; optional Cookie state stays encrypted and Feishu is disabled.
+- Port 3001 is the only local application environment; `npm run local` restarts its uncommitted development preview.
 - Production exposes versioned identity and preserves its PostgreSQL/config/data/media volumes and unrelated services.
 - Only main plus the local WIP archive branch remain locally; merged GitHub branches and extra worktrees were removed.
 
@@ -20,11 +20,10 @@ Start new work from current main, preview only on port 3001, commit before candi
 
 ## Recent Verification
 
-- 2026-08-17: Canvas batch-result direct downloads passed deterministic multi-sink/latest-attempt checks, TypeScript, the complete offline baseline, and mocked Chromium desktop/mobile download events with responsive screenshots; no provider or runtime-data mutation was used.
-- 2026-08-17: Dongchedi category guards, serial drafts, pause/resume, Cookie secrecy, full offline baseline, and unauthenticated desktop/mobile smoke passed without external calls.
+- 2026-08-18: Selective Feishu publish mode contracts, API/queue/simple-run/review/Canvas checks, full offline baseline, and mocked Chromium at 1440x1000 and 390x844 passed without real Feishu or provider calls; Canvas invalid nested toolbar selects were corrected after the browser exposed a hydration error.
+- 2026-08-18: `npm run local` restarted the dirty-worktree development preview on port 3001; full offline baseline and HTTP health passed.
+- 2026-08-17: Current Dongchedi category `/article/{id}` discovery and canonicalization fix passed focused fixtures, direct-import compatibility checks, lint, TypeScript, build, and the complete offline baseline; Playwright was diagnostic-only and no auth state was saved.
 - 2026-08-17: full local and isolated VPS baselines, exact-SHA deployment, identity, health, 30-table PostgreSQL schema, six unchanged FluxPost volumes, protected services, empty recent error log, two rescue tags, active weekly timer, and three-way parity passed.
-- 2026-08-17: three extra worktrees and four stale records were removed; root runtime data/media/config were preserved; unique WIP is recoverable from archive/root-wip-20260817 and archive-root-wip-20260817.
-- 2026-08-17: external 0814 FFmpeg batch script upgraded to smooth-beat-v2; all 18 processable outputs rebuilt with adaptive duration, non-looping audio, smooth transitions, and deterministic light motion; media and repository baselines passed.
 
 ## Risks And Unknowns
 

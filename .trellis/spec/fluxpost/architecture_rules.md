@@ -8,7 +8,7 @@ Last updated: 2026-07-20
 - API routes under `src/app/api/**/route.ts` should stay thin and delegate domain work to `src/lib/*`.
 - Platform crawling belongs in `src/lib/tikhub.ts`.
 - Source link batch-import orchestration belongs in `src/lib/source-link-import.ts`; the API route should stay thin and delegate to that helper. Reusable source-link resolution for simple-run link mode also belongs in this module. TikHub platform detail/share endpoint construction and response normalization for source links still belong in `src/lib/tikhub.ts`.
-- Source-link-only local importers belong in their own `src/lib/*` modules and should be dispatched from `src/lib/source-link-import.ts`. Dongchedi article parsing belongs in `src/lib/dongchedi.ts`; it should canonicalize `/ugc/article/{id}` inputs, normalize embedded article data as `platform="dongchedi"`, and fail clearly on anti-bot challenge HTML.
+- Source-link-only local importers belong in their own `src/lib/*` modules and should be dispatched from `src/lib/source-link-import.ts`. Dongchedi article parsing belongs in `src/lib/dongchedi.ts`; it should canonicalize current `/article/{id}` URLs while accepting legacy `/ugc/article/{id}` inputs, normalize embedded article data as `platform="dongchedi"`, and fail clearly on anti-bot challenge HTML.
 - Feishu task-number content import belongs in `src/lib/feishu-content-import.ts`. It should read configured Base records by `任务编号`, download `动态素材` attachments through the Base attachment download command, normalize imported records as `NormalizedSourceItem` with `platform="feishu"`, and leave generated-post publishing to the existing Feishu publish path.
 - Feishu distribution audit belongs in `src/lib/distribution-check.ts`. The API route `src/app/api/distribution-check/route.ts` should stay thin, require workspace auth, and delegate to the helper. The helper should enqueue durable jobs for large batches, run background workers with dedicated distribution concurrency pools, use `lark-cli base +field-list`, `+record-search` or `+record-get`, and grouped `+record-batch-update`, writing `是否分发` and `内容评分` only.
 - Content pool persistence belongs in `src/lib/content-pool.ts`.
@@ -1031,6 +1031,65 @@ const policy = normalizeContentSafetyPolicySnapshot(run.contentSafetyPolicy);
 const result = await filterUnsafeSourceItems(items, context, policy);
 ```
 
+## Scenario: Selective Feishu Content Publishing
+
+### 1. Scope / Trigger
+
+- Trigger: changing Feishu publish modes, homepage automatic publishing, review single/batch publishing, Canvas `publish.feishu`, the durable publish queue, or Base record/attachment writes.
+- The canonical modes are `full`, `text`, and `media`; UI, API, queue, persistence, worker, and CLI code must import the shared contract from `src/lib/feishu-publish-mode.ts`.
+
+### 2. Signatures
+
+- `POST /api/publish/feishu` accepts `{ postIds: string[], publishMode?: "full" | "text" | "media" }`.
+- `POST /api/simple/runs` accepts the same optional `feishuPublishMode` when `writeFeishu` is enabled; `SimpleRunInput.feishuPublishMode` persists with the run.
+- `enqueueFeishuPublishJob(posts, { ownerUserId, ownerDisplayName, source, sourceRunId?, publishMode? })` persists `FeishuPublishJob.publishMode` in queue JSON and includes it in active-job deduplication.
+- Canvas uses `publish.feishu@2` with `config.publishMode`; `publish.feishu@1` upgrades to v2 with `publishMode: "full"` without changing ports or edges.
+
+### 3. Contracts
+
+- Missing mode is compatibility-only and normalizes to `full`; an explicitly supplied unknown mode is invalid. New jobs and runs persist the normalized value, while old JSON without the field reads as `full` without a schema migration.
+- `full` writes title, body, metadata, vehicle, and attachments. `text` writes only non-empty title and body, performs only those text read-back checks, and skips tag completion, vehicle validation, media repair, preparation, and upload. `media` writes only attachments, creates an empty-field record when no record id exists, and skips all text/metadata preparation and verification.
+- Unselected Base fields must be absent from record create/update payloads; they must never be cleared as a side effect. Custom CLI payloads receive the same projected post/record payload plus the normalized mode.
+- Per-item validation preserves partial success: invalid selected content becomes a validation item failure, valid siblings continue, and a job with no valid items fails before any external write.
+- Mode-aware post state updates preserve prior state outside the selected category. A `text` success does not reset attachment state; a `media` success does not fabricate text verification.
+
+### 4. Validation & Error Matrix
+
+| Condition | Required result |
+| --- | --- |
+| Explicit unknown API mode | HTTP `400`, no queue insert |
+| Missing historical mode | Normalize to `full` |
+| `text` item missing title or body | Item validation failure before external write |
+| `media` item with no image or video | Item validation failure before external write |
+| All items invalid for the selected mode | Terminal failed job, zero Feishu record writes |
+| Required selected Base field is not configured | `needs_config` before external write |
+| Same owner/posts/mode already active | Return the active job; a different mode may enqueue separately |
+| Custom media CLI returns a record id but attachment evidence fails | Preserve record id and report attachment failure, never completed/zero-success |
+
+### 5. Good/Base/Bad Cases
+
+- Good: publish one approved post as `text`; only title/body appear in the CLI record payload and no media work starts.
+- Good: publish the same post as `media`; the queue treats it as distinct from the active `text` job and uploads projected images/videos without metadata writes.
+- Base: load an old simple run, queue row, or Canvas v1 node without a mode and retain the original complete-publish behavior.
+- Bad: include empty metadata fields in selective payloads, silently coerce an explicit typo to `full`, deduplicate jobs without the mode, or report media completion from a record id alone.
+
+### 6. Tests Required
+
+- `.trellis/verification/feishu_publish_mode_check.mjs` covers mode parsing, field projection, custom media evidence, entry-point wiring, and no excluded-field writes.
+- Queue, simple-run, review, and Canvas checks cover persisted mode, mode-aware deduplication, old-data defaults, API `400`, `publish.feishu@1` upgrade, and v2 validation.
+- TypeScript, lint, build, and the full isolated baseline must pass. Mocked Playwright at 1440x1000 and 390x844 must select all modes on `/`, `/review`, and `/canvas`, assert ARIA/config state and no horizontal overflow, and must not submit a real publish.
+
+### 7. Wrong vs Correct
+
+```typescript
+// Wrong: explicit typos silently regain complete-write behavior.
+const mode = isFeishuPublishMode(request.publishMode) ? request.publishMode : "full";
+
+// Correct: API boundaries reject explicit invalid values; defaults apply only when absent.
+const mode = normalizeFeishuPublishMode(request.publishMode);
+await enqueueFeishuPublishJob(posts, { ...context, publishMode: mode });
+```
+
 ## Scenario: Dongchedi Category Page Serial Rewrite
 
 ### 1. Scope / Trigger
@@ -1047,7 +1106,7 @@ const result = await filterUnsafeSourceItems(items, context, policy);
 
 ### 3. Contracts
 
-- Category URLs require HTTPS, exact host `dongchedi.com` or `www.dongchedi.com`, and a `/news/...` path. Discovery parses only the submitted HTML and returns at most 30 same-host `/ugc/article/{id}` links; it never follows pagination.
+- Category URLs require HTTPS, exact host `dongchedi.com` or `www.dongchedi.com`, and a `/news/...` path. Discovery parses only the submitted HTML and returns at most 30 same-host current `/article/{id}` links (while accepting legacy `/ugc/article/{id}` markup); it never follows pagination.
 - One loop owns the complete article sequence: resolve/cache media -> safety filter -> tag/ingest -> text/image rewrite -> save independent `draft` -> persist per-link result. The next article cannot start before that sequence finishes or fails. Image task concurrency is 1 for this mode; ordinary Simple Run concurrency remains unchanged.
 - Redirects are revalidated against the exact HTTPS host allowlist. HTML requests have bounded timeout, bytes, and redirect count; only transient transport errors receive one retry. `403`, `429`, login/challenge pages, or repeated timeout pause later work. A parsed `Retry-After` sets `resumeAfter` and rejects early resume.
 - Optional Cookie plaintext exists only in the worker-local hydrated input. The stored run contains an AES-256-GCM envelope, all browser responses clear both Cookie fields, and terminal completion/failure/termination clears the envelope. Paused work retains only the envelope so an authorized resume can continue.

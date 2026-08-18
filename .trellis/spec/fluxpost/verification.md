@@ -43,11 +43,11 @@ Do not deploy a dirty worktree, branch name, abbreviated SHA, local runtime rows
 
 ## Recent Verification
 
+- 2026-08-17: Dongchedi current/legacy path fixtures, empty-page Cookie error, import checks, lint, TypeScript, build, and offline baseline passed; Playwright was diagnostic-only.
 - 2026-08-17: Dongchedi category guards, serial drafts, pause/resume, Cookie secrecy, partial completion, full offline baseline, and unauthenticated desktop/mobile smoke passed without external calls.
 - 2026-08-17: Exact-SHA local/VPS baselines, clean port-3001 candidate, GitHub main, production identity/health/schema, unchanged six FluxPost volumes and protected services, logs, timer, rescue tags, branch/worktree cleanup, and final three-way parity passed without external provider writes.
 - 2026-08-17: Single-port candidate contracts, PowerShell parsing, runtime/deployment checks, lint, TypeScript, build, isolated HTTP/SQLite smoke, and the complete deterministic baseline passed without external calls; exact candidate startup and rollout remain pending.
-- 2026-08-14: Local-production parity contracts, PowerShell parsing, lint, TypeScript, build, isolated identity HTTP smoke, SQLite, and the complete deterministic baseline passed without external calls; production rollout remains pending approval.
-- 2026-08-04: Content safety passed deterministic/model-fallback/API/audit/snapshot checks and deployed as `20260804-102825-e6692c3d0cce` after approved candidate/preflight gates; production health and rollback passed.
+- 2026-08-18: Feishu full/text/media mode contracts, field isolation, queue/Canvas compatibility, complete offline baseline, and responsive UI screenshots passed without external writes.
 Older evidence is preserved in `.trellis/spec/fluxpost/archive/verification-history.md`.
 
 ## Missing Coverage
