@@ -8,7 +8,7 @@
 
 <!-- @@@auto:current-status -->
 - **Active File**: `journal-1.md`
-- **Total Sessions**: 30
+- **Total Sessions**: 31
 - **Last Active**: 2026-08-18
 <!-- @@@/auto:current-status -->
 
@@ -19,7 +19,7 @@
 <!-- @@@auto:active-documents -->
 | File | Lines | Status |
 |------|-------|--------|
-| `journal-1.md` | ~1021 | Active |
+| `journal-1.md` | ~1056 | Active |
 <!-- @@@/auto:active-documents -->
 
 ---
@@ -29,6 +29,7 @@
 <!-- @@@auto:session-history -->
 | # | Date | Title | Commits | Branch |
 |---|------|-------|---------|--------|
+| 31 | 2026-08-18 | Consolidate local candidate and resume Feishu queue | `a82d233`, `4ac4451`, `d8c71b4` | `main` |
 | 30 | 2026-08-18 | Selective Feishu content publishing | `73cc0f4`, `202587a` | `main` |
 | 29 | 2026-08-17 | Canvas batch result downloads | `3a7aefb` | `main` |
 | 28 | 2026-08-17 | Commit Dongchedi category batch rewrite | `a74bf42`, `eb441c4` | `main` |

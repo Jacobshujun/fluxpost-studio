@@ -1019,3 +1019,38 @@ Implemented and verified full, text-only, and media-only Feishu publishing acros
 ### Next Steps
 
 - None - task complete
+
+
+## Session 31: Consolidate local candidate and resume Feishu queue
+
+**Date**: 2026-08-18
+**Task**: Consolidate local candidate and resume Feishu queue
+**Branch**: `main`
+
+### Summary
+
+Kept one clean candidate runtime on port 3001, preserved LAN and account behavior, resumed durable Feishu jobs at startup, and verified the queued 16-post publish completed without record or attachment failures.
+
+### Main Changes
+
+(Add details)
+
+### Git Commits
+
+| Hash | Message |
+|------|---------|
+| `a82d233` | (see git log) |
+| `4ac4451` | (see git log) |
+| `d8c71b4` | (see git log) |
+
+### Testing
+
+- [OK] (Add test results)
+
+### Status
+
+[OK] **Completed**
+
+### Next Steps
+
+- None - task complete
