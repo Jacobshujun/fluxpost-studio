@@ -985,3 +985,37 @@ Added direct image downloads to completed or partial Canvas V2 batch main-task r
 ### Next Steps
 
 - None - task complete
+
+
+## Session 30: Selective Feishu content publishing
+
+**Date**: 2026-08-18
+**Task**: Selective Feishu content publishing
+**Branch**: `main`
+
+### Summary
+
+Implemented and verified full, text-only, and media-only Feishu publishing across homepage, review, and Canvas; added durable mode-aware queue/CLI contracts, responsive mocked UI coverage, fixed Canvas toolbar hydration, and passed the complete offline baseline without live writes.
+
+### Main Changes
+
+(Add details)
+
+### Git Commits
+
+| Hash | Message |
+|------|---------|
+| `73cc0f4` | (see git log) |
+| `202587a` | (see git log) |
+
+### Testing
+
+- [OK] (Add test results)
+
+### Status
+
+[OK] **Completed**
+
+### Next Steps
+
+- None - task complete
