@@ -56,6 +56,12 @@ npm run dev
 Port `3001` is the only local application environment. Development preview uses the same port with background workers disabled by default; set `FLUXPOST_DEVELOPMENT_WORKERS=1` only for an intentional worker test.
 
 ```powershell
+npm run local
+```
+
+`npm run local` replaces any stale listener on port `3001` and starts the current uncommitted worktree in development mode. To start without replacing an existing listener, use:
+
+```powershell
 npm run dev:lan
 ```
 

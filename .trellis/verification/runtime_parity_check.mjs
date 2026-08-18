@@ -68,6 +68,7 @@ assert.doesNotMatch(route, /getConfigStatus|process\.cwd|branch|hostname|env\.lo
 const packageJson = JSON.parse(read("package.json"));
 assert.equal(packageJson.scripts.dev, "node scripts/local/start-dev.mjs");
 assert.match(packageJson.scripts["dev:lan"], /start-dev\.mjs --host 0\.0\.0\.0 --port 3001/);
+assert.match(packageJson.scripts.local, /scripts\/local\/restart-dev\.ps1/);
 assert.match(packageJson.scripts["local:restart"], /scripts\/local\/restart\.ps1/);
 assert.match(packageJson.scripts["local:parity"], /check-production-parity\.ps1/);
 assert.match(packageJson.scripts["start:lan"], /scripts\/local\/restart\.ps1/);
@@ -77,6 +78,12 @@ assert.match(development, /FLUXPOST_RUNTIME_MODE:\s*"development"/);
 assert.match(development, /FLUXPOST_RELEASE_SHA:\s*""/);
 assert.match(development, /FLUXPOST_DISABLE_BACKGROUND_WORKERS/);
 assert.match(development, /FLUXPOST_DEVELOPMENT_WORKERS/);
+
+const developmentRestart = read("scripts/local/restart-dev.ps1");
+assert.match(developmentRestart, /Get-ListeningProcessIds/);
+assert.match(developmentRestart, /Stop-Process/);
+assert.match(developmentRestart, /scripts\\local\\start-dev\.mjs/);
+assert.doesNotMatch(developmentRestart, /status --porcelain|FLUXPOST_RUNTIME_MODE\s*=\s*"candidate"/);
 
 const restart = read("scripts/local/restart.ps1");
 assert.match(restart, /FLUXPOST_RUNTIME_MODE\s*=\s*"candidate"/);
