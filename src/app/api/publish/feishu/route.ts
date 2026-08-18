@@ -7,6 +7,7 @@ import {
   listFeishuPublishJobs,
 } from "@/lib/feishu-publish-queue";
 import { getGeneratedPostsByIds } from "@/lib/generated-posts";
+import { normalizeFeishuPublishMode } from "@/lib/feishu-publish-mode";
 import { requireWorkspaceAccount } from "@/lib/workspace-accounts";
 
 export const runtime = "nodejs";
@@ -34,8 +35,14 @@ export async function POST(request: Request) {
   const startedAt = Date.now();
   try {
     const account = await requireWorkspaceAccount(request);
-    const body = (await request.json()) as { postIds?: string[] };
+    const body = (await request.json()) as { postIds?: string[]; publishMode?: unknown };
     const postIds = normalizePostIds(body.postIds);
+    let publishMode;
+    try {
+      publishMode = normalizeFeishuPublishMode(body.publishMode);
+    } catch (error) {
+      return NextResponse.json({ error: error instanceof Error ? error.message : "Invalid Feishu publish mode" }, { status: 400 });
+    }
     if (!postIds.length) {
       await recordExecutionLog({
         scope: "publish/feishu",
@@ -55,6 +62,7 @@ export async function POST(request: Request) {
       source: "manual",
       ownerUserId: account.id,
       ownerDisplayName: account.displayName,
+      publishMode,
     });
 
     await recordExecutionLog({
@@ -67,6 +75,7 @@ export async function POST(request: Request) {
         jobId: job.id,
         postCount: job.postIds.length,
         ownerUserId: job.ownerUserId,
+        publishMode: job.publishMode,
       },
     });
 
@@ -87,7 +96,7 @@ export async function POST(request: Request) {
       message: compactError(error),
       durationMs: Date.now() - startedAt,
     });
-    return NextResponse.json({ error: message }, { status: /sign-in/i.test(message) ? 401 : 500 });
+    return NextResponse.json({ error: message }, { status: /sign-in/i.test(message) ? 401 : /publish mode/i.test(message) ? 400 : 500 });
   }
 }
 

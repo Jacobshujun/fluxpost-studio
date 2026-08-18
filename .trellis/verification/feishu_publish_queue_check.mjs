@@ -35,6 +35,7 @@ const check = read(".trellis/verification/check.mjs");
 
 assertContains(types, /export type FeishuPublishQueueStatus/, "Feishu publish queue status type is missing.");
 assertContains(types, /export type FeishuPublishJob = \{[\s\S]*ownerUserId:\s*string[\s\S]*posts:\s*GeneratedPost\[\]/, "Feishu publish job must carry owner and posts.");
+assertContains(types, /export type FeishuPublishJob = \{[\s\S]*publishMode:\s*FeishuPublishMode/, "Feishu publish jobs must persist their selected mode.");
 assertContains(types, /export type GeneratedPost = \{[\s\S]*taskKeyword\?:\s*string/, "Generated posts must persist the task keyword for Feishu vehicle writes.");
 assertContains(types, /SimpleRunPublishResult = \{[\s\S]*status:\s*"queued"\s*\|\s*"running"/, "Simple-run publish result must include queued/running.");
 assertContains(types, /SimpleRunPublishResult = \{[\s\S]*jobId\?:\s*string/, "Simple-run publish result must persist the Feishu job id.");
@@ -60,6 +61,7 @@ assertContains(queue, /saveGeneratedPost\(post\)/, "Feishu queue worker must per
 assertContains(queue, /markSourceRewritten\(post\.sourceItemId,\s*post\)/, "Feishu queue worker must update source usage state.");
 assertContains(queue, /syncSimpleRunPublishJob/, "Feishu queue worker must update simple-run publish state.");
 assertContains(queue, /const publishPosts = normalizePosts\(posts\)/, "Feishu queue enqueue must snapshot posts without synchronous preparation.");
+assertContains(queue, /findEquivalentQueuedJob\(ownerUserId,\s*postIds,\s*publishMode\)/, "Feishu queue dedupe must include the selected mode.");
 assertContains(queue, /prepareFeishuPublishJob[\s\S]*enrichPostsWithContentTags[\s\S]*validatePostsForFeishuPublish[\s\S]*persistPostsSerially/, "Feishu worker must prepare and persist posts before external publishing.");
 assertContains(queue, /onChunkComplete:[\s\S]*persistPostsSerially\(changedPosts\)[\s\S]*saveFeishuPublishJobToDb/, "Each Feishu chunk must persist post state and durable progress.");
 assertContains(queue, /completedChunks:\s*job\.progress\?\.completedChunks\s*\|\|\s*0/, "Terminal progress must retain completed chunks instead of treating planned chunks as completed.");
@@ -138,6 +140,9 @@ async function verifyFiftyPostManualEnqueue(routeSource) {
       },
     },
     "@/lib/activity-log": { compactError: (error) => String(error), recordExecutionLog: async () => undefined },
+    "@/lib/feishu-publish-mode": {
+      normalizeFeishuPublishMode: (value) => value === undefined ? "full" : value,
+    },
     "@/lib/feishu-publish-queue": {
       buildFeishuPublishJobResponse: async (value) => ({ status: "queued", jobId: value.id, queueStatus: value.status, job: value }),
       enqueueFeishuPublishJob: async (value) => {

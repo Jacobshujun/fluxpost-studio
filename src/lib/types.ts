@@ -1,4 +1,7 @@
 import type { ImageProviderProfile, ImageProviderRoute } from "./image-providers/contracts";
+import type { FeishuPublishMode } from "./feishu-publish-mode";
+
+export type { FeishuPublishMode } from "./feishu-publish-mode";
 
 export type CrawlPlatform = "wechat_channels" | "xiaohongshu" | "douyin" | "weibo";
 
@@ -768,6 +771,7 @@ export type SimpleRunInput = {
   enableVideoTranscription?: boolean;
   generateImages?: boolean;
   writeFeishu?: boolean;
+  feishuPublishMode?: FeishuPublishMode;
   feishuTaskNumbers?: string[];
   viralUrl?: string;
   viralImitateImages?: boolean;
@@ -865,6 +869,7 @@ export type SimpleRunPublishResult = {
   status: "queued" | "running" | "published" | "record_failed" | "attachment_failed" | "needs_config" | "skipped" | "failed";
   postCount: number;
   jobId?: string;
+  publishMode?: FeishuPublishMode;
   payloadPath?: string;
   message?: string;
   notificationStatus?: string;
@@ -1025,6 +1030,7 @@ export type FeishuPublishJob = {
   id: string;
   ownerUserId: string;
   source: FeishuPublishJobSource;
+  publishMode: FeishuPublishMode;
   sourceRunId?: string;
   status: FeishuPublishQueueStatus;
   priority: number;

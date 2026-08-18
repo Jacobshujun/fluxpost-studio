@@ -73,8 +73,9 @@ const areCanvasPortKindsCompatibleForUi = compileFunction(canvasTypes, "areCanva
 const temp = mkdtempSync(path.join(tmpdir(), "fluxpost-canvas-check-"));
 try {
   writeFileSync(path.join(temp, "toapis-image-api.js"), `exports.toApisImageRatios = ${JSON.stringify(["1:1", "3:2", "2:3", "4:3", "3:4", "5:4", "4:5", "16:9", "9:16", "2:1", "1:2", "21:9", "9:21"])}; exports.toApis4kImageRatios = ${JSON.stringify(["16:9", "9:16", "2:1", "1:2", "21:9", "9:21"])};`, "utf8");
+  writeFileSync(path.join(temp, "feishu-publish-mode.js"), "exports.feishuPublishModeOptions=[{value:'full',label:'完整写入'},{value:'text',label:'仅标题与正文'},{value:'media',label:'仅图片与视频'}];exports.normalizeFeishuPublishMode=(value)=>value===undefined?'full':['full','text','media'].includes(value)?value:(()=>{throw new Error('invalid mode')})();", "utf8");
   for (const name of ["types", "node-utils", "source-video-contract", "save-images", "registry", "graph", "serialization", "clipboard", "workflow-file"]) {
-    const source = read(`src/lib/canvas/${name}.ts`).replace('"../toapis-image-api"', '"./toapis-image-api"');
+    const source = read(`src/lib/canvas/${name}.ts`).replace('"../toapis-image-api"', '"./toapis-image-api"').replace('"../feishu-publish-mode"', '"./feishu-publish-mode"');
     const output = ts.transpileModule(source, {
       compilerOptions: { module: ts.ModuleKind.CommonJS, target: ts.ScriptTarget.ES2022 },
       fileName: `${name}.ts`,
@@ -95,6 +96,14 @@ try {
   assert.deepEqual(getCanvasNodeDefinition("compose.social-post")?.inputs.map((port) => `${port.id}:${port.kind}`), ["title:text", "body:text", "vehicle:text", "images:images", "videos:videos"], "content composition must accept vehicle text from an upstream node");
   assert.ok(!getCanvasNodeDefinition("compose.social-post")?.fields.some((field) => field.key === "vehicle"), "new content composition nodes must not edit vehicle text in node config");
   assert.deepEqual(getCanvasNodeDefinition("compose.social-post")?.defaultConfig, { fallbackTitle: "画布生成内容" });
+  assert.equal(getCanvasNodeDefinition("publish.feishu")?.version, 2, "new Feishu publish nodes must use v2");
+  assert.equal(getCanvasNodeDefinition("publish.feishu", 1)?.version, 1, "legacy Feishu publish snapshots must remain resolvable");
+  assert.deepEqual(getCanvasNodeDefinition("publish.feishu")?.defaultConfig, { publishMode: "full" });
+  assert.match(validateCanvasNodeConfig("publish.feishu", { publishMode: "bad" }, 2).join(" "), /invalid mode/i);
+  assert.equal(validateCanvasNodeConfig("publish.feishu", { publishMode: "media" }, 2).length, 0);
+  const upgradedFeishu = upgradeCanvasNode({ id: "publish", type: "publish.feishu", version: 1, position: { x: 0, y: 0 }, config: {} });
+  assert.equal(upgradedFeishu.version, 2);
+  assert.equal(upgradedFeishu.config.publishMode, "full");
   assert.equal(getCanvasNodeDefinition("utility.text-split")?.version, 2, "new text split nodes must use v2");
   assert.equal(getCanvasNodeDefinition("utility.text-split")?.label, "文本分割", "text split must use the confirmed node name");
   assert.deepEqual(getCanvasNodeDefinition("utility.text-split")?.outputs.map((port) => port.label), ["标题", "正文"]);

@@ -12,6 +12,10 @@ import {
   saveSimpleRunToDb,
 } from "./database";
 import { publishPostsToFeishu } from "./feishu-cli";
+import {
+  feishuPublishModeIncludesMedia,
+  normalizeFeishuPublishMode,
+} from "./feishu-publish-mode";
 import { listFeishuVehicleOptions, normalizeFeishuVehicleValue } from "./feishu-field-options";
 import { countFeishuPublishChunks, feishuRecordBatchSize } from "./feishu-publish-batching";
 import { getGeneratedPostsByIds, saveGeneratedPost } from "./generated-posts";
@@ -24,6 +28,7 @@ import type {
   FeishuPublishJobResult,
   FeishuPublishProgressStage,
   FeishuPublishJobSource,
+  FeishuPublishMode,
   FeishuPublishQueueStatus,
   GeneratedPost,
   SimpleRun,
@@ -36,6 +41,7 @@ type EnqueueFeishuPublishJobOptions = {
   source?: FeishuPublishJobSource;
   sourceRunId?: string;
   priority?: number;
+  publishMode?: FeishuPublishMode;
 };
 
 const defaultOwnerUserId = "local";
@@ -69,8 +75,9 @@ export async function enqueueFeishuPublishJob(posts: GeneratedPost[], options: E
     updatedAt: new Date().toISOString(),
   }));
   const source = options.source || "manual";
+  const publishMode = normalizeFeishuPublishMode(options.publishMode);
   const postIds = approvedPosts.map((post) => post.id);
-  const existingJob = await findEquivalentQueuedJob(ownerUserId, postIds);
+  const existingJob = await findEquivalentQueuedJob(ownerUserId, postIds, publishMode);
   if (existingJob) {
     ensureFeishuPublishQueueWorker();
     return existingJob;
@@ -81,6 +88,7 @@ export async function enqueueFeishuPublishJob(posts: GeneratedPost[], options: E
     id: `feishu-publish-${Date.now()}-${randomUUID().slice(0, 8)}`,
     ownerUserId,
     source,
+    publishMode,
     sourceRunId: options.sourceRunId,
     status: "queued",
     priority: Number(options.priority || 0),
@@ -105,6 +113,7 @@ export async function enqueueFeishuPublishJob(posts: GeneratedPost[], options: E
       ownerUserId,
       source,
       sourceRunId: options.sourceRunId || null,
+      publishMode,
       postCount: postIds.length,
     },
   });
@@ -237,6 +246,7 @@ async function executeFeishuPublishJob(
       ownerUserId: job.ownerUserId,
       source: job.source,
       sourceRunId: job.sourceRunId || null,
+      publishMode: job.publishMode,
       postCount: job.postIds.length,
     },
   });
@@ -268,6 +278,7 @@ async function executeFeishuPublishJob(
   let progressJob = job;
   const processedPostIds = new Set(preparationFailures.map((failure) => failure.postId));
   const publishResult = await publishPostsToFeishu(publishablePosts, {
+    publishMode: job.publishMode,
     preflightFailures: preparationFailures,
     onChunkComplete: async (chunk) => {
       chunk.postIds.forEach((postId) => processedPostIds.add(postId));
@@ -279,7 +290,7 @@ async function executeFeishuPublishJob(
           return {
             ...post,
             feishu,
-            status: isPostFullyPublished(post, feishu) ? ("published" as const) : ("approved" as const),
+            status: isPostFullyPublished(post, feishu, job.publishMode) ? ("published" as const) : ("approved" as const),
             updatedAt: new Date().toISOString(),
           };
         });
@@ -317,7 +328,7 @@ async function executeFeishuPublishJob(
     },
     updatedAt: new Date().toISOString(),
   });
-  const publishedPosts = await persistPublishedPosts(publishablePosts, publishResult);
+  const publishedPosts = await persistPublishedPosts(publishablePosts, publishResult, job.publishMode);
   const publishedById = new Map(publishedPosts.map((post) => [post.id, post]));
   const finalPosts = job.posts.map((post) => publishedById.get(post.id) || post);
   const jobResult = buildJobResult(publishResult, mediaRepairCount, preparationFailures, finalPosts);
@@ -350,6 +361,7 @@ async function executeFeishuPublishJob(
       postCount: completedJob.postIds.length,
       recordCount: jobResult.recordCount || 0,
       attachmentFailureCount: jobResult.attachmentFailureCount || 0,
+      publishMode: completedJob.publishMode,
     },
   });
 
@@ -359,6 +371,7 @@ async function executeFeishuPublishJob(
 async function persistPublishedPosts(
   posts: GeneratedPost[],
   publishResult: Awaited<ReturnType<typeof publishPostsToFeishu>>,
+  publishMode: FeishuPublishMode,
 ) {
   const feishuStateByPostId = new Map((publishResult.postStates || []).map((item) => [item.postId, item.feishu]));
   const now = new Date().toISOString();
@@ -367,7 +380,7 @@ async function persistPublishedPosts(
     return {
       ...post,
       feishu,
-      status: isPostFullyPublished(post, feishu) ? ("published" as const) : ("approved" as const),
+      status: isPostFullyPublished(post, feishu, publishMode) ? ("published" as const) : ("approved" as const),
       updatedAt: now,
     };
   });
@@ -433,14 +446,19 @@ async function prepareFeishuPublishJob(job: FeishuPublishJob) {
     progress: buildPublishProgress("preparing", job.postIds.length),
     updatedAt: new Date().toISOString(),
   });
-  const latestPosts = await enrichPostsWithContentTags(await loadLatestPostsForJob(preparedJob));
-  const validation = await validatePostsForFeishuPublish(latestPosts);
+  const latestPosts = await loadLatestPostsForJob(preparedJob);
+  const preparedPosts = job.publishMode === "full" ? await enrichPostsWithContentTags(latestPosts) : latestPosts;
+  const validation = await validatePostsForFeishuPublish(preparedPosts, job.publishMode);
   await persistPostsSerially(validation.posts);
 
   let mediaRepairCount = 0;
   const repairedPosts: GeneratedPost[] = [];
 
   for (const post of validation.posts) {
+    if (!feishuPublishModeIncludesMedia(job.publishMode)) {
+      repairedPosts.push(post);
+      continue;
+    }
     const repairedImages = await repairRuntimeMediaReferences(post.imageUrls, () => {
       mediaRepairCount += 1;
     });
@@ -536,7 +554,9 @@ async function enrichPostsWithContentTags(posts: GeneratedPost[]) {
   return posts.map((post) => (post.contentTags?.length ? post : { ...post, contentTags: tagsByPostId.get(post.id) || [] }));
 }
 
-async function validatePostsForFeishuPublish(posts: GeneratedPost[]) {
+async function validatePostsForFeishuPublish(posts: GeneratedPost[], publishMode: FeishuPublishMode) {
+  if (publishMode === "text") return validateTextPostsForFeishuPublish(posts);
+  if (publishMode === "media") return validateMediaPostsForFeishuPublish(posts);
   const vehicleOptions = await listFeishuVehicleOptions();
   const itemFailures: FeishuPublishItemFailure[] = [];
   const publishableIds = new Set<string>();
@@ -566,12 +586,43 @@ async function validatePostsForFeishuPublish(posts: GeneratedPost[]) {
   };
 }
 
-async function findEquivalentQueuedJob(ownerUserId: string, postIds: string[]) {
+function validateTextPostsForFeishuPublish(posts: GeneratedPost[]) {
+  const itemFailures: FeishuPublishItemFailure[] = [];
+  const publishablePosts = posts.filter((post) => {
+    if (post.title.trim() && post.body.trim()) return true;
+    itemFailures.push({
+      postId: post.id,
+      stage: "validation",
+      error: "Text-only Feishu publishing requires both a non-empty title and body.",
+      retrySafe: true,
+    });
+    return false;
+  });
+  return { posts, publishablePosts, itemFailures };
+}
+
+function validateMediaPostsForFeishuPublish(posts: GeneratedPost[]) {
+  const itemFailures: FeishuPublishItemFailure[] = [];
+  const publishablePosts = posts.filter((post) => {
+    if (post.imageUrls.length + (post.videoUrls?.length || 0) > 0) return true;
+    itemFailures.push({
+      postId: post.id,
+      stage: "validation",
+      error: "Media-only Feishu publishing requires at least one image or video.",
+      retrySafe: true,
+    });
+    return false;
+  });
+  return { posts, publishablePosts, itemFailures };
+}
+
+async function findEquivalentQueuedJob(ownerUserId: string, postIds: string[], publishMode: FeishuPublishMode) {
   const sortedPostIds = sortIds(postIds);
   const jobs = await readFeishuPublishJobsFromDb(100);
   return jobs.find((job) => {
     if (job.ownerUserId !== ownerUserId) return false;
     if (job.status !== "queued" && job.status !== "running") return false;
+    if (job.publishMode !== publishMode) return false;
     return sortIds(job.postIds).join("\n") === sortedPostIds.join("\n");
   });
 }
@@ -708,6 +759,7 @@ async function syncSimpleRunPublishJob(job: FeishuPublishJob) {
       status: publishStatus,
       postCount: job.postIds.length,
       jobId: job.id,
+      publishMode: job.publishMode,
       payloadPath: job.result?.payloadPath,
       message,
       notificationStatus: job.result?.notificationStatus,
@@ -864,7 +916,9 @@ function appendUnique(values: string[], value: string) {
   return values.includes(value) ? values : [...values, value];
 }
 
-function isPostFullyPublished(post: GeneratedPost, feishu?: GeneratedPost["feishu"]) {
+function isPostFullyPublished(post: GeneratedPost, feishu: GeneratedPost["feishu"] | undefined, publishMode: FeishuPublishMode) {
+  if (publishMode === "text") return feishu?.recordStatus === "verified";
+  if (publishMode === "media") return Boolean(feishu?.recordId) && feishu?.attachmentStatus === "uploaded";
   if (feishu?.recordStatus !== "verified") return false;
   const mediaCount = post.imageUrls.length + (post.videoUrls?.length || 0);
   return mediaCount === 0 ? feishu.attachmentStatus === "skipped" : feishu.attachmentStatus === "uploaded";

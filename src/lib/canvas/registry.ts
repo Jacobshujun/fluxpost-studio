@@ -3,6 +3,7 @@ import { toApis4kImageRatios, toApisImageRatios } from "../toapis-image-api";
 import { validateCanvasImageFilenamePrefix } from "./save-images";
 import { canvasPromptPresets, canvasVisionPresets, parseCanvasImageSelection, parseCanvasVideoTimestamps, resolveCanvasImageDimensions } from "./node-utils";
 import { defaultCanvasSourceVideoProjectName, isCanvasSourceVideoSnapshotCurrent } from "./source-video-contract";
+import { feishuPublishModeOptions, normalizeFeishuPublishMode } from "../feishu-publish-mode";
 
 const canvasNodeDefinitionVersions: CanvasNodeDefinition[] = [
   {
@@ -549,6 +550,21 @@ const textSplitV2Definition: CanvasNodeDefinition = {
   defaultConfig: { mode: "first-line", delimiter: "---", delimiterIndex: 1 },
 };
 
+const feishuPublishV2Definition: CanvasNodeDefinition = {
+  type: "publish.feishu",
+  version: 2,
+  label: "飞书发布",
+  description: "按所选内容类别加入现有飞书发布队列。",
+  category: "publish",
+  icon: "Send",
+  color: "#155eef",
+  inputs: [{ id: "post", label: "内容", kind: "socialPost", required: true }],
+  outputs: [{ id: "job", label: "发布任务", kind: "publishJobRef" }],
+  fields: [{ key: "publishMode", label: "写入模式", kind: "select", options: [...feishuPublishModeOptions] }],
+  defaultConfig: { publishMode: "full" },
+  capability: "external_write",
+};
+
 export const canvasNodeDefinitions = canvasNodeDefinitionVersions.map((definition) =>
   definition.type === "model.gpt-image"
     ? gptImageV2Definition
@@ -556,12 +572,14 @@ export const canvasNodeDefinitions = canvasNodeDefinitionVersions.map((definitio
       ? promptSwitchV2Definition
     : definition.type === "utility.text-split"
       ? textSplitV2Definition
+    : definition.type === "publish.feishu"
+      ? feishuPublishV2Definition
       : definition,
 );
 
 const definitionMap = new Map(canvasNodeDefinitions.map((definition) => [definition.type, definition]));
 const definitionVersionMap = new Map(
-  [...canvasNodeDefinitionVersions, gptImageV2Definition, promptSwitchV2Definition, textSplitV2Definition].map((definition) => [`${definition.type}@${definition.version}`, definition]),
+  [...canvasNodeDefinitionVersions, gptImageV2Definition, promptSwitchV2Definition, textSplitV2Definition, feishuPublishV2Definition].map((definition) => [`${definition.type}@${definition.version}`, definition]),
 );
 
 export function getCanvasNodeDefinition(type: CanvasNodeType, version?: number) {
@@ -697,6 +715,9 @@ export function validateCanvasNodeConfig(type: CanvasNodeType, config: CanvasNod
     const prefixError = validateCanvasImageFilenamePrefix(config.filenamePrefix);
     if (prefixError) errors.push(prefixError);
   }
+  if (type === "publish.feishu" && version !== 1) {
+    try { normalizeFeishuPublishMode(config.publishMode); } catch (error) { errors.push(error instanceof Error ? error.message : "Feishu publish mode is invalid."); }
+  }
   if (type === "model.gpt-image" && definition.version === 2) {
     const referenceUrls = normalizeUrlList(config.referenceUrls);
     if (referenceUrls.length > 16) errors.push("GPT-Image-2 direct reference images cannot exceed 16.");
@@ -718,6 +739,14 @@ export function validateCanvasNodeConfig(type: CanvasNodeType, config: CanvasNod
 }
 
 export function upgradeCanvasNode(node: CanvasNode): CanvasNode {
+  if (node.type === "publish.feishu" && node.version === 1) {
+    return {
+      ...structuredClone(node),
+      version: 2,
+      executionMode: getCanvasNodeExecutionMode(node),
+      config: { ...structuredClone(node.config), publishMode: "full" },
+    };
+  }
   if (node.type === "utility.prompt-switch" && node.version === 1) {
     const selectedInput = node.config.strategy === "scene-modification" ? "2" : node.config.strategy === "scene-person" ? "3" : "1";
     return {

@@ -26,6 +26,7 @@ const route = read("src/app/api/simple/runs/route.ts");
 
 assertContains(types, /export type SimpleRunQueueItem = \{[\s\S]*runId:\s*string[\s\S]*status:\s*SimpleRunQueueStatus/, "Simple run queue item type is missing.");
 assertContains(types, /platformCrawlSettings\?:\s*PlatformCrawlSettings/, "SimpleRun must persist platform crawl settings for queued execution.");
+assertContains(types, /feishuPublishMode\?:\s*FeishuPublishMode/, "SimpleRun must persist its Feishu publish mode.");
 
 assertContains(simpleRuns, /SIMPLE_RUN_MAX_ITEMS",\s*500,\s*10,\s*2000/, "Simple-mode target limit must be configurable and default above 100.");
 assertNotContains(simpleRuns, /const\s+maxSimpleRunItems\s*=\s*100\b/, "Simple-mode target limit must no longer be hard-capped at 100.");
@@ -47,6 +48,8 @@ assertContains(page, /buildSimpleOverallProgressRuns\(runs,\s*activeRun\)/, "Com
 assertContains(page, /simple-overall-run-list/, "Compact progress must render a multi-run progress list.");
 assertContains(page, /progressRuns\.map\(\(run\)/, "Compact progress must map over multiple runs.");
 assertNotContains(page, /<SimpleOverallProgressBar\s+run=/, "Compact progress must not be wired to a single run prop.");
+assertContains(page, /feishuPublishMode:\s*simpleFeishuPublishMode/, "Compact runs must send the selected Feishu mode.");
+assertContains(route, /normalizeFeishuPublishMode\(body\.feishuPublishMode\)/, "Simple-run API must strictly validate the selected Feishu mode.");
 
 assertContains(database, /CREATE TABLE IF NOT EXISTS simple_run_queue/, "Runtime database schema must create simple_run_queue.");
 assertContains(schema, /CREATE TABLE IF NOT EXISTS simple_run_queue/, "PostgreSQL migration must create simple_run_queue.");

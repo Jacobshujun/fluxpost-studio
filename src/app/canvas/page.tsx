@@ -1187,6 +1187,7 @@ export default function CanvasPage() {
         }}>
           <option value="">选择画布</option>
           {workflows.map((workflow) => <option key={workflow.id} value={workflow.id}>{workflow.name}{workflow.isTemplate ? " · 模板" : ""}</option>)}
+        </select>
         <select className="canvas-template-select" value="" disabled={busy} aria-label="创建画布模板" onChange={(event) => {
           const templateKey = event.target.value as CanvasWorkflowTemplateKey;
           if (templateKey) void createWorkflowFromTemplate(templateKey);
@@ -1194,7 +1195,6 @@ export default function CanvasPage() {
           <option value="">模板</option>
           <option value="video-reconstruct-seedance">视频重构 · Seedance</option>
           <option value="video-reconstruct-gpt-image">视频重构 · GPT 图片</option>
-        </select>
         </select>
         <input className="canvas-name-input" value={activeWorkflow?.name || ""} disabled={!activeWorkflow} aria-label="画布名称" onChange={(event) => {
           setActiveWorkflow((current) => current ? { ...current, name: event.target.value } : current);

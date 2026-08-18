@@ -97,6 +97,18 @@ assertContains(
 );
 
 assertContains(
+  mainPage,
+  /feishuPublishMode:\s*simpleFeishuPublishMode/,
+  "Compact/simple workflow should send one selected Feishu publish mode.",
+);
+
+assertContains(
+  reviewPage,
+  /postIds:\s*payloadPosts\.map\([\s\S]*publishMode:\s*feishuPublishMode/,
+  "Review single and batch publishing should share one page-level Feishu mode.",
+);
+
+assertContains(
   types,
   /writeFeishu\?:\s*boolean/,
   "SimpleRunInput should persist whether the run should write Feishu automatically.",

@@ -20,6 +20,7 @@ import {
   saveSimpleRunToDb,
 } from "./database";
 import { enqueueFeishuPublishJob, ensureFeishuPublishQueueWorker } from "./feishu-publish-queue";
+import { normalizeFeishuPublishMode } from "./feishu-publish-mode";
 import { importFeishuContentByTaskNumbers, normalizeFeishuTaskNumberInput } from "./feishu-content-import";
 import { saveGeneratedPost } from "./generated-posts";
 import { decryptDongchediCookie, encryptDongchediCookie } from "./dongchedi-cookie";
@@ -442,18 +443,27 @@ function simpleRunAccessActor(input: SimpleRunInput) {
 }
 
 function ensureSimpleRunOwner(run: SimpleRun): SimpleRun {
-  if (run.ownerUserId || !run.input.ownerUserId) return run;
+  const input = {
+    ...run.input,
+    feishuPublishMode: normalizeFeishuPublishMode(run.input.feishuPublishMode),
+  };
+  if (run.ownerUserId || !run.input.ownerUserId) return { ...run, input };
   return {
     ...run,
+    input,
     ownerUserId: run.input.ownerUserId,
     ownerDisplayName: run.input.ownerDisplayName,
   };
 }
 
 function hydrateSimpleRunInput(input: SimpleRunInput): SimpleRunInput {
-  if (!input.cookieCiphertext) return input;
-  return {
+  const normalized = {
     ...input,
+    feishuPublishMode: normalizeFeishuPublishMode(input.feishuPublishMode),
+  };
+  if (!input.cookieCiphertext) return normalized;
+  return {
+    ...normalized,
     cookie: decryptDongchediCookie(input.cookieCiphertext),
   };
 }
@@ -733,6 +743,7 @@ async function runSimpleRunWorkflow(
       sourceRunId: run.id,
       ownerUserId: run.input.ownerUserId || "local",
       ownerDisplayName: run.input.ownerDisplayName,
+      publishMode: normalizedInput.feishuPublishMode,
     });
     await assertSimpleRunNotForceTerminated(run.id);
     run = {
@@ -1383,6 +1394,7 @@ async function runSimpleViralWorkflow(
       sourceRunId: run.id,
       ownerUserId: run.input.ownerUserId || "local",
       ownerDisplayName: run.input.ownerDisplayName,
+      publishMode: normalizedInput.feishuPublishMode,
     });
     run = {
       ...run,
@@ -1600,6 +1612,7 @@ async function runSimpleOriginalWorkflow(
       sourceRunId: run.id,
       ownerUserId: run.input.ownerUserId || "local",
       ownerDisplayName: run.input.ownerDisplayName,
+      publishMode: normalizedInput.feishuPublishMode,
     });
     run = {
       ...run,
@@ -2462,6 +2475,7 @@ function normalizeSimpleRunInput(input: CreateSimpleRunInput): SimpleRunInput {
     enableVideoTranscription: input.enableVideoTranscription === true,
     generateImages: input.generateImages !== false,
     writeFeishu: sourceMode === "pool" ? false : input.writeFeishu === true,
+    feishuPublishMode: normalizeFeishuPublishMode(input.feishuPublishMode),
     feishuTaskNumbers: sourceMode === "feishu" ? feishuTaskNumbers : undefined,
     viralUrl: sourceMode === "viral" ? viralUrl : undefined,
     viralImitateImages: sourceMode === "viral" ? input.viralImitateImages === true : undefined,

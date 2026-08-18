@@ -11,12 +11,19 @@ import { concurrencyConfig, mapWithConcurrency, runWithConcurrencyPool } from ".
 import { feishuRecordBatchSize, processFeishuPublishChunks } from "./feishu-publish-batching";
 import { ensureFeishuCliIdentity } from "./feishu-cli-identity";
 import {
+  buildCustomMediaAttachmentEvidence,
+  feishuPublishModeIncludesMedia,
+  feishuPublishModeIncludesText,
+  formatFeishuPublishMode,
+  normalizeFeishuPublishMode,
+} from "./feishu-publish-mode";
+import {
   verifyFeishuRecordFields,
   type FeishuRecordFieldFailure,
   type FeishuRecordFieldExpectation,
 } from "./feishu-record-verification";
 import { materializeRuntimeMedia } from "./runtime-media-materializer";
-import type { FeishuPostPublishState, FeishuPublishItemFailure, FeishuPublishJobSource, GeneratedPost } from "./types";
+import type { FeishuPostPublishState, FeishuPublishItemFailure, FeishuPublishJobSource, FeishuPublishMode, GeneratedPost } from "./types";
 
 const execFileAsync = promisify(execFile);
 
@@ -132,12 +139,14 @@ type FeishuPublishNotificationSummary = FeishuPublishNotificationContext & {
   recordMappings: FeishuRecordMapping[];
   recordFailureCount: number;
   attachmentFailureCount: number;
+  publishMode: FeishuPublishMode;
 };
 
 type PublishPostsToFeishuOptions = {
   notificationContext?: FeishuPublishNotificationContext;
   preflightFailures?: FeishuPublishItemFailure[];
   onChunkComplete?: (progress: FeishuPublishChunkProgress) => Promise<void>;
+  publishMode?: FeishuPublishMode;
 };
 
 type FeishuPublishChunkProgress = {
@@ -155,10 +164,11 @@ const maxFeishuAttachmentImageBytes = 30 * 1024 * 1024;
 const feishuAttachmentStagingRoot = path.join(process.cwd(), "data", "feishu-outbox");
 
 export async function publishPostsToFeishu(posts: GeneratedPost[], options: PublishPostsToFeishuOptions = {}) {
+  const publishMode = normalizeFeishuPublishMode(options.publishMode);
   const outboxDir = path.join(process.cwd(), "data", "feishu-outbox");
   await mkdir(outboxDir, { recursive: true });
   const payloadPath = path.join(outboxDir, `posts-${Date.now()}.json`);
-  await writeFile(payloadPath, JSON.stringify({ posts }, null, 2), "utf8");
+  await writeFile(payloadPath, JSON.stringify({ posts: projectPostsForFeishuPayload(posts, publishMode) }, null, 2), "utf8");
 
   if (!appConfig.feishuCliBin) {
     return {
@@ -166,7 +176,7 @@ export async function publishPostsToFeishu(posts: GeneratedPost[], options: Publ
       payloadPath,
       message: "FEISHU_CLI_BIN is not configured. Payload has been staged locally.",
       recordMappings: [] as FeishuRecordMapping[],
-      postStates: buildStagedFeishuPostStateUpdates(posts, payloadPath),
+      postStates: buildStagedFeishuPostStateUpdates(posts, payloadPath, publishMode),
       recordFailures: [] as FeishuRecordFailure[],
       attachmentUploads: [] as FeishuAttachmentUpload[],
       attachmentFailures: [] as FeishuAttachmentFailure[],
@@ -180,7 +190,7 @@ export async function publishPostsToFeishu(posts: GeneratedPost[], options: Publ
       payloadPath,
       message: "FEISHU_APP_ID or FEISHU_APP_SECRET is not configured. Payload has been staged locally.",
       recordMappings: [] as FeishuRecordMapping[],
-      postStates: buildStagedFeishuPostStateUpdates(posts, payloadPath),
+      postStates: buildStagedFeishuPostStateUpdates(posts, payloadPath, publishMode),
       recordFailures: [] as FeishuRecordFailure[],
       attachmentUploads: [] as FeishuAttachmentUpload[],
       attachmentFailures: [] as FeishuAttachmentFailure[],
@@ -194,7 +204,7 @@ export async function publishPostsToFeishu(posts: GeneratedPost[], options: Publ
       payloadPath,
       message: "FEISHU_BITABLE_APP_TOKEN or FEISHU_BITABLE_TABLE_ID is not configured. Payload has been staged locally.",
       recordMappings: [] as FeishuRecordMapping[],
-      postStates: buildStagedFeishuPostStateUpdates(posts, payloadPath),
+      postStates: buildStagedFeishuPostStateUpdates(posts, payloadPath, publishMode),
       recordFailures: [] as FeishuRecordFailure[],
       attachmentUploads: [] as FeishuAttachmentUpload[],
       attachmentFailures: [] as FeishuAttachmentFailure[],
@@ -203,9 +213,23 @@ export async function publishPostsToFeishu(posts: GeneratedPost[], options: Publ
   }
 
   const fieldMap = getBitableFieldMap();
+  const fieldMapError = validateBitableFieldMapForPublishMode(fieldMap, publishMode);
+  if (fieldMapError) {
+    return {
+      status: "needs_config" as const,
+      payloadPath,
+      message: `${fieldMapError} Payload has been staged locally.`,
+      recordMappings: [] as FeishuRecordMapping[],
+      postStates: buildStagedFeishuPostStateUpdates(posts, payloadPath, publishMode),
+      recordFailures: [] as FeishuRecordFailure[],
+      attachmentUploads: [] as FeishuAttachmentUpload[],
+      attachmentFailures: [] as FeishuAttachmentFailure[],
+      mediaFailures: [] as FeishuMediaFailure[],
+    };
+  }
   const useDefaultBaseCreate = !appConfig.feishuCliArgs.trim();
   const attachmentPreparation =
-    useDefaultBaseCreate && fieldMap.imageUrls
+    feishuPublishModeIncludesMedia(publishMode) && useDefaultBaseCreate && fieldMap.imageUrls
       ? await prepareAttachmentFilesForPosts(posts)
       : { files: new Map<string, PreparedAttachmentSet>(), failures: [] as FeishuMediaFailure[] };
   const attachmentFiles = attachmentPreparation.files;
@@ -244,7 +268,7 @@ export async function publishPostsToFeishu(posts: GeneratedPost[], options: Publ
     if (postsToCreate.length) {
       const recordPayloadPath = path.join(outboxDir, `base-records-${Date.now()}-${chunkIndex + 1}.json`);
       recordPayloadPaths.push(recordPayloadPath);
-      await writeFile(recordPayloadPath, JSON.stringify(buildBitableRecordPayload(postsToCreate, fieldMap), null, 2), "utf8");
+      await writeFile(recordPayloadPath, JSON.stringify(buildBitableRecordPayload(postsToCreate, fieldMap, publishMode, !useDefaultBaseCreate), null, 2), "utf8");
 
       try {
         const args = buildCliArgs(payloadPath, recordPayloadPath);
@@ -257,19 +281,22 @@ export async function publishPostsToFeishu(posts: GeneratedPost[], options: Publ
             FEISHU_RECORD_PAYLOAD_PATH: recordPayloadPath,
             FEISHU_BITABLE_APP_TOKEN: appConfig.feishuBitableAppToken,
             FEISHU_BITABLE_TABLE_ID: appConfig.feishuBitableTableId,
+            FEISHU_PUBLISH_MODE: publishMode,
           }),
         });
         stdoutParts.push(result.stdout);
         stderrParts.push(result.stderr);
 
         const createdRecordIds = parseCreatedRecordIds(result.stdout);
-        recordMappings.push(
-          ...postsToCreate.slice(0, createdRecordIds.length).map((post, index) => ({
+        const createdMappings = postsToCreate.slice(0, createdRecordIds.length).map((post, index) => ({
             postId: post.id,
             recordId: createdRecordIds[index],
             created: true,
-          })),
-        );
+          }));
+        recordMappings.push(...createdMappings);
+        if (!useDefaultBaseCreate && publishMode === "media") {
+          attachmentUploads.push(...buildCustomMediaAttachmentEvidence(postsToCreate, createdMappings));
+        }
         if (createdRecordIds.length < postsToCreate.length) {
           recordFailures.push(
             ...postsToCreate.slice(createdRecordIds.length).map((post) => ({
@@ -284,13 +311,25 @@ export async function publishPostsToFeishu(posts: GeneratedPost[], options: Publ
         const stdout = getCliOutput(error, "stdout");
         const stderr = getCliOutput(error, "stderr");
         const returnedRecordIds = tryParseCreatedRecordIds(stdout || "");
-        recordMappings.push(
-          ...postsToCreate.slice(0, returnedRecordIds.length).map((post, index) => ({
+        const returnedMappings = postsToCreate.slice(0, returnedRecordIds.length).map((post, index) => ({
             postId: post.id,
             recordId: returnedRecordIds[index],
             created: true,
-          })),
-        );
+          }));
+        recordMappings.push(...returnedMappings);
+        if (!useDefaultBaseCreate && publishMode === "media") {
+          const mappingByPostId = new Map(returnedMappings.map((mapping) => [mapping.postId, mapping]));
+          attachmentFailures.push(
+            ...postsToCreate.slice(0, returnedRecordIds.length).map((post) => ({
+              postId: post.id,
+              recordId: mappingByPostId.get(post.id)?.recordId || "",
+              fileCount: countPostMedia(post),
+              error: message,
+              stdout,
+              stderr,
+            })),
+          );
+        }
         recordFailures.push(
           ...postsToCreate
             .slice(returnedRecordIds.length)
@@ -301,7 +340,7 @@ export async function publishPostsToFeishu(posts: GeneratedPost[], options: Publ
       }
     }
 
-    if (useDefaultBaseCreate) {
+    if (useDefaultBaseCreate && feishuPublishModeIncludesText(publishMode)) {
       const failedRecordPostIds = new Set(recordFailures.map((item) => item.postId));
       const recordWriteResult = await writeAndVerifyGeneratedFieldsToFeishu(
         chunk.filter((post) => !failedRecordPostIds.has(post.id)),
@@ -309,13 +348,14 @@ export async function publishPostsToFeishu(posts: GeneratedPost[], options: Publ
         fieldMap,
         outboxDir,
         chunkIndex,
+        publishMode,
       );
       recordFailures.push(...recordWriteResult.failures);
       stdoutParts.push(...recordWriteResult.stdout);
       stderrParts.push(...recordWriteResult.stderr);
     }
 
-    if (useDefaultBaseCreate && fieldMap.imageUrls) {
+    if (useDefaultBaseCreate && fieldMap.imageUrls && feishuPublishModeIncludesMedia(publishMode)) {
       const failedRecordPostIds = new Set(recordFailures.map((item) => item.postId));
       const uploadResult = await uploadGeneratedMediaToFeishu(
         chunk.filter((post) => !failedRecordPostIds.has(post.id)),
@@ -351,6 +391,7 @@ export async function publishPostsToFeishu(posts: GeneratedPost[], options: Publ
           attachmentUploads,
           attachmentFailures,
           payloadPath,
+          publishMode,
         ),
         recordMappings: recordMappings.filter((item) => chunkPostIds.has(item.postId)),
         recordFailures: recordFailures.filter((item) => chunkPostIds.has(item.postId)),
@@ -367,6 +408,7 @@ export async function publishPostsToFeishu(posts: GeneratedPost[], options: Publ
     attachmentUploads,
     attachmentFailures,
     payloadPath,
+    publishMode,
   );
   const notification = publishablePosts.length
     ? await sendFeishuPublishNotification(posts, attachmentUploads, {
@@ -375,6 +417,7 @@ export async function publishPostsToFeishu(posts: GeneratedPost[], options: Publ
         recordMappings,
         recordFailureCount: recordFailures.length + externalPreflightFailures.length,
         attachmentFailureCount: attachmentFailures.length,
+        publishMode,
       })
     : {
         status: "skipped" as const,
@@ -474,8 +517,13 @@ function toCliRelativePath(filePath: string) {
   return relativePath.startsWith("..") ? filePath : `./${relativePath.replaceAll("\\", "/")}`;
 }
 
-function buildBitableRecordPayload(posts: GeneratedPost[], fieldMap: Record<string, string>) {
-  const entries = Object.entries(fieldMap).filter(([key, fieldName]) => key !== "imageUrls" && fieldName.trim());
+function buildBitableRecordPayload(
+  posts: GeneratedPost[],
+  fieldMap: Record<string, string>,
+  publishMode: FeishuPublishMode,
+  includeMediaField: boolean,
+) {
+  const entries = selectBitableFieldEntries(fieldMap, publishMode, includeMediaField);
 
   return {
     fields: entries.map(([, fieldName]) => fieldName),
@@ -489,6 +537,7 @@ async function writeAndVerifyGeneratedFieldsToFeishu(
   fieldMap: Record<string, string>,
   outboxDir: string,
   chunkIndex: number,
+  publishMode: FeishuPublishMode,
 ) {
   const mappingByPostId = new Map(recordMappings.map((item) => [item.postId, item]));
   const writeResults: FeishuRecordWriteResult[] = await mapWithConcurrency(
@@ -501,7 +550,7 @@ async function writeAndVerifyGeneratedFieldsToFeishu(
         return {
           post,
           recordId,
-          fields: buildBitableRecordPatch(post, fieldMap),
+          fields: buildBitableRecordPatch(post, fieldMap, publishMode),
           stdout: "",
           stderr: "",
           failure: {
@@ -512,7 +561,7 @@ async function writeAndVerifyGeneratedFieldsToFeishu(
         } satisfies FeishuRecordWriteResult;
       }
 
-      const fields = buildBitableRecordPatch(post, fieldMap);
+      const fields = buildBitableRecordPatch(post, fieldMap, publishMode);
       const patchPath = path.join(
         outboxDir,
         `base-record-patch-${Date.now()}-${chunkIndex + 1}-${postIndex + 1}.json`,
@@ -724,12 +773,28 @@ async function readBackGeneratedFieldsFromFeishu(writes: FeishuRecordWriteSucces
   return { stdout: result.stdout, stderr: result.stderr, failures };
 }
 
-function buildBitableRecordPatch(post: GeneratedPost, fieldMap: Record<string, string>) {
+function buildBitableRecordPatch(post: GeneratedPost, fieldMap: Record<string, string>, publishMode: FeishuPublishMode) {
   return Object.fromEntries(
-    Object.entries(fieldMap)
-      .filter(([key, fieldName]) => key !== "imageUrls" && fieldName.trim())
+    selectBitableFieldEntries(fieldMap, publishMode, false)
       .map(([key, fieldName]) => [fieldName, getPostFieldValue(post, key)]),
   );
+}
+
+function selectBitableFieldEntries(fieldMap: Record<string, string>, publishMode: FeishuPublishMode, includeMediaField: boolean) {
+  return Object.entries(fieldMap).filter(([key, fieldName]) => {
+    if (!fieldName.trim()) return false;
+    if (publishMode === "text") return key === "title" || key === "body";
+    if (publishMode === "media") return includeMediaField && key === "imageUrls";
+    return key !== "imageUrls";
+  });
+}
+
+function projectPostsForFeishuPayload(posts: GeneratedPost[], publishMode: FeishuPublishMode) {
+  if (publishMode === "full") return posts;
+  if (publishMode === "text") {
+    return posts.map((post) => ({ id: post.id, title: post.title, body: post.body }));
+  }
+  return posts.map((post) => ({ id: post.id, imageUrls: post.imageUrls, videoUrls: post.videoUrls || [] }));
 }
 
 function getBitableFieldMap() {
@@ -754,6 +819,19 @@ function getBitableFieldMap() {
   } catch (error) {
     throw new Error(`FEISHU_BITABLE_FIELD_MAP must be valid JSON: ${error instanceof Error ? error.message : "unknown parse error"}`);
   }
+}
+
+function validateBitableFieldMapForPublishMode(fieldMap: Record<string, string>, publishMode: FeishuPublishMode) {
+  if (publishMode === "text") {
+    const missingFields = ["title", "body"].filter((key) => !fieldMap[key]?.trim());
+    if (missingFields.length) {
+      return `FEISHU_BITABLE_FIELD_MAP must configure non-empty ${missingFields.join(" and ")} fields for text publishing.`;
+    }
+  }
+  if (publishMode === "media" && !fieldMap.imageUrls?.trim()) {
+    return "FEISHU_BITABLE_FIELD_MAP must configure a non-empty imageUrls attachment field for media publishing.";
+  }
+  return "";
 }
 
 async function uploadGeneratedMediaToFeishu(
@@ -885,6 +963,7 @@ function buildFeishuPostStateUpdates(
   attachmentUploads: FeishuAttachmentUpload[],
   attachmentFailures: FeishuAttachmentFailure[],
   payloadPath: string,
+  publishMode: FeishuPublishMode,
 ): FeishuPostStateUpdate[] {
   const mappingByPostId = new Map(recordMappings.map((item) => [item.postId, item]));
   const recordFailureByPostId = new Map(recordFailures.map((item) => [item.postId, item]));
@@ -906,6 +985,27 @@ function buildFeishuPostStateUpdates(
     };
 
     if (recordFailure) {
+      if (publishMode === "media") {
+        return {
+          postId: post.id,
+          feishu: {
+            ...next,
+            attachmentStatus: "failed",
+            attachmentFileCount: 0,
+            attachmentError: recordFailure.error,
+          },
+        };
+      }
+      if (publishMode === "text") {
+        return {
+          postId: post.id,
+          feishu: {
+            ...next,
+            recordStatus: "failed",
+            recordError: recordFailure.error,
+          },
+        };
+      }
       return {
         postId: post.id,
         feishu: {
@@ -920,10 +1020,14 @@ function buildFeishuPostStateUpdates(
 
     const verifiedNext: FeishuPostPublishState = {
       ...next,
-      recordStatus: recordId ? "verified" : next.recordStatus,
-      recordVerifiedAt: recordId ? now : next.recordVerifiedAt,
-      recordError: undefined,
+      ...(feishuPublishModeIncludesText(publishMode) && recordId
+        ? { recordStatus: "verified" as const, recordVerifiedAt: now, recordError: undefined }
+        : {}),
     };
+
+    if (!feishuPublishModeIncludesMedia(publishMode)) {
+      return { postId: post.id, feishu: verifiedNext };
+    }
 
     if (failure) {
       return {
@@ -962,14 +1066,19 @@ function buildFeishuPostStateUpdates(
   });
 }
 
-function buildStagedFeishuPostStateUpdates(posts: GeneratedPost[], payloadPath: string): FeishuPostStateUpdate[] {
+function buildStagedFeishuPostStateUpdates(
+  posts: GeneratedPost[],
+  payloadPath: string,
+  publishMode: FeishuPublishMode,
+): FeishuPostStateUpdate[] {
   return posts.map((post) => ({
     postId: post.id,
     feishu: {
       ...post.feishu,
       payloadPath,
-      attachmentStatus: countPostMedia(post) ? "pending" : "skipped",
-      attachmentFileCount: 0,
+      ...(feishuPublishModeIncludesMedia(publishMode)
+        ? { attachmentStatus: countPostMedia(post) ? ("pending" as const) : ("skipped" as const), attachmentFileCount: 0 }
+        : {}),
     },
   }));
 }
@@ -1165,7 +1274,9 @@ function buildPublishNotificationText(
   attachmentUploads: Array<{ postId: string; recordId: string; fileCount: number }>,
   context: FeishuPublishNotificationSummary,
 ) {
-  const mediaCount = posts.reduce((total, post) => total + countPostMedia(post), 0);
+  const mediaCount = feishuPublishModeIncludesMedia(context.publishMode)
+    ? posts.reduce((total, post) => total + countPostMedia(post), 0)
+    : 0;
   const uploadedMediaCount = attachmentUploads.reduce((total, item) => total + item.fileCount, 0);
   const createdCount = context.recordMappings.filter((item) => item.created).length;
   const reusedCount = Math.max(0, context.recordMappings.length - createdCount);
@@ -1174,6 +1285,7 @@ function buildPublishNotificationText(
   const lines = [
     header,
     `任务：${formatNotificationTask(posts, context)}`,
+    `写入模式：${formatFeishuPublishMode(context.publishMode)}`,
   ];
 
   const sourceLine = formatNotificationSource(context);
@@ -1184,21 +1296,25 @@ function buildPublishNotificationText(
   lines.push(`记录：${formatNotificationRecordLine(recordCount, createdCount, reusedCount)}`);
   if (context.status === "record_failed") {
     lines.push(`记录字段：验证失败 ${context.recordFailureCount} 组`);
-  } else {
+  } else if (feishuPublishModeIncludesMedia(context.publishMode)) {
     lines.push(
       context.status === "attachment_failed"
         ? `素材：已上传 ${uploadedMediaCount} 个，失败 ${context.attachmentFailureCount} 组`
         : `素材：${uploadedMediaCount || mediaCount} 个`,
     );
   }
-  lines.push(...formatNotificationContentLines(posts));
+  if (feishuPublishModeIncludesText(context.publishMode)) lines.push(...formatNotificationContentLines(posts));
   lines.push(`时间：${formatFeishuDateTime(new Date().toISOString())}`);
   lines.push(
     context.status === "record_failed"
       ? "请重试记录字段写入；系统会复用已有记录，不会重复创建。"
       : context.status === "attachment_failed"
         ? "请优先检查飞书多维表格中的动态素材，必要时重试附件上传。"
-        : "请到目标飞书多维表格复核动态标题、动态正文和动态素材。",
+        : context.publishMode === "text"
+          ? "请到目标飞书多维表格复核动态标题和动态正文。"
+          : context.publishMode === "media"
+            ? "请到目标飞书多维表格复核动态素材。"
+            : "请到目标飞书多维表格复核动态标题、动态正文和动态素材。",
   );
 
   return lines.join("\n");
@@ -1523,7 +1639,7 @@ function getPostFieldValue(post: GeneratedPost, key: string) {
     case "status":
       return formatReviewStatus(post.status);
     case "imageUrls":
-      return post.imageUrls.join("\n");
+      return [...post.imageUrls, ...postVideoUrls(post)].join("\n");
     case "contentTags":
       return post.contentTags || [];
     case "contentCreationSource":

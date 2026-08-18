@@ -40,6 +40,7 @@ const nodeChecks = [
   ["Source video reference check", "source_video_reference_check.mjs"],
   ["Concurrency integration check", "concurrency_check.mjs"],
   ["Feishu publish resume check", "feishu_publish_resume_check.mjs"],
+  ["Feishu selective publish mode check", "feishu_publish_mode_check.mjs"],
   ["Feishu publish queue check", "feishu_publish_queue_check.mjs"],
   ["Feishu publish batch check", "feishu_publish_batch_check.mjs"],
   ["Feishu publish media recovery check", "feishu_publish_media_recovery_check.mjs"],

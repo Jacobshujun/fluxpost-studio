@@ -1,0 +1,4 @@
+{"_example": "Fill with {\"file\": \"<path>\", \"reason\": \"<why>\"}. Put spec/research files only — no code paths. Run `python .trellis/scripts/get_context.py --mode packages` to list available specs. Delete this line once real entries are added."}
+{"file": ".trellis/spec/fluxpost/verification.md", "reason": "Authoritative baseline and no-live-Feishu verification boundary"}
+{"file": ".trellis/spec/fluxpost/architecture_rules.md", "reason": "Verify queue ownership, partial failure, persistence, retry, and external write invariants"}
+{"file": ".trellis/spec/frontend/quality-guidelines.md", "reason": "Verify UI payloads, responsive controls, errors, and deterministic checks"}

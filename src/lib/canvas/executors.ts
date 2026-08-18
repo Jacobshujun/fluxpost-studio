@@ -1,5 +1,6 @@
 import { randomUUID } from "node:crypto";
 import { enqueueFeishuPublishJob, ensureFeishuPublishQueueWorker } from "../feishu-publish-queue";
+import { normalizeFeishuPublishMode } from "../feishu-publish-mode";
 import { saveGeneratedPost } from "../generated-posts";
 import { generateCanvasGptImages, generateImagesFromPrompt } from "../image-generation";
 import { callOpenAIForText, callOpenAIForVisionText } from "../openai";
@@ -387,14 +388,16 @@ function resolveCanvasCompositionVehicle(node: CanvasNode, artifacts: CanvasArti
   return textValues(artifacts).join(" ").trim() || String(node.config.vehicle || "").trim() || undefined;
 }
 
-async function executeFeishuPublish({ inputs, runId, account }: CanvasNodeExecutionContext) {
+async function executeFeishuPublish({ node, inputs, runId, account }: CanvasNodeExecutionContext) {
   const artifacts = (inputs.post || []).filter((artifact): artifact is Extract<CanvasArtifact, { kind: "socialPost" }> => artifact.kind === "socialPost");
   if (!artifacts.length) throw new Error("Feishu publish requires a social post artifact.");
+  const publishMode = normalizeFeishuPublishMode(node.config.publishMode);
   const job = await enqueueFeishuPublishJob(artifacts.map((artifact) => artifact.post), {
     ownerUserId: account.id,
     ownerDisplayName: account.displayName,
     source: "manual",
     sourceRunId: runId,
+    publishMode,
   });
   ensureFeishuPublishQueueWorker();
   return { outputs: { job: { kind: "publishJobRef" as const, jobId: job.id, status: job.status } } };

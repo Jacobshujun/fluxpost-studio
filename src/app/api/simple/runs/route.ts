@@ -2,6 +2,7 @@ import { NextResponse } from "next/server";
 import { compactError, recordExecutionLog } from "@/lib/activity-log";
 import { appConfig } from "@/lib/config";
 import { resolveLibraryAssetSelections } from "@/lib/library-assets";
+import { normalizeFeishuPublishMode } from "@/lib/feishu-publish-mode";
 import { listSimpleRuns, pauseSimpleRun, resumeSimpleRun, startSimpleRun, terminateSimpleRun } from "@/lib/simple-runs";
 import { requireWorkspaceAccount } from "@/lib/workspace-accounts";
 import type { CrawlPlatform, SourceLinkPlatform, WorkspacePromptSettings } from "@/lib/types";
@@ -39,6 +40,7 @@ export async function POST(request: Request) {
       enableVideoTranscription?: boolean;
       generateImages?: boolean;
       writeFeishu?: boolean;
+      feishuPublishMode?: unknown;
       feishuTaskNumbers?: string[] | string;
       viralUrl?: string;
       viralImitateImages?: boolean;
@@ -65,6 +67,12 @@ export async function POST(request: Request) {
       Array.isArray(body.viralMaterialAssetIds) ? body.viralMaterialAssetIds : [],
       "vehicle",
     );
+    let feishuPublishMode;
+    try {
+      feishuPublishMode = normalizeFeishuPublishMode(body.feishuPublishMode);
+    } catch (error) {
+      return NextResponse.json({ error: error instanceof Error ? error.message : "Invalid Feishu publish mode" }, { status: 400 });
+    }
     const run = await startSimpleRun({
       sourceMode: resolvedSourceMode,
       keyword: body.keyword || "",
@@ -82,6 +90,7 @@ export async function POST(request: Request) {
       enableVideoTranscription: body.enableVideoTranscription === true,
       generateImages: body.generateImages !== false,
       writeFeishu: body.writeFeishu === true,
+      feishuPublishMode,
       feishuTaskNumbers: body.feishuTaskNumbers,
       viralUrl: body.viralUrl,
       viralImitateImages: body.viralImitateImages === true,

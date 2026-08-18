@@ -42,6 +42,7 @@ import {
   defaultPeopleWithCarWashPrompt,
 } from "@/lib/creation-controls";
 import { defaultDistributionCheckPrompt } from "@/lib/distribution-check-prompt";
+import { feishuPublishModeOptions, formatFeishuPublishMode, normalizeFeishuPublishMode } from "@/lib/feishu-publish-mode";
 import { defaultImageGenerationSize, imageGenerationSizeOptions, isImageGenerationSize, normalizeImageGenerationSize } from "@/lib/image-size-options";
 import { toRemoteImagePreviewSrc } from "@/lib/media-preview";
 import { getStoredTheme, setStoredTheme, subscribeTheme, type ThemeMode } from "@/lib/theme";
@@ -50,6 +51,7 @@ import {
   type ConfigStatus,
   type CrawlPlatform,
   type ImageStrategyPrompts,
+  type FeishuPublishMode,
   type LibraryAsset,
   type LibraryAssetPage,
   type LibraryCollection,
@@ -181,6 +183,7 @@ export default function Home() {
   const [simpleEnableVideoTranscription, setSimpleEnableVideoTranscription] = useState(defaultSimpleRunMediaSettings.enableVideoTranscription);
   const [simpleGenerateImages, setSimpleGenerateImages] = useState(defaultSimpleRunMediaSettings.generateImages);
   const [simpleWriteFeishu, setSimpleWriteFeishu] = useState(false);
+  const [simpleFeishuPublishMode, setSimpleFeishuPublishMode] = useState<FeishuPublishMode>("full");
   const [simpleViralImitateImages, setSimpleViralImitateImages] = useState(false);
   const [simpleViralMaterialAssetIds, setSimpleViralMaterialAssetIds] = useState<string[]>([]);
   const [simpleViralMaterialFolderId, setSimpleViralMaterialFolderId] = useState("");
@@ -546,6 +549,7 @@ export default function Home() {
           enableVideoTranscription: simpleEnableVideoTranscription,
           generateImages: simpleGenerateImages,
           writeFeishu: simpleWriteFeishu,
+          feishuPublishMode: simpleFeishuPublishMode,
           feishuTaskNumbers: sourceMode === "feishu" ? feishuTaskNumbers : undefined,
           viralUrl: sourceMode === "viral" ? viralUrl : undefined,
           viralImitateImages: sourceMode === "viral" ? simpleViralImitateImages : undefined,
@@ -692,6 +696,7 @@ export default function Home() {
             enableVideoTranscription={simpleEnableVideoTranscription}
             generateImages={simpleGenerateImages}
             writeFeishu={simpleWriteFeishu}
+            feishuPublishMode={simpleFeishuPublishMode}
             viralImitateImages={simpleViralImitateImages}
             viralMaterialFolders={viralMaterialFolders}
             activeViralMaterialFolderId={activeSimpleViralMaterialFolderId}
@@ -727,6 +732,7 @@ export default function Home() {
             onEnableVideoTranscriptionChange={(value) => updateSimpleRunMediaSettingsDraft({ enableVideoTranscription: value })}
             onGenerateImagesChange={(value) => updateSimpleRunMediaSettingsDraft({ generateImages: value })}
             onWriteFeishuChange={setSimpleWriteFeishu}
+            onFeishuPublishModeChange={setSimpleFeishuPublishMode}
             onViralImitateImagesChange={setSimpleViralImitateImages}
             onToggleViralMaterialFolder={onToggleViralMaterialFolder}
             onToggleViralMaterialAsset={onToggleViralMaterialAsset}
@@ -771,6 +777,7 @@ function CompactWorkspace(props: {
   enableVideoTranscription: boolean;
   generateImages: boolean;
   writeFeishu: boolean;
+  feishuPublishMode: FeishuPublishMode;
   viralImitateImages: boolean;
   viralMaterialFolders: ViralMaterialFolderCandidate[];
   activeViralMaterialFolderId: string;
@@ -806,6 +813,7 @@ function CompactWorkspace(props: {
   onEnableVideoTranscriptionChange: (value: boolean) => void;
   onGenerateImagesChange: (value: boolean) => void;
   onWriteFeishuChange: (value: boolean) => void;
+  onFeishuPublishModeChange: (value: FeishuPublishMode) => void;
   onViralImitateImagesChange: (value: boolean) => void;
   onToggleViralMaterialFolder: (folderId: string) => void;
   onToggleViralMaterialAsset: (assetId: string) => void;
@@ -822,7 +830,7 @@ function CompactWorkspace(props: {
   onControlRun: (runId: string, action: "pause" | "resume") => void;
   onSelectRun: (runId: string) => void;
 }) {
-  const { sourceMode, keyword, targetCount, selectedPlatforms, linkText, linkPlatform, pageUrl, cookie, videoFrameOriginalReference, useComfyUiKlein, directOriginalReference, includeSourceVideo, enableVideoTranscription, generateImages, writeFeishu, viralImitateImages, viralMaterialFolders, activeViralMaterialFolderId, viralMaterialCandidates, selectedViralMaterialAssetIds, linkCount, feishuTaskText, feishuTaskCount, viralUrl, originalPrompt, originalUseWebSearch, config, materialPaths, settings, runs, activeRun, busy, terminatingRunId, controllingRunId, settingsBusy } = props;
+  const { sourceMode, keyword, targetCount, selectedPlatforms, linkText, linkPlatform, pageUrl, cookie, videoFrameOriginalReference, useComfyUiKlein, directOriginalReference, includeSourceVideo, enableVideoTranscription, generateImages, writeFeishu, feishuPublishMode, viralImitateImages, viralMaterialFolders, activeViralMaterialFolderId, viralMaterialCandidates, selectedViralMaterialAssetIds, linkCount, feishuTaskText, feishuTaskCount, viralUrl, originalPrompt, originalUseWebSearch, config, materialPaths, settings, runs, activeRun, busy, terminatingRunId, controllingRunId, settingsBusy } = props;
   const sourceDetail = sourceMode === "dongchedi_page" ? `懂车帝栏目 · ${targetCount} 条` : sourceMode === "links" ? `链接 ${linkCount} 条` : sourceMode === "feishu" ? `飞书 ${feishuTaskCount} 条` : sourceMode === "viral" ? "爆款仿写 1 条" : sourceMode === "original" ? "原创 1 条" : `平台 ${selectedPlatforms.length} 个`;
   const canStart = sourceMode === "dongchedi_page" ? Boolean(keyword.trim() && pageUrl.trim()) : sourceMode === "feishu" ? feishuTaskCount > 0 : sourceMode === "links" ? Boolean(keyword.trim()) && linkCount > 0 : sourceMode === "viral" ? Boolean(keyword.trim() && viralUrl.trim()) && (!generateImages || !viralImitateImages || selectedViralMaterialAssetIds.length > 0) : sourceMode === "original" ? Boolean(keyword.trim() && originalPrompt.trim()) && (!originalUseWebSearch || config?.openaiTextEndpoint === "responses") : Boolean(keyword.trim() && selectedPlatforms.length);
 
@@ -866,7 +874,7 @@ function CompactWorkspace(props: {
             {sourceMode !== "viral" && sourceMode !== "original" ? <><CheckRow checked={useComfyUiKlein} disabled={busy || settingsBusy} onChange={props.onUseComfyUiKleinChange}>启用本地 Klein 模型</CheckRow><CheckRow checked={directOriginalReference} disabled={busy || settingsBusy} onChange={props.onDirectOriginalReferenceChange}>直接引用原图</CheckRow><CheckRow checked={includeSourceVideo} disabled={busy || settingsBusy} onChange={props.onIncludeSourceVideoChange}>引用源视频素材</CheckRow><CheckRow checked={enableVideoTranscription} disabled={busy || settingsBusy} onChange={props.onEnableVideoTranscriptionChange}>启用视频音频转文字</CheckRow></> : null}
           </div>
 
-          {sourceMode !== "dongchedi_page" ? <label className="simple-write-feishu-row"><input className="mt-1 h-4 w-4 accent-[var(--mint)]" type="checkbox" checked={writeFeishu} onChange={(event) => props.onWriteFeishuChange(event.target.checked)} disabled={busy || settingsBusy} /><span><span className="block text-xs font-black text-white">写入飞书</span><span className="mt-1 block text-[11px] text-white/50">{writeFeishu ? "生成后自动审查并排队写入。" : "只生成本地草稿。"}</span></span></label> : null}
+          {sourceMode !== "dongchedi_page" ? <div className="simple-feishu-controls"><label className="simple-write-feishu-row"><input className="mt-1 h-4 w-4 accent-[var(--mint)]" type="checkbox" checked={writeFeishu} onChange={(event) => props.onWriteFeishuChange(event.target.checked)} disabled={busy || settingsBusy} /><span><span className="block text-xs font-black text-white">写入飞书</span><span className="mt-1 block text-[11px] text-white/50">{writeFeishu ? "生成后自动审查并排队写入。" : "只生成本地草稿。"}</span></span></label>{writeFeishu ? <FeishuPublishModeSelector value={feishuPublishMode} disabled={busy || settingsBusy} onChange={props.onFeishuPublishModeChange} /> : null}</div> : null}
 
           <div className="simple-policy-preview"><div className="flex items-center justify-between gap-3"><PanelTitle icon={<Lightbulb className="h-4 w-4" />} title="提示词与图片策略" /><span className="status-badge text-[10px] text-[var(--mint)]">可自定义</span></div><div className="simple-prompt-stack mt-3"><label><FieldLabel label="文字内容提示词" /><textarea className="field simple-prompt-textarea" aria-label="精简版文字内容提示词" value={settings.textInstruction} onChange={(event) => props.onSettingsChange({ textInstruction: event.target.value })} disabled={busy || settingsBusy} /></label><ImageStrategyPromptEditor settings={settings} disabled={busy || settingsBusy} onChange={props.onSettingsChange} /><label><FieldLabel label="图片生成尺寸" /><ImageSizeInput className="field" value={settings.imageSize} onChange={(value) => props.onSettingsChange({ imageSize: value })} disabled={busy || settingsBusy} ariaLabel="精简版图片生成尺寸" listId="compact-image-size-presets" /></label></div><div className="mt-3 flex flex-wrap gap-2"><span className="status-badge text-[10px] text-white/52">素材 {materialPaths.length} 个</span><span className="status-badge text-[10px] text-white/52">{settings.imageQuality}</span></div><button className="soft-button mt-3 flex h-10 w-full items-center justify-center gap-2 text-xs" type="button" onClick={props.onSaveSettings} disabled={busy || settingsBusy}>{settingsBusy ? <Loader2 className="h-4 w-4 animate-spin" /> : <Check className="h-4 w-4" />}保存当前策略</button></div>
 
@@ -903,6 +911,10 @@ function SimpleRunPauseControl({ run, busy, compact = false, onControl }: { run:
   const resume = run.status === "paused";
   const pending = Boolean(run.pauseRequestedAt);
   return <button className={compact ? "simple-overall-run-stop" : "soft-button flex h-8 items-center gap-1 px-2 text-[10px]"} type="button" onClick={() => onControl(run.id, resume ? "resume" : "pause")} disabled={busy || pending} aria-label={resume ? `继续 ${run.input.keyword}` : `暂停 ${run.input.keyword}`}>{busy ? <Loader2 className="h-3.5 w-3.5 animate-spin" /> : resume ? <Play className="h-3.5 w-3.5" /> : <Pause className="h-3.5 w-3.5" />}{compact ? null : pending ? "暂停中" : resume ? "继续" : "暂停"}</button>;
+}
+
+function FeishuPublishModeSelector({ value, disabled, onChange }: { value: FeishuPublishMode; disabled: boolean; onChange: (value: FeishuPublishMode) => void }) {
+  return <div className="feishu-publish-mode-selector" role="group" aria-label="飞书写入模式">{feishuPublishModeOptions.map((option) => <button key={option.value} type="button" aria-pressed={value === option.value} className={value === option.value ? "feishu-publish-mode-option-active" : ""} onClick={() => onChange(option.value)} disabled={disabled}>{option.label}</button>)}</div>;
 }
 
 function ImageStrategyPromptEditor({ settings, disabled, onChange }: { settings: WorkspacePromptSettings; disabled: boolean; onChange: (patch: Partial<WorkspacePromptSettings>) => void }) {
@@ -963,7 +975,7 @@ function normalizeImageSizeInput(value: string) { const trimmed = value.trim(); 
 function isSimpleRunLive(run: SimpleRun) { return run.status === "queued" || run.status === "running"; }
 function canForceTerminateSimpleRun(run: SimpleRun | null | undefined) { return Boolean(run && (isSimpleRunLive(run) || run.status === "paused")); }
 function buildSimpleOverallProgressRuns(runs: SimpleRun[], activeRun: SimpleRun | null) { const liveRuns = runs.filter((run) => isSimpleRunLive(run) || run.status === "paused"); if (liveRuns.length) return liveRuns.slice(0, 8); return activeRun ? [activeRun] : runs.slice(0, 1); }
-function buildSimpleOverallProgressSummary(run: SimpleRun | null | undefined, busy: boolean, sourceDetail: string, targetCount: number) { if (!run) return { title: "整体进度", label: busy ? "正在提交任务" : "等待任务发起", detail: `${sourceDetail} · 目标 ${targetCount} 条`, value: busy ? 8 : 0, tone: busy ? "running" : "idle", crawled: 0, produced: 0, published: 0 }; const stages = run.stages || []; const total = stages.reduce((sum, stage) => sum + stage.total, 0); const finished = stages.reduce((sum, stage) => sum + stage.completed + stage.failed + stage.skipped, 0); const value = run.status === "completed" ? 100 : run.status === "failed" ? 100 : total ? Math.max(4, Math.min(98, Math.round((finished / total) * 100))) : 8; return { title: run.input.keyword || "自动任务", label: formatSimpleRunStatus(run.status), detail: run.pauseReason || stages.find((stage) => stage.status === "running")?.message || stages.find((stage) => stage.status === "queued")?.message || buildSimpleRunMessage(run), value, tone: run.status === "failed" ? "error" : isSimpleRunLive(run) ? "running" : run.status === "paused" ? "idle" : "success", crawled: run.platformResults.reduce((sum, item) => sum + item.crawled, 0), produced: run.posts.length, published: run.posts.filter((post) => post.status === "published").length }; }
+function buildSimpleOverallProgressSummary(run: SimpleRun | null | undefined, busy: boolean, sourceDetail: string, targetCount: number) { if (!run) return { title: "整体进度", label: busy ? "正在提交任务" : "等待任务发起", detail: `${sourceDetail} · 目标 ${targetCount} 条`, value: busy ? 8 : 0, tone: busy ? "running" : "idle", crawled: 0, produced: 0, published: 0 }; const stages = run.stages || []; const total = stages.reduce((sum, stage) => sum + stage.total, 0); const finished = stages.reduce((sum, stage) => sum + stage.completed + stage.failed + stage.skipped, 0); const value = run.status === "completed" ? 100 : run.status === "failed" ? 100 : total ? Math.max(4, Math.min(98, Math.round((finished / total) * 100))) : 8; const modeLabel = run.input.writeFeishu ? ` · ${formatFeishuPublishMode(normalizeFeishuPublishMode(run.input.feishuPublishMode))}` : ""; return { title: run.input.keyword || "自动任务", label: `${formatSimpleRunStatus(run.status)}${modeLabel}`, detail: run.pauseReason || stages.find((stage) => stage.status === "running")?.message || stages.find((stage) => stage.status === "queued")?.message || buildSimpleRunMessage(run), value, tone: run.status === "failed" ? "error" : isSimpleRunLive(run) ? "running" : run.status === "paused" ? "idle" : "success", crawled: run.platformResults.reduce((sum, item) => sum + item.crawled, 0), produced: run.posts.length, published: run.posts.filter((post) => post.status === "published").length }; }
 function buildSimpleRunMessage(run: SimpleRun) { const crawled = run.platformResults.reduce((sum, item) => sum + item.crawled, 0); return `任务完成：抓取 ${crawled} 条，生成 ${run.posts.length} 条`; }
 function formatSimpleRunStatus(value: SimpleRun["status"]) { return { queued: "排队中", running: "执行中", paused: "已暂停", completed: "已完成", partial: "部分完成", failed: "失败" }[value]; }
 function getSimpleRunStatusClass(value: SimpleRun["status"]) { return value === "completed" ? "text-[var(--mint)]" : value === "failed" ? "text-[var(--rose)]" : value === "running" ? "text-[var(--cyan)]" : "text-[var(--amber)]"; }

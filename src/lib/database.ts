@@ -24,6 +24,7 @@ import type {
   WorkspaceAccountRecord,
   WorkspaceSession,
 } from "./types";
+import { normalizeFeishuPublishMode } from "./feishu-publish-mode";
 
 type SqliteStatement = {
   all: (...params: unknown[]) => unknown[];
@@ -665,11 +666,12 @@ export async function readExecutionLogsFromDb(limit?: number): Promise<Execution
 }
 
 export async function readSimpleRunsFromDb(limit = 30): Promise<SimpleRun[]> {
-  return readJsonRows<SimpleRun>("simple_runs", "created_at DESC", limit);
+  return (await readJsonRows<SimpleRun>("simple_runs", "created_at DESC", limit)).map(normalizeStoredSimpleRun);
 }
 
 export async function getSimpleRunFromDb(runId: string) {
-  return readJsonRowById<SimpleRun>("simple_runs", runId);
+  const run = await readJsonRowById<SimpleRun>("simple_runs", runId);
+  return run ? normalizeStoredSimpleRun(run) : undefined;
 }
 
 export async function saveSimpleRunToDb(run: SimpleRun) {
@@ -4184,6 +4186,7 @@ function fromFeishuPublishQueueRow(row: FeishuPublishQueueRow): FeishuPublishJob
     id: row.id,
     ownerUserId: row.owner_user_id,
     source: row.source,
+    publishMode: normalizeFeishuPublishMode(data.publishMode),
     sourceRunId: row.source_run_id || undefined,
     status: row.status,
     priority: Number(row.priority || 0),
@@ -4197,6 +4200,16 @@ function fromFeishuPublishQueueRow(row: FeishuPublishQueueRow): FeishuPublishJob
     startedAt: row.started_at ? normalizeDateValue(row.started_at) : undefined,
     completedAt: row.completed_at ? normalizeDateValue(row.completed_at) : undefined,
     error: row.error || data.error,
+  };
+}
+
+function normalizeStoredSimpleRun(run: SimpleRun): SimpleRun {
+  return {
+    ...run,
+    input: {
+      ...run.input,
+      feishuPublishMode: normalizeFeishuPublishMode(run.input.feishuPublishMode),
+    },
   };
 }
 

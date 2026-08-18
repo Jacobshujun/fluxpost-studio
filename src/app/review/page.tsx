@@ -32,8 +32,9 @@ import {
   X,
 } from "lucide-react";
 import { toRemoteImagePreviewSrc } from "@/lib/media-preview";
+import { feishuPublishModeIncludesMedia, feishuPublishModeOptions, formatFeishuPublishMode } from "@/lib/feishu-publish-mode";
 import { getStoredTheme, setStoredTheme, subscribeTheme, type ThemeMode } from "@/lib/theme";
-import type { FeishuPostPublishState, FeishuPublishJob, GeneratedPost, Platform, XhsCard } from "@/lib/types";
+import type { FeishuPostPublishState, FeishuPublishJob, FeishuPublishMode, GeneratedPost, Platform, XhsCard } from "@/lib/types";
 
 type ReviewFilter = GeneratedPost["status"] | "all" | "ready";
 type ReviewTimeFilter = "all" | "today" | "7d" | "30d";
@@ -88,6 +89,7 @@ type PublishSnapshot = {
   progress: number;
   queueStatus?: FeishuPublishJob["status"];
   notification?: string;
+  publishMode: FeishuPublishMode;
 };
 
 type PreviewState = {
@@ -148,6 +150,7 @@ export default function ReviewPage() {
   const [busy, setBusy] = useState<BusyState>("load");
   const [message, setMessage] = useState("");
   const [publish, setPublish] = useState<PublishSnapshot | null>(null);
+  const [feishuPublishMode, setFeishuPublishMode] = useState<FeishuPublishMode>("full");
   const [preview, setPreview] = useState<PreviewState>(null);
   const [feishuVehicleOptions, setFeishuVehicleOptions] = useState<string[]>([]);
   const [feishuVehicleFieldName, setFeishuVehicleFieldName] = useState("车型");
@@ -621,9 +624,10 @@ export default function ReviewPage() {
       postIds: postsToPublish.map((post) => post.id),
       status: "running",
       title: "正在提交飞书写入队列",
-      detail: `准备写入 ${postsToPublish.length} 条内容，素材共 ${countPostMedia(postsToPublish)} 个。`,
+      detail: describePublishSubmission(postsToPublish, feishuPublishMode),
       progress: 32,
       notification: "完成后会按当前配置发送飞书通知。",
+      publishMode: feishuPublishMode,
     });
     try {
       if (draft && postsToPublish.some((post) => post.id === draft.id)) {
@@ -634,7 +638,7 @@ export default function ReviewPage() {
       const res = await fetch("/api/publish/feishu", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ postIds: payloadPosts.map((post) => post.id) }),
+        body: JSON.stringify({ postIds: payloadPosts.map((post) => post.id), publishMode: feishuPublishMode }),
       });
       const data = (await res.json()) as FeishuPublishResponse;
       if (!res.ok) throw new Error(data.error || "写入飞书失败");
@@ -649,6 +653,7 @@ export default function ReviewPage() {
         title: "飞书写入失败",
         detail,
         progress: 100,
+        publishMode: feishuPublishMode,
       });
       setMessage(detail);
     } finally {
@@ -1019,6 +1024,7 @@ export default function ReviewPage() {
             </div>
 
             <div className="mt-4 grid gap-2">
+              <FeishuPublishModeSelector value={feishuPublishMode} disabled={Boolean(busy)} onChange={setFeishuPublishMode} />
               <button className="soft-button flex h-11 items-center justify-center gap-2 text-xs font-black" type="button" onClick={() => batchSetStatus("approved")} disabled={Boolean(busy) || !selectedPostIds.length}>
                 <ShieldCheck className="h-4 w-4" />
                 批量审查通过
@@ -1231,7 +1237,7 @@ function PublishStatusCard({ publish }: { publish: PublishSnapshot }) {
           {icon}
           <p className="truncate text-xs font-black">{publish.title}</p>
         </div>
-        <span className="text-[11px] font-black tabular-nums">{publish.progress}%</span>
+        <span className="flex items-center gap-2 text-[11px] font-black tabular-nums"><span className="status-badge">{formatFeishuPublishMode(publish.publishMode)}</span>{publish.progress}%</span>
       </div>
       <div className="publish-status-track mt-2">
         <span style={{ width: `${publish.progress}%` }} />
@@ -1241,6 +1247,10 @@ function PublishStatusCard({ publish }: { publish: PublishSnapshot }) {
       {publish.notification ? <p className="mt-1 text-[11px] leading-5 opacity-80">{publish.notification}</p> : null}
     </div>
   );
+}
+
+function FeishuPublishModeSelector({ value, disabled, onChange }: { value: FeishuPublishMode; disabled: boolean; onChange: (value: FeishuPublishMode) => void }) {
+  return <div className="feishu-publish-mode-selector" role="group" aria-label="飞书写入模式">{feishuPublishModeOptions.map((option) => <button key={option.value} type="button" aria-pressed={value === option.value} className={value === option.value ? "feishu-publish-mode-option-active" : ""} onClick={() => onChange(option.value)} disabled={disabled}>{option.label}</button>)}</div>;
 }
 
 function PreviewDialog({
@@ -1400,6 +1410,7 @@ function buildPublishSnapshot(posts: GeneratedPost[], data: FeishuPublishRespons
     : "";
   const firstFailure = job?.result?.itemFailures?.[0];
   const failureDetail = firstFailure ? `首个失败 ${firstFailure.postId}：${firstFailure.error}` : "";
+  const publishMode = job?.publishMode || "full";
 
   if (status === "queued" || queueStatus === "queued") {
     return {
@@ -1415,6 +1426,7 @@ function buildPublishSnapshot(posts: GeneratedPost[], data: FeishuPublishRespons
           : `已进入飞书写入队列，共 ${posts.length} 条内容。`),
       progress: 5,
       notification,
+      publishMode,
     };
   }
 
@@ -1435,6 +1447,7 @@ function buildPublishSnapshot(posts: GeneratedPost[], data: FeishuPublishRespons
       detail: progressDetail || data.message || `正在写入 ${posts.length} 条内容。`,
       progress: progressPercent,
       notification,
+      publishMode,
     };
   }
 
@@ -1448,6 +1461,7 @@ function buildPublishSnapshot(posts: GeneratedPost[], data: FeishuPublishRespons
       detail: [progressDetail, data.message || `发布流程返回 ${status || "unknown"}。`, failureDetail].filter(Boolean).join("。"),
       progress: 100,
       notification,
+      publishMode,
     };
   }
 
@@ -1457,10 +1471,18 @@ function buildPublishSnapshot(posts: GeneratedPost[], data: FeishuPublishRespons
     postIds: posts.map((post) => post.id),
     status: data.notification?.status === "failed" ? "warning" : "success",
     title: data.notification?.status === "failed" ? "飞书写入完成，通知失败" : "飞书写入完成",
-    detail: `已写入 ${job?.result?.succeededCount ?? job?.result?.recordCount ?? posts.length} 条记录，处理 ${countPostMedia(posts)} 个素材。`,
+    detail: feishuPublishModeIncludesMedia(publishMode)
+      ? `已写入 ${job?.result?.succeededCount ?? job?.result?.recordCount ?? posts.length} 条记录，处理 ${countPostMedia(posts)} 个素材。`
+      : `已写入 ${job?.result?.succeededCount ?? job?.result?.recordCount ?? posts.length} 条记录。`,
     progress: 100,
     notification,
+    publishMode,
   };
+}
+
+function describePublishSubmission(posts: GeneratedPost[], publishMode: FeishuPublishMode) {
+  const base = `准备以“${formatFeishuPublishMode(publishMode)}”写入 ${posts.length} 条内容`;
+  return feishuPublishModeIncludesMedia(publishMode) ? `${base}，素材共 ${countPostMedia(posts)} 个。` : `${base}。`;
 }
 
 function buildPublishMessage(data: FeishuPublishResponse) {
