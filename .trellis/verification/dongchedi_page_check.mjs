@@ -38,7 +38,7 @@ const pageModule = loadTsModule("src/lib/dongchedi-page.ts", {
 
 const categoryUrl = "https://www.dongchedi.com/news/industry/2";
 if (pageModule.normalizeDongchediCategoryUrl(categoryUrl) !== categoryUrl) throw new Error("Category URL should be accepted unchanged.");
-for (const invalid of ["https://example.com/news/industry/2", "http://www.dongchedi.com/news/industry/2", "https://www.dongchedi.com/ugc/article/7643008384274546713"]) {
+for (const invalid of ["https://example.com/news/industry/2", "http://www.dongchedi.com/news/industry/2", "https://www.dongchedi.com/article/7643008384274546713"]) {
   let rejected = false;
   try { pageModule.normalizeDongchediCategoryUrl(invalid); } catch { rejected = true; }
   if (!rejected) throw new Error(`Unsafe category URL should be rejected: ${invalid}`);
@@ -46,12 +46,14 @@ for (const invalid of ["https://example.com/news/industry/2", "http://www.dongch
 
 const cards = Array.from({ length: 35 }, (_value, index) => {
   const id = String(7643008384274546700n + BigInt(index));
-  return `<a href="/ugc/article/${id}"><img src="https://p3.dcarimg.com/${index}.jpg">Article ${index}</a>`;
+  const articlePath = index === 1 ? `/ugc/article/${id}` : `/article/${id}`;
+  return `<a href="${articlePath}"><img src="https://p3.dcarimg.com/${index}.jpg">Article ${index}</a>`;
 }).join("");
-const articles = pageModule.extractDongchediCategoryArticles(`${cards}<a href="https://example.com/ugc/article/9999999999999999999">external</a>`, 30);
+const articles = pageModule.extractDongchediCategoryArticles(`${cards}<a href="https://example.com/article/9999999999999999999">external</a>`, 30);
 if (articles.length !== 30) throw new Error(`Category extraction should cap at 30, got ${articles.length}.`);
 if (new Set(articles.map((article) => article.sourceId)).size !== 30) throw new Error("Category extraction should deduplicate article ids.");
 if (!articles[0].title?.includes("Article 0") || !articles[0].coverUrl?.includes("0.jpg")) throw new Error("Category card metadata should be preserved.");
+if (articles.some((article) => !article.url.startsWith("https://www.dongchedi.com/article/"))) throw new Error("Category results should use current canonical article URLs.");
 for (const count of [1, 10, 30]) {
   const selected = pageModule.extractDongchediCategoryArticles(cards, count);
   if (selected.length !== count) throw new Error(`Category target ${count} should select exactly ${count} items.`);
@@ -64,10 +66,13 @@ const dongchediModule = loadTsModule("src/lib/dongchedi.ts", {
   "./media-cache": { cacheCrawledMedia: async (items) => items },
   "./video-quality": { rankVideoUrlsByQuality: (items) => items.map((item) => item.url) },
 });
-if (dongchediModule.resolveDongchediRedirectUrl("/ugc/article/7643008384274546713", categoryUrl) !== "https://www.dongchedi.com/ugc/article/7643008384274546713") {
+if (dongchediModule.buildDongchediArticleUrl("7643008384274546713") !== "https://www.dongchedi.com/article/7643008384274546713") {
+  throw new Error("Dongchedi article ids should use the current canonical path.");
+}
+if (dongchediModule.resolveDongchediRedirectUrl("/article/7643008384274546713", categoryUrl) !== "https://www.dongchedi.com/article/7643008384274546713") {
   throw new Error("Same-host Dongchedi redirects should be accepted.");
 }
-for (const location of ["https://example.com/ugc/article/7643008384274546713", "http://www.dongchedi.com/ugc/article/7643008384274546713"]) {
+for (const location of ["https://example.com/article/7643008384274546713", "http://www.dongchedi.com/article/7643008384274546713"]) {
   let rejected = false;
   try { dongchediModule.resolveDongchediRedirectUrl(location, categoryUrl); } catch { rejected = true; }
   if (!rejected) throw new Error(`Unsafe redirect should be rejected: ${location}`);
@@ -78,6 +83,13 @@ if (dongchediModule.isDongchediAccessChallenge('<header><button>登录</button><
 if (!dongchediModule.isDongchediAccessChallenge('<title>登录 - 懂车帝</title><main class="login-page"></main>')) {
   throw new Error("A dedicated login page must stop category processing.");
 }
+let emptyCategoryRejected = false;
+try {
+  await pageModule.discoverDongchediCategory(categoryUrl);
+} catch (error) {
+  emptyCategoryRejected = /authenticated article links/i.test(error instanceof Error ? error.message : String(error));
+}
+if (!emptyCategoryRejected) throw new Error("An empty authenticated category response should return an actionable Cookie error.");
 
 const key = Buffer.alloc(32, 7).toString("base64");
 const cookieModule = loadTsModule("src/lib/dongchedi-cookie.ts", {

@@ -100,7 +100,8 @@ const {
 } = dongchediModule;
 
 const articleId = "7643008384274546713";
-const canonicalUrl = "https://www.dongchedi.com/ugc/article/7643008384274546713";
+const canonicalUrl = "https://www.dongchedi.com/article/7643008384274546713";
+const legacyUrl = "https://www.dongchedi.com/ugc/article/7643008384274546713";
 
 if (buildDongchediArticleUrl(articleId) !== canonicalUrl) {
   throw new Error("Dongchedi article URL should be canonical.");
@@ -109,9 +110,12 @@ if (extractDongchediArticleId(articleId) !== articleId) {
   throw new Error("Pure Dongchedi article ids should be accepted.");
 }
 if (extractDongchediArticleId(`${canonicalUrl}?aid=36`) !== articleId) {
-  throw new Error("Dongchedi article URLs should be accepted.");
+  throw new Error("Current Dongchedi article URLs should be accepted.");
 }
-if (!isDongchediSource(canonicalUrl)) {
+if (extractDongchediArticleId(legacyUrl) !== articleId) {
+  throw new Error("Legacy Dongchedi article URLs should remain accepted.");
+}
+if (!isDongchediSource(canonicalUrl) || !isDongchediSource(legacyUrl)) {
   throw new Error("Dongchedi article URLs should be detected.");
 }
 
@@ -195,7 +199,7 @@ const mixedHtml = `<html><head><title>GX and ES8 gap</title><script id="__NEXT_D
     },
   },
 })}</script></head><body></body></html>`;
-const mixedItem = normalizeDongchediArticle("7650456390460555326", "https://www.dongchedi.com/ugc/article/7650456390460555326", mixedHtml);
+const mixedItem = normalizeDongchediArticle("7650456390460555326", "https://www.dongchedi.com/article/7650456390460555326", mixedHtml);
 
 if (mixedItem.title !== "GX and ES8 gap") {
   throw new Error(`Dongchedi mixed page should use article/fallback title, got ${mixedItem.title}.`);

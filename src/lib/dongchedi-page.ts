@@ -3,6 +3,7 @@ import { fetchDongchediHtml, isDongchediAccessChallenge } from "./dongchedi";
 
 const allowedHosts = new Set(["dongchedi.com", "www.dongchedi.com"]);
 const articleIdPattern = /^\d{8,24}$/;
+const articlePathPattern = /^\/(?:ugc\/)?article\/(\d{8,24})(?:\/|$)/i;
 
 export type DongchediCategoryArticle = {
   sourceId: string;
@@ -33,7 +34,7 @@ export function extractDongchediCategoryArticles(html: string, limit = 30): Dong
     seen.add(sourceId);
     result.push({
       sourceId,
-      url: `https://www.dongchedi.com/ugc/article/${sourceId}`,
+      url: `https://www.dongchedi.com/article/${sourceId}`,
       title: context?.title?.trim() || undefined,
       coverUrl: context?.coverUrl,
     });
@@ -48,7 +49,7 @@ export function extractDongchediCategoryArticles(html: string, limit = 30): Dong
       return;
     }
     if (!allowedHosts.has(parsed.hostname.toLowerCase())) return;
-    const match = parsed.pathname.match(/^\/ugc\/article\/(\d{8,24})(?:\/|$)/i);
+    const match = parsed.pathname.match(articlePathPattern);
     if (!match) return;
     const card = document(element);
     const image = card.find("img").first();
@@ -58,7 +59,7 @@ export function extractDongchediCategoryArticles(html: string, limit = 30): Dong
     });
   });
 
-  for (const match of html.matchAll(/["'](?:https?:\/\/(?:www\.)?dongchedi\.com)?\/ugc\/article\/(\d{8,24})(?:[/?#]|["'])/gi)) {
+  for (const match of html.matchAll(/["'](?:https?:\/\/(?:www\.)?dongchedi\.com)?\/(?:ugc\/)?article\/(\d{8,24})(?:[/?#]|["'])/gi)) {
     add(match[1]);
   }
 
@@ -72,7 +73,9 @@ export async function discoverDongchediCategory(value: string, options: { cookie
     throw new Error("Dongchedi category page returned a login or anti-bot challenge; provide an authorized Cookie or use direct article links.");
   }
   const articles = extractDongchediCategoryArticles(html, Math.min(Math.max(options.limit || 30, 1), 30));
-  if (!articles.length) throw new Error("No Dongchedi article links were found on the category page.");
+  if (!articles.length) {
+    throw new Error("Dongchedi category page did not include authenticated article links; provide a current authorized Cookie and retry.");
+  }
   return { pageUrl, articles };
 }
 

@@ -25,7 +25,7 @@ export async function fetchDongchediItemBySource(value: string, options: SourceF
 }
 
 export function buildDongchediArticleUrl(sourceId: string) {
-  return `${dongchediBaseUrl}/ugc/article/${sourceId}`;
+  return `${dongchediBaseUrl}/article/${sourceId}`;
 }
 
 export function isDongchediAccessChallenge(html: string) {
