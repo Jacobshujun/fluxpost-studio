@@ -48,7 +48,7 @@ traceable code identity.
 
 ## Acceptance Criteria
 
-- [ ] AC1: `npm run local` builds and starts a clean committed full-SHA candidate
+- [x] AC1: `npm run local` builds and starts a clean committed full-SHA candidate
   on `127.0.0.1:3001`, exposes `mode="candidate"`, `versioned=true`, and the
   exact `HEAD` through `/api/version`.
 - [x] AC2: `package.json` no longer exposes an application hot-reload or

@@ -15,7 +15,7 @@
   changes; leave historical archives untouched.
 - [x] 6. Run focused runtime/account checks, TypeScript, lint, build, and the full
   deterministic baseline without external provider calls.
-- [ ] 7. Update Trellis task/status evidence, commit the complete change, confirm
+- [x] 7. Update Trellis task/status evidence, commit the complete change, confirm
   a clean worktree, then run `npm run local` to activate and smoke the exact
   committed candidate on `127.0.0.1:3001`.
 

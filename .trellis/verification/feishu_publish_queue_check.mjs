@@ -27,6 +27,7 @@ const types = read("src/lib/types.ts");
 const database = read("src/lib/database.ts");
 const schema = read("db/migrations/001_initial_postgres.sql");
 const queue = read("src/lib/feishu-publish-queue.ts");
+const instrumentation = read("src/instrumentation.ts");
 const feishu = read("src/lib/feishu-cli.ts");
 const route = read("src/app/api/publish/feishu/route.ts");
 const simpleRuns = read("src/lib/simple-runs.ts");
@@ -51,6 +52,11 @@ assertContains(database, /running\.owner_user_id = feishu_publish_queue\.owner_u
 
 assertContains(queue, /FEISHU_PUBLISH_WORKER_CONCURRENCY/, "Feishu queue worker concurrency env is missing.");
 assertContains(queue, /FLUXPOST_DISABLE_BACKGROUND_WORKERS\s*===\s*"1"/, "Isolated verification must be able to enqueue without starting Feishu workers.");
+assertContains(
+  instrumentation,
+  /import\("@\/lib\/feishu-publish-queue"\)[\s\S]*ensureFeishuPublishQueueWorker\(\)/,
+  "The application startup must resume durable queued Feishu publishes without waiting for a later API request.",
+);
 assertContains(queue, /publishPostsToFeishu\(publishablePosts,\s*\{[\s\S]*notificationContext:\s*\{[\s\S]*jobId:\s*job\.id[\s\S]*source:\s*job\.source[\s\S]*sourceRunId:\s*job\.sourceRunId/, "Feishu queue worker must pass job context to Feishu notifications.");
 assertContains(queue, /if \(!publishablePosts\.length\) \{[\s\S]*saveTerminalFeishuJob[\s\S]*return failedJob;[\s\S]*publishPostsToFeishu\(publishablePosts/, "An all-invalid prepared job must settle without invoking Feishu record creation.");
 assertContains(queue, /taskKeyword:\s*post\.taskKeyword\s*\|\|\s*simpleRun\?\.input\.keyword/, "Feishu queue worker must backfill task keyword from the simple run before writing Base records.");
