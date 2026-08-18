@@ -20,7 +20,7 @@ Verify and commit each fix before `npm run local` replaces the port-3001 candida
 
 ## Recent Verification
 
-- 2026-08-18: Candidate-only loopback/LAN, clean-tree guard, startup Feishu queue resume, permissions, full baseline, build, and isolated smoke passed offline.
+- 2026-08-18: Candidate-only startup, permissions, baseline, build, and smoke passed; startup resume then published the queued Feishu job 16/16 without record or attachment failures.
 - 2026-08-18: Selective Feishu publish mode contracts, API/queue/simple-run/review/Canvas checks, full offline baseline, and mocked Chromium at 1440x1000 and 390x844 passed without real Feishu or provider calls; Canvas invalid nested toolbar selects were corrected after the browser exposed a hydration error.
 - 2026-08-17: Current Dongchedi category `/article/{id}` discovery and canonicalization fix passed focused fixtures, direct-import compatibility checks, lint, TypeScript, build, and the complete offline baseline; Playwright was diagnostic-only and no auth state was saved.
 - 2026-08-17: full local and isolated VPS baselines, exact-SHA deployment, identity, health, 30-table PostgreSQL schema, six unchanged FluxPost volumes, protected services, empty recent error log, two rescue tags, active weekly timer, and three-way parity passed.
