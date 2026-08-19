@@ -753,6 +753,23 @@ export default function CanvasPage() {
     }
   }
 
+  function handleCanvasImageDragOver(event: React.DragEvent<HTMLDivElement>) {
+    if (isMobile || !activeWorkflow || mediaBusy || !dataTransferHasImageFile(event.dataTransfer)) return;
+    event.preventDefault();
+    event.dataTransfer.dropEffect = "copy";
+  }
+
+  async function handleCanvasImageDrop(event: React.DragEvent<HTMLDivElement>) {
+    if (isMobile || !activeWorkflow || mediaBusy) return;
+    const files = dataTransferImageFiles(event.dataTransfer);
+    if (!files.length) return;
+    event.preventDefault();
+    event.stopPropagation();
+    const position = reactFlowRef.current?.screenToFlowPosition({ x: event.clientX, y: event.clientY }) || { x: 80, y: 80 };
+    const targetNodeId = canvasImageDropTargetId(event.target, nodes);
+    await importImageFiles(files, targetNodeId, position);
+  }
+
   async function pasteFromSystemClipboard(targetNodeId?: string) {
     const readText = navigator.clipboard?.readText;
     if (!readText) {
@@ -1090,7 +1107,7 @@ export default function CanvasPage() {
     };
     const handlePaste = (event: ClipboardEvent) => {
       if (isEditableClipboardTarget(event.target) || !event.clipboardData) return;
-      const imageFiles = clipboardDataImageFiles(event.clipboardData);
+      const imageFiles = dataTransferImageFiles(event.clipboardData);
       if (imageFiles.length) {
         const targetImageNodeId = selectedCanvasNode && (selectedCanvasNode.type === "input.images" || (selectedCanvasNode.type === "model.gpt-image" && selectedCanvasNode.version >= 2))
           ? selectedCanvasNode.id
@@ -1248,7 +1265,7 @@ export default function CanvasPage() {
           ))}
         </aside>
 
-        <div className="canvas-stage" data-testid="canvas-stage" ref={stageRef} onContextMenu={(event) => {
+        <div className="canvas-stage" data-testid="canvas-stage" ref={stageRef} onDragOver={(event) => handleCanvasImageDragOver(event)} onDrop={(event) => void handleCanvasImageDrop(event)} onContextMenu={(event) => {
           const target = event.target instanceof Element ? event.target : null;
           if (isEditableClipboardTarget(event.target) || isMobile || !activeWorkflow || !target?.closest(".react-flow__pane")) return;
           event.preventDefault();
@@ -3853,12 +3870,25 @@ function moveListItem<T>(items: T[], from: number, to: number) {
   return next;
 }
 
-function clipboardDataImageFiles(data: DataTransfer) {
+function dataTransferImageFiles(data: DataTransfer) {
   const itemFiles = Array.from(data.items)
     .filter((item) => item.kind === "file" && item.type.startsWith("image/"))
     .map((item) => item.getAsFile())
     .filter((file): file is File => Boolean(file));
   return itemFiles.length ? itemFiles : Array.from(data.files).filter((file) => file.type.startsWith("image/"));
+}
+
+function dataTransferHasImageFile(data: DataTransfer) {
+  return Array.from(data.items).some((item) => item.kind === "file" && item.type.startsWith("image/"))
+    || Array.from(data.files).some((file) => file.type.startsWith("image/"));
+}
+
+function canvasImageDropTargetId(target: EventTarget | null, nodes: FlowNode[]) {
+  if (!(target instanceof Element)) return undefined;
+  const nodeId = target.closest(".react-flow__node")?.getAttribute("data-id");
+  if (!nodeId) return undefined;
+  const node = nodes.find((candidate) => candidate.id === nodeId)?.data.canvasNode;
+  return node && (node.type === "input.images" || (node.type === "model.gpt-image" && node.version >= 2)) ? nodeId : undefined;
 }
 
 async function clipboardImageFiles(items: ClipboardItem[]) {

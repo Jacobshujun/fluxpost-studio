@@ -323,7 +323,7 @@
       "status": "ready_for_review",
       "definition_of_done": [
         "Signed-in operators can manage owner-scoped workflows and copy, cut, paste, duplicate, or delete selected desktop nodes",
-        "The canvas supports typed nodes with acyclic validation plus authenticated file/clipboard image import that stores media references only",
+        "The canvas supports typed nodes with acyclic validation plus authenticated picker/clipboard/drag image import that stores media references only and never adds dropped files to the shared library",
         "Runs persist immutable graph snapshots and execute ready DAG branches in parallel with node-level status, failure blocking, cancellation, retry, and upstream reuse",
         "Billable model and external-write plans pass preflight then enqueue without browser prompts for unattended batches, while the server records plan acknowledgement and Feishu nodes expose only the existing publish queue",
         "Seedance validates inputs and credit, persists submit_id/gen_status, and resumes accepted tasks by querying the original submit_id",
@@ -354,7 +354,7 @@
       ],
       "evidence": [
         "2026-07-28 copy_library_check.mjs and canvas_scheduler_check.mjs passed domain, schema, auth, snapshot, compatibility, injection, and two-call skeleton contracts",
-        "2026-07-29 copy defaults/sorts, batch permissions, marquee/select-all/modifier shortcuts, editable-target guards, fixed header/editor with independent list scrolling, wrapped mobile batch controls, build/restart, and mocked responsive wheel/interaction checks passed; full baseline stopped only at an unrelated untracked temporary CJS lint file",
+        "2026-08-19 local-image drag filtering, protected dragover, Flow-coordinate placement, compatible-node append routing, Canvas contracts, lint, and TypeScript passed without library or provider calls",
         "2026-08-03 copy-library contracts deployed at a65767384c1b1993c95c8c32d053edcd10c3fac6 after the full baseline; route 200, API 401, schema, services, and volumes passed without live providers"
       ],
       "notes": "Keep ready_for_review until authenticated multi-user PostgreSQL use and an operator-approved real two-call text-model batch prove the live path. Default checks must not invoke paid models."

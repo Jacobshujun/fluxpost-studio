@@ -841,7 +841,7 @@ await assert.rejects(
   /没有可下载的保存图片结果/u,
   "batch downloads must fail clearly when a main run has no save result",
 );
-requireText(page, ["ReactFlow", "onConnect", "wouldCreateCycle", "NodeInspector", "panOnDrag={isMobile}", "selectionOnDrag={!isMobile}", "nodesDraggable={!isMobile}", "RunSummary", "FlowingCanvasEdge", "canvas-port-row", "colorMode={flowColorMode}", "subscribeTheme", "CANVAS_CLIPBOARD_MIME", "clipboardDataImageFiles", "isEditableClipboardTarget", "pasteFromSystemClipboard", "canvas-image-file-input", "CanvasNodeInteractionContext", "latestNodeRuns", "latestSuccessfulNodeRuns", "useMemo(() => latestAttempts", "(result.get(nodeRun.nodeId)?.attempt || 0) < nodeRun.attempt", "const selectedRun = explicitRun || data.runs[0]", "await refreshRun(selectedRun.id, workflowId)", "runSelectionIsExplicitRef", "focusCanvasNode", "selectedNodeId", "if (selectedNode) setSelectedNodeId(selectedNode.id)", "interaction?.selectedNodeId === node.id", "canvas-node-text-editor nodrag nopan nowheel", "event.currentTarget.focus({ preventScroll: true })", "interaction?.onNodeFocus(node.id)", "onClick={(event) => {", "onKeyDown={(event) => event.stopPropagation()}", "CanvasModelNodeResult", "CanvasImagePreviewNodeResult", "updateNodeExecutionMode", "仅运行此节点", "运行到此节点", 'requestRun([selectedNodeId], "isolated")', "打开评审", "历史版本 r", "最近成功结果 · r", "definition?.outputs", "isPreviewableModelArtifact", "artifact.value.trim()", "artifact.items.length > 0", "showArtifact", "运行完成，但没有可预览内容", "CanvasTextPreviewDialog", "CanvasVideoPreviewDialog", "CanvasImagePreviewDialog", "canvas-node-result-gallery", "canvas-node-result-gallery-open", "canvas-node-result-gallery-meta", "canvas-image-preview-open", "图片{index + 1}", "imageUrls.length}/16", "moveListItem", 'form.append("mode", "gpt-reference")', "edgeAnimationDelay", "pathLength={100}", "canvas-flow-edge-trail", "canvas-flow-edge-body", "canvas-flow-edge-core", "打开原图", "缩小图片", "放大图片", "重置图片缩放"], "canvas UI");
+requireText(page, ["ReactFlow", "onConnect", "wouldCreateCycle", "NodeInspector", "panOnDrag={isMobile}", "selectionOnDrag={!isMobile}", "nodesDraggable={!isMobile}", "RunSummary", "FlowingCanvasEdge", "canvas-port-row", "colorMode={flowColorMode}", "subscribeTheme", "CANVAS_CLIPBOARD_MIME", "dataTransferImageFiles", "isEditableClipboardTarget", "pasteFromSystemClipboard", "canvas-image-file-input", "CanvasNodeInteractionContext", "latestNodeRuns", "latestSuccessfulNodeRuns", "useMemo(() => latestAttempts", "(result.get(nodeRun.nodeId)?.attempt || 0) < nodeRun.attempt", "const selectedRun = explicitRun || data.runs[0]", "await refreshRun(selectedRun.id, workflowId)", "runSelectionIsExplicitRef", "focusCanvasNode", "selectedNodeId", "if (selectedNode) setSelectedNodeId(selectedNode.id)", "interaction?.selectedNodeId === node.id", "canvas-node-text-editor nodrag nopan nowheel", "event.currentTarget.focus({ preventScroll: true })", "interaction?.onNodeFocus(node.id)", "onClick={(event) => {", "onKeyDown={(event) => event.stopPropagation()}", "CanvasModelNodeResult", "CanvasImagePreviewNodeResult", "updateNodeExecutionMode", "仅运行此节点", "运行到此节点", 'requestRun([selectedNodeId], "isolated")', "打开评审", "历史版本 r", "最近成功结果 · r", "definition?.outputs", "isPreviewableModelArtifact", "artifact.value.trim()", "artifact.items.length > 0", "showArtifact", "运行完成，但没有可预览内容", "CanvasTextPreviewDialog", "CanvasVideoPreviewDialog", "CanvasImagePreviewDialog", "canvas-node-result-gallery", "canvas-node-result-gallery-open", "canvas-node-result-gallery-meta", "canvas-image-preview-open", "图片{index + 1}", "imageUrls.length}/16", "moveListItem", 'form.append("mode", "gpt-reference")', "edgeAnimationDelay", "pathLength={100}", "canvas-flow-edge-trail", "canvas-flow-edge-body", "canvas-flow-edge-core", "打开原图", "缩小图片", "放大图片", "重置图片缩放"], "canvas UI");
 requireText(page, [
   "prepareCanvasClipboardPaste",
   "canvasClipboardRef",
@@ -1001,6 +1001,48 @@ requireText(edgeFunction, ["canvasEdgeBeamProfile(sourceX, sourceY, targetX, tar
 assert.ok(edgeFunction.includes("selected || data?.beamActive"), "selected or running-related edges must retain their emphasized beam state");
 assert.ok(!edgeFunction.includes("beamActive ? <>"), "idle edges must keep their flow paths mounted");
 requireText(page, ['minZoom={0.2}', '<Controls showInteractive={false} />'], "canvas native zoom policy");
+const canvasStage = page.slice(page.indexOf('<div className="canvas-stage"'), page.indexOf('{activeWorkflow ? <CanvasNodeInteractionContext.Provider'));
+requireText(canvasStage, [
+  "onDragOver={(event) => handleCanvasImageDragOver(event)}",
+  "onDrop={(event) => void handleCanvasImageDrop(event)}",
+], "canvas local image drop surface");
+const imageDropHandler = page.slice(page.indexOf("function handleCanvasImageDragOver"), page.indexOf("async function pasteFromSystemClipboard"));
+requireText(imageDropHandler, [
+  "dataTransferHasImageFile(event.dataTransfer)",
+  "dataTransferImageFiles(event.dataTransfer)",
+  'event.dataTransfer.dropEffect = "copy"',
+  "reactFlowRef.current?.screenToFlowPosition({ x: event.clientX, y: event.clientY })",
+  "canvasImageDropTargetId(event.target, nodes)",
+  "importImageFiles(files, targetNodeId, position)",
+], "canvas local image drop behavior");
+const dataTransferHasImageFile = compileFunction(page, "dataTransferHasImageFile");
+assert.equal(dataTransferHasImageFile({ items: [{ kind: "file", type: "image/png" }], files: [] }), true, "dragover must accept protected image items before File objects are readable");
+assert.equal(dataTransferHasImageFile({ items: [{ kind: "file", type: "text/plain" }], files: [] }), false, "dragover must ignore non-image files");
+const dataTransferImageFiles = compileFunction(page, "dataTransferImageFiles");
+assert.deepEqual(
+  dataTransferImageFiles({
+    items: [
+      { kind: "file", type: "image/png", getAsFile: () => ({ name: "one.png", type: "image/png" }) },
+      { kind: "file", type: "text/plain", getAsFile: () => ({ name: "notes.txt", type: "text/plain" }) },
+    ],
+    files: [],
+  }).map((file) => file.name),
+  ["one.png"],
+  "canvas drops must import image files only",
+);
+class CanvasDropElement {
+  constructor(nodeId) { this.nodeId = nodeId; }
+  closest(selector) { return selector === ".react-flow__node" ? { getAttribute: () => this.nodeId } : null; }
+}
+const canvasImageDropTargetId = compileFunction(page, "canvasImageDropTargetId", { Element: CanvasDropElement });
+const dropNodes = [
+  { id: "image-node", data: { canvasNode: { type: "input.images", version: 1 } } },
+  { id: "gpt-image-node", data: { canvasNode: { type: "model.gpt-image", version: 2 } } },
+  { id: "text-node", data: { canvasNode: { type: "input.text", version: 1 } } },
+];
+assert.equal(canvasImageDropTargetId(new CanvasDropElement("image-node"), dropNodes), "image-node", "dropping on an image input must append to that node");
+assert.equal(canvasImageDropTargetId(new CanvasDropElement("gpt-image-node"), dropNodes), "gpt-image-node", "dropping on GPT Image v2 must append a reference image");
+assert.equal(canvasImageDropTargetId(new CanvasDropElement("text-node"), dropNodes), undefined, "dropping outside an image-compatible node must create a new image input");
 for (const removedZoomController of ["CanvasViewportControls", "canvasWheelZoomTarget", "canvasZoomEase", "canvasZoomTransition", "smoothCanvasWheelZoom", "zoomOnScroll={false}"]) {
   assert.ok(!page.includes(removedZoomController), `custom eased zoom controller must stay removed: ${removedZoomController}`);
 }
