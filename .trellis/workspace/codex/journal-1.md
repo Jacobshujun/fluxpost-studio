@@ -1186,3 +1186,37 @@ Implemented official-style structured Seedance image mentions, TOS-backed direct
 ### Next Steps
 
 - None - task complete
+
+
+## Session 36: Seedance prompt assistant
+
+**Date**: 2026-08-19
+**Task**: Seedance prompt assistant
+**Branch**: `main`
+
+### Summary
+
+Added a structured Seedance Prompt assistant with text/vision routing, stable image references, deterministic audits, explicit apply UI, offline checks, full baseline coverage, and desktop/mobile browser verification.
+
+### Main Changes
+
+(Add details)
+
+### Git Commits
+
+| Hash | Message |
+|------|---------|
+| `ca8afe7` | (see git log) |
+| `d6f10ef` | (see git log) |
+
+### Testing
+
+- [OK] (Add test results)
+
+### Status
+
+[OK] **Completed**
+
+### Next Steps
+
+- None - task complete

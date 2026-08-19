@@ -8,7 +8,7 @@
 
 <!-- @@@auto:current-status -->
 - **Active File**: `journal-1.md`
-- **Total Sessions**: 35
+- **Total Sessions**: 36
 - **Last Active**: 2026-08-19
 <!-- @@@/auto:current-status -->
 
@@ -19,7 +19,7 @@
 <!-- @@@auto:active-documents -->
 | File | Lines | Status |
 |------|-------|--------|
-| `journal-1.md` | ~1188 | Active |
+| `journal-1.md` | ~1222 | Active |
 <!-- @@@/auto:active-documents -->
 
 ---
@@ -29,6 +29,7 @@
 <!-- @@@auto:session-history -->
 | # | Date | Title | Commits | Branch |
 |---|------|-------|---------|--------|
+| 36 | 2026-08-19 | Seedance prompt assistant | `ca8afe7`, `d6f10ef` | `main` |
 | 35 | 2026-08-19 | Seedance structured image mentions | `2ed25a7` | `main` |
 | 34 | 2026-08-19 | Upgrade Canvas Seedance node to Ark 2.5 | `dae645e` | `main` |
 | 33 | 2026-08-19 | Use workspace prompts for source production | `ce573b4` | `main` |
