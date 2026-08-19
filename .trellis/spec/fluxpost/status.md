@@ -4,11 +4,11 @@ Last updated: 2026-08-19
 
 ## One-Line Status
 
-Port 3001 remains the clean candidate; this Canvas change is local and unpushed.
+Port 3001 remains the clean candidate; prompt-only content production is verified locally and uncommitted.
 
 ## Current Focus
 
-- Homepage automatic runs, review single/batch actions, and Canvas `publish.feishu@2` support complete, title/body-only, or image/video-only writes through one persisted queue contract; compatibility defaults remain complete writes.
+- Source-based Simple Runs now use only frozen workspace prompts and explicit media switches; pool runs remain review-first with Feishu disabled. Homepage, review, and Canvas selective Feishu writes share one persisted queue contract.
 - Desktop Canvas accepts local image drops at the pointer or onto a compatible image node through runtime media only; dropped files never enter the shared library.
 - Dongchedi category tasks discover current `/article/{id}` links (with legacy `/ugc/article/{id}` compatibility), process up to 30 current-page articles serially into review drafts, and fail clearly when authenticated markup is unavailable; optional Cookie state stays encrypted and Feishu is disabled.
 - Port 3001 runs only the clean candidate: `npm run local` binds loopback, `local:lan` exposes the same SHA, and startup resumes queued Feishu work; the existing accounts apply to both.
@@ -20,7 +20,7 @@ Verify and commit each fix before `npm run local` replaces the port-3001 candida
 
 ## Recent Verification
 
-- 2026-08-19: Canvas image-drop contracts, protected dragover, target routing, lint, TypeScript, build, HTTP/SQLite smoke, and the full offline baseline passed without library or provider calls.
+- 2026-08-19: Prompt-only production and Canvas image-drop contracts passed focused checks, lint, TypeScript, build, HTTP/SQLite smoke, and the full offline baseline without provider calls.
 - 2026-08-18: Candidate-only startup, permissions, baseline, build, and smoke passed; startup resume then published the queued Feishu job 16/16 without record or attachment failures.
 - 2026-08-18: Selective Feishu publish mode contracts, API/queue/simple-run/review/Canvas checks, full offline baseline, and mocked Chromium at 1440x1000 and 390x844 passed without real Feishu or provider calls; Canvas invalid nested toolbar selects were corrected after the browser exposed a hydration error.
 - 2026-08-17: Current Dongchedi category `/article/{id}` discovery and canonicalization fix passed focused fixtures, direct-import compatibility checks, lint, TypeScript, build, and the complete offline baseline; Playwright was diagnostic-only and no auth state was saved.

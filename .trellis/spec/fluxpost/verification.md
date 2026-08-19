@@ -1,6 +1,6 @@
 # Verification
 
-Last updated: 2026-08-14
+Last updated: 2026-08-19
 
 ## Baseline Command
 
@@ -43,7 +43,7 @@ Do not deploy a dirty worktree, branch name, abbreviated SHA, local runtime rows
 
 ## Recent Verification
 
-- 2026-08-18: Candidate-only loopback/LAN commands, clean-tree guard, permissions, full baseline, build, and isolated smoke passed offline.
+- 2026-08-19: Content-pool/ordinary prompt-only production checks, removed automatic-plan contracts, shared settings and Feishu-disabled pool boundaries, lint, TypeScript, build, isolated smoke, and the full offline baseline passed without external calls.
 - 2026-08-17: Dongchedi current/legacy path fixtures, empty-page Cookie error, import checks, lint, TypeScript, build, and offline baseline passed; Playwright was diagnostic-only.
 - 2026-08-17: Exact-SHA local/VPS baselines, clean port-3001 candidate, GitHub main, production identity/health/schema, unchanged six FluxPost volumes and protected services, logs, timer, rescue tags, branch/worktree cleanup, and final three-way parity passed without external provider writes.
 - 2026-08-17: Single-port candidate contracts, PowerShell parsing, runtime/deployment checks, lint, TypeScript, build, isolated HTTP/SQLite smoke, and the complete deterministic baseline passed without external calls; exact candidate startup and rollout remain pending.

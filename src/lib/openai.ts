@@ -1,10 +1,9 @@
 import { compactError, recordExecutionLog } from "./activity-log";
 import { appConfig, openaiTextUrl } from "./config";
 import { runWithConcurrencyPool } from "./concurrency";
-import { formatImageTasksForPrompt, mergeProductionPlan } from "./creation-controls";
+import { formatImageTasksForPrompt } from "./creation-controls";
 import { makeDemoPost } from "./mock-data";
 import { toModelImageUrl } from "./model-image-input";
-import { buildProductionPlan, formatNonTextProductionConstraintsForPrompt } from "./production-plan";
 import { resolveSourceVideoUrls } from "./source-video-reference";
 import {
   clampGeneratedTitleMax,
@@ -16,13 +15,12 @@ import {
   pickTitleLengthProfile,
   type TitleLengthProfile,
 } from "./title-guard";
-import type { GeneratedPost, NormalizedSourceItem, ProductionPlan, SourceImageTask } from "./types";
+import type { GeneratedPost, NormalizedSourceItem, SourceImageTask } from "./types";
 
 type RewriteInput = {
   source: NormalizedSourceItem;
   materialPaths: string[];
   instruction?: string;
-  productionPlanOverride?: ProductionPlan;
   imageTasks?: SourceImageTask[];
   includeSourceVideo?: boolean;
 };
@@ -56,11 +54,6 @@ type JsonModelOptions = {
 };
 
 export async function generatePost(input: RewriteInput): Promise<GeneratedPost> {
-  const productionPlan = mergeProductionPlan(input.source.productionPlan || buildProductionPlan(input.source), input.productionPlanOverride);
-  if (productionPlan.decision === "observe_only") {
-    throw new Error("该内容被制作策略标记为仅观察，不进入自动生成流程");
-  }
-
   if (!appConfig.openaiApiKey) {
     const source = input.source;
     const demoPost = makeDemoPost(input.source, input.materialPaths);
@@ -68,6 +61,7 @@ export async function generatePost(input: RewriteInput): Promise<GeneratedPost> 
       ...demoPost,
       videoUrls: input.includeSourceVideo === true ? resolveSourceVideoUrls(source) : [],
       title: clampGeneratedTitleMax(demoPost.title),
+      imageTasks: input.imageTasks,
     };
   }
 
@@ -76,10 +70,9 @@ export async function generatePost(input: RewriteInput): Promise<GeneratedPost> 
   const userTextInstruction = input.instruction?.trim() || "基于用户提供的原文信息重写，保留事实主体，重排结构和表达，避免复述原文句式。";
   const prompt = [
     "你是社交媒体图文内容制作专家。不要直接仿写原文，而是提取信息点、爆款表达模型和平台语感后进行原创重构。",
-    "文案生产策略完全以用户文案提示词为准；自动识别出的内容方向只用于制作准入、素材需求和图片策略，不得覆盖用户文案提示词。",
-    "除非用户文案提示词明确要求切换品牌、车型或视角，否则必须保留原文事实主体，不要因为竞品识别自动改成小鹏、G6 或其他车型。",
+    "文案生产策略完全以用户文案提示词为准，不要自行添加行业、竞品、品牌或车型转换策略。",
+    "除非用户文案提示词明确要求切换品牌、车型或视角，否则必须保留原文事实主体。",
     `用户文案提示词:\n${userTextInstruction}`,
-    `非文案制作约束:\n${formatNonTextProductionConstraintsForPrompt(productionPlan)}`,
     `用户选择的图片处理任务:\n${formatImageTasksForPrompt(input.imageTasks)}`,
     "如果用户选择了图片任务，imagePrompt 必须只围绕被选中的图片/关键帧展开，不要处理未选中的图片。",
     "如果图片策略是原图引用，必须保留原图作为配图，不要提出洗图或重构要求。",
@@ -110,7 +103,6 @@ export async function generatePost(input: RewriteInput): Promise<GeneratedPost> 
     imageUrls: [],
     videoUrls: input.includeSourceVideo === true ? resolveSourceVideoUrls(input.source) : [],
     contentTags: input.source.contentTagging?.tags || [],
-    productionPlanOverride: productionPlan,
     imageTasks: input.imageTasks,
     materialPaths: input.materialPaths,
     status: "draft",

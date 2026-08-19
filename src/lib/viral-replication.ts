@@ -5,7 +5,6 @@ import { appConfig, openaiTextUrl } from "./config";
 import { runWithConcurrencyPool } from "./concurrency";
 import { generatePost } from "./openai";
 import { toModelImageUrl } from "./model-image-input";
-import { buildProductionPlan } from "./production-plan";
 import { resolveSourceLinks } from "./source-link-import";
 import type {
   GeneratedPost,
@@ -251,26 +250,7 @@ export async function buildViralGeneratedPost(input: {
   const sourceForDraft: NormalizedSourceItem = {
     ...input.source.item,
     contentText: buildViralTextBrief(input.source, input.targetKeyword),
-    productionPlan: {
-      ...buildProductionPlan(input.source.item),
-      decision: "adopt",
-      textStrategy: "creative_reframe_with_xpeng",
-      imageStrategy: input.imitateImages === false ? "none" : "creative_analysis_rebuild_with_xpeng_assets",
-      materialRequirements: {
-        vehicleDocs: false,
-        vehicleImages: input.imitateImages !== false,
-        sourceImages: false,
-        videoKeyframes: false,
-        videoPublicPoints: false,
-      },
-      promptGuidance: {
-        textBrief: `Learn the viral structure and rewrite it for ${input.targetKeyword}. Do not invent vehicle parameters.`,
-        imageBrief:
-          input.imitateImages === false
-            ? "Generate text only; do not request viral-style image imitation."
-            : `Use ordered local ${input.targetKeyword} vehicle images as image 1 and viral source images as image 2 composition and style references; never publish original viral images.`,
-      },
-    },
+    productionPlan: undefined,
   };
   return generatePost({
     source: sourceForDraft,

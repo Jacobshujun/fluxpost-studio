@@ -65,7 +65,6 @@ const cjsModule = { exports: {} };
       },
     },
     "./openai": { generatePost: async (input) => ({ imageTasks: input.imageTasks, aiNotes: [] }) },
-    "./production-plan": { buildProductionPlan: () => ({}) },
     "./source-link-import": { resolveSourceLinks: async () => ({ items: [], results: [] }) },
   };
   vm.runInNewContext(transpiled.outputText, {

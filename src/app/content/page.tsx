@@ -12,7 +12,6 @@ import {
   ExternalLink,
   FileText,
   Filter,
-  Image as ImageIcon,
   Layers3,
   Loader2,
   Maximize2,
@@ -49,7 +48,6 @@ import {
   type NormalizedSourceItem,
   type Platform,
   type PlatformCrawlSetting,
-  type ProductionPlan,
   type SimpleRun,
   type SimpleRunMediaSettings,
   type SourceLinkPlatform,
@@ -1485,7 +1483,6 @@ export default function ContentDeskPage() {
                   onCreateManual={createManualSourceItem}
                 />
 
-                <ProductionPlanCard item={selectedSource} />
                 <PoolSecondaryCard
                   selectedCount={selectedContentItems.length}
                   busy={busy === "secondary"}
@@ -1986,29 +1983,6 @@ function SourceManagementCard({
   );
 }
 
-function ProductionPlanCard({ item }: { item: NormalizedSourceItem }) {
-  const plan = item.productionPlan;
-  if (!plan) return null;
-  return (
-    <div className="content-cluster mt-4">
-      <div className="flex items-center justify-between gap-3">
-        <PanelTitle icon={<ClipboardCheck className="h-4 w-4" />} title="生产策略" />
-        <span className="status-badge text-[11px] text-white/55">{formatProductionDecision(plan.decision)}</span>
-      </div>
-      <div className="mt-4 grid gap-2 sm:grid-cols-3">
-        <PoolMetric label="内容方向" value={formatContentDirection(plan.contentDirection)} />
-        <PoolMetric label="文案策略" value={formatTextStrategy(plan.textStrategy)} />
-        <PoolMetric label="图片策略" value={formatImageStrategy(plan.imageStrategy)} />
-      </div>
-      <p className="mt-3 text-xs leading-5 text-white/62">{plan.reason}</p>
-      <div className="mt-3 grid gap-3 md:grid-cols-2">
-        <AnalysisBlock label="文案 Brief" value={plan.promptGuidance.textBrief} icon={<FileText className="h-3.5 w-3.5" />} />
-        <AnalysisBlock label="图片 Brief" value={plan.promptGuidance.imageBrief} icon={<ImageIcon className="h-3.5 w-3.5" />} />
-      </div>
-    </div>
-  );
-}
-
 function PoolSecondaryCard({
   selectedCount,
   busy,
@@ -2088,15 +2062,6 @@ function PoolSecondaryCard({
           </Link>
         </div>
       ) : null}
-    </div>
-  );
-}
-
-function AnalysisBlock({ label, value, icon }: { label: string; value: string; icon?: ReactNode }) {
-  return (
-    <div className="analysis-block">
-      <p className="flex items-center gap-1.5 text-[11px] font-semibold text-white/55">{icon}{label}</p>
-      <p className="mt-1 text-xs leading-5 text-white/72">{value}</p>
     </div>
   );
 }
@@ -2502,49 +2467,6 @@ function formatLinkImportStatus(value: LinkImportResultStatus) {
     duplicate: "重复",
     unsupported: "不支持",
     failed: "失败",
-  };
-  return labels[value];
-}
-
-function formatContentDirection(value: ProductionPlan["contentDirection"]) {
-  const labels: Record<ProductionPlan["contentDirection"], string> = {
-    industry: "行业",
-    competitor: "竞品",
-    xpeng: "小鹏",
-    unknown: "待确认",
-  };
-  return labels[value];
-}
-
-function formatProductionDecision(value: ProductionPlan["decision"]) {
-  const labels: Record<ProductionPlan["decision"], string> = {
-    adopt: "可制作",
-    observe_only: "仅观察",
-    needs_review: "待确认",
-  };
-  return labels[value];
-}
-
-function formatTextStrategy(value: ProductionPlan["textStrategy"]) {
-  const labels: Record<ProductionPlan["textStrategy"], string> = {
-    source_rewrite: "洗稿重写",
-    xpeng_original_from_materials: "车型资料原创",
-    creative_reframe_with_xpeng: "竞品转小鹏表达",
-    video_extract_rewrite: "视频要点重构",
-    not_adopt: "不采用",
-  };
-  return labels[value];
-}
-
-function formatImageStrategy(value: ProductionPlan["imageStrategy"]) {
-  const labels: Record<ProductionPlan["imageStrategy"], string> = {
-    use_source_image: "原图引用",
-    redesign_source_image: "原图洗图",
-    redesign_source_or_xpeng_assets: "原图/小鹏素材重构",
-    creative_analysis_rebuild_with_xpeng_assets: "创意拆解重构",
-    video_keyframe_reference: "关键帧参考",
-    none: "无图片任务",
-    not_adopt: "不采用",
   };
   return labels[value];
 }

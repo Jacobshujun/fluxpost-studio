@@ -635,7 +635,6 @@ const loadVisionModule = (endpoint, apiKey, requests) => loadTsModule("src/lib/o
   "./creation-controls": {},
   "./mock-data": {},
   "./model-image-input": { toModelImageUrl: async (url) => `prepared:${url}` },
-  "./production-plan": {},
   "./source-video-reference": {},
   "./title-guard": {},
   "./types": {},

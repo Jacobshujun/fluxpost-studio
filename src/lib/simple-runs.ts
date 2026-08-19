@@ -29,7 +29,6 @@ import { generateImagesFromPrompt, generateImagesFromPromptList } from "./image-
 import { generatePost } from "./openai";
 import { buildOriginalGeneratedPost, extractOriginalTopic } from "./original-creation";
 import { isComfyUiKleinConfigured } from "./comfyui-klein";
-import { buildProductionPlan } from "./production-plan";
 import { savePost } from "./store";
 import { hasSourceVideoReference, isSourceVideoLike } from "./source-video-reference";
 import { resolveSourceLinks, resolveSourceLinksSerial, type SourceLinkImportResult } from "./source-link-import";
@@ -592,13 +591,7 @@ async function runSimpleRunWorkflow(
   }
 
   const rankedProductionCandidates = taggedItems
-    .map((item) => ({
-      item: {
-        ...item,
-        productionPlan: item.productionPlan || buildProductionPlan(item),
-      },
-      score: item.hotScore || calculateHotScore(item),
-    }))
+    .map((item) => ({ item, score: item.hotScore || calculateHotScore(item) }))
     .sort((a, b) => b.score - a.score);
   const generateImages = shouldGenerateImages(normalizedInput);
   const { productionItems, noMediaItems } = selectSimpleProductionItems(rankedProductionCandidates, normalizedInput.targetCount, {
@@ -629,12 +622,6 @@ async function runSimpleRunWorkflow(
   const productionConcurrency = isSimpleRunDongchediPageMode(normalizedInput) ? 1 : concurrencyConfig.production;
   await mapWithConcurrency(productionItems, productionConcurrency, async (source) =>
     runWithConcurrencyPool("production", async () => {
-    const plan = source.productionPlan || buildProductionPlan(source);
-    if (plan.decision === "observe_only") {
-      await produceRunUpdates.update((latestRun) => incrementStage(latestRun, "produce", { skipped: 1 }, plan.reason));
-      return;
-    }
-
     try {
       const { post, publishReady } = await produceSimpleSourceDraft(source, normalizedInput, settings, generateImages);
       await produceRunUpdates.update(async (latestRun) => {
@@ -932,21 +919,20 @@ async function runSimpleDongchediPageWorkflow(
       continue;
     }
 
-    const sourceWithPlan = { ...taggedSource, productionPlan: taggedSource.productionPlan || buildProductionPlan(taggedSource) };
-    const selection = selectSimpleProductionItems([{ item: sourceWithPlan, score: sourceWithPlan.hotScore || calculateHotScore(sourceWithPlan) }], 1, {
+    const selection = selectSimpleProductionItems([{ item: taggedSource, score: taggedSource.hotScore || calculateHotScore(taggedSource) }], 1, {
       requireVisualSource: shouldGenerateImages(normalizedInput),
     });
     if (!selection.productionItems.length) {
-      const message = describeSimpleProductionMediaSkip(sourceWithPlan);
+      const message = describeSimpleProductionMediaSkip(taggedSource);
       run = await updateDongchediLinkResult(run, article.url, { status: "filtered", error: message });
       run = await incrementStage(run, "produce", { skipped: 1 }, message);
       continue;
     }
 
-    run = await setStage(run, "produce", { status: "running", message: `Rewriting: ${sourceWithPlan.title}` });
+    run = await setStage(run, "produce", { status: "running", message: `Rewriting: ${taggedSource.title}` });
     try {
       const { post } = await produceSimpleSourceDraft(
-        sourceWithPlan,
+        taggedSource,
         normalizedInput,
         settings,
         shouldGenerateImages(normalizedInput),
@@ -1001,27 +987,11 @@ async function produceSimpleSourceDraft(
   settings: WorkspacePromptSettings,
   generateImages: boolean,
 ) {
-  const plan = source.productionPlan || buildProductionPlan(source);
   const imageTasks = buildSimpleImageTasks(source, settings, normalizedInput);
   const draft = await generatePost({
     source,
     materialPaths: normalizedInput.materialPaths,
     instruction: settings.textInstruction,
-    productionPlanOverride: {
-      ...plan,
-      promptGuidance: {
-        ...plan.promptGuidance,
-        textBrief: settings.textInstruction,
-        imageBrief: [
-          `汽车外观: ${settings.imageStrategyPrompts.carExterior}`,
-          `车型美图: ${settings.imageStrategyPrompts.carExterior}`,
-          `带文字图: ${settings.imageStrategyPrompts.textImage}`,
-          `人车美图: ${settings.imageStrategyPrompts.peopleWithCar}`,
-          "APP: 原图引用，不调用图片模型",
-          "内饰空间: 原图引用，不调用图片模型",
-        ].join("\n"),
-      },
-    },
     imageTasks,
     includeSourceVideo: normalizedInput.includeSourceVideo === true,
   });
@@ -2277,10 +2247,6 @@ function selectSimpleProductionItems(
 
   for (const { item } of candidates) {
     if (productionItems.length >= targetCount) break;
-    if (hasSimpleProductionPickupRecordTag(item)) {
-      noMediaItems.push(item);
-      continue;
-    }
     if (options.requireVisualSource !== false && !hasSimpleProductionVisualSource(item)) {
       noMediaItems.push(item);
       continue;
@@ -2292,13 +2258,8 @@ function selectSimpleProductionItems(
 }
 
 function hasSimpleProductionVisualSource(source: NormalizedSourceItem) {
-  if (hasSimpleProductionPickupRecordTag(source)) return false;
   if (isSimpleProductionVideoLikeSource(source)) return Boolean(hasSimpleProductionVideoReference(source) || source.videoFrames?.length);
   return Boolean((source.downloadedImages?.length || 0) > 0 || source.images.length > 0);
-}
-
-function hasSimpleProductionPickupRecordTag(source: NormalizedSourceItem) {
-  return Boolean(source.contentTagging?.tags.includes("提车记录"));
 }
 
 function isSimpleProductionVideoLikeSource(source: NormalizedSourceItem) {
@@ -2310,7 +2271,6 @@ function hasSimpleProductionVideoReference(source: NormalizedSourceItem) {
 }
 
 function describeSimpleProductionMediaSkip(source: NormalizedSourceItem) {
-  if (hasSimpleProductionPickupRecordTag(source)) return "Skipped pickup record source excluded from production.";
   if (isSimpleProductionVideoLikeSource(source)) return "Skipped video source without a source video reference or extracted video frames.";
   return "Skipped source without images, downloaded images, or video frames.";
 }
@@ -2334,7 +2294,6 @@ function buildSimpleProductionMediaSkipDetails(runId: string, source: Normalized
     sourceItemId: source.id,
     platform: source.platform,
     mediaType: source.mediaType || "unknown",
-    pickupRecord: hasSimpleProductionPickupRecordTag(source),
     contentTags: source.contentTagging?.tags?.join(",") || null,
     videoLike: isSimpleProductionVideoLikeSource(source),
     videoPresent: Boolean(source.videoUrl || source.downloadedVideoUrl || source.mediaCache?.videoPresent),

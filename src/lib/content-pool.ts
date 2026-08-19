@@ -1,7 +1,6 @@
 import { filterAlignedDownloadedImages, isLikelyNonContentImageUrl, normalizeContentImageUrls } from "./media-url-filter";
 import { readContentProjectsFromDb, writeContentProjectsToDb } from "./database";
 import { buildMediaCacheStatus } from "./media-cache-status";
-import { buildProductionPlan } from "./production-plan";
 import { updateSourceContentTags, updateSourceVisualTags } from "./source-tagging";
 import { enrichSourceTimestamps } from "./source-timestamps";
 import { extractDouyinCarouselImageUrls } from "./douyin-media";
@@ -79,7 +78,7 @@ export async function ingestCrawlItems(query: string, items: NormalizedSourceIte
         downloadedImages,
         downloadedVideoUrl,
         videoFrames,
-        productionPlan: buildProductionPlan(enrichedItem),
+        productionPlan: undefined,
         downloadErrors: downloadErrors.length ? downloadErrors : undefined,
         mediaUrls: replaceVideoFrameUrlsInMediaUrls(
           mergeStringArrays(
@@ -119,7 +118,6 @@ export async function ingestCrawlItems(query: string, items: NormalizedSourceIte
         lastSeenAt: now,
         usedCount: 0,
         analysis: analyzeSourceItem(enrichedItem),
-        productionPlan: buildProductionPlan(enrichedItem),
       };
       existing.set(enrichedItem.id, {
         ...nextItem,
@@ -174,7 +172,6 @@ export async function createSourceItem(query: string, item: Omit<NormalizedSourc
     ...sourceItem,
     hotScore: calculateHotScore(sourceItem),
     analysis: analyzeSourceItem(sourceItem),
-    productionPlan: buildProductionPlan(sourceItem),
   };
 
   const nextItem = {
@@ -230,7 +227,7 @@ export async function updateSourceItem(sourceItemId: string, patch: Partial<Norm
         ...nextItem,
         hotScore: patch.hotScore ?? calculateHotScore(nextItem),
         analysis: patch.analysis || item.analysis || analyzeSourceItem(nextItem),
-        productionPlan: patch.productionPlan || (patch.contentTagging === undefined ? item.productionPlan : undefined) || buildProductionPlan(nextItem),
+        productionPlan: undefined,
       };
       const recalculated = {
         ...recalculatedBase,
@@ -285,7 +282,7 @@ export async function batchUpdateSourceItemStatus(sourceItemIds: string[], poolS
         ...item,
         poolStatus,
         analysis: item.analysis || analyzeSourceItem(item),
-        productionPlan: item.productionPlan || buildProductionPlan(item),
+        productionPlan: undefined,
         lastSeenAt: item.lastSeenAt || now,
       };
       updatedItems.set(nextItem.id, nextItem);
@@ -452,7 +449,7 @@ function refreshProjectStats(project: ContentProject): ContentProject {
         ),
         videoFrames,
       ),
-      productionPlan: enrichedItem.productionPlan || buildProductionPlan({ ...enrichedItem, images, downloadedImages, videoFrames }),
+      productionPlan: undefined,
     };
     return {
       ...normalizedItem,

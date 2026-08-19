@@ -1,6 +1,6 @@
 import { mergeDownloadedAndRemoteImages } from "./media-url-filter";
 import { maxVideoHighlightFrames, selectBestVideoHighlightFrames } from "./video-frame-policy";
-import type { ImageStrategyPrompts, NormalizedSourceItem, ProductionPlan, SourceImageTask, VisualTag } from "./types";
+import type { ImageStrategyPrompts, NormalizedSourceItem, SourceImageTask, VisualTag } from "./types";
 
 export const defaultImageWashPrompt =
   "根据图上的信息，重新设计整张图片，背景浅色调，文字更有设计感，更有辨识度，无衬线。除了原图的文字意外，不要新增任何其他文字信息。";
@@ -145,24 +145,6 @@ function getSourceVideoFrameTasks(
     if (source.videoFrameOriginalReference === true) return task;
     return applyVisualTagImageStrategy(task, visualTagsByUrl.get(frame.url), prompts, options);
   });
-}
-
-export function mergeProductionPlan(basePlan: ProductionPlan, override?: ProductionPlan): ProductionPlan {
-  if (!override) return basePlan;
-  return {
-    ...basePlan,
-    ...override,
-    materialRequirements: {
-      ...basePlan.materialRequirements,
-      ...override.materialRequirements,
-    },
-    promptGuidance: {
-      ...basePlan.promptGuidance,
-      ...override.promptGuidance,
-    },
-    workflow: override.workflow?.length ? override.workflow : basePlan.workflow,
-    riskFlags: override.riskFlags ?? basePlan.riskFlags,
-  };
 }
 
 export function formatImageTasksForPrompt(tasks?: SourceImageTask[]) {

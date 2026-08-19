@@ -56,7 +56,6 @@ export function makeDemoPost(source: NormalizedSourceItem, materialPaths: string
       "社交媒体图文封面，保留用户提供素材的主体，背景改为干净的城市工作室，玻璃反光，高级编辑台氛围，清晰可读的中文标题区域，真实摄影质感",
     imageUrls: [],
     videoUrls: includeSourceVideo ? resolveSourceVideoUrls(source) : [],
-    productionPlanOverride: source.productionPlan,
     imageTasks: buildDefaultImageTasks(source),
     materialPaths,
     status: "draft",
