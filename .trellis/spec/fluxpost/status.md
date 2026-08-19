@@ -4,7 +4,7 @@ Last updated: 2026-08-19
 
 ## One-Line Status
 
-Seedance 2.5 structured image mentions and TOS-backed direct references are verified offline; port 3001 still runs the prior clean candidate until the change is committed.
+The Seedance 2.5 Inspector now has a structured, deterministically audited Prompt assistant; port 3001 still runs the prior clean candidate until this verified change is committed.
 
 ## Current Focus
 
@@ -16,13 +16,13 @@ Seedance 2.5 structured image mentions and TOS-backed direct references are veri
 
 ## Next Entry
 
-Verify and commit each fix before `npm run local` replaces the port-3001 candidate; use `npm run local:lan` only when LAN access is needed, then promote the unchanged verified SHA.
+Commit the verified Prompt assistant, run `npm run local` to replace port 3001 with that clean SHA, then verify the Seedance Inspector on desktop and mobile without submitting a paid model run.
 
 ## Recent Verification
 
+- 2026-08-19: Seedance Prompt assistant contracts, API/UI wiring and offline baseline passed without provider calls.
 - 2026-08-19: Seedance structured marker/order/conflict/deleted-reference/TOS/resume contracts, Canvas scheduler/copy fixtures, lint, TypeScript, build, isolated HTTP/SQLite baseline, and mocked Chromium at 1440x960 and 390x844 passed without Ark or TOS calls.
 - 2026-08-19: Ark Seedance 2.5 request/resume/error and legacy-node contracts passed mocked adapter checks, lint, TypeScript, build, HTTP/SQLite smoke, and the full offline baseline without provider calls.
-- 2026-08-18: Selective Feishu publish mode contracts, API/queue/simple-run/review/Canvas checks, full offline baseline, and mocked Chromium at 1440x1000 and 390x844 passed without real Feishu or provider calls; Canvas invalid nested toolbar selects were corrected after the browser exposed a hydration error.
 
 ## Risks And Unknowns
 

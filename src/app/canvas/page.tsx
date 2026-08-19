@@ -95,6 +95,14 @@ import { canvasNodeDefinitions, createCanvasNode, getCanvasBatchBindableFields, 
 import { CANVAS_SAVE_IMAGE_MAX_ITEMS } from "@/lib/canvas/save-images";
 import { createCanvasSchedulerSkeleton } from "@/lib/canvas/scheduler-skeleton";
 import {
+  serializeSeedanceAssistantPrompt,
+  type SeedanceAssistantAction,
+  type SeedanceAssistantCandidate,
+  type SeedanceAssistantMode,
+  type SeedanceAssistantReference,
+  type SeedancePromptAssistantResponse,
+} from "@/lib/canvas/seedance-prompt-assistant";
+import {
   orderSeedanceFixedReferences,
   parseSeedancePromptDocument,
   resolveSeedanceFixedReferences,
@@ -2046,6 +2054,7 @@ function NodeInspector({
     </div> : null}
     </select></label>
     {isSeedance ? <SeedancePromptComposer
+      key={node.id}
       node={node}
       references={orderedSeedanceReferences}
       graph={graph}
@@ -2131,6 +2140,13 @@ function SeedancePromptComposer({ node, references, graph, errors, onPatch, crea
   const editorRef = useRef<HTMLDivElement>(null);
   const [menu, setMenu] = useState<SeedanceMentionMenuState | null>(null);
   const [activeIndex, setActiveIndex] = useState(0);
+  const [assistantOpen, setAssistantOpen] = useState(false);
+  const [assistantMode, setAssistantMode] = useState<SeedanceAssistantMode>("auto");
+  const [assistantAction, setAssistantAction] = useState<SeedanceAssistantAction>("generate");
+  const [assistantIntent, setAssistantIntent] = useState("");
+  const [assistantBusy, setAssistantBusy] = useState(false);
+  const [assistantError, setAssistantError] = useState("");
+  const [assistantResult, setAssistantResult] = useState<{ response: SeedancePromptAssistantResponse; references: SeedanceAssistantReference[] }>();
   const promptDocument = String(node.config.prompt || "");
   const bindings = useMemo(() => seedanceMentionBindings(node.config), [node.config]);
   const numberByUrl = useMemo(() => new Map(references.map((reference, index) => [reference.url, index + 1])), [references]);
@@ -2143,6 +2159,13 @@ function SeedancePromptComposer({ node, references, graph, errors, onPatch, crea
     const query = menu?.query.trim().toLowerCase() || "";
     return choices.filter((choice) => !query || `图片${choice.number} ${choice.name}`.toLowerCase().includes(query));
   }, [choices, menu?.query]);
+  const upstreamPromptConnected = graph.edges.some((edge) => edge.target === node.id && edge.targetPort === "prompt");
+  const assistantReferences = useMemo<SeedanceAssistantReference[]>(() => references.map((reference, index) => ({
+    id: `assistant-ref-${index + 1}`,
+    number: index + 1,
+    url: reference.url,
+    name: seedanceReferenceName(reference, graph, node),
+  })), [graph, node, references]);
 
   useLayoutEffect(() => {
     const editor = editorRef.current;
@@ -2187,10 +2210,69 @@ function SeedancePromptComposer({ node, references, graph, errors, onPatch, crea
     commitDocument({ id, url: choice.reference.url });
     setMenu(null);
   };
+  const requestAssistant = async () => {
+    setAssistantBusy(true);
+    setAssistantError("");
+    try {
+      const response = await api<SeedancePromptAssistantResponse>("/api/canvas/seedance/prompt-assist", {
+        method: "POST",
+        body: JSON.stringify({
+          action: assistantAction,
+          mode: assistantMode,
+          intent: assistantIntent,
+          existingPrompt: seedancePromptDocumentText(promptDocument, bindings, numberByUrl),
+          duration: Number(node.config.duration),
+          ratio: String(node.config.ratio),
+          references: assistantReferences,
+        }),
+      });
+      setAssistantResult({ response, references: assistantReferences });
+    } catch (error) {
+      setAssistantError(errorMessage(error));
+    } finally {
+      setAssistantBusy(false);
+    }
+  };
+  const applyAssistantCandidate = (candidate: SeedanceAssistantCandidate) => {
+    if (!assistantResult || candidate.complianceRisk === "high") return;
+    if (upstreamPromptConnected) {
+      setAssistantError("请先断开外部提示词连接，再应用到节点 Prompt。");
+      return;
+    }
+    const snapshotById = new Map(assistantResult.references.map((reference) => [reference.id, reference]));
+    const availableUrls = new Set(references.map((reference) => reference.url));
+    const mentionIds: string[] = [];
+    const mentionUrls: string[] = [];
+    const documentValue = candidate.promptParts.map((part) => {
+      if (part.type === "text") return part.value;
+      const snapshot = snapshotById.get(part.referenceId);
+      if (!snapshot || !availableUrls.has(snapshot.url)) throw new Error("候选引用的参考图已被移除，请重新生成方案。");
+      const id = createMentionId();
+      mentionIds.push(id);
+      mentionUrls.push(snapshot.url);
+      return seedanceMentionMarker(id);
+    }).join("").trim();
+    onPatch({
+      prompt: documentValue,
+      mentionIds,
+      mentionUrls,
+      duration: candidate.duration,
+      ratio: candidate.ratio,
+      complianceRisk: candidate.complianceRisk,
+    });
+    setAssistantError("");
+    setAssistantOpen(false);
+  };
   const visibleErrors = Array.from(new Set(errors.map(seedanceInspectorError)));
   const visibleActiveIndex = Math.min(activeIndex, Math.max(0, filteredChoices.length - 1));
   return <div className="canvas-seedance-prompt">
-    <div className="canvas-seedance-section-heading"><strong>Prompt</strong><span>{promptDocument.trim() ? "节点 Prompt" : "外部提示词"}</span></div>
+    <div className="canvas-seedance-section-heading">
+      <strong>Prompt</strong>
+      <span className="canvas-seedance-heading-actions">
+        <button type="button" onClick={() => setAssistantOpen((current) => !current)} aria-expanded={assistantOpen}><WandSparkles />AI 优化</button>
+        <em>{promptDocument.trim() ? "节点 Prompt" : "外部提示词"}</em>
+      </span>
+    </div>
     <div className={`canvas-seedance-editor-shell ${visibleErrors.length ? "has-error" : ""}`}>
       <div
         ref={editorRef}
@@ -2247,7 +2329,76 @@ function SeedancePromptComposer({ node, references, graph, errors, onPatch, crea
       </div> : null}
     </div>
     {visibleErrors.length ? <div className="canvas-seedance-errors" role="alert">{visibleErrors.map((error) => <p key={error}><AlertTriangle />{error}</p>)}</div> : null}
+    {assistantOpen ? <div className="canvas-seedance-assistant">
+      <div className="canvas-seedance-assistant-controls">
+        <label><span>模式</span><select value={assistantMode} onChange={(event) => setAssistantMode(event.target.value as SeedanceAssistantMode)}>
+          <option value="auto">自动识别</option>
+          <option value="text">文生视频</option>
+          <option value="image">图生视频</option>
+          <option value="storyboard">分镜板</option>
+          <option value="rewrite">改写现有</option>
+        </select></label>
+        <label><span>操作</span><select value={assistantAction} onChange={(event) => setAssistantAction(event.target.value as SeedanceAssistantAction)}>
+          <option value="generate">生成方案</option>
+          <option value="rewrite">整体改写</option>
+          <option value="hook">强化 Hook</option>
+          <option value="repair">修复运镜</option>
+          <option value="shorten">压缩提示词</option>
+        </select></label>
+      </div>
+      <label><span>创意要求</span><textarea value={assistantIntent} onChange={(event) => setAssistantIntent(event.target.value)} placeholder="例如：汽车从雨幕中驶出，前两秒要有强冲击" maxLength={4000} /></label>
+      <button className="canvas-seedance-assistant-generate" type="button" disabled={assistantBusy || (!assistantIntent.trim() && !promptDocument.trim())} onClick={() => void requestAssistant()}>
+        {assistantBusy ? <LoaderCircle className="animate-spin" /> : <Sparkles />}<span>{assistantBusy ? "生成中" : "生成两个方案"}</span>
+      </button>
+      {assistantError ? <p className="canvas-seedance-assistant-error" role="alert"><AlertTriangle />{assistantError}</p> : null}
+      {assistantResult ? <div className="canvas-seedance-candidates">
+        <div className="canvas-seedance-assistant-mode"><span>识别模式</span><strong>{seedanceAssistantModeLabel(assistantResult.response.resolvedMode)}</strong></div>
+        {assistantResult.response.candidates.map((candidate) => <SeedanceAssistantCandidateView
+          key={candidate.id}
+          candidate={candidate}
+          references={assistantResult.references}
+          applyBlocked={upstreamPromptConnected}
+          onApply={() => {
+            try { applyAssistantCandidate(candidate); } catch (error) { setAssistantError(errorMessage(error)); }
+          }}
+        />)}
+      </div> : null}
+    </div> : null}
   </div>;
+}
+
+function SeedanceAssistantCandidateView({ candidate, references, applyBlocked, onApply }: {
+  candidate: SeedanceAssistantCandidate;
+  references: SeedanceAssistantReference[];
+  applyBlocked: boolean;
+  onApply: () => void;
+}) {
+  const prompt = serializeSeedanceAssistantPrompt(candidate.promptParts, references);
+  const blocked = applyBlocked || candidate.complianceRisk === "high";
+  return <article className="canvas-seedance-candidate">
+    <header><strong>{candidate.title}</strong><span className={`is-${candidate.complianceRisk}`}>{seedanceRiskLabel(candidate.complianceRisk)}</span></header>
+    <p className="canvas-seedance-candidate-prompt">{prompt}</p>
+    <div className="canvas-seedance-candidate-meta"><span>{candidate.duration} 秒</span><span>{candidate.ratio}</span><span>{candidate.checks.characterCount}/2000</span></div>
+    {candidate.warnings.length ? <ul>{candidate.warnings.map((warning) => <li key={warning}>{warning}</li>)}</ul> : null}
+    <button type="button" disabled={blocked} onClick={onApply} title={applyBlocked ? "先断开外部提示词连接" : candidate.complianceRisk === "high" ? "高风险方案禁止应用" : "应用到节点 Prompt"}><CheckCircle2 /><span>应用方案</span></button>
+  </article>;
+}
+
+function seedancePromptDocumentText(value: string, bindings: Array<{ id: string; url: string }>, numberByUrl: Map<string, number>) {
+  const bindingMap = new Map(bindings.map((binding) => [binding.id, binding.url]));
+  return parseSeedancePromptDocument(value).map((part) => {
+    if (part.kind === "text") return part.value;
+    const number = numberByUrl.get(bindingMap.get(part.id) || "");
+    return number ? `@图片${number}` : "";
+  }).join("").trim();
+}
+
+function seedanceAssistantModeLabel(mode: SeedancePromptAssistantResponse["resolvedMode"]) {
+  return ({ text: "文生视频", image: "图生视频", storyboard: "分镜板", rewrite: "改写现有" } as const)[mode];
+}
+
+function seedanceRiskLabel(risk: SeedanceAssistantCandidate["complianceRisk"]) {
+  return ({ low: "低风险", medium: "需复核", high: "禁止应用" } as const)[risk];
 }
 
 function seedanceReferenceName(reference: SeedanceFixedReference, graph: CanvasGraph, node: CanvasNode) {

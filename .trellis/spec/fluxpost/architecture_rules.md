@@ -641,6 +641,41 @@ throw new ImageProviderError("accepted task timed out", {
 - `input.copy-library@1` freezes `entryId`, display title, title/body/tag snapshots, and `snapshotAt`; its literal executor returns independent `title:text` and `body:text` outputs without database access. Private entries are owner/admin readable, team entries are member-readable, and only owner/admin may edit or delete.
 - GPT vision accepts 1-8 prepared images, uses the configured Responses/Chat text endpoint plus the `gpt` pool, declares `text_model`, and maps missing text configuration to `needs_config`. Image transformation accepts 20 images at 30 MB each; video frames accept 4 videos/20 total frames and persist content-addressed URL/dimension metadata through runtime media.
 - `model.gpt-vision@1` treats non-empty text connected to `instruction` as the complete model prompt: it trims and joins multiple incoming text artifacts in edge order, then sends only that user text without the analysis preset or node-level default instruction. When no effective user text is connected, the existing preset plus optional node instruction remains the backward-compatible fallback.
+
+## Scenario: Seedance Prompt Assistant
+
+### 1. Scope / Trigger
+- The `model.seedance@1` Inspector may turn an operator brief, existing Prompt, and zero to nine fixed reference images into two reviewable Prompt candidates. This is an authoring aid only: it never starts a Canvas run, submits Seedance, or overwrites node config without an explicit apply command.
+
+### 2. Signatures
+- Browser API: `POST /api/canvas/seedance/prompt-assist`, authenticated through `requireWorkspaceAccount(request)`.
+- Domain entry: `createSeedancePromptCandidates(input, { generateText, generateVision }) -> Promise<SeedancePromptAssistantResponse>` in `src/lib/canvas/seedance-prompt-assistant.ts`.
+- Apply boundary: structured `promptParts` are serialized into the existing `prompt` plus `mentionIds`/`mentionUrls` config through `seedanceMentionMarker(...)`; no Canvas graph schema or database migration is added.
+
+### 3. Contracts
+- Request is `{ action, mode, intent, existingPrompt, duration, ratio, references }`. Actions are `generate|rewrite|shorten|hook|repair`; modes are `auto|text|image|storyboard|rewrite`; duration is an integer `4..15`; ratio uses the Seedance registry ratios; intent is at most 4000 characters and existing Prompt at most 2000.
+- Each reference is `{ id, number, url, name? }`: `id` is a unique stable `[A-Za-z0-9_-]{1,80}` token, number is `1..9`, and URL is public HTTP(S). Image/storyboard requests send at most the first eight URLs to the vision model while all nine remain valid structured references.
+- Response is `{ resolvedMode, candidates }` with exactly two candidates. Prompt parts are `{ type: "text", value }` or `{ type: "image", referenceId }`; model text may not hand-write `@图片N`, `图片N`, or a reference id. FluxPost, not the model, computes character count, reference validity, time coverage, opening Hook presence, camera conflicts, and final compliance risk.
+- Candidate application uses the generation-time `referenceId -> URL` snapshot and verifies that URL still exists in the node's current fixed references. Reordering therefore keeps identity; removal requires regeneration. Applying also updates duration, ratio, and compliance risk. A connected upstream Prompt blocks local candidate application.
+
+### 4. Validation & Error Matrix
+- Missing sign-in -> HTTP `401`; malformed JSON or invalid caller fields -> HTTP `400`; provider/config/response-contract failure -> HTTP `500` with a visible message.
+- Response count other than two, malformed part, missing reference, hand-written image number, invalid duration/ratio, empty Prompt, or Prompt over 2000 characters -> reject the whole response before UI display.
+- Deterministic high compliance risk -> candidate remains visible for diagnosis but apply is disabled; medium risk remains explicitly reviewable; low risk may be applied.
+- A camera conflict, missing opening Hook, incomplete 13-15 second timeline, or ninth unanalysed vision reference -> candidate warning, not silent repair.
+
+### 5. Good/Base/Bad Cases
+- Good: one brief plus one car reference routes to vision, returns two structured candidates, and explicit apply creates stable existing Seedance mention bindings.
+- Base: no images routes to text; an existing Prompt or a non-generate action routes to rewrite; medium-risk output stays reviewable with warnings.
+- Bad: raw model `@图片1`, a deleted reference, over-2000 output, high-risk output, or local apply while an upstream Prompt is connected fails closed.
+
+### 6. Tests Required
+- `.trellis/verification/seedance_prompt_assistant_check.mjs` injects text/vision model functions and asserts auto routing, exactly-two decoding, stable reference serialization, caller bounds, overlength rejection, timeline/Hook/camera audits, risk escalation, authenticated route wiring, explicit apply wiring, and UI styles without external calls.
+- The full baseline must continue to cover Canvas graph/reference contracts, lint, TypeScript, build, isolated HTTP/SQLite smoke, and absence of paid provider calls.
+
+### 7. Wrong vs Correct
+- Wrong: load a local Codex `SKILL.md` at runtime, trust model-authored checks, or paste ordinal `@图片N` text directly into node config.
+- Correct: encode the relevant skill rules in a versioned domain prompt, return stable structured reference ids, recompute hard checks in FluxPost, and apply only through the existing mention-marker contract.
 - `compose.social-post@1` accepts optional single text input `vehicle`, trims it into `GeneratedPost.feishuVehicle`, and no longer exposes vehicle as new-node config. Connected text takes precedence; persisted `config.vehicle` remains a read-only fallback for historical nodes.
 - `utility.image-preview` copies URL/metadata-only image artifacts into node runs. Direct sinks run passively after an included image producer; failed, cancelled, blocked, or empty attempts never replace the last output-bearing success. Durable lookup joins all workflow runs rather than scanning the recent-run limit.
 - `utility.display-any@1` is an outputless passive sink with one required, single-connection `value:any` input. Its executor requires exactly one upstream `CanvasArtifact` and clones it to the non-connectable `nodeRun.outputs.preview`; the node UI renders all five existing artifact kinds and uses the ordinary input fingerprint for reuse. It adds no capability or confirmation.

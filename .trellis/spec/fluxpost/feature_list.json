@@ -327,6 +327,7 @@
         "Runs persist immutable graph snapshots and execute ready DAG branches in parallel with node-level status, failure blocking, cancellation, retry, and upstream reuse",
         "Billable model and external-write plans pass preflight then enqueue without browser prompts for unattended batches, while the server records plan acknowledgement and Feishu nodes expose only the existing publish queue",
         "Seedance accepts local or legacy upstream Prompt sources, keeps stable official-style image mentions across fixed reference reorder/removal, freezes provider-facing inputs, and resumes accepted Ark tasks by querying the original task id",
+        "Seedance offers two audited Prompt candidates and explicit stable-reference apply without submitting a run",
         "Default deterministic verification covers graph, persistence, API, desktop, and mobile contracts without paid provider or Feishu writes",
         "A passive save-images node freezes 1-30 references for explicit signed-in desktop downloads without server paths or new persistence",
         "Desktop fragments preserve internal edges, configuration, layout, execution mode, and scheduler roles across workflows, while versioned FluxPost JSON exports current edit state and imports as a new owner-scoped workflow",
@@ -335,9 +336,9 @@
         "Batch scheduler V2 lets users define typed main/child parameters, source filters, fixed/full/random expansion with exact or inclusive-range counts, main-once and child-per-main preview-frozen no-replacement selection, cartesian/zip composition, explicit node-field bindings, partial/strict aggregation, custom names for same-type Canvas nodes, and explicit main-task shared upstream results"
       ],
       "evidence": [
+        "2026-08-19 Seedance Prompt assistant routing, reference/audit/API/UI checks and offline baseline passed without provider calls.",
         "2026-08-19 Seedance structured mentions, canonical image ordering, TOS gating, resolved-input resume, full offline baseline, and mocked Chromium desktop/mobile checks passed without Ark or TOS calls.",
-        "2026-08-14 save-images contracts, full local/VPS baselines, mocked Edge single/multi/partial/history downloads, fixed-SHA production activation, unauthenticated download 401, and rollback checks passed without external provider writes.",
-        "2026-08-05 Canvas portability plus V2 shared outputs passed workflow/scheduler checks, mocked Chromium, TypeScript, lint, build/restart, local 200/401, and the complete isolated baseline without external calls."
+        "2026-08-14 save-images contracts, full local/VPS baselines, mocked Edge single/multi/partial/history downloads, fixed-SHA production activation, unauthenticated download 401, and rollback checks passed without external provider writes."
       ],
       "notes": "Keep ready_for_review until operator-approved real Seedance/Feishu and batch image-provider smokes plus PostgreSQL migration/multi-user concurrency are live-verified."
     },
