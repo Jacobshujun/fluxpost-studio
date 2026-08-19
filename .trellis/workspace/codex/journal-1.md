@@ -1054,3 +1054,36 @@ Kept one clean candidate runtime on port 3001, preserved LAN and account behavio
 ### Next Steps
 
 - None - task complete
+
+
+## Session 32: Canvas local image drop
+
+**Date**: 2026-08-19
+**Task**: Canvas local image drop
+**Branch**: `main`
+
+### Summary
+
+Added desktop local-image drag and drop for Canvas, reusing authenticated runtime media uploads without creating library assets; verified focused contracts and full offline baseline.
+
+### Main Changes
+
+(Add details)
+
+### Git Commits
+
+| Hash | Message |
+|------|---------|
+| `3281b7e` | (see git log) |
+
+### Testing
+
+- [OK] (Add test results)
+
+### Status
+
+[OK] **Completed**
+
+### Next Steps
+
+- None - task complete
