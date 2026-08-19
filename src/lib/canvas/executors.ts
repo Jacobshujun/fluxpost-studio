@@ -7,6 +7,7 @@ import { callOpenAIForText, callOpenAIForVisionText } from "../openai";
 import type { GeneratedPost, SourceImageTask } from "../types";
 import type { WorkspaceAccessActor } from "../workspace-ownership";
 import { ArkSeedanceNeedsConfigError, queryArkSeedanceVideo, submitArkSeedanceVideo } from "./seedance";
+import { resolveSeedanceInput } from "./seedance-references";
 import { CanvasMediaNeedsConfigError, extractCanvasVideoFrames, reconstructCanvasVideo, transformCanvasImages } from "./media-tools";
 import { canvasVisionPresets, concatenateCanvasText, parseCanvasImageSelection, renderCanvasPromptTemplate, splitCanvasText } from "./node-utils";
 import { normalizeUrlList } from "./registry";
@@ -31,6 +32,7 @@ export type CanvasNodeExecutionContext = {
     taskId: string;
     route: "primary" | "backup";
     status: string;
+    resolvedInputs?: Record<string, CanvasArtifact[]>;
   }) => Promise<void>;
 };
 
@@ -321,21 +323,32 @@ function pixelSizeForRatio(ratio: string, resolution: "1k" | "2k" | "4k") {
   return `${Math.max(64, Math.round(widthRatio * scale))}x${Math.max(64, Math.round(heightRatio * scale))}`;
 }
 
-async function executeSeedance({ node, inputs, previousNodeRun }: CanvasNodeExecutionContext) {
+async function executeSeedance({ node, inputs, previousNodeRun, onProviderTaskUpdate }: CanvasNodeExecutionContext) {
   try {
     const previousSubmitId = previousNodeRun?.providerTaskId;
-    const submission = previousSubmitId
-      ? await queryArkSeedanceVideo(previousSubmitId)
-      : await submitArkSeedanceVideo({
-          prompt: textValues(inputs.prompt).join("\n\n"),
-          images: mediaUrls(inputs.images, "images"),
+    let resolvedInputs: Record<string, CanvasArtifact[]> | undefined;
+    let submission;
+    if (previousSubmitId) {
+      submission = await queryArkSeedanceVideo(previousSubmitId);
+    } else {
+      const resolved = resolveSeedanceInput(node.config, inputs.prompt, mediaUrls(inputs.images, "images"));
+      resolvedInputs = {
+        ...inputs,
+        prompt: [{ kind: "text", value: resolved.prompt }],
+        images: [{ kind: "images", items: resolved.images.map((url, index) => ({ url, name: `图片${index + 1}` })) }],
+      };
+      submission = await submitArkSeedanceVideo({
+          prompt: resolved.prompt,
+          images: resolved.images,
           videos: mediaUrls(inputs.videos, "videos"),
           duration: Number(node.config.duration),
           ratio: String(node.config.ratio),
           resolution: String(node.config.resolution),
           generateAudio: typeof node.config.generateAudio === "boolean" ? node.config.generateAudio : true,
           watermark: typeof node.config.watermark === "boolean" ? node.config.watermark : true,
-        });
+      });
+      await onProviderTaskUpdate?.({ taskId: submission.taskId, route: "primary", status: submission.status, resolvedInputs });
+    }
     const pending = !["success", "succeeded", "completed"].includes(submission.status) || submission.videoUrls.length === 0;
     return {
       outputs: {
@@ -348,6 +361,7 @@ async function executeSeedance({ node, inputs, previousNodeRun }: CanvasNodeExec
       },
       providerTaskId: submission.taskId,
       providerStatus: submission.status,
+      ...(resolvedInputs ? { resolvedInputs } : {}),
       pending,
     };
   } catch (error) {

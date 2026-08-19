@@ -1162,13 +1162,18 @@ for (const link of links) {
 
 - `POST {ARK_BASE_URL}/contents/generations/tasks` creates one task; `GET {ARK_BASE_URL}/contents/generations/tasks/{taskId}` queries the same task.
 - `submitArkSeedanceVideo(input) -> ArkSeedanceSubmission`; `queryArkSeedanceVideo(taskId) -> ArkSeedanceSubmission`.
+- `resolveSeedanceInput(config, promptArtifacts, upstreamImages) -> { prompt, images, promptSource }` resolves the exact provider-facing Prompt and image order before the first POST. `resolveSeedanceFixedReferences(graph, nodeId)` exposes only node uploads plus directly connected `input.images@1`/`input.library-images@1` snapshots to the Inspector mention menu.
+- `POST /api/canvas/media` accepts authenticated multipart `mode=seedance-reference`; this mode requires enabled, fully configured TOS and returns only verified public HTTP(S) URLs.
 - Environment: required `ARK_API_KEY`; optional `ARK_BASE_URL`, `ARK_SEEDANCE_MODEL` (default `doubao-seedance-2-5-260628`), and `ARK_SEEDANCE_REQUEST_TIMEOUT_MS` (default 30 seconds).
 
 ### 3. Contracts
 
 - Create content is ordered text, `reference_image` items, then `reference_video` items. The body also carries `generate_audio`, `ratio`, `duration`, `resolution`, and `watermark`; auth is `Bearer` and must never be logged.
+- `model.seedance@1` keeps flat optional config fields `prompt`, `referenceUrls`, `mentionIds`, and `mentionUrls`. Prompt stores opaque `{{seedance-image:<id>}}` markers; parallel mention arrays bind each active id to its original URL. The UI renders fixed official-style `@图片N` chips, but the API receives plain `图片N` text without `@`.
+- A non-empty node Prompt and an effective upstream Prompt are mutually exclusive. An empty node Prompt preserves legacy upstream-only behavior. The authoring menu excludes dynamic model outputs; those outputs remain ordinary unmentioned runtime references.
+- Canonical image order is direct references, actively mentioned upstream references in first-mention order, then remaining upstream runtime references, with first-occurrence URL deduplication. Reordering changes displayed numbers without changing URL binding; removing a bound image leaves an invalid chip and blocks submission.
 - Prompt is non-empty and at most 2,000 characters; duration is 4-15 seconds; references retain the conservative 9-image, 3-video, 12-total limits and must be public HTTP(S) URLs.
-- Canvas persists the returned Ark `id` as `providerTaskId`. Non-terminal work requeues and performs GET with that id; it never repeats POST. `succeeded` requires `content.video_url`.
+- Before POST, the node run freezes the resolved Prompt and images named `图片1..N` in `inputs`. Canvas persists the returned Ark `id` as `providerTaskId`; non-terminal recovery preserves those resolved inputs and performs GET with that id before any re-resolution or upload. `succeeded` requires `content.video_url`.
 - `model.seedance` remains version 1 so saved graphs load. Historical `modelVersion` is ignored; absent `generateAudio`/`watermark` values normalize to true at execution.
 
 ### 4. Validation & Error Matrix
@@ -1176,6 +1181,11 @@ for (const link of links) {
 | Condition | Required result |
 | --- | --- |
 | Missing key or model | Canvas `needs_config`, zero provider requests |
+| Empty local Prompt and no upstream Prompt | Graph/run validation error before POST |
+| Local and effective upstream Prompt both present | Explicit conflict error before POST |
+| Unknown/malformed/unbound marker or removed bound URL | Invalid mention error; never rebind by array position |
+| More than nine deduplicated runtime images | Explicit local error before POST |
+| Seedance upload with disabled/incomplete TOS or a non-public result URL | HTTP `400`; do not mutate node config |
 | Invalid prompt/parameter/reference | Explicit local error before POST |
 | Ark HTTP 401/403 | `needs_config` without exposing credentials |
 | Other non-2xx | Error includes HTTP status and sanitized provider message |
@@ -1186,13 +1196,14 @@ for (const link of links) {
 
 ### 5. Good/Base/Bad Cases
 
-- Good: submit text + image + video once, persist the id, then a later GET returns the video URL.
-- Base: a text-only task follows the same async lifecycle and uses the configured model/endpoint.
-- Bad: query credits or poll inside preflight, accept local-only media paths, log authorization headers, bump the Canvas node version without migration, or replay POST after ambiguous acceptance.
+- Good: `让{{seedance-image:person}}驾驶{{seedance-image:car}}` binds stable URLs, serializes to `让图片1驾驶图片2`, sends those two image items in the same order, persists the resolved inputs, then a later GET returns the video URL.
+- Base: an old node with an empty local Prompt continues to consume upstream text and ordinary ordered images without mention config.
+- Bad: bind mentions to array positions, expose dynamic model outputs in the `@` menu, silently choose one of two Prompt sources, accept local-only media paths, bump the node version without migration, or replay POST after ambiguous acceptance.
 
 ### 6. Tests Required
 
-- `.trellis/verification/canvas_workflows_check.mjs` executes the adapter with mocked fetch and asserts URL, method, Bearer auth, content roles, parameters, create/query normalization, provider failure, old-node loading, and zero fetches when unconfigured.
+- `.trellis/verification/canvas_workflows_check.mjs` executes the adapter with mocked fetch and asserts URL, method, Bearer auth, content roles/order, marker parsing, `图片N` serialization, fixed-versus-dynamic discovery, Prompt conflicts, deleted bindings, old-node loading, resolved-input persistence, GET-only resume, TOS route gating, and zero fetches when unconfigured.
+- Mocked Chromium checks must cover keyboard mention selection, immutable chip rendering, numbering after direct-reference reorder, invalid state after removal, plain-text paste, and no Inspector/menu horizontal overflow at desktop and 390px mobile widths.
 - TypeScript, lint, build, isolated HTTP/SQLite smoke, and the complete offline baseline must pass without a live Ark/Seedance call.
 
 ### 7. Wrong vs Correct
@@ -1201,10 +1212,19 @@ for (const link of links) {
 // Wrong: a worker restart pays for a replacement task.
 await submitArkSeedanceVideo(input);
 
-// Correct: persisted provider identity resumes the accepted task.
+// Wrong: array position is persisted as the reference identity.
+config.prompt = "让@图片1驾驶@图片2";
+
+// Correct: persist the resolved request once, then resume the accepted identity.
+const resolved = resolveSeedanceInput(config, promptArtifacts, upstreamImages);
 const result = previousNodeRun?.providerTaskId
   ? await queryArkSeedanceVideo(previousNodeRun.providerTaskId)
-  : await submitArkSeedanceVideo(input);
+  : await submitArkSeedanceVideo({ ...input, prompt: resolved.prompt, images: resolved.images });
+
+// Correct: the editor persists stable marker-to-URL bindings; resolution emits official ordinals.
+config.prompt = `让${seedanceMentionMarker("person-id")}驾驶${seedanceMentionMarker("car-id")}`;
+config.mentionIds = ["person-id", "car-id"];
+config.mentionUrls = [personUrl, carUrl];
 ```
 
 ## Trellis Rules

@@ -1,6 +1,7 @@
 import { getCanvasNodeDefinition, getCanvasNodeExecutionMode, validateCanvasNodeConfig } from "./registry";
 import { areCanvasPortKindsCompatible, CANVAS_GRAPH_LIMITS, CANVAS_NODE_SIZE_LIMITS, CANVAS_SCHEDULER_ROLES, isCanvasNodeSize } from "./types";
 import type { CanvasEdge, CanvasGraph, CanvasGraphValidation, CanvasNodeCapability, CanvasRunPlan, CanvasSchedulerRole } from "./types";
+import { validateSeedanceGraphNode } from "./seedance-references";
 
 const schedulerRoles = new Set<CanvasSchedulerRole>(CANVAS_SCHEDULER_ROLES);
 
@@ -87,6 +88,7 @@ export function validateCanvasGraph(graph: CanvasGraph): CanvasGraphValidation {
         errors.push(`${definition?.label || node.id} requires input ${input.label}.`);
       }
     }
+    if (node.type === "model.seedance" && executionMode === "enabled") errors.push(...validateSeedanceGraphNode(graph, node));
   }
 
   const order = topologicalOrder(graph, nodes);

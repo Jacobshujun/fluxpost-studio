@@ -4,6 +4,7 @@ import { validateCanvasImageFilenamePrefix } from "./save-images";
 import { canvasPromptPresets, canvasVisionPresets, parseCanvasImageSelection, parseCanvasVideoTimestamps, resolveCanvasImageDimensions } from "./node-utils";
 import { defaultCanvasSourceVideoProjectName, isCanvasSourceVideoSnapshotCurrent } from "./source-video-contract";
 import { feishuPublishModeOptions, normalizeFeishuPublishMode } from "../feishu-publish-mode";
+import { validateSeedanceReferenceConfig } from "./seedance-references";
 
 const canvasNodeDefinitionVersions: CanvasNodeDefinition[] = [
   {
@@ -194,7 +195,7 @@ const canvasNodeDefinitionVersions: CanvasNodeDefinition[] = [
     icon: "Clapperboard",
     color: "#ef4444",
     inputs: [
-      { id: "prompt", label: "提示词", kind: "text", required: true, multiple: true },
+      { id: "prompt", label: "外部提示词", kind: "text", multiple: true },
       { id: "images", label: "参考图", kind: "images", multiple: true },
       { id: "videos", label: "参考视频", kind: "videos", multiple: true },
     ],
@@ -229,7 +230,18 @@ const canvasNodeDefinitionVersions: CanvasNodeDefinition[] = [
         ],
       },
     ],
-    defaultConfig: { duration: 8, ratio: "9:16", resolution: "720p", generateAudio: true, watermark: true, complianceRisk: "low" },
+    defaultConfig: {
+      prompt: "",
+      referenceUrls: [],
+      mentionIds: [],
+      mentionUrls: [],
+      duration: 8,
+      ratio: "9:16",
+      resolution: "720p",
+      generateAudio: true,
+      watermark: true,
+      complianceRisk: "low",
+    },
     capability: "video_model",
     bypass: { inputPort: "videos", outputPort: "videos" },
   },
@@ -722,6 +734,7 @@ export function validateCanvasNodeConfig(type: CanvasNodeType, config: CanvasNod
     }
   }
   if (type === "model.seedance") {
+    errors.push(...validateSeedanceReferenceConfig(config));
     if (config.complianceRisk === "high") errors.push("Seedance 高合规风险任务禁止提交。");
   }
   return errors;

@@ -74,7 +74,7 @@ const temp = mkdtempSync(path.join(tmpdir(), "fluxpost-canvas-check-"));
 try {
   writeFileSync(path.join(temp, "toapis-image-api.js"), `exports.toApisImageRatios = ${JSON.stringify(["1:1", "3:2", "2:3", "4:3", "3:4", "5:4", "4:5", "16:9", "9:16", "2:1", "1:2", "21:9", "9:21"])}; exports.toApis4kImageRatios = ${JSON.stringify(["16:9", "9:16", "2:1", "1:2", "21:9", "9:21"])};`, "utf8");
   writeFileSync(path.join(temp, "feishu-publish-mode.js"), "exports.feishuPublishModeOptions=[{value:'full',label:'完整写入'},{value:'text',label:'仅标题与正文'},{value:'media',label:'仅图片与视频'}];exports.normalizeFeishuPublishMode=(value)=>value===undefined?'full':['full','text','media'].includes(value)?value:(()=>{throw new Error('invalid mode')})();", "utf8");
-  for (const name of ["types", "node-utils", "source-video-contract", "save-images", "registry", "graph", "serialization", "clipboard", "workflow-file"]) {
+  for (const name of ["types", "node-utils", "source-video-contract", "save-images", "seedance-references", "registry", "graph", "serialization", "clipboard", "workflow-file"]) {
     const source = read(`src/lib/canvas/${name}.ts`).replace('"../toapis-image-api"', '"./toapis-image-api"').replace('"../feishu-publish-mode"', '"./feishu-publish-mode"');
     const output = ts.transpileModule(source, {
       compilerOptions: { module: ts.ModuleKind.CommonJS, target: ts.ScriptTarget.ES2022 },
@@ -88,6 +88,7 @@ try {
   const { createCanvasClipboardPayload, instantiateCanvasClipboardPayload, parseCanvasClipboardPayload, prepareCanvasClipboardPaste } = require(path.join(temp, "clipboard.js"));
   const { createCanvasWorkflowFile, parseCanvasWorkflowFile, canvasWorkflowFileName, CANVAS_WORKFLOW_FILE_MAX_BYTES } = require(path.join(temp, "workflow-file.js"));
   const { areCanvasPortKindsCompatible, CANVAS_GRAPH_LIMITS, CANVAS_NODE_SIZE_LIMITS } = require(path.join(temp, "types.js"));
+  const seedanceReferences = require(path.join(temp, "seedance-references.js"));
   const nodeUtils = require(path.join(temp, "node-utils.js"));
   assert.equal(getCanvasNodeDefinition("input.images")?.label, "图片", "image input node should use the concise label");
   assert.equal(getCanvasNodeDefinition("model.gpt-image")?.version, 2, "new GPT image nodes must use v2");
@@ -97,6 +98,10 @@ try {
   assert.equal(getCanvasNodeDefinition("model.seedance")?.label, "Seedance 2.5");
   assert.deepEqual(getCanvasNodeDefinition("model.seedance")?.fields.map((field) => field.key), ["duration", "ratio", "resolution", "generateAudio", "watermark", "complianceRisk"]);
   assert.deepEqual(getCanvasNodeDefinition("model.seedance")?.defaultConfig, {
+    prompt: "",
+    referenceUrls: [],
+    mentionIds: [],
+    mentionUrls: [],
     duration: 8,
     ratio: "9:16",
     resolution: "720p",
@@ -112,6 +117,63 @@ try {
     config: { duration: 8, ratio: "9:16", resolution: "720p", modelVersion: "seedance2.0_vip", complianceRisk: "low" },
   };
   assert.equal(upgradeCanvasNode(legacySeedance).version, 1, "legacy Dreamina-backed Seedance nodes must remain readable");
+  assert.equal(getCanvasNodeDefinition("model.seedance")?.inputs.find((port) => port.id === "prompt")?.required, undefined, "Seedance local Prompt must make the upstream Prompt port optional");
+  const personMarker = seedanceReferences.seedanceMentionMarker("person-ref");
+  const carMarker = seedanceReferences.seedanceMentionMarker("car-ref");
+  const resolvedMentions = seedanceReferences.resolveSeedanceInput({
+    prompt: `让${personMarker}驾驶${carMarker}`,
+    referenceUrls: ["https://example.test/person.jpg"],
+    mentionIds: ["person-ref", "car-ref"],
+    mentionUrls: ["https://example.test/person.jpg", "https://example.test/car.jpg"],
+  }, [], ["https://example.test/dynamic.jpg", "https://example.test/car.jpg"]);
+  assert.deepEqual(resolvedMentions, {
+    prompt: "让图片1驾驶图片2",
+    images: ["https://example.test/person.jpg", "https://example.test/car.jpg", "https://example.test/dynamic.jpg"],
+    promptSource: "node",
+  }, "Seedance mentioned fixed images must precede unmentioned dynamic images and serialize to official ordinals");
+  assert.deepEqual(seedanceReferences.parseSeedancePromptDocument(`前${personMarker}后`), [
+    { kind: "text", value: "前" },
+    { kind: "mention", id: "person-ref" },
+    { kind: "text", value: "后" },
+  ]);
+  assert.throws(() => seedanceReferences.resolveSeedanceInput({
+    prompt: personMarker,
+    mentionIds: ["person-ref"],
+    mentionUrls: ["https://example.test/removed.jpg"],
+  }, [], ["https://example.test/other.jpg"]), /removed image/i, "deleted Seedance mentions must not silently rebind");
+  assert.throws(() => seedanceReferences.resolveSeedanceInput({ prompt: "节点 Prompt" }, [{ kind: "text", value: "上游 Prompt" }], []), /at the same time/i);
+  assert.deepEqual(seedanceReferences.resolveSeedanceInput({}, [{ kind: "text", value: "旧工作流 Prompt" }], ["https://example.test/legacy.jpg"]), {
+    prompt: "旧工作流 Prompt",
+    images: ["https://example.test/legacy.jpg"],
+    promptSource: "upstream",
+  }, "legacy upstream-only Seedance nodes must retain their behavior");
+  const fixedReferenceGraph = {
+    nodes: [
+      { id: "seedance", type: "model.seedance", version: 1, position: { x: 0, y: 0 }, config: { referenceUrls: ["https://example.test/direct.jpg"] } },
+      { id: "static", type: "input.images", version: 1, position: { x: 0, y: 0 }, config: { urls: ["https://example.test/static.jpg"] } },
+      { id: "dynamic", type: "model.gpt-image", version: 2, position: { x: 0, y: 0 }, config: {} },
+    ],
+    edges: [
+      { id: "static-edge", source: "static", sourcePort: "images", target: "seedance", targetPort: "images" },
+      { id: "dynamic-edge", source: "dynamic", sourcePort: "images", target: "seedance", targetPort: "images" },
+    ],
+    viewport: { x: 0, y: 0, zoom: 1 },
+  };
+  assert.deepEqual(seedanceReferences.resolveSeedanceFixedReferences(fixedReferenceGraph, "seedance").map((item) => item.url), [
+    "https://example.test/direct.jpg",
+    "https://example.test/static.jpg",
+  ], "Seedance authoring references must exclude dynamic model outputs");
+  const fixedReferences = seedanceReferences.resolveSeedanceFixedReferences(fixedReferenceGraph, "seedance");
+  assert.deepEqual(seedanceReferences.orderSeedanceFixedReferences({
+    prompt: seedanceReferences.seedanceMentionMarker("static-ref"),
+    referenceUrls: ["https://example.test/direct.jpg"],
+    mentionIds: ["static-ref"],
+    mentionUrls: ["https://example.test/static.jpg"],
+  }, fixedReferences).map((item) => item.url), [
+    "https://example.test/direct.jpg",
+    "https://example.test/static.jpg",
+  ], "Seedance Inspector numbering must use the same direct-first order as provider serialization");
+  assert.throws(() => seedanceReferences.resolveSeedanceInput({ prompt: "字".repeat(2001) }, [], []), /2000 characters/i, "Seedance local Prompt length must be validated before the provider adapter");
   assert.deepEqual(getCanvasNodeDefinition("compose.social-post")?.inputs.map((port) => `${port.id}:${port.kind}`), ["title:text", "body:text", "vehicle:text", "images:images", "videos:videos"], "content composition must accept vehicle text from an upstream node");
   assert.ok(!getCanvasNodeDefinition("compose.social-post")?.fields.some((field) => field.key === "vehicle"), "new content composition nodes must not edit vehicle text in node config");
   assert.deepEqual(getCanvasNodeDefinition("compose.social-post")?.defaultConfig, { fallbackTitle: "画布生成内容" });
@@ -848,6 +910,21 @@ for (const route of [
 }
 
 const page = read("src/app/canvas/page.tsx");
+requireText(page, [
+  "SeedancePromptComposer",
+  "orderSeedanceFixedReferences",
+  "resolveSeedanceFixedReferences",
+  "seedance-reference",
+  "seedanceMentionSequenceRef",
+  "seedanceMentionMarker",
+  "data-seedance-mention-id",
+  'contentEditable = "false"',
+  "event.clipboardData.getData(\"text/plain\")",
+  'role="listbox"',
+  'role="option"',
+  "固定参考图",
+  "Prompt 中存在已移除的图片引用",
+], "Seedance structured mention Inspector");
 requireText(page, ["onlyRenderVisibleElements", "displayedEdges", "markActiveCanvasEdges", "canvasViewportDetail", "syncCanvasViewportDetail", "dataset.canvasViewportDetail", 'classList.add("canvas-stage-viewport-moving")', 'classList.remove("canvas-stage-viewport-moving")'], "canvas viewport performance policy");
 const canvasFlowNodeSource = page.slice(page.indexOf("function CanvasFlowNode"), page.indexOf("function CanvasNodeTextEditor"));
 requireText(canvasFlowNodeSource, ["visibleImageUrls.map", "<Image src={url}"], "canvas media nodes must retain their mounted media subtree");
@@ -1152,7 +1229,7 @@ for (const removedZoomController of ["CanvasViewportControls", "canvasWheelZoomT
   assert.ok(!page.includes(removedZoomController), `custom eased zoom controller must stay removed: ${removedZoomController}`);
 }
 const uploadRoute = read("src/app/api/canvas/media/route.ts");
-requireText(uploadRoute, ["requireWorkspaceAccount", "request.formData()", "form.getAll(\"files\")", "maxCanvasUploadFiles", "maxCanvasUploadBytes", "saveRuntimeImageUpload"], "canvas media route");
+requireText(uploadRoute, ["requireWorkspaceAccount", "request.formData()", "form.getAll(\"files\")", "maxCanvasUploadFiles", "maxCanvasUploadBytes", "saveRuntimeImageUpload", 'mode === "seedance-reference"', "appConfig.tosEnabled", "isTosRuntimeMediaConfigured", "public HTTP(S) URL"], "canvas media route");
 const runtimeUpload = read("src/lib/runtime-image-upload.ts");
 requireText(runtimeUpload, ["sniffImageFormat(buffer)", "format?.browserSupported", "persistRuntimeMedia", 'directory: "review-uploads" | "canvas-uploads"'], "runtime image upload");
 const styles = read("src/app/globals.css");

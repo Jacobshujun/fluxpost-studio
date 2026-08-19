@@ -94,6 +94,16 @@ import {
 import { canvasNodeDefinitions, createCanvasNode, getCanvasBatchBindableFields, getCanvasNodeDefinition, getCanvasNodeExecutionMode } from "@/lib/canvas/registry";
 import { CANVAS_SAVE_IMAGE_MAX_ITEMS } from "@/lib/canvas/save-images";
 import { createCanvasSchedulerSkeleton } from "@/lib/canvas/scheduler-skeleton";
+import {
+  orderSeedanceFixedReferences,
+  parseSeedancePromptDocument,
+  resolveSeedanceFixedReferences,
+  seedanceMentionBindings,
+  seedanceMentionIds,
+  seedanceMentionMarker,
+  validateSeedanceGraphNode,
+  type SeedanceFixedReference,
+} from "@/lib/canvas/seedance-references";
 import { canvasSourceVideoSnapshotConfig, canvasSourceVideoSnapshotFromConfig, clearCanvasSourceVideoSnapshot, isCanvasSourceVideoSnapshotCurrent } from "@/lib/canvas/source-video-contract";
 import type { CanvasWorkflowTemplateKey } from "@/lib/canvas/templates";
 import {
@@ -217,6 +227,8 @@ export default function CanvasPage() {
   const stageRef = useRef<HTMLDivElement | null>(null);
   const canvasPointerRef = useRef<{ x: number; y: number } | null>(null);
   const pasteSequenceRef = useRef(0);
+  const seedanceMentionSequenceRef = useRef(0);
+  const seedanceMentionSessionRef = useRef("");
   const canvasClipboardRef = useRef<CanvasClipboardPayload | undefined>(undefined);
   const workflowFileInputRef = useRef<HTMLInputElement>(null);
   const activeWorkflowIdRef = useRef<string | undefined>(undefined);
@@ -234,6 +246,9 @@ export default function CanvasPage() {
   const selectedCanvasNode = selectedFlowNode?.data.canvasNode;
   const displayedNodes = useMemo(() => nodes.map((node) => applyFlowNodeSize(node, isMobile)), [isMobile, nodes]);
   const editableGraph = useMemo(() => currentGraph(nodes, edges, viewport), [edges, nodes, viewport]);
+  const selectedSeedanceReferences = useMemo(() => selectedCanvasNode?.type === "model.seedance"
+    ? resolveSeedanceFixedReferences(editableGraph, selectedCanvasNode.id)
+    : [], [editableGraph, selectedCanvasNode?.id, selectedCanvasNode?.type]);
   const latestNodeRuns = useMemo(() => latestAttempts(activeRun?.nodeRuns || []), [activeRun?.nodeRuns]);
   const displayedEdges = useMemo(() => markActiveCanvasEdges(edges, latestNodeRuns), [edges, latestNodeRuns]);
   const activeTaskCount = taskRuns.length
@@ -243,6 +258,11 @@ export default function CanvasPage() {
   const markDirty = useCallback(() => {
     dirtyVersionRef.current += 1;
     setDirty(true);
+  }, []);
+  const createSeedanceMentionId = useCallback(() => {
+    if (!seedanceMentionSessionRef.current) seedanceMentionSessionRef.current = Date.now().toString(36);
+    seedanceMentionSequenceRef.current += 1;
+    return `mention-${seedanceMentionSessionRef.current}-${seedanceMentionSequenceRef.current}`;
   }, []);
   const updateNodeConfig = useCallback((nodeId: string, key: string, value: CanvasEditableConfigValue) => {
     setNodes((current) => current.map((node) => {
@@ -710,21 +730,29 @@ export default function CanvasPage() {
     setMediaBusy(true);
     try {
       const target = targetNodeId
-        ? nodes.find((flowNode) => flowNode.id === targetNodeId && ["input.images", "model.gpt-image"].includes(flowNode.data.canvasNode.type))
+        ? nodes.find((flowNode) => flowNode.id === targetNodeId && ["input.images", "model.gpt-image", "model.seedance"].includes(flowNode.data.canvasNode.type))
         : undefined;
       const isGptReference = target?.data.canvasNode.type === "model.gpt-image" && target.data.canvasNode.version >= 2;
-      const configKey = isGptReference ? "referenceUrls" : "urls";
+      const isSeedanceReference = target?.data.canvasNode.type === "model.seedance";
+      const configKey = isGptReference || isSeedanceReference ? "referenceUrls" : "urls";
       const currentUrls = target ? normalizeConfigUrls(target.data.canvasNode.config[configKey]) : [];
       if (isGptReference) {
         if (currentUrls.length + files.length > 16) throw new Error(`GPT-Image-2 最多支持 16 张参考图片，当前 ${currentUrls.length} 张。`);
         const invalid = files.find((file) => !["image/png", "image/jpeg"].includes(file.type) || file.size > 50 * 1024 * 1024);
         if (invalid) throw new Error(`${invalid.name} 必须是 PNG/JPEG 且不超过 50MB。`);
       }
+      if (isSeedanceReference && target) {
+        const fixedCount = resolveSeedanceFixedReferences(editableGraph, target.id).length;
+        if (fixedCount + files.length > 9) throw new Error(`Seedance 最多支持 9 张参考图片，当前已有 ${fixedCount} 张。`);
+        const invalid = files.find((file) => !["image/png", "image/jpeg", "image/webp", "image/gif"].includes(file.type));
+        if (invalid) throw new Error(`${invalid.name} 必须是 PNG、JPEG、WebP 或 GIF 图片。`);
+      }
       const imageUrls: string[] = [];
       for (const file of files) {
         const form = new FormData();
         form.append("files", file);
         if (isGptReference) form.append("mode", "gpt-reference");
+        if (isSeedanceReference) form.append("mode", "seedance-reference");
         const response = await fetch("/api/canvas/media", { method: "POST", body: form });
         const data = await response.json() as { images?: Array<{ imageUrl: string }>; error?: string };
         if (!response.ok || !data.images?.length) throw new Error(data.error || `Image import failed (${response.status})`);
@@ -1333,6 +1361,9 @@ export default function CanvasPage() {
             sourceVideoBusy={sourceVideoBusyNodeId === selectedCanvasNode.id}
             onPreviewImage={openImagePreview}
             mediaBusy={mediaBusy}
+            graph={editableGraph}
+            seedanceReferences={selectedSeedanceReferences}
+            createSeedanceMentionId={createSeedanceMentionId}
           /> : <div className="canvas-inspector-empty">选择节点查看参数与端口</div>}
         </aside>
       </section>
@@ -1951,6 +1982,9 @@ function NodeInspector({
   sourceVideoBusy,
   onPreviewImage,
   mediaBusy,
+  graph,
+  seedanceReferences,
+  createSeedanceMentionId,
 }: {
   node: CanvasNode;
   onChange: (key: string, value: CanvasEditableConfigValue) => void;
@@ -1964,6 +1998,9 @@ function NodeInspector({
   sourceVideoBusy: boolean;
   onPreviewImage: (url: string, index: number) => void;
   mediaBusy: boolean;
+  graph: CanvasGraph;
+  seedanceReferences: SeedanceFixedReference[];
+  createSeedanceMentionId: () => string;
 }) {
   const definition = getCanvasNodeDefinition(node.type, node.version);
   const defaultLabel = definition?.label || node.type;
@@ -1974,8 +2011,11 @@ function NodeInspector({
   }, [defaultLabel, node.id, node.label]);
   if (!definition) return null;
   const isGptImageV2 = node.type === "model.gpt-image" && node.version >= 2;
-  const imageConfigKey = isGptImageV2 ? "referenceUrls" : "urls";
-  const imageUrls = node.type === "input.images" || isGptImageV2 ? normalizeConfigUrls(node.config[imageConfigKey]) : [];
+  const isSeedance = node.type === "model.seedance";
+  const imageConfigKey = isGptImageV2 || isSeedance ? "referenceUrls" : "urls";
+  const imageUrls = node.type === "input.images" || isGptImageV2 || isSeedance ? normalizeConfigUrls(node.config[imageConfigKey]) : [];
+  const orderedSeedanceReferences = isSeedance ? orderSeedanceFixedReferences(node.config, seedanceReferences) : [];
+  const seedanceErrors = isSeedance ? validateSeedanceGraphNode(graph, node) : [];
   const sourceVideoSnapshot = node.type === "input.source-video" ? canvasSourceVideoSnapshotFromConfig(node.config) : undefined;
   const sourceVideoCurrent = node.type === "input.source-video" && isCanvasSourceVideoSnapshotCurrent(node.config);
   const executionMode = node.executionMode === "bypass" || node.executionMode === "disabled" ? node.executionMode : "enabled";
@@ -2005,30 +2045,43 @@ function NodeInspector({
       </button>
     </div> : null}
     </select></label>
-    {node.type === "input.images" || isGptImageV2 ? <div className="canvas-image-import">
+    {isSeedance ? <SeedancePromptComposer
+      node={node}
+      references={orderedSeedanceReferences}
+      graph={graph}
+      errors={seedanceErrors}
+      onPatch={onPatch}
+      createMentionId={createSeedanceMentionId}
+    /> : null}
+    {node.type === "input.images" || isGptImageV2 || isSeedance ? <div className={`canvas-image-import ${isSeedance ? "canvas-seedance-references" : ""}`}>
       {isGptImageV2 ? <div className="canvas-image-import-count"><strong>参考图片</strong><span>{imageUrls.length}/16</span></div> : null}
+      {isSeedance ? <div className="canvas-image-import-count"><strong>固定参考图</strong><span>{orderedSeedanceReferences.length}/9</span></div> : null}
       <div className="canvas-image-import-actions">
-        <label className={mediaBusy || (isGptImageV2 && imageUrls.length >= 16) ? "is-disabled" : ""}>
+        <label className={mediaBusy || (isGptImageV2 && imageUrls.length >= 16) || (isSeedance && orderedSeedanceReferences.length >= 9) ? "is-disabled" : ""}>
           <Upload /><span>{mediaBusy ? "导入中" : "导入图片"}</span>
-          <input className="canvas-image-file-input" type="file" accept={isGptImageV2 ? "image/jpeg,image/png" : "image/jpeg,image/png,image/gif,image/webp,image/avif"} multiple disabled={mediaBusy || (isGptImageV2 && imageUrls.length >= 16)} onChange={(event) => {
+          <input className="canvas-image-file-input" type="file" accept={isGptImageV2 ? "image/jpeg,image/png" : isSeedance ? "image/jpeg,image/png,image/gif,image/webp" : "image/jpeg,image/png,image/gif,image/webp,image/avif"} multiple disabled={mediaBusy || (isGptImageV2 && imageUrls.length >= 16) || (isSeedance && orderedSeedanceReferences.length >= 9)} onChange={(event) => {
             const files = Array.from(event.target.files || []);
             event.target.value = "";
             if (files.length) void onImportImages(files);
           }} />
         </label>
-        <button type="button" onClick={() => void onPasteImages()} disabled={mediaBusy || (isGptImageV2 && imageUrls.length >= 16)}><ClipboardPaste /><span>粘贴图片</span></button>
+        <button type="button" onClick={() => void onPasteImages()} disabled={mediaBusy || (isGptImageV2 && imageUrls.length >= 16) || (isSeedance && orderedSeedanceReferences.length >= 9)}><ClipboardPaste /><span>粘贴图片</span></button>
       </div>
-      {imageUrls.length ? <div className={`canvas-image-preview-list ${isGptImageV2 ? "is-ordered" : ""}`}>{imageUrls.map((url, index) => <div className="canvas-image-preview" key={`${url}-${index}`}>
+      {(isSeedance ? orderedSeedanceReferences.length : imageUrls.length) ? <div className={`canvas-image-preview-list ${isGptImageV2 || isSeedance ? "is-ordered" : ""}`}>{(isSeedance ? orderedSeedanceReferences : imageUrls).map((item, index) => {
+        const url = typeof item === "string" ? item : item.url;
+        const directIndex = isSeedance ? imageUrls.indexOf(url) : index;
+        const isDirect = !isSeedance || directIndex >= 0;
+        return <div className={`canvas-image-preview ${isSeedance && !isDirect ? "is-upstream" : ""}`} key={`${url}-${index}`}>
         <button className="canvas-image-preview-open" type="button" onClick={() => onPreviewImage(url, index)} aria-label={`预览图片 ${index + 1}`} title="预览图片">
           <span style={{ backgroundImage: `url(${JSON.stringify(url)})` }} />
         </button>
-        {isGptImageV2 ? <span className="canvas-image-preview-index">图片{index + 1}</span> : null}
-        {isGptImageV2 ? <span className="canvas-image-preview-order">
-          <button type="button" disabled={index === 0} onClick={() => onChange(imageConfigKey, moveListItem(imageUrls, index, index - 1))} aria-label={`上移图片 ${index + 1}`} title="上移"><ArrowUp /></button>
-          <button type="button" disabled={index === imageUrls.length - 1} onClick={() => onChange(imageConfigKey, moveListItem(imageUrls, index, index + 1))} aria-label={`下移图片 ${index + 1}`} title="下移"><ArrowDown /></button>
+        {isGptImageV2 || isSeedance ? <span className="canvas-image-preview-index">图片{index + 1}{isSeedance ? <small>{isDirect ? "上传" : "上游"}</small> : null}</span> : null}
+        {(isGptImageV2 || (isSeedance && isDirect)) ? <span className="canvas-image-preview-order">
+          <button type="button" disabled={directIndex === 0} onClick={() => onChange(imageConfigKey, moveListItem(imageUrls, directIndex, directIndex - 1))} aria-label={`上移图片 ${index + 1}`} title="上移"><ArrowUp /></button>
+          <button type="button" disabled={directIndex === imageUrls.length - 1} onClick={() => onChange(imageConfigKey, moveListItem(imageUrls, directIndex, directIndex + 1))} aria-label={`下移图片 ${index + 1}`} title="下移"><ArrowDown /></button>
         </span> : null}
-        <button className="canvas-image-preview-remove" type="button" onClick={() => onChange(imageConfigKey, imageUrls.filter((_, currentIndex) => currentIndex !== index))} aria-label={`移除图片 ${index + 1}`} title="移除图片"><X /></button>
-      </div>)}</div> : null}
+        {isDirect ? <button className="canvas-image-preview-remove" type="button" onClick={() => onChange(imageConfigKey, imageUrls.filter((_, currentIndex) => currentIndex !== directIndex))} aria-label={`移除图片 ${index + 1}`} title="移除图片"><X /></button> : null}
+      </div>})}</div> : null}
     </div> : null}
     {definition.fields.map((field) => {
       if (field.key === "outputCompression" && node.config.outputFormat !== "jpeg") return null;
@@ -2062,6 +2115,260 @@ function NodeInspector({
     <div className="canvas-port-list"><span>输入</span>{definition.inputs.length ? definition.inputs.map((port) => <small key={port.id}>{port.label} · {portKindLabel(port.kind)}{port.required ? " · 必填" : ""}</small>) : <small>无</small>}</div>
     <div className="canvas-port-list"><span>输出</span>{definition.outputs.length ? definition.outputs.map((port) => <small key={port.id}>{port.label} · {portKindLabel(port.kind)}</small>) : <small>无</small>}</div>
   </div>;
+}
+
+type SeedanceMentionMenuState = { range: Range; query: string };
+type SeedanceMentionChoice = { reference: SeedanceFixedReference; number: number; name: string };
+
+function SeedancePromptComposer({ node, references, graph, errors, onPatch, createMentionId }: {
+  node: CanvasNode;
+  references: SeedanceFixedReference[];
+  graph: CanvasGraph;
+  errors: string[];
+  onPatch: (patch: CanvasNode["config"]) => void;
+  createMentionId: () => string;
+}) {
+  const editorRef = useRef<HTMLDivElement>(null);
+  const [menu, setMenu] = useState<SeedanceMentionMenuState | null>(null);
+  const [activeIndex, setActiveIndex] = useState(0);
+  const promptDocument = String(node.config.prompt || "");
+  const bindings = useMemo(() => seedanceMentionBindings(node.config), [node.config]);
+  const numberByUrl = useMemo(() => new Map(references.map((reference, index) => [reference.url, index + 1])), [references]);
+  const choices = useMemo<SeedanceMentionChoice[]>(() => references.map((reference, index) => ({
+    reference,
+    number: index + 1,
+    name: seedanceReferenceName(reference, graph, node),
+  })), [graph, node, references]);
+  const filteredChoices = useMemo(() => {
+    const query = menu?.query.trim().toLowerCase() || "";
+    return choices.filter((choice) => !query || `图片${choice.number} ${choice.name}`.toLowerCase().includes(query));
+  }, [choices, menu?.query]);
+
+  useLayoutEffect(() => {
+    const editor = editorRef.current;
+    if (!editor) return;
+    if (document.activeElement === editor && editor.dataset.seedanceDocument === promptDocument) {
+      refreshSeedanceMentionChips(editor, bindings, numberByUrl);
+      return;
+    }
+    renderSeedancePromptDocument(editor, promptDocument, bindings, numberByUrl);
+    editor.dataset.seedanceDocument = promptDocument;
+  }, [bindings, numberByUrl, promptDocument]);
+
+  const updateMenu = () => {
+    const editor = editorRef.current;
+    setMenu(editor ? seedanceMentionQuery(editor) : null);
+    setActiveIndex(0);
+  };
+  const commitDocument = (additionalBinding?: { id: string; url: string }) => {
+    const editor = editorRef.current;
+    if (!editor) return;
+    const documentValue = serializeSeedancePromptEditor(editor);
+    const bindingMap = new Map(bindings.map((binding) => [binding.id, binding.url]));
+    if (additionalBinding) bindingMap.set(additionalBinding.id, additionalBinding.url);
+    const activeIds = Array.from(new Set(seedanceMentionIds(documentValue)));
+    const activeBindings = activeIds.flatMap((id) => {
+      const url = bindingMap.get(id);
+      return url ? [{ id, url }] : [];
+    });
+    editor.dataset.seedanceDocument = documentValue;
+    onPatch({
+      prompt: documentValue,
+      mentionIds: activeBindings.map((binding) => binding.id),
+      mentionUrls: activeBindings.map((binding) => binding.url),
+    });
+    refreshSeedanceMentionChips(editor, activeBindings, numberByUrl);
+  };
+  const chooseReference = (choice: SeedanceMentionChoice) => {
+    const editor = editorRef.current;
+    if (!editor || !menu) return;
+    const id = createMentionId();
+    insertSeedanceMention(editor, menu.range, id, choice.number);
+    commitDocument({ id, url: choice.reference.url });
+    setMenu(null);
+  };
+  const visibleErrors = Array.from(new Set(errors.map(seedanceInspectorError)));
+  const visibleActiveIndex = Math.min(activeIndex, Math.max(0, filteredChoices.length - 1));
+  return <div className="canvas-seedance-prompt">
+    <div className="canvas-seedance-section-heading"><strong>Prompt</strong><span>{promptDocument.trim() ? "节点 Prompt" : "外部提示词"}</span></div>
+    <div className={`canvas-seedance-editor-shell ${visibleErrors.length ? "has-error" : ""}`}>
+      <div
+        ref={editorRef}
+        className="canvas-seedance-editor"
+        contentEditable
+        suppressContentEditableWarning
+        role="textbox"
+        aria-multiline="true"
+        aria-label="Seedance Prompt"
+        aria-controls="seedance-reference-menu"
+        aria-haspopup="listbox"
+        data-placeholder="描述镜头内容"
+        onInput={() => { commitDocument(); updateMenu(); }}
+        onClick={updateMenu}
+        onKeyUp={(event) => {
+          if (!["ArrowDown", "ArrowUp", "Enter", "Tab", "Escape"].includes(event.key)) updateMenu();
+        }}
+        onKeyDown={(event) => {
+          if (!menu) return;
+          if (event.key === "Escape") {
+            event.preventDefault();
+            setMenu(null);
+          } else if (event.key === "ArrowDown" || event.key === "ArrowUp") {
+            event.preventDefault();
+            const direction = event.key === "ArrowDown" ? 1 : -1;
+            setActiveIndex((current) => filteredChoices.length ? (current + direction + filteredChoices.length) % filteredChoices.length : 0);
+          } else if ((event.key === "Enter" || event.key === "Tab") && filteredChoices[visibleActiveIndex]) {
+            event.preventDefault();
+            chooseReference(filteredChoices[visibleActiveIndex]);
+          }
+        }}
+        onPaste={(event) => {
+          event.preventDefault();
+          insertSeedancePlainText(event.currentTarget, event.clipboardData.getData("text/plain"));
+          commitDocument();
+          updateMenu();
+        }}
+        onBlur={() => setMenu(null)}
+      />
+      {menu ? <div id="seedance-reference-menu" className="canvas-seedance-mention-menu" role="listbox" aria-label="固定参考图">
+        {filteredChoices.length ? filteredChoices.map((choice, index) => <button
+          type="button"
+          role="option"
+          aria-selected={index === visibleActiveIndex}
+          className={index === visibleActiveIndex ? "is-active" : ""}
+          key={choice.reference.url}
+          onMouseDown={(event) => event.preventDefault()}
+          onMouseEnter={() => setActiveIndex(index)}
+          onClick={() => chooseReference(choice)}
+        >
+          <span className="canvas-seedance-menu-thumb" style={{ backgroundImage: `url(${JSON.stringify(choice.reference.url)})` }} />
+          <span><strong>@图片{choice.number}</strong><small>{choice.name}</small></span>
+        </button>) : <p>暂无固定参考图</p>}
+      </div> : null}
+    </div>
+    {visibleErrors.length ? <div className="canvas-seedance-errors" role="alert">{visibleErrors.map((error) => <p key={error}><AlertTriangle />{error}</p>)}</div> : null}
+  </div>;
+}
+
+function seedanceReferenceName(reference: SeedanceFixedReference, graph: CanvasGraph, node: CanvasNode) {
+  if (reference.source === "direct") {
+    const index = normalizeConfigUrls(node.config.referenceUrls).indexOf(reference.url);
+    return `节点上传 · 第 ${Math.max(0, index) + 1} 张`;
+  }
+  const source = graph.nodes.find((candidate) => candidate.id === reference.sourceNodeId);
+  const sourceIndex = source ? normalizeConfigUrls(source.config.urls).indexOf(reference.url) : -1;
+  const sourceName = source?.label?.trim() || (source ? getCanvasNodeDefinition(source.type, source.version)?.label : "上游图片") || "上游图片";
+  return `${sourceName} · 第 ${Math.max(0, sourceIndex) + 1} 张`;
+}
+
+function seedanceInspectorError(error: string) {
+  if (error.includes("requires a node Prompt")) return "请填写节点 Prompt 或连接外部提示词。";
+  if (error.includes("at the same time")) return "节点 Prompt 与外部提示词不能同时使用。";
+  if (error.includes("removed image")) return "Prompt 中存在已移除的图片引用。";
+  if (error.includes("mention") || error.includes("binding")) return "Prompt 中存在失效的图片引用。";
+  if (error.includes("2000 characters")) return "Prompt 不能超过 2000 个字符。";
+  if (error.includes("at most 9")) return "Seedance 最多支持 9 张参考图片。";
+  return error;
+}
+
+function renderSeedancePromptDocument(editor: HTMLDivElement, value: string, bindings: Array<{ id: string; url: string }>, numberByUrl: Map<string, number>) {
+  const bindingMap = new Map(bindings.map((binding) => [binding.id, binding.url]));
+  const fragment = document.createDocumentFragment();
+  for (const part of parseSeedancePromptDocument(value)) {
+    if (part.kind === "text") {
+      fragment.append(document.createTextNode(part.value));
+      continue;
+    }
+    fragment.append(createSeedanceMentionChip(part.id, bindingMap.get(part.id), numberByUrl));
+  }
+  editor.replaceChildren(fragment);
+}
+
+function refreshSeedanceMentionChips(editor: HTMLDivElement, bindings: Array<{ id: string; url: string }>, numberByUrl: Map<string, number>) {
+  const bindingMap = new Map(bindings.map((binding) => [binding.id, binding.url]));
+  for (const chip of Array.from(editor.querySelectorAll<HTMLElement>("[data-seedance-mention-id]"))) {
+    const id = chip.dataset.seedanceMentionId || "";
+    const number = numberByUrl.get(bindingMap.get(id) || "");
+    chip.classList.toggle("is-invalid", !number);
+    chip.textContent = number ? `@图片${number}` : "@失效图片";
+    chip.title = number ? `图片${number}` : "引用图片已移除";
+  }
+}
+
+function createSeedanceMentionChip(id: string, url: string | undefined, numberByUrl: Map<string, number>) {
+  const chip = document.createElement("span");
+  const number = numberByUrl.get(url || "");
+  chip.className = `canvas-seedance-mention${number ? "" : " is-invalid"}`;
+  chip.dataset.seedanceMentionId = id;
+  chip.contentEditable = "false";
+  chip.textContent = number ? `@图片${number}` : "@失效图片";
+  chip.title = number ? `图片${number}` : "引用图片已移除";
+  return chip;
+}
+
+function serializeSeedancePromptEditor(editor: HTMLDivElement) {
+  const readNode = (node: ChildNode): string => {
+    if (node.nodeType === Node.TEXT_NODE) return (node.textContent || "").replaceAll("\u200B", "");
+    if (!(node instanceof HTMLElement)) return "";
+    const mentionId = node.dataset.seedanceMentionId;
+    if (mentionId) return seedanceMentionMarker(mentionId);
+    if (node.tagName === "BR") return "\n";
+    return Array.from(node.childNodes).map(readNode).join("");
+  };
+  let result = "";
+  for (const child of Array.from(editor.childNodes)) {
+    const block = child instanceof HTMLElement && ["DIV", "P"].includes(child.tagName);
+    if (block && result && !result.endsWith("\n")) result += "\n";
+    result += readNode(child);
+  }
+  return result.replaceAll("\u200B", "");
+}
+
+function seedanceMentionQuery(editor: HTMLDivElement): SeedanceMentionMenuState | null {
+  const selection = window.getSelection();
+  if (!selection?.isCollapsed || !selection.rangeCount || !selection.focusNode || !editor.contains(selection.focusNode)) return null;
+  if (selection.focusNode.nodeType !== Node.TEXT_NODE) return null;
+  const text = selection.focusNode.textContent || "";
+  const beforeCaret = text.slice(0, selection.focusOffset);
+  const match = beforeCaret.match(/@([^\s@]*)$/);
+  if (!match) return null;
+  const range = document.createRange();
+  range.setStart(selection.focusNode, selection.focusOffset - match[0].length);
+  range.setEnd(selection.focusNode, selection.focusOffset);
+  return { range, query: match[1] };
+}
+
+function insertSeedanceMention(editor: HTMLDivElement, range: Range, id: string, number: number) {
+  range.deleteContents();
+  const chip = document.createElement("span");
+  chip.className = "canvas-seedance-mention";
+  chip.dataset.seedanceMentionId = id;
+  chip.contentEditable = "false";
+  chip.textContent = `@图片${number}`;
+  chip.title = `图片${number}`;
+  const caret = document.createTextNode("\u200B");
+  range.insertNode(caret);
+  range.insertNode(chip);
+  const selection = window.getSelection();
+  selection?.removeAllRanges();
+  const nextRange = document.createRange();
+  nextRange.setStart(caret, caret.data.length);
+  nextRange.collapse(true);
+  selection?.addRange(nextRange);
+  editor.focus({ preventScroll: true });
+}
+
+function insertSeedancePlainText(editor: HTMLDivElement, text: string) {
+  const selection = window.getSelection();
+  if (!selection?.rangeCount || !selection.focusNode || !editor.contains(selection.focusNode)) return;
+  const range = selection.getRangeAt(0);
+  range.deleteContents();
+  const textNode = document.createTextNode(text.replace(/\r\n?/g, "\n"));
+  range.insertNode(textNode);
+  range.setStartAfter(textNode);
+  range.collapse(true);
+  selection.removeAllRanges();
+  selection.addRange(range);
 }
 
 function ContentPoolSnapshotPicker({ node, onPatch }: { node: CanvasNode; onPatch: (patch: CanvasNode["config"]) => void }) {
@@ -3888,7 +4195,7 @@ function canvasImageDropTargetId(target: EventTarget | null, nodes: FlowNode[]) 
   const nodeId = target.closest(".react-flow__node")?.getAttribute("data-id");
   if (!nodeId) return undefined;
   const node = nodes.find((candidate) => candidate.id === nodeId)?.data.canvasNode;
-  return node && (node.type === "input.images" || (node.type === "model.gpt-image" && node.version >= 2)) ? nodeId : undefined;
+  return node && (node.type === "input.images" || node.type === "model.seedance" || (node.type === "model.gpt-image" && node.version >= 2)) ? nodeId : undefined;
 }
 
 async function clipboardImageFiles(items: ClipboardItem[]) {

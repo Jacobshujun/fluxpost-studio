@@ -672,6 +672,7 @@ async function runReadyNode(
         const updatedAt = new Date().toISOString();
         nodeRun = {
           ...nodeRun,
+          inputs: state.resolvedInputs || nodeRun.inputs,
           providerTaskId: state.taskId,
           providerTaskRoute: state.route,
           providerStatus: state.status,
@@ -684,7 +685,7 @@ async function runReadyNode(
     nodeRun = await saveCanvasNodeRunToDb({
       ...nodeRun,
       status: result.pending ? "running" : "completed",
-      inputs: result.resolvedInputs || inputs,
+      inputs: result.resolvedInputs || (resumableNodeRun ? nodeRun.inputs : inputs),
       outputs: result.outputs,
       providerTaskId: result.providerTaskId || nodeRun.providerTaskId,
       providerTaskRoute: result.providerTaskRoute || nodeRun.providerTaskRoute,

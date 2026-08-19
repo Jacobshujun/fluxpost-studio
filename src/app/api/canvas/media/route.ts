@@ -1,5 +1,7 @@
 import { NextResponse } from "next/server";
 import { RuntimeImageUploadInputError, saveRuntimeImageUpload } from "@/lib/runtime-image-upload";
+import { appConfig } from "@/lib/config";
+import { isTosRuntimeMediaConfigured } from "@/lib/runtime-media-storage";
 import { isWorkspaceSignInError, requireWorkspaceAccount } from "@/lib/workspace-accounts";
 
 export const runtime = "nodejs";
@@ -12,7 +14,11 @@ export async function POST(request: Request) {
   try {
     await requireWorkspaceAccount(request);
     const form = await request.formData();
-    const mode = form.get("mode") === "gpt-reference" ? "gpt-reference" : "canvas-image";
+    const requestedMode = form.get("mode");
+    const mode = requestedMode === "gpt-reference" || requestedMode === "seedance-reference" ? requestedMode : "canvas-image";
+    if (mode === "seedance-reference" && (!appConfig.tosEnabled || !isTosRuntimeMediaConfigured())) {
+      throw new RuntimeImageUploadInputError("Seedance reference uploads require enabled and fully configured TOS storage.");
+    }
     const files = form.getAll("files").filter(isUploadedFile);
     if (!files.length) return NextResponse.json({ error: "At least one image file is required." }, { status: 400 });
     if (files.length > maxCanvasUploadFiles) {
@@ -24,11 +30,16 @@ export async function POST(request: Request) {
 
     const images = [];
     for (const file of files) {
-      images.push(await saveRuntimeImageUpload(file, {
+      const image = await saveRuntimeImageUpload(file, {
         directory: "canvas-uploads",
         prefix: "canvas",
         ...(mode === "gpt-reference" ? { maxBytes: maxGptReferenceBytes, allowedMimeTypes: ["image/png", "image/jpeg"] } : {}),
-      }));
+        ...(mode === "seedance-reference" ? { allowedMimeTypes: ["image/png", "image/jpeg", "image/webp", "image/gif"] } : {}),
+      });
+      if (mode === "seedance-reference" && !/^https?:\/\//i.test(image.imageUrl)) {
+        throw new RuntimeImageUploadInputError("Seedance reference upload did not produce a public HTTP(S) URL.");
+      }
+      images.push(image);
     }
     return NextResponse.json({ images }, { status: 201 });
   } catch (error) {

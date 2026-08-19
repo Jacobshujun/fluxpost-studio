@@ -33,7 +33,7 @@ let visibleSourceVideoIds;
 try {
   writeFileSync(path.join(temp, "toapis-image-api.js"), "exports.toApisImageRatios=['1:1'];exports.toApis4kImageRatios=['16:9'];", "utf8");
   writeFileSync(path.join(temp, "feishu-publish-mode.js"), "exports.feishuPublishModeOptions=[{value:'full',label:'full'},{value:'text',label:'text'},{value:'media',label:'media'}];exports.normalizeFeishuPublishMode=(value)=>value===undefined?'full':['full','text','media'].includes(value)?value:(()=>{throw new Error('invalid mode')})();", "utf8");
-  for (const name of ["types", "node-utils", "source-video-contract", "save-images", "registry", "graph", "scheduler-skeleton", "scheduler-v2"]) {
+  for (const name of ["types", "node-utils", "source-video-contract", "save-images", "seedance-references", "registry", "graph", "scheduler-skeleton", "scheduler-v2"]) {
     const source = read(`src/lib/canvas/${name}.ts`).replace('"../toapis-image-api"', '"./toapis-image-api"').replace('"../feishu-publish-mode"', '"./feishu-publish-mode"');
     writeFileSync(path.join(temp, `${name}.js`), ts.transpileModule(source, {
       compilerOptions: { module: ts.ModuleKind.CommonJS, target: ts.ScriptTarget.ES2022 },
