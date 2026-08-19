@@ -1220,3 +1220,36 @@ Added a structured Seedance Prompt assistant with text/vision routing, stable im
 ### Next Steps
 
 - None - task complete
+
+
+## Session 37: Runtime Seedance skill loading
+
+**Date**: 2026-08-19
+**Task**: Runtime Seedance skill loading
+**Branch**: `main`
+
+### Summary
+
+Seedance Prompt assistant now reads an operator-managed SKILL.md at request time, reloads changed content by file metadata, exposes source/hash metadata, preserves deterministic hard audits, and includes offline regression coverage.
+
+### Main Changes
+
+(Add details)
+
+### Git Commits
+
+| Hash | Message |
+|------|---------|
+| `740156d` | (see git log) |
+
+### Testing
+
+- [OK] (Add test results)
+
+### Status
+
+[OK] **Completed**
+
+### Next Steps
+
+- None - task complete
