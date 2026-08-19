@@ -16,11 +16,11 @@ The Seedance 2.5 Inspector now has a structured, deterministically audited Promp
 
 ## Next Entry
 
-Commit the verified Prompt assistant, run `npm run local` to replace port 3001 with that clean SHA, then verify the Seedance Inspector on desktop and mobile without submitting a paid model run.
+Before further code work, confirm `/api/version` matches clean HEAD; use `npm run local` if final Trellis metadata commits advance the SHA.
 
 ## Recent Verification
 
-- 2026-08-19: Seedance Prompt assistant contracts, API/UI wiring and offline baseline passed without provider calls.
+- 2026-08-19: Seedance Prompt assistant contracts, offline baseline, and mocked Chromium apply flow at 1440x960/390x844 passed without provider calls; candidate `ca8afe7` served on port 3001.
 - 2026-08-19: Seedance structured marker/order/conflict/deleted-reference/TOS/resume contracts, Canvas scheduler/copy fixtures, lint, TypeScript, build, isolated HTTP/SQLite baseline, and mocked Chromium at 1440x960 and 390x844 passed without Ark or TOS calls.
 - 2026-08-19: Ark Seedance 2.5 request/resume/error and legacy-node contracts passed mocked adapter checks, lint, TypeScript, build, HTTP/SQLite smoke, and the full offline baseline without provider calls.
 

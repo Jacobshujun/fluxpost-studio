@@ -336,7 +336,7 @@
         "Batch scheduler V2 lets users define typed main/child parameters, source filters, fixed/full/random expansion with exact or inclusive-range counts, main-once and child-per-main preview-frozen no-replacement selection, cartesian/zip composition, explicit node-field bindings, partial/strict aggregation, custom names for same-type Canvas nodes, and explicit main-task shared upstream results"
       ],
       "evidence": [
-        "2026-08-19 Seedance Prompt assistant routing, reference/audit/API/UI checks and offline baseline passed without provider calls.",
+        "2026-08-19 Seedance Prompt assistant contracts, offline baseline, and mocked desktop/mobile apply flow passed without provider calls.",
         "2026-08-19 Seedance structured mentions, canonical image ordering, TOS gating, resolved-input resume, full offline baseline, and mocked Chromium desktop/mobile checks passed without Ark or TOS calls.",
         "2026-08-14 save-images contracts, full local/VPS baselines, mocked Edge single/multi/partial/history downloads, fixed-SHA production activation, unauthenticated download 401, and rollback checks passed without external provider writes."
       ],
