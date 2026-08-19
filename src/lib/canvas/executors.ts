@@ -6,7 +6,7 @@ import { generateCanvasGptImages, generateImagesFromPrompt } from "../image-gene
 import { callOpenAIForText, callOpenAIForVisionText } from "../openai";
 import type { GeneratedPost, SourceImageTask } from "../types";
 import type { WorkspaceAccessActor } from "../workspace-ownership";
-import { DreaminaNeedsConfigError, queryDreaminaVideo, submitDreaminaVideo } from "./dreamina";
+import { ArkSeedanceNeedsConfigError, queryArkSeedanceVideo, submitArkSeedanceVideo } from "./seedance";
 import { CanvasMediaNeedsConfigError, extractCanvasVideoFrames, reconstructCanvasVideo, transformCanvasImages } from "./media-tools";
 import { canvasVisionPresets, concatenateCanvasText, parseCanvasImageSelection, renderCanvasPromptTemplate, splitCanvasText } from "./node-utils";
 import { normalizeUrlList } from "./registry";
@@ -325,15 +325,16 @@ async function executeSeedance({ node, inputs, previousNodeRun }: CanvasNodeExec
   try {
     const previousSubmitId = previousNodeRun?.providerTaskId;
     const submission = previousSubmitId
-      ? await queryDreaminaVideo(previousSubmitId)
-      : await submitDreaminaVideo({
+      ? await queryArkSeedanceVideo(previousSubmitId)
+      : await submitArkSeedanceVideo({
           prompt: textValues(inputs.prompt).join("\n\n"),
           images: mediaUrls(inputs.images, "images"),
           videos: mediaUrls(inputs.videos, "videos"),
           duration: Number(node.config.duration),
           ratio: String(node.config.ratio),
           resolution: String(node.config.resolution),
-          modelVersion: String(node.config.modelVersion),
+          generateAudio: typeof node.config.generateAudio === "boolean" ? node.config.generateAudio : true,
+          watermark: typeof node.config.watermark === "boolean" ? node.config.watermark : true,
         });
     const pending = !["success", "succeeded", "completed"].includes(submission.status) || submission.videoUrls.length === 0;
     return {
@@ -341,16 +342,16 @@ async function executeSeedance({ node, inputs, previousNodeRun }: CanvasNodeExec
         videos: {
           kind: "videos" as const,
           items: submission.videoUrls.map((url) => ({ url })),
-          providerTaskId: submission.submitId,
+          providerTaskId: submission.taskId,
           providerStatus: submission.status,
         },
       },
-      providerTaskId: submission.submitId,
+      providerTaskId: submission.taskId,
       providerStatus: submission.status,
       pending,
     };
   } catch (error) {
-    if (error instanceof DreaminaNeedsConfigError) throw new CanvasNeedsConfigError(error.message);
+    if (error instanceof ArkSeedanceNeedsConfigError) throw new CanvasNeedsConfigError(error.message);
     throw error;
   }
 }

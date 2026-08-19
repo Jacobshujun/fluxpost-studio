@@ -85,8 +85,6 @@ function readAppConfig() {
   comfyUiKleinScheduler: process.env.COMFYUI_KLEIN_KSAMPLER_SCHEDULER || "",
   comfyUiKleinDenoise: optionalNumber(process.env.COMFYUI_KLEIN_KSAMPLER_DENOISE),
   comfyUiKleinFailurePolicy: normalizeKleinFailurePolicy(process.env.COMFYUI_KLEIN_FAILURE_POLICY || "fallback_source"),
-  dreaminaCliBin: process.env.DREAMINA_CLI_BIN || "dreamina",
-  dreaminaCliTimeoutMs: numberOrDefault(process.env.DREAMINA_CLI_TIMEOUT_MS, 180_000),
   feishuAppId: process.env.FEISHU_APP_ID || "",
   feishuAppSecret: process.env.FEISHU_APP_SECRET || "",
   feishuBrand: normalizeFeishuBrand(process.env.FEISHU_BRAND || "feishu"),
@@ -114,6 +112,8 @@ function readAppConfig() {
   larkTaskApiToken: process.env.LARK_TASK_API_TOKEN || process.env.FEISHU_TASK_API_TOKEN || "",
   arkBaseUrl: normalizeBaseUrl(process.env.ARK_BASE_URL || "https://ark.cn-beijing.volces.com/api/v3"),
   arkApiKey: process.env.ARK_API_KEY || process.env.VOLCENGINE_ASR_APP_KEY || process.env.VOLCENGINE_ASR_API_KEY || "",
+  arkSeedanceModel: process.env.ARK_SEEDANCE_MODEL || "doubao-seedance-2-5-260628",
+  arkSeedanceRequestTimeoutMs: numberOrDefault(process.env.ARK_SEEDANCE_REQUEST_TIMEOUT_MS, 30_000),
   arkVideoTranscriptionModel: process.env.ARK_VIDEO_TRANSCRIPTION_MODEL || "doubao-seed-2-0-lite-260428",
   arkVideoTranscriptionPrompt: process.env.ARK_VIDEO_TRANSCRIPTION_PROMPT || "请识别音频中的内容，以文字形式返回识别结果。",
   arkVideoTranscriptionAudioExtractTimeoutMs: numberOrDefault(process.env.ARK_VIDEO_TRANSCRIPTION_AUDIO_EXTRACT_TIMEOUT_MS, 120_000),
@@ -190,7 +190,6 @@ export function getConfigStatus(): ConfigStatus {
     comfyUiKleinWorkflowConfigured,
     comfyUiKleinWorkflowJsonConfigured: Boolean(appConfig.comfyUiKleinWorkflowJson.trim()),
     comfyUiBaseUrl: appConfig.comfyUiBaseUrl,
-    dreaminaCliBin: appConfig.dreaminaCliBin,
     tikhubBaseUrl: appConfig.tikhubBaseUrl,
     feishuCliBin: appConfig.feishuCliBin || undefined,
     feishuNotifyConfigured: Boolean(appConfig.feishuNotifyChatId || appConfig.feishuNotifyUserId),
@@ -527,14 +526,14 @@ const advancedConfigGroups: ConfigDefinitionGroup[] = [
   },
   {
     id: "seedance",
-    title: "Seedance 视频",
-    description: "Dreamina CLI 的安装路径和单次前台等待上限。登录身份由部署环境维护。",
+    title: "Seedance 2.5 视频",
+    description: "通过火山方舟 Content Generation API 生成或编辑视频，复用 Ark API Key。",
     fields: [
-      configField("DREAMINA_CLI_BIN", "Dreamina CLI", "dreamina 可执行文件路径或命令名。", "text", "seedance", {
-        read: () => appConfig.dreaminaCliBin,
+      configField("ARK_SEEDANCE_MODEL", "Seedance 模型", "模型 ID 或已开通的 Endpoint ID。", "text", "seedance", {
+        read: () => appConfig.arkSeedanceModel,
       }),
-      configField("DREAMINA_CLI_TIMEOUT_MS", "CLI 超时毫秒", "前台命令等待上限；已获得 submit_id 后只查询原任务。", "number", "seedance", {
-        read: () => String(appConfig.dreaminaCliTimeoutMs),
+      configField("ARK_SEEDANCE_REQUEST_TIMEOUT_MS", "请求超时毫秒", "单次任务创建或状态查询的 HTTP 等待上限。", "number", "seedance", {
+        read: () => String(appConfig.arkSeedanceRequestTimeoutMs),
       }),
     ],
   },
@@ -646,7 +645,7 @@ const advancedConfigGroups: ConfigDefinitionGroup[] = [
       configField("ARK_BASE_URL", "Ark Base URL", "Ark API 根地址。", "text", "ark", {
         read: () => appConfig.arkBaseUrl,
       }),
-      configField("ARK_API_KEY", "Ark API Key", "视频转写接口密钥。", "secret", "ark", {
+      configField("ARK_API_KEY", "Ark API Key", "视频转写与 Seedance 2.5 共用的接口密钥。", "secret", "ark", {
         configured: () => Boolean(process.env.ARK_API_KEY),
       }),
       configField("VOLCENGINE_ASR_APP_KEY", "火山 ASR 兼容 Key", "旧环境变量兼容别名。", "secret", "ark", {

@@ -93,6 +93,25 @@ try {
   assert.equal(getCanvasNodeDefinition("model.gpt-image")?.version, 2, "new GPT image nodes must use v2");
   assert.equal(getCanvasNodeDefinition("model.gpt-image", 1)?.version, 1, "legacy GPT image snapshots must remain resolvable");
   assert.equal(getCanvasNodeDefinition("model.gpt-vision")?.inputs.find((port) => port.id === "instruction")?.label, "用户提示词", "vision prompt input must be presented as authoritative user text");
+  assert.equal(getCanvasNodeDefinition("model.seedance")?.version, 1, "Seedance 2.5 must preserve the saved Canvas node version");
+  assert.equal(getCanvasNodeDefinition("model.seedance")?.label, "Seedance 2.5");
+  assert.deepEqual(getCanvasNodeDefinition("model.seedance")?.fields.map((field) => field.key), ["duration", "ratio", "resolution", "generateAudio", "watermark", "complianceRisk"]);
+  assert.deepEqual(getCanvasNodeDefinition("model.seedance")?.defaultConfig, {
+    duration: 8,
+    ratio: "9:16",
+    resolution: "720p",
+    generateAudio: true,
+    watermark: true,
+    complianceRisk: "low",
+  });
+  const legacySeedance = {
+    id: "legacy-seedance",
+    type: "model.seedance",
+    version: 1,
+    position: { x: 0, y: 0 },
+    config: { duration: 8, ratio: "9:16", resolution: "720p", modelVersion: "seedance2.0_vip", complianceRisk: "low" },
+  };
+  assert.equal(upgradeCanvasNode(legacySeedance).version, 1, "legacy Dreamina-backed Seedance nodes must remain readable");
   assert.deepEqual(getCanvasNodeDefinition("compose.social-post")?.inputs.map((port) => `${port.id}:${port.kind}`), ["title:text", "body:text", "vehicle:text", "images:images", "videos:videos"], "content composition must accept vehicle text from an upstream node");
   assert.ok(!getCanvasNodeDefinition("compose.social-post")?.fields.some((field) => field.key === "vehicle"), "new content composition nodes must not edit vehicle text in node config");
   assert.deepEqual(getCanvasNodeDefinition("compose.social-post")?.defaultConfig, { fallbackTitle: "画布生成内容" });
@@ -581,12 +600,99 @@ assert.match(runs, /error: status === "running"\s*\? undefined\s*:/, "Pending pr
 requireText(read("src/lib/concurrency.ts"), ["image: readConcurrencyEnv(\"WORKER_IMAGE_CONCURRENCY\", 100, 100)"], "confirmed ToAPIs 100-task submission concurrency");
 requireText(read("src/app/api/canvas/runs/route.ts"), ["ensureCanvasRunWorker", "export async function GET"], "canvas status reads must wake durable recovery after a local restart");
 
-const dreamina = read("src/lib/canvas/dreamina.ts");
-requireText(dreamina, ["user_credit", "totalCredit < 100", "query_result", "--submit_id=", "if (!singleImage) args.push", "Dreamina did not return submit_id", "execFileAsync"], "Dreamina adapter");
-assert.ok(!dreamina.includes("exec("), "Dreamina adapter must not use a shell command string");
+const seedanceSource = read("src/lib/canvas/seedance.ts");
+requireText(seedanceSource, ["contents/generations/tasks", "reference_image", "reference_video", "generate_audio", "Authorization", "Bearer", "AbortSignal.timeout", "succeeded without a video URL"], "Ark Seedance adapter");
+assert.ok(!seedanceSource.includes("dreamina"), "Ark Seedance adapter must not retain Dreamina CLI behavior");
+
+const seedanceRequests = [];
+const seedanceResponses = [
+  new Response(JSON.stringify({ id: "ark-task-1" }), { status: 200 }),
+  new Response(JSON.stringify({ id: "ark-task-1", status: "succeeded", content: { video_url: "https://example.test/result.mp4" } }), { status: 200 }),
+  new Response(JSON.stringify({ id: "ark-task-failed", status: "failed", error: { code: "BadRequest", message: "invalid reference" } }), { status: 200 }),
+];
+const seedance = loadTsModule("src/lib/canvas/seedance.ts", {
+  "../config": {
+    appConfig: {
+      arkApiKey: "test-ark-key",
+      arkBaseUrl: "https://ark.example.test/api/v3",
+      arkSeedanceModel: "doubao-seedance-2-5-260628",
+      arkSeedanceRequestTimeoutMs: 30_000,
+    },
+  },
+}, {
+  AbortSignal,
+  fetch: async (url, init) => {
+    seedanceRequests.push({ url: String(url), init });
+    return seedanceResponses.shift();
+  },
+});
+const createdSeedance = await seedance.submitArkSeedanceVideo({
+  prompt: "替换产品，运镜不变",
+  images: ["https://example.test/reference.jpg"],
+  videos: ["https://example.test/source.mp4"],
+  duration: 5,
+  ratio: "16:9",
+  resolution: "720p",
+  generateAudio: true,
+  watermark: false,
+});
+assert.equal(createdSeedance.taskId, "ark-task-1");
+assert.equal(createdSeedance.status, "queued");
+assert.equal(seedanceRequests[0].url, "https://ark.example.test/api/v3/contents/generations/tasks");
+assert.equal(seedanceRequests[0].init.method, "POST");
+assert.equal(seedanceRequests[0].init.headers.Authorization, "Bearer test-ark-key");
+assert.deepEqual(JSON.parse(seedanceRequests[0].init.body), {
+  model: "doubao-seedance-2-5-260628",
+  content: [
+    { type: "text", text: "替换产品，运镜不变" },
+    { type: "image_url", image_url: { url: "https://example.test/reference.jpg" }, role: "reference_image" },
+    { type: "video_url", video_url: { url: "https://example.test/source.mp4" }, role: "reference_video" },
+  ],
+  generate_audio: true,
+  ratio: "16:9",
+  duration: 5,
+  resolution: "720p",
+  watermark: false,
+});
+const completedSeedance = await seedance.queryArkSeedanceVideo("ark-task-1");
+assert.equal(seedanceRequests[1].url, "https://ark.example.test/api/v3/contents/generations/tasks/ark-task-1");
+assert.equal(seedanceRequests[1].init.method, "GET");
+assert.deepEqual(Array.from(completedSeedance.videoUrls), ["https://example.test/result.mp4"]);
+await assert.rejects(() => seedance.queryArkSeedanceVideo("ark-task-failed"), /BadRequest: invalid reference/);
+
+let unconfiguredSeedanceRequests = 0;
+const unconfiguredSeedance = loadTsModule("src/lib/canvas/seedance.ts", {
+  "../config": {
+    appConfig: {
+      arkApiKey: "",
+      arkBaseUrl: "https://ark.example.test/api/v3",
+      arkSeedanceModel: "doubao-seedance-2-5-260628",
+      arkSeedanceRequestTimeoutMs: 30_000,
+    },
+  },
+}, {
+  AbortSignal,
+  fetch: async () => {
+    unconfiguredSeedanceRequests += 1;
+    throw new Error("unexpected network call");
+  },
+});
+await assert.rejects(() => unconfiguredSeedance.submitArkSeedanceVideo({
+  prompt: "测试",
+  images: [],
+  videos: [],
+  duration: 5,
+  ratio: "16:9",
+  resolution: "720p",
+  generateAudio: true,
+  watermark: true,
+}), /ARK_API_KEY is required/);
+assert.equal(unconfiguredSeedanceRequests, 0, "missing Ark configuration must fail before network access");
 
 const executors = read("src/lib/canvas/executors.ts");
-requireText(executors, ["callOpenAIForText", "callOpenAIForVisionText", "generateCanvasGptImages", "directReferences", "resolveCanvasGptImageReferences", "references.length > 16", "resolvedInputs", "resumeTaskId", "resumeTaskRoute", "onTaskUpdate", "result.status === \"pending\"", "providerTaskRoute", "utility.image-preview", "executeImagePreview", "utility.save-images", "executeSaveImages", "utility.display-any", "executeDisplayAny", "executePromptTemplate", "executeTextSplit", "executeGptVision", "executeImageSelect", "executeImageTransform", "executeVideoFrames", "CanvasMediaNeedsConfigError", "generateImagesFromPrompt", "saveGeneratedPost", "enqueueFeishuPublishJob", "queryDreaminaVideo(previousSubmitId)"], "node executors");
+requireText(executors, ["callOpenAIForText", "callOpenAIForVisionText", "generateCanvasGptImages", "directReferences", "resolveCanvasGptImageReferences", "references.length > 16", "resolvedInputs", "resumeTaskId", "resumeTaskRoute", "onTaskUpdate", "result.status === \"pending\"", "providerTaskRoute", "utility.image-preview", "executeImagePreview", "utility.save-images", "executeSaveImages", "utility.display-any", "executeDisplayAny", "executePromptTemplate", "executeTextSplit", "executeGptVision", "executeImageSelect", "executeImageTransform", "executeVideoFrames", "CanvasMediaNeedsConfigError", "generateImagesFromPrompt", "saveGeneratedPost", "enqueueFeishuPublishJob", "queryArkSeedanceVideo(previousSubmitId)"], "node executors");
+requireText(runs, ["getArkSeedanceReadiness", 'needsConfig ? "needs_config" : "blocked"'], "Ark Seedance local preflight");
+assert.ok(!runs.includes("getDreaminaCredit"), "Canvas preflight must not call Dreamina or a live Ark endpoint");
 const resolveCanvasVisionInstruction = compileFunctions(executors, ["resolveCanvasVisionInstruction", "textValues"], "resolveCanvasVisionInstruction", { canvasVisionPresets: { describe: "默认图片描述" } });
 const visionNode = { config: { preset: "describe", instruction: "默认节点指令" } };
 assert.equal(resolveCanvasVisionInstruction(visionNode, [{ kind: "text", value: "  用户提示词  " }]), "用户提示词", "connected user text must fully replace the vision preset and node instruction");

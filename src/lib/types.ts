@@ -1264,7 +1264,6 @@ export type ConfigStatus = {
   comfyUiKleinWorkflowConfigured: boolean;
   comfyUiKleinWorkflowJsonConfigured: boolean;
   comfyUiBaseUrl?: string;
-  dreaminaCliBin?: string;
   tikhubBaseUrl: string;
   feishuCliBin?: string;
   feishuNotifyConfigured: boolean;

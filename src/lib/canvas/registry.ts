@@ -188,8 +188,8 @@ const canvasNodeDefinitionVersions: CanvasNodeDefinition[] = [
   {
     type: "model.seedance",
     version: 1,
-    label: "Seedance",
-    description: "通过 Dreamina CLI 生成 4-15 秒视频。",
+    label: "Seedance 2.5",
+    description: "通过火山方舟 Seedance 2.5 生成或编辑 4-15 秒视频。",
     category: "model",
     icon: "Clapperboard",
     color: "#ef4444",
@@ -216,16 +216,8 @@ const canvasNodeDefinitionVersions: CanvasNodeDefinition[] = [
           { value: "1080p", label: "1080p" },
         ],
       },
-      {
-        key: "modelVersion",
-        label: "模型",
-        kind: "select",
-        options: [
-          { value: "seedance2.0_vip", label: "Seedance 2.0 VIP" },
-          { value: "seedance2.0fast_vip", label: "Seedance 2.0 Fast VIP" },
-          { value: "seedance2.0", label: "Seedance 2.0" },
-        ],
-      },
+      { key: "generateAudio", label: "生成音频", kind: "boolean" },
+      { key: "watermark", label: "添加水印", kind: "boolean" },
       {
         key: "complianceRisk",
         label: "合规风险",
@@ -237,7 +229,7 @@ const canvasNodeDefinitionVersions: CanvasNodeDefinition[] = [
         ],
       },
     ],
-    defaultConfig: { duration: 8, ratio: "9:16", resolution: "720p", modelVersion: "seedance2.0_vip", complianceRisk: "low" },
+    defaultConfig: { duration: 8, ratio: "9:16", resolution: "720p", generateAudio: true, watermark: true, complianceRisk: "low" },
     capability: "video_model",
     bypass: { inputPort: "videos", outputPort: "videos" },
   },
@@ -731,9 +723,6 @@ export function validateCanvasNodeConfig(type: CanvasNodeType, config: CanvasNod
   }
   if (type === "model.seedance") {
     if (config.complianceRisk === "high") errors.push("Seedance 高合规风险任务禁止提交。");
-    if (config.resolution === "1080p" && config.modelVersion !== "seedance2.0_vip") {
-      errors.push("Seedance 1080p 仅支持 seedance2.0_vip。");
-    }
   }
   return errors;
 }

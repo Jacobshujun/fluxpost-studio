@@ -21,7 +21,7 @@ import {
 } from "../workspace-ownership";
 import { concurrencyConfig } from "../concurrency";
 import { CanvasNeedsConfigError, executeCanvasNode, resolveCanvasLiteralOutputs } from "./executors";
-import { DreaminaNeedsConfigError, getDreaminaCredit } from "./dreamina";
+import { ArkSeedanceNeedsConfigError, getArkSeedanceReadiness } from "./seedance";
 import { buildCanvasRunPlan, collectDescendants } from "./graph";
 import { getCanvasNodeDefinition, getCanvasNodeExecutionMode, normalizeUrlList } from "./registry";
 import type {
@@ -76,29 +76,24 @@ export async function planCanvasRunWithMode(
       continue;
     }
     try {
-      const credit = await getDreaminaCredit();
-      const blocked = credit.totalCredit < 100;
-      preflightBlocked ||= blocked;
+      const readiness = getArkSeedanceReadiness();
       details.push({
         nodeId,
         label: node.label?.trim() || definition?.label || node.type,
-        model: String(node.config.modelVersion),
+        model: readiness.model,
         resolution: String(node.config.resolution),
         durationSeconds: Number(node.config.duration),
-        credit: credit.totalCredit,
-        status: blocked ? "blocked" : "ready",
-        message: blocked ? "Dreamina 余额低于 100 积分，已阻止提交。" : undefined,
+        status: "ready",
       });
     } catch (error) {
-      const needsConfig = error instanceof DreaminaNeedsConfigError;
+      const needsConfig = error instanceof ArkSeedanceNeedsConfigError;
       details.push({
         nodeId,
         label: node.label?.trim() || definition?.label || node.type,
-        model: String(node.config.modelVersion),
         resolution: String(node.config.resolution),
         durationSeconds: Number(node.config.duration),
         status: needsConfig ? "needs_config" : "blocked",
-        message: error instanceof Error ? error.message : "Dreamina preflight failed.",
+        message: error instanceof Error ? error.message : "Ark Seedance preflight failed.",
       });
       preflightBlocked ||= !needsConfig;
     }

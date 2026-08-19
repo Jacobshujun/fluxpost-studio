@@ -1152,6 +1152,61 @@ for (const link of links) {
 }
 ```
 
+## Scenario: Canvas Ark Seedance 2.5
+
+### 1. Scope / Trigger
+
+- Trigger: changing `model.seedance`, Ark video generation configuration, provider request/response decoding, or Canvas video-task recovery. This integration uses Ark Content Generation directly; Dreamina CLI is not an active provider.
+
+### 2. Signatures
+
+- `POST {ARK_BASE_URL}/contents/generations/tasks` creates one task; `GET {ARK_BASE_URL}/contents/generations/tasks/{taskId}` queries the same task.
+- `submitArkSeedanceVideo(input) -> ArkSeedanceSubmission`; `queryArkSeedanceVideo(taskId) -> ArkSeedanceSubmission`.
+- Environment: required `ARK_API_KEY`; optional `ARK_BASE_URL`, `ARK_SEEDANCE_MODEL` (default `doubao-seedance-2-5-260628`), and `ARK_SEEDANCE_REQUEST_TIMEOUT_MS` (default 30 seconds).
+
+### 3. Contracts
+
+- Create content is ordered text, `reference_image` items, then `reference_video` items. The body also carries `generate_audio`, `ratio`, `duration`, `resolution`, and `watermark`; auth is `Bearer` and must never be logged.
+- Prompt is non-empty and at most 2,000 characters; duration is 4-15 seconds; references retain the conservative 9-image, 3-video, 12-total limits and must be public HTTP(S) URLs.
+- Canvas persists the returned Ark `id` as `providerTaskId`. Non-terminal work requeues and performs GET with that id; it never repeats POST. `succeeded` requires `content.video_url`.
+- `model.seedance` remains version 1 so saved graphs load. Historical `modelVersion` is ignored; absent `generateAudio`/`watermark` values normalize to true at execution.
+
+### 4. Validation & Error Matrix
+
+| Condition | Required result |
+| --- | --- |
+| Missing key or model | Canvas `needs_config`, zero provider requests |
+| Invalid prompt/parameter/reference | Explicit local error before POST |
+| Ark HTTP 401/403 | `needs_config` without exposing credentials |
+| Other non-2xx | Error includes HTTP status and sanitized provider message |
+| Create response without `id` | Non-resumable failure; never auto-resubmit |
+| `queued`/`running` | Persist id/status and requeue for GET |
+| `failed`/`cancelled` | Terminal provider error with retained task identity |
+| `succeeded` without video URL | Explicit terminal failure |
+
+### 5. Good/Base/Bad Cases
+
+- Good: submit text + image + video once, persist the id, then a later GET returns the video URL.
+- Base: a text-only task follows the same async lifecycle and uses the configured model/endpoint.
+- Bad: query credits or poll inside preflight, accept local-only media paths, log authorization headers, bump the Canvas node version without migration, or replay POST after ambiguous acceptance.
+
+### 6. Tests Required
+
+- `.trellis/verification/canvas_workflows_check.mjs` executes the adapter with mocked fetch and asserts URL, method, Bearer auth, content roles, parameters, create/query normalization, provider failure, old-node loading, and zero fetches when unconfigured.
+- TypeScript, lint, build, isolated HTTP/SQLite smoke, and the complete offline baseline must pass without a live Ark/Seedance call.
+
+### 7. Wrong vs Correct
+
+```typescript
+// Wrong: a worker restart pays for a replacement task.
+await submitArkSeedanceVideo(input);
+
+// Correct: persisted provider identity resumes the accepted task.
+const result = previousNodeRun?.providerTaskId
+  ? await queryArkSeedanceVideo(previousNodeRun.providerTaskId)
+  : await submitArkSeedanceVideo(input);
+```
+
 ## Trellis Rules
 
 - `.trellis/` is the only active persistent AI collaboration system. `.trellis/spec/fluxpost/` is the FluxPost project-memory layer inside that system.

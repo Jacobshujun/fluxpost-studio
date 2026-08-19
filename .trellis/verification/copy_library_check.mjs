@@ -180,7 +180,7 @@ try {
     "../generated-posts": {},
     "../image-generation": {},
     "../openai": {},
-    "./dreamina": {},
+    "./seedance": {},
     "./media-tools": {},
     "./node-utils": require(path.join(temp, "node-utils.js")),
     "./registry": registry,
