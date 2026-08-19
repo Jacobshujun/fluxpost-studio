@@ -1153,3 +1153,36 @@ Replaced the legacy Dreamina Seedance 2.0 Canvas executor with Ark Seedance 2.5 
 ### Next Steps
 
 - None - task complete
+
+
+## Session 35: Seedance structured image mentions
+
+**Date**: 2026-08-19
+**Task**: Seedance structured image mentions
+**Branch**: `main`
+
+### Summary
+
+Implemented official-style structured Seedance image mentions, TOS-backed direct references, stable reference binding and canonical provider ordering, invalid-reference blocking, resolved-input resume, responsive Inspector interactions, and deterministic offline coverage.
+
+### Main Changes
+
+(Add details)
+
+### Git Commits
+
+| Hash | Message |
+|------|---------|
+| `2ed25a7` | (see git log) |
+
+### Testing
+
+- [OK] (Add test results)
+
+### Status
+
+[OK] **Completed**
+
+### Next Steps
+
+- None - task complete
