@@ -33,7 +33,7 @@
 
 - [x] Run Canvas workflow/media checks, TypeScript, lint, build, and the complete offline baseline from `.trellis/spec/fluxpost/verification.md`.
 - [x] Update stable Canvas architecture/spec facts and lightweight status only when evidence is complete.
-- [ ] Review diffs for secrets/runtime data, run `git diff --check`, commit through Phase 3.4, archive the task, record the journal, and restart the clean port-3001 candidate.
+- [x] Review diffs for secrets/runtime data, run `git diff --check`, commit through Phase 3.4, archive the task, record the journal, and restart the clean port-3001 candidate.
 
 ## Rollback Points
 
