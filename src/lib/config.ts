@@ -114,6 +114,7 @@ function readAppConfig() {
   arkApiKey: process.env.ARK_API_KEY || process.env.VOLCENGINE_ASR_APP_KEY || process.env.VOLCENGINE_ASR_API_KEY || "",
   arkSeedanceModel: process.env.ARK_SEEDANCE_MODEL || "doubao-seedance-2-5-260628",
   arkSeedanceRequestTimeoutMs: numberOrDefault(process.env.ARK_SEEDANCE_REQUEST_TIMEOUT_MS, 30_000),
+  seedancePromptSkillPath: process.env.SEEDANCE_PROMPT_SKILL_PATH?.trim() || "",
   arkVideoTranscriptionModel: process.env.ARK_VIDEO_TRANSCRIPTION_MODEL || "doubao-seed-2-0-lite-260428",
   arkVideoTranscriptionPrompt: process.env.ARK_VIDEO_TRANSCRIPTION_PROMPT || "请识别音频中的内容，以文字形式返回识别结果。",
   arkVideoTranscriptionAudioExtractTimeoutMs: numberOrDefault(process.env.ARK_VIDEO_TRANSCRIPTION_AUDIO_EXTRACT_TIMEOUT_MS, 120_000),
@@ -534,6 +535,9 @@ const advancedConfigGroups: ConfigDefinitionGroup[] = [
       }),
       configField("ARK_SEEDANCE_REQUEST_TIMEOUT_MS", "请求超时毫秒", "单次任务创建或状态查询的 HTTP 等待上限。", "number", "seedance", {
         read: () => String(appConfig.arkSeedanceRequestTimeoutMs),
+      }),
+      configField("SEEDANCE_PROMPT_SKILL_PATH", "Prompt Skill 文件", "服务端运行时读取的 SKILL.md 路径；文件更新后下一次优化请求自动生效。", "text", "seedance", {
+        read: () => appConfig.seedancePromptSkillPath,
       }),
     ],
   },

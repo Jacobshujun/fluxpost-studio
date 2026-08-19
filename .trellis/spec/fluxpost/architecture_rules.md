@@ -649,7 +649,9 @@ throw new ImageProviderError("accepted task timed out", {
 
 ### 2. Signatures
 - Browser API: `POST /api/canvas/seedance/prompt-assist`, authenticated through `requireWorkspaceAccount(request)`.
-- Domain entry: `createSeedancePromptCandidates(input, { generateText, generateVision }) -> Promise<SeedancePromptAssistantResponse>` in `src/lib/canvas/seedance-prompt-assistant.ts`.
+- Domain entry: `createSeedancePromptCandidates(input, { generateText, generateVision }) -> Promise<SeedancePromptAssistantResponse>` in `src/lib/canvas/seedance-prompt-assistant.ts`; each request loads the server-only Skill through `src/lib/canvas/seedance-skill-loader.ts`.
+- Runtime Skill contract: optional `SEEDANCE_PROMPT_SKILL_PATH` selects a bounded operator-managed UTF-8 file. Empty configuration uses built-in creative guidance; a configured missing, unreadable, empty, or oversized file fails visibly. Cache identity is resolved path plus `mtime` and size, and changed files are reloaded automatically.
+- Skill boundary: the prompt-assist response exposes only `source`, SHA-256 `version`, and `updatedAt`; local paths and full Skill text never cross that API. Configured and real target basenames must both be `SKILL.md`. Skill text is model reference material followed by an immutable FluxPost contract and cannot replace deterministic candidate audits.
 - Apply boundary: structured `promptParts` are serialized into the existing `prompt` plus `mentionIds`/`mentionUrls` config through `seedanceMentionMarker(...)`; no Canvas graph schema or database migration is added.
 
 ### 3. Contracts

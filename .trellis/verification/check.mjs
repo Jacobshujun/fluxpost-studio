@@ -82,6 +82,7 @@ const nodeChecks = [
   ["Canvas image download check", "canvas_image_download_check.mjs"],
   ["Canvas video reconstruction check", "canvas_video_reconstruction_check.mjs"],
   ["Seedance prompt assistant check", "seedance_prompt_assistant_check.mjs"],
+  ["Seedance runtime skill check", "seedance_runtime_skill_check.mjs"],
   ["Canvas batch scheduler check", "canvas_scheduler_check.mjs"],
   ["Copy library check", "copy_library_check.mjs"],
   ["Source tagging image check", "source_tagging_image_check.mjs"],

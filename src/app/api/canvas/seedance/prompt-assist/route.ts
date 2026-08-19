@@ -1,5 +1,6 @@
 import { NextResponse } from "next/server";
 import { createSeedancePromptCandidates, SeedancePromptAssistantInputError } from "@/lib/canvas/seedance-prompt-assistant";
+import { loadSeedancePromptSkill } from "@/lib/canvas/seedance-skill-loader";
 import { callOpenAIForText, callOpenAIForVisionText } from "@/lib/openai";
 import { isWorkspaceSignInError, requireWorkspaceAccount } from "@/lib/workspace-accounts";
 
@@ -12,6 +13,7 @@ export async function POST(request: Request) {
     const result = await createSeedancePromptCandidates(input, {
       generateText: (prompt) => callOpenAIForText(prompt, { logLabel: "Canvas Seedance prompt assistant" }),
       generateVision: (prompt, imageUrls) => callOpenAIForVisionText(prompt, imageUrls, { logLabel: "Canvas Seedance prompt assistant vision" }),
+      loadSkill: loadSeedancePromptSkill,
     });
     return NextResponse.json(result);
   } catch (error) {

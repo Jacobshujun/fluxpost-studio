@@ -4,10 +4,11 @@ Last updated: 2026-08-19
 
 ## One-Line Status
 
-The Seedance 2.5 Inspector now has a structured, deterministically audited Prompt assistant; port 3001 still runs the prior clean candidate until this verified change is committed.
+The Seedance Prompt assistant now loads an operator-managed Skill at request time and reports its version; port 3001 must be refreshed after this change is verified and committed.
 
 ## Current Focus
 
+- Canvas Seedance Prompt optimization reads optional `SEEDANCE_PROMPT_SKILL_PATH` on the server, automatically reloads changed files, exposes only source/hash metadata, and retains FluxPost hard audits after the mutable Skill reference.
 - Simple Runs use frozen workspace prompts; pool runs remain review-first and Feishu-disabled.
 - Desktop Canvas accepts local image drops at the pointer or onto a compatible image node through runtime media only; dropped files never enter the shared library.
 - Canvas `model.seedance@1` now combines TOS-backed direct uploads with fixed upstream images, supports stable official-style `@图片N` Prompt mentions, freezes provider-facing Prompt/image order, and resumes the original Ark task ID without re-resolution; old upstream-only nodes remain loadable.
@@ -20,9 +21,8 @@ Before further code work, confirm `/api/version` matches clean HEAD; use `npm ru
 
 ## Recent Verification
 
+- 2026-08-19: Runtime Seedance Skill refresh/error/metadata checks, lint, TypeScript, build, HTTP/SQLite smoke, and the complete offline baseline passed without provider calls.
 - 2026-08-19: Seedance Prompt assistant contracts, offline baseline, and mocked Chromium apply flow at 1440x960/390x844 passed without provider calls; candidate `ca8afe7` served on port 3001.
-- 2026-08-19: Seedance structured marker/order/conflict/deleted-reference/TOS/resume contracts, Canvas scheduler/copy fixtures, lint, TypeScript, build, isolated HTTP/SQLite baseline, and mocked Chromium at 1440x960 and 390x844 passed without Ark or TOS calls.
-- 2026-08-19: Ark Seedance 2.5 request/resume/error and legacy-node contracts passed mocked adapter checks, lint, TypeScript, build, HTTP/SQLite smoke, and the full offline baseline without provider calls.
 
 ## Risks And Unknowns
 

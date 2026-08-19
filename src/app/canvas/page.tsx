@@ -2353,6 +2353,7 @@ function SeedancePromptComposer({ node, references, graph, errors, onPatch, crea
       {assistantError ? <p className="canvas-seedance-assistant-error" role="alert"><AlertTriangle />{assistantError}</p> : null}
       {assistantResult ? <div className="canvas-seedance-candidates">
         <div className="canvas-seedance-assistant-mode"><span>识别模式</span><strong>{seedanceAssistantModeLabel(assistantResult.response.resolvedMode)}</strong></div>
+        <div className="canvas-seedance-assistant-mode"><span>Skill</span><strong>{assistantResult.response.skill.source === "configured-file" ? "外部文件" : "内置规则"}</strong><code title={assistantResult.response.skill.version}>{assistantResult.response.skill.version.slice(0, 12)}</code></div>
         {assistantResult.response.candidates.map((candidate) => <SeedanceAssistantCandidateView
           key={candidate.id}
           candidate={candidate}

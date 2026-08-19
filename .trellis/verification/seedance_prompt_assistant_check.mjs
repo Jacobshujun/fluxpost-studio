@@ -31,6 +31,7 @@ function loadAssistantModule() {
 }
 
 const assistant = loadAssistantModule();
+const loadSkill = () => ({ content: "runtime skill marker", metadata: { source: "configured-file", version: "runtime-hash", updatedAt: "2026-08-19T00:00:00.000Z" } });
 const baseInput = {
   action: "generate",
   mode: "auto",
@@ -51,8 +52,11 @@ const validCandidates = (parts = [{ type: "text", value: "开场第一秒，汽�
 let textCalls = 0;
 let visionCalls = 0;
 const textResult = await assistant.createSeedancePromptCandidates(baseInput, {
+  loadSkill,
   generateText: async (prompt) => {
     textCalls += 1;
+    assert.match(prompt, /runtime skill marker/);
+    assert.ok(prompt.indexOf("runtime skill marker") < prompt.indexOf("FluxPost hard contract \(immutable\)"));
     assert.match(prompt, /前2秒出现核心视觉 Hook/);
     assert.match(prompt, /恰好返回 2 个 candidates/);
     return validCandidates();
@@ -67,12 +71,14 @@ assert.equal(textResult.candidates.length, 2);
 assert.equal(textCalls, 1);
 assert.equal(visionCalls, 0);
 assert.equal(textResult.candidates[0].checks.hookPresent, true);
+assert.equal(textResult.skill.source, "configured-file");
 
 const imageInput = {
   ...baseInput,
   references: [{ id: "assistant-ref-1", number: 1, url: "https://example.test/car.jpg", name: "汽车" }],
 };
 const imageResult = await assistant.createSeedancePromptCandidates(imageInput, {
+  loadSkill,
   generateText: async () => {
     textCalls += 1;
     return validCandidates();
@@ -130,6 +136,7 @@ const route = read("src/app/api/canvas/seedance/prompt-assist/route.ts");
 assert.match(route, /await requireWorkspaceAccount\(request\)/);
 assert.match(route, /createSeedancePromptCandidates\(input/);
 assert.match(route, /callOpenAIForVisionText/);
+assert.match(route, /loadSkill: loadSeedancePromptSkill/);
 assert.match(route, /SeedancePromptAssistantInputError \|\| error instanceof SyntaxError \? 400/);
 
 const page = read("src/app/canvas/page.tsx");
@@ -141,6 +148,7 @@ for (const snippet of [
   "请先断开外部提示词连接",
   "seedanceMentionMarker(id)",
   "snapshot.url",
+  "response.skill.source",
 ]) assert.ok(page.includes(snippet), `Canvas Seedance assistant UI is missing ${snippet}`);
 
 const css = read("src/app/globals.css");

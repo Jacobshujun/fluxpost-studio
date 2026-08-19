@@ -43,6 +43,7 @@ Do not deploy a dirty worktree, branch name, abbreviated SHA, local runtime rows
 
 ## Recent Verification
 
+- 2026-08-19: Runtime Seedance Skill loading checks cover configured-file hashing, automatic refresh, cache reuse, missing-file errors, assistant metadata, and UI/API wiring without provider calls.
 - 2026-08-19: Content-pool/ordinary prompt-only production checks, removed automatic-plan contracts, shared settings and Feishu-disabled pool boundaries, lint, TypeScript, build, isolated smoke, and the full offline baseline passed without external calls.
 - 2026-08-19: Seedance Prompt assistant contracts, full offline baseline, and mocked Chromium apply flow at 1440x960/390x844 passed without provider calls.
 - 2026-08-17: Dongchedi current/legacy path fixtures, empty-page Cookie error, import checks, lint, TypeScript, build, and offline baseline passed; Playwright was diagnostic-only.
