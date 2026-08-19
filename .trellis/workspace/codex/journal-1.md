@@ -1087,3 +1087,36 @@ Added desktop local-image drag and drop for Canvas, reusing authenticated runtim
 ### Next Steps
 
 - None - task complete
+
+
+## Session 33: Use workspace prompts for source production
+
+**Date**: 2026-08-19
+**Task**: Use workspace prompts for source production
+**Branch**: `main`
+
+### Summary
+
+Removed automatic source production classification, made workspace prompts and explicit media controls authoritative, preserved review-first pool behavior, updated deterministic checks and FluxPost specs, and passed the full offline baseline.
+
+### Main Changes
+
+(Add details)
+
+### Git Commits
+
+| Hash | Message |
+|------|---------|
+| `ce573b4` | (see git log) |
+
+### Testing
+
+- [OK] (Add test results)
+
+### Status
+
+[OK] **Completed**
+
+### Next Steps
+
+- None - task complete
