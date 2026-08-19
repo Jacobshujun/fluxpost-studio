@@ -8,7 +8,7 @@
 
 <!-- @@@auto:current-status -->
 - **Active File**: `journal-1.md`
-- **Total Sessions**: 33
+- **Total Sessions**: 34
 - **Last Active**: 2026-08-19
 <!-- @@@/auto:current-status -->
 
@@ -19,7 +19,7 @@
 <!-- @@@auto:active-documents -->
 | File | Lines | Status |
 |------|-------|--------|
-| `journal-1.md` | ~1122 | Active |
+| `journal-1.md` | ~1155 | Active |
 <!-- @@@/auto:active-documents -->
 
 ---
@@ -29,6 +29,7 @@
 <!-- @@@auto:session-history -->
 | # | Date | Title | Commits | Branch |
 |---|------|-------|---------|--------|
+| 34 | 2026-08-19 | Upgrade Canvas Seedance node to Ark 2.5 | `dae645e` | `main` |
 | 33 | 2026-08-19 | Use workspace prompts for source production | `ce573b4` | `main` |
 | 32 | 2026-08-19 | Canvas local image drop | `3281b7e` | `main` |
 | 31 | 2026-08-18 | Consolidate local candidate and resume Feishu queue | `a82d233`, `4ac4451`, `d8c71b4` | `main` |

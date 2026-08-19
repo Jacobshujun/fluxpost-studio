@@ -1120,3 +1120,36 @@ Removed automatic source production classification, made workspace prompts and e
 ### Next Steps
 
 - None - task complete
+
+
+## Session 34: Upgrade Canvas Seedance node to Ark 2.5
+
+**Date**: 2026-08-19
+**Task**: Upgrade Canvas Seedance node to Ark 2.5
+**Branch**: `main`
+
+### Summary
+
+Replaced the legacy Dreamina Seedance 2.0 Canvas executor with Ark Seedance 2.5 task creation and resume polling, added node controls and offline contract checks, and documented the runtime boundary.
+
+### Main Changes
+
+(Add details)
+
+### Git Commits
+
+| Hash | Message |
+|------|---------|
+| `dae645e` | (see git log) |
+
+### Testing
+
+- [OK] (Add test results)
+
+### Status
+
+[OK] **Completed**
+
+### Next Steps
+
+- None - task complete
