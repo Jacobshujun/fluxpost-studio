@@ -976,6 +976,50 @@ const field = getCanvasBatchBindableFields(node)
 if (!field?.parameterTypes.includes(parameter.valueType)) throw new Error("Incompatible batch binding");
 ```
 
+## Scenario: Canvas Scheduler Library Thumbnails
+
+### 1. Scope / Trigger
+
+- Trigger: changing Canvas schedule library search, picker pagination/selection, library thumbnail delivery, or derived thumbnail cache/prewarm behavior.
+
+### 2. Signatures
+
+- `GET /api/library/assets/:id/thumbnail -> image/webp`; `getLibraryThumbnail({ publicUrl, sha256 }) -> { bytes, cacheStatus, etag }`.
+- `npm run library:thumbnails:prewarm`; optional `WORKER_LIBRARY_THUMBNAIL_CONCURRENCY`, default and hard cap `4`.
+
+### 3. Contracts
+
+- Search uses a component-local draft, commits after 350 ms or Enter, and remounts on schedule ID changes. Replacement requests keep the old grid mounted but disabled. Pages use `limit=24`; only the button appends a page. Select-all consumes cursors into IDs without appending unloaded assets to the DOM.
+- Tiles use the authenticated thumbnail route; preview and frozen schedule values retain `LibraryAsset.publicUrl`. Thumbnails are 240x144 WebP, SHA-keyed under `data/library-thumbnails/v1`, atomically written, same-SHA deduplicated, and generated through the four-slot pool. Source reads accept only managed TOS URLs, reject redirects, non-images, payloads over 30 MB, and corrupt images.
+- Successful responses use a private immutable one-year cache, SHA-derived ETag, content length/type, and `X-FluxPost-Thumbnail-Cache`. Prewarm reuses the cache service, skips valid files, reports generated/skipped/failed/bytes, and performs no DB or TOS write.
+
+### 4. Validation & Error Matrix
+
+- Missing session -> `401`; missing/inaccessible asset -> `404`; source/cache/generation failure -> explicit `502`, never original-image fallback.
+- Invalid SHA, unmanaged/redirected source, non-image, empty/oversized/corrupt bytes -> generation failure and no valid cache artifact.
+
+### 5. Good/Base/Bad Cases
+
+- Good: rapid typing sends one final query, leaves 24 stale tiles visible while pending, then swaps to 24 or fewer thumbnails; select-all may select 437 IDs while 24 tiles remain mounted.
+- Base: preview, preflight, launch, and old schedules continue using original URLs. Bad: per-key schedule writes, automatic pagination, original URLs in tiles, following redirects, or silently serving originals on thumbnail errors.
+
+### 6. Tests Required
+
+- `library_thumbnails_check.mjs` covers dimensions/format, hits, same-SHA dedupe, four-slot bounds, atomic cleanup, managed-source/redirect/size/corruption failures, route auth, dependency, and prewarm statistics. `canvas_scheduler_check.mjs` covers the UI contracts.
+- Mocked Chromium at 1440x960 and 390x844 covers debounce/request/save counts, stale grid, explicit paging, ID-only select-all, range/clear/preview, thumbnails, console errors, and overflow; lint, TypeScript, build, and the full offline baseline remain required.
+
+### 7. Wrong vs Correct
+
+```typescript
+// Wrong: mutate the schedule and mount originals on every key.
+onChange({ ...filter, search: value });
+<Image src={asset.publicUrl} />
+
+// Correct: debounce the filter contract and render the authenticated derivative.
+searchCommitTimer.current = setTimeout(() => commitSearch(value), 350);
+<Image src={`/api/library/assets/${asset.id}/thumbnail`} />
+```
+
 ## Scenario: Batch Original Xiaohongshu Card Workspace
 
 ### 1. Scope / Trigger

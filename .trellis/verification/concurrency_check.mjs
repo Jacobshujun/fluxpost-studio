@@ -37,6 +37,11 @@ assertContains(
 );
 assertContains(
   concurrency,
+  /libraryThumbnail:\s*readConcurrencyEnv\("WORKER_LIBRARY_THUMBNAIL_CONCURRENCY",\s*4,\s*4\)/,
+  "Library thumbnail generation must use a dedicated four-slot pool.",
+);
+assertContains(
+  concurrency,
   /localVideo:\s*readConcurrencyEnv\("WORKER_LOCAL_VIDEO_CONCURRENCY",\s*1,\s*4\)/,
   "Local video encoding must default to one worker and have a hard cap of four.",
 );

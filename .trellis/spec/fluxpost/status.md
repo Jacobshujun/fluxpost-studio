@@ -4,20 +4,21 @@ Last updated: 2026-08-20
 
 ## One-Line Status
 
-Finished-body governance and the Canvas local video-loader queue are implemented and pass the complete offline baseline; the video-loader is live on the versioned local candidate, with no production deployment.
+Canvas scheduler image search now uses debounced 24-item thumbnail pages and passes the complete offline baseline; commit, thumbnail prewarm, and the clean port-3001 candidate refresh remain pending approval.
 
 ## Current Focus
 
-- `input.video-loader@1` stores up to 200 ordered MP4/MOV/WebM snapshots, ordinary runs emit only the current video, and V2 scheduling freezes one video per task.
-- Authenticated raw uploads stream/hash/probe up to 512 MB and persist through the runtime-media boundary; mocked browser checks cover desktop queue flows and 390px Inspector overflow.
-- The parallel finished-body policy remains present and green; port 3001 serves the current clean committed candidate.
+- Scheduler keyword drafts commit after 350 ms or Enter; pending searches retain and disable the old grid, and explicit 24-item paging prevents automatic original-image fan-out.
+- Authenticated 240x144 WebP thumbnails use a SHA-keyed atomic local cache, same-image deduplication, and a four-slot pool; previews and frozen tasks retain originals.
+- Focused domain/browser checks and the full offline baseline pass. Existing unrelated dirty changes in `src/lib/canvas/executors.ts` and `canvas_workflows_check.mjs` remain outside this task.
 
 ## Next Entry
 
-Commit the finished-body task separately; the video-loader candidate is ready for operator checks at `http://127.0.0.1:3001/canvas`.
+Confirm the task-only commit plan. After commit, run `npm run library:thumbnails:prewarm`, then `npm run local` and verify `http://127.0.0.1:3001/canvas`.
 
 ## Recent Verification
 
+- 2026-08-20: Canvas scheduler thumbnail/cache/prewarm checks, mocked Chromium 1440x960/390x844 search and selection flows, lint, TypeScript, build, isolated smoke, and the complete offline baseline passed without external writes or provider calls.
 - 2026-08-20: Canvas video-loader focused upload/workflow/scheduler checks, mocked Chromium desktop/mobile flows, lint, TypeScript, build, isolated smoke, the complete offline baseline, and clean candidate identity on port 3001 passed without external services.
 - 2026-08-20: Finished-body Unicode/prompt/repair/history/persistence/review/copy/Canvas/Feishu checks also passed in the same complete offline baseline without live providers.
 

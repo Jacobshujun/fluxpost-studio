@@ -1,0 +1,5 @@
+{"file":".trellis/spec/fluxpost/architecture_rules.md","reason":"Canvas scheduling, library snapshots, runtime-data, and media boundaries."}
+{"file":".trellis/spec/fluxpost/pitfalls.md","reason":"Runtime-data, ownership, TOS, and verification risks."}
+{"file":".trellis/spec/frontend/state-management.md","reason":"Local draft and authenticated server-state behavior."}
+{"file":".trellis/spec/frontend/component-guidelines.md","reason":"Cursor selection, stale-request, and dense Canvas UI conventions."}
+{"file":".trellis/spec/guides/cross-layer-thinking-guide.md","reason":"UI to API to cache data-flow contract."}

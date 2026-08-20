@@ -51,6 +51,7 @@ import {
   GitBranch,
   Home,
   Image as ImageIcon,
+  ImageOff,
   Images,
   Layers3,
   ListChecks,
@@ -3440,6 +3441,7 @@ function CanvasScheduleCenter({ workflow, graph, onSaveBindings, onPreview, onCl
               <div><small>画布版本</small><strong>r{selected.workflowRevision}</strong></div>
             </div>
             {editable ? selected.schemaVersion === 2 ? <CanvasScheduleV2Editor
+              key={selected.id}
               schedule={selected}
               graph={graph}
               busy={busy}
@@ -3466,8 +3468,8 @@ function CanvasScheduleCenter({ workflow, graph, onSaveBindings, onPreview, onCl
                       <option value="input-1">输入 1</option><option value="input-2">输入 2</option><option value="input-3">输入 3</option>
                     </select></label>
                   </div>
-                  <ScheduleAssetFilterEditor title="场景 / 内容素材" role="reference" filter={batch.sceneFilter} count={batch.sceneCount} onCountChange={(sceneCount) => patchBatch(batch.id, { sceneCount })} onChange={(sceneFilter) => patchBatch(batch.id, { sceneFilter })} onPreview={onPreview} />
-                  <ScheduleAssetFilterEditor title="车型素材" role="vehicle" filter={batch.vehicleFilter} onChange={(vehicleFilter) => patchBatch(batch.id, { vehicleFilter })} onPreview={onPreview} />
+                  <ScheduleAssetFilterEditor key={`${selected.id}:${batch.id}:scene`} title="场景 / 内容素材" role="reference" filter={batch.sceneFilter} count={batch.sceneCount} onCountChange={(sceneCount) => patchBatch(batch.id, { sceneCount })} onChange={(sceneFilter) => patchBatch(batch.id, { sceneFilter })} onPreview={onPreview} />
+                  <ScheduleAssetFilterEditor key={`${selected.id}:${batch.id}:vehicle`} title="车型素材" role="vehicle" filter={batch.vehicleFilter} onChange={(vehicleFilter) => patchBatch(batch.id, { vehicleFilter })} onPreview={onPreview} />
                   {batch.copyFilter ? <ScheduleCopyFilterEditor filter={batch.copyFilter} onChange={(copyFilter) => patchBatch(batch.id, { copyFilter })} onDisable={() => patchBatch(batch.id, { copyFilter: undefined })} /> : <button className="canvas-schedule-add" type="button" onClick={() => patchBatch(batch.id, { copyFilter: emptyScheduleCopyFilter() })}><BookOpenText />启用文案池</button>}
                   <div className="canvas-schedule-range"><span>每篇车型图片数</span><label><small>最少</small><input type="number" min={1} max={16} value={batch.vehicleCountMin} onChange={(event) => patchBatch(batch.id, { vehicleCountMin: Number(event.target.value) })} /></label><span>至</span><label><small>最多</small><input type="number" min={1} max={16} value={batch.vehicleCountMax} onChange={(event) => patchBatch(batch.id, { vehicleCountMax: Number(event.target.value) })} /></label></div>
                   {batch.contentTasks.length ? <SchedulePreview batch={batch} busy={busy} onResample={(contentTaskId) => void scheduleAction("resample", { batchId: batch.id, contentTaskId }, false)} /> : null}
@@ -3863,20 +3865,21 @@ function ScheduleAssetFilterEditor({ title, role, filter, count, onCountChange, 
   filterMatchLabel?: boolean;
 }) {
   const [data, setData] = useState<LibraryAssetPage>({ assets: [], collections: [], total: 0 });
+  const [searchDraftState, setSearchDraftState] = useState({ source: filter.search, value: filter.search });
   const [busy, setBusy] = useState(false);
   const [loadingMore, setLoadingMore] = useState(false);
   const [selectingAll, setSelectingAll] = useState(false);
+  const [selectedAllQuery, setSelectedAllQuery] = useState("");
   const [error, setError] = useState("");
   const requestGenerationRef = useRef(0);
   const pageOperationRef = useRef(0);
   const loadingMoreRef = useRef(false);
   const selectingAllRef = useRef(false);
   const selectionAnchorIdRef = useRef<string | undefined>(undefined);
-  const resultViewportRef = useRef<HTMLDivElement>(null);
-  const loadMoreRef = useRef<HTMLDivElement>(null);
+  const searchCommitTimerRef = useRef<ReturnType<typeof setTimeout> | undefined>(undefined);
   const tagsText = filter.tags.join(", ");
   const queryString = useMemo(() => {
-    const params = new URLSearchParams({ role, limit: "100" });
+    const params = new URLSearchParams({ role, limit: "24" });
     if (filter.search.trim()) params.set("search", filter.search.trim());
     if (filter.collectionId) params.set("collectionId", filter.collectionId);
     splitScheduleTags(tagsText).forEach((tag) => params.append("tag", tag));
@@ -3884,11 +3887,29 @@ function ScheduleAssetFilterEditor({ title, role, filter, count, onCountChange, 
   }, [filter.collectionId, filter.search, role, tagsText]);
   const queryStringRef = useRef(queryString);
   const filterRef = useRef(filter);
+  const searchDraft = searchDraftState.source === filter.search ? searchDraftState.value : filter.search;
 
   useLayoutEffect(() => {
     queryStringRef.current = queryString;
     filterRef.current = filter;
   }, [filter, queryString]);
+
+  useEffect(() => () => {
+    if (searchCommitTimerRef.current) clearTimeout(searchCommitTimerRef.current);
+  }, []);
+
+  const commitSearch = useCallback((value: string) => {
+    if (searchCommitTimerRef.current) clearTimeout(searchCommitTimerRef.current);
+    searchCommitTimerRef.current = undefined;
+    if (value === filterRef.current.search) return;
+    onChange({ ...filterRef.current, search: value });
+  }, [onChange]);
+
+  const updateSearchDraft = (value: string) => {
+    setSearchDraftState({ source: filter.search, value });
+    if (searchCommitTimerRef.current) clearTimeout(searchCommitTimerRef.current);
+    searchCommitTimerRef.current = setTimeout(() => commitSearch(value), 350);
+  };
 
   useEffect(() => {
     const generation = ++requestGenerationRef.current;
@@ -3897,25 +3918,24 @@ function ScheduleAssetFilterEditor({ title, role, filter, count, onCountChange, 
     selectingAllRef.current = false;
     selectionAnchorIdRef.current = undefined;
     const controller = new AbortController();
-    const resetTimer = setTimeout(() => {
+    const timer = setTimeout(() => {
+      setSelectedAllQuery("");
       setBusy(true);
       setLoadingMore(false);
       setSelectingAll(false);
       setError("");
-      setData({ assets: [], collections: [], total: 0 });
+      void (async () => {
+        try {
+          const result = await api<LibraryAssetPage>(`/api/library/assets?${queryString}`, { signal: controller.signal });
+          if (generation === requestGenerationRef.current && queryString === queryStringRef.current) setData(result);
+        } catch (loadError) {
+          if (!controller.signal.aborted && generation === requestGenerationRef.current && queryString === queryStringRef.current) setError(errorMessage(loadError));
+        } finally {
+          if (!controller.signal.aborted && generation === requestGenerationRef.current && queryString === queryStringRef.current) setBusy(false);
+        }
+      })();
     }, 0);
-    const timer = setTimeout(async () => {
-      try {
-        const result = await api<LibraryAssetPage>(`/api/library/assets?${queryString}`, { signal: controller.signal });
-        if (generation === requestGenerationRef.current && queryString === queryStringRef.current) setData(result);
-      } catch (loadError) {
-        if (!controller.signal.aborted && generation === requestGenerationRef.current && queryString === queryStringRef.current) setError(errorMessage(loadError));
-      } finally {
-        if (!controller.signal.aborted && generation === requestGenerationRef.current && queryString === queryStringRef.current) setBusy(false);
-      }
-    }, 250);
     return () => {
-      clearTimeout(resetTimer);
       clearTimeout(timer);
       controller.abort();
       if (requestGenerationRef.current === generation) requestGenerationRef.current += 1;
@@ -3956,8 +3976,8 @@ function ScheduleAssetFilterEditor({ title, role, filter, count, onCountChange, 
     setError("");
     const generation = requestGenerationRef.current;
     const operation = ++pageOperationRef.current;
-    const assets = [...data.assets];
-    const knownIds = new Set(assets.map((asset) => asset.id));
+    const assetIds = data.assets.map((asset) => asset.id);
+    const knownIds = new Set(assetIds);
     const seenCursors = new Set<string>();
     let cursor = data.nextCursor;
     try {
@@ -3969,15 +3989,15 @@ function ScheduleAssetFilterEditor({ title, role, filter, count, onCountChange, 
         result.assets.forEach((asset) => {
           if (!knownIds.has(asset.id)) {
             knownIds.add(asset.id);
-            assets.push(asset);
+            assetIds.push(asset.id);
           }
         });
         cursor = result.nextCursor;
       }
       const latestFilter = filterRef.current;
       if (generation !== requestGenerationRef.current || queryString !== queryStringRef.current || latestFilter.mode !== "manual") return;
-      setData((current) => ({ ...current, assets, nextCursor: undefined }));
-      onChange({ ...latestFilter, assetIds: assets.map((asset) => asset.id) });
+      onChange({ ...latestFilter, assetIds });
+      setSelectedAllQuery(queryString);
     } catch (selectError) {
       if (generation === requestGenerationRef.current && queryString === queryStringRef.current) setError(errorMessage(selectError));
     } finally {
@@ -3988,18 +4008,9 @@ function ScheduleAssetFilterEditor({ title, role, filter, count, onCountChange, 
     }
   }, [busy, data.assets, data.nextCursor, onChange, queryString]);
 
-  useEffect(() => {
-    const target = loadMoreRef.current;
-    if (!target || !data.nextCursor || typeof IntersectionObserver === "undefined") return;
-    const observer = new IntersectionObserver((entries) => {
-      if (entries.some((entry) => entry.isIntersecting)) void loadMore();
-    }, { root: resultViewportRef.current, rootMargin: "160px 0px" });
-    observer.observe(target);
-    return () => observer.disconnect();
-  }, [data.nextCursor, loadMore]);
-
   const toggle = (assetId: string, event: React.MouseEvent<HTMLButtonElement>) => {
-    if (filter.mode !== "manual") return;
+    if (filter.mode !== "manual" || busy) return;
+    setSelectedAllQuery("");
     if (singleSelection) {
       selectionAnchorIdRef.current = assetId;
       onChange({ ...filter, assetIds: filter.assetIds.includes(assetId) ? [] : [assetId] });
@@ -4027,7 +4038,7 @@ function ScheduleAssetFilterEditor({ title, role, filter, count, onCountChange, 
     height: asset.height,
     sequence: data.assets.map((item) => ({ id: item.id, url: item.publicUrl, width: item.width, height: item.height })),
   });
-  const allMatchesSelected = data.total > 0 && !data.nextCursor && data.assets.length === data.total && data.assets.every((asset) => filter.assetIds.includes(asset.id));
+  const allMatchesSelected = data.total > 0 && selectedAllQuery === queryString;
   const status = busy
     ? "正在筛选"
     : selectingAll
@@ -4039,7 +4050,7 @@ function ScheduleAssetFilterEditor({ title, role, filter, count, onCountChange, 
   return <div className="canvas-schedule-assets">
     <div className="canvas-schedule-assets-head"><strong>{title}</strong><div className="canvas-task-filters"><button type="button" aria-pressed={filter.mode === "manual"} onClick={() => onChange({ ...filter, mode: "manual" })}>手动选择</button><button type="button" aria-pressed={filter.mode === "random"} onClick={() => onChange({ ...filter, mode: "random" })}>{filterMatchLabel ? "条件匹配" : "条件随机"}</button></div></div>
     <div className="canvas-schedule-filter-row">
-      <label><Search /><input value={filter.search} onChange={(event) => onChange({ ...filter, search: event.target.value })} placeholder="关键字" /></label>
+      <label><Search /><input value={searchDraft} onChange={(event) => updateSearchDraft(event.target.value)} onKeyDown={(event) => { if (event.key === "Enter") { event.preventDefault(); commitSearch(searchDraft); } }} placeholder="关键字" /></label>
       <select value={filter.collectionId || ""} onChange={(event) => onChange({ ...filter, collectionId: event.target.value || undefined })}><option value="">全部集合</option>{data.collections.map((collection) => <option value={collection.id} key={collection.id}>{collection.name}</option>)}</select>
       <input value={tagsText} onChange={(event) => onChange({ ...filter, tags: splitScheduleTags(event.target.value) })} placeholder="多个标签，AND" />
       {count !== undefined && filter.mode === "random" ? <label className="canvas-schedule-count"><span>抽取</span><input type="number" min={1} max={500} value={count} onChange={(event) => onCountChange?.(Number(event.target.value))} /></label> : null}
@@ -4048,22 +4059,40 @@ function ScheduleAssetFilterEditor({ title, role, filter, count, onCountChange, 
       <small className="canvas-schedule-pool-count" aria-live="polite">{status}</small>
       {filter.mode === "manual" && !singleSelection ? <div>
         <button type="button" onClick={() => void selectAllAssets()} disabled={busy || loadingMore || selectingAll || !data.assets.length || allMatchesSelected}><CheckCircle2 />{selectingAll ? "全选中..." : allMatchesSelected ? "已全选" : "全选当前筛选结果"}</button>
-        <button type="button" onClick={() => onChange({ ...filter, assetIds: [] })} disabled={selectingAll || !filter.assetIds.length}><X />清空已选</button>
+        <button type="button" onClick={() => { setSelectedAllQuery(""); onChange({ ...filter, assetIds: [] }); }} disabled={selectingAll || !filter.assetIds.length}><X />清空已选</button>
       </div> : null}
     </div>
-    <div className="canvas-schedule-asset-results" ref={resultViewportRef}>
+    <div className={`canvas-schedule-asset-results ${busy ? "is-loading" : ""}`} aria-busy={busy}>
       {busy && !data.assets.length ? <div className="canvas-schedule-asset-state"><LoaderCircle className="animate-spin" />正在载入图片</div> : null}
       {!busy && !error && !data.assets.length ? <div className="canvas-schedule-asset-state"><Images />当前筛选没有图片</div> : null}
       {data.assets.length ? <div className="canvas-schedule-asset-grid">{data.assets.map((asset, index) => <article key={asset.id} className={filter.assetIds.includes(asset.id) ? "is-selected" : ""}>
-        <button className="canvas-schedule-asset-select" type="button" onClick={(event) => toggle(asset.id, event)} disabled={filter.mode !== "manual" || selectingAll} title={filter.mode === "manual" ? asset.name : undefined} aria-label={`${filter.assetIds.includes(asset.id) ? "取消选择" : "选择"} ${asset.name}`}>
-          <Image src={asset.publicUrl} alt="" width={88} height={64} unoptimized referrerPolicy="no-referrer" /><span>{asset.name}</span>{filter.mode === "manual" && filter.assetIds.includes(asset.id) ? <CheckCircle2 className="canvas-schedule-asset-selected-mark" /> : null}
+        <button className="canvas-schedule-asset-select" type="button" onClick={(event) => toggle(asset.id, event)} disabled={filter.mode !== "manual" || selectingAll || busy} title={filter.mode === "manual" ? asset.name : undefined} aria-label={`${filter.assetIds.includes(asset.id) ? "取消选择" : "选择"} ${asset.name}`}>
+          <ScheduleAssetThumbnail asset={asset} /><span>{asset.name}</span>{filter.mode === "manual" && filter.assetIds.includes(asset.id) ? <CheckCircle2 className="canvas-schedule-asset-selected-mark" /> : null}
         </button>
-        <button className="canvas-schedule-asset-preview" type="button" onPointerDown={(event) => event.stopPropagation()} onClick={(event) => { event.stopPropagation(); openPreview(asset, index); }} aria-label={`预览 ${asset.name}`} title="预览图片"><Eye /></button>
+        <button className="canvas-schedule-asset-preview" type="button" disabled={busy} onPointerDown={(event) => event.stopPropagation()} onClick={(event) => { event.stopPropagation(); openPreview(asset, index); }} aria-label={`预览 ${asset.name}`} title="预览图片"><Eye /></button>
       </article>)}</div> : null}
-      {data.nextCursor ? <div className="canvas-schedule-asset-load-more" ref={loadMoreRef}><button type="button" onClick={() => void loadMore()} disabled={loadingMore || selectingAll}>{loadingMore ? <LoaderCircle className="animate-spin" /> : <ArrowDown />}{loadingMore ? "正在加载下一页..." : "加载更多"}</button></div> : null}
+      {data.nextCursor ? <div className="canvas-schedule-asset-load-more"><button type="button" onClick={() => void loadMore()} disabled={busy || loadingMore || selectingAll}>{loadingMore ? <LoaderCircle className="animate-spin" /> : <ArrowDown />}{loadingMore ? "正在加载下一页..." : "加载更多"}</button></div> : null}
     </div>
     {error ? <p className="canvas-picker-error">{error}</p> : null}
   </div>;
+}
+
+function ScheduleAssetThumbnail({ asset }: { asset: LibraryAsset }) {
+  const [state, setState] = useState<"loading" | "ready" | "error">("loading");
+  return <span className={`canvas-schedule-asset-thumbnail is-${state}`}>
+    {state === "loading" ? <LoaderCircle className="animate-spin" /> : null}
+    {state === "error" ? <ImageOff /> : null}
+    <Image
+      src={`/api/library/assets/${encodeURIComponent(asset.id)}/thumbnail`}
+      alt=""
+      width={240}
+      height={144}
+      unoptimized
+      loading="lazy"
+      onLoad={() => setState("ready")}
+      onError={() => setState("error")}
+    />
+  </span>;
 }
 
 function ScheduleCopyFilterEditor({ filter, onChange, onDisable, singleSelection = false, filterMatchLabel = false }: {

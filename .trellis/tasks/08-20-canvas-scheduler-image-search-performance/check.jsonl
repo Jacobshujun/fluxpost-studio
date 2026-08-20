@@ -1,0 +1,4 @@
+{"file":".trellis/spec/fluxpost/verification.md","reason":"Offline completion baseline and candidate rules."}
+{"file":".trellis/spec/frontend/quality-guidelines.md","reason":"Responsive UI, explicit errors, and deterministic check requirements."}
+{"file":".trellis/spec/frontend/type-safety.md","reason":"Authenticated route and cross-layer response contract."}
+{"file":".trellis/spec/fluxpost/architecture_rules.md","reason":"Canvas/library compatibility and required checks."}

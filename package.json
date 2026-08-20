@@ -16,6 +16,7 @@
     "lark:events": "node scripts/lark-task-events.mjs",
     "db:diagnose": "powershell -ExecutionPolicy Bypass -File scripts/local/postgres-diagnose.ps1",
     "db:migrate:postgres": "node scripts/db/migrate-sqlite-to-postgres.mjs",
+    "library:thumbnails:prewarm": "tsx scripts/library/prewarm-thumbnails.ts",
     "lint": "eslint"
   },
   "dependencies": {
@@ -28,7 +29,8 @@
     "next": "16.2.6",
     "pg": "^8.21.0",
     "react": "19.2.4",
-    "react-dom": "19.2.4"
+    "react-dom": "19.2.4",
+    "sharp": "0.34.5"
   },
   "devDependencies": {
     "@tailwindcss/postcss": "^4",
@@ -38,6 +40,7 @@
     "eslint": "^9",
     "eslint-config-next": "16.2.6",
     "tailwindcss": "^4",
+    "tsx": "4.23.1",
     "typescript": "^5"
   }
 }

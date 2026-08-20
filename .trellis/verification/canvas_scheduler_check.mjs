@@ -1227,13 +1227,19 @@ try {
   for (const snippet of ["CanvasScheduleCenter", "CanvasScheduleV2Editor", "CanvasScheduleParameterEditor", "ScheduleV2RuntimeTree", "节点名称", "人物场景预设", "ScheduleAssetFilterEditor", "多个标签，AND", "条件随机", "条件匹配", "批次内随机去重", "随机抽取", "固定个数", "随机范围", "每个主任务随机抽取", "确认并启动", "接受新增候选图", "onBlur={commitLabel}", "onSchedulerRoleChange", "insertSchedulerSkeleton", "Switch 输入", "画布绑定", "onSaveBindings", "saveQueueRef.current = saveQueueRef.current.then", "current?.id === schedule.id ? current.revision : schedule.revision"]) {
     assert.ok(page.includes(snippet), `Canvas UI is missing ${snippet}`);
   }
-  for (const snippet of ["requestGenerationRef", "queryStringRef", "filterRef", "IntersectionObserver", "seenCursors", "selectIdRange", "全选当前筛选结果", "清空已选", "加载更多", "预览图片", "上一张图片", "下一张图片"]) {
+  for (const snippet of ["requestGenerationRef", "queryStringRef", "filterRef", "searchDraftState", "commitSearch", "ScheduleAssetThumbnail", "/thumbnail", "seenCursors", "selectIdRange", "全选当前筛选结果", "清空已选", "加载更多", "预览图片", "上一张图片", "下一张图片"]) {
     assert.ok(page.includes(snippet), `Canvas scheduler image source UI is missing ${snippet}`);
   }
+  assert.ok(!page.includes("IntersectionObserver"), "scheduler image pagination must require an explicit load-more command");
+  assert.match(page, /new URLSearchParams\(\{ role, limit: "24" \}\)/, "scheduler image pages must be capped at 24 assets");
+  assert.match(page, /setTimeout\(\(\) => commitSearch\(value\), 350\)/, "scheduler keyword input must debounce definition updates for 350 ms");
+  assert.match(page, /event\.key === "Enter"[\s\S]*commitSearch\(searchDraft\)/, "Enter must commit the scheduler keyword immediately");
+  assert.match(page, /<CanvasScheduleV2Editor[\s\S]*key=\{selected\.id\}/, "switching schedules must remount V2 filter drafts and cancel pending search commits");
+  assert.match(page, /key=\{`\$\{selected\.id\}:\$\{batch\.id\}:scene`\}[\s\S]*key=\{`\$\{selected\.id\}:\$\{batch\.id\}:vehicle`\}/, "switching legacy schedules must remount both filter drafts and cancel pending search commits");
   assert.ok(!page.includes("data.assets.slice(0, 30)"), "scheduler image sources must render the complete loaded page");
   assert.match(page, /while \(cursor\)[\s\S]*seenCursors\.has\(cursor\)/, "select-all must consume every cursor and reject repeats");
-  assert.match(page, /latestFilter\.mode !== "manual"[\s\S]*onChange\(\{ \.\.\.latestFilter, assetIds: assets\.map\(\(asset\) => asset\.id\) \}\)/, "select-all must commit all matching ids once without restoring stale filter state");
-  assert.match(page, /onChange\(\{ \.\.\.filter, assetIds: \[\] \}\)/, "bulk clear must update only asset ids");
+  assert.match(page, /const assetIds = data\.assets\.map\(\(asset\) => asset\.id\)[\s\S]*assetIds\.push\(asset\.id\)[\s\S]*onChange\(\{ \.\.\.latestFilter, assetIds \}\)[\s\S]*setSelectedAllQuery\(queryString\)/, "select-all must accumulate and commit ids without appending unloaded assets to the DOM");
+  assert.match(page, /setSelectedAllQuery\(""\); onChange\(\{ \.\.\.filter, assetIds: \[\] \}\)/, "bulk clear must update only asset ids and local completion state");
   assert.match(page, /sequence: data\.assets\.map/, "preview navigation must use the ordered loaded image sequence");
   assert.match(page, /function canvasScheduleParameterImages\([\s\S]*"url" in value[\s\S]*seen\.has\(key\)/, "V2 preview must extract and deduplicate frozen image snapshots");
   assert.match(page, /function ScheduleV2PreviewImages\([\s\S]*onPreview\(\{ kind: "image"[\s\S]*sequence \}\)[\s\S]*<Image src=\{image\.url\}/, "V2 preview must render frozen images and open the existing sequence viewer");
