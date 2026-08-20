@@ -178,7 +178,7 @@ function uniqueReferences(references: SeedanceFixedReference[]) {
 
 function normalizeUrls(value: CanvasNodeConfig[string] | string[]) {
   const values = Array.isArray(value) ? value : typeof value === "string" ? value.split(/\r?\n/) : [];
-  return uniqueStrings(values.map((item) => item.trim()).filter(Boolean));
+  return uniqueStrings(values.filter((item): item is string => typeof item === "string").map((item) => item.trim()).filter(Boolean));
 }
 
 function stringArray(value: CanvasNodeConfig[string]) {
