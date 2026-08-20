@@ -82,6 +82,8 @@ assert.match(restart, /\[string\]\$HostName\s*=\s*"127\.0\.0\.1"/);
 assert.match(restart, /FLUXPOST_RUNTIME_MODE\s*=\s*"candidate"/);
 assert.match(restart, /FLUXPOST_RELEASE_SHA\s*=\s*\$ReleaseSha/);
 assert.match(restart, /ProjectRoot/);
+assert.match(restart, /rev-parse --path-format=absolute --git-common-dir/);
+assert.match(restart, /Local candidate must run from the primary Git worktree/);
 assert.match(restart, /rev-parse HEAD/);
 assert.match(restart, /git\.exe[\s\S]*status --porcelain/);
 assertOrder(restart, "npm.cmd run build", "Stop existing server");

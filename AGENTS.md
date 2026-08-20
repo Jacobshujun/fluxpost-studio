@@ -47,6 +47,7 @@ At the start of a new session:
 - Do not invent checks or commands. Use commands that exist in this project.
 - For code or deployment changes, use `.trellis/spec/fluxpost/rules.md` first, then read targeted sections of `.trellis/spec/fluxpost/pitfalls.md`, `.trellis/spec/fluxpost/architecture_rules.md`, or `.trellis/spec/fluxpost/decisions.md` only when the task touches those boundaries.
 - Port `3001` is the only local application environment. Fixes must be verified and committed before `npm run local` replaces the listener with the clean current HEAD as a versioned candidate.
+- Never create sibling candidate directories or linked worktrees. Run port `3001` only from the primary worktree; do not bypass its clean-tree guard.
 - Record only facts that can be confirmed from the repository or from an explicit user instruction. Mark unknowns as `pending confirmation`.
 
 ## Completion Protocol

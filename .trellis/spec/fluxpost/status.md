@@ -4,31 +4,29 @@ Last updated: 2026-08-20
 
 ## One-Line Status
 
-Canvas scheduler image search uses debounced 24-item thumbnail pages, is committed, fully prewarmed, and active on the clean versioned port-3001 candidate after passing the complete offline baseline.
+The duplicate linked candidate is removed; local startup now permits only the primary worktree, and the complete offline baseline passes after runtime-data recovery.
 
 ## Current Focus
 
-- Scheduler keyword drafts commit after 350 ms or Enter; pending searches retain and disable the old grid, and explicit 24-item paging prevents automatic original-image fan-out.
-- Authenticated 240x144 WebP thumbnails use a SHA-keyed atomic local cache, same-image deduplication, and a four-slot pool; previews and frozen tasks retain originals.
-- Commit `5c24d4f` contains the feature. All 437 assets prewarmed successfully into 435 SHA-deduplicated WebP files (about 1.94 MB versus 455.64 MB of originals), and a second run skipped all 437 as valid cache hits.
-- The final clean candidate serves `/canvas` on port 3001 with exact runtime identity, authenticated thumbnail boundaries, and desktop/390px mocked browser regression passing.
-- Focused domain/browser checks and the full offline baseline pass. Existing unrelated dirty changes in `src/lib/canvas/executors.ts` and `canvas_workflows_check.mjs` remain outside this task.
+- `D:\FluxPost\social-content-studio` is the only project directory and Git worktree; sibling candidates and linked-worktree startup are prohibited.
+- The port-3001 restart script resolves Git's common directory and rejects any non-primary worktree before build or listener replacement.
+- PostgreSQL business rows remain intact. A validated compatibility SQLite database, 133 exact TOS objects, and 24 header-valid disk-recovery media files were restored; unrecoverable historical local media remains explicitly missing instead of being replaced by corrupt placeholders.
+- Focused runtime/SQLite checks and the full offline baseline pass. Existing unrelated dirty changes in `src/lib/canvas/executors.ts` and `canvas_workflows_check.mjs` remain outside this task.
 
 ## Next Entry
 
-Use `http://127.0.0.1:3001/canvas` for operator verification; no production deployment was performed.
+Commit the primary-worktree guard, then restart the clean committed primary worktree on port 3001; no production deployment was performed.
 
 ## Recent Verification
 
-- 2026-08-20: Canvas scheduler thumbnail/cache/prewarm checks, mocked Chromium 1440x960/390x844 search and selection flows, lint, TypeScript, build, isolated smoke, and the complete offline baseline passed without external writes or provider calls.
-- 2026-08-20: Local prewarm generated all 437 requested thumbnails with zero failures; SHA deduplication produced 435 cache files, and the second run reported 437 skips and zero generation.
-- 2026-08-20: Canvas video-loader focused upload/workflow/scheduler checks, mocked Chromium desktop/mobile flows, lint, TypeScript, build, isolated smoke, the complete offline baseline, and clean candidate identity on port 3001 passed without external services.
-- 2026-08-20: Finished-body Unicode/prompt/repair/history/persistence/review/copy/Canvas/Feishu checks also passed in the same complete offline baseline without live providers.
+- 2026-08-20: Primary-worktree startup guard, runtime parity, SQLite validation, lint, TypeScript, build, isolated HTTP smoke, and the complete offline baseline passed.
+- 2026-08-20: Read-only PostgreSQL counts confirmed 2,693 generated posts, 3,081 runtime posts, 1,377 simple runs, 54 content projects, 10 Canvas workflows, and 7 accounts.
+- 2026-08-20: Verified recovery restored 133 exact TOS objects (30,512,581 bytes), 24 valid disk media files, and an integrity-checked SQLite compatibility database without writing corrupt recovery placeholders.
 
 ## Risks And Unknowns
 
 - Nine high-severity transitive package advisories remain; do not run npm audit fix --force during routine releases.
-- Local builds over the large retained media tree emit known Turbopack dynamic-path tracing warnings.
+- Historical local-only media not present in TOS could not be recovered from NTFS without corruption; PostgreSQL rows remain intact and missing files may require source recache or regeneration.
 - Archive refs are local only and intentionally not pushed because they include local task screenshots/evidence.
 
 ## History

@@ -264,7 +264,7 @@ return NextResponse.json({ status: getConfigStatus(), advanced: getAdvancedConfi
 ## Deployment Rules
 
 - Confirmed entries are `npm run local` for the loopback port-3001 candidate, `npm run local:lan` for the same candidate on the LAN, `npm run build`/`npm run start` as internal production-mode primitives, and `npm run local:parity` for the final equality check.
-- Port `3001` is the only local application environment and runs only the committed candidate; candidate restart must refuse a dirty worktree and use its current full HEAD without creating a mirror worktree or state file.
+- Port `3001` is the only local application environment and runs only the committed candidate; candidate restart must refuse a dirty or linked worktree, resolve the primary worktree from Git's common directory, and use its current full HEAD without creating a sibling candidate, mirror worktree, or state file.
 - Candidate preparation must install locked dependencies before activation. Candidate restart builds before stopping the existing listener, injects `FLUXPOST_RUNTIME_MODE=candidate` plus the full SHA, and verifies `/api/version` and HTTP behavior. It selects configuration by path and never copies configuration or runtime data.
 - Keep standalone output opt-in through `FLUXPOST_STANDALONE_BUILD=1` for Docker builds. Default local builds must remain compatible with `next start` without creating `.next/standalone`, and standalone tracing must not package runtime data, generated media, crawled media, or test artifacts.
 - The candidate uses normal background-worker behavior on both loopback and LAN bindings. Only isolated deterministic smoke servers may disable workers on their private test ports.

@@ -16,6 +16,15 @@ $projectRoot = [IO.Path]::GetFullPath($ProjectRoot)
 if (-not (Test-Path -LiteralPath $projectRoot -PathType Container)) {
   throw "Candidate project root does not exist"
 }
+
+$gitCommonDir = (& git.exe -C $projectRoot rev-parse --path-format=absolute --git-common-dir).Trim()
+if ($LASTEXITCODE -ne 0 -or -not $gitCommonDir) {
+  throw "Could not resolve the primary Git worktree"
+}
+$primaryProjectRoot = [IO.Path]::GetFullPath((Split-Path -Parent $gitCommonDir))
+if (-not [StringComparer]::OrdinalIgnoreCase.Equals($projectRoot.TrimEnd("\", "/"), $primaryProjectRoot.TrimEnd("\", "/"))) {
+  throw "Local candidate must run from the primary Git worktree: $primaryProjectRoot"
+}
 Set-Location $projectRoot
 
 $ReleaseSha = (& git.exe -C $projectRoot rev-parse HEAD).Trim()
