@@ -1253,3 +1253,36 @@ Seedance Prompt assistant now reads an operator-managed SKILL.md at request time
 ### Next Steps
 
 - None - task complete
+
+
+## Session 38: Canvas video subtitle node
+
+**Date**: 2026-08-20
+**Task**: Canvas video subtitle node
+**Branch**: `main`
+
+### Summary
+
+Added automatic video subtitle extraction, ASS hard-subtitle rendering, configurable subtitle styles, and owner-scoped preset management; verified baseline, responsive browser flows, and clean port-3001 candidate.
+
+### Main Changes
+
+(Add details)
+
+### Git Commits
+
+| Hash | Message |
+|------|---------|
+| `65dbf60` | (see git log) |
+
+### Testing
+
+- [OK] (Add test results)
+
+### Status
+
+[OK] **Completed**
+
+### Next Steps
+
+- None - task complete
