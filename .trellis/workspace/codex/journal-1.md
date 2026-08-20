@@ -1323,3 +1323,36 @@ Added authenticated local MP4/MOV/WebM queue uploads, selected-video literal exe
 ### Next Steps
 
 - None - task complete
+
+
+## Session 40: Global finished-body character limit
+
+**Date**: 2026-08-20
+**Task**: Global finished-body character limit
+**Branch**: `main`
+
+### Summary
+
+Implemented and verified the global 800-target/1000-max Unicode finished-body policy across AI generation, persistence, review, copy library, Canvas composition, and Feishu publishing while preserving harvested source text and unchanged unmarked history.
+
+### Main Changes
+
+(Add details)
+
+### Git Commits
+
+| Hash | Message |
+|------|---------|
+| `120b435` | (see git log) |
+
+### Testing
+
+- [OK] (Add test results)
+
+### Status
+
+[OK] **Completed**
+
+### Next Steps
+
+- None - task complete
