@@ -3,7 +3,6 @@ import { mkdtemp, readFile, rm, stat } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { basename, join } from "node:path";
 import { compactError, recordExecutionLog } from "./activity-log";
-import type { CanvasSubtitleSegment } from "./canvas/types";
 import { appConfig } from "./config";
 import type { SourceVideoTranscript } from "./types";
 
@@ -11,14 +10,6 @@ type TranscribeVideoContentInput = {
   videoPath: string;
   videoPublicUrl?: string;
   sourceItemId?: string;
-};
-
-export const CANVAS_SUBTITLE_TIMELINE_PROTOCOL_VERSION = 2;
-
-const CANVAS_SUBTITLE_FINAL_END_OVERFLOW_TOLERANCE_MS = 1_000;
-
-type TranscribeVideoSubtitleInput = TranscribeVideoContentInput & {
-  durationSeconds: number;
 };
 
 type ArkFileResponse = {
@@ -90,108 +81,6 @@ export async function transcribeVideoContent(input: TranscribeVideoContentInput)
   } finally {
     await extractedAudio?.cleanup().catch(() => undefined);
   }
-}
-
-export async function transcribeVideoSubtitleTimeline(input: TranscribeVideoSubtitleInput): Promise<CanvasSubtitleSegment[]> {
-  if (!isArkVideoTranscriptionConfigured()) throw new Error("Ark video transcription is not configured.");
-  if (!Number.isFinite(input.durationSeconds) || input.durationSeconds <= 0) throw new Error("Video duration is required for subtitle timing validation.");
-  const startedAt = Date.now();
-  const videoStat = await stat(input.videoPath);
-  if (!videoStat.size) throw new Error("Cached video file is empty.");
-
-  let extractedAudio: ExtractedAudioFile | undefined;
-  try {
-    extractedAudio = await extractAudioMp3FromVideo(input.videoPath, input, startedAt);
-    const fileId = await uploadAudioFileToArk(extractedAudio.audioPath, extractedAudio.audioBytes, input, startedAt);
-    const durationMs = Math.round(input.durationSeconds * 1000);
-    const requestPrompt = buildVideoSubtitlePrompt(appConfig.arkVideoSubtitlePrompt, durationMs);
-    const output = await callArkResponsesForAudioOutput(fileId, appConfig.arkVideoSubtitleModel, requestPrompt);
-    const segments = normalizeVideoSubtitleTimeline(output, input.durationSeconds);
-    await recordExecutionLog({
-      scope: "video/subtitles",
-      action: "Ark subtitle timeline completed",
-      status: "success",
-      message: "Video speech subtitle timing is ready for Canvas rendering.",
-      durationMs: Date.now() - startedAt,
-      details: { sourceItemId: input.sourceItemId || null, fileId, model: appConfig.arkVideoSubtitleModel, segmentCount: segments.length },
-    });
-    return segments;
-  } catch (error) {
-    await recordExecutionLog({
-      scope: "video/subtitles",
-      action: "Ark subtitle timeline failed",
-      status: "error",
-      message: compactError(error),
-      durationMs: Date.now() - startedAt,
-      details: { sourceItemId: input.sourceItemId || null, model: appConfig.arkVideoSubtitleModel },
-    });
-    throw error;
-  } finally {
-    await extractedAudio?.cleanup().catch(() => undefined);
-  }
-}
-
-export function buildVideoSubtitlePrompt(basePrompt: string, durationMs: number) {
-  return `${basePrompt}\n\nThe exact media duration upper bound is durationMs=${durationMs}. Every segment must satisfy startMs < ${durationMs} and endMs <= ${durationMs}. Do not return timing beyond this bound.`;
-}
-
-export function normalizeVideoSubtitleTimeline(value: string | unknown, durationSeconds: number): CanvasSubtitleSegment[] {
-  const parsed = typeof value === "string" ? parseJsonObject(value) : value;
-  if (!parsed || typeof parsed !== "object" || Array.isArray(parsed)) throw new Error("Ark subtitle response must be a JSON object.");
-  const rawSegments = (parsed as { segments?: unknown }).segments;
-  if (!Array.isArray(rawSegments) || !rawSegments.length) throw new Error("Ark subtitle response did not contain any speech segments.");
-  const durationMs = Math.round(durationSeconds * 1000);
-  let previousEndMs = 0;
-  return rawSegments.map((raw, index) => {
-    if (!raw || typeof raw !== "object" || Array.isArray(raw)) throw new Error(`Subtitle segment ${index + 1} is invalid.`);
-    const segment = raw as { startMs?: unknown; endMs?: unknown; text?: unknown };
-    const startMs = Number(segment.startMs);
-    const rawEndMs = Number(segment.endMs);
-    const text = typeof segment.text === "string" ? segment.text.replace(/\s+/g, " ").trim() : "";
-    if (!Number.isInteger(startMs) || !Number.isInteger(rawEndMs)) {
-      throw new Error(`Subtitle segment ${index + 1} timing must use integer milliseconds (startMs=${startMs}, endMs=${rawEndMs}, durationMs=${durationMs}).`);
-    }
-    if (startMs < 0 || rawEndMs <= startMs) {
-      throw subtitleTimingBoundaryError(index, startMs, rawEndMs, durationMs);
-    }
-    let endMs = rawEndMs;
-    if (endMs > durationMs) {
-      const overflowMs = endMs - durationMs;
-      const isFinalSegment = index === rawSegments.length - 1;
-      if (!isFinalSegment) {
-        throw subtitleTimingBoundaryError(index, startMs, endMs, durationMs, `intermediate segment overflowMs=${overflowMs}`);
-      }
-      if (startMs >= durationMs) {
-        throw subtitleTimingBoundaryError(index, startMs, endMs, durationMs, `final segment start is outside duration; overflowMs=${overflowMs}`);
-      }
-      if (overflowMs > CANVAS_SUBTITLE_FINAL_END_OVERFLOW_TOLERANCE_MS) {
-        throw subtitleTimingBoundaryError(
-          index,
-          startMs,
-          endMs,
-          durationMs,
-          `final segment overflowMs=${overflowMs} exceeds toleranceMs=${CANVAS_SUBTITLE_FINAL_END_OVERFLOW_TOLERANCE_MS}`,
-        );
-      }
-      endMs = durationMs;
-    }
-    if (index > 0 && startMs < previousEndMs) {
-      throw new Error(
-        `Subtitle segment ${index + 1} overlaps or is out of order (startMs=${startMs}, endMs=${endMs}, previousEndMs=${previousEndMs}, durationMs=${durationMs}).`,
-      );
-    }
-    if (!text) throw new Error(`Subtitle segment ${index + 1} text is empty.`);
-    if (text.length > 500) throw new Error(`Subtitle segment ${index + 1} text is too long.`);
-    previousEndMs = endMs;
-    return { startMs, endMs, text };
-  });
-}
-
-function subtitleTimingBoundaryError(index: number, startMs: number, endMs: number, durationMs: number, reason?: string) {
-  const suffix = reason ? `; ${reason}` : "";
-  return new Error(
-    `Subtitle segment ${index + 1} timing is outside the video duration (startMs=${startMs}, endMs=${endMs}, durationMs=${durationMs}${suffix}).`,
-  );
 }
 
 export function mergeTranscriptIntoContentText(contentText: string | undefined, transcriptText: string | undefined) {

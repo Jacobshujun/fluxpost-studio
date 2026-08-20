@@ -139,6 +139,7 @@ import type {
   CanvasEdge,
   CanvasGraph,
   CanvasLatestSuccessfulNodeRun,
+  CanvasMediaReference,
   CanvasNode,
   CanvasNodeExecutionMode,
   CanvasNodeRun,
@@ -274,6 +275,9 @@ export default function CanvasPage() {
     ? resolveSeedanceFixedReferences(editableGraph, selectedCanvasNode.id)
     : [], [editableGraph, selectedCanvasNode?.id, selectedCanvasNode?.type]);
   const latestNodeRuns = useMemo(() => latestAttempts(activeRun?.nodeRuns || []), [activeRun?.nodeRuns]);
+  const selectedSubtitlePreviewMedia = useMemo(() => selectedCanvasNode?.type === "utility.video-subtitles"
+    ? resolveCanvasSubtitlePreviewMedia(selectedCanvasNode, editableGraph, latestNodeRuns, latestSuccessfulNodeRuns)
+    : undefined, [editableGraph, latestNodeRuns, latestSuccessfulNodeRuns, selectedCanvasNode]);
   const displayedEdges = useMemo(() => markActiveCanvasEdges(edges, latestNodeRuns), [edges, latestNodeRuns]);
   const activeTaskCount = taskRuns.length
     ? taskRuns.filter((run) => isActiveCanvasRun(run.status)).length
@@ -1471,6 +1475,7 @@ export default function CanvasPage() {
             onPreviewImage={openImagePreview}
             mediaBusy={mediaBusy}
             graph={editableGraph}
+            subtitlePreviewMedia={selectedSubtitlePreviewMedia}
             seedanceReferences={selectedSeedanceReferences}
             createSeedanceMentionId={createSeedanceMentionId}
           /> : <div className="canvas-inspector-empty">选择节点查看参数与端口</div>}
@@ -2104,6 +2109,7 @@ function NodeInspector({
   onPreviewImage,
   mediaBusy,
   graph,
+  subtitlePreviewMedia,
   seedanceReferences,
   createSeedanceMentionId,
 }: {
@@ -2125,6 +2131,7 @@ function NodeInspector({
   onPreviewImage: (url: string, index: number) => void;
   mediaBusy: boolean;
   graph: CanvasGraph;
+  subtitlePreviewMedia?: CanvasMediaReference;
   seedanceReferences: SeedanceFixedReference[];
   createSeedanceMentionId: () => string;
 }) {
@@ -2221,7 +2228,7 @@ function NodeInspector({
       onPreview={onPreviewVideo}
       onChange={(videos, selectedVideoId) => onPatch(canvasVideoLoaderConfig(videos, selectedVideoId))}
     /> : null}
-    {node.type === "utility.video-subtitles" ? <CanvasSubtitleStyleEditor node={node} onPatch={onPatch} /> : definition.fields.map((field) => {
+    {node.type === "utility.video-subtitles" ? <CanvasSubtitleStyleEditor node={node} media={subtitlePreviewMedia} onPatch={onPatch} /> : definition.fields.map((field) => {
       if (field.key === "outputCompression" && node.config.outputFormat !== "jpeg") return null;
       if (field.key === "template" && node.config.preset !== "custom") return null;
       if (node.type === "utility.text-split" && (field.key === "delimiter" || field.key === "delimiterIndex") && node.config.mode !== "delimiter") return null;
@@ -2296,8 +2303,10 @@ type CanvasSubtitlePresetResponse = {
   currentAccountId: string;
 };
 
-function CanvasSubtitleStyleEditor({ node, onPatch }: { node: CanvasNode; onPatch: (patch: CanvasNode["config"]) => void }) {
+function CanvasSubtitleStyleEditor({ node, media, onPatch }: { node: CanvasNode; media?: CanvasMediaReference; onPatch: (patch: CanvasNode["config"]) => void }) {
   const style = canvasSubtitleStyleFromConfig(node.config);
+  const [naturalMedia, setNaturalMedia] = useState<CanvasSubtitlePreviewMedia>();
+  const [failedMediaUrl, setFailedMediaUrl] = useState("");
   const [resources, setResources] = useState<CanvasSubtitlePresetResponse>({ presets: [], fonts: [], recommendedFont: "", currentAccountId: "" });
   const [selectedPresetId, setSelectedPresetId] = useState("");
   const [presetName, setPresetName] = useState("");
@@ -2392,9 +2401,25 @@ function CanvasSubtitleStyleEditor({ node, onPatch }: { node: CanvasNode; onPatc
   const previewBackground = style.backgroundEnabled ? hexToRgba(style.backgroundColor, style.backgroundOpacity / 100) : "transparent";
   const previewOutline = style.outlineWidthPercent > 0 ? subtitlePreviewShadow(style.outlineColor, Math.max(1, style.outlineWidthPercent * 4)) : "none";
   const previewFont = Math.max(12, Math.min(30, 18 * style.fontSizePercent / 5));
+  const previewMedia = naturalMedia?.url === media?.url ? naturalMedia : canvasSubtitlePreviewMedia(media);
+  const mediaLoadFailed = Boolean(media?.url && failedMediaUrl === media.url);
+  const previewRatio = previewMedia ? previewMedia.width / previewMedia.height : 16 / 9;
+  const previewMaxWidth = previewRatio < 1 ? `${Math.round(320 * previewRatio)}px` : "100%";
 
   return <div className="canvas-subtitle-editor">
-    <div className="canvas-subtitle-preview" style={{ alignItems: previewPosition, justifyContent: previewAlign }}>
+    <div className="canvas-subtitle-preview-meta" aria-live="polite">
+      <span>{previewMedia ? `${previewMedia.width}×${previewMedia.height}` : "等待视频分辨率"}</span>
+      <small>{previewMedia ? `${formatAspectRatio(previewMedia.width, previewMedia.height)}${previewMedia.durationSeconds ? ` · ${formatMediaDuration(previewMedia.durationSeconds)}` : ""}` : "连接视频后显示实际预览"}</small>
+    </div>
+    <div className="canvas-subtitle-preview" style={{ alignItems: previewPosition, justifyContent: previewAlign, aspectRatio: `${previewMedia?.width || 16} / ${previewMedia?.height || 9}`, maxWidth: previewMaxWidth }}>
+      {media?.url && !mediaLoadFailed ? <video src={media.url} muted playsInline preload="metadata" aria-label="字幕视频预览" onError={() => setFailedMediaUrl(media.url)} onLoadedMetadata={(event) => {
+        const width = event.currentTarget.videoWidth;
+        const height = event.currentTarget.videoHeight;
+        if (width > 0 && height > 0) {
+          setFailedMediaUrl("");
+          setNaturalMedia({ url: media.url, width, height, durationSeconds: Number.isFinite(event.currentTarget.duration) ? event.currentTarget.duration : media.durationSeconds });
+        }
+      }} /> : <div className="canvas-subtitle-preview-empty"><FileVideo2 /><span>{mediaLoadFailed ? "视频预览不可用" : "等待视频"}</span></div>}
       <span style={{
         color: style.textColor,
         background: previewBackground,
@@ -2403,7 +2428,7 @@ function CanvasSubtitleStyleEditor({ node, onPatch }: { node: CanvasNode; onPatc
         fontWeight: style.bold ? 800 : 500,
         textAlign: previewTextAlign,
         textShadow: previewOutline,
-        marginBlock: `${Math.min(16, style.verticalMarginPercent / 2)}%`,
+        marginBlock: `${Math.min(40, style.verticalMarginPercent / previewRatio)}%`,
       }}>这是一段字幕样式预览<br />中英混排 FluxPost</span>
     </div>
 
@@ -2443,6 +2468,60 @@ function CanvasSubtitleRange({ label, value, min, max, step, suffix, onChange }:
 
 function CanvasSubtitleColor({ label, value, disabled, onChange }: { label: string; value: string; disabled?: boolean; onChange: (value: string) => void }) {
   return <label className={disabled ? "is-disabled" : ""}><span>{label}</span><input type="color" value={value} disabled={disabled} onChange={(event) => onChange(event.target.value.toUpperCase())} /></label>;
+}
+
+type CanvasSubtitlePreviewMedia = { url: string; width: number; height: number; durationSeconds?: number };
+
+function canvasSubtitlePreviewMedia(media?: CanvasMediaReference): CanvasSubtitlePreviewMedia | undefined {
+  if (!media?.url || !Number.isInteger(media.width) || !Number.isInteger(media.height) || media.width! <= 0 || media.height! <= 0) return undefined;
+  return { url: media.url, width: media.width!, height: media.height!, durationSeconds: media.durationSeconds };
+}
+
+function resolveCanvasSubtitlePreviewMedia(
+  node: CanvasNode,
+  graph: CanvasGraph,
+  latestNodeRuns: Map<string, CanvasNodeRun>,
+  latestSuccessfulNodeRuns: Map<string, CanvasLatestSuccessfulNodeRun>,
+): CanvasMediaReference | undefined {
+  const currentInput = firstVideoArtifactItem(latestNodeRuns.get(node.id)?.inputs.videos);
+  if (currentInput) return currentInput;
+  const successfulInput = firstVideoArtifactItem(latestSuccessfulNodeRuns.get(node.id)?.nodeRun.inputs.videos);
+  if (successfulInput) return successfulInput;
+  const edge = graph.edges.find((item) => item.target === node.id && item.targetPort === "videos");
+  if (!edge) return undefined;
+  const currentUpstreamOutput = latestNodeRuns.get(edge.source)?.outputs[edge.sourcePort];
+  if (currentUpstreamOutput?.kind === "videos" && currentUpstreamOutput.items[0]) return currentUpstreamOutput.items[0];
+  const successfulUpstreamOutput = latestSuccessfulNodeRuns.get(edge.source)?.nodeRun.outputs[edge.sourcePort];
+  if (successfulUpstreamOutput?.kind === "videos" && successfulUpstreamOutput.items[0]) return successfulUpstreamOutput.items[0];
+  const upstream = graph.nodes.find((item) => item.id === edge.source);
+  if (!upstream) return undefined;
+  if (upstream.type === "input.video-loader") {
+    const video = selectedCanvasVideo(upstream.config);
+    return video ? { url: video.url, name: video.filename, mimeType: video.mimeType, width: video.width, height: video.height, durationSeconds: video.durationSeconds } : undefined;
+  }
+  if (upstream.type === "input.source-video") {
+    const source = canvasSourceVideoSnapshotFromConfig(upstream.config);
+    return source ? { url: source.url, name: source.title, width: source.width, height: source.height, durationSeconds: source.durationSeconds } : undefined;
+  }
+  if (upstream.type === "input.videos") {
+    const url = normalizeConfigUrls(upstream.config.urls)[0];
+    return url ? { url } : undefined;
+  }
+  return undefined;
+}
+
+function firstVideoArtifactItem(artifacts?: CanvasArtifact[]) {
+  const artifact = artifacts?.find((item) => item.kind === "videos");
+  return artifact?.kind === "videos" ? artifact.items[0] : undefined;
+}
+
+function formatAspectRatio(width: number, height: number) {
+  const divisor = greatestCommonDivisor(width, height);
+  return `${width / divisor}:${height / divisor}`;
+}
+
+function greatestCommonDivisor(left: number, right: number): number {
+  return right ? greatestCommonDivisor(right, left % right) : Math.max(1, left);
 }
 
 function CanvasSubtitleSegments({ label, value, options, onChange }: { label: string; value: string; options: Array<{ value: string; label: string }>; onChange: (value: string) => void }) {

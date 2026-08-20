@@ -34,6 +34,7 @@ Code fixes start from current GitHub `main` in a clean worktree. Run the complet
 
 ```bash
 npm install
+python -m pip install -r requirements/canvas-subtitles.txt
 # Create .env.local from the Environment section below, then fill local values.
 npm run local
 ```
@@ -111,6 +112,12 @@ DONGCHEDI_PAGE_TASK_TIMEOUT_MS=7200000
 
 DATABASE_URL=
 DATABASE_POOL_MAX=10
+
+CANVAS_SUBTITLE_PYTHON_BIN=python
+CANVAS_SUBTITLE_WHISPER_MODEL=Systran/faster-whisper-small
+CANVAS_SUBTITLE_WHISPER_DEVICE=cpu
+CANVAS_SUBTITLE_WHISPER_COMPUTE_TYPE=int8
+CANVAS_SUBTITLE_WHISPER_TIMEOUT_MS=1800000
 
 WORKSPACE_AUTH_MODE=whitelist
 WORKSPACE_ALLOWED_USERS=alice:Alice,bob:Bob

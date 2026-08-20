@@ -140,6 +140,8 @@ const dependencies = {
 const bodyRequest = (body, headers) => new Request("http://localhost/api/canvas/video-uploads", { method: "POST", body, headers, duplex: "half" });
 try {
   execFileSync("ffmpeg", ["-hide_banner", "-loglevel", "error", "-y", "-f", "lavfi", "-i", "color=c=red:s=64x48:d=0.25", "-f", "lavfi", "-i", "sine=frequency=1000:duration=0.25", "-shortest", "-c:v", "libx264", "-pix_fmt", "yuv420p", "-c:a", "aac", path.join(temp, "sample.mp4")]);
+  execFileSync("ffmpeg", ["-hide_banner", "-loglevel", "error", "-y", "-display_rotation:v:0", "90", "-i", path.join(temp, "sample.mp4"), "-c", "copy", path.join(temp, "rotated.mp4")]);
+  execFileSync("ffmpeg", ["-hide_banner", "-loglevel", "error", "-y", "-f", "lavfi", "-i", "color=c=red:s=64x48:d=2", "-itsoffset", "0.5", "-f", "lavfi", "-i", "sine=frequency=1000:duration=1", "-map", "0:v:0", "-map", "1:a:0", "-c:v", "libx264", "-pix_fmt", "yuv420p", "-c:a", "aac", path.join(temp, "delayed-audio.mp4")]);
   execFileSync("ffmpeg", ["-hide_banner", "-loglevel", "error", "-y", "-f", "lavfi", "-i", "color=c=blue:s=64x48:d=0.25", "-an", "-c:v", "libx264", "-pix_fmt", "yuv420p", "-f", "mov", path.join(temp, "sample.mov")]);
   execFileSync("ffmpeg", ["-hide_banner", "-loglevel", "error", "-y", "-f", "lavfi", "-i", "color=c=green:s=64x48:d=0.25", "-an", "-c:v", "libvpx-vp9", path.join(temp, "sample.webm")]);
   execFileSync("ffmpeg", ["-hide_banner", "-loglevel", "error", "-y", "-f", "lavfi", "-i", "sine=frequency=600:duration=0.25", "-vn", "-c:a", "aac", path.join(temp, "audio-only.m4a")]);
@@ -155,6 +157,20 @@ try {
   }
   assert.equal(persistCalls.length, 3);
   assert.deepEqual(readdirSync(stagingRoot), [], "successful uploads must leave no staging files");
+
+  const rotated = await mediaTools.probeCanvasMediaFile(path.join(temp, "rotated.mp4"));
+  assert.equal(rotated.codedWidth, 64);
+  assert.equal(rotated.codedHeight, 48);
+  assert.equal(Math.abs(rotated.rotation), 90);
+  assert.equal(rotated.width, 48, "90-degree metadata must swap displayed width");
+  assert.equal(rotated.height, 64, "90-degree metadata must swap displayed height");
+  assert.equal(rotated.mediaStartSeconds, 0);
+  assert.equal(rotated.videoStartSeconds, 0);
+  assert.equal(rotated.audioStartSeconds, 0);
+
+  const delayedAudio = await mediaTools.probeCanvasMediaFile(path.join(temp, "delayed-audio.mp4"));
+  assert.ok(Math.abs(delayedAudio.mediaStartSeconds - delayedAudio.videoStartSeconds) < 0.01);
+  assert.ok(delayedAudio.audioStartSeconds - delayedAudio.mediaStartSeconds > 0.4, "audio stream origin must retain its delay from the media timeline");
 
   await assert.rejects(() => uploadService.saveCanvasVideoUpload(bodyRequest(new Uint8Array(), { "content-type": "video/mp4" }), "empty.mp4", dependencies), /不能为空/);
   await assert.rejects(() => uploadService.saveCanvasVideoUpload(bodyRequest(Buffer.from("not a video"), { "content-type": "video/mp4" }), "fake.mp4", dependencies), /ffprobe|video|Invalid data/i);

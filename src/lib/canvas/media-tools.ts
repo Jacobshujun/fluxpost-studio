@@ -30,6 +30,12 @@ type CanvasMediaProbe = {
   durationSeconds?: number;
   width: number;
   height: number;
+  codedWidth: number;
+  codedHeight: number;
+  rotation: number;
+  mediaStartSeconds: number;
+  videoStartSeconds: number;
+  audioStartSeconds: number;
   hasAudio: boolean;
   formatName?: string;
   sizeBytes: number;
@@ -219,29 +225,55 @@ async function probeVideoMetadata(filePath: string) {
 export async function probeCanvasMediaFile(filePath: string): Promise<CanvasMediaProbe> {
   const output = await runMediaCommand("ffprobe", [
     "-v", "error",
-    "-show_entries", "format=duration,format_name:stream=index,codec_type,width,height,duration",
+    "-show_entries", "format=duration,format_name,start_time:stream=index,codec_type,width,height,duration,start_time:stream_side_data=rotation",
     "-of", "json",
     filePath,
   ]);
   const data = JSON.parse(output) as {
-    format?: { duration?: string; format_name?: string };
-    streams?: Array<{ index?: number; codec_type?: string; width?: number; height?: number; duration?: string }>;
+    format?: { duration?: string; format_name?: string; start_time?: string };
+    streams?: Array<{ index?: number; codec_type?: string; width?: number; height?: number; duration?: string; start_time?: string; side_data_list?: Array<{ rotation?: number }> }>;
   };
   const video = data.streams?.find((stream) => stream.codec_type === "video");
   const audio = data.streams?.find((stream) => stream.codec_type === "audio");
-  const width = Number(video?.width);
-  const height = Number(video?.height);
-  if (!Number.isInteger(width) || !Number.isInteger(height) || width <= 0 || height <= 0) throw new Error("Media does not contain a valid video stream.");
-  const duration = Number(audio?.duration || data.format?.duration);
+  const codedWidth = Number(video?.width);
+  const codedHeight = Number(video?.height);
+  if (!Number.isInteger(codedWidth) || !Number.isInteger(codedHeight) || codedWidth <= 0 || codedHeight <= 0) throw new Error("Media does not contain a valid video stream.");
+  const rotation = normalizeVideoRotation(video?.side_data_list?.find((item) => Number.isFinite(Number(item.rotation)))?.rotation);
+  const swapsDimensions = Math.abs(rotation) === 90;
+  const width = swapsDimensions ? codedHeight : codedWidth;
+  const height = swapsDimensions ? codedWidth : codedHeight;
+  const duration = Number(data.format?.duration || video?.duration || audio?.duration);
+  const formatStartSeconds = optionalFiniteSeconds(data.format?.start_time);
+  const videoStartSeconds = optionalFiniteSeconds(video?.start_time) ?? formatStartSeconds ?? 0;
+  const mediaStartSeconds = formatStartSeconds ?? videoStartSeconds;
+  const audioStartSeconds = optionalFiniteSeconds(audio?.start_time) ?? mediaStartSeconds;
   const file = await stat(filePath);
   return {
     durationSeconds: Number.isFinite(duration) && duration > 0 ? duration : undefined,
     width,
     height,
+    codedWidth,
+    codedHeight,
+    rotation,
+    mediaStartSeconds,
+    videoStartSeconds,
+    audioStartSeconds,
     hasAudio: Boolean(audio),
     formatName: data.format?.format_name,
     sizeBytes: file.size,
   };
+}
+
+function normalizeVideoRotation(value: unknown) {
+  if (!Number.isFinite(Number(value))) return 0;
+  const normalized = ((Math.round(Number(value)) % 360) + 360) % 360;
+  if (normalized === 90 || normalized === 270) return normalized === 270 ? -90 : 90;
+  return normalized === 180 ? 180 : 0;
+}
+
+function optionalFiniteSeconds(value: unknown) {
+  const parsed = Number(value);
+  return Number.isFinite(parsed) ? parsed : undefined;
 }
 
 async function probeRequiredSourceVideo(filePath: string) {

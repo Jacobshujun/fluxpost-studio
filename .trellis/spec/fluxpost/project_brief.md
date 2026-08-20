@@ -105,7 +105,7 @@ Last updated: 2026-08-20
 - Source-based generated posts can store final source video materials in optional `GeneratedPost.videoUrls` only when the operator enables the default-off `引用源视频素材` / `includeSourceVideo` switch; resolution prefers cached local `downloadedVideoUrl` over remote `videoUrl`.
 - Reusable reference/vehicle images live in the TOS-backed `library_assets` domain; the compact home consumes accessible vehicle assets by id and freezes their public URLs into simple runs.
 - Video frame extraction uses the system `ffmpeg` executable through `src/lib/media-cache.ts`.
-- Ark audio extracts MP3 with FFmpeg, uploads it to Files as `user_data`, then calls Responses with `input_audio.file_id`. Crawl/simple-run keeps optional plain text; Canvas subtitles require one video, strict timing, owner cache, and ASS hard-subtitle MP4 plus text.
+- Ark audio extracts MP3 with FFmpeg, uploads it to Files as `user_data`, then calls Responses with `input_audio.file_id` for optional crawl/simple-run plain text. Canvas subtitles instead require one video, use local Faster Whisper acoustic word timing, keep an owner/settings/protocol-scoped timeline cache, and emit ASS hard-subtitle MP4 plus text.
 - Sensitive config is environment-based and must stay out of Trellis docs: `.env.local`, `.env*`, API keys, Feishu tokens, and local user material paths when private.
 
 ## External Integrations
@@ -114,7 +114,7 @@ Last updated: 2026-08-20
 
 - TikHub API base URL/key are configured by `TIKHUB_BASE_URL` and `TIKHUB_API_KEY`.
 - Video transcription is task-level opt-in: advanced keyword crawl, advanced source-link import, and simple keyword/link/Feishu runs pass `enableVideoTranscription === true` only when the operator enables the UI switch. Default-off tasks still download videos and extract frames without invoking Ark transcription.
-- Ark audio uses `ARK_API_KEY` (or legacy `VOLCENGINE_ASR_APP_KEY`) plus optional base/model/prompt/timeouts/size settings. Canvas timing has separate `ARK_VIDEO_SUBTITLE_MODEL` and `ARK_VIDEO_SUBTITLE_PROMPT`; offline checks never call Ark.
+- Ark plain-text audio uses `ARK_API_KEY` (or legacy `VOLCENGINE_ASR_APP_KEY`) plus optional base/model/prompt/timeouts/size settings. Canvas subtitle timing is local-only through `CANVAS_SUBTITLE_PYTHON_BIN`, `CANVAS_SUBTITLE_WHISPER_MODEL`, `CANVAS_SUBTITLE_WHISPER_DEVICE`, `CANVAS_SUBTITLE_WHISPER_COMPUTE_TYPE`, and `CANVAS_SUBTITLE_WHISPER_TIMEOUT_MS`; it does not fall back to Ark.
 - Workspace whitelist access is configured by `WORKSPACE_AUTH_MODE=whitelist`, `WORKSPACE_ALLOWED_USERS`, `WORKSPACE_ADMIN_USERS`, and `WORKSPACE_ACCESS_PASSWORD`; do not record the real allowed user list, admin list, setup key, or account passwords in Trellis docs.
 - PostgreSQL runtime storage is configured by `DATABASE_URL` and optional `DATABASE_POOL_MAX`.
 - Local PostgreSQL facts confirmed on 2026-06-04: Windows service `postgresql-x64-18` is running, the client binaries live under `D:\Program Files\PostgreSQL\18\bin`, and a dedicated FluxPost Studio database/user were provisioned for the app.

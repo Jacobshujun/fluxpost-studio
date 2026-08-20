@@ -4,23 +4,24 @@ Last updated: 2026-08-20
 
 ## One-Line Status
 
-Local A/B build-slot isolation is committed and active on port 3001; successful slot switching and controlled startup-failure restoration are verified against the same clean SHA.
+Canvas local subtitle timing and resolution-preview fixes pass focused, browser, real-media, build, and complete offline verification; commit and clean port-3001 activation remain.
 
 ## Current Focus
 
-- The primary worktree owns two ignored Next build slots. Development and verification builds do not overwrite the slot serving port 3001.
-- `npm run local` builds clean committed HEAD into the inactive slot before stopping the listener, records slot/SHA identity only after health passes, and restores the previous managed slot on activation failure.
-- Fixed slot selection, primary-worktree/clean-tree guards, generated-type and ESLint exclusions, PowerShell syntax, both real slot builds, the complete offline baseline, and an actual failed-startup restoration pass.
-- Port 3001 runs clean candidate `0909776383c05eab37a2f66a0b2443dde693e2da` from `.next-local-b`; the ignored state file reports the same slot and SHA. Existing unrelated dirty changes in `src/lib/canvas/executors.ts` and `canvas_workflows_check.mjs` remain outside this task.
+- Canvas subtitle protocol v3 uses local Faster Whisper small/CPU/int8 word timestamps, origin-aware strict timing, settings-scoped cache identity, and no Ark fallback; crawl/simple-run Ark plain text remains unchanged.
+- FFprobe normalizes rotation/displayed dimensions and stream origins; ASS, output metadata, and the actual-video inspector preview use the same displayed size.
+- Deterministic landscape/portrait/rotate-90 FFmpeg fixtures, delayed audio origin, complete video duration, mocked Chromium desktop/mobile geometry, and explicit local-process failures are covered.
+- Privacy-safe real-media verification on the recent `1280x720 / 16.136009s` input produced 11 acoustic segments from `0ms` through `15940ms` without recording subtitle text.
+- Port 3001 still runs the prior clean candidate until the verified task is committed and activated through `npm run local`.
 
 ## Next Entry
 
-Observe the versioned local candidate on port 3001. Push, production deployment, and final local/GitHub/production parity remain separate approval gates.
+Commit the verified subtitle fix, require a clean worktree, activate it through `npm run local`, and verify exact `/api/version` identity plus `/canvas` health. Do not push or deploy production.
 
 ## Recent Verification
 
-- 2026-08-20: Committed SHA `0909776383c05eab37a2f66a0b2443dde693e2da` activated through slot A then slot B; a controlled missing-`BUILD_ID` startup failure restored slot A with the same SHA and passed full HTTP smoke before the final healthy slot-B activation.
-- 2026-08-20: Local A/B slot contracts, PowerShell syntax, slot-A/slot-B production builds without tracked config churn, lint, TypeScript, isolated HTTP/SQLite smoke, and the complete offline baseline passed without external calls; port 3001 remained available on the prior candidate.
+- 2026-08-20: Canvas subtitle/loader focused checks, TypeScript, lint, production build, private-port Chromium desktop/mobile landscape/portrait/failure checks, and the complete offline Trellis baseline passed without paid provider calls.
+- 2026-08-20: Real Faster Whisper `1.2.1` small/CPU/int8 verification produced 11 privacy-safe acoustic boundaries for the recent 16.136-second local input; landscape, portrait, rotate-90, delayed-audio, H.264/AAC, and full-duration FFmpeg fixtures passed.
 
 ## Risks And Unknowns
 

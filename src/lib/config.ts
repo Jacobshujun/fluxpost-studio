@@ -117,8 +117,11 @@ function readAppConfig() {
   seedancePromptSkillPath: process.env.SEEDANCE_PROMPT_SKILL_PATH?.trim() || "",
   arkVideoTranscriptionModel: process.env.ARK_VIDEO_TRANSCRIPTION_MODEL || "doubao-seed-2-0-lite-260428",
   arkVideoTranscriptionPrompt: process.env.ARK_VIDEO_TRANSCRIPTION_PROMPT || "请识别音频中的内容，以文字形式返回识别结果。",
-  arkVideoSubtitleModel: process.env.ARK_VIDEO_SUBTITLE_MODEL || process.env.ARK_VIDEO_TRANSCRIPTION_MODEL || "doubao-seed-2-0-lite-260428",
-  arkVideoSubtitlePrompt: process.env.ARK_VIDEO_SUBTITLE_PROMPT || "识别音频中的原语言语音并生成字幕时间轴。只返回 JSON 对象，格式为 {\"segments\":[{\"startMs\":0,\"endMs\":1000,\"text\":\"字幕\"}]}。时间使用毫秒整数，句段按时间升序且不得重叠，不要翻译，不要输出 Markdown 或其他文字。",
+  canvasSubtitlePythonBin: process.env.CANVAS_SUBTITLE_PYTHON_BIN?.trim() || "python",
+  canvasSubtitleWhisperModel: process.env.CANVAS_SUBTITLE_WHISPER_MODEL?.trim() || "Systran/faster-whisper-small",
+  canvasSubtitleWhisperDevice: process.env.CANVAS_SUBTITLE_WHISPER_DEVICE?.trim() || "cpu",
+  canvasSubtitleWhisperComputeType: process.env.CANVAS_SUBTITLE_WHISPER_COMPUTE_TYPE?.trim() || "int8",
+  canvasSubtitleWhisperTimeoutMs: numberOrDefault(process.env.CANVAS_SUBTITLE_WHISPER_TIMEOUT_MS, 1_800_000),
   arkVideoTranscriptionAudioExtractTimeoutMs: numberOrDefault(process.env.ARK_VIDEO_TRANSCRIPTION_AUDIO_EXTRACT_TIMEOUT_MS, 120_000),
   arkVideoTranscriptionUploadTimeoutMs: numberOrDefault(process.env.ARK_VIDEO_TRANSCRIPTION_UPLOAD_TIMEOUT_MS, 300_000),
   arkVideoTranscriptionTimeoutMs: numberOrDefault(process.env.ARK_VIDEO_TRANSCRIPTION_TIMEOUT_MS || process.env.VOLCENGINE_ASR_TIMEOUT_MS, 120_000),
@@ -644,6 +647,28 @@ const advancedConfigGroups: ConfigDefinitionGroup[] = [
     ],
   },
   {
+    id: "canvas-subtitles",
+    title: "Canvas 本地字幕",
+    description: "使用本地 Faster Whisper 生成声学时间轴，不调用 Ark 字幕模型。",
+    fields: [
+      configField("CANVAS_SUBTITLE_PYTHON_BIN", "Python 命令", "包含 faster-whisper 的 Python 可执行文件或命令名。", "text", "canvas-subtitles", {
+        read: () => appConfig.canvasSubtitlePythonBin,
+      }),
+      configField("CANVAS_SUBTITLE_WHISPER_MODEL", "Whisper 模型", "必须已缓存到本机，运行时不会自动下载。", "text", "canvas-subtitles", {
+        read: () => appConfig.canvasSubtitleWhisperModel,
+      }),
+      configField("CANVAS_SUBTITLE_WHISPER_DEVICE", "推理设备", "默认使用 CPU。", "text", "canvas-subtitles", {
+        read: () => appConfig.canvasSubtitleWhisperDevice,
+      }),
+      configField("CANVAS_SUBTITLE_WHISPER_COMPUTE_TYPE", "计算精度", "CPU 默认 int8。", "text", "canvas-subtitles", {
+        read: () => appConfig.canvasSubtitleWhisperComputeType,
+      }),
+      configField("CANVAS_SUBTITLE_WHISPER_TIMEOUT_MS", "识别超时毫秒", "单个 Canvas 字幕识别任务的最长运行时间。", "number", "canvas-subtitles", {
+        read: () => String(appConfig.canvasSubtitleWhisperTimeoutMs),
+      }),
+    ],
+  },
+  {
     id: "ark",
     title: "视频转写",
     description: "Ark / 火山音频转写，用于视频内容补全文案。",
@@ -662,12 +687,6 @@ const advancedConfigGroups: ConfigDefinitionGroup[] = [
       }),
       configField("ARK_VIDEO_TRANSCRIPTION_PROMPT", "转写提示词", "发送给转写模型的提示词。", "textarea", "ark", {
         read: () => appConfig.arkVideoTranscriptionPrompt,
-      }),
-      configField("ARK_VIDEO_SUBTITLE_MODEL", "字幕时间轴模型", "Canvas 视频字幕节点使用的 Ark 音频模型。", "text", "ark", {
-        read: () => appConfig.arkVideoSubtitleModel,
-      }),
-      configField("ARK_VIDEO_SUBTITLE_PROMPT", "字幕时间轴提示词", "要求 Ark 返回严格毫秒级字幕句段 JSON。", "textarea", "ark", {
-        read: () => appConfig.arkVideoSubtitlePrompt,
       }),
       configField("ARK_VIDEO_TRANSCRIPTION_MAX_AUDIO_BYTES", "最大音频字节数", "超过该大小的音频不会上传。", "number", "ark", {
         read: () => String(appConfig.arkVideoTranscriptionMaxAudioBytes),

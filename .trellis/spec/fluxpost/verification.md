@@ -19,7 +19,7 @@ The baseline verifies:
 
 - Trellis file existence, context budgets, latest markers, JSON validity, and feature evidence limits.
 - PostgreSQL schema, accounts/ownership, libraries, configuration, TOS, v4 deployment/image-retention/timer scripts, execution logs, platform mappings, media, video, concurrency, queues, Feishu boundaries, source imports, review flows, and row-level persistence.
-- Infinite Canvas graph/API/DAG, common nodes, subtitle FFmpeg/presets, media, provider resume, scheduler, copy-library, and original-batch contracts without paid calls.
+- Infinite Canvas graph/API/DAG, common nodes, local subtitle process/timing/cache/rotation/FFmpeg/presets, media, provider resume, scheduler, copy-library, and original-batch contracts without paid calls.
 - Canvas local video-loader snapshot, streaming upload/FFprobe, selected-literal output, frozen V2 queue, and single-video task contracts without external storage calls.
 - Finished-body Unicode counting, 800-target prompts, one-repair fallback, history promotion, persistence consistency, editor clamping, Canvas composition, and Feishu exemptions without paid calls.
 - Runtime identity/secrecy, manifest-derived activation identity, candidate-only local startup, loopback/LAN bindings, and parity command contracts.
@@ -45,16 +45,14 @@ Do not deploy a dirty worktree, branch name, abbreviated SHA, local runtime rows
 
 ## Recent Verification
 
+- 2026-08-20: Canvas subtitle v3 errors/timing/cache, rotated dimensions, delayed audio, full-duration H.264/AAC, real Faster Whisper `1.2.1`, desktop/mobile Chromium, lint, TypeScript, build, smoke, and the offline baseline passed without text disclosure or paid calls.
 - 2026-08-20: Clean committed SHA `0909776383c05eab37a2f66a0b2443dde693e2da` activated on both managed slots; a controlled inactive-slot missing-`BUILD_ID` failure restored the prior slot, identity, state marker, and full HTTP smoke before final healthy activation on `.next-local-b`.
-- 2026-08-20: Local A/B build-slot allow-list, primary-worktree/clean-tree ordering, SHA markers, atomic state and rollback contracts, both real slot builds without TypeScript config churn, lint, TypeScript, isolated HTTP/SQLite smoke, and the complete offline baseline passed while port 3001 remained on its prior candidate.
-- 2026-08-20: Canvas scheduler search/thumbnail checks covered 350 ms debounce, stale 24-item grids, explicit paging, ID-only select-all, original previews, 240x144 WebP cache/auth/concurrency/atomic/prewarm contracts, mocked Chromium 1440x960/390x844, and the full offline baseline without external writes.
-- 2026-08-20: Explicit local thumbnail prewarm processed 437 assets with zero failures into 435 SHA-deduplicated files (1,938,318 bytes); the second run generated zero and skipped all 437 cached assets.
 - 2026-08-20: Canvas video-loader MP4/MOV/WebM and failure cleanup checks used local FFmpeg/FFprobe with mocked persistence; workflow/scheduler, mocked Chromium 1440x900/390x844, lint, TypeScript, build, smoke, and the full offline baseline passed.
 Older evidence is preserved in `.trellis/spec/fluxpost/archive/verification-history.md`.
 
 ## Missing Coverage
 
-- No live paid Ark subtitle/Seedance, GPT image/text, TikHub, ComfyUI, Feishu, or Lark action is part of the default baseline.
+- No live paid Ark plain-text transcription, Seedance, GPT image/text, TikHub, ComfyUI, Feishu, or Lark action is part of the default baseline. Canvas subtitle timing is local Faster Whisper and was verified separately against one recent local input.
 - No local Canvas history, media, account, or configuration migration was performed.
 - No authenticated production Canvas create/save/run walkthrough or multi-user PostgreSQL concurrency test was run during this release.
 - No default check changes DNS, firewall, Nginx routing, Docker volumes, or external production services.

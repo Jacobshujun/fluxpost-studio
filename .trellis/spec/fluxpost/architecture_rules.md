@@ -1342,21 +1342,25 @@ config.mentionUrls = [personUrl, carUrl];
 
 ### 1. Scope / Trigger
 
-- Applies to `utility.video-subtitles@1`, Ark subtitle timing, ASS rendering, subtitle presets, fonts, or subtitle cache persistence.
+- Applies to `utility.video-subtitles@1`, local acoustic timing, media display dimensions/time origins, ASS rendering, subtitle presets, fonts, or subtitle cache persistence.
 
 ### 2. Signatures
 
 - Node: one required `videos` input; `videos` and `text` outputs.
 - API: `GET|POST /api/canvas/subtitle-presets`; `PATCH|DELETE /api/canvas/subtitle-presets/{id}`.
 - DB: owner-scoped `canvas_subtitle_presets` and `canvas_subtitle_transcript_cache` in PostgreSQL and SQLite.
-- Env: shared Ark key/base/audio limits plus `ARK_VIDEO_SUBTITLE_MODEL` and `ARK_VIDEO_SUBTITLE_PROMPT`.
+- Local recognizer: `scripts/canvas/faster_whisper_subtitles.py` with locked `faster-whisper==1.2.1`.
+- Env: `CANVAS_SUBTITLE_PYTHON_BIN`, `CANVAS_SUBTITLE_WHISPER_MODEL`, `CANVAS_SUBTITLE_WHISPER_DEVICE`, `CANVAS_SUBTITLE_WHISPER_COMPUTE_TYPE`, and `CANVAS_SUBTITLE_WHISPER_TIMEOUT_MS`.
 
 ### 3. Contracts
 
-- Ark receives the configured base prompt plus a request-only exact `durationMs` bound. It must return ordered, non-overlapping, non-empty integer-millisecond `{ startMs, endMs, text }` segments. Successful timelines cache by owner, video SHA-256, model, the unchanged base-prompt SHA-256, and protocol version.
-- Timeline protocol v2 may clip only the final segment when `endMs` exceeds the probed duration by at most `1000ms`, provided `startMs` remains before the media end. Intermediate overflow, a final start at or beyond the media end, and larger overflow remain failures; raw provider text is never included in boundary diagnostics.
+- Faster Whisper uses automatic language detection, `task=transcribe`, VAD, word timestamps, cached local model files, CPU/int8 defaults, and no translation. Each subtitle segment uses its first/last valid word boundary; Node owns timeout, JSON validation, sanitized errors, and `localVideo` concurrency.
+- Timeline protocol v3 shifts audio-relative timestamps by `audioStartSeconds - mediaStartSeconds`, requires positive ordered/non-overlapping integer-millisecond segments, and may clip only the final `endMs` overflow of at most `100ms`. Diagnostics and verification evidence never include subtitle text.
+- Successful timelines cache by owner, video SHA-256, engine, model, inference-settings hash, and protocol version. Style is excluded from timing identity; protocol/model/settings changes and historical Ark v1/v2 rows cannot be reused.
+- `probeCanvasMediaFile(...)` owns coded dimensions, normalized `rotation`, displayed `width/height`, format/video/audio starts, duration, audio presence, format, and byte size. `90/270` degrees swaps displayed dimensions; Canvas media references, preview metadata, ASS `PlayResX/PlayResY`, fingerprints, and output metadata all use displayed dimensions.
 - Style is a node snapshot. Three built-ins are read-only; stored names are owner-unique after NFKC/whitespace/case normalization. Operators access their own rows; admins access all with owner attribution. Revision is required for update/delete.
-- FFmpeg/libass renders ASS to H.264/AAC `yuv420p` faststart MP4 through the `localVideo` pool and runtime-media persistence. The selected server font must exist; no silent font or original-video fallback is allowed during enabled execution.
+- The editor resolves video from current inputs, recent successful inputs, upstream run output, or direct upstream snapshots, then corrects stale dimensions from browser metadata. Preview ratio follows the actual video and video failure produces an explicit neutral state; dimensions remain media facts, not editable style config.
+- FFmpeg/libass autorotates the source and renders ASS to H.264/AAC `yuv420p` faststart MP4 through the `localVideo` pool and runtime-media persistence. It preserves full video duration and relative audio/video starts; the selected server font must exist, with no silent font, Ark, or original-video fallback.
 
 ### 4. Validation & Error Matrix
 
@@ -1367,38 +1371,38 @@ config.mentionUrls = [personUrl, carUrl];
 | Duplicate normalized name or stale revision | HTTP 409 |
 | Missing/inaccessible preset | HTTP 404 |
 | Input count other than one, no audio, empty/invalid timeline | Failed node, no output video |
-| Final `endMs` overflow from `1` through `1000ms`, with `startMs < durationMs` | Clip final `endMs` to `durationMs` and continue |
-| Intermediate overflow, final `startMs >= durationMs`, or final overflow over `1000ms` | Failed node with segment/timing boundary values and no subtitle text |
-| Missing Ark key, FFmpeg/libass, or selected font | `needs_config`, zero successful output |
+| Final `endMs` overflow from `1` through `100ms`, with `startMs < durationMs` | Clip final `endMs` to `durationMs` and continue |
+| Intermediate overflow, word overlap, final `startMs >= durationMs`, or final overflow over `100ms` | Failed node with segment/timing boundary values and no subtitle text |
+| Missing Python, `faster-whisper`, local model, FFmpeg/libass, or selected font | `needs_config`, zero successful output |
+| Recognizer timeout, illegal JSON, no speech, or other local inference failure | Explicit failed node with sanitized error and no Ark fallback |
 | Video over 512 MB or 600 seconds | Explicit failure before recognition |
 
 ### 5. Good/Base/Bad Cases
 
-- Good: first run tells Ark the exact media bound, clips a small final-segment overshoot if needed, and caches protocol-v2 timing; a style-only rerun reuses timing and only re-encodes locally.
+- Good: first run derives word-level acoustic timing, maps the audio origin onto the video timeline, caches protocol-v3 timing, and renders ASS at normalized displayed dimensions; a style-only rerun reuses timing and only re-encodes locally.
 - Base: loading a built-in or stored preset copies its style into node config; later preset changes do not mutate the node.
-- Bad: clip an intermediate segment, accept an unbounded final overshoot, hash the request-expanded prompt as the configured prompt, cache across owners, translate speech, invent timing while wrapping text, overwrite without confirmation/revision, substitute a font, or return the unmodified video as success.
+- Bad: estimate timing from generated text, ignore rotation/stream origins, clip an intermediate segment, cache across owners/settings/protocols, translate speech, expose recognized text in diagnostics, save resolution as style config, substitute a font, or return the unmodified video as success.
 
 ### 6. Tests Required
 
-- `.trellis/verification/canvas_video_subtitles_check.mjs` covers the request-only duration prompt, unchanged base-prompt hash, protocol-v2 cache identity, exact `1000ms` final clipping, rejected overflow cases, diagnostic secrecy, strict timing/text validation, style limits, ownership/revisions/unique conflicts, ASS output, and a real local FFmpeg H.264/AAC encode without Ark.
-- Mocked Chromium covers preview/style/preset CRUD/result text at 1440x960 and 390x844 with no overflow or browser errors. TypeScript, lint, build, HTTP/SQLite smoke, and the full offline baseline must pass.
+- `.trellis/verification/canvas_video_subtitles_check.mjs` covers local settings, process/config/timeout/JSON/no-speech errors, word/timeline boundaries, origin shifts, exact `100ms` final clipping, diagnostic secrecy, v3 cache isolation, presets, displayed ASS dimensions, and real landscape/portrait/rotate-90 H.264/AAC outputs with complete duration and preserved stream offsets.
+- `.trellis/verification/canvas_video_loader_check.mjs` covers coded/displayed rotation dimensions and real delayed-audio FFprobe origins. Mocked Chromium covers stale snapshot correction, actual video background, landscape/portrait geometry, neutral failure state, and desktop/mobile containment. TypeScript, lint, build, HTTP/SQLite smoke, and the full offline baseline must pass.
 
 ### 7. Wrong vs Correct
 
 ```typescript
-// Wrong: accept every provider timestamp after a global clamp.
-const globallyClamped = rawSegments.map((segment) => ({ ...segment, endMs: Math.min(segment.endMs, durationMs) }));
+// Wrong: estimate timestamps with a text generation model or clamp every segment.
+const estimated = await generateSubtitleTimelineWithArk(video);
 
-// Correct: constrain the request and clip only an eligible final overshoot.
-const requestPrompt = buildVideoSubtitlePrompt(basePrompt, durationMs);
-const normalizedSegments = normalizeVideoSubtitleTimeline(await recognize(requestPrompt), durationSeconds);
+// Correct: map local word timestamps onto probed media origins and validate v3 bounds.
+const normalizedSegments = normalizeCanvasLocalSubtitleTimeline(await recognizeLocally(video), mediaProbe);
 
-// Wrong: changing appearance pays for another recognition request.
-const segments = await transcribeVideoSubtitleTimeline(input);
+// Wrong: compose rotated video against coded dimensions.
+const ass = buildCanvasSubtitleAss({ width: probe.codedWidth, height: probe.codedHeight, segments, style });
 
-// Correct: identity excludes style; rendering fingerprints include it.
-const segments = await resolveTimeline(ownerVideoModelPromptKey, input);
-return renderAssVideo(segments, validatedStyle);
+// Correct: use displayed dimensions everywhere; timing identity excludes style.
+const segments = await resolveTimeline(ownerVideoEngineModelSettingsProtocolKey, input);
+return renderAssVideo(segments, validatedStyle, probe.width, probe.height);
 ```
 
 ## Scenario: Finished Body Character Policy

@@ -3,15 +3,14 @@ import { execFile } from "node:child_process";
 import { createReadStream } from "node:fs";
 import { mkdir, rename, rm, stat, writeFile } from "node:fs/promises";
 import path from "node:path";
-import { appConfig } from "../config";
 import { runWithConcurrencyPool } from "../concurrency";
 import { getCanvasSubtitleTranscriptCacheFromDb, saveCanvasSubtitleTranscriptCacheToDb } from "../database";
 import { materializeRuntimeMedia } from "../runtime-media-materializer";
 import { findExistingRuntimeMedia, persistRuntimeMedia } from "../runtime-media-storage";
-import { CANVAS_SUBTITLE_TIMELINE_PROTOCOL_VERSION, transcribeVideoSubtitleTimeline } from "../video-transcription";
 import { requireCanvasSubtitleFont } from "./subtitle-fonts";
 import { normalizeCanvasSubtitleStyle } from "./subtitle-style";
 import { CanvasMediaNeedsConfigError, probeCanvasMediaFile } from "./media-tools";
+import { CANVAS_SUBTITLE_TIMELINE_PROTOCOL_VERSION, canvasSubtitleRecognizerSettings, canvasSubtitleRecognizerSettingsHash, transcribeCanvasLocalSubtitleTimeline } from "./local-subtitle-timeline";
 import type { CanvasMediaReference, CanvasSubtitleSegment, CanvasSubtitleStyle } from "./types";
 
 const maxVideoBytes = 512 * 1024 * 1024;
@@ -34,23 +33,27 @@ export async function addCanvasVideoSubtitles(input: { source: CanvasMediaRefere
     });
     await requireSubtitleFfmpegCapabilities();
     const videoSha256 = await hashFile(source.filePath);
-    const promptSha256 = sha256(appConfig.arkVideoSubtitlePrompt);
-    const cacheId = sha256(JSON.stringify({
+    const recognizer = canvasSubtitleRecognizerSettings();
+    const settingsHash = canvasSubtitleRecognizerSettingsHash();
+    const cacheId = buildCanvasSubtitleTimelineCacheId({
       ownerUserId: input.ownerUserId,
       videoSha256,
-      model: appConfig.arkVideoSubtitleModel,
-      promptSha256,
-      protocolVersion: CANVAS_SUBTITLE_TIMELINE_PROTOCOL_VERSION,
-    }));
+      engine: recognizer.engine,
+      model: recognizer.model,
+      settingsHash,
+    });
     const segments = await resolveTimeline(cacheId, {
       ownerUserId: input.ownerUserId,
       videoSha256,
-      promptSha256,
+      engine: recognizer.engine,
+      model: recognizer.model,
+      settingsHash,
       videoPath: source.filePath,
-      videoPublicUrl: input.source.url,
       durationSeconds: metadata.durationSeconds,
+      mediaStartSeconds: metadata.mediaStartSeconds,
+      audioStartSeconds: metadata.audioStartSeconds,
     });
-    const fingerprint = sha256(JSON.stringify({ kind: "video-subtitles-v1", videoSha256, segments, style, width: metadata.width, height: metadata.height })).slice(0, 32);
+    const fingerprint = sha256(JSON.stringify({ kind: "video-subtitles-v3", videoSha256, segments, style, width: metadata.width, height: metadata.height, rotation: metadata.rotation })).slice(0, 32);
     const publicPath = `/generated/canvas-tools/${fingerprint}.mp4`;
     const existing = await existingOutput(publicPath);
     if (existing) return subtitleResult(existing, metadata, segments);
@@ -117,19 +120,38 @@ export function wrapSubtitleText(value: string, maxCharsPerLine: number) {
   return lines.join("\\N");
 }
 
-async function resolveTimeline(cacheId: string, input: { ownerUserId: string; videoSha256: string; promptSha256: string; videoPath: string; videoPublicUrl: string; durationSeconds: number }) {
+export function buildCanvasSubtitleTimelineCacheId(input: {
+  ownerUserId: string;
+  videoSha256: string;
+  engine: "faster-whisper";
+  model: string;
+  settingsHash: string;
+  protocolVersion?: number;
+}) {
+  return sha256(JSON.stringify({
+    ownerUserId: input.ownerUserId,
+    videoSha256: input.videoSha256,
+    engine: input.engine,
+    model: input.model,
+    settingsHash: input.settingsHash,
+    protocolVersion: input.protocolVersion ?? CANVAS_SUBTITLE_TIMELINE_PROTOCOL_VERSION,
+  }));
+}
+
+async function resolveTimeline(cacheId: string, input: { ownerUserId: string; videoSha256: string; engine: "faster-whisper"; model: string; settingsHash: string; videoPath: string; durationSeconds: number; mediaStartSeconds: number; audioStartSeconds: number }) {
   const cached = await getCanvasSubtitleTranscriptCacheFromDb(cacheId);
   if (cached) return cached.segments;
   const active = activeTimelines.get(cacheId);
   if (active) return active;
-  const request = transcribeVideoSubtitleTimeline(input).then(async (segments) => {
+  const request = runWithConcurrencyPool("localVideo", () => transcribeCanvasLocalSubtitleTimeline(input)).then(async (segments) => {
     const now = new Date().toISOString();
     await saveCanvasSubtitleTranscriptCacheToDb({
       id: cacheId,
       ownerUserId: input.ownerUserId,
       videoSha256: input.videoSha256,
-      model: appConfig.arkVideoSubtitleModel,
-      promptSha256: input.promptSha256,
+      engine: input.engine,
+      model: input.model,
+      settingsHash: input.settingsHash,
       protocolVersion: CANVAS_SUBTITLE_TIMELINE_PROTOCOL_VERSION,
       segments,
       createdAt: now,

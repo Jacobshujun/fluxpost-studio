@@ -84,8 +84,9 @@ export type CanvasSubtitleTranscriptCacheEntry = {
   id: string;
   ownerUserId: string;
   videoSha256: string;
+  engine: "faster-whisper";
   model: string;
-  promptSha256: string;
+  settingsHash: string;
   protocolVersion: number;
   segments: CanvasSubtitleSegment[];
   createdAt: string;

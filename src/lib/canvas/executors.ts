@@ -177,7 +177,7 @@ async function executeVideoSubtitles({ node, inputs, account }: CanvasNodeExecut
       },
     };
   } catch (error) {
-    if (error instanceof CanvasMediaNeedsConfigError || (error instanceof Error && /Ark video transcription is not configured/i.test(error.message))) {
+    if (error instanceof CanvasMediaNeedsConfigError) {
       throw new CanvasNeedsConfigError(error.message);
     }
     throw error;
