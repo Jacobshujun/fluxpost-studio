@@ -1356,3 +1356,37 @@ Implemented and verified the global 800-target/1000-max Unicode finished-body po
 ### Next Steps
 
 - None - task complete
+
+
+## Session 41: Optimize Canvas scheduler image search
+
+**Date**: 2026-08-20
+**Task**: Optimize Canvas scheduler image search
+**Branch**: `main`
+
+### Summary
+
+Debounced Canvas library search, added authenticated SHA-cached thumbnails and prewarm, verified 437 assets and refreshed clean candidate c6d1247 on port 3001.
+
+### Main Changes
+
+(Add details)
+
+### Git Commits
+
+| Hash | Message |
+|------|---------|
+| `5c24d4f` | (see git log) |
+| `c6d1247` | (see git log) |
+
+### Testing
+
+- [OK] (Add test results)
+
+### Status
+
+[OK] **Completed**
+
+### Next Steps
+
+- None - task complete
