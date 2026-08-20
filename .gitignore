@@ -31,11 +31,7 @@ yarn-error.log*
 .pnpm-debug.log*
 
 # local runtime data
-/data/*.json
-/data/*.db
-/data/*.db-shm
-/data/*.db-wal
-/data/feishu-outbox/
+/data/
 /public/generated/
 /public/media/
 /test-artifacts/
