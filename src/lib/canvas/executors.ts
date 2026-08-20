@@ -13,7 +13,9 @@ import { canvasVisionPresets, concatenateCanvasText, parseCanvasImageSelection, 
 import { normalizeUrlList } from "./registry";
 import { CANVAS_SAVE_IMAGE_MAX_ITEMS } from "./save-images";
 import { canvasSourceVideoSnapshotFromConfig, isCanvasSourceVideoSnapshotCurrent } from "./source-video-contract";
+import { canvasSubtitleStyleFromConfig } from "./subtitle-style";
 import type { CanvasArtifact, CanvasMediaReference, CanvasNode, CanvasNodeRun } from "./types";
+import { addCanvasVideoSubtitles } from "./video-subtitles";
 
 export class CanvasNeedsConfigError extends Error {
   constructor(message: string) {
@@ -63,6 +65,7 @@ const executors: Record<CanvasNode["type"], CanvasNodeExecutor> = {
   "utility.save-images": executeSaveImages,
   "utility.display-any": executeDisplayAny,
   "utility.video-reconstruct": executeVideoReconstruct,
+  "utility.video-subtitles": executeVideoSubtitles,
   "utility.prompt-template": executePromptTemplate,
   "utility.text-concatenate": executeTextConcatenate,
   "utility.prompt-switch": executePromptSwitch,
@@ -152,6 +155,25 @@ async function executeVideoReconstruct({ inputs }: CanvasNodeExecutionContext) {
   const replacement = replacements[0];
   const output = await reconstructCanvasVideo({ source: sourceItems[0], replacement: replacement.item, replacementKind: replacement.kind });
   return { outputs: { videos: { kind: "videos" as const, items: [output] } } };
+}
+
+async function executeVideoSubtitles({ node, inputs, account }: CanvasNodeExecutionContext) {
+  const items = videoItems(inputs.videos);
+  if (items.length !== 1) throw new Error(`Video subtitles requires exactly one source video; resolved ${items.length}.`);
+  try {
+    const result = await addCanvasVideoSubtitles({ source: items[0], style: canvasSubtitleStyleFromConfig(node.config), ownerUserId: account.id });
+    return {
+      outputs: {
+        videos: { kind: "videos" as const, items: [result.video] },
+        text: { kind: "text" as const, value: result.text },
+      },
+    };
+  } catch (error) {
+    if (error instanceof CanvasMediaNeedsConfigError || (error instanceof Error && /Ark video transcription is not configured/i.test(error.message))) {
+      throw new CanvasNeedsConfigError(error.message);
+    }
+    throw error;
+  }
 }
 
 async function executePromptTemplate({ node, inputs }: CanvasNodeExecutionContext) {

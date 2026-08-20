@@ -1,6 +1,6 @@
 # Project Brief
 
-Last updated: 2026-06-25
+Last updated: 2026-08-20
 
 ## Project Name, Goal, Path
 
@@ -63,6 +63,7 @@ Last updated: 2026-06-25
   - `GET|POST|DELETE /api/accounts/session`
   - `GET /api/config`
   - `GET /api/version`
+  - `GET|POST /api/canvas/subtitle-presets`; `PATCH|DELETE /api/canvas/subtitle-presets/{id}`
   - `GET /api/content-pool`
   - `GET|POST|PATCH|DELETE /api/content/items`
   - `GET|POST /api/crawl/jobs`
@@ -94,7 +95,7 @@ Last updated: 2026-06-25
 - Legacy JSON files under `data/` can be used as one-time migration sources for active domains: `content-pool.json`, `batch-production.json`, `generated-posts.json`, and `execution-log.json`. `material-library.json` is retired local state and is not imported.
 - Runtime database stores workspace accounts/sessions, content projects, generated posts, batch jobs, execution logs, crawl jobs, runtime posts, simple runs, and workspace settings metadata, including saved production prompts and the `/distribution-check` audit prompt.
 - Runtime database also stores owner-scoped `original_batches`, `original_batch_items`, and `original_batch_queue` records for the `/original` 1-100 topic Xiaohongshu card workspace. Its worker concurrency is controlled by `WORKER_ORIGINAL_BATCH_CONCURRENCY`, default `2` and hard-capped at `8`.
-- Runtime database also stores durable simple/image/Feishu/distribution queues plus library assets, roles, collections, labels, manual overrides, and tagging jobs; library image binaries remain in TOS.
+- Runtime database also stores durable queues, library metadata, owner-scoped Canvas subtitle presets/timeline cache, roles, labels, overrides, and tagging jobs; media binaries remain outside PostgreSQL.
 - Workspace sessions use an HttpOnly `fluxpost_session` browser cookie. In default whitelist mode, the first-admin setup key is environment-driven and not stored in the runtime database; daily account passwords are stored only as Node `scrypt` hashes.
 - SQLite-to-PostgreSQL migration script: `scripts/db/migrate-sqlite-to-postgres.mjs`. It copies metadata and JSON payload rows; it does not move media binaries.
 - Feishu outbox payload directory from code/README: `data/feishu-outbox/`.
@@ -104,7 +105,7 @@ Last updated: 2026-06-25
 - Source-based generated posts can store final source video materials in optional `GeneratedPost.videoUrls` only when the operator enables the default-off `引用源视频素材` / `includeSourceVideo` switch; resolution prefers cached local `downloadedVideoUrl` over remote `videoUrl`.
 - Reusable reference/vehicle images live in the TOS-backed `library_assets` domain; the compact home consumes accessible vehicle assets by id and freezes their public URLs into simple runs.
 - Video frame extraction uses the system `ffmpeg` executable through `src/lib/media-cache.ts`.
-- Video transcription receives the cached local video path from `src/lib/media-cache.ts` only when a crawl/import/simple-run task passes `enableVideoTranscription === true`; when the switch is enabled and `ARK_API_KEY` or the existing `VOLCENGINE_ASR_APP_KEY` alias is configured, `src/lib/video-transcription.ts` extracts MP3 audio with `ffmpeg`, uploads the MP3 to Ark `/files` with `purpose=user_data`, calls Ark `/responses` with `input_audio.file_id`, and merges successful transcript text into `NormalizedSourceItem.contentText` before rewrite.
+- Ark audio extracts MP3 with FFmpeg, uploads it to Files as `user_data`, then calls Responses with `input_audio.file_id`. Crawl/simple-run keeps optional plain text; Canvas subtitles require one video, strict timing, owner cache, and ASS hard-subtitle MP4 plus text.
 - Sensitive config is environment-based and must stay out of Trellis docs: `.env.local`, `.env*`, API keys, Feishu tokens, and local user material paths when private.
 
 ## External Integrations
@@ -113,7 +114,7 @@ Last updated: 2026-06-25
 
 - TikHub API base URL/key are configured by `TIKHUB_BASE_URL` and `TIKHUB_API_KEY`.
 - Video transcription is task-level opt-in: advanced keyword crawl, advanced source-link import, and simple keyword/link/Feishu runs pass `enableVideoTranscription === true` only when the operator enables the UI switch. Default-off tasks still download videos and extract frames without invoking Ark transcription.
-- Ark video transcription is configured by `ARK_API_KEY`, optional `ARK_BASE_URL`, `ARK_VIDEO_TRANSCRIPTION_MODEL`, `ARK_VIDEO_TRANSCRIPTION_PROMPT`, `ARK_VIDEO_TRANSCRIPTION_AUDIO_EXTRACT_TIMEOUT_MS`, `ARK_VIDEO_TRANSCRIPTION_UPLOAD_TIMEOUT_MS`, `ARK_VIDEO_TRANSCRIPTION_TIMEOUT_MS`, and `ARK_VIDEO_TRANSCRIPTION_MAX_AUDIO_BYTES`; the existing `VOLCENGINE_ASR_APP_KEY` name remains accepted as a compatibility alias for the key. The model defaults to `doubao-seed-2-0-lite-260428`, audio extraction timeout defaults to 120s, upload timeout defaults to 300s, Responses timeout defaults to 120s, and the default prompt is `请识别音频中的内容，以文字形式返回识别结果。`. Default baseline checks verify wiring only and do not call the live Ark service.
+- Ark audio uses `ARK_API_KEY` (or legacy `VOLCENGINE_ASR_APP_KEY`) plus optional base/model/prompt/timeouts/size settings. Canvas timing has separate `ARK_VIDEO_SUBTITLE_MODEL` and `ARK_VIDEO_SUBTITLE_PROMPT`; offline checks never call Ark.
 - Workspace whitelist access is configured by `WORKSPACE_AUTH_MODE=whitelist`, `WORKSPACE_ALLOWED_USERS`, `WORKSPACE_ADMIN_USERS`, and `WORKSPACE_ACCESS_PASSWORD`; do not record the real allowed user list, admin list, setup key, or account passwords in Trellis docs.
 - PostgreSQL runtime storage is configured by `DATABASE_URL` and optional `DATABASE_POOL_MAX`.
 - Local PostgreSQL facts confirmed on 2026-06-04: Windows service `postgresql-x64-18` is running, the client binaries live under `D:\Program Files\PostgreSQL\18\bin`, and a dedicated FluxPost Studio database/user were provisioned for the app.

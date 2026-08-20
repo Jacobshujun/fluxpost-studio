@@ -1,14 +1,14 @@
 # FluxPost Current Status
 
-Last updated: 2026-08-19
+Last updated: 2026-08-20
 
 ## One-Line Status
 
-The Seedance Prompt assistant now loads an operator-managed Skill at request time and reports its version; port 3001 must be refreshed after this change is verified and committed.
+Infinite Canvas now has a verified video-subtitle node with Ark timing, hard-subtitle MP4 output, style controls, and owner-scoped presets; port 3001 must be refreshed from the committed candidate.
 
 ## Current Focus
 
-- Canvas Seedance Prompt optimization reads optional `SEEDANCE_PROMPT_SKILL_PATH` on the server, automatically reloads changed files, exposes only source/hash metadata, and retains FluxPost hard audits after the mutable Skill reference.
+- Canvas `utility.video-subtitles@1` accepts one video, caches an owner-scoped validated Ark timeline, emits H.264/AAC hard-subtitle MP4 plus text, and snapshots built-in or owner-scoped style presets.
 - Simple Runs use frozen workspace prompts; pool runs remain review-first and Feishu-disabled.
 - Desktop Canvas accepts local image drops at the pointer or onto a compatible image node through runtime media only; dropped files never enter the shared library.
 - Canvas `model.seedance@1` now combines TOS-backed direct uploads with fixed upstream images, supports stable official-style `@图片N` Prompt mentions, freezes provider-facing Prompt/image order, and resumes the original Ark task ID without re-resolution; old upstream-only nodes remain loadable.
@@ -17,12 +17,12 @@ The Seedance Prompt assistant now loads an operator-managed Skill at request tim
 
 ## Next Entry
 
-Before further code work, confirm `/api/version` matches clean HEAD; use `npm run local` if final Trellis metadata commits advance the SHA.
+Commit the verified subtitle candidate, run `npm run local`, then confirm `/api/version` matches clean HEAD and `/canvas` loads on port 3001.
 
 ## Recent Verification
 
-- 2026-08-19: Runtime Seedance Skill refresh/error/metadata checks, lint, TypeScript, build, HTTP/SQLite smoke, and the complete offline baseline passed without provider calls.
-- 2026-08-19: Seedance Prompt assistant contracts, offline baseline, and mocked Chromium apply flow at 1440x960/390x844 passed without provider calls; candidate `ca8afe7` served on port 3001.
+- 2026-08-20: Subtitle contracts, real local FFmpeg/ASS encode, owner/admin preset checks, lint, TypeScript, build, HTTP/SQLite smoke, and the offline baseline passed without Ark calls.
+- 2026-08-20: Mocked Chromium preview/style/preset/result flows passed at 1440x960 and 390x844 without overflow or browser errors.
 
 ## Risks And Unknowns
 

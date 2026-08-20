@@ -1264,6 +1264,59 @@ config.mentionIds = ["person-id", "car-id"];
 config.mentionUrls = [personUrl, carUrl];
 ```
 
+## Scenario: Canvas Video Hard Subtitles
+
+### 1. Scope / Trigger
+
+- Applies to `utility.video-subtitles@1`, Ark subtitle timing, ASS rendering, subtitle presets, fonts, or subtitle cache persistence.
+
+### 2. Signatures
+
+- Node: one required `videos` input; `videos` and `text` outputs.
+- API: `GET|POST /api/canvas/subtitle-presets`; `PATCH|DELETE /api/canvas/subtitle-presets/{id}`.
+- DB: owner-scoped `canvas_subtitle_presets` and `canvas_subtitle_transcript_cache` in PostgreSQL and SQLite.
+- Env: shared Ark key/base/audio limits plus `ARK_VIDEO_SUBTITLE_MODEL` and `ARK_VIDEO_SUBTITLE_PROMPT`.
+
+### 3. Contracts
+
+- Ark must return ordered, non-overlapping, non-empty integer-millisecond `{ startMs, endMs, text }` segments inside the probed duration; successful timelines cache by owner, video SHA-256, model, prompt SHA-256, and protocol version.
+- Style is a node snapshot. Three built-ins are read-only; stored names are owner-unique after NFKC/whitespace/case normalization. Operators access their own rows; admins access all with owner attribution. Revision is required for update/delete.
+- FFmpeg/libass renders ASS to H.264/AAC `yuv420p` faststart MP4 through the `localVideo` pool and runtime-media persistence. The selected server font must exist; no silent font or original-video fallback is allowed during enabled execution.
+
+### 4. Validation & Error Matrix
+
+| Condition | Result |
+| --- | --- |
+| Missing sign-in | HTTP 401 |
+| Invalid style/name/body | HTTP 400 |
+| Duplicate normalized name or stale revision | HTTP 409 |
+| Missing/inaccessible preset | HTTP 404 |
+| Input count other than one, no audio, empty/invalid timeline | Failed node, no output video |
+| Missing Ark key, FFmpeg/libass, or selected font | `needs_config`, zero successful output |
+| Video over 512 MB or 600 seconds | Explicit failure before recognition |
+
+### 5. Good/Base/Bad Cases
+
+- Good: first run recognizes and caches timing; a style-only rerun reuses timing and only re-encodes locally.
+- Base: loading a built-in or stored preset copies its style into node config; later preset changes do not mutate the node.
+- Bad: cache across owners, translate speech, invent timing while wrapping text, overwrite without confirmation/revision, substitute a font, or return the unmodified video as success.
+
+### 6. Tests Required
+
+- `.trellis/verification/canvas_video_subtitles_check.mjs` covers strict timing, style limits, ownership/revisions/unique conflicts, ASS output, and a real local FFmpeg H.264/AAC encode without Ark.
+- Mocked Chromium covers preview/style/preset CRUD/result text at 1440x960 and 390x844 with no overflow or browser errors. TypeScript, lint, build, HTTP/SQLite smoke, and the full offline baseline must pass.
+
+### 7. Wrong vs Correct
+
+```typescript
+// Wrong: changing appearance pays for another recognition request.
+const segments = await transcribeVideoSubtitleTimeline(input);
+
+// Correct: identity excludes style; rendering fingerprints include it.
+const segments = await resolveTimeline(ownerVideoModelPromptKey, input);
+return renderAssVideo(segments, validatedStyle);
+```
+
 ## Trellis Rules
 
 - `.trellis/` is the only active persistent AI collaboration system. `.trellis/spec/fluxpost/` is the FluxPost project-memory layer inside that system.

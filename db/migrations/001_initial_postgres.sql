@@ -340,3 +340,24 @@ CREATE TABLE IF NOT EXISTS copy_library_entries (
 );
 CREATE INDEX IF NOT EXISTS idx_copy_library_entries_owner_updated ON copy_library_entries(owner_user_id, updated_at DESC, id DESC);
 CREATE INDEX IF NOT EXISTS idx_copy_library_entries_visibility_updated ON copy_library_entries(visibility, updated_at DESC, id DESC);
+
+CREATE TABLE IF NOT EXISTS canvas_subtitle_presets (
+  id TEXT PRIMARY KEY,
+  owner_user_id TEXT NOT NULL,
+  normalized_name TEXT NOT NULL,
+  revision INTEGER NOT NULL,
+  created_at TIMESTAMPTZ NOT NULL,
+  updated_at TIMESTAMPTZ NOT NULL,
+  data_json JSONB NOT NULL,
+  UNIQUE(owner_user_id, normalized_name)
+);
+CREATE INDEX IF NOT EXISTS idx_canvas_subtitle_presets_owner_updated ON canvas_subtitle_presets(owner_user_id, updated_at DESC);
+
+CREATE TABLE IF NOT EXISTS canvas_subtitle_transcript_cache (
+  id TEXT PRIMARY KEY,
+  owner_user_id TEXT NOT NULL,
+  created_at TIMESTAMPTZ NOT NULL,
+  updated_at TIMESTAMPTZ NOT NULL,
+  data_json JSONB NOT NULL
+);
+CREATE INDEX IF NOT EXISTS idx_canvas_subtitle_transcript_cache_owner_updated ON canvas_subtitle_transcript_cache(owner_user_id, updated_at DESC);

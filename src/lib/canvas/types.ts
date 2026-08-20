@@ -32,6 +32,53 @@ export type CanvasMediaReference = {
   durationSeconds?: number;
 };
 
+export type CanvasSubtitleSegment = {
+  startMs: number;
+  endMs: number;
+  text: string;
+};
+
+export type CanvasSubtitleStyle = {
+  fontFamily: string;
+  fontSizePercent: number;
+  bold: boolean;
+  textColor: string;
+  outlineColor: string;
+  outlineWidthPercent: number;
+  backgroundEnabled: boolean;
+  backgroundColor: string;
+  backgroundOpacity: number;
+  verticalPosition: "top" | "middle" | "bottom";
+  horizontalAlign: "left" | "center" | "right";
+  verticalMarginPercent: number;
+  maxCharsPerLine: number;
+};
+
+export type CanvasSubtitlePreset = {
+  id: string;
+  ownerUserId: string;
+  ownerDisplayName: string;
+  name: string;
+  normalizedName: string;
+  revision: number;
+  style: CanvasSubtitleStyle;
+  builtIn?: boolean;
+  createdAt: string;
+  updatedAt: string;
+};
+
+export type CanvasSubtitleTranscriptCacheEntry = {
+  id: string;
+  ownerUserId: string;
+  videoSha256: string;
+  model: string;
+  promptSha256: string;
+  protocolVersion: number;
+  segments: CanvasSubtitleSegment[];
+  createdAt: string;
+  updatedAt: string;
+};
+
 export type CanvasArtifact =
   | { kind: "text"; value: string }
   | { kind: "images"; items: CanvasMediaReference[] }
@@ -55,6 +102,7 @@ export type CanvasNodeType =
   | "utility.save-images"
   | "utility.display-any"
   | "utility.video-reconstruct"
+  | "utility.video-subtitles"
   | "utility.prompt-template"
   | "utility.text-concatenate"
   | "utility.prompt-switch"

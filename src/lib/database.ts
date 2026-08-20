@@ -1,7 +1,7 @@
 import { existsSync, mkdirSync, readFileSync } from "node:fs";
 import path from "node:path";
 import { Pool, type PoolClient } from "pg";
-import type { CanvasNodeRun, CanvasRun, CanvasRunQueueItem, CanvasSchedule, CanvasWorkflow } from "./canvas/types";
+import type { CanvasNodeRun, CanvasRun, CanvasRunQueueItem, CanvasSchedule, CanvasSubtitlePreset, CanvasSubtitleTranscriptCacheEntry, CanvasWorkflow } from "./canvas/types";
 import { getLibraryAssetAddedAt } from "./library-sort";
 import type {
   ContentProject,
@@ -3372,6 +3372,27 @@ function createSqliteSchema(db: SqliteDatabase) {
     );
     CREATE INDEX IF NOT EXISTS idx_canvas_workflows_owner_updated ON canvas_workflows(owner_user_id, updated_at DESC);
 
+    CREATE TABLE IF NOT EXISTS canvas_subtitle_presets (
+      id TEXT PRIMARY KEY,
+      owner_user_id TEXT NOT NULL,
+      normalized_name TEXT NOT NULL,
+      revision INTEGER NOT NULL,
+      created_at TEXT NOT NULL,
+      updated_at TEXT NOT NULL,
+      data_json TEXT NOT NULL,
+      UNIQUE(owner_user_id, normalized_name)
+    );
+    CREATE INDEX IF NOT EXISTS idx_canvas_subtitle_presets_owner_updated ON canvas_subtitle_presets(owner_user_id, updated_at DESC);
+
+    CREATE TABLE IF NOT EXISTS canvas_subtitle_transcript_cache (
+      id TEXT PRIMARY KEY,
+      owner_user_id TEXT NOT NULL,
+      created_at TEXT NOT NULL,
+      updated_at TEXT NOT NULL,
+      data_json TEXT NOT NULL
+    );
+    CREATE INDEX IF NOT EXISTS idx_canvas_subtitle_transcript_cache_owner_updated ON canvas_subtitle_transcript_cache(owner_user_id, updated_at DESC);
+
     CREATE TABLE IF NOT EXISTS canvas_schedules (
       id TEXT PRIMARY KEY,
       owner_user_id TEXT NOT NULL,
@@ -3794,6 +3815,27 @@ const postgresSchemaSql = `
   );
   CREATE INDEX IF NOT EXISTS idx_canvas_workflows_owner_updated ON canvas_workflows(owner_user_id, updated_at DESC);
 
+  CREATE TABLE IF NOT EXISTS canvas_subtitle_presets (
+    id TEXT PRIMARY KEY,
+    owner_user_id TEXT NOT NULL,
+    normalized_name TEXT NOT NULL,
+    revision INTEGER NOT NULL,
+    created_at TIMESTAMPTZ NOT NULL,
+    updated_at TIMESTAMPTZ NOT NULL,
+    data_json JSONB NOT NULL,
+    UNIQUE(owner_user_id, normalized_name)
+  );
+  CREATE INDEX IF NOT EXISTS idx_canvas_subtitle_presets_owner_updated ON canvas_subtitle_presets(owner_user_id, updated_at DESC);
+
+  CREATE TABLE IF NOT EXISTS canvas_subtitle_transcript_cache (
+    id TEXT PRIMARY KEY,
+    owner_user_id TEXT NOT NULL,
+    created_at TIMESTAMPTZ NOT NULL,
+    updated_at TIMESTAMPTZ NOT NULL,
+    data_json JSONB NOT NULL
+  );
+  CREATE INDEX IF NOT EXISTS idx_canvas_subtitle_transcript_cache_owner_updated ON canvas_subtitle_transcript_cache(owner_user_id, updated_at DESC);
+
   CREATE TABLE IF NOT EXISTS canvas_schedules (
     id TEXT PRIMARY KEY,
     owner_user_id TEXT NOT NULL,
@@ -4201,6 +4243,99 @@ function fromFeishuPublishQueueRow(row: FeishuPublishQueueRow): FeishuPublishJob
     completedAt: row.completed_at ? normalizeDateValue(row.completed_at) : undefined,
     error: row.error || data.error,
   };
+}
+
+export async function listCanvasSubtitlePresetsFromDb() {
+  await ensureDatabaseReady();
+  if (getDatabaseBackend() === "postgres") {
+    const result = await getPostgresPool().query<JsonRow>("SELECT data_json FROM canvas_subtitle_presets ORDER BY updated_at DESC");
+    return result.rows.map((row) => fromJson<CanvasSubtitlePreset>(row.data_json));
+  }
+  return (getSqliteDatabase().prepare("SELECT data_json FROM canvas_subtitle_presets ORDER BY updated_at DESC").all() as JsonRow[])
+    .map((row) => fromJson<CanvasSubtitlePreset>(row.data_json));
+}
+
+export async function getCanvasSubtitlePresetFromDb(presetId: string) {
+  await ensureDatabaseReady();
+  if (getDatabaseBackend() === "postgres") {
+    const result = await getPostgresPool().query<JsonRow>("SELECT data_json FROM canvas_subtitle_presets WHERE id = $1", [presetId]);
+    return result.rows[0] ? fromJson<CanvasSubtitlePreset>(result.rows[0].data_json) : undefined;
+  }
+  const row = getSqliteDatabase().prepare("SELECT data_json FROM canvas_subtitle_presets WHERE id = ?").get(presetId) as JsonRow | undefined;
+  return row ? fromJson<CanvasSubtitlePreset>(row.data_json) : undefined;
+}
+
+export async function createCanvasSubtitlePresetInDb(preset: CanvasSubtitlePreset) {
+  await ensureDatabaseReady();
+  if (getDatabaseBackend() === "postgres") {
+    await getPostgresPool().query(
+      `INSERT INTO canvas_subtitle_presets (id, owner_user_id, normalized_name, revision, created_at, updated_at, data_json)
+       VALUES ($1, $2, $3, $4, $5, $6, $7::jsonb)`,
+      [preset.id, preset.ownerUserId, preset.normalizedName, preset.revision, preset.createdAt, preset.updatedAt, toJson(preset)],
+    );
+  } else {
+    getSqliteDatabase().prepare(
+      `INSERT INTO canvas_subtitle_presets (id, owner_user_id, normalized_name, revision, created_at, updated_at, data_json)
+       VALUES (?, ?, ?, ?, ?, ?, ?)`,
+    ).run(preset.id, preset.ownerUserId, preset.normalizedName, preset.revision, preset.createdAt, preset.updatedAt, toJson(preset));
+  }
+  return preset;
+}
+
+export async function updateCanvasSubtitlePresetInDb(preset: CanvasSubtitlePreset, expectedRevision: number) {
+  await ensureDatabaseReady();
+  if (getDatabaseBackend() === "postgres") {
+    const result = await getPostgresPool().query(
+      `UPDATE canvas_subtitle_presets SET owner_user_id = $1, normalized_name = $2, revision = $3, updated_at = $4, data_json = $5::jsonb
+       WHERE id = $6 AND revision = $7`,
+      [preset.ownerUserId, preset.normalizedName, preset.revision, preset.updatedAt, toJson(preset), preset.id, expectedRevision],
+    );
+    return Number(result.rowCount || 0) === 1;
+  }
+  const result = getSqliteDatabase().prepare(
+    `UPDATE canvas_subtitle_presets SET owner_user_id = ?, normalized_name = ?, revision = ?, updated_at = ?, data_json = ?
+     WHERE id = ? AND revision = ?`,
+  ).run(preset.ownerUserId, preset.normalizedName, preset.revision, preset.updatedAt, toJson(preset), preset.id, expectedRevision) as { changes?: number };
+  return Number(result.changes || 0) === 1;
+}
+
+export async function deleteCanvasSubtitlePresetFromDb(presetId: string, expectedRevision: number) {
+  await ensureDatabaseReady();
+  if (getDatabaseBackend() === "postgres") {
+    const result = await getPostgresPool().query("DELETE FROM canvas_subtitle_presets WHERE id = $1 AND revision = $2", [presetId, expectedRevision]);
+    return Number(result.rowCount || 0) === 1;
+  }
+  const result = getSqliteDatabase().prepare("DELETE FROM canvas_subtitle_presets WHERE id = ? AND revision = ?").run(presetId, expectedRevision) as { changes?: number };
+  return Number(result.changes || 0) === 1;
+}
+
+export async function getCanvasSubtitleTranscriptCacheFromDb(cacheId: string) {
+  await ensureDatabaseReady();
+  if (getDatabaseBackend() === "postgres") {
+    const result = await getPostgresPool().query<JsonRow>("SELECT data_json FROM canvas_subtitle_transcript_cache WHERE id = $1", [cacheId]);
+    return result.rows[0] ? fromJson<CanvasSubtitleTranscriptCacheEntry>(result.rows[0].data_json) : undefined;
+  }
+  const row = getSqliteDatabase().prepare("SELECT data_json FROM canvas_subtitle_transcript_cache WHERE id = ?").get(cacheId) as JsonRow | undefined;
+  return row ? fromJson<CanvasSubtitleTranscriptCacheEntry>(row.data_json) : undefined;
+}
+
+export async function saveCanvasSubtitleTranscriptCacheToDb(entry: CanvasSubtitleTranscriptCacheEntry) {
+  await ensureDatabaseReady();
+  if (getDatabaseBackend() === "postgres") {
+    await getPostgresPool().query(
+      `INSERT INTO canvas_subtitle_transcript_cache (id, owner_user_id, created_at, updated_at, data_json)
+       VALUES ($1, $2, $3, $4, $5::jsonb)
+       ON CONFLICT(id) DO UPDATE SET updated_at = excluded.updated_at, data_json = excluded.data_json`,
+      [entry.id, entry.ownerUserId, entry.createdAt, entry.updatedAt, toJson(entry)],
+    );
+  } else {
+    getSqliteDatabase().prepare(
+      `INSERT INTO canvas_subtitle_transcript_cache (id, owner_user_id, created_at, updated_at, data_json)
+       VALUES (?, ?, ?, ?, ?)
+       ON CONFLICT(id) DO UPDATE SET updated_at = excluded.updated_at, data_json = excluded.data_json`,
+    ).run(entry.id, entry.ownerUserId, entry.createdAt, entry.updatedAt, toJson(entry));
+  }
+  return entry;
 }
 
 function normalizeStoredSimpleRun(run: SimpleRun): SimpleRun {

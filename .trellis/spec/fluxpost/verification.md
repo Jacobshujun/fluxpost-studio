@@ -1,6 +1,6 @@
 # Verification
 
-Last updated: 2026-08-19
+Last updated: 2026-08-20
 
 ## Baseline Command
 
@@ -19,7 +19,7 @@ The baseline verifies:
 
 - Trellis file existence, context budgets, latest markers, JSON validity, and feature evidence limits.
 - PostgreSQL schema, accounts/ownership, libraries, configuration, TOS, v4 deployment/image-retention/timer scripts, execution logs, platform mappings, media, video, concurrency, queues, Feishu boundaries, source imports, review flows, and row-level persistence.
-- Infinite Canvas graph/workflow/API/DAG, common nodes, media helpers, provider resume, scheduler, frozen copy input, copy-library, and original-batch contracts without paid calls.
+- Infinite Canvas graph/API/DAG, common nodes, subtitle FFmpeg/presets, media, provider resume, scheduler, copy-library, and original-batch contracts without paid calls.
 - Runtime identity/secrecy, manifest-derived activation identity, candidate-only local startup, loopback/LAN bindings, and parity command contracts.
 - `npm run lint`, `npx --no-install tsc --noEmit`, and `npm run build`.
 - Isolated production HTTP smoke and SQLite store validation.
@@ -43,17 +43,16 @@ Do not deploy a dirty worktree, branch name, abbreviated SHA, local runtime rows
 
 ## Recent Verification
 
+- 2026-08-20: Subtitle timing/style/cache/preset ownership and conflicts, real local FFmpeg ASS encode, full offline baseline, and mocked Chromium 1440x960/390x844 flows passed without Ark calls.
 - 2026-08-19: Runtime Seedance Skill loading checks cover configured-file hashing, automatic refresh, cache reuse, missing-file errors, assistant metadata, and UI/API wiring without provider calls.
 - 2026-08-19: Content-pool/ordinary prompt-only production checks, removed automatic-plan contracts, shared settings and Feishu-disabled pool boundaries, lint, TypeScript, build, isolated smoke, and the full offline baseline passed without external calls.
 - 2026-08-19: Seedance Prompt assistant contracts, full offline baseline, and mocked Chromium apply flow at 1440x960/390x844 passed without provider calls.
 - 2026-08-17: Dongchedi current/legacy path fixtures, empty-page Cookie error, import checks, lint, TypeScript, build, and offline baseline passed; Playwright was diagnostic-only.
-- 2026-08-17: Exact-SHA local/VPS baselines, clean port-3001 candidate, GitHub main, production identity/health/schema, unchanged six FluxPost volumes and protected services, logs, timer, rescue tags, branch/worktree cleanup, and final three-way parity passed without external provider writes.
-- 2026-08-17: Single-port candidate contracts, PowerShell parsing, runtime/deployment checks, lint, TypeScript, build, isolated HTTP/SQLite smoke, and the complete deterministic baseline passed without external calls; exact candidate startup and rollout remain pending.
 Older evidence is preserved in `.trellis/spec/fluxpost/archive/verification-history.md`.
 
 ## Missing Coverage
 
-- No live paid Seedance, GPT image/text, TikHub, ComfyUI, Feishu, or Lark action is part of the default baseline.
+- No live paid Ark subtitle/Seedance, GPT image/text, TikHub, ComfyUI, Feishu, or Lark action is part of the default baseline.
 - No local Canvas history, media, account, or configuration migration was performed.
 - No authenticated production Canvas create/save/run walkthrough or multi-user PostgreSQL concurrency test was run during this release.
 - No default check changes DNS, firewall, Nginx routing, Docker volumes, or external production services.

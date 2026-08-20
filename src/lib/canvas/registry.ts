@@ -5,6 +5,7 @@ import { canvasPromptPresets, canvasVisionPresets, parseCanvasImageSelection, pa
 import { defaultCanvasSourceVideoProjectName, isCanvasSourceVideoSnapshotCurrent } from "./source-video-contract";
 import { feishuPublishModeOptions, normalizeFeishuPublishMode } from "../feishu-publish-mode";
 import { validateSeedanceReferenceConfig } from "./seedance-references";
+import { canvasSubtitleStyleConfig, defaultCanvasSubtitleStyle, validateCanvasSubtitleStyle } from "./subtitle-style";
 
 const canvasNodeDefinitionVersions: CanvasNodeDefinition[] = [
   {
@@ -441,6 +442,38 @@ const canvasNodeDefinitionVersions: CanvasNodeDefinition[] = [
     defaultConfig: { mode: "even", coverSeconds: 0.5, count: 4, timestamps: "0.5,2,5", maxEdge: 1920, quality: 90 },
   },
   {
+    type: "utility.video-subtitles",
+    version: 1,
+    label: "视频字幕",
+    description: "自动识别视频语音并烧录可配置的硬字幕。",
+    category: "utility",
+    icon: "Captions",
+    color: "#b45309",
+    inputs: [{ id: "videos", label: "视频", kind: "videos", required: true }],
+    outputs: [
+      { id: "videos", label: "字幕视频", kind: "videos" },
+      { id: "text", label: "字幕文本", kind: "text" },
+    ],
+    fields: [
+      { key: "fontFamily", label: "字体", kind: "text" },
+      { key: "fontSizePercent", label: "字号比例", kind: "number", min: 2, max: 12 },
+      { key: "bold", label: "粗体", kind: "boolean" },
+      { key: "textColor", label: "文字颜色", kind: "text" },
+      { key: "outlineColor", label: "描边颜色", kind: "text" },
+      { key: "outlineWidthPercent", label: "描边宽度", kind: "number", min: 0, max: 1.5 },
+      { key: "backgroundEnabled", label: "背景", kind: "boolean" },
+      { key: "backgroundColor", label: "背景颜色", kind: "text" },
+      { key: "backgroundOpacity", label: "背景不透明度", kind: "number", min: 0, max: 100 },
+      { key: "verticalPosition", label: "垂直位置", kind: "select", options: [{ value: "top", label: "顶部" }, { value: "middle", label: "居中" }, { value: "bottom", label: "底部" }] },
+      { key: "horizontalAlign", label: "水平对齐", kind: "select", options: [{ value: "left", label: "左对齐" }, { value: "center", label: "居中" }, { value: "right", label: "右对齐" }] },
+      { key: "verticalMarginPercent", label: "垂直边距", kind: "number", min: 0, max: 30 },
+      { key: "maxCharsPerLine", label: "每行最大字数", kind: "number", min: 8, max: 30 },
+    ],
+    defaultConfig: canvasSubtitleStyleConfig(defaultCanvasSubtitleStyle),
+    capability: "text_model",
+    bypass: { inputPort: "videos", outputPort: "videos" },
+  },
+  {
     type: "compose.social-post",
     version: 1,
     label: "内容组装",
@@ -715,6 +748,7 @@ export function validateCanvasNodeConfig(type: CanvasNodeType, config: CanvasNod
   if (type === "utility.video-frames") {
     try { parseCanvasVideoTimestamps(config); } catch (error) { errors.push(error instanceof Error ? error.message : "Video frame settings are invalid."); }
   }
+  if (type === "utility.video-subtitles") errors.push(...validateCanvasSubtitleStyle(config));
   if (type === "utility.save-images") {
     const prefixError = validateCanvasImageFilenamePrefix(config.filenamePrefix);
     if (prefixError) errors.push(prefixError);

@@ -323,7 +323,7 @@
       "status": "ready_for_review",
       "definition_of_done": [
         "Signed-in operators can manage owner-scoped workflows and copy, cut, paste, duplicate, or delete selected desktop nodes",
-        "The canvas supports typed nodes with acyclic validation plus authenticated picker/clipboard/drag image import that stores media references only and never adds dropped files to the shared library",
+        "The canvas supports typed acyclic nodes, authenticated media import, and one-video Ark-timed hard-subtitle MP4/text output with snapshot style presets",
         "Runs persist immutable graph snapshots and execute ready DAG branches in parallel with node-level status, failure blocking, cancellation, retry, and upstream reuse",
         "Billable model and external-write plans pass preflight then enqueue without browser prompts for unattended batches, while the server records plan acknowledgement and Feishu nodes expose only the existing publish queue",
         "Seedance accepts local or legacy upstream Prompt sources, keeps stable official-style image mentions across fixed reference reorder/removal, freezes provider-facing inputs, and resumes accepted Ark tasks by querying the original task id",
@@ -338,9 +338,9 @@
       "evidence": [
         "2026-08-19 Seedance Prompt assistant contracts, offline baseline, and mocked desktop/mobile apply flow passed without provider calls.",
         "2026-08-19 Seedance structured mentions, canonical image ordering, TOS gating, resolved-input resume, full offline baseline, and mocked Chromium desktop/mobile checks passed without Ark or TOS calls.",
-        "2026-08-14 save-images contracts, full local/VPS baselines, mocked Edge single/multi/partial/history downloads, fixed-SHA production activation, unauthenticated download 401, and rollback checks passed without external provider writes."
+        "2026-08-20 subtitle timeline/style/cache/preset/FFmpeg contracts, full offline baseline, and mocked Chromium desktop/mobile preset flows passed without Ark calls."
       ],
-      "notes": "Keep ready_for_review until operator-approved real Seedance/Feishu and batch image-provider smokes plus PostgreSQL migration/multi-user concurrency are live-verified."
+      "notes": "Keep ready_for_review until operator-approved real subtitle/Seedance/Feishu/provider runs and PostgreSQL multi-user concurrency are live-verified."
     },
     {
       "id": "copy-library",

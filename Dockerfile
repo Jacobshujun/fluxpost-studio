@@ -10,7 +10,7 @@ WORKDIR /app
 ENV NEXT_TELEMETRY_DISABLED=1
 ENV FLUXPOST_STANDALONE_BUILD=1
 RUN apt-get update \
-  && apt-get install -y --no-install-recommends bash ffmpeg git \
+  && apt-get install -y --no-install-recommends bash ffmpeg fontconfig fonts-noto-cjk git \
   && rm -rf /var/lib/apt/lists/*
 COPY . .
 RUN node .trellis/verification/check.mjs
@@ -31,7 +31,7 @@ ENV PORT=3000
 ENV HOSTNAME=0.0.0.0
 
 RUN apt-get update \
-  && apt-get install -y --no-install-recommends ca-certificates curl ffmpeg \
+  && apt-get install -y --no-install-recommends ca-certificates curl ffmpeg fontconfig fonts-noto-cjk \
   && rm -rf /var/lib/apt/lists/* \
   && npm install -g @larksuite/cli@1.0.67
 

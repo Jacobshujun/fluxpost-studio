@@ -33,6 +33,7 @@ import {
   ArrowDown,
   ArrowUp,
   BookOpenText,
+  Captions,
   CheckCircle2,
   ChevronLeft,
   ChevronRight,
@@ -93,6 +94,7 @@ import {
 } from "@/lib/canvas/clipboard";
 import { canvasNodeDefinitions, createCanvasNode, getCanvasBatchBindableFields, getCanvasNodeDefinition, getCanvasNodeExecutionMode } from "@/lib/canvas/registry";
 import { CANVAS_SAVE_IMAGE_MAX_ITEMS } from "@/lib/canvas/save-images";
+import { canvasSubtitleStyleConfig, canvasSubtitleStyleFromConfig, normalizeCanvasSubtitlePresetName } from "@/lib/canvas/subtitle-style";
 import { createCanvasSchedulerSkeleton } from "@/lib/canvas/scheduler-skeleton";
 import {
   serializeSeedanceAssistantPrompt,
@@ -159,6 +161,8 @@ import type {
   CanvasScheduleV2Definition,
   CanvasScheduleV2SharedOutput,
   CanvasSourceVideoSnapshot,
+  CanvasSubtitlePreset,
+  CanvasSubtitleStyle,
   CanvasSchedulerRole,
   CanvasWorkflow,
 } from "@/lib/canvas/types";
@@ -291,6 +295,9 @@ export default function CanvasPage() {
     }));
     markDirty();
   }, [markDirty]);
+  const updateSelectedConfigPatch = useCallback((patch: CanvasNode["config"]) => {
+    if (selectedNodeId) updateNodeConfigPatch(selectedNodeId, patch);
+  }, [selectedNodeId, updateNodeConfigPatch]);
   const updateNodeExecutionMode = useCallback((nodeId: string, executionMode: CanvasNodeExecutionMode) => {
     setNodes((current) => current.map((node) => node.id !== nodeId ? node : {
       ...node,
@@ -1359,7 +1366,7 @@ export default function CanvasPage() {
           {selectedCanvasNode ? <NodeInspector
             node={selectedCanvasNode}
             onChange={updateSelectedConfig}
-            onPatch={(patch) => updateNodeConfigPatch(selectedCanvasNode.id, patch)}
+            onPatch={updateSelectedConfigPatch}
             onLabelChange={(label) => updateNodeLabel(selectedCanvasNode.id, label)}
             onExecutionModeChange={(mode) => updateNodeExecutionMode(selectedCanvasNode.id, mode)}
             onSchedulerRoleChange={(role) => updateNodeSchedulerRole(selectedCanvasNode.id, role)}
@@ -1502,7 +1509,7 @@ function CanvasFlowNode({ data, selected }: NodeProps<FlowNode>) {
       </button>)}
     </div> : null}
     {node.type === "utility.text-split" ? <CanvasTextSplitNodeResult nodeRun={nodeRun} latestSuccessful={latestSuccessful} historicalRevision={historicalRevision} onPreview={(next) => interaction?.onPreview(next)} />
-      : node.type.startsWith("model.") || ["utility.prompt-template", "utility.text-concatenate", "utility.image-select", "utility.image-transform", "utility.video-frames", "utility.video-reconstruct"].includes(node.type)
+      : node.type.startsWith("model.") || ["utility.prompt-template", "utility.text-concatenate", "utility.image-select", "utility.image-transform", "utility.video-frames", "utility.video-reconstruct", "utility.video-subtitles"].includes(node.type)
         ? <CanvasModelNodeResult node={node} nodeRun={nodeRun} latestSuccessful={latestSuccessful} historicalRevision={historicalRevision} onPreview={(next) => interaction?.onPreview(next)} />
         : null}
     {node.type === "utility.image-preview" ? <CanvasImagePreviewNodeResult nodeRun={nodeRun} latestSuccessful={latestSuccessful} onPreview={(next) => interaction?.onPreview(next)} /> : null}
@@ -1881,6 +1888,10 @@ function CanvasModelNodeResult({
       onPreview={onPreview}
     /> : null}
     {showArtifact && artifact?.kind === "videos" ? <CanvasResultVideoPreview items={artifact.items} onPreview={onPreview} /> : null}
+    {node.type === "utility.video-subtitles" && artifactRun.outputs.text?.kind === "text" ? <div className="canvas-node-text-result canvas-subtitle-text-result">
+      <p>{artifactRun.outputs.text.value}</p>
+      <button type="button" onClick={() => onPreview({ kind: "text", value: artifactRun.outputs.text.kind === "text" ? artifactRun.outputs.text.value : "" })} aria-label="查看完整字幕文本" title="查看完整字幕文本"><Maximize2 /></button>
+    </div> : null}
   </div>;
 }
 
@@ -2092,7 +2103,7 @@ function NodeInspector({
         {isDirect ? <button className="canvas-image-preview-remove" type="button" onClick={() => onChange(imageConfigKey, imageUrls.filter((_, currentIndex) => currentIndex !== directIndex))} aria-label={`移除图片 ${index + 1}`} title="移除图片"><X /></button> : null}
       </div>})}</div> : null}
     </div> : null}
-    {definition.fields.map((field) => {
+    {node.type === "utility.video-subtitles" ? <CanvasSubtitleStyleEditor node={node} onPatch={onPatch} /> : definition.fields.map((field) => {
       if (field.key === "outputCompression" && node.config.outputFormat !== "jpeg") return null;
       if (field.key === "template" && node.config.preset !== "custom") return null;
       if (node.type === "utility.text-split" && (field.key === "delimiter" || field.key === "delimiterIndex") && node.config.mode !== "delimiter") return null;
@@ -2124,6 +2135,176 @@ function NodeInspector({
     <div className="canvas-port-list"><span>输入</span>{definition.inputs.length ? definition.inputs.map((port) => <small key={port.id}>{port.label} · {portKindLabel(port.kind)}{port.required ? " · 必填" : ""}</small>) : <small>无</small>}</div>
     <div className="canvas-port-list"><span>输出</span>{definition.outputs.length ? definition.outputs.map((port) => <small key={port.id}>{port.label} · {portKindLabel(port.kind)}</small>) : <small>无</small>}</div>
   </div>;
+}
+
+type CanvasSubtitlePresetResponse = {
+  presets: CanvasSubtitlePreset[];
+  fonts: string[];
+  recommendedFont: string;
+  currentAccountId: string;
+};
+
+function CanvasSubtitleStyleEditor({ node, onPatch }: { node: CanvasNode; onPatch: (patch: CanvasNode["config"]) => void }) {
+  const style = canvasSubtitleStyleFromConfig(node.config);
+  const [resources, setResources] = useState<CanvasSubtitlePresetResponse>({ presets: [], fonts: [], recommendedFont: "", currentAccountId: "" });
+  const [selectedPresetId, setSelectedPresetId] = useState("");
+  const [presetName, setPresetName] = useState("");
+  const [busy, setBusy] = useState(false);
+  const [message, setMessage] = useState("正在载入字幕样式...");
+
+  const loadResources = useCallback(async () => {
+    try {
+      const data = await api<CanvasSubtitlePresetResponse>("/api/canvas/subtitle-presets");
+      setResources(data);
+      setMessage("");
+      if (!data.fonts.includes(style.fontFamily) && data.recommendedFont) onPatch({ fontFamily: data.recommendedFont });
+    } catch (error) {
+      setMessage(errorMessage(error));
+    }
+  }, [onPatch, style.fontFamily]);
+
+  useEffect(() => {
+    let active = true;
+    void api<CanvasSubtitlePresetResponse>("/api/canvas/subtitle-presets").then((data) => {
+      if (!active) return;
+      setResources(data);
+      setMessage("");
+      if (!data.fonts.includes(style.fontFamily) && data.recommendedFont) onPatch({ fontFamily: data.recommendedFont });
+    }).catch((error) => {
+      if (active) setMessage(errorMessage(error));
+    });
+    return () => { active = false; };
+  }, [node.id, onPatch, style.fontFamily]);
+
+  const selectPreset = (presetId: string) => {
+    setSelectedPresetId(presetId);
+    const preset = resources.presets.find((item) => item.id === presetId);
+    if (!preset) return;
+    setPresetName(preset.builtIn ? "" : preset.name);
+    onPatch(canvasSubtitleStyleConfig(preset.style));
+    setMessage(`已加载“${preset.name}”`);
+  };
+
+  const savePreset = async () => {
+    const name = presetName.trim();
+    if (!name || busy) return setMessage("请输入预设名称。");
+    setBusy(true);
+    try {
+      const normalized = normalizeCanvasSubtitlePresetName(name);
+      const selected = resources.presets.find((item) => item.id === selectedPresetId && !item.builtIn && item.normalizedName === normalized);
+      const existing = selected || resources.presets.find((item) => !item.builtIn && item.ownerUserId === resources.currentAccountId && item.normalizedName === normalized);
+      let preset: CanvasSubtitlePreset;
+      if (existing) {
+        if (!window.confirm(`覆盖字幕预设“${existing.name}”？`)) return;
+        preset = (await api<{ preset: CanvasSubtitlePreset }>(`/api/canvas/subtitle-presets/${existing.id}`, {
+          method: "PATCH",
+          body: JSON.stringify({ name, style, revision: existing.revision }),
+        })).preset;
+      } else {
+        preset = (await api<{ preset: CanvasSubtitlePreset }>("/api/canvas/subtitle-presets", {
+          method: "POST",
+          body: JSON.stringify({ name, style }),
+        })).preset;
+      }
+      setSelectedPresetId(preset.id);
+      await loadResources();
+      setMessage(`已保存“${preset.name}”`);
+    } catch (error) {
+      setMessage(errorMessage(error));
+    } finally {
+      setBusy(false);
+    }
+  };
+
+  const deletePreset = async () => {
+    const preset = resources.presets.find((item) => item.id === selectedPresetId);
+    if (!preset || preset.builtIn || busy || !window.confirm(`删除字幕预设“${preset.name}”？`)) return;
+    setBusy(true);
+    try {
+      await api(`/api/canvas/subtitle-presets/${preset.id}?revision=${preset.revision}`, { method: "DELETE" });
+      setSelectedPresetId("");
+      setPresetName("");
+      await loadResources();
+      setMessage(`已删除“${preset.name}”`);
+    } catch (error) {
+      setMessage(errorMessage(error));
+    } finally {
+      setBusy(false);
+    }
+  };
+
+  const patchStyle = <K extends keyof CanvasSubtitleStyle>(key: K, value: CanvasSubtitleStyle[K]) => onPatch({ [key]: value });
+  const previewPosition = style.verticalPosition === "top" ? "flex-start" : style.verticalPosition === "middle" ? "center" : "flex-end";
+  const previewAlign = style.horizontalAlign === "left" ? "flex-start" : style.horizontalAlign === "right" ? "flex-end" : "center";
+  const previewTextAlign = style.horizontalAlign;
+  const previewBackground = style.backgroundEnabled ? hexToRgba(style.backgroundColor, style.backgroundOpacity / 100) : "transparent";
+  const previewOutline = style.outlineWidthPercent > 0 ? subtitlePreviewShadow(style.outlineColor, Math.max(1, style.outlineWidthPercent * 4)) : "none";
+  const previewFont = Math.max(12, Math.min(30, 18 * style.fontSizePercent / 5));
+
+  return <div className="canvas-subtitle-editor">
+    <div className="canvas-subtitle-preview" style={{ alignItems: previewPosition, justifyContent: previewAlign }}>
+      <span style={{
+        color: style.textColor,
+        background: previewBackground,
+        fontFamily: style.fontFamily,
+        fontSize: previewFont,
+        fontWeight: style.bold ? 800 : 500,
+        textAlign: previewTextAlign,
+        textShadow: previewOutline,
+        marginBlock: `${Math.min(16, style.verticalMarginPercent / 2)}%`,
+      }}>这是一段字幕样式预览<br />中英混排 FluxPost</span>
+    </div>
+
+    <div className="canvas-subtitle-presets">
+      <select aria-label="加载字幕预设" value={selectedPresetId} onChange={(event) => selectPreset(event.target.value)} disabled={busy}>
+        <option value="">加载预设</option>
+        {resources.presets.map((preset) => <option value={preset.id} key={preset.id}>{preset.builtIn ? "内置" : preset.ownerDisplayName} · {preset.name}</option>)}
+      </select>
+      <div><input value={presetName} maxLength={60} placeholder="预设名称" onChange={(event) => setPresetName(event.target.value)} /><button type="button" onClick={() => void savePreset()} disabled={busy}><Save /><span>保存</span></button><button type="button" onClick={() => void deletePreset()} disabled={busy || !selectedPresetId || resources.presets.find((item) => item.id === selectedPresetId)?.builtIn} aria-label="删除字幕预设" title="删除字幕预设"><Trash2 /></button></div>
+    </div>
+
+    <label><span>字体</span><select value={style.fontFamily} onChange={(event) => patchStyle("fontFamily", event.target.value)} disabled={busy || !resources.fonts.length}>
+      {!resources.fonts.includes(style.fontFamily) ? <option value={style.fontFamily}>{style.fontFamily} · 未安装</option> : null}
+      {resources.fonts.map((font) => <option key={font} value={font}>{font}</option>)}
+    </select></label>
+    <CanvasSubtitleRange label="字号" value={style.fontSizePercent} min={2} max={12} step={0.5} suffix="%" onChange={(value) => patchStyle("fontSizePercent", value)} />
+    <div className="canvas-subtitle-color-grid">
+      <CanvasSubtitleColor label="文字" value={style.textColor} onChange={(value) => patchStyle("textColor", value)} />
+      <CanvasSubtitleColor label="描边" value={style.outlineColor} onChange={(value) => patchStyle("outlineColor", value)} />
+      <CanvasSubtitleColor label="背景" value={style.backgroundColor} onChange={(value) => patchStyle("backgroundColor", value)} disabled={!style.backgroundEnabled} />
+    </div>
+    <label className="canvas-inspector-toggle"><span>粗体</span><input type="checkbox" checked={style.bold} onChange={(event) => patchStyle("bold", event.target.checked)} /></label>
+    <CanvasSubtitleRange label="描边宽度" value={style.outlineWidthPercent} min={0} max={1.5} step={0.05} suffix="%" onChange={(value) => patchStyle("outlineWidthPercent", value)} />
+    <label className="canvas-inspector-toggle"><span>字幕背景</span><input type="checkbox" checked={style.backgroundEnabled} onChange={(event) => patchStyle("backgroundEnabled", event.target.checked)} /></label>
+    {style.backgroundEnabled ? <CanvasSubtitleRange label="背景不透明度" value={style.backgroundOpacity} min={0} max={100} step={1} suffix="%" onChange={(value) => patchStyle("backgroundOpacity", value)} /> : null}
+    <CanvasSubtitleSegments label="垂直位置" value={style.verticalPosition} options={[{ value: "top", label: "顶部" }, { value: "middle", label: "居中" }, { value: "bottom", label: "底部" }]} onChange={(value) => patchStyle("verticalPosition", value as CanvasSubtitleStyle["verticalPosition"])} />
+    <CanvasSubtitleSegments label="水平对齐" value={style.horizontalAlign} options={[{ value: "left", label: "左" }, { value: "center", label: "中" }, { value: "right", label: "右" }]} onChange={(value) => patchStyle("horizontalAlign", value as CanvasSubtitleStyle["horizontalAlign"])} />
+    <CanvasSubtitleRange label="垂直边距" value={style.verticalMarginPercent} min={0} max={30} step={1} suffix="%" onChange={(value) => patchStyle("verticalMarginPercent", value)} />
+    <CanvasSubtitleRange label="每行最大字数" value={style.maxCharsPerLine} min={8} max={30} step={1} suffix="字" onChange={(value) => patchStyle("maxCharsPerLine", Math.round(value))} />
+    {message ? <p className="canvas-subtitle-message">{message}</p> : null}
+  </div>;
+}
+
+function CanvasSubtitleRange({ label, value, min, max, step, suffix, onChange }: { label: string; value: number; min: number; max: number; step: number; suffix: string; onChange: (value: number) => void }) {
+  return <label className="canvas-subtitle-range"><span>{label}<small>{value}{suffix}</small></span><input type="range" value={value} min={min} max={max} step={step} onChange={(event) => onChange(Number(event.target.value))} /></label>;
+}
+
+function CanvasSubtitleColor({ label, value, disabled, onChange }: { label: string; value: string; disabled?: boolean; onChange: (value: string) => void }) {
+  return <label className={disabled ? "is-disabled" : ""}><span>{label}</span><input type="color" value={value} disabled={disabled} onChange={(event) => onChange(event.target.value.toUpperCase())} /></label>;
+}
+
+function CanvasSubtitleSegments({ label, value, options, onChange }: { label: string; value: string; options: Array<{ value: string; label: string }>; onChange: (value: string) => void }) {
+  return <div className="canvas-subtitle-segments"><span>{label}</span><div>{options.map((option) => <button type="button" className={option.value === value ? "is-active" : ""} key={option.value} onClick={() => onChange(option.value)}>{option.label}</button>)}</div></div>;
+}
+
+function hexToRgba(value: string, opacity: number) {
+  const hex = value.replace("#", "");
+  return `rgba(${Number.parseInt(hex.slice(0, 2), 16)}, ${Number.parseInt(hex.slice(2, 4), 16)}, ${Number.parseInt(hex.slice(4, 6), 16)}, ${opacity})`;
+}
+
+function subtitlePreviewShadow(color: string, width: number) {
+  const offset = Math.max(1, Math.round(width));
+  return [`-${offset}px 0 ${color}`, `${offset}px 0 ${color}`, `0 -${offset}px ${color}`, `0 ${offset}px ${color}`, `-${offset}px -${offset}px ${color}`, `${offset}px ${offset}px ${color}`].join(",");
 }
 
 type SeedanceMentionMenuState = { range: Range; query: string };
@@ -4940,6 +5121,7 @@ function iconForNode(type: CanvasNodeType) {
   if (type === "utility.image-select") return <ImageIcon {...props} />;
   if (type === "utility.image-transform") return <Maximize2 {...props} />;
   if (type === "utility.video-frames") return <Clapperboard {...props} />;
+  if (type === "utility.video-subtitles") return <Captions {...props} />;
   if (type === "compose.social-post") return <PanelsTopLeft {...props} />;
   return <Send {...props} />;
 }
