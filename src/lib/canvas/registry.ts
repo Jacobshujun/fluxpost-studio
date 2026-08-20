@@ -6,6 +6,7 @@ import { defaultCanvasSourceVideoProjectName, isCanvasSourceVideoSnapshotCurrent
 import { feishuPublishModeOptions, normalizeFeishuPublishMode } from "../feishu-publish-mode";
 import { validateSeedanceReferenceConfig } from "./seedance-references";
 import { canvasSubtitleStyleConfig, defaultCanvasSubtitleStyle, validateCanvasSubtitleStyle } from "./subtitle-style";
+import { validateCanvasVideoLoaderConfig } from "./video-loader";
 
 const canvasNodeDefinitionVersions: CanvasNodeDefinition[] = [
   {
@@ -46,6 +47,19 @@ const canvasNodeDefinitionVersions: CanvasNodeDefinition[] = [
     outputs: [{ id: "videos", label: "视频", kind: "videos" }],
     fields: [{ key: "urls", label: "视频 URL", kind: "url-list", placeholder: "每行一个视频 URL" }],
     defaultConfig: { urls: [] },
+  },
+  {
+    type: "input.video-loader",
+    version: 1,
+    label: "视频加载",
+    description: "从本地加载视频队列，普通运行输出当前选中的一个视频。",
+    category: "input",
+    icon: "FileUp",
+    color: "#d45d2c",
+    inputs: [],
+    outputs: [{ id: "videos", label: "当前视频", kind: "videos" }],
+    fields: [],
+    defaultConfig: { videos: [], selectedVideoId: "" },
   },
   {
     type: "input.source-video",
@@ -626,6 +640,9 @@ export function getCanvasNodeDefinition(type: CanvasNodeType, version?: number) 
 export function getCanvasBatchBindableFields(node: Pick<CanvasNode, "type" | "version">): CanvasBatchBindableField[] {
   const definition = getCanvasNodeDefinition(node.type, node.version);
   if (!definition) return [];
+  if (node.type === "input.video-loader") {
+    return [{ key: "videos", label: "视频队列", parameterTypes: ["video"], adapter: "video-input" }];
+  }
   return definition.fields.flatMap((field): CanvasBatchBindableField[] => {
     if (node.type === "input.source-video" && field.key === "sourceUrl") {
       return [{ key: field.key, label: field.label, parameterTypes: ["source-video"], adapter: "source-video-input" }];
@@ -699,6 +716,7 @@ export function validateCanvasNodeConfig(type: CanvasNodeType, config: CanvasNod
   if ((type === "input.images" || type === "input.videos") && !normalizeUrlList(config.urls).length) {
     errors.push(`${definition.label}至少需要一个 URL。`);
   }
+  if (type === "input.video-loader") errors.push(...validateCanvasVideoLoaderConfig(config));
   if (type === "input.source-video") {
     if (!String(config.sourceUrl || "").trim()) errors.push("源视频链接不能为空。");
     if (!String(config.projectName || "").trim()) errors.push("源视频内容池项目不能为空。");
@@ -857,7 +875,7 @@ function legacyGptImageSize(size: string) {
 
 export function normalizeUrlList(value: CanvasNodeConfig[string]) {
   const values = Array.isArray(value) ? value : typeof value === "string" ? value.split(/\r?\n/) : [];
-  return Array.from(new Set(values.map((item) => item.trim()).filter(Boolean)));
+  return Array.from(new Set(values.filter((item): item is string => typeof item === "string").map((item) => item.trim()).filter(Boolean)));
 }
 
 function promptPresetLabel(value: string) {

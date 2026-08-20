@@ -27,6 +27,7 @@ import { buildCanvasRunPlan } from "./graph";
 import { getCanvasBatchBindableFields, getCanvasNodeDefinition, getCanvasNodeExecutionMode } from "./registry";
 import { isCanvasSourceVideoSnapshot } from "./source-video-contract";
 import { resolveCanvasSourceVideos } from "./source-video-service";
+import { canvasVideoSnapshotsFromConfig } from "./video-loader";
 import {
   cancelCanvasRun,
   createCanvasRunFromGraph,
@@ -741,7 +742,7 @@ async function preflightCanvasScheduleV2(current: CanvasSchedule, account: Works
   if (!current.definition) throw new Error("V2 batch definition is required.");
   const definition = normalizeCanvasScheduleV2Definition(current.definition);
   validateCanvasScheduleV2Definition(workflow.graph, definition);
-  const resolved = await Promise.all(definition.parameters.map((parameter) => resolveCanvasScheduleV2Parameter(account, parameter)));
+  const resolved = await Promise.all(definition.parameters.map((parameter) => resolveCanvasScheduleV2Parameter(account, workflow.graph, parameter)));
   const now = new Date().toISOString();
   const expansion = expandCanvasScheduleV2(resolved, definition, now);
   for (const main of expansion.mainTasks) {
@@ -775,7 +776,7 @@ async function preflightCanvasScheduleV2(current: CanvasSchedule, account: Works
     totalContentTasks: expansion.totalMainTasks,
     totalImageTasks: expansion.totalChildTasks,
     previewRevision: canvasScheduleV2PreviewFingerprint(definition, expansion.mainTasks),
-    workflowSnapshot: undefined,
+    workflowSnapshot: structuredClone(workflow.graph),
     error: undefined,
     updatedAt: now,
   };
@@ -784,10 +785,14 @@ async function preflightCanvasScheduleV2(current: CanvasSchedule, account: Works
 }
 
 async function launchCanvasScheduleV2(current: CanvasSchedule, account: WorkspaceAccessActor, previewRevision: string) {
-  const workflow = await requireScheduleWorkflow(current, account);
+  const latestWorkflow = current.workflowSnapshot
+    ? await requireScheduleWorkflow(current, account, true)
+    : await requireScheduleWorkflow(current, account);
   const definition = current.definition;
+  const workflowSnapshot = current.workflowSnapshot || latestWorkflow.graph;
   if (!definition || !current.mainTasks?.length) throw new Error("Run V2 preflight before launching this schedule.");
-  validateCanvasScheduleV2Definition(workflow.graph, definition);
+  const workflow = { ...latestWorkflow, revision: current.workflowRevision };
+  validateCanvasScheduleV2Definition(workflowSnapshot, definition);
   if (canvasScheduleV2PreviewFingerprint(definition, current.mainTasks) !== previewRevision) {
     throw new Error("The V2 parameter preview changed. Review it again before launch.");
   }
@@ -820,7 +825,7 @@ async function launchCanvasScheduleV2(current: CanvasSchedule, account: Workspac
     ...current,
     revision: current.revision + 1,
     status: "queued",
-    workflowSnapshot: structuredClone(workflow.graph),
+    workflowSnapshot: structuredClone(workflowSnapshot),
     mainTasks,
     launchedAt: now,
     completedAt: undefined,
@@ -835,7 +840,7 @@ async function launchCanvasScheduleV2(current: CanvasSchedule, account: Workspac
         id: main.sharedRunId!,
         workflow,
         graph: applyCanvasScheduleV2Parameters(
-          workflow.graph,
+          workflowSnapshot,
           definition.parameters.filter((parameter) => parameter.scope === "main"),
           main.parameterValues,
         ),
@@ -852,7 +857,7 @@ async function launchCanvasScheduleV2(current: CanvasSchedule, account: Workspac
     }
     for (const child of main.childTasks) {
       const createdAt = new Date(Date.parse(now) + sequence++).toISOString();
-      const graph = applyCanvasScheduleV2Parameters(workflow.graph, definition.parameters, {
+      const graph = applyCanvasScheduleV2Parameters(workflowSnapshot, definition.parameters, {
         ...main.parameterValues,
         ...child.parameterValues,
       });
@@ -1464,6 +1469,7 @@ async function resolveScheduleCopyPool(account: WorkspaceAccessActor, filter: Ca
 
 async function resolveCanvasScheduleV2Parameter(
   account: WorkspaceAccessActor,
+  graph: CanvasGraph,
   parameter: CanvasScheduleParameter,
 ): Promise<ResolvedCanvasScheduleParameter> {
   const source = parameter.source;
@@ -1477,6 +1483,13 @@ async function resolveCanvasScheduleV2Parameter(
   if (source.mode === "library-filter") {
     const assets = await resolveScheduleAssetPool(account, source.role, source.filter);
     const values: CanvasScheduleParameterValue[] = parameter.valueType === "image-group" ? [assets] : assets;
+    return resolvedCanvasScheduleV2Parameter(parameter, "manual-list", values);
+  }
+  if (source.mode === "video-loader-queue") {
+    const node = graph.nodes.find((candidate) => candidate.id === source.nodeId && candidate.type === "input.video-loader");
+    if (!node) throw new Error(`${parameter.name}: video loader node was not found.`);
+    const values = canvasVideoSnapshotsFromConfig(node.config);
+    if (!values.length) throw new Error(`${parameter.name}: video loader queue is empty.`);
     return resolvedCanvasScheduleV2Parameter(parameter, "manual-list", values);
   }
   if (source.mode === "source-video-links") {
@@ -1942,6 +1955,7 @@ function normalizeCanvasScheduleV2ParameterSource(parameter: CanvasScheduleParam
   if (source.mode === "fixed" || source.mode === "manual-list") return { mode: source.mode, values: structuredClone(source.values || []) };
   if (source.mode === "copy-filter") return { mode: "copy-filter", filter: normalizeCopyFilter(source.filter) };
   if (source.mode === "library-filter") return { mode: "library-filter", role: source.role === "vehicle" ? "vehicle" : "reference", filter: normalizeAssetFilter(source.filter) };
+  if (source.mode === "video-loader-queue") return { mode: "video-loader-queue", nodeId: String(source.nodeId || "").trim() };
   if (source.mode === "source-video-links") return {
     mode: "source-video-links",
     links: (Array.isArray(source.links) ? source.links : []).map((link) => String(link || "").trim()).filter(Boolean).slice(0, 200),

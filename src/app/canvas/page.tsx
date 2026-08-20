@@ -115,6 +115,7 @@ import {
   type SeedanceFixedReference,
 } from "@/lib/canvas/seedance-references";
 import { canvasSourceVideoSnapshotConfig, canvasSourceVideoSnapshotFromConfig, clearCanvasSourceVideoSnapshot, isCanvasSourceVideoSnapshotCurrent } from "@/lib/canvas/source-video-contract";
+import { canvasVideoLoaderConfig, canvasVideoSnapshotsFromConfig, MAX_CANVAS_VIDEO_LOADER_ITEMS, selectedCanvasVideo } from "@/lib/canvas/video-loader";
 import type { CanvasWorkflowTemplateKey } from "@/lib/canvas/templates";
 import {
   CANVAS_WORKFLOW_FILE_MAX_BYTES,
@@ -164,6 +165,7 @@ import type {
   CanvasSubtitlePreset,
   CanvasSubtitleStyle,
   CanvasSchedulerRole,
+  CanvasVideoSnapshot,
   CanvasWorkflow,
 } from "@/lib/canvas/types";
 
@@ -177,7 +179,15 @@ type QuickAddChoice = { definition: (typeof canvasNodeDefinitions)[number]; port
 type CanvasCopyLibraryResponse = { entries: CopyLibraryEntryView[]; tags: string[] };
 type CanvasTaskFilter = "all" | "active" | "history" | "failed";
 type CanvasViewportDetail = "full" | "reduced" | "overview";
-type CanvasEditableConfigValue = string | number | boolean | string[];
+type CanvasEditableConfigValue = Exclude<CanvasNode["config"][string], null | undefined>;
+type CanvasVideoUploadTask = {
+  id: string;
+  nodeId: string;
+  file: File;
+  progress: number;
+  status: "queued" | "uploading" | "failed";
+  error?: string;
+};
 type PreviewState =
   | { kind: "text"; value: string }
   | { kind: "image"; url: string; index: number; width?: number; height?: number; sequence?: Array<{ id: string; url: string; width?: number; height?: number }> }
@@ -205,7 +215,7 @@ const canvasHistoryCommitDelayMs = 350;
 const canvasViewportDetailZoom = { reduced: 0.65, overview: 0.35 } as const;
 const canvasEdgeAnimationDuration = { idle: 3.6, active: 1.8 } as const;
 let canvasScheduleParameterSequence = 0;
-const canvasScheduleParameterTypes = ["image", "image-group", "source-video", "text", "copy", "number", "boolean", "enum"] as const satisfies readonly CanvasScheduleParameterType[];
+const canvasScheduleParameterTypes = ["image", "image-group", "video", "source-video", "text", "copy", "number", "boolean", "enum"] as const satisfies readonly CanvasScheduleParameterType[];
 
 export default function CanvasPage() {
   const [workflows, setWorkflows] = useState<CanvasWorkflow[]>([]);
@@ -232,6 +242,7 @@ export default function CanvasPage() {
   const [isMobile, setIsMobile] = useState(false);
   const [flowColorMode, setFlowColorMode] = useState<"light" | "dark">("light");
   const [mediaBusy, setMediaBusy] = useState(false);
+  const [videoUploadTasks, setVideoUploadTasks] = useState<CanvasVideoUploadTask[]>([]);
   const [preview, setPreview] = useState<PreviewState>(null);
   const [quickAdd, setQuickAdd] = useState<QuickAddState>(null);
   const saveTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
@@ -796,14 +807,91 @@ export default function CanvasPage() {
     }
   }
 
-  function handleCanvasImageDragOver(event: React.DragEvent<HTMLDivElement>) {
-    if (isMobile || !activeWorkflow || mediaBusy || !dataTransferHasImageFile(event.dataTransfer)) return;
+  async function importVideoFiles(files: File[], targetNodeId?: string, position = getCanvasPastePosition()) {
+    if (!files.length || !activeWorkflow) return;
+    if (!targetNodeId && isMobile) return;
+    if (videoUploadTasks.some((task) => task.status === "queued" || task.status === "uploading")) {
+      setMessage("请等待当前视频批次上传完成后再继续添加。");
+      return;
+    }
+    const target = targetNodeId ? nodes.find((candidate) => candidate.id === targetNodeId && candidate.data.canvasNode.type === "input.video-loader") : undefined;
+    const existing = target ? canvasVideoSnapshotsFromConfig(target.data.canvasNode.config) : [];
+    const reserved = videoUploadTasks.filter((task) => task.nodeId === target?.id).length;
+    if (existing.length + reserved + files.length > MAX_CANVAS_VIDEO_LOADER_ITEMS) {
+      setMessage(`视频加载节点最多支持 ${MAX_CANVAS_VIDEO_LOADER_ITEMS} 个视频，当前已有 ${existing.length} 个。`);
+      return;
+    }
+    const nodeId = target?.id || `input-video-loader-${Date.now()}-${++pasteSequenceRef.current}`;
+    if (!target) {
+      const canvasNode = createCanvasNode("input.video-loader", nodeId, position);
+      canvasNode.executionMode = "disabled";
+      setNodes((current) => [...current.map((node) => ({ ...node, selected: false })), { ...toFlowNode(canvasNode, isMobile), selected: true }]);
+      setSelectedNodeId(nodeId);
+      markDirty();
+    }
+    const tasks = files.map((file, index): CanvasVideoUploadTask => ({
+      id: `video-upload-${Date.now()}-${index}-${Math.random().toString(36).slice(2, 8)}`,
+      nodeId,
+      file,
+      progress: 0,
+      status: "queued",
+    }));
+    setVideoUploadTasks((current) => [...current, ...tasks]);
+    for (const task of tasks) await runVideoUploadTask(task);
+  }
+
+  async function runVideoUploadTask(task: CanvasVideoUploadTask) {
+    const target = nodes.find((flowNode) => flowNode.id === task.nodeId && flowNode.data.canvasNode.type === "input.video-loader");
+    if (target && canvasVideoSnapshotsFromConfig(target.data.canvasNode.config).length >= MAX_CANVAS_VIDEO_LOADER_ITEMS) {
+      const error = `视频加载节点最多支持 ${MAX_CANVAS_VIDEO_LOADER_ITEMS} 个视频。`;
+      setVideoUploadTasks((current) => current.map((item) => item.id === task.id ? { ...item, status: "failed", error } : item));
+      setMessage(error);
+      return;
+    }
+    setVideoUploadTasks((current) => current.map((item) => item.id === task.id ? { ...item, status: "uploading", progress: 0, error: undefined } : item));
+    try {
+      const video = await uploadCanvasVideo(task.file, (progress) => {
+        setVideoUploadTasks((current) => current.map((item) => item.id === task.id ? { ...item, progress } : item));
+      });
+      setNodes((current) => current.map((flowNode) => {
+        if (flowNode.id !== task.nodeId || flowNode.data.canvasNode.type !== "input.video-loader") return flowNode;
+        const node = flowNode.data.canvasNode;
+        const videos = canvasVideoSnapshotsFromConfig(node.config);
+        const config = canvasVideoLoaderConfig([...videos, video], String(node.config.selectedVideoId || ""));
+        return { ...flowNode, data: { canvasNode: { ...node, config, executionMode: "enabled" } } };
+      }));
+      setVideoUploadTasks((current) => current.filter((item) => item.id !== task.id));
+      setSelectedNodeId(task.nodeId);
+      markDirty();
+      setMessage(`已加载视频：${video.filename}`);
+    } catch (error) {
+      setVideoUploadTasks((current) => current.map((item) => item.id === task.id ? { ...item, status: "failed", error: errorMessage(error) } : item));
+      setMessage(errorMessage(error));
+    }
+  }
+
+  function handleCanvasMediaDragOver(event: React.DragEvent<HTMLDivElement>) {
+    const hasVideo = dataTransferHasVideoFile(event.dataTransfer);
+    const videoBusy = videoUploadTasks.some((task) => task.status === "queued" || task.status === "uploading");
+    if (isMobile || !activeWorkflow || mediaBusy || (hasVideo && videoBusy) || (!dataTransferHasImageFile(event.dataTransfer) && !hasVideo)) return;
     event.preventDefault();
     event.dataTransfer.dropEffect = "copy";
   }
 
-  async function handleCanvasImageDrop(event: React.DragEvent<HTMLDivElement>) {
+  async function handleCanvasMediaDrop(event: React.DragEvent<HTMLDivElement>) {
     if (isMobile || !activeWorkflow || mediaBusy) return;
+    const videoFiles = dataTransferVideoFiles(event.dataTransfer);
+    if (videoFiles.length) {
+      event.preventDefault();
+      event.stopPropagation();
+      if (videoUploadTasks.some((task) => task.status === "queued" || task.status === "uploading")) {
+        setMessage("请等待当前视频批次上传完成后再继续添加。");
+        return;
+      }
+      const position = reactFlowRef.current?.screenToFlowPosition({ x: event.clientX, y: event.clientY }) || { x: 80, y: 80 };
+      await importVideoFiles(videoFiles, canvasVideoDropTargetId(event.target, nodes), position);
+      return;
+    }
     const files = dataTransferImageFiles(event.dataTransfer);
     if (!files.length) return;
     event.preventDefault();
@@ -1308,7 +1396,7 @@ export default function CanvasPage() {
           ))}
         </aside>
 
-        <div className="canvas-stage" data-testid="canvas-stage" ref={stageRef} onDragOver={(event) => handleCanvasImageDragOver(event)} onDrop={(event) => void handleCanvasImageDrop(event)} onContextMenu={(event) => {
+        <div className="canvas-stage" data-testid="canvas-stage" ref={stageRef} onDragOver={(event) => handleCanvasMediaDragOver(event)} onDrop={(event) => void handleCanvasMediaDrop(event)} onContextMenu={(event) => {
           const target = event.target instanceof Element ? event.target : null;
           if (isEditableClipboardTarget(event.target) || isMobile || !activeWorkflow || !target?.closest(".react-flow__pane")) return;
           event.preventDefault();
@@ -1372,6 +1460,11 @@ export default function CanvasPage() {
             onSchedulerRoleChange={(role) => updateNodeSchedulerRole(selectedCanvasNode.id, role)}
             onImportImages={(files) => importImageFiles(files, selectedCanvasNode.id)}
             onPasteImages={() => pasteFromSystemClipboard(selectedCanvasNode.id)}
+            onImportVideos={(files) => importVideoFiles(files, selectedCanvasNode.id)}
+            videoUploadTasks={videoUploadTasks.filter((task) => task.nodeId === selectedCanvasNode.id)}
+            onRetryVideoUpload={(task) => runVideoUploadTask(task)}
+            onDismissVideoUpload={(taskId) => setVideoUploadTasks((current) => current.filter((task) => task.id !== taskId))}
+            onPreviewVideo={(url, index) => setPreview({ kind: "video", url, index })}
             onResolveSourceVideo={() => resolveSourceVideoNode(selectedCanvasNode.id)}
             sourceVideoBusy={sourceVideoBusyNodeId === selectedCanvasNode.id}
             onPreviewImage={openImagePreview}
@@ -1441,6 +1534,8 @@ function CanvasFlowNode({ data, selected }: NodeProps<FlowNode>) {
       ? normalizeConfigUrls(node.config.referenceUrls)
       : [];
   const visibleImageUrls = imageUrls.slice(0, 4);
+  const loadedVideos = node.type === "input.video-loader" ? canvasVideoSnapshotsFromConfig(node.config) : [];
+  const currentLoadedVideo = node.type === "input.video-loader" ? selectedCanvasVideo(node.config) : undefined;
   const nodeRun = interaction?.latestNodeRuns.get(node.id);
   const latestSuccessful = interaction?.latestSuccessfulNodeRuns.get(node.id);
   const historicalRevision = interaction?.activeRun && interaction.workflowRevision !== interaction.activeRun.run.workflowRevision
@@ -1488,6 +1583,7 @@ function CanvasFlowNode({ data, selected }: NodeProps<FlowNode>) {
       onFocus={() => interaction?.onNodeFocus(node.id)}
     /> : null}
     {node.type === "input.source-video" ? <div className="canvas-node-source-video-summary"><FileVideo2 /><div><strong>{String(node.config.sourceTitle || "等待解析源视频")}</strong><small>{isCanvasSourceVideoSnapshotCurrent(node.config) ? `${Number(node.config.sourceDurationSeconds || 0).toFixed(1)} 秒 · ${node.config.sourceWidth}×${node.config.sourceHeight}` : "快照未就绪"}</small></div></div> : null}
+    {node.type === "input.video-loader" ? <div className="canvas-node-source-video-summary canvas-video-loader-summary"><FileUp /><div><strong>{currentLoadedVideo?.filename || "等待加载视频"}</strong><small>{currentLoadedVideo ? `${formatMediaDuration(currentLoadedVideo.durationSeconds)} · ${currentLoadedVideo.width}×${currentLoadedVideo.height} · 队列 ${loadedVideos.length}` : "从属性面板选择或拖入视频"}</small></div>{currentLoadedVideo ? <button className="nodrag nopan nowheel" type="button" onClick={(event) => { event.stopPropagation(); interaction?.onPreview({ kind: "video", url: currentLoadedVideo.url, index: loadedVideos.indexOf(currentLoadedVideo) }); }} aria-label="预览当前视频" title="预览"><Play /></button> : null}</div> : null}
     {node.type === "input.copy-library" ? <div className="canvas-node-copy-summary"><BookOpenText /><div><strong>{String(node.config.entryTitle || node.config.snapshotTitle || "未选择文案")}</strong><small>{configStringList(node.config.snapshotTags).slice(0, 3).join(" · ") || "无标签"}</small></div></div> : null}
     {node.type === "utility.text-split" && node.version >= 2 ? <CanvasTextSplitControls
       node={node}
@@ -1997,6 +2093,11 @@ function NodeInspector({
   onSchedulerRoleChange,
   onImportImages,
   onPasteImages,
+  onImportVideos,
+  videoUploadTasks,
+  onRetryVideoUpload,
+  onDismissVideoUpload,
+  onPreviewVideo,
   onResolveSourceVideo,
   sourceVideoBusy,
   onPreviewImage,
@@ -2013,6 +2114,11 @@ function NodeInspector({
   onSchedulerRoleChange: (role?: CanvasSchedulerRole) => void;
   onImportImages: (files: File[]) => Promise<void>;
   onPasteImages: () => Promise<void>;
+  onImportVideos: (files: File[]) => Promise<void>;
+  videoUploadTasks: CanvasVideoUploadTask[];
+  onRetryVideoUpload: (task: CanvasVideoUploadTask) => Promise<void>;
+  onDismissVideoUpload: (taskId: string) => void;
+  onPreviewVideo: (url: string, index: number) => void;
   onResolveSourceVideo: () => Promise<void>;
   sourceVideoBusy: boolean;
   onPreviewImage: (url: string, index: number) => void;
@@ -2037,6 +2143,7 @@ function NodeInspector({
   const seedanceErrors = isSeedance ? validateSeedanceGraphNode(graph, node) : [];
   const sourceVideoSnapshot = node.type === "input.source-video" ? canvasSourceVideoSnapshotFromConfig(node.config) : undefined;
   const sourceVideoCurrent = node.type === "input.source-video" && isCanvasSourceVideoSnapshotCurrent(node.config);
+  const loadedVideos = node.type === "input.video-loader" ? canvasVideoSnapshotsFromConfig(node.config) : [];
   const executionMode = node.executionMode === "bypass" || node.executionMode === "disabled" ? node.executionMode : "enabled";
   const commitLabel = () => {
     const normalized = labelDraft.trim().slice(0, 80) || defaultLabel;
@@ -2103,6 +2210,16 @@ function NodeInspector({
         {isDirect ? <button className="canvas-image-preview-remove" type="button" onClick={() => onChange(imageConfigKey, imageUrls.filter((_, currentIndex) => currentIndex !== directIndex))} aria-label={`移除图片 ${index + 1}`} title="移除图片"><X /></button> : null}
       </div>})}</div> : null}
     </div> : null}
+    {node.type === "input.video-loader" ? <CanvasVideoLoaderEditor
+      videos={loadedVideos}
+      selectedVideoId={String(node.config.selectedVideoId || "")}
+      uploads={videoUploadTasks}
+      onImport={onImportVideos}
+      onRetry={onRetryVideoUpload}
+      onDismiss={onDismissVideoUpload}
+      onPreview={onPreviewVideo}
+      onChange={(videos, selectedVideoId) => onPatch(canvasVideoLoaderConfig(videos, selectedVideoId))}
+    /> : null}
     {node.type === "utility.video-subtitles" ? <CanvasSubtitleStyleEditor node={node} onPatch={onPatch} /> : definition.fields.map((field) => {
       if (field.key === "outputCompression" && node.config.outputFormat !== "jpeg") return null;
       if (field.key === "template" && node.config.preset !== "custom") return null;
@@ -2135,6 +2252,40 @@ function NodeInspector({
     <div className="canvas-port-list"><span>输入</span>{definition.inputs.length ? definition.inputs.map((port) => <small key={port.id}>{port.label} · {portKindLabel(port.kind)}{port.required ? " · 必填" : ""}</small>) : <small>无</small>}</div>
     <div className="canvas-port-list"><span>输出</span>{definition.outputs.length ? definition.outputs.map((port) => <small key={port.id}>{port.label} · {portKindLabel(port.kind)}</small>) : <small>无</small>}</div>
   </div>;
+}
+
+function CanvasVideoLoaderEditor({ videos, selectedVideoId, uploads, onImport, onRetry, onDismiss, onPreview, onChange }: {
+  videos: CanvasVideoSnapshot[];
+  selectedVideoId: string;
+  uploads: CanvasVideoUploadTask[];
+  onImport: (files: File[]) => Promise<void>;
+  onRetry: (task: CanvasVideoUploadTask) => Promise<void>;
+  onDismiss: (taskId: string) => void;
+  onPreview: (url: string, index: number) => void;
+  onChange: (videos: CanvasVideoSnapshot[], selectedVideoId: string) => void;
+}) {
+  const uploadBusy = uploads.some((task) => task.status === "queued" || task.status === "uploading");
+  const remaining = MAX_CANVAS_VIDEO_LOADER_ITEMS - videos.length - uploads.length;
+  const remove = (id: string) => {
+    const next = videos.filter((video) => video.id !== id);
+    onChange(next, id === selectedVideoId ? next[0]?.id || "" : selectedVideoId);
+  };
+  return <section className="canvas-video-loader">
+    <header><span><strong>视频队列</strong><small>{videos.length}/{MAX_CANVAS_VIDEO_LOADER_ITEMS}</small></span><label className={remaining <= 0 || uploadBusy ? "is-disabled" : ""}><Upload /><span>上传视频</span><input type="file" accept="video/mp4,video/quicktime,video/webm,.mp4,.mov,.webm" multiple disabled={remaining <= 0 || uploadBusy} onChange={(event) => {
+      const files = Array.from(event.currentTarget.files || []).slice(0, remaining);
+      event.currentTarget.value = "";
+      if (files.length) void onImport(files);
+    }} /></label></header>
+    {uploads.length ? <div className="canvas-video-upload-list">{uploads.map((task) => <div className={`canvas-video-upload is-${task.status}`} key={task.id}>
+      <span><strong>{task.file.name}</strong><small>{task.status === "failed" ? task.error : task.status === "queued" ? "等待上传" : `上传中 ${task.progress}%`}</small></span>
+      {task.status === "uploading" ? <progress max={100} value={task.progress} /> : null}
+      {task.status === "failed" ? <div><button type="button" disabled={uploadBusy} onClick={() => void onRetry(task)}><RefreshCw />重试</button><button type="button" disabled={uploadBusy} onClick={() => onDismiss(task.id)} aria-label={`移除失败任务 ${task.file.name}`} title="移除"><X /></button></div> : null}
+    </div>)}</div> : null}
+    {videos.length ? <div className="canvas-video-loader-queue">{videos.map((video, index) => <article className={video.id === selectedVideoId ? "is-selected" : ""} key={video.id}>
+      <label><input type="radio" name="video-loader-current" checked={video.id === selectedVideoId} onChange={() => onChange(videos, video.id)} /><span><strong>{video.filename}</strong><small>{formatMediaDuration(video.durationSeconds)} · {video.width}×{video.height} · {formatBytes(video.bytes)}{video.hasAudio ? " · 有音轨" : " · 无音轨"}</small></span></label>
+      <div><button type="button" onClick={() => onPreview(video.url, index)} aria-label={`预览视频 ${video.filename}`} title="预览"><Play /></button><button type="button" disabled={index === 0} onClick={() => onChange(moveListItem(videos, index, index - 1), selectedVideoId)} aria-label={`上移视频 ${video.filename}`} title="上移"><ArrowUp /></button><button type="button" disabled={index === videos.length - 1} onClick={() => onChange(moveListItem(videos, index, index + 1), selectedVideoId)} aria-label={`下移视频 ${video.filename}`} title="下移"><ArrowDown /></button><button type="button" onClick={() => remove(video.id)} aria-label={`移除视频 ${video.filename}`} title="移除"><Trash2 /></button></div>
+    </article>)}</div> : <div className="canvas-video-loader-empty"><FileVideo2 /><span>选择视频，或直接拖到画布</span></div>}
+  </section>;
 }
 
 type CanvasSubtitlePresetResponse = {
@@ -3370,7 +3521,7 @@ function CanvasScheduleV2Editor({ schedule, graph, busy, onDefinitionChange, onA
     const first = firstCanvasBatchBinding(graph);
     if (!first) return;
     const valueType = first.field.parameterTypes[0];
-    const source = defaultCanvasScheduleParameterSource(valueType);
+    const source = defaultCanvasScheduleParameterSource(valueType, first.node.id);
     if (scope === "main" && source.mode === "library-filter") source.filter.mode = "manual";
     patchDefinition({ parameters: [...definition.parameters, {
       id: nextCanvasScheduleParameterId(),
@@ -3378,7 +3529,7 @@ function CanvasScheduleV2Editor({ schedule, graph, busy, onDefinitionChange, onA
       scope,
       valueType,
       source,
-      expansion: scope === "child" ? "each" : "fixed",
+      expansion: valueType === "video" || scope === "child" ? "each" : "fixed",
       binding: { nodeId: first.node.id, fieldKey: first.field.key },
     }] });
   };
@@ -3484,13 +3635,14 @@ function CanvasScheduleParameterEditor({ parameter, graph, onChange, onRemove, o
   const sampleCount = canvasScheduleParameterSampleCount(parameter);
   const updateType = (valueType: CanvasScheduleParameterType) => {
     const binding = canvasBatchBindingOptions(graph, valueType)[0];
-    let source = defaultCanvasScheduleParameterSource(valueType);
+    let source = defaultCanvasScheduleParameterSource(valueType, binding?.node.id);
     if (source.mode === "fixed" && parameter.expansion !== "fixed") source = { mode: "manual-list", values: source.values };
     if ((valueType === "image" || valueType === "image-group") && parameter.expansion === "fixed" && source.mode === "library-filter") source.filter.mode = "manual";
     onChange({
       ...parameter,
       valueType,
       source,
+      expansion: valueType === "video" ? "each" : parameter.expansion,
       binding: binding ? { nodeId: binding.node.id, fieldKey: binding.field.key } : { nodeId: "", fieldKey: "" },
     });
   };
@@ -3519,11 +3671,15 @@ function CanvasScheduleParameterEditor({ parameter, graph, onChange, onRemove, o
       <label><span>展开</span><select value={parameter.expansion} onChange={(event) => updateExpansion(event.target.value as CanvasScheduleParameter["expansion"])}><option value="fixed">固定共享</option><option value="each">全量逐项</option><option value="random">随机抽取</option></select></label>
       <label><span>绑定字段</span><select value={`${parameter.binding.nodeId}::${parameter.binding.fieldKey}`} onChange={(event) => {
         const option = bindingOptions.find((candidate) => `${candidate.node.id}::${candidate.field.key}` === event.target.value);
-        if (option) onChange({ ...parameter, binding: { nodeId: option.node.id, fieldKey: option.field.key } });
+        if (option) onChange({
+          ...parameter,
+          binding: { nodeId: option.node.id, fieldKey: option.field.key },
+          source: parameter.valueType === "video" ? { mode: "video-loader-queue", nodeId: option.node.id } : parameter.source,
+        });
       }}><option value="::">未选择</option>{bindingOptions.map((option) => <option key={`${option.node.id}-${option.field.key}`} value={`${option.node.id}::${option.field.key}`}>{option.label}</option>)}</select></label>
     </div>
     {parameter.expansion === "random" ? <CanvasScheduleSampleCountEditor parameter={parameter} sampleCount={sampleCount} onChange={onChange} /> : null}
-    <CanvasScheduleParameterSourceEditor parameter={parameter} onChange={onChange} onPreview={onPreview} />
+    <CanvasScheduleParameterSourceEditor parameter={parameter} graph={graph} onChange={onChange} onPreview={onPreview} />
   </article>;
 }
 
@@ -3552,7 +3708,16 @@ function CanvasScheduleSampleCountEditor({ parameter, sampleCount, onChange }: {
   </div>;
 }
 
-function CanvasScheduleParameterSourceEditor({ parameter, onChange, onPreview }: { parameter: CanvasScheduleParameter; onChange: (parameter: CanvasScheduleParameter) => void; onPreview: (preview: Extract<NonNullable<PreviewState>, { kind: "image" }>) => void }) {
+function CanvasScheduleParameterSourceEditor({ parameter, graph, onChange, onPreview }: { parameter: CanvasScheduleParameter; graph: CanvasGraph; onChange: (parameter: CanvasScheduleParameter) => void; onPreview: (preview: Extract<NonNullable<PreviewState>, { kind: "image" }>) => void }) {
+  if (parameter.valueType === "video") {
+    const nodeId = parameter.source.mode === "video-loader-queue" ? parameter.source.nodeId : parameter.binding.nodeId;
+    const node = graph.nodes.find((candidate) => candidate.id === nodeId && candidate.type === "input.video-loader");
+    const count = node ? canvasVideoSnapshotsFromConfig(node.config).length : 0;
+    return <div className="canvas-schedule-parameter-source canvas-schedule-video-source">
+      <FileVideo2 />
+      <span><strong>{node ? canvasNodeDisplayName(node) : "视频加载节点未绑定"}</strong><small>{node ? `预演时按当前顺序冻结 ${count} 个视频` : "请选择兼容的视频队列字段"}</small></span>
+    </div>;
+  }
   if (parameter.valueType === "source-video") {
     const source = parameter.source.mode === "source-video-links"
       ? parameter.source
@@ -4466,11 +4631,11 @@ function stepCanvasHistory(history: CanvasHistory, graph: CanvasGraph, direction
 
 function normalizeConfigUrls(value: CanvasNode["config"][string]) {
   const values = Array.isArray(value) ? value : typeof value === "string" ? value.split(/\r?\n/) : [];
-  return Array.from(new Set(values.map((item) => item.trim()).filter(Boolean)));
+  return Array.from(new Set(values.filter((item): item is string => typeof item === "string").map((item) => item.trim()).filter(Boolean)));
 }
 
 function configStringList(value: CanvasNode["config"][string]) {
-  return Array.isArray(value) ? value.map((item) => item.trim()) : [];
+  return Array.isArray(value) ? value.filter((item): item is string => typeof item === "string").map((item) => item.trim()) : [];
 }
 
 function contentPoolSnapshotConfig(item: NormalizedSourceItem): CanvasNode["config"] {
@@ -4523,12 +4688,80 @@ function dataTransferHasImageFile(data: DataTransfer) {
     || Array.from(data.files).some((file) => file.type.startsWith("image/"));
 }
 
+const canvasVideoFileTypes = new Set(["video/mp4", "video/quicktime", "video/webm"]);
+const canvasVideoFileExtensions = [".mp4", ".mov", ".webm"];
+
+function isCanvasVideoFile(file: File) {
+  const name = file.name.toLowerCase();
+  return canvasVideoFileTypes.has(file.type.toLowerCase()) || canvasVideoFileExtensions.some((extension) => name.endsWith(extension));
+}
+
+function dataTransferVideoFiles(data: DataTransfer) {
+  const itemFiles = Array.from(data.items)
+    .filter((item) => item.kind === "file")
+    .map((item) => item.getAsFile())
+    .filter((file): file is File => file !== null && isCanvasVideoFile(file));
+  return itemFiles.length ? itemFiles : Array.from(data.files).filter(isCanvasVideoFile);
+}
+
+function dataTransferHasVideoFile(data: DataTransfer) {
+  return Array.from(data.items).some((item) => item.kind === "file" && canvasVideoFileTypes.has(item.type.toLowerCase()))
+    || Array.from(data.files).some(isCanvasVideoFile);
+}
+
 function canvasImageDropTargetId(target: EventTarget | null, nodes: FlowNode[]) {
   if (!(target instanceof Element)) return undefined;
   const nodeId = target.closest(".react-flow__node")?.getAttribute("data-id");
   if (!nodeId) return undefined;
   const node = nodes.find((candidate) => candidate.id === nodeId)?.data.canvasNode;
   return node && (node.type === "input.images" || node.type === "model.seedance" || (node.type === "model.gpt-image" && node.version >= 2)) ? nodeId : undefined;
+}
+
+function canvasVideoDropTargetId(target: EventTarget | null, nodes: FlowNode[]) {
+  if (!(target instanceof Element)) return undefined;
+  const nodeId = target.closest(".react-flow__node")?.getAttribute("data-id");
+  return nodeId && nodes.some((candidate) => candidate.id === nodeId && candidate.data.canvasNode.type === "input.video-loader")
+    ? nodeId
+    : undefined;
+}
+
+function uploadCanvasVideo(file: File, onProgress: (progress: number) => void) {
+  return new Promise<CanvasVideoSnapshot>((resolve, reject) => {
+    const request = new XMLHttpRequest();
+    request.open("POST", `/api/canvas/video-uploads?filename=${encodeURIComponent(file.name)}`);
+    request.responseType = "json";
+    request.upload.addEventListener("progress", (event) => {
+      if (event.lengthComputable) onProgress(Math.min(100, Math.round((event.loaded / event.total) * 100)));
+    });
+    request.addEventListener("load", () => {
+      const response = request.response as { video?: CanvasVideoSnapshot; error?: string } | null;
+      if (request.status >= 200 && request.status < 300 && response?.video) {
+        onProgress(100);
+        resolve(response.video);
+        return;
+      }
+      reject(new Error(response?.error || `视频上传失败 (${request.status})`));
+    });
+    request.addEventListener("error", () => reject(new Error("视频上传网络连接失败。")));
+    request.addEventListener("abort", () => reject(new Error("视频上传已取消。")));
+    request.send(file);
+  });
+}
+
+function formatMediaDuration(seconds: number) {
+  const total = Math.max(0, Math.round(seconds));
+  const hours = Math.floor(total / 3600);
+  const minutes = Math.floor((total % 3600) / 60);
+  const remainder = total % 60;
+  return hours > 0
+    ? `${hours}:${String(minutes).padStart(2, "0")}:${String(remainder).padStart(2, "0")}`
+    : `${minutes}:${String(remainder).padStart(2, "0")}`;
+}
+
+function formatBytes(bytes: number) {
+  if (bytes < 1024) return `${bytes} B`;
+  if (bytes < 1024 * 1024) return `${(bytes / 1024).toFixed(1)} KB`;
+  return `${(bytes / (1024 * 1024)).toFixed(1)} MB`;
 }
 
 async function clipboardImageFiles(items: ClipboardItem[]) {
@@ -4889,7 +5122,8 @@ function nextCanvasScheduleParameterId() {
   return `canvas-v2-parameter-${Date.now()}-${canvasScheduleParameterSequence}`;
 }
 
-function defaultCanvasScheduleParameterSource(valueType: CanvasScheduleParameterType): CanvasScheduleParameterSource {
+function defaultCanvasScheduleParameterSource(valueType: CanvasScheduleParameterType, nodeId = ""): CanvasScheduleParameterSource {
+  if (valueType === "video") return { mode: "video-loader-queue", nodeId };
   if (valueType === "source-video") return { mode: "source-video-links", links: [], projectName: "视频内容重构" };
   if (valueType === "image" || valueType === "image-group") return { mode: "library-filter", role: "reference", filter: emptyScheduleFilter() };
   if (valueType === "copy") return { mode: "copy-filter", filter: emptyScheduleCopyFilter() };
@@ -4932,7 +5166,7 @@ function parseCanvasScheduleScalarValues(valueType: CanvasScheduleParameterType,
 }
 
 function canvasScheduleParameterTypeLabel(value: CanvasScheduleParameterType) {
-  return ({ image: "图片", "image-group": "图片组", "source-video": "源视频", text: "文本", copy: "文案记录", number: "数字", boolean: "布尔值", enum: "枚举" } as const)[value];
+  return ({ image: "图片", "image-group": "图片组", video: "视频", "source-video": "源视频", text: "文本", copy: "文案记录", number: "数字", boolean: "布尔值", enum: "枚举" } as const)[value];
 }
 
 function formatCanvasScheduleParameterValues(values: Record<string, CanvasScheduleParameterValue>) {
@@ -4940,7 +5174,7 @@ function formatCanvasScheduleParameterValues(values: Record<string, CanvasSchedu
     if (Array.isArray(value)) return `${value.length} 张图片`;
     if (value && typeof value === "object") {
       if ("projectName" in value) return value.title || value.id;
-      if ("url" in value) return value.name || value.id;
+      if ("url" in value) return ("name" in value ? value.name : "filename" in value ? value.filename : undefined) || value.id;
       if ("body" in value) return value.title;
     }
     return String(value);
@@ -4959,7 +5193,8 @@ function canvasScheduleParameterImages(values: Record<string, CanvasSchedulePara
       && "url" in value
       && typeof value.url === "string"
       && value.url
-      && !("projectName" in value),
+      && !("projectName" in value)
+      && !("filename" in value),
     ))
     .filter((image) => {
       const key = `${image.id}\u0000${image.url}`;
@@ -4990,7 +5225,7 @@ function schedulerBindingsEqual(left: CanvasScheduleBindings, right: Partial<Can
 function schedulerBindingNodeOptions(graph: CanvasGraph, role: CanvasSchedulerRole) {
   const compatibleNodes = graph.nodes.filter((node) => schedulerRolesForNode(node).includes(role));
   return compatibleNodes.map((node, index) => {
-    const assetNames = Array.isArray(node.config.assetNames) ? node.config.assetNames : [];
+    const assetNames = Array.isArray(node.config.assetNames) ? node.config.assetNames.filter((item): item is string => typeof item === "string") : [];
     const definition = getCanvasNodeDefinition(node.type, node.version);
     return {
       id: node.id,
@@ -5102,6 +5337,7 @@ function iconForNode(type: CanvasNodeType) {
   if (type === "input.text") return <Type {...props} />;
   if (type === "input.images") return <ImageIcon {...props} />;
   if (type === "input.source-video") return <FileVideo2 {...props} />;
+  if (type === "input.video-loader") return <FileUp {...props} />;
   if (type === "input.videos") return <Video {...props} />;
   if (type === "input.content-pool") return <Layers3 {...props} />;
   if (type === "input.library-images") return <Images {...props} />;

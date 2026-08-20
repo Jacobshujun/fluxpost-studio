@@ -33,7 +33,7 @@ let visibleSourceVideoIds;
 try {
   writeFileSync(path.join(temp, "toapis-image-api.js"), "exports.toApisImageRatios=['1:1'];exports.toApis4kImageRatios=['16:9'];", "utf8");
   writeFileSync(path.join(temp, "feishu-publish-mode.js"), "exports.feishuPublishModeOptions=[{value:'full',label:'full'},{value:'text',label:'text'},{value:'media',label:'media'}];exports.normalizeFeishuPublishMode=(value)=>value===undefined?'full':['full','text','media'].includes(value)?value:(()=>{throw new Error('invalid mode')})();", "utf8");
-  for (const name of ["types", "node-utils", "source-video-contract", "save-images", "seedance-references", "subtitle-style", "registry", "graph", "scheduler-skeleton", "scheduler-v2"]) {
+  for (const name of ["types", "node-utils", "source-video-contract", "video-loader", "save-images", "seedance-references", "subtitle-style", "registry", "graph", "scheduler-skeleton", "scheduler-v2"]) {
     const source = read(`src/lib/canvas/${name}.ts`).replace('"../toapis-image-api"', '"./toapis-image-api"').replace('"../feishu-publish-mode"', '"./feishu-publish-mode"');
     writeFileSync(path.join(temp, `${name}.js`), ts.transpileModule(source, {
       compilerOptions: { module: ts.ModuleKind.CommonJS, target: ts.ScriptTarget.ES2022 },
@@ -122,6 +122,7 @@ try {
       getCanvasRun: async () => structuredClone(canvasRunFixture),
       prepareCanvasRunFromGraph: (input) => ({
         id: input.id,
+        workflowRevision: input.workflow.revision,
         graph: structuredClone(input.graph),
         targetNodeIds: structuredClone(input.targetNodeIds),
         batchContext: structuredClone(input.batchContext),
@@ -131,6 +132,7 @@ try {
     }, { get: (target, key) => target[key] || emptyAsync }),
     "./scheduler-v2": schedulerV2,
     "./source-video-contract": require(path.join(temp, "source-video-contract.js")),
+    "./video-loader": require(path.join(temp, "video-loader.js")),
     "./source-video-service": {
       resolveCanvasSourceVideos: async () => {
         sourceVideoResolveCalls += 1;
@@ -755,6 +757,50 @@ try {
   );
   assert.equal(launchedRuns, undefined, "owner visibility failure must reject before creating any Canvas runs");
   visibleSourceVideoIds = undefined;
+
+  const loaderVideos = [
+    { id: "sha256:video-one", filename: "one.mp4", url: "/generated/canvas-video-uploads/one.mp4", mimeType: "video/mp4", bytes: 1024, durationSeconds: 4, width: 720, height: 1280, hasAudio: true, uploadedAt: "2026-08-20T00:00:00.000Z" },
+    { id: "sha256:video-two", filename: "two.webm", url: "/generated/canvas-video-uploads/two.webm", mimeType: "video/webm", bytes: 2048, durationSeconds: 7, width: 1280, height: 720, hasAudio: false, uploadedAt: "2026-08-20T00:00:01.000Z" },
+  ];
+  const videoLoaderNode = { ...node("video-loader", "input.video-loader"), config: { videos: loaderVideos, selectedVideoId: loaderVideos[1].id } };
+  const videoLoaderGraph = {
+    nodes: [videoLoaderNode, node("video-frames", "utility.video-frames")],
+    edges: [edge("video-loader", "videos", "video-frames", "videos")],
+    viewport: { x: 0, y: 0, zoom: 1 },
+  };
+  const videoLoaderDefinition = {
+    parameters: [{
+      id: "video-parameter",
+      name: "Loaded video",
+      scope: "main",
+      valueType: "video",
+      source: { mode: "video-loader-queue", nodeId: "video-loader" },
+      expansion: "each",
+      binding: { nodeId: "video-loader", fieldKey: "videos" },
+    }],
+    expansion: { main: "cartesian", child: "cartesian" },
+    sharedOutputs: [],
+    childResult: { nodeId: "video-frames", outputPort: "images", artifactKind: "images" },
+    aggregationPolicy: "all",
+  };
+  workflowRecord = { id: "workflow-video-loader", name: "Video loader", revision: 1, ownerUserId: account.id, ownerDisplayName: account.displayName, graph: videoLoaderGraph };
+  storedSchedule = {
+    id: "schedule-video-loader", schemaVersion: 2, ownerUserId: account.id, ownerDisplayName: account.displayName,
+    name: "Video loader batch", revision: 1, workflowId: workflowRecord.id, workflowRevision: 1, status: "draft",
+    batches: [], definition: videoLoaderDefinition, mainTasks: [], totalMainTasks: 0, totalChildTasks: 0,
+    totalContentTasks: 0, totalImageTasks: 0, createdAt, updatedAt: createdAt,
+  };
+  const videoLoaderPreview = await scheduler.preflightCanvasSchedule(storedSchedule.id, account, storedSchedule.revision);
+  assert.deepEqual(videoLoaderPreview.mainTasks.map((main) => main.parameterValues["video-parameter"].id), loaderVideos.map((video) => video.id), "preflight must freeze the ordered loader queue, independent of the selected normal-run video");
+  assert.deepEqual(videoLoaderPreview.workflowSnapshot.nodes.find((item) => item.id === "video-loader").config.videos.map((video) => video.id), loaderVideos.map((video) => video.id));
+  storedSchedule = structuredClone(videoLoaderPreview);
+  workflowRecord = { ...workflowRecord, revision: 2, graph: structuredClone(videoLoaderGraph) };
+  workflowRecord.graph.nodes.find((item) => item.id === "video-loader").config = { videos: [], selectedVideoId: "" };
+  launchedRuns = undefined;
+  await scheduler.launchCanvasSchedule(storedSchedule.id, account, { revision: storedSchedule.revision, previewRevision: storedSchedule.previewRevision });
+  assert.equal(launchedRuns.length, 2, "one frozen video must produce one task");
+  assert.deepEqual(launchedRuns.map((run) => run.graph.nodes.find((item) => item.id === "video-loader").config.videos.map((video) => video.id)), [[loaderVideos[0].id], [loaderVideos[1].id]], "each task graph must contain exactly its frozen video");
+  assert.ok(launchedRuns.every((run) => run.workflowRevision === 1), "runs must retain the preflight workflow revision after later edits");
 
   libraryAssetsByRole = {
     reference: [

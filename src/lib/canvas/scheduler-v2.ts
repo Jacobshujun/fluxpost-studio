@@ -2,6 +2,7 @@ import { randomUUID } from "node:crypto";
 import { buildCanvasRunPlan } from "./graph";
 import { getCanvasBatchBindableFields, getCanvasNodeDefinition, getCanvasNodeExecutionMode } from "./registry";
 import { canvasSourceVideoSnapshotConfig, isCanvasSourceVideoSnapshot } from "./source-video-contract";
+import { canvasVideoLoaderConfig, normalizeCanvasVideoSnapshot } from "./video-loader";
 import type {
   CanvasArtifact,
   CanvasGraph,
@@ -348,7 +349,7 @@ export function extractCanvasScheduleV2Artifacts(
 
 function validateCanvasScheduleParameterSource(parameter: CanvasScheduleParameter) {
   const source = parameter.source;
-  if (!source || !['fixed', 'manual-list', 'library-filter', 'copy-filter', 'source-video-links'].includes(source.mode)) throw new Error(`${parameter.name}: parameter source is invalid.`);
+  if (!source || !['fixed', 'manual-list', 'library-filter', 'copy-filter', 'video-loader-queue', 'source-video-links'].includes(source.mode)) throw new Error(`${parameter.name}: parameter source is invalid.`);
   if (source.mode === "fixed" || source.mode === "manual-list") {
     if (!Array.isArray(source.values)) throw new Error(`${parameter.name}: parameter values must be a list.`);
     if (source.mode === "fixed" && source.values.length !== 1) throw new Error(`${parameter.name}: fixed source requires exactly one value.`);
@@ -358,6 +359,10 @@ function validateCanvasScheduleParameterSource(parameter: CanvasScheduleParamete
   if (parameter.expansion === "random" && source.mode === "fixed") throw new Error(`${parameter.name}: random expansion requires multiple candidate values.`);
   if (source.mode === "copy-filter" && parameter.valueType !== "copy") throw new Error(`${parameter.name}: copy filters require a copy parameter.`);
   if (source.mode === "library-filter" && !['image', 'image-group'].includes(parameter.valueType)) throw new Error(`${parameter.name}: library filters require an image parameter.`);
+  if (source.mode === "video-loader-queue") {
+    if (parameter.valueType !== "video") throw new Error(`${parameter.name}: video loader queues require a video parameter.`);
+    if (!source.nodeId?.trim() || source.nodeId !== parameter.binding.nodeId) throw new Error(`${parameter.name}: video loader queue must use its bound node.`);
+  }
   if (source.mode === "source-video-links") {
     if (parameter.valueType !== "source-video") throw new Error(`${parameter.name}: source video links require a source-video parameter.`);
     if (!Array.isArray(source.links) || !source.links.length || source.links.length > 200) throw new Error(`${parameter.name}: source video links must contain 1-200 entries.`);
@@ -366,6 +371,9 @@ function validateCanvasScheduleParameterSource(parameter: CanvasScheduleParamete
   }
   if (parameter.valueType === "source-video" && source.mode !== "source-video-links" && source.mode !== "fixed" && source.mode !== "manual-list") {
     throw new Error(`${parameter.name}: source-video parameters require frozen values or source video links.`);
+  }
+  if (parameter.valueType === "video" && source.mode !== "video-loader-queue" && source.mode !== "fixed" && source.mode !== "manual-list") {
+    throw new Error(`${parameter.name}: video parameters require a loader queue or frozen values.`);
   }
 }
 
@@ -427,6 +435,7 @@ function isCanvasScheduleParameterValue(type: CanvasScheduleParameter["valueType
   if (type === "image") return isAssetSnapshot(value);
   if (type === "image-group") return Array.isArray(value) && value.length > 0 && value.every(isAssetSnapshot);
   if (type === "copy") return isCopySnapshot(value);
+  if (type === "video") return Boolean(normalizeCanvasVideoSnapshot(value));
   if (type === "source-video") return isCanvasSourceVideoSnapshot(value);
   if (type === "number") return typeof value === "number" && Number.isFinite(value);
   if (type === "boolean") return typeof value === "boolean";
@@ -471,6 +480,11 @@ function applyCanvasParameterValue(node: CanvasNode, parameter: CanvasSchedulePa
       config: { ...node.config, ...canvasSourceVideoSnapshotConfig(value) },
       executionMode: "enabled",
     };
+  }
+  if (field.adapter === "video-input") {
+    const video = normalizeCanvasVideoSnapshot(value);
+    if (!video) throw new Error(`${parameter.name}: expected a frozen video snapshot.`);
+    return { ...node, config: canvasVideoLoaderConfig([video], video.id), executionMode: "enabled" };
   }
   if (typeof value === "object") throw new Error(`${parameter.name}: scalar binding received a structured value.`);
   return { ...node, config: { ...node.config, [field.key]: value } };

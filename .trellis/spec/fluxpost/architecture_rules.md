@@ -642,6 +642,36 @@ throw new ImageProviderError("accepted task timed out", {
 - GPT vision accepts 1-8 prepared images, uses the configured Responses/Chat text endpoint plus the `gpt` pool, declares `text_model`, and maps missing text configuration to `needs_config`. Image transformation accepts 20 images at 30 MB each; video frames accept 4 videos/20 total frames and persist content-addressed URL/dimension metadata through runtime media.
 - `model.gpt-vision@1` treats non-empty text connected to `instruction` as the complete model prompt: it trims and joins multiple incoming text artifacts in edge order, then sends only that user text without the analysis preset or node-level default instruction. When no effective user text is connected, the existing preset plus optional node instruction remains the backward-compatible fallback.
 
+## Scenario: Canvas Video Loader
+
+### 1. Scope / Trigger
+- Applies to local Canvas video upload, `input.video-loader@1`, or V2 video-queue scheduling.
+
+### 2. Signatures
+- `POST /api/canvas/video-uploads?filename=...` accepts one authenticated raw body and returns `{ video: CanvasVideoSnapshot }`.
+- V2 uses `valueType: "video"`, source `{ mode: "video-loader-queue", nodeId }`, and adapter `video-input`.
+
+### 3. Contracts
+- A node stores at most 200 ordered snapshots; each has content-hash id, filename, URL, MIME, bytes, duration, dimensions, audio state, and upload time. Normal execution emits only `selectedVideoId`.
+- The server streams and hashes at most 512 MB, verifies MP4/MOV/WebM plus a video stream with FFprobe, persists through `persistRuntimeMedia`, and always removes staging files.
+- V2 preflight freezes queue values and the graph; each task graph receives one snapshot. Later node edits do not change that preview.
+
+### 4. Validation & Error Matrix
+- Missing/invalid selection or queue -> graph error. Empty, oversized, unsupported, or streamless upload -> HTTP `400`. Missing account -> `401`.
+
+### 5. Good/Base/Bad Cases
+- Good: ordered queue expands one video per concurrent task. Base: old URL/source-video nodes remain unchanged. Bad: buffer the file, trust MIME, or reread the queue at launch.
+
+### 6. Tests Required
+- `canvas_video_loader_check.mjs` uses real local FFmpeg/FFprobe and mocked persistence; scheduler/workflow checks assert serialization, freezing, injection, and compatibility. Mocked Chromium covers desktop queue flows and 390px overflow without external calls.
+
+### 7. Wrong vs Correct
+```typescript
+// Wrong: taskGraph.config.videos = liveNode.config.videos;
+// Correct:
+taskGraph.config = canvasVideoLoaderConfig([frozenVideo], frozenVideo.id);
+```
+
 ## Scenario: Seedance Prompt Assistant
 
 ### 1. Scope / Trigger

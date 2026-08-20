@@ -32,6 +32,19 @@ export type CanvasMediaReference = {
   durationSeconds?: number;
 };
 
+export type CanvasVideoSnapshot = {
+  id: string;
+  filename: string;
+  url: string;
+  mimeType: "video/mp4" | "video/quicktime" | "video/webm";
+  bytes: number;
+  durationSeconds: number;
+  width: number;
+  height: number;
+  hasAudio: boolean;
+  uploadedAt: string;
+};
+
 export type CanvasSubtitleSegment = {
   startMs: number;
   endMs: number;
@@ -90,6 +103,7 @@ export type CanvasNodeType =
   | "input.text"
   | "input.images"
   | "input.videos"
+  | "input.video-loader"
   | "input.source-video"
   | "input.content-pool"
   | "input.library-images"
@@ -131,7 +145,7 @@ export const CANVAS_SCHEDULER_ROLE_LABELS: Record<CanvasSchedulerRole, string> =
   "copy-input": "文案库输入",
 };
 
-export type CanvasConfigValue = string | number | boolean | string[] | null | undefined;
+export type CanvasConfigValue = string | number | boolean | string[] | CanvasVideoSnapshot[] | null | undefined;
 export type CanvasNodeConfig = Record<string, CanvasConfigValue>;
 
 export type CanvasPosition = { x: number; y: number };
@@ -405,7 +419,7 @@ export type CanvasScheduleCopySnapshot = {
   updatedAt: string;
 };
 
-export type CanvasScheduleParameterType = "image" | "image-group" | "source-video" | "text" | "copy" | "number" | "boolean" | "enum";
+export type CanvasScheduleParameterType = "image" | "image-group" | "video" | "source-video" | "text" | "copy" | "number" | "boolean" | "enum";
 export type CanvasScheduleParameterScope = "main" | "child";
 export type CanvasScheduleExpansionMode = "cartesian" | "zip";
 export type CanvasScheduleAggregationPolicy = "at-least-one" | "all";
@@ -417,12 +431,14 @@ export type CanvasScheduleParameterValue =
   | CanvasScheduleAssetSnapshot
   | CanvasScheduleAssetSnapshot[]
   | CanvasScheduleCopySnapshot
+  | CanvasVideoSnapshot
   | CanvasSourceVideoSnapshot;
 
 export type CanvasScheduleParameterSource =
   | { mode: "fixed" | "manual-list"; values: CanvasScheduleParameterValue[] }
   | { mode: "library-filter"; role: "reference" | "vehicle"; filter: CanvasScheduleAssetFilter }
   | { mode: "copy-filter"; filter: CanvasScheduleCopyFilter }
+  | { mode: "video-loader-queue"; nodeId: string }
   | { mode: "source-video-links"; links: string[]; projectName: string };
 
 export type CanvasScheduleParameterBinding = {
@@ -503,7 +519,7 @@ export type CanvasScheduleV2MainTask = {
   updatedAt: string;
 };
 
-export type CanvasBatchBindingAdapter = "config-value" | "image-input" | "copy-input" | "source-video-input";
+export type CanvasBatchBindingAdapter = "config-value" | "image-input" | "video-input" | "copy-input" | "source-video-input";
 
 export type CanvasBatchBindableField = {
   key: string;

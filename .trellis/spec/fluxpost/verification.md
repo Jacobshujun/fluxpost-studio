@@ -20,6 +20,7 @@ The baseline verifies:
 - Trellis file existence, context budgets, latest markers, JSON validity, and feature evidence limits.
 - PostgreSQL schema, accounts/ownership, libraries, configuration, TOS, v4 deployment/image-retention/timer scripts, execution logs, platform mappings, media, video, concurrency, queues, Feishu boundaries, source imports, review flows, and row-level persistence.
 - Infinite Canvas graph/API/DAG, common nodes, subtitle FFmpeg/presets, media, provider resume, scheduler, copy-library, and original-batch contracts without paid calls.
+- Canvas local video-loader snapshot, streaming upload/FFprobe, selected-literal output, frozen V2 queue, and single-video task contracts without external storage calls.
 - Runtime identity/secrecy, manifest-derived activation identity, candidate-only local startup, loopback/LAN bindings, and parity command contracts.
 - `npm run lint`, `npx --no-install tsc --noEmit`, and `npm run build`.
 - Isolated production HTTP smoke and SQLite store validation.
@@ -43,6 +44,7 @@ Do not deploy a dirty worktree, branch name, abbreviated SHA, local runtime rows
 
 ## Recent Verification
 
+- 2026-08-20: Canvas video-loader MP4/MOV/WebM and failure cleanup checks used local FFmpeg/FFprobe with mocked persistence; workflow/scheduler, mocked Chromium 1440x900/390x844, lint, TypeScript, build, smoke, and the full offline baseline passed.
 - 2026-08-20: Subtitle timing/style/cache/preset ownership and conflicts, real local FFmpeg ASS encode, full offline baseline, and mocked Chromium 1440x960/390x844 flows passed without Ark calls.
 - 2026-08-19: Runtime Seedance Skill loading checks cover configured-file hashing, automatic refresh, cache reuse, missing-file errors, assistant metadata, and UI/API wiring without provider calls.
 - 2026-08-19: Content-pool/ordinary prompt-only production checks, removed automatic-plan contracts, shared settings and Feishu-disabled pool boundaries, lint, TypeScript, build, isolated smoke, and the full offline baseline passed without external calls.

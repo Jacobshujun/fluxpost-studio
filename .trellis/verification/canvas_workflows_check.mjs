@@ -74,7 +74,7 @@ const temp = mkdtempSync(path.join(tmpdir(), "fluxpost-canvas-check-"));
 try {
   writeFileSync(path.join(temp, "toapis-image-api.js"), `exports.toApisImageRatios = ${JSON.stringify(["1:1", "3:2", "2:3", "4:3", "3:4", "5:4", "4:5", "16:9", "9:16", "2:1", "1:2", "21:9", "9:21"])}; exports.toApis4kImageRatios = ${JSON.stringify(["16:9", "9:16", "2:1", "1:2", "21:9", "9:21"])};`, "utf8");
   writeFileSync(path.join(temp, "feishu-publish-mode.js"), "exports.feishuPublishModeOptions=[{value:'full',label:'完整写入'},{value:'text',label:'仅标题与正文'},{value:'media',label:'仅图片与视频'}];exports.normalizeFeishuPublishMode=(value)=>value===undefined?'full':['full','text','media'].includes(value)?value:(()=>{throw new Error('invalid mode')})();", "utf8");
-  for (const name of ["types", "node-utils", "source-video-contract", "save-images", "seedance-references", "subtitle-style", "registry", "graph", "serialization", "clipboard", "workflow-file"]) {
+  for (const name of ["types", "node-utils", "source-video-contract", "video-loader", "save-images", "seedance-references", "subtitle-style", "registry", "graph", "serialization", "clipboard", "workflow-file"]) {
     const source = read(`src/lib/canvas/${name}.ts`).replace('"../toapis-image-api"', '"./toapis-image-api"').replace('"../feishu-publish-mode"', '"./feishu-publish-mode"');
     const output = ts.transpileModule(source, {
       compilerOptions: { module: ts.ModuleKind.CommonJS, target: ts.ScriptTarget.ES2022 },
@@ -1185,14 +1185,16 @@ assert.ok(!edgeFunction.includes("beamActive ? <>"), "idle edges must keep their
 requireText(page, ['minZoom={0.2}', '<Controls showInteractive={false} />'], "canvas native zoom policy");
 const canvasStage = page.slice(page.indexOf('<div className="canvas-stage"'), page.indexOf('{activeWorkflow ? <CanvasNodeInteractionContext.Provider'));
 requireText(canvasStage, [
-  "onDragOver={(event) => handleCanvasImageDragOver(event)}",
-  "onDrop={(event) => void handleCanvasImageDrop(event)}",
-], "canvas local image drop surface");
-const imageDropHandler = page.slice(page.indexOf("function handleCanvasImageDragOver"), page.indexOf("async function pasteFromSystemClipboard"));
+  "onDragOver={(event) => handleCanvasMediaDragOver(event)}",
+  "onDrop={(event) => void handleCanvasMediaDrop(event)}",
+], "canvas local media drop surface");
+const imageDropHandler = page.slice(page.indexOf("function handleCanvasMediaDragOver"), page.indexOf("async function pasteFromSystemClipboard"));
 requireText(imageDropHandler, [
   "dataTransferHasImageFile(event.dataTransfer)",
   "dataTransferImageFiles(event.dataTransfer)",
   'event.dataTransfer.dropEffect = "copy"',
+  "dataTransferHasVideoFile(event.dataTransfer)",
+  "dataTransferVideoFiles(event.dataTransfer)",
   "reactFlowRef.current?.screenToFlowPosition({ x: event.clientX, y: event.clientY })",
   "canvasImageDropTargetId(event.target, nodes)",
   "importImageFiles(files, targetNodeId, position)",

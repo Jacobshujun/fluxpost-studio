@@ -17,6 +17,7 @@ import { canvasSubtitleStyleFromConfig } from "./subtitle-style";
 import type { CanvasArtifact, CanvasMediaReference, CanvasNode, CanvasNodeRun } from "./types";
 import { addCanvasVideoSubtitles } from "./video-subtitles";
 
+import { selectedCanvasVideo } from "./video-loader";
 export class CanvasNeedsConfigError extends Error {
   constructor(message: string) {
     super(message);
@@ -54,6 +55,7 @@ const executors: Record<CanvasNode["type"], CanvasNodeExecutor> = {
   "input.images": executeLiteralNode,
   "input.videos": executeLiteralNode,
   "input.source-video": executeLiteralNode,
+  "input.video-loader": executeLiteralNode,
   "input.content-pool": executeLiteralNode,
   "input.library-images": executeLiteralNode,
   "input.copy-library": executeLiteralNode,
@@ -92,6 +94,11 @@ export function resolveCanvasLiteralOutputs(node: CanvasNode): Record<string, Ca
   if (node.type === "input.images") return { images: imageArtifact(normalizeUrlList(node.config.urls)) };
   if (node.type === "input.videos") return { videos: videoArtifact(normalizeUrlList(node.config.urls)) };
   if (node.type === "input.source-video") {
+  if (node.type === "input.video-loader") {
+    const video = selectedCanvasVideo(node.config);
+    if (!video) throw new Error("视频加载节点没有有效的当前视频。");
+    return { videos: { kind: "videos", items: [{ url: video.url, name: video.filename, mimeType: video.mimeType, width: video.width, height: video.height, durationSeconds: video.durationSeconds }] } };
+  }
     const source = canvasSourceVideoSnapshotFromConfig(node.config);
     if (!source || !isCanvasSourceVideoSnapshotCurrent(node.config)) throw new Error("Source video snapshot is missing or stale. Resolve the source link again.");
     return { videos: { kind: "videos", items: [{ url: source.url, name: source.title, width: source.width, height: source.height, durationSeconds: source.durationSeconds }] } };

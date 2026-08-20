@@ -1,4 +1,5 @@
 import { getCanvasNodeDefinition } from "./registry";
+import { MAX_CANVAS_VIDEO_LOADER_ITEMS, normalizeCanvasVideoSnapshot } from "./video-loader";
 import {
   areCanvasPortKindsCompatible,
   CANVAS_GRAPH_LIMITS,
@@ -51,7 +52,7 @@ export function decodeCanvasGraphFragment(nodesValue: unknown, edgesValue: unkno
       throw new CanvasSerializationError(`Unknown canvas node type or version: ${String(valueNode.type || "(missing)")}.`);
     }
     if (!isCanvasPosition(valueNode.position)) throw new CanvasSerializationError(`Node ${valueNode.id} has an invalid position.`);
-    if (!isCanvasNodeConfig(valueNode.config)) throw new CanvasSerializationError(`Node ${valueNode.id} has an invalid config.`);
+    if (!isCanvasNodeConfig(valueNode.config, definition.type)) throw new CanvasSerializationError(`Node ${valueNode.id} has an invalid config.`);
     if (valueNode.label !== undefined && (typeof valueNode.label !== "string" || valueNode.label.length > maxNodeLabelLength)) {
       throw new CanvasSerializationError(`Node ${valueNode.id} has an invalid label.`);
     }
@@ -137,13 +138,27 @@ function isCanvasIdentifier(value: unknown): value is string {
   return typeof value === "string" && value.length > 0 && value.length <= maxIdentifierLength;
 }
 
-function isCanvasNodeConfig(value: unknown): value is CanvasNode["config"] {
+function isCanvasNodeConfig(value: unknown, nodeType: CanvasNode["type"]): value is CanvasNode["config"] {
   if (!isRecord(value)) return false;
-  return Object.values(value).every((item) =>
-    item === null || item === undefined || typeof item === "string" || typeof item === "boolean"
-      || (typeof item === "number" && Number.isFinite(item))
-      || (Array.isArray(item) && item.every((entry) => typeof entry === "string")),
-  );
+  return Object.entries(value).every(([key, item]) => {
+    if (nodeType === "input.video-loader" && key === "videos") {
+      if (!Array.isArray(item) || item.length > MAX_CANVAS_VIDEO_LOADER_ITEMS) return false;
+      const ids = new Set<string>();
+      return item.every((entry) => {
+        const snapshot = normalizeCanvasVideoSnapshot(entry);
+        if (!snapshot || ids.has(snapshot.id)) return false;
+        ids.add(snapshot.id);
+        return true;
+      });
+    }
+    return isFlatCanvasConfigValue(item);
+  });
+}
+
+function isFlatCanvasConfigValue(value: unknown): boolean {
+  if (value === null || value === undefined || typeof value === "string" || typeof value === "boolean") return true;
+  if (typeof value === "number") return Number.isFinite(value);
+  return Array.isArray(value) && value.every((entry) => typeof entry === "string");
 }
 
 function hasCycle(nodes: CanvasNode[], edges: CanvasEdge[]) {
