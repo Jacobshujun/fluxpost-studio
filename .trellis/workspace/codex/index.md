@@ -8,7 +8,7 @@
 
 <!-- @@@auto:current-status -->
 - **Active File**: `journal-1.md`
-- **Total Sessions**: 38
+- **Total Sessions**: 39
 - **Last Active**: 2026-08-20
 <!-- @@@/auto:current-status -->
 
@@ -19,7 +19,7 @@
 <!-- @@@auto:active-documents -->
 | File | Lines | Status |
 |------|-------|--------|
-| `journal-1.md` | ~1288 | Active |
+| `journal-1.md` | ~1325 | Active |
 <!-- @@@/auto:active-documents -->
 
 ---
@@ -29,6 +29,7 @@
 <!-- @@@auto:session-history -->
 | # | Date | Title | Commits | Branch |
 |---|------|-------|---------|--------|
+| 39 | 2026-08-20 | Canvas video loader | `f49c9c3`, `7088cbc`, `aa83176`, `f0e5244`, `d67fe4f` | `main` |
 | 38 | 2026-08-20 | Canvas video subtitle node | `65dbf60` | `main` |
 | 37 | 2026-08-19 | Runtime Seedance skill loading | `740156d` | `main` |
 | 36 | 2026-08-19 | Seedance prompt assistant | `ca8afe7`, `d6f10ef` | `main` |

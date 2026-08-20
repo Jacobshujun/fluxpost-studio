@@ -1286,3 +1286,40 @@ Added automatic video subtitle extraction, ASS hard-subtitle rendering, configur
 ### Next Steps
 
 - None - task complete
+
+
+## Session 39: Canvas video loader
+
+**Date**: 2026-08-20
+**Task**: Canvas video loader
+**Branch**: `main`
+
+### Summary
+
+Added authenticated local MP4/MOV/WebM queue uploads, selected-video literal execution, frozen one-video V2 scheduling, desktop/mobile queue controls, focused and browser verification, and a versioned local candidate on port 3001.
+
+### Main Changes
+
+(Add details)
+
+### Git Commits
+
+| Hash | Message |
+|------|---------|
+| `f49c9c3` | (see git log) |
+| `7088cbc` | (see git log) |
+| `aa83176` | (see git log) |
+| `f0e5244` | (see git log) |
+| `d67fe4f` | (see git log) |
+
+### Testing
+
+- [OK] (Add test results)
+
+### Status
+
+[OK] **Completed**
+
+### Next Steps
+
+- None - task complete
