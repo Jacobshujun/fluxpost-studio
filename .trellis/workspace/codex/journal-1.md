@@ -1424,3 +1424,37 @@ Added duration-aware Ark subtitle prompts, protocol-v2 final-segment clipping up
 ### Next Steps
 
 - None - task complete
+
+
+## Session 43: Local candidate build-slot isolation
+
+**Date**: 2026-08-20
+**Task**: Local candidate build-slot isolation
+**Branch**: `main`
+
+### Summary
+
+Committed primary-worktree A/B Next build slots, activated both managed slots on port 3001, proved controlled failed-startup restoration to the prior slot, passed the complete offline baseline, and archived the task.
+
+### Main Changes
+
+(Add details)
+
+### Git Commits
+
+| Hash | Message |
+|------|---------|
+| `0909776` | (see git log) |
+| `8c760e7` | (see git log) |
+
+### Testing
+
+- [OK] (Add test results)
+
+### Status
+
+[OK] **Completed**
+
+### Next Steps
+
+- None - task complete
