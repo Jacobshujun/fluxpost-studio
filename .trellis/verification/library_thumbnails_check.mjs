@@ -29,6 +29,8 @@ for (const contract of ["requireWorkspaceAccount(request)", "getLibraryAsset(acc
 const prewarm = read("scripts/library/prewarm-thumbnails.ts");
 const prewarmService = read("src/lib/library-thumbnail-prewarm.ts");
 assert(prewarm.includes("loadEnvConfig(process.cwd())") && prewarm.includes("listLibraryAssetsFromDb") && prewarm.includes("prewarmLibraryThumbnails"), "Prewarm must load app env and reuse the database/cache services.");
+assert(prewarm.includes("async function main()") && prewarm.includes("void main().catch"), "Prewarm must use a CommonJS-compatible async entry point.");
+assert(prewarm.includes('import { loadEnvConfig } from "@next/env"'), "Prewarm must use the CommonJS-compatible named @next/env export.");
 assert(prewarmService.includes("getLibraryThumbnail") && prewarmService.includes("cacheStatus === \"generated\"") && prewarmService.includes("summary.failed += 1"), "Prewarm service must reuse thumbnail generation and report generated, skipped, and failed assets.");
 assert(!/persistLibraryObject|putObject|saveLibraryAsset/.test(prewarm), "Prewarm must not write TOS or database records.");
 const packageJson = JSON.parse(read("package.json"));
