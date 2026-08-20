@@ -15,6 +15,10 @@
 
 # next.js
 /.next/
+/.next-local-a/
+/.next-local-b/
+/.fluxpost-local-candidate.json
+/.fluxpost-local-candidate.json.tmp
 /out/
 
 # production

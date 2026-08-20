@@ -368,13 +368,13 @@
       "definition_of_done": [
         "Port 3001 is the only local application environment and runs only the clean committed candidate; loopback and LAN entries share the same candidate implementation",
         "Versioned runtimes expose a minimal full-SHA identity derived from the activated release",
-        "Candidate startup enforces clean HEAD identity and builds before replacing the listener without creating mirror worktrees",
+        "Candidate startup enforces clean HEAD identity, builds into an inactive primary-worktree slot before replacing the listener, and restores the prior slot on failed activation without creating mirror worktrees",
         "Push and exact-SHA deployment promote only the candidate tested on port 3001",
         "Final parity requires exact local runtime/HEAD, GitHub main, and production SHA equality without syncing runtime data"
       ],
       "evidence": [
         "2026-08-17 exact-SHA local/VPS candidate, deployment, identity, health, volumes, rollback, and final parity passed",
-        "2026-08-18 candidate-only loopback/LAN commands, clean-tree guard, permissions, full baseline, build, and isolated smoke passed without external writes"
+        "2026-08-20 primary-worktree A/B build-slot isolation, clean-tree ordering, SHA/state/rollback contracts, both slot builds, and the complete offline baseline passed while the prior port-3001 candidate remained available"
       ],
       "notes": "Keep ready_for_review for operator observation; code identity and environment cleanup are complete, while runtime data and configuration remain intentionally environment-specific."
     },

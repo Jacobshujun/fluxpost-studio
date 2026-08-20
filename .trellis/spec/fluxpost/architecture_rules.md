@@ -1424,6 +1424,68 @@ return renderAssVideo(segments, validatedStyle);
 ### 7. Wrong vs Correct
 - Wrong: `body.slice(0, 1000)` or rewriting all history. Correct: use the shared policy and the object returned by persistence.
 
+## Scenario: Primary-Worktree Local Build Slots
+
+### 1. Scope / Trigger
+
+- Trigger: changing local candidate build, activation, rollback, runtime identity, or port-3001 startup behavior.
+- Port 3001 remains the only local application environment and must run from the primary Git worktree. Build slots are ignored output directories, not repositories, worktrees, application instances, or operator-managed versions.
+
+### 2. Signatures
+
+- Loopback activation: `npm run local`.
+- LAN activation: `npm run local:lan`.
+- Launcher: `scripts/local/restart.ps1 [-Port 3001] [-HostName 127.0.0.1|0.0.0.0] [-ConfigFile <path>] [-ProjectRoot <primary-worktree>]`.
+- Next output selector: `FLUXPOST_NEXT_DIST_DIR=.next-local-a|.next-local-b`; unset ordinary builds retain `.next`.
+- Local state: `.fluxpost-local-candidate.json` contains `{ "slot": string, "commit": fullSha }`; each valid slot contains `.fluxpost-commit` with the same SHA.
+
+### 3. Contracts
+
+- Reject a dirty worktree, invalid full HEAD SHA, or non-primary worktree before building or stopping a listener.
+- Select only the inactive fixed slot, build committed HEAD there, verify the worktree remains clean, and write the slot commit marker before listener replacement.
+- Stop port 3001 only after build success. Start the selected slot with `FLUXPOST_RUNTIME_MODE=candidate` and `FLUXPOST_RELEASE_SHA=<HEAD>`.
+- Commit active state atomically only after `/api/version` and the existing HTTP smoke pass. Normal background workers remain enabled.
+- `.next-local-a`, `.next-local-b`, slot state, and temporary state are Git-ignored; ESLint ignores both generated slot trees. `tsconfig.json` permanently includes both slots' generated type paths so alternating builds do not mutate tracked configuration.
+
+### 4. Validation & Error Matrix
+
+| Condition | Required result |
+| --- | --- |
+| Dirty or non-primary worktree | Fail before build and leave port 3001 untouched |
+| Invalid `FLUXPOST_NEXT_DIST_DIR` | Next config rejects it explicitly |
+| Candidate build or post-build clean check fails | Leave current listener and active state untouched |
+| Listener cannot be stopped safely | Abort without starting another candidate |
+| New candidate identity or HTTP smoke fails | Stop it, restore the prior valid slot and SHA, and report update failure |
+| First migration with a valid primary-worktree `.next` candidate | Use it as the one-time rollback source; never use a sibling worktree |
+| No valid managed or legacy primary-worktree candidate | Report explicit activation failure |
+| State write fails after startup | Treat activation as failed and restore the prior valid slot |
+
+### 5. Good/Base/Bad Cases
+
+- Good: slot A serves 3001, development and verification use `.next`, then `npm run local` builds clean HEAD into slot B and switches only after health passes.
+- Base: the first managed activation builds slot A while an older primary-worktree `.next` candidate remains available, then records slot A after successful smoke.
+- Bad: build over the active slot, start a second port, create a sibling candidate directory/worktree, bypass the clean-tree guard, record state before health passes, or expose intermediate commits as operator-managed versions.
+
+### 6. Tests Required
+
+- `.trellis/verification/runtime_parity_check.mjs` asserts fixed-slot allow-listing, ignores, generated type paths, primary-worktree and clean-tree guards, build-before-stop ordering, SHA markers, atomic state, rollback markers, identity, and HTTP smoke wiring.
+- Run PowerShell parser validation, lint, TypeScript, a real build in both slots without `tsconfig.json` churn, and the complete offline baseline with isolated HTTP smoke.
+- After commit, run `npm run local` and verify port 3001 reports the exact committed SHA from the primary worktree and the state/slot markers agree.
+
+### 7. Wrong vs Correct
+
+```powershell
+# Wrong: overwrite files that the running application may still read.
+npm.cmd run build
+Stop-PortListener -Port 3001
+
+# Correct: build the inactive fixed slot before replacing the listener.
+$env:FLUXPOST_NEXT_DIST_DIR = $targetSlot
+npm.cmd run build
+Stop-PortListener -Port 3001
+Start-CandidateServer -Slot $targetSlot -Commit $ReleaseSha
+```
+
 ## Trellis Rules
 
 - `.trellis/` is the only active persistent AI collaboration system. `.trellis/spec/fluxpost/` is the FluxPost project-memory layer inside that system.

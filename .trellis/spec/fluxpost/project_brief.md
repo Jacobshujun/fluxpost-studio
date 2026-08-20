@@ -37,7 +37,7 @@ Last updated: 2026-08-20
 - Database driver: `pg` is installed for optional PostgreSQL runtime storage.
 - Package manager: npm, confirmed by `package-lock.json`.
 - Scripts from `package.json`:
-  - `npm run local`: build and run the clean current HEAD as the only local versioned candidate on `127.0.0.1:3001`, with normal background workers and full-SHA identity.
+  - `npm run local`: build the clean current HEAD in an inactive local slot, then run it as the only local versioned candidate on `127.0.0.1:3001`, with normal background workers, full-SHA identity, and previous-slot restoration on activation failure.
   - `npm run local:lan`: same candidate on `0.0.0.0:3001`; compatibility aliases are `local:restart` and `start:lan`.
   - `npm run build`: Next production build.
   - `npm run start`: Next production server.
@@ -140,7 +140,7 @@ Last updated: 2026-08-20
 
 - The only local application runtime is the clean committed candidate on port `3001`; normal background workers are enabled. Loopback is the default binding and LAN access changes only the bind host.
 - Confirmed production entry: `npm run build` followed by `npm run start`.
-- Port `3001` is the only local application environment. `npm run local` runs the clean current HEAD directly as a candidate; after exact-SHA push and deployment, `npm run local:parity` proves local/GitHub/production equality. Configuration and runtime data are never synchronized as code.
+- Port `3001` is the only local application environment. `npm run local` builds clean current HEAD into the inactive ignored local build slot and switches only after build success; after exact-SHA push and deployment, `npm run local:parity` proves local/GitHub/production equality. Configuration and runtime data are never synchronized as code.
 - `next.config.ts` sets Turbopack root to `process.cwd()`.
 - GitHub-driven Ubuntu 24.04 deployment is owned by `scripts/deploy/vps-bootstrap.sh`, `scripts/deploy/vps-deploy.sh`, `scripts/deploy/vps-enable-domain.sh`, `compose.yaml`, and `docs/deployment/ubuntu-docker.md`.
 - Fresh bootstrap enforces the RAM minimum, installs official Docker/Compose, generates secrets, and creates the root-only repo/releases/current/bin layout. Existing `--app-only` hosts may count enabled swap toward a 1.5 GB combined minimum but never change swap.

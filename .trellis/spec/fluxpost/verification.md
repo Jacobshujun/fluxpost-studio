@@ -45,12 +45,10 @@ Do not deploy a dirty worktree, branch name, abbreviated SHA, local runtime rows
 
 ## Recent Verification
 
+- 2026-08-20: Local A/B build-slot allow-list, primary-worktree/clean-tree ordering, SHA markers, atomic state and rollback contracts, both real slot builds without TypeScript config churn, lint, TypeScript, isolated HTTP/SQLite smoke, and the complete offline baseline passed while port 3001 remained on its prior candidate.
 - 2026-08-20: Canvas scheduler search/thumbnail checks covered 350 ms debounce, stale 24-item grids, explicit paging, ID-only select-all, original previews, 240x144 WebP cache/auth/concurrency/atomic/prewarm contracts, mocked Chromium 1440x960/390x844, and the full offline baseline without external writes.
 - 2026-08-20: Explicit local thumbnail prewarm processed 437 assets with zero failures into 435 SHA-deduplicated files (1,938,318 bytes); the second run generated zero and skipped all 437 cached assets.
 - 2026-08-20: Canvas video-loader MP4/MOV/WebM and failure cleanup checks used local FFmpeg/FFprobe with mocked persistence; workflow/scheduler, mocked Chromium 1440x900/390x844, lint, TypeScript, build, smoke, and the full offline baseline passed.
-- 2026-08-20: Finished-body policy focused checks and the complete offline baseline passed without live providers.
-- 2026-08-20: Subtitle timing/style/cache/preset ownership and conflicts, real local FFmpeg ASS encode, full offline baseline, and mocked Chromium 1440x960/390x844 flows passed without Ark calls.
-- 2026-08-19: Runtime Seedance Skill loading checks cover configured-file hashing, automatic refresh, cache reuse, missing-file errors, assistant metadata, and UI/API wiring without provider calls.
 Older evidence is preserved in `.trellis/spec/fluxpost/archive/verification-history.md`.
 
 ## Missing Coverage

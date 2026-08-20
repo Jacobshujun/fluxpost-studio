@@ -53,7 +53,7 @@ npm run local
 
 ### Single local candidate environment
 
-Port `3001` has one local application runtime: the clean, committed, versioned candidate. The default command binds to `127.0.0.1:3001`, enables normal background workers, builds the current full Git SHA, replaces the existing listener, and verifies the candidate identity and HTTP health.
+Port `3001` has one local application runtime: the clean, committed, versioned candidate. Development changes do not alter that running application. The default command binds to `127.0.0.1:3001`, enables normal background workers, builds the current full Git SHA in an inactive local build slot, and replaces the existing listener only after that build succeeds. It then verifies candidate identity and HTTP health.
 
 ```powershell
 npm run local
@@ -67,7 +67,7 @@ npm run local:lan
 
 `npm run local:restart` remains a compatibility alias for `npm run local`, and `npm run start:lan` remains a compatibility alias for `npm run local:lan`; neither starts a different local version. The existing whitelist/accounts authentication, account management, and `admin`/`operator` permissions apply to both network bindings.
 
-Fixes must pass their focused checks and the deterministic baseline, then be committed before `npm run local` can activate them. The candidate command rejects a dirty worktree before it stops the current listener.
+Fixes must pass their focused checks and the deterministic baseline, then be committed before `npm run local` can activate them. The candidate command rejects a dirty worktree before building or stopping the current listener. The two ignored build slots are internal implementation details, not versions the operator needs to manage. If activation or health verification fails, the launcher restores the previously recorded slot.
 
 After the exact tested SHA is pushed to GitHub `main` and deployed unchanged, verify local, GitHub, and production equality with:
 
@@ -75,7 +75,7 @@ After the exact tested SHA is pushed to GitHub `main` and deployed unchanged, ve
 npm run local:parity
 ```
 
-Run `npm ci` while no server from that worktree is active whenever dependencies change. `npm run local` runs the production build before replacing the listener, injects the current full HEAD as runtime identity, and refuses a dirty worktree. A configuration file outside the worktree can be selected with `-ConfigFile` or the user-level `FLUXPOST_LOCAL_CONFIG_FILE`. Code promotion never copies environment files, credentials, accounts, databases, queues, generated media, or provider state.
+Run `npm ci` while no server from that worktree is active whenever dependencies change. `npm run local` builds into the inactive `.next-local-a` or `.next-local-b` slot while the current application remains available, injects the current full HEAD as runtime identity, and refuses a dirty worktree. Only the successful slot becomes active; the other slot remains available for rollback. A configuration file outside the worktree can be selected with `-ConfigFile` or the user-level `FLUXPOST_LOCAL_CONFIG_FILE`. Code promotion never copies environment files, credentials, accounts, databases, queues, generated media, or provider state.
 
 ## PostgreSQL Runtime Storage
 
