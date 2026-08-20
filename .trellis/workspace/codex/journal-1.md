@@ -1390,3 +1390,37 @@ Debounced Canvas library search, added authenticated SHA-cached thumbnails and p
 ### Next Steps
 
 - None - task complete
+
+
+## Session 42: Fix Canvas subtitle end boundary
+
+**Date**: 2026-08-20
+**Task**: Fix Canvas subtitle end boundary
+**Branch**: `main`
+
+### Summary
+
+Added duration-aware Ark subtitle prompts, protocol-v2 final-segment clipping up to 1000 ms, strict timing diagnostics, regression coverage, and the stable Canvas subtitle contract; full offline baseline passed without Ark or runtime retry.
+
+### Main Changes
+
+(Add details)
+
+### Git Commits
+
+| Hash | Message |
+|------|---------|
+| `8383c1a` | (see git log) |
+| `c9bf779` | (see git log) |
+
+### Testing
+
+- [OK] (Add test results)
+
+### Status
+
+[OK] **Completed**
+
+### Next Steps
+
+- None - task complete
