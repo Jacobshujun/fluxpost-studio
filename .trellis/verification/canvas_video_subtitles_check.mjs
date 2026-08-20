@@ -111,6 +111,17 @@ const transcription = loadTsModule("src/lib/video-transcription.ts", {
   "./config": config,
   "./types": {},
 });
+assert.equal(transcription.CANVAS_SUBTITLE_TIMELINE_PROTOCOL_VERSION, 2);
+const baseSubtitlePrompt = config.appConfig.arkVideoSubtitlePrompt;
+const requestSubtitlePrompt = transcription.buildVideoSubtitlePrompt(baseSubtitlePrompt, 16136);
+assert.equal(config.appConfig.arkVideoSubtitlePrompt, baseSubtitlePrompt, "request prompt construction must not mutate the configured base prompt");
+assert.ok(requestSubtitlePrompt.startsWith(`${baseSubtitlePrompt}\n\n`));
+assert.match(requestSubtitlePrompt, /durationMs=16136/);
+assert.match(requestSubtitlePrompt, /startMs < 16136/);
+assert.match(requestSubtitlePrompt, /endMs <= 16136/);
+const transcriptionSource = read("src/lib/video-transcription.ts");
+assert.ok(transcriptionSource.includes("buildVideoSubtitlePrompt(appConfig.arkVideoSubtitlePrompt, durationMs)"));
+assert.ok(transcriptionSource.includes("callArkResponsesForAudioOutput(fileId, appConfig.arkVideoSubtitleModel, requestPrompt)"));
 const timeline = transcription.normalizeVideoSubtitleTimeline({ segments: [
   { startMs: 0, endMs: 900, text: "你好" },
   { startMs: 900, endMs: 1900, text: "FluxPost" },
@@ -119,10 +130,44 @@ assert.deepEqual(JSON.parse(JSON.stringify(timeline)), [
   { startMs: 0, endMs: 900, text: "你好" },
   { startMs: 900, endMs: 1900, text: "FluxPost" },
 ]);
+const clippedFinalTimeline = transcription.normalizeVideoSubtitleTimeline({ segments: [
+  { startMs: 0, endMs: 900, text: "A" },
+  { startMs: 900, endMs: 3000, text: "B" },
+] }, 2);
+assert.deepEqual(JSON.parse(JSON.stringify(clippedFinalTimeline)), [
+  { startMs: 0, endMs: 900, text: "A" },
+  { startMs: 900, endMs: 2000, text: "B" },
+]);
 assert.throws(() => transcription.normalizeVideoSubtitleTimeline({ segments: [] }, 2), /did not contain/);
-assert.throws(() => transcription.normalizeVideoSubtitleTimeline({ segments: [{ startMs: 0, endMs: 1000, text: "A" }, { startMs: 999, endMs: 1200, text: "B" }] }, 2), /overlaps/);
-assert.throws(() => transcription.normalizeVideoSubtitleTimeline({ segments: [{ startMs: 0, endMs: 2100, text: "A" }] }, 2), /outside/);
+assert.throws(
+  () => transcription.normalizeVideoSubtitleTimeline({ segments: [{ startMs: 0, endMs: 1000, text: "A" }, { startMs: 999, endMs: 1200, text: "PRIVATE OVERLAP TEXT" }] }, 2),
+  /segment 2.*startMs=999, endMs=1200, previousEndMs=1000, durationMs=2000/,
+);
+assert.throws(() => transcription.normalizeVideoSubtitleTimeline({ segments: [{ startMs: 0.5, endMs: 1000, text: "A" }] }, 2), /integer milliseconds/);
+assert.throws(() => transcription.normalizeVideoSubtitleTimeline({ segments: [{ startMs: -1, endMs: 1000, text: "A" }] }, 2), /outside/);
+assert.throws(() => transcription.normalizeVideoSubtitleTimeline({ segments: [{ startMs: 1000, endMs: 1000, text: "A" }] }, 2), /outside/);
+assert.throws(
+  () => transcription.normalizeVideoSubtitleTimeline({ segments: [{ startMs: 0, endMs: 2100, text: "PRIVATE SUBTITLE TEXT" }, { startMs: 2100, endMs: 2200, text: "B" }] }, 2),
+  /segment 1.*startMs=0, endMs=2100, durationMs=2000; intermediate segment overflowMs=100/,
+);
+let timingBoundaryError;
+try {
+  transcription.normalizeVideoSubtitleTimeline({ segments: [{ startMs: 0, endMs: 2100, text: "PRIVATE SUBTITLE TEXT" }, { startMs: 2100, endMs: 2200, text: "B" }] }, 2);
+} catch (error) {
+  timingBoundaryError = error;
+}
+assert.ok(timingBoundaryError, "intermediate overflow must fail");
+assert.ok(!String(timingBoundaryError).includes("PRIVATE SUBTITLE TEXT"), "timing diagnostics must not include subtitle text");
+assert.throws(
+  () => transcription.normalizeVideoSubtitleTimeline({ segments: [{ startMs: 0, endMs: 3001, text: "A" }] }, 2),
+  /segment 1.*overflowMs=1001 exceeds toleranceMs=1000/,
+);
+assert.throws(
+  () => transcription.normalizeVideoSubtitleTimeline({ segments: [{ startMs: 2000, endMs: 2100, text: "A" }] }, 2),
+  /segment 1.*startMs=2000, endMs=2100, durationMs=2000; final segment start is outside duration/,
+);
 assert.throws(() => transcription.normalizeVideoSubtitleTimeline({ segments: [{ startMs: 0, endMs: 1000, text: "" }] }, 2), /empty/);
+assert.throws(() => transcription.normalizeVideoSubtitleTimeline({ segments: [{ startMs: 0, endMs: 1000, text: "A".repeat(501) }] }, 2), /too long/);
 
 const videoSubtitles = loadTsModule("src/lib/canvas/video-subtitles.ts", {
   "../config": config,
@@ -130,13 +175,16 @@ const videoSubtitles = loadTsModule("src/lib/canvas/video-subtitles.ts", {
   "../database": {},
   "../runtime-media-materializer": {},
   "../runtime-media-storage": {},
-  "../video-transcription": { CANVAS_SUBTITLE_TIMELINE_PROTOCOL_VERSION: 1 },
+  "../video-transcription": { CANVAS_SUBTITLE_TIMELINE_PROTOCOL_VERSION: 2 },
   "./subtitle-fonts": {},
   "./subtitle-style": styleModule,
   "./media-tools": { CanvasMediaNeedsConfigError: class extends Error {} },
   "./types": {},
 });
-assert.ok(!read("src/lib/canvas/video-subtitles.ts").includes('"-shortest"'), "subtitle encoding must preserve the source video duration when audio ends first");
+const videoSubtitlesSource = read("src/lib/canvas/video-subtitles.ts");
+assert.ok(!videoSubtitlesSource.includes('"-shortest"'), "subtitle encoding must preserve the source video duration when audio ends first");
+assert.match(videoSubtitlesSource, /const promptSha256 = sha256\(appConfig\.arkVideoSubtitlePrompt\)/, "cache prompt hash must continue using the configured base prompt");
+assert.match(videoSubtitlesSource, /const cacheId = sha256\([\s\S]*?protocolVersion: CANVAS_SUBTITLE_TIMELINE_PROTOCOL_VERSION/, "timeline protocol version must participate in cache identity");
 const ass = videoSubtitles.buildCanvasSubtitleAss({
   segments: timeline,
   style: { ...defaultStyle, fontFamily: "Arial", backgroundEnabled: true, maxCharsPerLine: 4 },

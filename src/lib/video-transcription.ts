@@ -13,7 +13,9 @@ type TranscribeVideoContentInput = {
   sourceItemId?: string;
 };
 
-export const CANVAS_SUBTITLE_TIMELINE_PROTOCOL_VERSION = 1;
+export const CANVAS_SUBTITLE_TIMELINE_PROTOCOL_VERSION = 2;
+
+const CANVAS_SUBTITLE_FINAL_END_OVERFLOW_TOLERANCE_MS = 1_000;
 
 type TranscribeVideoSubtitleInput = TranscribeVideoContentInput & {
   durationSeconds: number;
@@ -101,7 +103,9 @@ export async function transcribeVideoSubtitleTimeline(input: TranscribeVideoSubt
   try {
     extractedAudio = await extractAudioMp3FromVideo(input.videoPath, input, startedAt);
     const fileId = await uploadAudioFileToArk(extractedAudio.audioPath, extractedAudio.audioBytes, input, startedAt);
-    const output = await callArkResponsesForAudioOutput(fileId, appConfig.arkVideoSubtitleModel, appConfig.arkVideoSubtitlePrompt);
+    const durationMs = Math.round(input.durationSeconds * 1000);
+    const requestPrompt = buildVideoSubtitlePrompt(appConfig.arkVideoSubtitlePrompt, durationMs);
+    const output = await callArkResponsesForAudioOutput(fileId, appConfig.arkVideoSubtitleModel, requestPrompt);
     const segments = normalizeVideoSubtitleTimeline(output, input.durationSeconds);
     await recordExecutionLog({
       scope: "video/subtitles",
@@ -127,6 +131,10 @@ export async function transcribeVideoSubtitleTimeline(input: TranscribeVideoSubt
   }
 }
 
+export function buildVideoSubtitlePrompt(basePrompt: string, durationMs: number) {
+  return `${basePrompt}\n\nThe exact media duration upper bound is durationMs=${durationMs}. Every segment must satisfy startMs < ${durationMs} and endMs <= ${durationMs}. Do not return timing beyond this bound.`;
+}
+
 export function normalizeVideoSubtitleTimeline(value: string | unknown, durationSeconds: number): CanvasSubtitleSegment[] {
   const parsed = typeof value === "string" ? parseJsonObject(value) : value;
   if (!parsed || typeof parsed !== "object" || Array.isArray(parsed)) throw new Error("Ark subtitle response must be a JSON object.");
@@ -138,16 +146,52 @@ export function normalizeVideoSubtitleTimeline(value: string | unknown, duration
     if (!raw || typeof raw !== "object" || Array.isArray(raw)) throw new Error(`Subtitle segment ${index + 1} is invalid.`);
     const segment = raw as { startMs?: unknown; endMs?: unknown; text?: unknown };
     const startMs = Number(segment.startMs);
-    const endMs = Number(segment.endMs);
+    const rawEndMs = Number(segment.endMs);
     const text = typeof segment.text === "string" ? segment.text.replace(/\s+/g, " ").trim() : "";
-    if (!Number.isInteger(startMs) || !Number.isInteger(endMs)) throw new Error(`Subtitle segment ${index + 1} timing must use integer milliseconds.`);
-    if (startMs < 0 || endMs <= startMs || endMs > durationMs) throw new Error(`Subtitle segment ${index + 1} timing is outside the video duration.`);
-    if (index > 0 && startMs < previousEndMs) throw new Error(`Subtitle segment ${index + 1} overlaps or is out of order.`);
+    if (!Number.isInteger(startMs) || !Number.isInteger(rawEndMs)) {
+      throw new Error(`Subtitle segment ${index + 1} timing must use integer milliseconds (startMs=${startMs}, endMs=${rawEndMs}, durationMs=${durationMs}).`);
+    }
+    if (startMs < 0 || rawEndMs <= startMs) {
+      throw subtitleTimingBoundaryError(index, startMs, rawEndMs, durationMs);
+    }
+    let endMs = rawEndMs;
+    if (endMs > durationMs) {
+      const overflowMs = endMs - durationMs;
+      const isFinalSegment = index === rawSegments.length - 1;
+      if (!isFinalSegment) {
+        throw subtitleTimingBoundaryError(index, startMs, endMs, durationMs, `intermediate segment overflowMs=${overflowMs}`);
+      }
+      if (startMs >= durationMs) {
+        throw subtitleTimingBoundaryError(index, startMs, endMs, durationMs, `final segment start is outside duration; overflowMs=${overflowMs}`);
+      }
+      if (overflowMs > CANVAS_SUBTITLE_FINAL_END_OVERFLOW_TOLERANCE_MS) {
+        throw subtitleTimingBoundaryError(
+          index,
+          startMs,
+          endMs,
+          durationMs,
+          `final segment overflowMs=${overflowMs} exceeds toleranceMs=${CANVAS_SUBTITLE_FINAL_END_OVERFLOW_TOLERANCE_MS}`,
+        );
+      }
+      endMs = durationMs;
+    }
+    if (index > 0 && startMs < previousEndMs) {
+      throw new Error(
+        `Subtitle segment ${index + 1} overlaps or is out of order (startMs=${startMs}, endMs=${endMs}, previousEndMs=${previousEndMs}, durationMs=${durationMs}).`,
+      );
+    }
     if (!text) throw new Error(`Subtitle segment ${index + 1} text is empty.`);
     if (text.length > 500) throw new Error(`Subtitle segment ${index + 1} text is too long.`);
     previousEndMs = endMs;
     return { startMs, endMs, text };
   });
+}
+
+function subtitleTimingBoundaryError(index: number, startMs: number, endMs: number, durationMs: number, reason?: string) {
+  const suffix = reason ? `; ${reason}` : "";
+  return new Error(
+    `Subtitle segment ${index + 1} timing is outside the video duration (startMs=${startMs}, endMs=${endMs}, durationMs=${durationMs}${suffix}).`,
+  );
 }
 
 export function mergeTranscriptIntoContentText(contentText: string | undefined, transcriptText: string | undefined) {
