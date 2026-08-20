@@ -4,18 +4,19 @@ Last updated: 2026-08-20
 
 ## One-Line Status
 
-Canvas scheduler image search uses debounced 24-item thumbnail pages, is committed and fully prewarmed, and passes the complete offline baseline; only the clean port-3001 candidate refresh remains.
+Canvas scheduler image search uses debounced 24-item thumbnail pages, is committed, fully prewarmed, and active on the clean versioned port-3001 candidate after passing the complete offline baseline.
 
 ## Current Focus
 
 - Scheduler keyword drafts commit after 350 ms or Enter; pending searches retain and disable the old grid, and explicit 24-item paging prevents automatic original-image fan-out.
 - Authenticated 240x144 WebP thumbnails use a SHA-keyed atomic local cache, same-image deduplication, and a four-slot pool; previews and frozen tasks retain originals.
 - Commit `5c24d4f` contains the feature. All 437 assets prewarmed successfully into 435 SHA-deduplicated WebP files (about 1.94 MB versus 455.64 MB of originals), and a second run skipped all 437 as valid cache hits.
+- The final clean candidate serves `/canvas` on port 3001 with exact runtime identity, authenticated thumbnail boundaries, and desktop/390px mocked browser regression passing.
 - Focused domain/browser checks and the full offline baseline pass. Existing unrelated dirty changes in `src/lib/canvas/executors.ts` and `canvas_workflows_check.mjs` remain outside this task.
 
 ## Next Entry
 
-Commit the CommonJS-compatible prewarm entry fix, then run `npm run local` and verify `http://127.0.0.1:3001/canvas`.
+Use `http://127.0.0.1:3001/canvas` for operator verification; no production deployment was performed.
 
 ## Recent Verification
 
