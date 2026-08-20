@@ -1193,9 +1193,9 @@ const imageDropHandler = page.slice(page.indexOf("function handleCanvasMediaDrag
 requireText(imageDropHandler, [
   "dataTransferHasImageFile(event.dataTransfer)",
   "dataTransferImageFiles(event.dataTransfer)",
-  'event.dataTransfer.dropEffect = "copy"',
   "dataTransferHasVideoFile(event.dataTransfer)",
   "dataTransferVideoFiles(event.dataTransfer)",
+  'event.dataTransfer.dropEffect = "copy"',
   "reactFlowRef.current?.screenToFlowPosition({ x: event.clientX, y: event.clientY })",
   "canvasImageDropTargetId(event.target, nodes)",
   "importImageFiles(files, targetNodeId, position)",

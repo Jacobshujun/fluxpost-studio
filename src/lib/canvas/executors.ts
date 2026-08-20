@@ -17,8 +17,8 @@ import { canvasSourceVideoSnapshotFromConfig, isCanvasSourceVideoSnapshotCurrent
 import { canvasSubtitleStyleFromConfig } from "./subtitle-style";
 import type { CanvasArtifact, CanvasMediaReference, CanvasNode, CanvasNodeRun } from "./types";
 import { addCanvasVideoSubtitles } from "./video-subtitles";
-
 import { selectedCanvasVideo } from "./video-loader";
+
 export class CanvasNeedsConfigError extends Error {
   constructor(message: string) {
     super(message);
@@ -55,8 +55,8 @@ const executors: Record<CanvasNode["type"], CanvasNodeExecutor> = {
   "input.text": executeLiteralNode,
   "input.images": executeLiteralNode,
   "input.videos": executeLiteralNode,
-  "input.source-video": executeLiteralNode,
   "input.video-loader": executeLiteralNode,
+  "input.source-video": executeLiteralNode,
   "input.content-pool": executeLiteralNode,
   "input.library-images": executeLiteralNode,
   "input.copy-library": executeLiteralNode,
