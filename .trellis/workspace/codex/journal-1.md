@@ -1458,3 +1458,36 @@ Committed primary-worktree A/B Next build slots, activated both managed slots on
 ### Next Steps
 
 - None - task complete
+
+
+## Session 44: Canvas local subtitle alignment
+
+**Date**: 2026-08-20
+**Task**: Canvas local subtitle alignment
+**Branch**: `main`
+
+### Summary
+
+Replaced Canvas Ark-estimated subtitle timing with local Faster Whisper v3 word timestamps, normalized rotation/display dimensions and stream origins, added actual-video ratio-aware preview, and verified real/local/browser/offline flows.
+
+### Main Changes
+
+(Add details)
+
+### Git Commits
+
+| Hash | Message |
+|------|---------|
+| `6756f44` | (see git log) |
+
+### Testing
+
+- [OK] (Add test results)
+
+### Status
+
+[OK] **Completed**
+
+### Next Steps
+
+- None - task complete

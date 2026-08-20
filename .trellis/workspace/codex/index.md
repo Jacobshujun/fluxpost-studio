@@ -8,7 +8,7 @@
 
 <!-- @@@auto:current-status -->
 - **Active File**: `journal-1.md`
-- **Total Sessions**: 43
+- **Total Sessions**: 44
 - **Last Active**: 2026-08-20
 <!-- @@@/auto:current-status -->
 
@@ -19,7 +19,7 @@
 <!-- @@@auto:active-documents -->
 | File | Lines | Status |
 |------|-------|--------|
-| `journal-1.md` | ~1460 | Active |
+| `journal-1.md` | ~1493 | Active |
 <!-- @@@/auto:active-documents -->
 
 ---
@@ -29,6 +29,7 @@
 <!-- @@@auto:session-history -->
 | # | Date | Title | Commits | Branch |
 |---|------|-------|---------|--------|
+| 44 | 2026-08-20 | Canvas local subtitle alignment | `6756f44` | `main` |
 | 43 | 2026-08-20 | Local candidate build-slot isolation | `0909776`, `8c760e7` | `main` |
 | 42 | 2026-08-20 | Fix Canvas subtitle end boundary | `8383c1a`, `c9bf779` | `main` |
 | 41 | 2026-08-20 | Optimize Canvas scheduler image search | `5c24d4f`, `c6d1247` | `main` |
