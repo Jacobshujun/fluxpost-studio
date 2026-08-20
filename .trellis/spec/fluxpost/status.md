@@ -10,7 +10,7 @@ The Canvas local video-loader queue is implemented, verified, and served by the 
 
 - `input.video-loader@1` stores up to 200 ordered MP4/MOV/WebM snapshots, ordinary runs emit only the current video, and V2 scheduling freezes one video per task.
 - Authenticated raw uploads stream/hash/probe up to 512 MB and persist through the runtime-media boundary; mocked browser checks cover desktop queue flows and 390px Inspector overflow.
-- Port 3001 serves clean candidate `aa83176dcebafd0e1ef07fae581ab8d9e60df464`.
+- Port 3001 serves the current clean committed candidate.
 
 ## Next Entry
 
