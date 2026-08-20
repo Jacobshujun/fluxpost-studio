@@ -374,7 +374,7 @@
       ],
       "evidence": [
         "2026-08-17 exact-SHA local/VPS candidate, deployment, identity, health, volumes, rollback, and final parity passed",
-        "2026-08-20 primary-worktree A/B build-slot isolation, clean-tree ordering, SHA/state/rollback contracts, both slot builds, and the complete offline baseline passed while the prior port-3001 candidate remained available"
+        "2026-08-20 primary-worktree A/B build-slot isolation, complete offline baseline, slot-A/slot-B activation, and controlled failed-startup restoration passed at clean SHA 0909776383c05eab37a2f66a0b2443dde693e2da"
       ],
       "notes": "Keep ready_for_review for operator observation; code identity and environment cleanup are complete, while runtime data and configuration remain intentionally environment-specific."
     },

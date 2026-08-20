@@ -45,6 +45,7 @@ Do not deploy a dirty worktree, branch name, abbreviated SHA, local runtime rows
 
 ## Recent Verification
 
+- 2026-08-20: Clean committed SHA `0909776383c05eab37a2f66a0b2443dde693e2da` activated on both managed slots; a controlled inactive-slot missing-`BUILD_ID` failure restored the prior slot, identity, state marker, and full HTTP smoke before final healthy activation on `.next-local-b`.
 - 2026-08-20: Local A/B build-slot allow-list, primary-worktree/clean-tree ordering, SHA markers, atomic state and rollback contracts, both real slot builds without TypeScript config churn, lint, TypeScript, isolated HTTP/SQLite smoke, and the complete offline baseline passed while port 3001 remained on its prior candidate.
 - 2026-08-20: Canvas scheduler search/thumbnail checks covered 350 ms debounce, stale 24-item grids, explicit paging, ID-only select-all, original previews, 240x144 WebP cache/auth/concurrency/atomic/prewarm contracts, mocked Chromium 1440x960/390x844, and the full offline baseline without external writes.
 - 2026-08-20: Explicit local thumbnail prewarm processed 437 assets with zero failures into 435 SHA-deduplicated files (1,938,318 bytes); the second run generated zero and skipped all 437 cached assets.

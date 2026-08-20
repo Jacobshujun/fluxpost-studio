@@ -26,8 +26,8 @@ Keep the currently usable application on port 3001 stable while new features and
 
 - [x] AC1: `npm run local` selects the inactive local build slot and builds into it without changing the active slot.
 - [x] AC2: A failed build leaves the current port-3001 listener untouched.
-- [ ] AC3: A successful build replaces port 3001 with the clean committed `HEAD`, reports candidate identity, and records the active slot as ignored local runtime state. Pending post-commit activation.
-- [ ] AC4: A failed startup or health check restores the prior slot and prior runtime identity when a prior managed slot exists.
+- [x] AC3: A successful build replaces port 3001 with the clean committed `HEAD`, reports candidate identity, and records the active slot as ignored local runtime state.
+- [x] AC4: A failed startup or health check restores the prior slot and prior runtime identity when a prior managed slot exists.
 - [x] AC5: The launcher rejects dirty or non-primary worktrees before build or listener replacement.
 - [x] AC6: Default builds and production standalone builds retain their existing output behavior when no local slot is selected.
 - [x] AC7: Focused runtime checks, type-check, lint, production build, and the complete offline baseline pass without external provider calls.
