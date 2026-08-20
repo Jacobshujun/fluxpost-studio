@@ -67,7 +67,7 @@ assertContains(feishu, /function sanitizeCliText\(value: string\)[\s\S]*--base-t
 assertContains(feishu, /Feishu attachment upload incomplete/, "Incomplete attachment uploads must be logged explicitly.");
 
 assertContains(route, /enqueueFeishuPublishJob/, "Manual publish route must enqueue Feishu publish jobs.");
-assertContains(simpleRuns, /enqueueFeishuPublishJob\(approvedPosts/, "Simple-run publish must enqueue Feishu publish jobs.");
+assertContains(simpleRuns, /enqueueFeishuPublishJob\(persistedApprovedPosts/, "Simple-run publish must enqueue normalized persisted posts.");
 assertContains(queue, /feishuStateByPostId/, "Feishu queue worker must persist returned Feishu post states.");
 assertContains(queue, /publishStatus === "attachment_failed"/, "Feishu queue worker must reflect attachment_failed in simple-run publish state.");
 assertContains(queue, /publishStatus === "record_failed"/, "Feishu queue worker must reflect record_failed in simple-run publish state.");

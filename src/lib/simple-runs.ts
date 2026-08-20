@@ -723,9 +723,9 @@ async function runSimpleRunWorkflow(
     }));
     await assertSimpleRunNotForceTerminated(run.id);
     const access = simpleRunAccessActor(normalizedInput);
-    const sourceStatusWarnings = await persistApprovedPostsForSimplePublish(approvedPosts, access, run.id);
+    const { posts: persistedApprovedPosts, sourceStatusWarnings } = await persistApprovedPostsForSimplePublish(approvedPosts, access, run.id);
 
-    const publishJob = await enqueueFeishuPublishJob(approvedPosts, {
+    const publishJob = await enqueueFeishuPublishJob(persistedApprovedPosts, {
       source: "simple",
       sourceRunId: run.id,
       ownerUserId: run.input.ownerUserId || "local",
@@ -746,7 +746,7 @@ async function runSimpleRunWorkflow(
       ),
       publish: {
         status: "queued",
-        postCount: approvedPosts.length,
+        postCount: persistedApprovedPosts.length,
         jobId: publishJob.id,
         message: `Feishu publish job ${publishJob.id} queued. Collection and generation workers are free while Feishu CLI writes run in order.`,
       },
@@ -1027,9 +1027,9 @@ async function produceSimpleSourceDraft(
     status: "draft",
     updatedAt: new Date().toISOString(),
   }, access, source);
-  await savePost(post, access);
-  await saveGeneratedPost(post, access);
-  return { post, publishReady: imageResult.status !== "needs_review" };
+  const savedPost = await saveGeneratedPost(post, access);
+  await savePost(savedPost, access, savedPost);
+  return { post: savedPost, publishReady: imageResult.status !== "needs_review" };
 }
 
 async function updateDongchediLinkResult(run: SimpleRun, url: string, patch: Partial<SimpleRunLinkResult>) {
@@ -1273,10 +1273,10 @@ async function runSimpleViralWorkflow(
       access,
       source.item,
     );
-    completedPost = post;
-    await savePost(post, access);
-    await saveGeneratedPost(post, access);
-    run = await addPostResult(run, post);
+    const savedPost = await saveGeneratedPost(post, access);
+    await savePost(savedPost, access, savedPost);
+    completedPost = savedPost;
+    run = await addPostResult(run, savedPost);
     run = await saveRun({
       ...run,
       viralResult: {
@@ -1358,8 +1358,8 @@ async function runSimpleViralWorkflow(
         updatedAt: new Date().toISOString(),
       },
     ];
-    await persistApprovedPostsForSimplePublish(approvedPosts, access, run.id);
-    const publishJob = await enqueueFeishuPublishJob(approvedPosts, {
+    const { posts: persistedApprovedPosts } = await persistApprovedPostsForSimplePublish(approvedPosts, access, run.id);
+    const publishJob = await enqueueFeishuPublishJob(persistedApprovedPosts, {
       source: "simple",
       sourceRunId: run.id,
       ownerUserId: run.input.ownerUserId || "local",
@@ -1499,10 +1499,10 @@ async function runSimpleOriginalWorkflow(
       },
       access,
     );
-    completedPost = post;
-    await savePost(post, access);
-    await saveGeneratedPost(post, access);
-    run = await addPostResult(run, post);
+    const savedPost = await saveGeneratedPost(post, access);
+    await savePost(savedPost, access, savedPost);
+    completedPost = savedPost;
+    run = await addPostResult(run, savedPost);
     run = await saveRun({
       ...run,
       originalResult: {
@@ -1576,8 +1576,8 @@ async function runSimpleOriginalWorkflow(
         updatedAt: new Date().toISOString(),
       },
     ];
-    await persistApprovedPostsForSimplePublish(approvedPosts, access, run.id);
-    const publishJob = await enqueueFeishuPublishJob(approvedPosts, {
+    const { posts: persistedApprovedPosts } = await persistApprovedPostsForSimplePublish(approvedPosts, access, run.id);
+    const publishJob = await enqueueFeishuPublishJob(persistedApprovedPosts, {
       source: "simple",
       sourceRunId: run.id,
       ownerUserId: run.input.ownerUserId || "local",
@@ -2653,31 +2653,33 @@ async function persistApprovedPostsForSimplePublish(
   runId: string,
 ) {
   const sourceStatusWarnings = new Map<string, string>();
+  const persistedPosts: GeneratedPost[] = [];
   for (const post of posts) {
-    await persistApprovedPostForSimplePublish(post, access);
-    const warning = await syncSimpleSourceStatus(post, access, runId, "approved");
-    if (warning) sourceStatusWarnings.set(post.id, warning);
+    const persistedPost = await persistApprovedPostForSimplePublish(post, access);
+    persistedPosts.push(persistedPost);
+    const warning = await syncSimpleSourceStatus(persistedPost, access, runId, "approved");
+    if (warning) sourceStatusWarnings.set(persistedPost.id, warning);
   }
-  return sourceStatusWarnings;
+  return { posts: persistedPosts, sourceStatusWarnings };
 }
 
 async function persistApprovedPostForSimplePublish(post: GeneratedPost, access: WorkspaceAccessActor | undefined) {
-  await withSimpleRunTransientDatabaseRetry(async () => {
-    await savePost(post, access);
-    await saveGeneratedPost(post, access);
+  return withSimpleRunTransientDatabaseRetry(async () => {
+    const savedPost = await saveGeneratedPost(post, access);
+    return savePost(savedPost, access, savedPost);
   });
 }
 
-async function withSimpleRunTransientDatabaseRetry(operation: () => Promise<void>) {
+async function withSimpleRunTransientDatabaseRetry<T>(operation: () => Promise<T>): Promise<T> {
   for (let attempt = 1; attempt <= simpleRunPublishPersistMaxAttempts; attempt += 1) {
     try {
-      await operation();
-      return;
+      return await operation();
     } catch (error) {
       if (attempt >= simpleRunPublishPersistMaxAttempts || !isSimpleRunTransientDatabaseError(error)) throw error;
       await delaySimpleRunPublishPersistRetry(attempt);
     }
   }
+  throw new Error("Simple-run persistence retry exhausted.");
 }
 
 function isSimpleRunTransientDatabaseError(error: unknown) {

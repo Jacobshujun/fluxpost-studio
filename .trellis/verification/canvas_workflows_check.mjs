@@ -801,6 +801,7 @@ const loadVisionModule = (endpoint, apiKey, requests) => loadTsModule("src/lib/o
   },
   "./concurrency": { runWithConcurrencyPool: async (pool, task) => { assert.equal(pool, "gpt"); return task(); } },
   "./creation-controls": {},
+  "./finished-body-policy": loadTsModule("src/lib/finished-body-policy.ts"),
   "./mock-data": {},
   "./model-image-input": { toModelImageUrl: async (url) => `prepared:${url}` },
   "./source-video-reference": {},

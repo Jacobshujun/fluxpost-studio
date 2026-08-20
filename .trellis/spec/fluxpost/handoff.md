@@ -6,16 +6,15 @@ This file is an on-demand history library. Do not read it during default startup
 
 ## 最近一条
 <!-- TRELLIS-LATEST-START -->
-2026-08-17 Dongchedi category-page rewrite is implemented, verified, and committed locally.
+2026-08-20 global finished-body limit is implemented and the complete offline baseline is green; task is ready for its scoped commit.
 
 Completed:
-- Added current-page-only 1-30 discovery, exact-host HTTP guards, bounded retries/time, AES-GCM Cookie envelopes, and terminal cleanup.
-- Added per-article end-to-end serial safety/tag/rewrite/image/draft flow with partial results, pause/resume/Retry-After, progress, and forced no-Feishu behavior.
-- Full offline baseline and unauthenticated port-3001 desktop/mobile smoke passed; no external provider calls ran.
+- Added shared 800-target/1000-max Unicode policy, one AI repair, deterministic fallback, versioned history promotion, UI counters/clamps, Canvas composition, and Feishu preflight.
+- Focused policy/persistence/review/copy/Feishu/simple checks and the complete baseline pass without live services.
 
 Next:
-- The scoped local commits are complete; push and deployment remain separate approval gates.
-- Authenticated workbench interaction and live authorized Dongchedi/model/image behavior remain manual gates. Do not push or deploy without separate approval.
+- Stage and commit only the global finished-body task files; the separate Canvas video-loader work is already committed.
+- Do not push or deploy without separate approval.
 <!-- TRELLIS-LATEST-END -->
 
 ## 历史记录

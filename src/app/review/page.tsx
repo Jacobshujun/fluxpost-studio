@@ -33,6 +33,7 @@ import {
 } from "lucide-react";
 import { toRemoteImagePreviewSrc } from "@/lib/media-preview";
 import { feishuPublishModeIncludesMedia, feishuPublishModeOptions, formatFeishuPublishMode } from "@/lib/feishu-publish-mode";
+import { FINISHED_BODY_MAX_CHARS, clampFinishedBodyInput, countFinishedBodyChars } from "@/lib/finished-body-policy";
 import { getStoredTheme, setStoredTheme, subscribeTheme, type ThemeMode } from "@/lib/theme";
 import type { FeishuPostPublishState, FeishuPublishJob, FeishuPublishMode, GeneratedPost, Platform, XhsCard } from "@/lib/types";
 
@@ -948,8 +949,11 @@ export default function ReviewPage() {
                       <input className="field mt-2 text-base font-black" value={draft.title} onChange={(event) => setDraft({ ...draft, title: event.target.value })} />
                     </label>
                     <label>
-                      <FieldLabel label="正文" />
-                      <textarea className="field review-body-editor mt-2" value={draft.body} onChange={(event) => setDraft({ ...draft, body: event.target.value })} />
+                      <span className="flex items-center justify-between gap-3">
+                        <FieldLabel label="正文" />
+                        <span className="text-[11px] text-[var(--text-muted)]">{countFinishedBodyChars(draft.body)}/{FINISHED_BODY_MAX_CHARS}</span>
+                      </span>
+                      <textarea className="field review-body-editor mt-2" value={draft.body} onChange={(event) => setDraft({ ...draft, body: clampFinishedBodyInput(event.target.value) })} />
                     </label>
                     <label>
                       <FieldLabel label={`写入飞书${feishuVehicleFieldName}`} />

@@ -32,7 +32,7 @@ has(simple,/if \(imitateImages\)[\s\S]*analyzeViralImages\(source\.images\)[\s\S
 has(simple,/Viral image imitation is disabled; generating copy only/,'viral text-only path missing');
 has(simple,/Only text was generated; image generation is disabled for this viral run/,'viral disabled image-generation path should still produce text');
 has(simple,/viralImitateImages:\s*sourceMode === "viral" \? input\.viralImitateImages === true : undefined/,'viralImitateImages normalization missing');
-has(simple,/enqueueFeishuPublishJob\(approvedPosts/,'Feishu queue reuse missing');
+has(simple,/enqueueFeishuPublishJob\(persistedApprovedPosts/,'Normalized persisted posts must reuse the Feishu queue');
 for(const n of ['analyzeViralSource','analyzeViralImages','indexMaterialImages','pairViralImagesWithMaterials','buildViralGeneratedPost'])has(viral,new RegExp('export (async )?function '+n),n+' missing');
 has(viral,/imitateImages\?:\s*boolean/,'viral generated post image imitation option missing');
 has(viral,/input\.imitateImages === false \? undefined : imageTasks/,'text-only viral generation must not pass image tasks');

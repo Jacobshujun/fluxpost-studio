@@ -2,6 +2,14 @@ import { compactError, recordExecutionLog } from "./activity-log";
 import { appConfig, openaiTextUrl } from "./config";
 import { runWithConcurrencyPool } from "./concurrency";
 import { formatImageTasksForPrompt } from "./creation-controls";
+import {
+  FINISHED_BODY_MAX_CHARS,
+  FINISHED_BODY_POLICY_VERSION,
+  FINISHED_BODY_TARGET_CHARS,
+  FINISHED_BODY_TARGET_INSTRUCTION,
+  countFinishedBodyChars,
+  truncateFinishedBody,
+} from "./finished-body-policy";
 import { makeDemoPost } from "./mock-data";
 import { toModelImageUrl } from "./model-image-input";
 import { resolveSourceVideoUrls } from "./source-video-reference";
@@ -59,6 +67,8 @@ export async function generatePost(input: RewriteInput): Promise<GeneratedPost> 
     const demoPost = makeDemoPost(input.source, input.materialPaths);
     return {
       ...demoPost,
+      body: truncateFinishedBody(demoPost.body),
+      bodyPolicyVersion: FINISHED_BODY_POLICY_VERSION,
       videoUrls: input.includeSourceVideo === true ? resolveSourceVideoUrls(source) : [],
       title: clampGeneratedTitleMax(demoPost.title),
       imageTasks: input.imageTasks,
@@ -81,6 +91,7 @@ export async function generatePost(input: RewriteInput): Promise<GeneratedPost> 
     "输出严格 JSON，字段为 title, body, imagePrompt, aiNotes。",
     titleStyleInstruction,
     "body 用中文，适合社交媒体图文发布，保留段落换行。",
+    FINISHED_BODY_TARGET_INSTRUCTION,
     `平台: ${input.source.platform}`,
     `原标题: ${input.source.title || ""}`,
     `原内容: ${input.source.contentText || ""}`,
@@ -89,7 +100,10 @@ export async function generatePost(input: RewriteInput): Promise<GeneratedPost> 
   ].join("\n");
 
   const json = await callOpenAIForJson(prompt);
-  const body = stringFromJson(json.body, "");
+  const body = await finalizeAiFinishedBody(stringFromJson(json.body, ""), {
+    context: `平台: ${input.source.platform}\n原标题: ${input.source.title || ""}`,
+    logLabel: "生成正文压缩",
+  });
   const rawTitle = stringFromJson(json.title, "未命名图文草稿");
   const title = await repairGeneratedTitleIfNeeded(rawTitle, input, body, titleProfile);
 
@@ -99,6 +113,7 @@ export async function generatePost(input: RewriteInput): Promise<GeneratedPost> 
     platform: input.source.platform,
     title,
     body,
+    bodyPolicyVersion: FINISHED_BODY_POLICY_VERSION,
     imagePrompt: stringFromJson(json.imagePrompt, ""),
     imageUrls: [],
     videoUrls: input.includeSourceVideo === true ? resolveSourceVideoUrls(input.source) : [],
@@ -113,10 +128,12 @@ export async function generatePost(input: RewriteInput): Promise<GeneratedPost> 
 
 export async function editPostWithPrompt(input: ReviewEditInput): Promise<GeneratedPost> {
   if (!appConfig.openaiApiKey) {
+    const body = truncateFinishedBody(`${input.post.body}\n\n修改备注：${input.instruction}`);
     return {
       ...input.post,
       title: clampGeneratedTitleMax(input.post.title),
-      body: `${input.post.body}\n\n修改备注：${input.instruction}`,
+      body,
+      bodyPolicyVersion: FINISHED_BODY_POLICY_VERSION,
       aiNotes: [...input.post.aiNotes, "当前为未配置 OpenAI API Key 时的本地编辑回显。"],
       status: "editing",
       updatedAt: new Date().toISOString(),
@@ -128,6 +145,7 @@ export async function editPostWithPrompt(input: ReviewEditInput): Promise<Genera
     "你是社交媒体图文审稿编辑。请根据用户指令修改草稿，保持可发布状态。",
     "输出严格 JSON，字段为 title, body, imagePrompt, aiNotes。",
     formatTitleStyleInstruction(titleProfile),
+    FINISHED_BODY_TARGET_INSTRUCTION,
     `当前标题: ${input.post.title}`,
     `当前正文: ${input.post.body}`,
     `当前图片提示词: ${input.post.imagePrompt}`,
@@ -136,10 +154,15 @@ export async function editPostWithPrompt(input: ReviewEditInput): Promise<Genera
 
   const json = await callOpenAIForJson(prompt);
 
+  const body = await finalizeAiFinishedBody(stringFromJson(json.body, input.post.body), {
+    context: `当前标题: ${input.post.title}\n用户指令: ${input.instruction}`,
+    logLabel: "审查正文压缩",
+  });
   return {
     ...input.post,
     title: clampGeneratedTitleMax(stringFromJson(json.title, input.post.title)),
-    body: stringFromJson(json.body, input.post.body),
+    body,
+    bodyPolicyVersion: FINISHED_BODY_POLICY_VERSION,
     imagePrompt: stringFromJson(json.imagePrompt, input.post.imagePrompt),
     aiNotes: arrayOfStrings(json.aiNotes),
     status: "editing",
@@ -165,6 +188,36 @@ export async function callOpenAIForText(prompt: string, options: JsonModelOption
   const text = typeof result.text === "string" ? result.text.trim() : "";
   if (!text) throw new Error("The text model returned an empty response.");
   return text;
+}
+
+export async function finalizeAiFinishedBody(
+  value: string,
+  options: { context?: string; logLabel?: string } = {},
+) {
+  const normalized = value.trim();
+  if (countFinishedBodyChars(normalized) <= FINISHED_BODY_MAX_CHARS) return normalized;
+
+  try {
+    const json = await callOpenAIForJson([
+      "你是社交媒体正文压缩编辑。只压缩正文，不新增事实，不改变车型、参数、结论或立场。",
+      `将正文压缩到约 ${FINISHED_BODY_TARGET_CHARS} 个字符，绝对不得超过 ${FINISHED_BODY_MAX_CHARS} 个字符。`,
+      "保留自然段落和完整句子，只输出严格 JSON，字段为 body。",
+      options.context?.trim() || "",
+      `待压缩正文:\n${normalized}`,
+    ].filter(Boolean).join("\n"), { logLabel: options.logLabel || "正文超限压缩" });
+    const repaired = stringFromJson(json.body, "");
+    if (repaired) return truncateFinishedBody(repaired);
+  } catch (error) {
+    await recordExecutionLog({
+      scope: "openai/text",
+      action: "Finished body repair fallback used",
+      status: "info",
+      message: compactError(error),
+      details: { originalBodyChars: countFinishedBodyChars(normalized) },
+    });
+  }
+
+  return truncateFinishedBody(normalized);
 }
 
 export async function callOpenAIForVisionText(prompt: string, imageUrls: string[], options: JsonModelOptions = {}) {

@@ -1347,6 +1347,29 @@ const segments = await resolveTimeline(ownerVideoModelPromptKey, input);
 return renderAssVideo(segments, validatedStyle);
 ```
 
+## Scenario: Finished Body Character Policy
+
+### 1. Scope / Trigger
+- Applies when a finished `GeneratedPost`/`CopyLibraryEntry` body is created or actually changed; harvested `contentText`, prompts, materials, and generic Canvas text remain open.
+
+### 2. Signatures
+- `bodyPolicyVersion?: 1`; shared constants are target `800`, maximum `1000`, version `1`.
+
+### 3. Contracts
+- Count `Array.from(body.trim()).length`. New/governed bodies are versioned and bounded. Unmarked history stays exempt until its body changes. AI gets one compression request at most, then sentence-aware local truncation. Persisted normalized objects must feed runtime snapshots and queues.
+
+### 4. Validation & Error Matrix
+- Governed body over 1000 -> truncate at writes; Feishu `text`/`full` preflight rejects corrupt stored rows. Unmarked history and `media` publish -> exempt. Unchanged history plus title/media/status update -> preserve body and marker absence.
+
+### 5. Good/Base/Bad Cases
+- Good: edited history becomes version 1; base: title-only history remains byte-for-byte unchanged; bad: truncate harvested source or enqueue the pre-normalized object.
+
+### 6. Tests Required
+- `finished_body_policy_check.mjs` covers Unicode, sentence/hard bounds, mocked first Prompt/one repair/failure; persistence, review, copy-library, Canvas, and Feishu checks cover boundary reuse and exemptions without live services.
+
+### 7. Wrong vs Correct
+- Wrong: `body.slice(0, 1000)` or rewriting all history. Correct: use the shared policy and the object returned by persistence.
+
 ## Trellis Rules
 
 - `.trellis/` is the only active persistent AI collaboration system. `.trellis/spec/fluxpost/` is the FluxPost project-memory layer inside that system.

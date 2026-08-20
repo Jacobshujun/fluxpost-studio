@@ -22,7 +22,8 @@ import {
 import { getGeneratedPost, saveGeneratedPost } from "./generated-posts";
 import { generateCanvasGptImages } from "./image-generation";
 import { generateCoverAnchoredCards, isOriginalCardProviderPending } from "./original-card-orchestrator";
-import { callOpenAIForJson, callOpenAIForVisionText } from "./openai";
+import { callOpenAIForJson, callOpenAIForVisionText, finalizeAiFinishedBody } from "./openai";
+import { FINISHED_BODY_POLICY_VERSION, applyFinishedBodyPolicy } from "./finished-body-policy";
 import { normalizeContentTags } from "./source-tagging";
 import { clampGeneratedTitleMax } from "./title-guard";
 import { accessActorFromOwner } from "./workspace-ownership";
@@ -377,7 +378,15 @@ async function executeOriginalBatchItem(queueItem: OriginalBatchQueueItem) {
     writing = await callOpenAIForJson(buildOriginalWritingPrompt({ ...item.input, plan: item.plan! }), {
       logLabel: `原创批次文案 ${item.ordinal + 1}`,
     });
-    if (!stringValue(writing.body, "")) throw new Error("The writing model returned an empty body.");
+    const body = stringValue(writing.body, "");
+    if (!body) throw new Error("The writing model returned an empty body.");
+    writing = {
+      ...writing,
+      body: await finalizeAiFinishedBody(body, {
+        context: `原创批次选题: ${item.input.topic}`,
+        logLabel: `原创批次正文压缩 ${item.ordinal + 1}`,
+      }),
+    };
     item = await saveOriginalBatchItemToDb({ ...item, writing, updatedAt: new Date().toISOString() });
     await assertBatchBoundary(item.batchId);
   }
@@ -412,7 +421,7 @@ async function executeOriginalBatchItem(queueItem: OriginalBatchQueueItem) {
   let post = item.postId ? await getGeneratedPost(item.postId, owner) : undefined;
   if (!post) {
     post = buildGeneratedPost(item, writing, series);
-    await saveGeneratedPost(post);
+    post = await saveGeneratedPost(post);
     item = await saveOriginalBatchItemToDb({ ...item, postId: post.id, updatedAt: new Date().toISOString() });
   }
 
@@ -497,6 +506,7 @@ async function persistSeries(item: OriginalBatchItem, series: XhsCardSeries, pos
 
 function buildGeneratedPost(item: OriginalBatchItem, writing: Record<string, unknown>, series: XhsCardSeries): GeneratedPost {
   const now = new Date().toISOString();
+  const finishedBody = applyFinishedBodyPolicy({ body: stringValue(writing.body, ""), bodyPolicyVersion: FINISHED_BODY_POLICY_VERSION });
   return {
     id: `post-original-batch-${item.id}`,
     ownerUserId: item.ownerUserId,
@@ -506,7 +516,7 @@ function buildGeneratedPost(item: OriginalBatchItem, writing: Record<string, unk
     sourceBatchItemId: item.id,
     platform: "original",
     title: clampGeneratedTitleMax(stringValue(writing.title, item.input.topic)),
-    body: stringValue(writing.body, ""),
+    ...finishedBody,
     taskKeyword: item.input.vehicleKeyword || item.input.topic,
     feishuVehicle: item.input.vehicleKeyword || "",
     imagePrompt: series.cards.map((card) => card.prompt).join("\n\n---\n\n"),

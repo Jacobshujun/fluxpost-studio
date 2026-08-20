@@ -17,8 +17,8 @@ const check = read(".trellis/verification/check.mjs");
 
 assertContains(
   simpleRuns,
-  /await savePost\(post,\s*access\);[\s\S]*await saveGeneratedPost\(post,\s*access\);[\s\S]*return \{ post, publishReady:/,
-  "Single-source production must persist both generated-post stores before returning the draft.",
+  /const savedPost = await saveGeneratedPost\(post,\s*access\);[\s\S]*await savePost\(savedPost,\s*access,\s*savedPost\);[\s\S]*return \{ post: savedPost, publishReady:/,
+  "Single-source production must persist and return the same normalized post in both generated-post stores.",
 );
 
 assertContains(
@@ -40,14 +40,20 @@ if (directSourceSyncCalls.length !== 1) {
 
 assertContains(
   simpleRuns,
-  /const sourceStatusWarnings = await persistApprovedPostsForSimplePublish\(approvedPosts,\s*access,\s*run\.id\)/,
-  "Simple publish approval should use the serialized local persistence helper.",
+  /const \{ posts: persistedApprovedPosts, sourceStatusWarnings \} = await persistApprovedPostsForSimplePublish\(approvedPosts,\s*access,\s*run\.id\)[\s\S]*enqueueFeishuPublishJob\(persistedApprovedPosts/,
+  "Simple publish approval should enqueue the normalized posts returned by serialized local persistence.",
 );
 
 assertContains(
   simpleRuns,
-  /async function persistApprovedPostsForSimplePublish[\s\S]*for \(const post of posts\)[\s\S]*await persistApprovedPostForSimplePublish\(post,\s*access\);[\s\S]*await syncSimpleSourceStatus\(post,\s*access,\s*runId,\s*"approved"\)/,
-  "Simple publish approval persistence should process posts sequentially before Feishu enqueue.",
+  /async function persistApprovedPostsForSimplePublish[\s\S]*for \(const post of posts\)[\s\S]*const persistedPost = await persistApprovedPostForSimplePublish\(post,\s*access\);[\s\S]*await syncSimpleSourceStatus\(persistedPost,\s*access,\s*runId,\s*"approved"\)[\s\S]*return \{ posts: persistedPosts, sourceStatusWarnings \}/,
+  "Simple publish approval persistence should process and return normalized posts sequentially before Feishu enqueue.",
+);
+
+assertContains(
+  simpleRuns,
+  /async function persistApprovedPostForSimplePublish[\s\S]*const savedPost = await saveGeneratedPost\(post,\s*access\);[\s\S]*return savePost\(savedPost,\s*access,\s*savedPost\)/,
+  "Simple publish persistence must reuse the generated-post store result in the runtime store.",
 );
 
 if (/Promise\.all\(\s*approvedPosts\.map/.test(simpleRuns)) {

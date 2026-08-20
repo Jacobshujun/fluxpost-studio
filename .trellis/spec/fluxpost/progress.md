@@ -6,14 +6,14 @@ This file is an on-demand history library. Current state belongs in `.trellis/sp
 
 ## 最近一条
 <!-- TRELLIS-LATEST-START -->
-2026-08-17 Dongchedi category batch rewrite:
+2026-08-20 global finished-body limit:
 
 Done:
-- Implemented safe category discovery, strict per-article serial processing, encrypted Cookie handling, pause/resume, partial drafts, workbench controls, and offline regression coverage.
-- Passed lint, TypeScript, build, complete deterministic baseline, isolated HTTP/SQLite, and unauthenticated desktop/mobile smoke without external calls.
+- Implemented Unicode body policy across generation, persistence, review, copy library, Canvas composition, and Feishu publishing compatibility.
+- Related deterministic checks and the complete offline baseline pass; harvested source and unchanged unmarked history remain intact.
 
 Next:
-- Scoped local commits are complete; authenticated/live-provider validation and any push/deployment remain separate gates.
+- Commit the scoped body-policy changes only; push and deployment remain separate approval gates.
 <!-- TRELLIS-LATEST-END -->
 
 ## 历史记录

@@ -581,6 +581,7 @@ export type GeneratedPost = {
   version?: number;
   title: string;
   body: string;
+  bodyPolicyVersion?: 1;
   taskKeyword?: string;
   feishuVehicle?: string;
   platform: Platform;
@@ -1098,6 +1099,7 @@ export type CopyLibraryEntry = {
   visibility: LibraryVisibility;
   title: string;
   body: string;
+  bodyPolicyVersion?: 1;
   tags: string[];
   createdAt: string;
   updatedAt: string;

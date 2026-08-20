@@ -6,6 +6,7 @@ import {
   saveCopyLibraryEntryToDb,
 } from "./database";
 import { compareLibraryText, libraryListSortDirection, normalizeLibraryListSort } from "./library-sort";
+import { applyFinishedBodyPolicy } from "./finished-body-policy";
 import type { CopyLibraryEntry, CopyLibraryEntryView, LibraryListSort, LibraryVisibility } from "./types";
 import { isWorkspaceAdmin, scopeWorkspaceOwner, type WorkspaceAccessActor } from "./workspace-ownership";
 
@@ -51,10 +52,12 @@ export async function getCopyLibraryEntry(account: WorkspaceAccessActor, entryId
 export async function createCopyLibraryEntry(account: WorkspaceAccessActor, input: CopyLibraryInput) {
   const owner = scopeWorkspaceOwner(account);
   const now = new Date().toISOString();
+  const normalized = normalizeCopyLibraryInput(input, true);
   const entry: CopyLibraryEntry = {
     id: `copy-${randomUUID()}`,
     ...owner,
-    ...normalizeCopyLibraryInput(input, true),
+    ...normalized,
+    ...applyFinishedBodyPolicy({ body: normalized.body }),
     createdAt: now,
     updatedAt: now,
   };
@@ -65,8 +68,17 @@ export async function createCopyLibraryEntry(account: WorkspaceAccessActor, inpu
 export async function updateCopyLibraryEntry(account: WorkspaceAccessActor, entryId: string, input: CopyLibraryInput) {
   const current = await requireEditableEntry(account, entryId);
   const patch = normalizeCopyLibraryInput(input, false);
+  if (typeof input.body === "string" && input.body === current.body) delete patch.body;
   if (!Object.keys(patch).length) throw new Error("At least one copy field is required.");
-  const entry: CopyLibraryEntry = { ...current, ...patch, updatedAt: new Date().toISOString() };
+  const finishedBody = patch.body === undefined
+    ? undefined
+    : applyFinishedBodyPolicy({ body: patch.body, bodyPolicyVersion: current.bodyPolicyVersion }, current);
+  const entry: CopyLibraryEntry = {
+    ...current,
+    ...patch,
+    ...(finishedBody || {}),
+    updatedAt: new Date().toISOString(),
+  };
   await saveCopyLibraryEntryToDb(entry);
   return toEntryView(account, entry);
 }

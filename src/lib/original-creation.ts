@@ -1,4 +1,5 @@
-import { callOpenAIForJson } from "./openai";
+import { callOpenAIForJson, finalizeAiFinishedBody } from "./openai";
+import { FINISHED_BODY_POLICY_VERSION, FINISHED_BODY_TARGET_INSTRUCTION } from "./finished-body-policy";
 import { clampGeneratedTitleMax } from "./title-guard";
 import type { ContentTag, GeneratedPost, WorkspacePromptSettings } from "./types";
 import { contentTagOptions } from "./types";
@@ -29,7 +30,10 @@ export async function buildOriginalGeneratedPost(input: {
     logLabel: input.useWebSearch ? "准备联网生成原创图文 Prompt" : "准备生成原创图文 Prompt",
   });
   const imagePrompts = arrayOfStrings(json.imagePrompts).slice(0, maxOriginalImagePrompts);
-  const body = stringFromJson(json.body, "");
+  const body = await finalizeAiFinishedBody(stringFromJson(json.body, ""), {
+    context: `原创主题: ${topic}\n车型或关键词: ${vehicleKeyword}`,
+    logLabel: "原创正文压缩",
+  });
   const title = clampGeneratedTitleMax(stringFromJson(json.title, topic || "原创图文"));
   const now = new Date().toISOString();
 
@@ -42,6 +46,7 @@ export async function buildOriginalGeneratedPost(input: {
       platform: "original",
       title,
       body,
+      bodyPolicyVersion: FINISHED_BODY_POLICY_VERSION,
       taskKeyword: vehicleKeyword,
       feishuVehicle: vehicleKeyword,
       imagePrompt: imagePrompts.join("\n\n"),
@@ -75,6 +80,7 @@ function buildOriginalPrompt(prompt: string, vehicleKeyword: string, settings: W
     `本次写入飞书车型/关键词: ${vehicleKeyword}。除非用户明确要求更换主体，正文、标题和配图规划都要围绕这个车型/关键词展开。`,
     "只输出严格 JSON，字段为 title, body, imagePrompts, contentTags, aiNotes。",
     "title 是社交媒体标题；body 保留自然段换行；imagePrompts 是数组，每一项是一张配图的独立生成提示词。",
+    FINISHED_BODY_TARGET_INSTRUCTION,
     `配图最多 ${maxOriginalImagePrompts} 张；只有正文确实需要视觉解释、场景展示、信息图或情绪封面时才规划配图；不需要配图时返回空数组。`,
     "每个 imagePrompts 项都必须能独立生成图片，写清主体、构图、风格、画幅和禁止事项，不要引用不存在的本地素材。",
     "不要编造不可验证的事实、价格、配置、销量、政策或时间；联网搜索启用时也要把事实写得克制。",

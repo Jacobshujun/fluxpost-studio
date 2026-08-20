@@ -104,12 +104,13 @@ export async function POST(request: Request) {
 
 function resolveReviewSideEffectMode(previousPost: GeneratedPost, savedPost: GeneratedPost, usedAiInstruction: boolean) {
   if (usedAiInstruction) return "await";
+  if (previousPost.body !== savedPost.body) return "await";
   if (previousPost.status !== savedPost.status) return "background";
   return savedPost.status === "approved" || savedPost.status === "published" ? "background" : "skip";
 }
 
 async function syncReviewSideEffects(post: GeneratedPost, account: WorkspaceAccessActor) {
-  await savePost(post, account);
+  await savePost(post, account, post);
   await markSourceRewritten(post.sourceItemId, post, account);
 }
 

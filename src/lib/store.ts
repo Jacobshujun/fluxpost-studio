@@ -7,6 +7,7 @@ import {
   saveRuntimePostToDb,
 } from "./database";
 import { applyWorkspaceOwner, canAccessWorkspaceOwner, filterWorkspaceOwnedRecords, type WorkspaceAccessActor } from "./workspace-ownership";
+import { applyFinishedBodyPolicy } from "./finished-body-policy";
 import type { CrawlJob, GeneratedPost } from "./types";
 
 export async function saveJob(job: CrawlJob, account?: WorkspaceAccessActor) {
@@ -23,8 +24,17 @@ export async function listJobs(account?: WorkspaceAccessActor) {
   return filterWorkspaceOwnedRecords(await listCrawlJobsFromDb(), account);
 }
 
-export async function savePost(post: GeneratedPost, account?: WorkspaceAccessActor) {
-  return saveRuntimePostToDb(applyWorkspaceOwner(post, account, post));
+export async function savePost(
+  post: GeneratedPost,
+  account?: WorkspaceAccessActor,
+  previousPolicyRecord?: GeneratedPost,
+) {
+  const previous = await getRuntimePostFromDb(post.id);
+  const finishedBody = applyFinishedBodyPolicy(post, previous || previousPolicyRecord);
+  return saveRuntimePostToDb({
+    ...applyWorkspaceOwner(post, account, previous || post),
+    ...finishedBody,
+  });
 }
 
 export async function getPost(id: string, account?: WorkspaceAccessActor) {

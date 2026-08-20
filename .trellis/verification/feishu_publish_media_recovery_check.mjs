@@ -35,11 +35,11 @@ const prepareIndex = source.queue.indexOf("prepareFeishuPublishJob(runningJob)")
 const publishIndex = source.queue.indexOf("publishPostsToFeishu(publishablePosts");
 assertEqual(prepareIndex >= 0 && publishIndex > prepareIndex, true, "Recovered URLs must be persisted before Feishu publish starts.");
 assertContains(source.queue, /resolveRuntimeMediaReference\(url\)/, "The queue must reuse shared runtime media reference resolution.");
-assertContains(source.queue, /changedPosts\.length\) await persistRecoveredPostsSerially\(changedPosts\)/, "Recovered generated posts must be persisted.");
+assertContains(source.queue, /changedPosts\.length \? await persistRecoveredPostsSerially\(changedPosts\) : \[\]/, "Recovered generated posts must be persisted and returned.");
 assertContains(
   source.queue,
-  /saveFeishuPublishJobToDb\(\{[\s\S]*posts:\s*repairedPosts[\s\S]*postIds:\s*repairedPosts\.map/,
-  "The running job snapshot must store repaired media references.",
+  /saveFeishuPublishJobToDb\(\{[\s\S]*posts:\s*finalPreparedPosts[\s\S]*postIds:\s*finalPreparedPosts\.map/,
+  "The running job snapshot must store normalized repaired media references.",
 );
 assertContains(source.queue, /isPostFullyPublished/, "Partial publish persistence must decide generated-post status per post.");
 

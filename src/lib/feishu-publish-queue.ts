@@ -16,6 +16,7 @@ import {
   feishuPublishModeIncludesMedia,
   normalizeFeishuPublishMode,
 } from "./feishu-publish-mode";
+import { isFinishedBodyPolicyCompliant } from "./finished-body-policy";
 import { listFeishuVehicleOptions, normalizeFeishuVehicleValue } from "./feishu-field-options";
 import { countFeishuPublishChunks, feishuRecordBatchSize } from "./feishu-publish-batching";
 import { getGeneratedPostsByIds, saveGeneratedPost } from "./generated-posts";
@@ -294,8 +295,8 @@ async function executeFeishuPublishJob(
             updatedAt: new Date().toISOString(),
           };
         });
-      await persistPostsSerially(changedPosts);
-      const changedById = new Map(changedPosts.map((post) => [post.id, post]));
+      const persistedChangedPosts = await persistPostsSerially(changedPosts);
+      const changedById = new Map(persistedChangedPosts.map((post) => [post.id, post]));
       const mergedPosts = progressJob.posts.map((post) => changedById.get(post.id) || post);
       const succeeded = mergedPosts.filter((post) => processedPostIds.has(post.id) && post.status === "published").length;
       progressJob = await saveFeishuPublishJobToDb({
@@ -385,32 +386,34 @@ async function persistPublishedPosts(
     };
   });
 
-  await persistPostsSerially(finalPosts);
-  return finalPosts;
+  return persistPostsSerially(finalPosts);
 }
 
 async function persistPostsSerially(posts: GeneratedPost[]) {
+  const persistedPosts: GeneratedPost[] = [];
   for (const post of posts) {
-    await withFeishuPublishTransientDatabaseRetry(() => persistOnePost(post));
+    persistedPosts.push(await withFeishuPublishTransientDatabaseRetry(() => persistOnePost(post)));
   }
+  return persistedPosts;
 }
 
 async function persistOnePost(post: GeneratedPost) {
-  await savePost(post);
-  await saveGeneratedPost(post);
-  await markSourceRewritten(post.sourceItemId, post);
+  const savedPost = await saveGeneratedPost(post);
+  const runtimePost = await savePost(savedPost, undefined, savedPost);
+  await markSourceRewritten(runtimePost.sourceItemId, runtimePost);
+  return runtimePost;
 }
 
-async function withFeishuPublishTransientDatabaseRetry(operation: () => Promise<void>) {
+async function withFeishuPublishTransientDatabaseRetry<T>(operation: () => Promise<T>): Promise<T> {
   for (let attempt = 1; attempt <= feishuPublishPersistMaxAttempts; attempt += 1) {
     try {
-      await operation();
-      return;
+      return await operation();
     } catch (error) {
       if (attempt >= feishuPublishPersistMaxAttempts || !isFeishuPublishTransientDatabaseError(error)) throw error;
       await delayFeishuPublishPersistRetry(attempt);
     }
   }
+  throw new Error("Feishu publish persistence retry exhausted.");
 }
 
 function isFeishuPublishTransientDatabaseError(error: unknown) {
@@ -449,12 +452,12 @@ async function prepareFeishuPublishJob(job: FeishuPublishJob) {
   const latestPosts = await loadLatestPostsForJob(preparedJob);
   const preparedPosts = job.publishMode === "full" ? await enrichPostsWithContentTags(latestPosts) : latestPosts;
   const validation = await validatePostsForFeishuPublish(preparedPosts, job.publishMode);
-  await persistPostsSerially(validation.posts);
+  const persistedPosts = await persistPostsSerially(validation.posts);
 
   let mediaRepairCount = 0;
   const repairedPosts: GeneratedPost[] = [];
 
-  for (const post of validation.posts) {
+  for (const post of persistedPosts) {
     if (!feishuPublishModeIncludesMedia(job.publishMode)) {
       repairedPosts.push(post);
       continue;
@@ -472,15 +475,17 @@ async function prepareFeishuPublishJob(job: FeishuPublishJob) {
     });
   }
 
-  const changedPosts = repairedPosts.filter((post, index) => post !== validation.posts[index] && hasMediaReferenceChanges(validation.posts[index], post));
-  if (changedPosts.length) await persistRecoveredPostsSerially(changedPosts);
+  const changedPosts = repairedPosts.filter((post, index) => post !== persistedPosts[index] && hasMediaReferenceChanges(persistedPosts[index], post));
+  const persistedRecoveredPosts = changedPosts.length ? await persistRecoveredPostsSerially(changedPosts) : [];
+  const recoveredById = new Map(persistedRecoveredPosts.map((post) => [post.id, post]));
+  const finalPreparedPosts = repairedPosts.map((post) => recoveredById.get(post.id) || post);
 
   const publishableIds = new Set(validation.publishablePosts.map((post) => post.id));
-  const publishablePosts = repairedPosts.filter((post) => publishableIds.has(post.id));
+  const publishablePosts = finalPreparedPosts.filter((post) => publishableIds.has(post.id));
   preparedJob = await saveFeishuPublishJobToDb({
     ...preparedJob,
-    posts: repairedPosts,
-    postIds: repairedPosts.map((post) => post.id),
+    posts: finalPreparedPosts,
+    postIds: finalPreparedPosts.map((post) => post.id),
     progress: {
       ...buildPublishProgress("publishing", repairedPosts.length, publishablePosts.length),
       processed: validation.itemFailures.length,
@@ -522,12 +527,14 @@ async function repairRuntimeMediaReferences(urls: string[], onRepair: () => void
 }
 
 async function persistRecoveredPostsSerially(posts: GeneratedPost[]) {
+  const persistedPosts: GeneratedPost[] = [];
   for (const post of posts) {
-    await withFeishuPublishTransientDatabaseRetry(async () => {
-      await savePost(post);
-      await saveGeneratedPost(post);
-    });
+    persistedPosts.push(await withFeishuPublishTransientDatabaseRetry(async () => {
+      const savedPost = await saveGeneratedPost(post);
+      return savePost(savedPost, undefined, savedPost);
+    }));
   }
+  return persistedPosts;
 }
 
 function hasMediaReferenceChanges(previous: GeneratedPost, next: GeneratedPost) {
@@ -561,6 +568,10 @@ async function validatePostsForFeishuPublish(posts: GeneratedPost[], publishMode
   const itemFailures: FeishuPublishItemFailure[] = [];
   const publishableIds = new Set<string>();
   const normalizedPosts = posts.map((post) => {
+    if (!isFinishedBodyPolicyCompliant(post)) {
+      itemFailures.push(finishedBodyValidationFailure(post));
+      return post;
+    }
     if (!vehicleOptions.options.length) {
       publishableIds.add(post.id);
       return post;
@@ -589,6 +600,10 @@ async function validatePostsForFeishuPublish(posts: GeneratedPost[], publishMode
 function validateTextPostsForFeishuPublish(posts: GeneratedPost[]) {
   const itemFailures: FeishuPublishItemFailure[] = [];
   const publishablePosts = posts.filter((post) => {
+    if (!isFinishedBodyPolicyCompliant(post)) {
+      itemFailures.push(finishedBodyValidationFailure(post));
+      return false;
+    }
     if (post.title.trim() && post.body.trim()) return true;
     itemFailures.push({
       postId: post.id,
@@ -599,6 +614,15 @@ function validateTextPostsForFeishuPublish(posts: GeneratedPost[]) {
     return false;
   });
   return { posts, publishablePosts, itemFailures };
+}
+
+function finishedBodyValidationFailure(post: GeneratedPost): FeishuPublishItemFailure {
+  return {
+    postId: post.id,
+    stage: "validation",
+    error: "The governed post body exceeds the 1000-character publishing limit.",
+    retrySafe: true,
+  };
 }
 
 function validateMediaPostsForFeishuPublish(posts: GeneratedPost[]) {

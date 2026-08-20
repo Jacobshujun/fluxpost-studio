@@ -13,6 +13,7 @@ import {
   type WorkspaceAccessActor,
 } from "./workspace-ownership";
 import { clampGeneratedTitleMax } from "./title-guard";
+import { applyFinishedBodyPolicy } from "./finished-body-policy";
 import type { GeneratedPost } from "./types";
 
 type StoredGeneratedPosts = {
@@ -48,8 +49,10 @@ export async function saveGeneratedPost(post: GeneratedPost, account?: Workspace
   const access = account || accessActorFromOwner(post.ownerUserId, post.ownerDisplayName);
   if (previous && access) assertCanAccessWorkspaceRecord(access, previous, "Generated post not found");
   const ownerAccount = previous ? undefined : account;
+  const finishedBody = applyFinishedBodyPolicy(post, previous);
   const nextPost: GeneratedPost = {
     ...applyWorkspaceOwner(post, ownerAccount, previous || post),
+    ...finishedBody,
     title: clampGeneratedTitleMax(post.title),
     createdAt: post.createdAt || previous?.createdAt || new Date().toISOString(),
     version: post.version || previous?.version || 1,
@@ -104,9 +107,11 @@ export async function batchUpdateGeneratedPostStatus(postIds: string[], status: 
     updatedPosts.set(nextPost.id, nextPost);
   });
 
-  if (foundIds.size) await Promise.all(Array.from(updatedPosts.values()).map((post) => saveGeneratedPost(post, account)));
+  const persistedPosts = foundIds.size
+    ? await Promise.all(Array.from(updatedPosts.values()).map((post) => saveGeneratedPost(post, account)))
+    : [];
   return {
-    posts: Array.from(updatedPosts.values()).sort((a, b) => b.updatedAt.localeCompare(a.updatedAt)),
+    posts: persistedPosts.sort((a, b) => b.updatedAt.localeCompare(a.updatedAt)),
     updatedCount: foundIds.size,
     notFoundIds: ids.filter((id) => !foundIds.has(id)),
   };

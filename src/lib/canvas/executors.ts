@@ -1,6 +1,7 @@
 import { randomUUID } from "node:crypto";
 import { enqueueFeishuPublishJob, ensureFeishuPublishQueueWorker } from "../feishu-publish-queue";
 import { normalizeFeishuPublishMode } from "../feishu-publish-mode";
+import { FINISHED_BODY_POLICY_VERSION, truncateFinishedBody } from "../finished-body-policy";
 import { saveGeneratedPost } from "../generated-posts";
 import { generateCanvasGptImages, generateImagesFromPrompt } from "../image-generation";
 import { callOpenAIForText, callOpenAIForVisionText } from "../openai";
@@ -412,7 +413,8 @@ async function executeComposition({ node, inputs, runId, account }: CanvasNodeEx
     sourceItemId: `canvas:${runId}:${node.id}`,
     createdAt: now,
     title: titles.join(" ").trim() || String(node.config.fallbackTitle || "画布生成内容"),
-    body: bodies.join("\n\n").trim(),
+    body: truncateFinishedBody(bodies.join("\n\n")),
+    bodyPolicyVersion: FINISHED_BODY_POLICY_VERSION,
     taskKeyword: "无限画布",
     feishuVehicle: resolveCanvasCompositionVehicle(node, inputs.vehicle),
     platform: "original",

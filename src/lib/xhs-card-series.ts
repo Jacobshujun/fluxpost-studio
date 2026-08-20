@@ -1,4 +1,5 @@
 import type { ImageProviderProfile } from "./image-providers/contracts";
+import { FINISHED_BODY_TARGET_INSTRUCTION } from "./finished-body-policy";
 import type {
   OriginalBatchSettings,
   OriginalContentPlan,
@@ -94,6 +95,7 @@ export function buildOriginalWritingPrompt(input: {
     "只输出严格 JSON，字段为 title, body, contentTags, cards。",
     "cards 数量和顺序必须与策划一致，每项字段为 title, subtitle, points, visualConcept。",
     "标题简洁有钩子但不虚假夸张；正文自然分段，可直接发布；不要声称未验证的事实。",
+    FINISHED_BODY_TARGET_INSTRUCTION,
     "卡片文字必须短、明确、适合直接画进图片；points 是字符串数组，不要塞入长段落。",
     `选题：${input.topic}`,
     `创作要求：${input.requirements || "无"}`,

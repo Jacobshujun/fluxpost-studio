@@ -68,6 +68,7 @@ const nodeChecks = [
   ["Simple queue and Feishu chunking check", "simple_queue_check.mjs"],
   ["Simple run persistence check", "simple_run_persistence_check.mjs"],
   ["Title prompt guard check", "title_prompt_guard_check.mjs"],
+  ["Finished body policy check", "finished_body_policy_check.mjs"],
   ["Canvas video loader check", "canvas_video_loader_check.mjs"],
   ["Image prompt guard check", "image_prompt_guard_check.mjs"],
   ["Image generation toggle check", "image_generation_toggle_check.mjs"],

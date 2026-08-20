@@ -14,6 +14,7 @@ try {
   const database = read("src/lib/database.ts");
   const postgresMigration = read("db/migrations/001_initial_postgres.sql");
   const copySource = read("src/lib/copy-library.ts");
+  const finishedBodyPolicySource = read("src/lib/finished-body-policy.ts");
   const sortSource = read("src/lib/library-sort.ts");
   const marqueeSource = read("src/lib/marquee-selection.ts");
   const listSelectionSource = read("src/lib/list-selection.ts");
@@ -54,8 +55,10 @@ try {
   const librarySort = loadTypeScriptModule(sortSource, "library-sort.ts", {});
   const marquee = loadTypeScriptModule(marqueeSource, "marquee-selection.ts", {});
   const listSelection = loadTypeScriptModule(listSelectionSource, "list-selection.ts", {});
+  const finishedBodyPolicy = loadTypeScriptModule(finishedBodyPolicySource, "finished-body-policy.ts", {});
   const copyLibrary = loadTypeScriptModule(copySource, "copy-library.ts", {
     "./database": databaseStub,
+    "./finished-body-policy": finishedBodyPolicy,
     "./library-sort": librarySort,
     "./workspace-ownership": ownershipStub,
   });
@@ -85,6 +88,7 @@ try {
     visibility: "team",
   });
   assert.equal(defaultTeamEntry.visibility, "team");
+  assert.equal(defaultTeamEntry.bodyPolicyVersion, 1);
   assert.equal(privateEntry.visibility, "private");
   assert.equal(privateEntry.canEdit, true);
   assert.deepEqual(new Set((await copyLibrary.listCopyLibraryEntries(teammate)).entries.map((entry) => entry.id)), new Set([defaultTeamEntry.id, teamEntry.id]));
@@ -92,6 +96,24 @@ try {
   await assert.rejects(copyLibrary.getCopyLibraryEntry(teammate, privateEntry.id), /not found/i);
   await assert.rejects(copyLibrary.updateCopyLibraryEntry(teammate, teamEntry.id, { title: "Blocked" }), /read-only/i);
   assert.equal((await copyLibrary.updateCopyLibraryEntry(admin, teamEntry.id, { title: "Admin edit" })).title, "Admin edit");
+  const legacyId = "copy-legacy-over-limit";
+  records.set(legacyId, {
+    id: legacyId,
+    ownerUserId: owner.id,
+    ownerDisplayName: owner.displayName,
+    visibility: "team",
+    title: "Legacy",
+    body: "旧".repeat(1001),
+    tags: [],
+    createdAt: "2025-01-01T00:00:00.000Z",
+    updatedAt: "2025-01-01T00:00:00.000Z",
+  });
+  const legacyTitleOnly = await copyLibrary.updateCopyLibraryEntry(owner, legacyId, { title: "Legacy title edit", body: records.get(legacyId).body });
+  assert.equal(legacyTitleOnly.body.length, 1001);
+  assert.equal(legacyTitleOnly.bodyPolicyVersion, undefined);
+  const promotedLegacy = await copyLibrary.updateCopyLibraryEntry(owner, legacyId, { body: `${"新".repeat(990)}。${"尾".repeat(30)}` });
+  assert.equal(promotedLegacy.bodyPolicyVersion, 1);
+  assert.equal(promotedLegacy.body, `${"新".repeat(990)}。`);
   assert.deepEqual((await copyLibrary.listCopyLibraryEntries(owner, { tags: ["launch", "ev"] })).entries.map((entry) => entry.id), [privateEntry.id]);
   assert.deepEqual(copyLibrary.parseCopyLibraryFilters(new URL("http://local/api/copy-library?tag=Launch&tag=EV,SUV")).tags, ["Launch", "EV", "SUV"]);
   assert.equal(copyLibrary.parseCopyLibraryFilters(new URL("http://local/api/copy-library?sort=owner-desc")).sort, "owner-desc");
@@ -164,7 +186,7 @@ try {
 
   writeFileSync(path.join(temp, "toapis-image-api.js"), "exports.toApisImageRatios=['1:1'];exports.toApis4kImageRatios=['16:9'];", "utf8");
   writeFileSync(path.join(temp, "feishu-publish-mode.js"), "exports.feishuPublishModeOptions=[{value:'full',label:'full'},{value:'text',label:'text'},{value:'media',label:'media'}];exports.normalizeFeishuPublishMode=(value)=>value===undefined?'full':['full','text','media'].includes(value)?value:(()=>{throw new Error('invalid mode')})();", "utf8");
-  for (const name of ["types", "node-utils", "source-video-contract", "save-images", "seedance-references", "subtitle-style", "registry"]) {
+  for (const name of ["types", "node-utils", "source-video-contract", "save-images", "seedance-references", "subtitle-style", "video-loader", "registry"]) {
     const source = read(`src/lib/canvas/${name}.ts`).replace('"../toapis-image-api"', '"./toapis-image-api"').replace('"../feishu-publish-mode"', '"./feishu-publish-mode"');
     writeFileSync(path.join(temp, `${name}.js`), transpile(source, `${name}.ts`), "utf8");
   }
@@ -178,6 +200,7 @@ try {
   const executors = loadTypeScriptModule(read("src/lib/canvas/executors.ts"), "executors.ts", {
     "../feishu-publish-queue": {},
     "../feishu-publish-mode": { normalizeFeishuPublishMode: (value) => value || "full" },
+    "../finished-body-policy": finishedBodyPolicy,
     "../generated-posts": {},
     "../image-generation": {},
     "../openai": {},
@@ -189,6 +212,7 @@ try {
     "./save-images": require(path.join(temp, "save-images.js")),
     "./source-video-contract": require(path.join(temp, "source-video-contract.js")),
     "./subtitle-style": require(path.join(temp, "subtitle-style.js")),
+    "./video-loader": require(path.join(temp, "video-loader.js")),
     "./video-subtitles": {},
   });
 

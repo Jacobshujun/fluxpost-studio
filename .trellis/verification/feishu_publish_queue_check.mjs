@@ -64,11 +64,18 @@ assertContains(queue, /claimNextFeishuPublishQueueItem\(workerId,\s*feishuPublis
 assertContains(queue, /heartbeatFeishuPublishQueueItem\(runningJob\.id,\s*workerId,\s*feishuPublishQueueLockMs\)/, "Feishu queue worker must heartbeat leases.");
 assertContains(queue, /feishuStateByPostId/, "Feishu queue worker must persist returned per-post Feishu state.");
 assertContains(queue, /saveGeneratedPost\(post\)/, "Feishu queue worker must persist generated posts.");
-assertContains(queue, /markSourceRewritten\(post\.sourceItemId,\s*post\)/, "Feishu queue worker must update source usage state.");
+assertContains(queue, /markSourceRewritten\(runtimePost\.sourceItemId,\s*runtimePost\)/, "Feishu queue worker must update source usage state from the normalized persisted post.");
 assertContains(queue, /syncSimpleRunPublishJob/, "Feishu queue worker must update simple-run publish state.");
 assertContains(queue, /const publishPosts = normalizePosts\(posts\)/, "Feishu queue enqueue must snapshot posts without synchronous preparation.");
 assertContains(queue, /findEquivalentQueuedJob\(ownerUserId,\s*postIds,\s*publishMode\)/, "Feishu queue dedupe must include the selected mode.");
 assertContains(queue, /prepareFeishuPublishJob[\s\S]*enrichPostsWithContentTags[\s\S]*validatePostsForFeishuPublish[\s\S]*persistPostsSerially/, "Feishu worker must prepare and persist posts before external publishing.");
+assertContains(queue, /if \(publishMode === "text"\) return validateTextPostsForFeishuPublish\(posts\)/, "Text publishing must use text and governed-body preflight.");
+assertContains(queue, /if \(publishMode === "media"\) return validateMediaPostsForFeishuPublish\(posts\)/, "Media publishing must use its body-length-exempt preflight.");
+assertContains(queue, /validatePostsForFeishuPublish[\s\S]*if \(!isFinishedBodyPolicyCompliant\(post\)\)[\s\S]*finishedBodyValidationFailure/, "Full publishing must reject governed over-limit bodies.");
+assertContains(queue, /validateTextPostsForFeishuPublish[\s\S]*if \(!isFinishedBodyPolicyCompliant\(post\)\)[\s\S]*finishedBodyValidationFailure/, "Text publishing must reject governed over-limit bodies.");
+const mediaValidation = queue.match(/function validateMediaPostsForFeishuPublish[\s\S]*?\n\}/)?.[0] || "";
+assertNotContains(mediaValidation, /isFinishedBodyPolicyCompliant/, "Media publishing must remain exempt from body-length validation.");
+assertContains(queue, /const savedPost = await saveGeneratedPost\(post\);[\s\S]*const runtimePost = await savePost\(savedPost, undefined, savedPost\);[\s\S]*markSourceRewritten\(runtimePost\.sourceItemId, runtimePost\)/, "Feishu persistence must reuse one normalized post across stores and source status.");
 assertContains(queue, /onChunkComplete:[\s\S]*persistPostsSerially\(changedPosts\)[\s\S]*saveFeishuPublishJobToDb/, "Each Feishu chunk must persist post state and durable progress.");
 assertContains(queue, /completedChunks:\s*job\.progress\?\.completedChunks\s*\|\|\s*0/, "Terminal progress must retain completed chunks instead of treating planned chunks as completed.");
 assertContains(queue, /retrySafe:\s*Boolean\(failure\.recordId\)/, "Known record ids must be retry-safe while unknown create outcomes remain unsafe.");
@@ -99,7 +106,7 @@ assertNotContains(route, /listFeishuVehicleOptions|persistPostsSerially|publishP
 assertContains(route, /\{\s*status:\s*202\s*\}/, "Manual Feishu enqueue must return HTTP 202 after creating the durable job.");
 assertContains(route, /export async function GET/, "Manual Feishu publish route must expose job polling.");
 
-assertContains(simpleRuns, /enqueueFeishuPublishJob\(approvedPosts/, "Simple-run publish stage must enqueue Feishu publishing.");
+assertContains(simpleRuns, /enqueueFeishuPublishJob\(persistedApprovedPosts/, "Simple-run publish stage must enqueue normalized persisted posts for Feishu publishing.");
 assertContains(simpleRuns, /taskKeyword:\s*resolveSimplePostTaskKeyword\(normalizedInput,\s*source\)/, "Simple-run generated posts must carry the task keyword for Feishu vehicle writes.");
 assertNotContains(simpleRuns, /publishPostsToFeishu/, "Simple-run publish stage must not call Feishu CLI directly.");
 
