@@ -250,7 +250,8 @@ async function executeVideoFrames({ node, inputs }: CanvasNodeExecutionContext) 
 async function executeGptText({ node, inputs }: CanvasNodeExecutionContext) {
   const source = textValues(inputs.prompt).join("\n\n");
   const instruction = String(node.config.instruction || "").trim();
-  const value = await callOpenAIForText(`${instruction}\n\n输入：\n${source}`, { logLabel: `Canvas GPT text node ${node.id}` });
+  const prompt = source ? `${instruction}\n\n输入：\n${source}` : instruction;
+  const value = await callOpenAIForText(prompt, { logLabel: `Canvas GPT text node ${node.id}` });
   return { outputs: { text: { kind: "text" as const, value } } };
 }
 

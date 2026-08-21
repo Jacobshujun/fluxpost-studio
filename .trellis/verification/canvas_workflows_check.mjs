@@ -352,6 +352,7 @@ try {
   const textNode = { id: "text", type: "input.text", version: 1, position: { x: 0, y: 0 }, config: { text: "source" } };
   assert.equal(getCanvasNodeExecutionMode(textNode), "enabled", "legacy nodes without a mode must remain enabled");
   const gptNode = { id: "gpt", type: "model.gpt-text", version: 1, position: { x: 200, y: 0 }, config: { instruction: "rewrite" } };
+  assert.equal(getCanvasNodeDefinition("model.gpt-text")?.inputs.find((port) => port.id === "prompt")?.required, undefined, "GPT text upstream input must be optional");
   const validGraph = {
     nodes: [textNode, gptNode],
     edges: [{ id: "e1", source: "text", sourcePort: "text", target: "gpt", targetPort: "prompt" }],
@@ -368,6 +369,19 @@ try {
   assert.equal(parseCanvasClipboardPayload(JSON.stringify(concatenateClipboard))?.nodes.find((node) => node.type === "utility.text-concatenate")?.config.clean_whitespace, true, "text concatenate config must round-trip through clipboard validation");
   assert.deepEqual(CANVAS_NODE_SIZE_LIMITS, { minWidth: 190, minHeight: 120, maxWidth: 720, maxHeight: 900 }, "node resizing bounds must stay shared across persistence and UI");
   assert.equal(validateCanvasGraph(validGraph).valid, true, "valid typed graph should pass");
+  const standaloneGptGraph = {
+    nodes: [gptNode],
+    edges: [],
+    viewport: { x: 0, y: 0, zoom: 1 },
+  };
+  assert.equal(validateCanvasGraph(standaloneGptGraph).valid, true, "GPT text must run from its instruction without an upstream node");
+  assert.deepEqual(buildCanvasRunPlan(standaloneGptGraph, ["gpt"]).includedNodeIds, ["gpt"]);
+  assert.deepEqual(buildCanvasRunPlan(standaloneGptGraph, ["gpt"]).capabilities, ["text_model"]);
+  assert.equal(buildCanvasRunPlan(standaloneGptGraph, ["gpt"]).steps[0]?.action, "execute");
+  assert.match(validateCanvasNodeConfig("model.gpt-text", { instruction: "" }).join(" "), /instruction|指令/i, "GPT text instruction must remain required");
+  const standaloneBypassGraph = structuredClone(standaloneGptGraph);
+  standaloneBypassGraph.nodes[0].executionMode = "bypass";
+  assert.match(validateCanvasGraph(standaloneBypassGraph).errors.join(" "), /requires input/i, "GPT text bypass must still require upstream text to pass through");
   const incompleteDraftGraph = {
     nodes: [
       { ...structuredClone(textNode), config: { text: "" } },
@@ -377,7 +391,7 @@ try {
     viewport: { x: 0, y: 0, zoom: 1 },
   };
   assert.equal(validateCanvasGraphForPersistence(incompleteDraftGraph).valid, true, "persistence must accept structurally valid incomplete drafts");
-  assert.match(validateCanvasGraph(incompleteDraftGraph).errors.join(" "), /不能为空.*requires input/i, "execution validation must still reject incomplete draft config and wiring");
+  assert.match(validateCanvasGraph(incompleteDraftGraph).errors.join(" "), /不能为空/i, "execution validation must still reject incomplete draft config");
   assert.equal(parseCanvasWorkflowFile(JSON.stringify(createCanvasWorkflowFile("Incomplete draft", incompleteDraftGraph))).graph.nodes.length, 2, "workflow files must round-trip incomplete drafts");
   const resizedGraph = structuredClone(validGraph);
   resizedGraph.nodes[0].size = { width: 360, height: 280 };
@@ -398,8 +412,8 @@ try {
   const disabledUpstreamGraph = structuredClone(validGraph);
   disabledUpstreamGraph.nodes[0].executionMode = "disabled";
   const disabledUpstreamPlan = buildCanvasRunPlan(disabledUpstreamGraph, ["gpt"]);
-  assert.equal(disabledUpstreamPlan.steps.find((step) => step.nodeId === "gpt")?.action, "blocked", "required dependents of disabled nodes must be blocked during planning");
-  assert.deepEqual(disabledUpstreamPlan.capabilities, [], "preflight-blocked paid nodes must not require confirmation");
+  assert.equal(disabledUpstreamPlan.steps.find((step) => step.nodeId === "gpt")?.action, "execute", "GPT text must fall back to its instruction when an upstream node is disabled");
+  assert.deepEqual(disabledUpstreamPlan.capabilities, ["text_model"], "instruction-only GPT text execution must retain paid confirmation");
   assert.equal(disabledUpstreamPlan.preflightBlocked, false, "branch blockers must not prevent unrelated with-upstream branches from running");
   const optionalDisabledGraph = {
     nodes: [
@@ -861,6 +875,21 @@ const visionNode = { config: { preset: "describe", instruction: "默认节点指
 assert.equal(resolveCanvasVisionInstruction(visionNode, [{ kind: "text", value: "  用户提示词  " }]), "用户提示词", "connected user text must fully replace the vision preset and node instruction");
 assert.equal(resolveCanvasVisionInstruction(visionNode, [{ kind: "text", value: "第一条" }, { kind: "text", value: "第二条" }]), "第一条\n\n第二条", "multiple user prompts must preserve incoming order");
 assert.equal(resolveCanvasVisionInstruction(visionNode, []), "默认图片描述\n\n默认节点指令", "legacy vision nodes without user text must retain preset fallback behavior");
+const gptTextRequests = [];
+const executeGptText = compileFunctions(executors, ["executeGptText", "textValues"], "executeGptText", {
+  callOpenAIForText: async (prompt, options) => {
+    gptTextRequests.push({ prompt, options });
+    return "generated";
+  },
+});
+const standaloneGptResult = await executeGptText({ node: { id: "standalone-gpt", config: { instruction: "Write a launch post." } }, inputs: {} });
+assert.equal(gptTextRequests[0].prompt, "Write a launch post.", "instruction-only GPT text must not append an empty input section");
+assert.equal(standaloneGptResult.outputs.text.value, "generated");
+await executeGptText({
+  node: { id: "connected-gpt", config: { instruction: "Rewrite these notes." } },
+  inputs: { prompt: [{ kind: "text", value: "First" }, { kind: "text", value: "Second" }] },
+});
+assert.equal(gptTextRequests[1].prompt, "Rewrite these notes.\n\n输入：\nFirst\n\nSecond", "connected GPT text must retain ordered upstream context");
 const resolveCanvasCompositionVehicle = compileFunctions(executors, ["resolveCanvasCompositionVehicle", "textValues"], "resolveCanvasCompositionVehicle");
 assert.equal(resolveCanvasCompositionVehicle({ config: { vehicle: "旧配置车型" } }, [{ kind: "text", value: "  小鹏 G6  " }]), "小鹏 G6", "connected vehicle text must override legacy node config");
 assert.equal(resolveCanvasCompositionVehicle({ config: { vehicle: "  旧配置车型  " } }, []), "旧配置车型", "legacy composition nodes must retain their saved vehicle fallback");

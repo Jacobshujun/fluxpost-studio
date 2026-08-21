@@ -4,22 +4,21 @@ Last updated: 2026-08-21
 
 ## One-Line Status
 
-Canvas incomplete-draft persistence is fixed, verified, and active on the clean port-3001 candidate.
+Standalone Canvas GPT text is implemented and verified for the clean port-3001 candidate.
 
 ## Current Focus
 
-- Canvas create/update/import now decode graph structure before persistence validation, so unfinished nodes and missing run inputs can be saved without weakening malformed graph rejection.
-- Run planning retains full config/input/provider readiness checks. Isolated SQLite round-trip, malformed-config rejection, save-race checks, TypeScript, lint, build, and the full offline baseline passed.
+- `model.gpt-text@1` accepts optional upstream text while instructions stay required and bypass stays input-dependent.
+- Focused checks and the full offline baseline passed without live providers.
 
 ## Next Entry
 
-Use the port-3001 Canvas normally and monitor draft saves across refreshes. Do not push or deploy production without separate approval.
+Use the port-3001 Canvas normally; do not push or deploy without separate approval.
 
 ## Recent Verification
 
+- 2026-08-21: Standalone GPT text planning, prompt assembly, validation, bypass, build, smoke, and the offline baseline passed without live providers.
 - 2026-08-21: Clean candidate activation and authenticated PostgreSQL draft refresh passed; fixtures were removed.
-- 2026-08-21: Canvas incomplete-draft persistence, structural decoding, execution-readiness separation, isolated SQLite round-trip, malformed-config rejection, save-race checks, and the full offline baseline passed.
-- 2026-08-20: Real Faster Whisper `1.2.1` small/CPU/int8 verification produced 11 privacy-safe acoustic boundaries for the recent 16.136-second local input; landscape, portrait, rotate-90, delayed-audio, H.264/AAC, and full-duration FFmpeg fixtures passed.
 
 ## Risks And Unknowns
 
