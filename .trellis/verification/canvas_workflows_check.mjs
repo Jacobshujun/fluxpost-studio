@@ -755,6 +755,93 @@ const executors = read("src/lib/canvas/executors.ts");
 requireText(executors, ["callOpenAIForText", "callOpenAIForVisionText", "generateCanvasGptImages", "directReferences", "resolveCanvasGptImageReferences", "references.length > 16", "resolvedInputs", "resumeTaskId", "resumeTaskRoute", "onTaskUpdate", "result.status === \"pending\"", "providerTaskRoute", "utility.image-preview", "executeImagePreview", "utility.save-images", "executeSaveImages", "utility.display-any", "executeDisplayAny", "executePromptTemplate", "executeTextSplit", "executeGptVision", "executeImageSelect", "executeImageTransform", "executeVideoFrames", "CanvasMediaNeedsConfigError", "generateImagesFromPrompt", "saveGeneratedPost", "enqueueFeishuPublishJob", "queryArkSeedanceVideo(previousSubmitId)"], "node executors");
 requireText(runs, ["getArkSeedanceReadiness", 'needsConfig ? "needs_config" : "blocked"'], "Ark Seedance local preflight");
 assert.ok(!runs.includes("getDreaminaCredit"), "Canvas preflight must not call Dreamina or a live Ark endpoint");
+const { createWorkflowSaveCoordinator } = loadTsModule("src/lib/canvas/workflow-save-coordinator.ts");
+const deferredSave = () => {
+  let resolve;
+  const promise = new Promise((resolvePromise) => {
+    resolve = resolvePromise;
+  });
+  return { promise, resolve };
+};
+let latestSaveSnapshot = { workflowId: "workflow-1", dirtyVersion: 1, name: "canvas", revision: 7, graph: { marker: "first" } };
+const saveRequests = [];
+const saveDeferreds = [];
+const saveFeedback = [];
+const savingTransitions = [];
+let activeSaves = 0;
+let maxActiveSaves = 0;
+const saveCoordinator = createWorkflowSaveCoordinator({
+  capture: () => structuredClone(latestSaveSnapshot),
+  save: async (snapshot) => {
+    saveRequests.push(snapshot);
+    activeSaves += 1;
+    maxActiveSaves = Math.max(maxActiveSaves, activeSaves);
+    const deferred = deferredSave();
+    saveDeferreds.push(deferred);
+    try {
+      return await deferred.promise;
+    } finally {
+      activeSaves -= 1;
+    }
+  },
+  onSavingChange: (saving) => savingTransitions.push(saving),
+  onSaved: (_workflow, snapshot, mode) => saveFeedback.push({ dirtyVersion: snapshot.dirtyVersion, mode }),
+});
+const firstAutomaticSave = saveCoordinator.request("automatic");
+assert.equal(saveRequests.length, 1, "the first automatic save must start immediately");
+latestSaveSnapshot = { ...latestSaveSnapshot, dirtyVersion: 2, graph: { marker: "latest" } };
+const queuedManualSave = saveCoordinator.request("manual");
+assert.equal(saveRequests.length, 1, "manual intent during a slow save must not create a concurrent PATCH");
+saveDeferreds[0].resolve({ id: "workflow-1", revision: 8 });
+await new Promise((resolve) => setImmediate(resolve));
+assert.equal(saveRequests.length, 2, "edits made during a slow save must trigger one serialized follow-up PATCH");
+assert.equal(saveRequests[1].revision, 8, "the follow-up PATCH must use the prior response revision");
+assert.equal(saveRequests[1].dirtyVersion, 2);
+assert.deepEqual(saveRequests[1].graph, { marker: "latest" }, "the follow-up PATCH must contain the latest graph");
+saveDeferreds[1].resolve({ id: "workflow-1", revision: 9 });
+assert.deepEqual(await Promise.all([firstAutomaticSave, queuedManualSave]), [true, true]);
+assert.equal(maxActiveSaves, 1, "workflow PATCH requests must remain serialized");
+assert.deepEqual(saveFeedback, [
+  { dirtyVersion: 1, mode: "automatic" },
+  { dirtyVersion: 2, mode: "manual" },
+]);
+assert.deepEqual(savingTransitions, [true, false], "saving feedback must remain stable across the serialized queue");
+
+let coveredSaveCalls = 0;
+const coveredDeferred = deferredSave();
+const coveredFeedback = [];
+const coveredCoordinator = createWorkflowSaveCoordinator({
+  capture: () => ({ workflowId: "covered", dirtyVersion: 4, name: "covered", revision: 11, graph: {} }),
+  save: async () => {
+    coveredSaveCalls += 1;
+    return coveredDeferred.promise;
+  },
+  onSaved: (_workflow, _snapshot, mode) => coveredFeedback.push(mode),
+});
+const coveredAutomatic = coveredCoordinator.request("automatic");
+const coveredManual = coveredCoordinator.request("manual");
+coveredDeferred.resolve({ id: "covered", revision: 12 });
+assert.deepEqual(await Promise.all([coveredAutomatic, coveredManual]), [true, true]);
+assert.equal(coveredSaveCalls, 1, "manual intent already covered by the in-flight snapshot must not duplicate the PATCH");
+assert.deepEqual(coveredFeedback, ["manual"], "covered manual intent must still receive manual-save acknowledgement");
+
+let retrySaveCalls = 0;
+const retryErrors = [];
+const retryCoordinator = createWorkflowSaveCoordinator({
+  capture: () => ({ workflowId: "retry", dirtyVersion: 3, name: "retry", revision: 2, graph: {} }),
+  save: async () => {
+    retrySaveCalls += 1;
+    if (retrySaveCalls === 1) throw new Error("temporary failure");
+    return { id: "retry", revision: 3 };
+  },
+  onError: (error) => retryErrors.push(error.message),
+});
+assert.equal(await retryCoordinator.request("automatic"), false);
+assert.equal(await retryCoordinator.request("automatic"), false, "a failed automatic save must not loop");
+assert.equal(retrySaveCalls, 1);
+assert.equal(await retryCoordinator.request("manual"), true, "a later explicit manual save must retry");
+assert.equal(retrySaveCalls, 2);
+assert.deepEqual(retryErrors, ["temporary failure"]);
 const resolveCanvasVisionInstruction = compileFunctions(executors, ["resolveCanvasVisionInstruction", "textValues"], "resolveCanvasVisionInstruction", { canvasVisionPresets: { describe: "默认图片描述" } });
 const visionNode = { config: { preset: "describe", instruction: "默认节点指令" } };
 assert.equal(resolveCanvasVisionInstruction(visionNode, [{ kind: "text", value: "  用户提示词  " }]), "用户提示词", "connected user text must fully replace the vision preset and node instruction");
@@ -911,6 +998,14 @@ for (const route of [
 }
 
 const page = read("src/app/canvas/page.tsx");
+requireText(page, [
+  "createWorkflowSaveCoordinator",
+  "workflowSaving",
+  "manualSaveAcknowledged",
+  'request(automatic ? "automatic" : "manual")',
+  'workflowSaving ? "保存中" : manualSaveAcknowledged ? "画布已保存" : "保存"',
+  "disabled={!activeWorkflow || busy}",
+], "Canvas serialized save UI");
 requireText(page, [
   "SeedancePromptComposer",
   "orderSeedanceFixedReferences",

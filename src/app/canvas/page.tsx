@@ -124,6 +124,7 @@ import {
   createCanvasWorkflowFile,
   parseCanvasWorkflowFile,
 } from "@/lib/canvas/workflow-file";
+import { createWorkflowSaveCoordinator } from "@/lib/canvas/workflow-save-coordinator";
 import {
   areCanvasPortKindsCompatible,
   CANVAS_NODE_SIZE_LIMITS,
@@ -234,6 +235,8 @@ export default function CanvasPage() {
   const [sourceVideoBusyNodeId, setSourceVideoBusyNodeId] = useState<string>();
   const [message, setMessage] = useState("正在载入画布...");
   const [busy, setBusy] = useState(false);
+  const [workflowSaving, setWorkflowSaving] = useState(false);
+  const [manualSaveAcknowledged, setManualSaveAcknowledged] = useState(false);
   const [dirty, setDirty] = useState(false);
   const [paletteVisible, setPaletteVisible] = useState(true);
   const [mobilePalette, setMobilePalette] = useState(false);
@@ -266,10 +269,64 @@ export default function CanvasPage() {
   const runSelectionIsExplicitRef = useRef(false);
   const taskCenterRequestRef = useRef(0);
   const dirtyVersionRef = useRef(0);
+  const activeWorkflowRef = useRef<CanvasWorkflow | null>(null);
+  const nodesRef = useRef<FlowNode[]>([]);
+  const edgesRef = useRef<FlowEdge[]>([]);
+  const viewportRef = useRef<Viewport>({ x: 0, y: 0, zoom: 1 });
   const connectionStartRef = useRef<QuickAddConnection | null>(null);
   const canvasHistoryRef = useRef<CanvasHistory>({ entries: [], index: -1 });
   const canvasHistoryTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const applyingCanvasHistoryRef = useRef(false);
+  const saveCoordinatorRef = useRef<ReturnType<typeof createWorkflowSaveCoordinator<CanvasGraph, CanvasWorkflow>> | null>(null);
+
+  activeWorkflowRef.current = activeWorkflow;
+  nodesRef.current = nodes;
+  edgesRef.current = edges;
+  viewportRef.current = viewport;
+  if (!saveCoordinatorRef.current) {
+    saveCoordinatorRef.current = createWorkflowSaveCoordinator<CanvasGraph, CanvasWorkflow>({
+      capture: () => {
+        const workflow = activeWorkflowRef.current;
+        if (!workflow) return undefined;
+        return {
+          workflowId: workflow.id,
+          dirtyVersion: dirtyVersionRef.current,
+          name: workflow.name,
+          revision: workflow.revision,
+          graph: currentGraph(nodesRef.current, edgesRef.current, viewportRef.current),
+        };
+      },
+      save: async (snapshot) => {
+        const data = await api<{ workflow: CanvasWorkflow }>(`/api/canvas/workflows/${snapshot.workflowId}`, {
+          method: "PATCH",
+          body: JSON.stringify({ name: snapshot.name, revision: snapshot.revision, graph: snapshot.graph }),
+        });
+        return data.workflow;
+      },
+      onSavingChange: setWorkflowSaving,
+      onSaved: (workflow, snapshot, mode) => {
+        const hasNewerEdits = dirtyVersionRef.current > snapshot.dirtyVersion;
+        const currentWorkflow = activeWorkflowRef.current;
+        const resolvedWorkflow = hasNewerEdits && currentWorkflow?.id === workflow.id
+          ? { ...workflow, name: currentWorkflow.name }
+          : workflow;
+        setWorkflows((current) => current.map((item) => item.id === workflow.id ? resolvedWorkflow : item));
+        if (activeWorkflowIdRef.current !== snapshot.workflowId) return;
+        activeWorkflowRef.current = resolvedWorkflow;
+        setActiveWorkflow(resolvedWorkflow);
+        if (dirtyVersionRef.current === snapshot.dirtyVersion) {
+          setDirty(false);
+          setManualSaveAcknowledged(mode === "manual");
+        }
+        setMessage(hasNewerEdits ? "已保存当前请求，最新修改待保存" : mode === "automatic" ? "已自动保存" : "画布已保存");
+      },
+      onError: (error, snapshot) => {
+        if (activeWorkflowIdRef.current !== snapshot.workflowId) return;
+        setManualSaveAcknowledged(false);
+        setMessage(errorMessage(error));
+      },
+    });
+  }
 
   const selectedFlowNode = nodes.find((node) => node.id === selectedNodeId);
   const selectedCanvasNode = selectedFlowNode?.data.canvasNode;
@@ -286,9 +343,11 @@ export default function CanvasPage() {
   const activeTaskCount = taskRuns.length
     ? taskRuns.filter((run) => isActiveCanvasRun(run.status)).length
     : activeRun && isActiveCanvasRun(activeRun.run.status) ? 1 : 0;
+  const canvasBusy = busy || workflowSaving;
   const openImagePreview = useCallback((url: string, index: number) => setPreview({ kind: "image", url, index }), []);
   const markDirty = useCallback(() => {
     dirtyVersionRef.current += 1;
+    setManualSaveAcknowledged(false);
     setDirty(true);
   }, []);
   const createSeedanceMentionId = useCallback(() => {
@@ -464,6 +523,7 @@ export default function CanvasPage() {
     runSelectionIsExplicitRef.current = false;
     dirtyVersionRef.current = 0;
     setDirty(false);
+    setManualSaveAcknowledged(false);
     setMessage(`已载入 ${workflow.name}`);
   }
 
@@ -520,36 +580,17 @@ export default function CanvasPage() {
 
 
   async function saveWorkflow(automatic = false) {
-    if (!activeWorkflow || busy) return false;
-    const workflow = activeWorkflow;
-    const savedDirtyVersion = dirtyVersionRef.current;
-    setBusy(true);
-    try {
-      const data = await api<{ workflow: CanvasWorkflow }>(`/api/canvas/workflows/${workflow.id}`, {
-        method: "PATCH",
-        body: JSON.stringify({
-          name: workflow.name,
-          revision: workflow.revision,
-          graph: currentGraph(nodes, edges, viewport),
-        }),
-      });
-      setWorkflows((current) => current.map((item) => item.id === data.workflow.id ? data.workflow : item));
-      if (activeWorkflowIdRef.current !== workflow.id) return false;
-      setActiveWorkflow(data.workflow);
-      if (dirtyVersionRef.current === savedDirtyVersion) setDirty(false);
-      setMessage(automatic ? "已自动保存" : "画布已保存");
-      return true;
-    } catch (error) {
-      setMessage(errorMessage(error));
-      return false;
-    } finally {
-      setBusy(false);
+    if (busy) return false;
+    if (!automatic) {
+      if (saveTimer.current) clearTimeout(saveTimer.current);
+      saveTimer.current = null;
     }
+    return saveCoordinatorRef.current?.request(automatic ? "automatic" : "manual") ?? false;
   }
 
   async function saveSchedulerBindings(bindings: CanvasScheduleBindings) {
     if (!activeWorkflow) return undefined;
-    if (busy) throw new Error("画布正在保存，请稍后再保存调度绑定。");
+    if (busy || workflowSaving) throw new Error("画布正在保存，请稍后再保存调度绑定。");
     const selectedBindingIds = CANVAS_SCHEDULER_ROLES.map((role) => bindings[role]).filter((nodeId): nodeId is string => Boolean(nodeId));
     if (CANVAS_REQUIRED_SCHEDULER_ROLES.some((role) => !bindings[role]) || new Set(selectedBindingIds).size !== selectedBindingIds.length) {
       throw new Error("五个必需调度角色必须分别绑定不同节点，可选文案角色也不能复用节点。");
@@ -1070,7 +1111,7 @@ export default function CanvasPage() {
   }
 
   async function applySubtitleRevision(nodeId: string, snapshot: CanvasSubtitleRevisionSnapshot) {
-    if (!activeWorkflow || busy) throw new Error("画布正在执行其他操作，请稍后再试。");
+    if (!activeWorkflow || busy || workflowSaving) throw new Error("画布正在执行其他操作，请稍后再试。");
     if (saveTimer.current) clearTimeout(saveTimer.current);
     saveTimer.current = null;
     const workflow = activeWorkflow;
@@ -1316,12 +1357,12 @@ export default function CanvasPage() {
       if (event.repeat) return;
       if (commandKey && event.altKey && !event.shiftKey && event.key === "Enter") {
         event.preventDefault();
-        if (activeRun && !terminalStatuses.has(activeRun.run.status) && !busy) void runAction("cancel");
+        if (activeRun && !terminalStatuses.has(activeRun.run.status) && !canvasBusy) void runAction("cancel");
         return;
       }
       if (commandKey && !event.altKey && !event.shiftKey && event.key === "Enter") {
         event.preventDefault();
-        if (activeWorkflow && nodes.length && !busy) void requestRun();
+        if (activeWorkflow && nodes.length && !canvasBusy) void requestRun();
         return;
       }
       if (commandKey && !event.altKey && event.key.toLowerCase() === "s") {
@@ -1391,7 +1432,7 @@ export default function CanvasPage() {
           <option value="">选择画布</option>
           {workflows.map((workflow) => <option key={workflow.id} value={workflow.id}>{workflow.name}{workflow.isTemplate ? " · 模板" : ""}</option>)}
         </select>
-        <select className="canvas-template-select" value="" disabled={busy} aria-label="创建画布模板" onChange={(event) => {
+        <select className="canvas-template-select" value="" disabled={canvasBusy} aria-label="创建画布模板" onChange={(event) => {
           const templateKey = event.target.value as CanvasWorkflowTemplateKey;
           if (templateKey) void createWorkflowFromTemplate(templateKey);
         }}>
@@ -1412,13 +1453,19 @@ export default function CanvasPage() {
           <button type="button" onClick={removeSelectedNodes} disabled={isMobile || !getSelectedNodeIds().length} aria-label="删除节点" aria-keyshortcuts="Delete Backspace" title="删除节点"><Trash2 /></button>
         </div>
         <div className="canvas-toolbar-actions">
-          <ToolbarButton label="新建" icon={<Plus />} onClick={createWorkflow} disabled={busy} />
-          <ToolbarButton label="保存" icon={busy ? <LoaderCircle className="animate-spin" /> : <Save />} onClick={() => void saveWorkflow()} disabled={!activeWorkflow || busy} ariaKeyShortcuts="Control+S Meta+S" />
-          <ToolbarButton label="导入" ariaLabel="导入工作流" icon={<FileUp />} onClick={() => workflowFileInputRef.current?.click()} disabled={busy} />
-          <ToolbarButton label="导出" ariaLabel="导出工作流" icon={<FileDown />} onClick={exportWorkflowFile} disabled={!activeWorkflow || busy} />
-          <ToolbarButton label="复制" icon={<Copy />} onClick={() => void duplicateWorkflow()} disabled={!activeWorkflow || busy} />
-          <ToolbarButton label="存为模板" icon={<FileText />} onClick={() => void duplicateWorkflow(true)} disabled={!activeWorkflow || busy} />
-          <ToolbarButton label="删除" icon={<Trash2 />} onClick={() => void removeWorkflow()} disabled={!activeWorkflow || busy} danger />
+          <ToolbarButton label="新建" icon={<Plus />} onClick={createWorkflow} disabled={canvasBusy} />
+          <ToolbarButton
+            label={workflowSaving ? "保存中" : manualSaveAcknowledged ? "画布已保存" : "保存"}
+            icon={workflowSaving ? <LoaderCircle className="animate-spin" /> : manualSaveAcknowledged ? <CheckCircle2 /> : <Save />}
+            onClick={() => void saveWorkflow()}
+            disabled={!activeWorkflow || busy}
+            ariaKeyShortcuts="Control+S Meta+S"
+          />
+          <ToolbarButton label="导入" ariaLabel="导入工作流" icon={<FileUp />} onClick={() => workflowFileInputRef.current?.click()} disabled={canvasBusy} />
+          <ToolbarButton label="导出" ariaLabel="导出工作流" icon={<FileDown />} onClick={exportWorkflowFile} disabled={!activeWorkflow || canvasBusy} />
+          <ToolbarButton label="复制" icon={<Copy />} onClick={() => void duplicateWorkflow()} disabled={!activeWorkflow || canvasBusy} />
+          <ToolbarButton label="存为模板" icon={<FileText />} onClick={() => void duplicateWorkflow(true)} disabled={!activeWorkflow || canvasBusy} />
+          <ToolbarButton label="删除" icon={<Trash2 />} onClick={() => void removeWorkflow()} disabled={!activeWorkflow || canvasBusy} danger />
           <input
             ref={workflowFileInputRef}
             hidden
@@ -1536,10 +1583,10 @@ export default function CanvasPage() {
 
       <section className="canvas-run-dock">
         <div className="canvas-run-actions">
-          <button type="button" onClick={() => void requestRun()} disabled={!activeWorkflow || !nodes.length || busy} aria-keyshortcuts="Control+Enter Meta+Enter"><Play />运行全部</button>
-          <button type="button" onClick={() => selectedNodeId && void requestRun([selectedNodeId], "isolated")} disabled={!selectedNodeId || busy}><Square />仅运行此节点</button>
-          <button type="button" onClick={() => selectedNodeId && void requestRun([selectedNodeId], "with-upstream")} disabled={!selectedNodeId || busy}><Play />运行到此节点</button>
-          {activeRun && !terminalStatuses.has(activeRun.run.status) ? <button type="button" onClick={() => void runAction("cancel")} disabled={busy} aria-keyshortcuts="Control+Alt+Enter Meta+Alt+Enter"><X />取消</button> : null}
+          <button type="button" onClick={() => void requestRun()} disabled={!activeWorkflow || !nodes.length || canvasBusy} aria-keyshortcuts="Control+Enter Meta+Enter"><Play />运行全部</button>
+          <button type="button" onClick={() => selectedNodeId && void requestRun([selectedNodeId], "isolated")} disabled={!selectedNodeId || canvasBusy}><Square />仅运行此节点</button>
+          <button type="button" onClick={() => selectedNodeId && void requestRun([selectedNodeId], "with-upstream")} disabled={!selectedNodeId || canvasBusy}><Play />运行到此节点</button>
+          {activeRun && !terminalStatuses.has(activeRun.run.status) ? <button type="button" onClick={() => void runAction("cancel")} disabled={canvasBusy} aria-keyshortcuts="Control+Alt+Enter Meta+Alt+Enter"><X />取消</button> : null}
         </div>
         <div className="canvas-message"><span className={dirty ? "is-dirty" : ""} />{message}</div>
         {activeRun ? <div className={`canvas-current-run is-${activeRun.run.status}`}><StatusIcon status={activeRun.run.status} /><span>{canvasRunStatusLabel(activeRun.run.status)}</span><small>r{activeRun.run.workflowRevision}</small></div> : <div className="canvas-current-run is-empty"><History /><span>暂无运行</span></div>}
