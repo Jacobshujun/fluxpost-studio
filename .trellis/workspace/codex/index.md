@@ -8,7 +8,7 @@
 
 <!-- @@@auto:current-status -->
 - **Active File**: `journal-1.md`
-- **Total Sessions**: 47
+- **Total Sessions**: 48
 - **Last Active**: 2026-08-21
 <!-- @@@/auto:current-status -->
 
@@ -19,7 +19,7 @@
 <!-- @@@auto:active-documents -->
 | File | Lines | Status |
 |------|-------|--------|
-| `journal-1.md` | ~1595 | Active |
+| `journal-1.md` | ~1629 | Active |
 <!-- @@@/auto:active-documents -->
 
 ---
@@ -29,6 +29,7 @@
 <!-- @@@auto:session-history -->
 | # | Date | Title | Commits | Branch |
 |---|------|-------|---------|--------|
+| 48 | 2026-08-21 | Fix Canvas draft persistence | `b672f9a`, `ab697cb` | `main` |
 | 47 | 2026-08-21 | Fix Canvas workflow save race | `072cce5`, `95d113e` | `main` |
 | 46 | 2026-08-21 | Canvas subtitle manual revision editor | `af6e12b1cbacf9b9651b2f78a3e9b6fe2980e3f3`, `7694afd` | `main` |
 | 45 | 2026-08-21 | Fix Canvas subtitle UTF-8 encoding | `6760804`, `44de559` | `main` |

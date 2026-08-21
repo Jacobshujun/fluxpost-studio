@@ -1593,3 +1593,37 @@ Serialized automatic and manual Canvas saves, added stable feedback and determin
 ### Next Steps
 
 - None - task complete
+
+
+## Session 48: Fix Canvas draft persistence
+
+**Date**: 2026-08-21
+**Task**: Fix Canvas draft persistence
+**Branch**: `main`
+
+### Summary
+
+Separated Canvas persistence validation from execution readiness, added draft round-trip coverage, activated the clean local candidate, and verified authenticated PostgreSQL save/refresh with fixture cleanup.
+
+### Main Changes
+
+(Add details)
+
+### Git Commits
+
+| Hash | Message |
+|------|---------|
+| `b672f9a` | (see git log) |
+| `ab697cb` | (see git log) |
+
+### Testing
+
+- [OK] (Add test results)
+
+### Status
+
+[OK] **Completed**
+
+### Next Steps
+
+- None - task complete
