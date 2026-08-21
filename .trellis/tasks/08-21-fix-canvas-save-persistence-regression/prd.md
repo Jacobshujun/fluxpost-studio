@@ -29,7 +29,7 @@
 - [x] 任何被全局 busy 或 revision 冲突阻止的保存都不会显示“画布已保存”或清除 dirty。
 - [x] 增加不依赖外部服务、不会保留用户数据的真实 persistence 回归检查，覆盖写入与回读一致性并清理测试记录。
 - [x] Canvas focused checks、mocked browser checks、TypeScript、lint、build 和完整离线 baseline 通过。
-- [ ] 修复提交后由 `npm run local` 激活，`/api/version` 与 clean HEAD 一致，`/canvas` 返回 200。
+- [x] 修复提交后由 `npm run local` 激活，`/api/version` 与 clean HEAD 一致，`/canvas` 返回 200。
 
 ## Out Of Scope
 

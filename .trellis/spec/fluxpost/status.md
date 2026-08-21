@@ -4,7 +4,7 @@ Last updated: 2026-08-21
 
 ## One-Line Status
 
-Canvas incomplete-draft persistence is fixed, verified, and awaiting clean port-3001 activation.
+Canvas incomplete-draft persistence is fixed, verified, and active on the clean port-3001 candidate.
 
 ## Current Focus
 
@@ -13,10 +13,11 @@ Canvas incomplete-draft persistence is fixed, verified, and awaiting clean port-
 
 ## Next Entry
 
-Commit and activate the clean candidate on port 3001, then verify one authenticated incomplete-draft save/reload. Do not push or deploy production without separate approval.
+Use the port-3001 Canvas normally and monitor draft saves across refreshes. Do not push or deploy production without separate approval.
 
 ## Recent Verification
 
+- 2026-08-21: Clean candidate activation and authenticated PostgreSQL draft refresh passed; fixtures were removed.
 - 2026-08-21: Canvas incomplete-draft persistence, structural decoding, execution-readiness separation, isolated SQLite round-trip, malformed-config rejection, save-race checks, and the full offline baseline passed.
 - 2026-08-20: Real Faster Whisper `1.2.1` small/CPU/int8 verification produced 11 privacy-safe acoustic boundaries for the recent 16.136-second local input; landscape, portrait, rotate-90, delayed-audio, H.264/AAC, and full-duration FFmpeg fixtures passed.
 
