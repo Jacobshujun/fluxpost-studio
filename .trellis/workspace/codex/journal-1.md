@@ -1525,3 +1525,37 @@ Forced Faster Whisper JSON stdout to UTF-8 on Windows, upgraded Canvas subtitle 
 ### Next Steps
 
 - None - task complete
+
+
+## Session 46: Canvas subtitle manual revision editor
+
+**Date**: 2026-08-21
+**Task**: Canvas subtitle manual revision editor
+**Branch**: `main`
+
+### Summary
+
+Implemented owner-scoped subtitle revisions, frozen hash-matched isolated re-rendering, FFmpeg waveform caching, full-screen desktop/mobile editing, deterministic checks, full offline baseline, and port-3001 browser verification.
+
+### Main Changes
+
+(Add details)
+
+### Git Commits
+
+| Hash | Message |
+|------|---------|
+| `af6e12b1cbacf9b9651b2f78a3e9b6fe2980e3f3` | (see git log) |
+| `7694afd` | (see git log) |
+
+### Testing
+
+- [OK] (Add test results)
+
+### Status
+
+[OK] **Completed**
+
+### Next Steps
+
+- None - task complete
