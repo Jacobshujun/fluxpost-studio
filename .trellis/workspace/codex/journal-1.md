@@ -1559,3 +1559,37 @@ Implemented owner-scoped subtitle revisions, frozen hash-matched isolated re-ren
 ### Next Steps
 
 - None - task complete
+
+
+## Session 47: Fix Canvas workflow save race
+
+**Date**: 2026-08-21
+**Task**: Fix Canvas workflow save race
+**Branch**: `main`
+
+### Summary
+
+Serialized automatic and manual Canvas saves, added stable feedback and deterministic/browser race coverage, verified the full offline baseline, and activated the clean port-3001 candidate.
+
+### Main Changes
+
+(Add details)
+
+### Git Commits
+
+| Hash | Message |
+|------|---------|
+| `072cce5` | (see git log) |
+| `95d113e` | (see git log) |
+
+### Testing
+
+- [OK] (Add test results)
+
+### Status
+
+[OK] **Completed**
+
+### Next Steps
+
+- None - task complete
