@@ -1342,13 +1342,14 @@ config.mentionUrls = [personUrl, carUrl];
 
 ### 1. Scope / Trigger
 
-- Applies to `utility.video-subtitles@1`, local acoustic timing, media display dimensions/time origins, ASS rendering, subtitle presets, fonts, or subtitle cache persistence.
+- Applies to `utility.video-subtitles@1`, local acoustic timing, media display dimensions/time origins, ASS rendering, subtitle presets, fonts, transcript cache persistence, or manual subtitle revision editing.
 
 ### 2. Signatures
 
 - Node: one required `videos` input; `videos` and `text` outputs.
 - API: `GET|POST /api/canvas/subtitle-presets`; `PATCH|DELETE /api/canvas/subtitle-presets/{id}`.
-- DB: owner-scoped `canvas_subtitle_presets` and `canvas_subtitle_transcript_cache` in PostgreSQL and SQLite.
+- Revision API: `POST /api/canvas/subtitle-revisions` accepts `{ workflowId, nodeId, nodeRunId }`; `PATCH /api/canvas/subtitle-revisions/{id}` accepts `{ revision, segments }`; `GET /api/canvas/subtitle-revisions/{id}/waveform` returns `{ durationMs, pointsPerSecond, peaks }`.
+- DB: owner-scoped `canvas_subtitle_presets`, `canvas_subtitle_transcript_cache`, `canvas_subtitle_revisions`, and `canvas_subtitle_waveform_cache` in PostgreSQL and SQLite. Migration `004_canvas_subtitle_revisions.sql` is additive.
 - Local recognizer: `scripts/canvas/faster_whisper_subtitles.py` with locked `faster-whisper==1.2.1`.
 - Env: `CANVAS_SUBTITLE_PYTHON_BIN`, `CANVAS_SUBTITLE_WHISPER_MODEL`, `CANVAS_SUBTITLE_WHISPER_DEVICE`, `CANVAS_SUBTITLE_WHISPER_COMPUTE_TYPE`, and `CANVAS_SUBTITLE_WHISPER_TIMEOUT_MS`.
 
@@ -1357,6 +1358,10 @@ config.mentionUrls = [personUrl, carUrl];
 - Faster Whisper uses automatic language detection, `task=transcribe`, VAD, word timestamps, cached local model files, CPU/int8 defaults, and no translation. Python stdout and Node decoding are explicitly UTF-8. Each segment uses its first/last valid word boundary; Node owns timeout, JSON validation, sanitized errors, and `localVideo` concurrency.
 - Timeline protocol v4 shifts audio-relative timestamps by `audioStartSeconds - mediaStartSeconds`, requires positive ordered/non-overlapping integer-millisecond segments, and may clip only the final `endMs` overflow of at most `100ms`. Diagnostics and verification evidence never include subtitle text.
 - Successful timelines cache by owner, video SHA-256, engine, model, inference-settings hash, and protocol version. Style is excluded from timing identity; protocol/model/settings changes and historical Ark v1/v2 rows cannot be reused.
+- Successful node runs persist internal subtitle metadata containing protocol versions, source video SHA-256, duration, source media reference, and validated segments without changing the public `videos` or `text` ports. Historical runs without this metadata require one successful rerun before editing.
+- A revision is unique by owner, workflow, node, and video SHA-256; it retains the immutable original recognition draft plus only the latest manual draft. `revision` updates are compare-and-set operations. Members access their own rows and admins may access all owners through the existing workspace access helper.
+- Applying a manual draft first saves it, then saves `{ protocolVersion, revisionId, revision, videoSha256, segments }` into the subtitle node config through the workflow revision lock, then creates an isolated run targeting that subtitle node. A matching current video SHA-256 validates and renders the frozen segments without transcript-cache or Whisper work; a mismatch ignores the snapshot and recognizes normally. Schedules consume only the frozen node snapshot and never read a revision draft implicitly.
+- Waveforms decode the authorized source with FFmpeg as signed 16-bit mono 8 kHz PCM, reduce each 160 samples to one min/max pair (50 pairs/second), run through `localVideo`, and cache/deduplicate by owner, video SHA-256, and waveform protocol. Empty audio, FFmpeg failure, and timeout remain explicit errors.
 - `probeCanvasMediaFile(...)` owns coded dimensions, normalized `rotation`, displayed `width/height`, format/video/audio starts, duration, audio presence, format, and byte size. `90/270` degrees swaps displayed dimensions; Canvas media references, preview metadata, ASS `PlayResX/PlayResY`, fingerprints, and output metadata all use displayed dimensions.
 - Style is a node snapshot. Three built-ins are read-only; stored names are owner-unique after NFKC/whitespace/case normalization. Operators access their own rows; admins access all with owner attribution. Revision is required for update/delete.
 - The editor resolves video from current inputs, recent successful inputs, upstream run output, or direct upstream snapshots, then corrects stale dimensions from browser metadata. Preview ratio follows the actual video and video failure produces an explicit neutral state; dimensions remain media facts, not editable style config.
@@ -1370,6 +1375,12 @@ config.mentionUrls = [personUrl, carUrl];
 | Invalid style/name/body | HTTP 400 |
 | Duplicate normalized name or stale revision | HTTP 409 |
 | Missing/inaccessible preset | HTTP 404 |
+| Missing/inaccessible subtitle revision or source workflow/run | HTTP 404 |
+| Historical successful run without structured timeline | HTTP 409 with `subtitle_rerun_required` |
+| Stale subtitle revision or stale workflow revision | HTTP 409; do not overwrite or enqueue a run |
+| Manual timeline outside 1-1000 segments, 1-500 trimmed characters, integer duration bounds, strict order, or non-overlap | HTTP 400 / blocked local save |
+| Frozen snapshot SHA-256 differs from the materialized current video | Ignore snapshot and run normal recognition |
+| Waveform has no decodable audio, FFmpeg fails, or five-minute timeout expires | Explicit waveform error; no empty successful cache row |
 | Input count other than one, no audio, empty/invalid timeline | Failed node, no output video |
 | Final `endMs` overflow from `1` through `100ms`, with `startMs < durationMs` | Clip final `endMs` to `durationMs` and continue |
 | Intermediate overflow, word overlap, final `startMs >= durationMs`, or final overflow over `100ms` | Failed node with segment/timing boundary values and no subtitle text |
@@ -1380,13 +1391,16 @@ config.mentionUrls = [personUrl, carUrl];
 ### 5. Good/Base/Bad Cases
 
 - Good: first run derives word-level acoustic timing, maps the audio origin onto the video timeline, caches protocol-v4 UTF-8 timing, and renders ASS at normalized displayed dimensions; a style-only rerun reuses timing and only re-encodes locally.
+- Good: an editor save increments the owner/node/video revision, and apply freezes that exact draft in the workflow before an isolated subtitle-only render; a matching hash performs zero recognition calls.
 - Base: loading a built-in or stored preset copies its style into node config; later preset changes do not mutate the node.
-- Bad: estimate timing from generated text, ignore rotation/stream origins, clip an intermediate segment, cache across owners/settings/protocols, translate speech, expose recognized text in diagnostics, save resolution as style config, substitute a font, or return the unmodified video as success.
+- Bad: estimate timing from generated text, read a mutable database draft during scheduling, reuse a manual timeline for a different video hash, overwrite a stale revision, ignore rotation/stream origins, clip an intermediate segment, cache across owners/settings/protocols, translate speech, expose recognized text in diagnostics, save resolution as style config, substitute a font, or return the unmodified video as success.
 
 ### 6. Tests Required
 
 - `.trellis/verification/canvas_video_subtitles_check.mjs` covers UTF-8 process output, local settings, process/config/timeout/JSON/no-speech errors, word/timeline boundaries, origin shifts, exact `100ms` final clipping, diagnostic secrecy, v4 cache isolation, presets, displayed ASS dimensions, and real landscape/portrait/rotate-90 H.264/AAC outputs with complete duration and preserved stream offsets.
 - `.trellis/verification/canvas_video_loader_check.mjs` covers coded/displayed rotation dimensions and real delayed-audio FFprobe origins. Mocked Chromium covers stale snapshot correction, actual video background, landscape/portrait geometry, neutral failure state, and desktop/mobile containment. TypeScript, lint, build, HTTP/SQLite smoke, and the full offline baseline must pass.
+- `.trellis/verification/canvas_subtitle_editor_check.mjs` covers segment validation/edit operations, snapshot match/mismatch recognition call counts, deterministic PCM reduction, waveform cache reuse/concurrent deduplication/timeout/no-audio errors, owner/admin access, revision conflicts, schema, workflow cleanup, and isolated apply wiring.
+- `.trellis/verification/canvas_subtitle_editor_browser_check.py` uses mocked APIs plus a local FFmpeg fixture to cover desktop/mobile modal bounds, nonblank waveform pixels, playback highlight/overlay, timeline dragging, explicit draft save, dirty-close confirmation, and document overflow without external calls.
 
 ### 7. Wrong vs Correct
 
@@ -1403,6 +1417,13 @@ const ass = buildCanvasSubtitleAss({ width: probe.codedWidth, height: probe.code
 // Correct: use displayed dimensions everywhere; timing identity excludes style.
 const segments = await resolveTimeline(ownerVideoEngineModelSettingsProtocolKey, input);
 return renderAssVideo(segments, validatedStyle, probe.width, probe.height);
+
+// Wrong: fetch the latest editable draft during a scheduled run.
+const segments = await getLatestSubtitleDraft(node.id, currentVideo);
+
+// Correct: use only a validated frozen snapshot when the current video hash matches.
+const segments = resolveCanvasSubtitleRevisionSegments(node.config.revisionSnapshot, currentVideoSha256, durationMs)
+  ?? await recognizeTimeline(currentVideo);
 ```
 
 ## Scenario: Finished Body Character Policy

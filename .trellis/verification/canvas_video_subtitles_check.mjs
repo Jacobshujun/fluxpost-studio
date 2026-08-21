@@ -255,6 +255,10 @@ const videoSubtitles = loadTsModule("src/lib/canvas/video-subtitles.ts", {
   "./local-subtitle-timeline": { CANVAS_SUBTITLE_TIMELINE_PROTOCOL_VERSION: 4 },
   "./subtitle-fonts": {},
   "./subtitle-style": styleModule,
+  "./subtitle-editor": {
+    CANVAS_SUBTITLE_REVISION_PROTOCOL_VERSION: 1,
+    validateCanvasSubtitleSegments: (segments) => segments,
+  },
   "./media-tools": { CanvasMediaNeedsConfigError: class extends Error {} },
   "./types": {},
 });

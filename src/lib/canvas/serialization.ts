@@ -1,4 +1,5 @@
 import { getCanvasNodeDefinition } from "./registry";
+import { decodeCanvasSubtitleRevisionSnapshot } from "./subtitle-editor";
 import { MAX_CANVAS_VIDEO_LOADER_ITEMS, normalizeCanvasVideoSnapshot } from "./video-loader";
 import {
   areCanvasPortKindsCompatible,
@@ -150,6 +151,9 @@ function isCanvasNodeConfig(value: unknown, nodeType: CanvasNode["type"]): value
         ids.add(snapshot.id);
         return true;
       });
+    }
+    if (nodeType === "utility.video-subtitles" && key === "revisionSnapshot") {
+      return Boolean(decodeCanvasSubtitleRevisionSnapshot(item));
     }
     return isFlatCanvasConfigValue(item);
   });

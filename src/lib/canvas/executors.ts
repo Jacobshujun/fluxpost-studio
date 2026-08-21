@@ -15,7 +15,8 @@ import { normalizeUrlList } from "./registry";
 import { CANVAS_SAVE_IMAGE_MAX_ITEMS } from "./save-images";
 import { canvasSourceVideoSnapshotFromConfig, isCanvasSourceVideoSnapshotCurrent } from "./source-video-contract";
 import { canvasSubtitleStyleFromConfig } from "./subtitle-style";
-import type { CanvasArtifact, CanvasMediaReference, CanvasNode, CanvasNodeRun } from "./types";
+import { decodeCanvasSubtitleRevisionSnapshot } from "./subtitle-editor";
+import type { CanvasArtifact, CanvasMediaReference, CanvasNode, CanvasNodeRun, CanvasSubtitleRunMetadata } from "./types";
 import { addCanvasVideoSubtitles } from "./video-subtitles";
 import { selectedCanvasVideo } from "./video-loader";
 
@@ -42,6 +43,7 @@ export type CanvasNodeExecutionContext = {
 
 export type CanvasNodeExecutionResult = {
   outputs: Record<string, CanvasArtifact>;
+  internalMetadata?: { subtitle?: CanvasSubtitleRunMetadata };
   resolvedInputs?: Record<string, CanvasArtifact[]>;
   providerTaskId?: string;
   providerTaskRoute?: "primary" | "backup";
@@ -169,12 +171,18 @@ async function executeVideoSubtitles({ node, inputs, account }: CanvasNodeExecut
   const items = videoItems(inputs.videos);
   if (items.length !== 1) throw new Error(`Video subtitles requires exactly one source video; resolved ${items.length}.`);
   try {
-    const result = await addCanvasVideoSubtitles({ source: items[0], style: canvasSubtitleStyleFromConfig(node.config), ownerUserId: account.id });
+    const result = await addCanvasVideoSubtitles({
+      source: items[0],
+      style: canvasSubtitleStyleFromConfig(node.config),
+      ownerUserId: account.id,
+      revisionSnapshot: decodeCanvasSubtitleRevisionSnapshot(node.config.revisionSnapshot),
+    });
     return {
       outputs: {
         videos: { kind: "videos" as const, items: [result.video] },
         text: { kind: "text" as const, value: result.text },
       },
+      internalMetadata: { subtitle: result.internalMetadata },
     };
   } catch (error) {
     if (error instanceof CanvasMediaNeedsConfigError) {

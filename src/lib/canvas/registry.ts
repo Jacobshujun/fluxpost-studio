@@ -6,6 +6,7 @@ import { defaultCanvasSourceVideoProjectName, isCanvasSourceVideoSnapshotCurrent
 import { feishuPublishModeOptions, normalizeFeishuPublishMode } from "../feishu-publish-mode";
 import { validateSeedanceReferenceConfig } from "./seedance-references";
 import { canvasSubtitleStyleConfig, defaultCanvasSubtitleStyle, validateCanvasSubtitleStyle } from "./subtitle-style";
+import { decodeCanvasSubtitleRevisionSnapshot } from "./subtitle-editor";
 import { validateCanvasVideoLoaderConfig } from "./video-loader";
 
 const canvasNodeDefinitionVersions: CanvasNodeDefinition[] = [
@@ -766,7 +767,10 @@ export function validateCanvasNodeConfig(type: CanvasNodeType, config: CanvasNod
   if (type === "utility.video-frames") {
     try { parseCanvasVideoTimestamps(config); } catch (error) { errors.push(error instanceof Error ? error.message : "Video frame settings are invalid."); }
   }
-  if (type === "utility.video-subtitles") errors.push(...validateCanvasSubtitleStyle(config));
+  if (type === "utility.video-subtitles") {
+    errors.push(...validateCanvasSubtitleStyle(config));
+    if (config.revisionSnapshot !== undefined && !decodeCanvasSubtitleRevisionSnapshot(config.revisionSnapshot)) errors.push("Subtitle revision snapshot is invalid.");
+  }
   if (type === "utility.save-images") {
     const prefixError = validateCanvasImageFilenamePrefix(config.filenamePrefix);
     if (prefixError) errors.push(prefixError);

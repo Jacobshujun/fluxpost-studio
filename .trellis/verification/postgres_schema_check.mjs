@@ -21,6 +21,8 @@ const requiredTables = [
   "feishu_publish_queue",
   "distribution_check_jobs",
   "lark_task_launches",
+  "canvas_subtitle_revisions",
+  "canvas_subtitle_waveform_cache",
 ];
 
 if (!existsSync(schemaPath)) {
@@ -69,6 +71,9 @@ for (const table of requiredTables.filter((table) => table !== "app_meta")) {
   "idx_lark_task_launches_message_id",
   "idx_lark_task_launches_run_id",
   "idx_lark_task_launches_created_at",
+  "idx_canvas_subtitle_revisions_workflow_node",
+  "idx_canvas_subtitle_revisions_owner_video",
+  "idx_canvas_subtitle_waveform_owner_video",
   "idx_workspace_accounts_status",
   "idx_workspace_sessions_account_id",
   "idx_workspace_sessions_expires_at",

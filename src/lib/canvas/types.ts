@@ -51,6 +51,51 @@ export type CanvasSubtitleSegment = {
   text: string;
 };
 
+export type CanvasSubtitleRevisionSnapshot = {
+  protocolVersion: 1;
+  revisionId: string;
+  revision: number;
+  videoSha256: string;
+  segments: CanvasSubtitleSegment[];
+};
+
+export type CanvasSubtitleRunMetadata = {
+  protocolVersion: 1;
+  timelineProtocolVersion: number;
+  videoSha256: string;
+  durationMs: number;
+  source: CanvasMediaReference;
+  segments: CanvasSubtitleSegment[];
+};
+
+export type CanvasSubtitleRevision = {
+  id: string;
+  ownerUserId: string;
+  ownerDisplayName: string;
+  workflowId: string;
+  nodeId: string;
+  videoSha256: string;
+  durationMs: number;
+  timelineProtocolVersion: number;
+  revision: number;
+  source: CanvasMediaReference;
+  originalSegments: CanvasSubtitleSegment[];
+  segments: CanvasSubtitleSegment[];
+  createdAt: string;
+  updatedAt: string;
+};
+
+export type CanvasSubtitleWaveform = {
+  protocolVersion: 1;
+  ownerUserId: string;
+  videoSha256: string;
+  durationMs: number;
+  pointsPerSecond: 50;
+  peaks: Array<[number, number]>;
+  createdAt: string;
+  updatedAt: string;
+};
+
 export type CanvasSubtitleStyle = {
   fontFamily: string;
   fontSizePercent: number;
@@ -146,7 +191,7 @@ export const CANVAS_SCHEDULER_ROLE_LABELS: Record<CanvasSchedulerRole, string> =
   "copy-input": "文案库输入",
 };
 
-export type CanvasConfigValue = string | number | boolean | string[] | CanvasVideoSnapshot[] | null | undefined;
+export type CanvasConfigValue = string | number | boolean | string[] | CanvasVideoSnapshot[] | CanvasSubtitleRevisionSnapshot | null | undefined;
 export type CanvasNodeConfig = Record<string, CanvasConfigValue>;
 
 export type CanvasPosition = { x: number; y: number };
@@ -280,6 +325,9 @@ export type CanvasNodeRun = {
   status: CanvasNodeRunStatus;
   inputs: Record<string, CanvasArtifact[]>;
   outputs: Record<string, CanvasArtifact>;
+  internalMetadata?: {
+    subtitle?: CanvasSubtitleRunMetadata;
+  };
   providerTaskId?: string;
   providerTaskRoute?: "primary" | "backup";
   providerStatus?: string;

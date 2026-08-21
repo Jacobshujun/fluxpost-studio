@@ -11,7 +11,8 @@ import { requireCanvasSubtitleFont } from "./subtitle-fonts";
 import { normalizeCanvasSubtitleStyle } from "./subtitle-style";
 import { CanvasMediaNeedsConfigError, probeCanvasMediaFile } from "./media-tools";
 import { CANVAS_SUBTITLE_TIMELINE_PROTOCOL_VERSION, canvasSubtitleRecognizerSettings, canvasSubtitleRecognizerSettingsHash, transcribeCanvasLocalSubtitleTimeline } from "./local-subtitle-timeline";
-import type { CanvasMediaReference, CanvasSubtitleSegment, CanvasSubtitleStyle } from "./types";
+import { CANVAS_SUBTITLE_REVISION_PROTOCOL_VERSION, validateCanvasSubtitleSegments } from "./subtitle-editor";
+import type { CanvasMediaReference, CanvasSubtitleRevisionSnapshot, CanvasSubtitleSegment, CanvasSubtitleStyle } from "./types";
 
 const maxVideoBytes = 512 * 1024 * 1024;
 const maxDurationSeconds = 600;
@@ -19,7 +20,7 @@ const videoEncodeTimeoutMs = 30 * 60_000;
 const outputRoot = path.join(/*turbopackIgnore: true*/ process.cwd(), "public", "generated", "canvas-tools");
 const activeTimelines = new Map<string, Promise<CanvasSubtitleSegment[]>>();
 
-export async function addCanvasVideoSubtitles(input: { source: CanvasMediaReference; style: CanvasSubtitleStyle; ownerUserId: string }) {
+export async function addCanvasVideoSubtitles(input: { source: CanvasMediaReference; style: CanvasSubtitleStyle; ownerUserId: string; revisionSnapshot?: CanvasSubtitleRevisionSnapshot }) {
   const source = await materializeRuntimeMedia(input.source.url, { maxBytes: maxVideoBytes, kind: "video" });
   let stagingPath = "";
   let assPath = "";
@@ -27,36 +28,21 @@ export async function addCanvasVideoSubtitles(input: { source: CanvasMediaRefere
     const metadata = await probeCanvasMediaFile(source.filePath);
     if (!metadata.hasAudio) throw new Error("Subtitle source video does not contain an audio track.");
     if (!metadata.durationSeconds || metadata.durationSeconds > maxDurationSeconds) throw new Error(`Subtitle source video duration must be at most ${maxDurationSeconds} seconds.`);
+    const durationSeconds = metadata.durationSeconds;
     const style = normalizeCanvasSubtitleStyle(input.style);
     style.fontFamily = await requireCanvasSubtitleFont(style.fontFamily).catch((error) => {
       throw new CanvasMediaNeedsConfigError(error instanceof Error ? error.message : "Subtitle font is unavailable.");
     });
     await requireSubtitleFfmpegCapabilities();
     const videoSha256 = await hashFile(source.filePath);
-    const recognizer = canvasSubtitleRecognizerSettings();
-    const settingsHash = canvasSubtitleRecognizerSettingsHash();
-    const cacheId = buildCanvasSubtitleTimelineCacheId({
-      ownerUserId: input.ownerUserId,
-      videoSha256,
-      engine: recognizer.engine,
-      model: recognizer.model,
-      settingsHash,
-    });
-    const segments = await resolveTimeline(cacheId, {
-      ownerUserId: input.ownerUserId,
-      videoSha256,
-      engine: recognizer.engine,
-      model: recognizer.model,
-      settingsHash,
-      videoPath: source.filePath,
-      durationSeconds: metadata.durationSeconds,
-      mediaStartSeconds: metadata.mediaStartSeconds,
-      audioStartSeconds: metadata.audioStartSeconds,
-    });
+    const durationMs = Math.round(durationSeconds * 1000);
+    const segments = await resolveCanvasSubtitleTimeline(input.revisionSnapshot, videoSha256, durationMs, () =>
+      recognizeTimeline({ ownerUserId: input.ownerUserId, videoSha256, videoPath: source.filePath, durationSeconds, mediaStartSeconds: metadata.mediaStartSeconds, audioStartSeconds: metadata.audioStartSeconds }),
+    );
     const fingerprint = sha256(JSON.stringify({ kind: "video-subtitles-v4", videoSha256, segments, style, width: metadata.width, height: metadata.height, rotation: metadata.rotation })).slice(0, 32);
     const publicPath = `/generated/canvas-tools/${fingerprint}.mp4`;
     const existing = await existingOutput(publicPath);
-    if (existing) return subtitleResult(existing, metadata, segments);
+    if (existing) return subtitleResult(existing, metadata, segments, { source: input.source, videoSha256, durationMs });
 
     await mkdir(outputRoot, { recursive: true });
     const assFilename = `.${fingerprint}-${randomUUID()}.ass`;
@@ -79,7 +65,7 @@ export async function addCanvasVideoSubtitles(input: { source: CanvasMediaRefere
     await rename(stagingPath, outputPath);
     stagingPath = "";
     const url = await persistRuntimeMedia({ filePath: outputPath, publicPath, contentType: "video/mp4", overwrite: false });
-    return subtitleResult(url, metadata, segments);
+    return subtitleResult(url, metadata, segments, { source: input.source, videoSha256, durationMs });
   } finally {
     await Promise.all([
       source.cleanup(),
@@ -87,6 +73,26 @@ export async function addCanvasVideoSubtitles(input: { source: CanvasMediaRefere
       stagingPath ? rm(stagingPath, { force: true }) : Promise.resolve(),
     ]);
   }
+}
+
+export function resolveCanvasSubtitleRevisionSegments(snapshot: CanvasSubtitleRevisionSnapshot | undefined, videoSha256: string, durationMs: number) {
+  return snapshot?.videoSha256 === videoSha256 ? validateCanvasSubtitleSegments(snapshot.segments, durationMs) : undefined;
+}
+
+export async function resolveCanvasSubtitleTimeline(
+  snapshot: CanvasSubtitleRevisionSnapshot | undefined,
+  videoSha256: string,
+  durationMs: number,
+  recognize: () => Promise<CanvasSubtitleSegment[]>,
+) {
+  return resolveCanvasSubtitleRevisionSegments(snapshot, videoSha256, durationMs) || recognize();
+}
+
+async function recognizeTimeline(input: { ownerUserId: string; videoSha256: string; videoPath: string; durationSeconds: number; mediaStartSeconds: number; audioStartSeconds: number }) {
+  const recognizer = canvasSubtitleRecognizerSettings();
+  const settingsHash = canvasSubtitleRecognizerSettingsHash();
+  const cacheId = buildCanvasSubtitleTimelineCacheId({ ownerUserId: input.ownerUserId, videoSha256: input.videoSha256, engine: recognizer.engine, model: recognizer.model, settingsHash });
+  return resolveTimeline(cacheId, { ...input, engine: recognizer.engine, model: recognizer.model, settingsHash });
 }
 
 export function buildCanvasSubtitleAss(input: { segments: CanvasSubtitleSegment[]; style: CanvasSubtitleStyle; width: number; height: number }) {
@@ -163,11 +169,24 @@ async function resolveTimeline(cacheId: string, input: { ownerUserId: string; vi
   return request;
 }
 
-function subtitleResult(url: string, metadata: { width: number; height: number; durationSeconds?: number }, segments: CanvasSubtitleSegment[]) {
+function subtitleResult(
+  url: string,
+  metadata: { width: number; height: number; durationSeconds?: number },
+  segments: CanvasSubtitleSegment[],
+  internal: { source: CanvasMediaReference; videoSha256: string; durationMs: number },
+) {
   return {
     video: { url, width: metadata.width, height: metadata.height, durationSeconds: metadata.durationSeconds, mimeType: "video/mp4" } satisfies CanvasMediaReference,
     text: segments.map((segment) => segment.text).join("\n"),
     segments,
+    internalMetadata: {
+      protocolVersion: CANVAS_SUBTITLE_REVISION_PROTOCOL_VERSION,
+      timelineProtocolVersion: CANVAS_SUBTITLE_TIMELINE_PROTOCOL_VERSION,
+      videoSha256: internal.videoSha256,
+      durationMs: internal.durationMs,
+      source: { ...internal.source },
+      segments: segments.map((segment) => ({ ...segment })),
+    },
   };
 }
 

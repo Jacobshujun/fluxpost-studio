@@ -1,7 +1,7 @@
 import { existsSync, mkdirSync, readFileSync } from "node:fs";
 import path from "node:path";
 import { Pool, type PoolClient } from "pg";
-import type { CanvasNodeRun, CanvasRun, CanvasRunQueueItem, CanvasSchedule, CanvasSubtitlePreset, CanvasSubtitleTranscriptCacheEntry, CanvasWorkflow } from "./canvas/types";
+import type { CanvasNodeRun, CanvasRun, CanvasRunQueueItem, CanvasSchedule, CanvasSubtitlePreset, CanvasSubtitleRevision, CanvasSubtitleTranscriptCacheEntry, CanvasSubtitleWaveform, CanvasWorkflow } from "./canvas/types";
 import { getLibraryAssetAddedAt } from "./library-sort";
 import type {
   ContentProject,
@@ -2464,11 +2464,31 @@ export async function updateCanvasWorkflowInDb(workflow: CanvasWorkflow, expecte
 export async function deleteCanvasWorkflowFromDb(workflowId: string, ownerUserId: string) {
   await ensureDatabaseReady();
   if (getDatabaseBackend() === "postgres") {
-    const result = await getPostgresPool().query("DELETE FROM canvas_workflows WHERE id = $1 AND owner_user_id = $2", [workflowId, ownerUserId]);
-    return Number(result.rowCount || 0) === 1;
+    const client = await getPostgresPool().connect();
+    try {
+      await client.query("BEGIN");
+      await client.query("DELETE FROM canvas_subtitle_revisions WHERE workflow_id = $1 AND owner_user_id = $2", [workflowId, ownerUserId]);
+      const result = await client.query("DELETE FROM canvas_workflows WHERE id = $1 AND owner_user_id = $2", [workflowId, ownerUserId]);
+      await client.query("COMMIT");
+      return Number(result.rowCount || 0) === 1;
+    } catch (error) {
+      await client.query("ROLLBACK");
+      throw error;
+    } finally {
+      client.release();
+    }
   }
-  const result = getSqliteDatabase().prepare("DELETE FROM canvas_workflows WHERE id = ? AND owner_user_id = ?").run(workflowId, ownerUserId) as { changes?: number };
-  return Number(result.changes || 0) === 1;
+  const db = getSqliteDatabase();
+  db.exec("BEGIN IMMEDIATE");
+  try {
+    db.prepare("DELETE FROM canvas_subtitle_revisions WHERE workflow_id = ? AND owner_user_id = ?").run(workflowId, ownerUserId);
+    const result = db.prepare("DELETE FROM canvas_workflows WHERE id = ? AND owner_user_id = ?").run(workflowId, ownerUserId) as { changes?: number };
+    db.exec("COMMIT");
+    return Number(result.changes || 0) === 1;
+  } catch (error) {
+    db.exec("ROLLBACK");
+    throw error;
+  }
 }
 
 export async function listCanvasSchedulesFromDb(limit = 100) {
@@ -3393,6 +3413,33 @@ function createSqliteSchema(db: SqliteDatabase) {
     );
     CREATE INDEX IF NOT EXISTS idx_canvas_subtitle_transcript_cache_owner_updated ON canvas_subtitle_transcript_cache(owner_user_id, updated_at DESC);
 
+    CREATE TABLE IF NOT EXISTS canvas_subtitle_revisions (
+      id TEXT PRIMARY KEY,
+      owner_user_id TEXT NOT NULL,
+      workflow_id TEXT NOT NULL,
+      node_id TEXT NOT NULL,
+      video_sha256 TEXT NOT NULL,
+      revision INTEGER NOT NULL,
+      created_at TEXT NOT NULL,
+      updated_at TEXT NOT NULL,
+      data_json TEXT NOT NULL,
+      UNIQUE(owner_user_id, workflow_id, node_id, video_sha256)
+    );
+    CREATE INDEX IF NOT EXISTS idx_canvas_subtitle_revisions_workflow_node ON canvas_subtitle_revisions(workflow_id, node_id, updated_at DESC);
+    CREATE INDEX IF NOT EXISTS idx_canvas_subtitle_revisions_owner_video ON canvas_subtitle_revisions(owner_user_id, video_sha256, updated_at DESC);
+
+    CREATE TABLE IF NOT EXISTS canvas_subtitle_waveform_cache (
+      id TEXT PRIMARY KEY,
+      owner_user_id TEXT NOT NULL,
+      video_sha256 TEXT NOT NULL,
+      protocol_version INTEGER NOT NULL,
+      created_at TEXT NOT NULL,
+      updated_at TEXT NOT NULL,
+      data_json TEXT NOT NULL,
+      UNIQUE(owner_user_id, video_sha256, protocol_version)
+    );
+    CREATE INDEX IF NOT EXISTS idx_canvas_subtitle_waveform_owner_video ON canvas_subtitle_waveform_cache(owner_user_id, video_sha256, protocol_version);
+
     CREATE TABLE IF NOT EXISTS canvas_schedules (
       id TEXT PRIMARY KEY,
       owner_user_id TEXT NOT NULL,
@@ -3835,6 +3882,33 @@ const postgresSchemaSql = `
     data_json JSONB NOT NULL
   );
   CREATE INDEX IF NOT EXISTS idx_canvas_subtitle_transcript_cache_owner_updated ON canvas_subtitle_transcript_cache(owner_user_id, updated_at DESC);
+
+  CREATE TABLE IF NOT EXISTS canvas_subtitle_revisions (
+    id TEXT PRIMARY KEY,
+    owner_user_id TEXT NOT NULL,
+    workflow_id TEXT NOT NULL,
+    node_id TEXT NOT NULL,
+    video_sha256 TEXT NOT NULL,
+    revision INTEGER NOT NULL,
+    created_at TIMESTAMPTZ NOT NULL,
+    updated_at TIMESTAMPTZ NOT NULL,
+    data_json JSONB NOT NULL,
+    UNIQUE(owner_user_id, workflow_id, node_id, video_sha256)
+  );
+  CREATE INDEX IF NOT EXISTS idx_canvas_subtitle_revisions_workflow_node ON canvas_subtitle_revisions(workflow_id, node_id, updated_at DESC);
+  CREATE INDEX IF NOT EXISTS idx_canvas_subtitle_revisions_owner_video ON canvas_subtitle_revisions(owner_user_id, video_sha256, updated_at DESC);
+
+  CREATE TABLE IF NOT EXISTS canvas_subtitle_waveform_cache (
+    id TEXT PRIMARY KEY,
+    owner_user_id TEXT NOT NULL,
+    video_sha256 TEXT NOT NULL,
+    protocol_version INTEGER NOT NULL,
+    created_at TIMESTAMPTZ NOT NULL,
+    updated_at TIMESTAMPTZ NOT NULL,
+    data_json JSONB NOT NULL,
+    UNIQUE(owner_user_id, video_sha256, protocol_version)
+  );
+  CREATE INDEX IF NOT EXISTS idx_canvas_subtitle_waveform_owner_video ON canvas_subtitle_waveform_cache(owner_user_id, video_sha256, protocol_version);
 
   CREATE TABLE IF NOT EXISTS canvas_schedules (
     id TEXT PRIMARY KEY,
@@ -4336,6 +4410,93 @@ export async function saveCanvasSubtitleTranscriptCacheToDb(entry: CanvasSubtitl
     ).run(entry.id, entry.ownerUserId, entry.createdAt, entry.updatedAt, toJson(entry));
   }
   return entry;
+}
+
+export async function getCanvasSubtitleRevisionFromDb(revisionId: string) {
+  await ensureDatabaseReady();
+  if (getDatabaseBackend() === "postgres") {
+    const result = await getPostgresPool().query<JsonRow>("SELECT data_json FROM canvas_subtitle_revisions WHERE id = $1", [revisionId]);
+    return result.rows[0] ? fromJson<CanvasSubtitleRevision>(result.rows[0].data_json) : undefined;
+  }
+  const row = getSqliteDatabase().prepare("SELECT data_json FROM canvas_subtitle_revisions WHERE id = ?").get(revisionId) as JsonRow | undefined;
+  return row ? fromJson<CanvasSubtitleRevision>(row.data_json) : undefined;
+}
+
+export async function getCanvasSubtitleRevisionByKeyFromDb(ownerUserId: string, workflowId: string, nodeId: string, videoSha256: string) {
+  await ensureDatabaseReady();
+  if (getDatabaseBackend() === "postgres") {
+    const result = await getPostgresPool().query<JsonRow>(
+      "SELECT data_json FROM canvas_subtitle_revisions WHERE owner_user_id = $1 AND workflow_id = $2 AND node_id = $3 AND video_sha256 = $4",
+      [ownerUserId, workflowId, nodeId, videoSha256],
+    );
+    return result.rows[0] ? fromJson<CanvasSubtitleRevision>(result.rows[0].data_json) : undefined;
+  }
+  const row = getSqliteDatabase().prepare(
+    "SELECT data_json FROM canvas_subtitle_revisions WHERE owner_user_id = ? AND workflow_id = ? AND node_id = ? AND video_sha256 = ?",
+  ).get(ownerUserId, workflowId, nodeId, videoSha256) as JsonRow | undefined;
+  return row ? fromJson<CanvasSubtitleRevision>(row.data_json) : undefined;
+}
+
+export async function createCanvasSubtitleRevisionInDb(revision: CanvasSubtitleRevision) {
+  await ensureDatabaseReady();
+  if (getDatabaseBackend() === "postgres") {
+    const result = await getPostgresPool().query(
+      `INSERT INTO canvas_subtitle_revisions (id, owner_user_id, workflow_id, node_id, video_sha256, revision, created_at, updated_at, data_json)
+       VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9::jsonb) ON CONFLICT(owner_user_id, workflow_id, node_id, video_sha256) DO NOTHING`,
+      [revision.id, revision.ownerUserId, revision.workflowId, revision.nodeId, revision.videoSha256, revision.revision, revision.createdAt, revision.updatedAt, toJson(revision)],
+    );
+    return Number(result.rowCount || 0) === 1;
+  }
+  const result = getSqliteDatabase().prepare(
+    `INSERT INTO canvas_subtitle_revisions (id, owner_user_id, workflow_id, node_id, video_sha256, revision, created_at, updated_at, data_json)
+     VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?) ON CONFLICT(owner_user_id, workflow_id, node_id, video_sha256) DO NOTHING`,
+  ).run(revision.id, revision.ownerUserId, revision.workflowId, revision.nodeId, revision.videoSha256, revision.revision, revision.createdAt, revision.updatedAt, toJson(revision)) as { changes?: number };
+  return Number(result.changes || 0) === 1;
+}
+
+export async function updateCanvasSubtitleRevisionInDb(revision: CanvasSubtitleRevision, expectedRevision: number) {
+  await ensureDatabaseReady();
+  if (getDatabaseBackend() === "postgres") {
+    const result = await getPostgresPool().query(
+      `UPDATE canvas_subtitle_revisions SET revision = $1, updated_at = $2, data_json = $3::jsonb
+       WHERE id = $4 AND owner_user_id = $5 AND revision = $6`,
+      [revision.revision, revision.updatedAt, toJson(revision), revision.id, revision.ownerUserId, expectedRevision],
+    );
+    return Number(result.rowCount || 0) === 1;
+  }
+  const result = getSqliteDatabase().prepare(
+    `UPDATE canvas_subtitle_revisions SET revision = ?, updated_at = ?, data_json = ?
+     WHERE id = ? AND owner_user_id = ? AND revision = ?`,
+  ).run(revision.revision, revision.updatedAt, toJson(revision), revision.id, revision.ownerUserId, expectedRevision) as { changes?: number };
+  return Number(result.changes || 0) === 1;
+}
+
+export async function getCanvasSubtitleWaveformFromDb(cacheId: string) {
+  await ensureDatabaseReady();
+  if (getDatabaseBackend() === "postgres") {
+    const result = await getPostgresPool().query<JsonRow>("SELECT data_json FROM canvas_subtitle_waveform_cache WHERE id = $1", [cacheId]);
+    return result.rows[0] ? fromJson<CanvasSubtitleWaveform>(result.rows[0].data_json) : undefined;
+  }
+  const row = getSqliteDatabase().prepare("SELECT data_json FROM canvas_subtitle_waveform_cache WHERE id = ?").get(cacheId) as JsonRow | undefined;
+  return row ? fromJson<CanvasSubtitleWaveform>(row.data_json) : undefined;
+}
+
+export async function saveCanvasSubtitleWaveformToDb(cacheId: string, waveform: CanvasSubtitleWaveform) {
+  await ensureDatabaseReady();
+  if (getDatabaseBackend() === "postgres") {
+    await getPostgresPool().query(
+      `INSERT INTO canvas_subtitle_waveform_cache (id, owner_user_id, video_sha256, protocol_version, created_at, updated_at, data_json)
+       VALUES ($1, $2, $3, $4, $5, $6, $7::jsonb)
+       ON CONFLICT(id) DO UPDATE SET updated_at = excluded.updated_at, data_json = excluded.data_json`,
+      [cacheId, waveform.ownerUserId, waveform.videoSha256, waveform.protocolVersion, waveform.createdAt, waveform.updatedAt, toJson(waveform)],
+    );
+  } else {
+    getSqliteDatabase().prepare(
+      `INSERT INTO canvas_subtitle_waveform_cache (id, owner_user_id, video_sha256, protocol_version, created_at, updated_at, data_json)
+       VALUES (?, ?, ?, ?, ?, ?, ?) ON CONFLICT(id) DO UPDATE SET updated_at = excluded.updated_at, data_json = excluded.data_json`,
+    ).run(cacheId, waveform.ownerUserId, waveform.videoSha256, waveform.protocolVersion, waveform.createdAt, waveform.updatedAt, toJson(waveform));
+  }
+  return waveform;
 }
 
 function normalizeStoredSimpleRun(run: SimpleRun): SimpleRun {

@@ -133,6 +133,7 @@ import {
 } from "@/lib/canvas/types";
 import { getStoredTheme, subscribeTheme } from "@/lib/theme";
 import { selectIdRange } from "@/lib/list-selection";
+import { SubtitleEditorDialog } from "./SubtitleEditorDialog";
 import type { ContentPoolSnapshot, CopyLibraryEntryView, LibraryAsset, LibraryAssetPage, NormalizedSourceItem } from "@/lib/types";
 import type {
   CanvasArtifact,
@@ -165,6 +166,7 @@ import type {
   CanvasScheduleV2SharedOutput,
   CanvasSourceVideoSnapshot,
   CanvasSubtitlePreset,
+  CanvasSubtitleRevisionSnapshot,
   CanvasSubtitleStyle,
   CanvasSchedulerRole,
   CanvasVideoSnapshot,
@@ -206,6 +208,7 @@ type CanvasNodeInteraction = {
   onExecutionModeChange: (nodeId: string, mode: CanvasNodeExecutionMode) => void;
   onNodeFocus: (nodeId: string) => void;
   onPreview: (preview: NonNullable<PreviewState>) => void;
+  onSubtitleEdit: (node: CanvasNode, nodeRun: CanvasNodeRun) => void;
 };
 
 const CanvasNodeInteractionContext = createContext<CanvasNodeInteraction | null>(null);
@@ -246,6 +249,7 @@ export default function CanvasPage() {
   const [mediaBusy, setMediaBusy] = useState(false);
   const [videoUploadTasks, setVideoUploadTasks] = useState<CanvasVideoUploadTask[]>([]);
   const [preview, setPreview] = useState<PreviewState>(null);
+  const [subtitleEditor, setSubtitleEditor] = useState<{ nodeId: string; nodeRunId: string }>();
   const [quickAdd, setQuickAdd] = useState<QuickAddState>(null);
   const saveTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
   const reactFlowRef = useRef<ReactFlowInstance<FlowNode, FlowEdge> | null>(null);
@@ -358,6 +362,7 @@ export default function CanvasPage() {
     onExecutionModeChange: updateNodeExecutionMode,
     onNodeFocus: focusCanvasNode,
     onPreview: setPreview,
+    onSubtitleEdit: (node, nodeRun) => setSubtitleEditor({ nodeId: node.id, nodeRunId: nodeRun.id }),
   }), [activeRun, activeWorkflow?.revision, focusCanvasNode, isMobile, latestNodeRuns, latestSuccessfulNodeRuns, selectedNodeId, updateNodeConfig, updateNodeExecutionMode]);
 
   useEffect(() => {
@@ -1064,6 +1069,51 @@ export default function CanvasPage() {
     }
   }
 
+  async function applySubtitleRevision(nodeId: string, snapshot: CanvasSubtitleRevisionSnapshot) {
+    if (!activeWorkflow || busy) throw new Error("画布正在执行其他操作，请稍后再试。");
+    if (saveTimer.current) clearTimeout(saveTimer.current);
+    saveTimer.current = null;
+    const workflow = activeWorkflow;
+    const graph = currentGraph(nodes, edges, viewport);
+    if (!graph.nodes.some((node) => node.id === nodeId && node.type === "utility.video-subtitles")) throw new Error("字幕节点已不存在，无法应用修订。");
+    graph.nodes = graph.nodes.map((node) => node.id === nodeId ? { ...node, config: { ...node.config, revisionSnapshot: snapshot } } : node);
+    setBusy(true);
+    try {
+      const saved = await api<{ workflow: CanvasWorkflow }>(`/api/canvas/workflows/${workflow.id}`, {
+        method: "PATCH",
+        body: JSON.stringify({ name: workflow.name, revision: workflow.revision, graph }),
+      });
+      if (activeWorkflowIdRef.current !== workflow.id) throw new Error("当前画布已切换，字幕修订未运行。");
+      setWorkflows((current) => current.map((item) => item.id === saved.workflow.id ? saved.workflow : item));
+      setActiveWorkflow(saved.workflow);
+      setNodes(toFlowNodes(saved.workflow.graph.nodes, isMobile));
+      setEdges(toFlowEdges(saved.workflow.graph.edges, saved.workflow.graph.nodes));
+      setDirty(false);
+      const planned = await api<{ plan: CanvasRunPlan }>("/api/canvas/runs", {
+        method: "POST",
+        body: JSON.stringify({ action: "plan", workflowId: saved.workflow.id, targetNodeIds: [nodeId], runMode: "isolated" }),
+      });
+      if (planned.plan.preflightBlocked) throw new Error(planned.plan.blockers[0]?.message || "字幕节点 isolated run 预检失败。");
+      const started = await api<{ run: CanvasRun }>("/api/canvas/runs", {
+        method: "POST",
+        body: JSON.stringify({
+          workflowId: saved.workflow.id,
+          targetNodeIds: [nodeId],
+          runMode: "isolated",
+          confirmed: true,
+          confirmationNodeIds: planned.plan.confirmationNodeIds,
+        }),
+      });
+      selectedRunIdRef.current = started.run.id;
+      runSelectionIsExplicitRef.current = false;
+      await loadRuns(saved.workflow.id);
+      await refreshRun(started.run.id, saved.workflow.id);
+      setMessage("字幕修订已保存，仅字幕节点已加入重新烧录队列。");
+    } finally {
+      setBusy(false);
+    }
+  }
+
   async function loadRuns(workflowId: string) {
     const requestId = ++loadRunsRequestRef.current;
     try {
@@ -1261,7 +1311,7 @@ export default function CanvasPage() {
       pasteCanvasPayload(payload);
     };
     const handleKeyDown = (event: KeyboardEvent) => {
-      if (isMobile || preview || event.defaultPrevented || isEditableClipboardTarget(event.target)) return;
+      if (isMobile || preview || subtitleEditor || event.defaultPrevented || isEditableClipboardTarget(event.target)) return;
       const commandKey = event.ctrlKey || event.metaKey;
       if (event.repeat) return;
       if (commandKey && event.altKey && !event.shiftKey && event.key === "Enter") {
@@ -1476,6 +1526,8 @@ export default function CanvasPage() {
             mediaBusy={mediaBusy}
             graph={editableGraph}
             subtitlePreviewMedia={selectedSubtitlePreviewMedia}
+            subtitleNodeRun={selectedCanvasNode.type === "utility.video-subtitles" ? latestNodeRuns.get(selectedCanvasNode.id) || latestSuccessfulNodeRuns.get(selectedCanvasNode.id)?.nodeRun : undefined}
+            onSubtitleEdit={(nodeRun) => setSubtitleEditor({ nodeId: selectedCanvasNode.id, nodeRunId: nodeRun.id })}
             seedanceReferences={selectedSeedanceReferences}
             createSeedanceMentionId={createSeedanceMentionId}
           /> : <div className="canvas-inspector-empty">选择节点查看参数与端口</div>}
@@ -1523,6 +1575,14 @@ export default function CanvasPage() {
       {preview?.kind === "image" ? <CanvasImagePreviewDialog preview={preview} onClose={() => setPreview(null)} /> : null}
       {preview?.kind === "text" ? <CanvasTextPreviewDialog value={preview.value} onClose={() => setPreview(null)} /> : null}
       {preview?.kind === "video" ? <CanvasVideoPreviewDialog url={preview.url} index={preview.index} onClose={() => setPreview(null)} /> : null}
+      {subtitleEditor && activeWorkflow ? <SubtitleEditorDialog
+        workflowId={activeWorkflow.id}
+        nodeId={subtitleEditor.nodeId}
+        nodeRunId={subtitleEditor.nodeRunId}
+        style={canvasSubtitleStyleFromConfig(nodes.find((node) => node.id === subtitleEditor.nodeId)?.data.canvasNode.config || {})}
+        onApply={(snapshot) => applySubtitleRevision(subtitleEditor.nodeId, snapshot)}
+        onClose={() => setSubtitleEditor(undefined)}
+      /> : null}
     </main>
   );
 }
@@ -1612,7 +1672,7 @@ function CanvasFlowNode({ data, selected }: NodeProps<FlowNode>) {
     </div> : null}
     {node.type === "utility.text-split" ? <CanvasTextSplitNodeResult nodeRun={nodeRun} latestSuccessful={latestSuccessful} historicalRevision={historicalRevision} onPreview={(next) => interaction?.onPreview(next)} />
       : node.type.startsWith("model.") || ["utility.prompt-template", "utility.text-concatenate", "utility.image-select", "utility.image-transform", "utility.video-frames", "utility.video-reconstruct", "utility.video-subtitles"].includes(node.type)
-        ? <CanvasModelNodeResult node={node} nodeRun={nodeRun} latestSuccessful={latestSuccessful} historicalRevision={historicalRevision} onPreview={(next) => interaction?.onPreview(next)} />
+        ? <CanvasModelNodeResult node={node} nodeRun={nodeRun} latestSuccessful={latestSuccessful} historicalRevision={historicalRevision} onPreview={(next) => interaction?.onPreview(next)} onSubtitleEdit={(result) => interaction?.onSubtitleEdit(node, result)} />
         : null}
     {node.type === "utility.image-preview" ? <CanvasImagePreviewNodeResult nodeRun={nodeRun} latestSuccessful={latestSuccessful} onPreview={(next) => interaction?.onPreview(next)} /> : null}
     {node.type === "utility.save-images" ? <CanvasSaveImagesNodeResult nodeRun={nodeRun} latestSuccessful={latestSuccessful} /> : null}
@@ -1942,12 +2002,14 @@ function CanvasModelNodeResult({
   latestSuccessful,
   historicalRevision,
   onPreview,
+  onSubtitleEdit,
 }: {
   node: CanvasNode;
   nodeRun?: CanvasNodeRun;
   latestSuccessful?: CanvasLatestSuccessfulNodeRun;
   historicalRevision?: number;
   onPreview: (preview: NonNullable<PreviewState>) => void;
+  onSubtitleEdit?: (nodeRun: CanvasNodeRun) => void;
 }) {
   const selectedArtifact = nodeRun ? getModelArtifact(node.type, nodeRun) : undefined;
   const artifactRun = selectedArtifact ? nodeRun : latestSuccessful?.nodeRun || nodeRun;
@@ -1994,6 +2056,7 @@ function CanvasModelNodeResult({
       <p>{artifactRun.outputs.text.value}</p>
       <button type="button" onClick={() => onPreview({ kind: "text", value: artifactRun.outputs.text.kind === "text" ? artifactRun.outputs.text.value : "" })} aria-label="查看完整字幕文本" title="查看完整字幕文本"><Maximize2 /></button>
     </div> : null}
+    {node.type === "utility.video-subtitles" && ["completed", "reused"].includes(artifactRun.status) ? <button className="canvas-subtitle-edit-entry" type="button" onClick={() => onSubtitleEdit?.(artifactRun)}><Captions />{artifactRun.internalMetadata?.subtitle ? "校对字幕" : "重新运行后校对"}</button> : null}
   </div>;
 }
 
@@ -2110,6 +2173,8 @@ function NodeInspector({
   mediaBusy,
   graph,
   subtitlePreviewMedia,
+  subtitleNodeRun,
+  onSubtitleEdit,
   seedanceReferences,
   createSeedanceMentionId,
 }: {
@@ -2132,6 +2197,8 @@ function NodeInspector({
   mediaBusy: boolean;
   graph: CanvasGraph;
   subtitlePreviewMedia?: CanvasMediaReference;
+  subtitleNodeRun?: CanvasNodeRun;
+  onSubtitleEdit: (nodeRun: CanvasNodeRun) => void;
   seedanceReferences: SeedanceFixedReference[];
   createSeedanceMentionId: () => string;
 }) {
@@ -2228,7 +2295,13 @@ function NodeInspector({
       onPreview={onPreviewVideo}
       onChange={(videos, selectedVideoId) => onPatch(canvasVideoLoaderConfig(videos, selectedVideoId))}
     /> : null}
-    {node.type === "utility.video-subtitles" ? <CanvasSubtitleStyleEditor node={node} media={subtitlePreviewMedia} onPatch={onPatch} /> : definition.fields.map((field) => {
+    {node.type === "utility.video-subtitles" ? <>
+      <div className="canvas-subtitle-inspector-entry">
+        <button type="button" disabled={!subtitleNodeRun || !["completed", "reused"].includes(subtitleNodeRun.status)} onClick={() => subtitleNodeRun && onSubtitleEdit(subtitleNodeRun)}><Captions />校对字幕</button>
+        <small>{subtitleNodeRun?.internalMetadata?.subtitle ? "修改文字和时间轴" : subtitleNodeRun ? "该结果需重新运行一次后才能校对" : "首次生成字幕后可校对"}</small>
+      </div>
+      <CanvasSubtitleStyleEditor node={node} media={subtitlePreviewMedia} onPatch={onPatch} />
+    </> : definition.fields.map((field) => {
       if (field.key === "outputCompression" && node.config.outputFormat !== "jpeg") return null;
       if (field.key === "template" && node.config.preset !== "custom") return null;
       if (node.type === "utility.text-split" && (field.key === "delimiter" || field.key === "delimiterIndex") && node.config.mode !== "delimiter") return null;
