@@ -84,7 +84,7 @@ try {
   }
   const require = createRequire(import.meta.url);
   const { getCanvasNodeDefinition, getCanvasNodeExecutionMode, upgradeCanvasGraph, upgradeCanvasNode, validateCanvasNodeConfig, normalizeUrlList } = require(path.join(temp, "registry.js"));
-  const { validateCanvasGraph, buildCanvasRunPlan } = require(path.join(temp, "graph.js"));
+  const { validateCanvasGraph, validateCanvasGraphForPersistence, buildCanvasRunPlan } = require(path.join(temp, "graph.js"));
   const { createCanvasClipboardPayload, instantiateCanvasClipboardPayload, parseCanvasClipboardPayload, prepareCanvasClipboardPaste } = require(path.join(temp, "clipboard.js"));
   const { createCanvasWorkflowFile, parseCanvasWorkflowFile, canvasWorkflowFileName, CANVAS_WORKFLOW_FILE_MAX_BYTES } = require(path.join(temp, "workflow-file.js"));
   const { areCanvasPortKindsCompatible, CANVAS_GRAPH_LIMITS, CANVAS_NODE_SIZE_LIMITS } = require(path.join(temp, "types.js"));
@@ -368,12 +368,24 @@ try {
   assert.equal(parseCanvasClipboardPayload(JSON.stringify(concatenateClipboard))?.nodes.find((node) => node.type === "utility.text-concatenate")?.config.clean_whitespace, true, "text concatenate config must round-trip through clipboard validation");
   assert.deepEqual(CANVAS_NODE_SIZE_LIMITS, { minWidth: 190, minHeight: 120, maxWidth: 720, maxHeight: 900 }, "node resizing bounds must stay shared across persistence and UI");
   assert.equal(validateCanvasGraph(validGraph).valid, true, "valid typed graph should pass");
+  const incompleteDraftGraph = {
+    nodes: [
+      { ...structuredClone(textNode), config: { text: "" } },
+      { ...structuredClone(gptNode), id: "draft-gpt" },
+    ],
+    edges: [],
+    viewport: { x: 0, y: 0, zoom: 1 },
+  };
+  assert.equal(validateCanvasGraphForPersistence(incompleteDraftGraph).valid, true, "persistence must accept structurally valid incomplete drafts");
+  assert.match(validateCanvasGraph(incompleteDraftGraph).errors.join(" "), /不能为空.*requires input/i, "execution validation must still reject incomplete draft config and wiring");
+  assert.equal(parseCanvasWorkflowFile(JSON.stringify(createCanvasWorkflowFile("Incomplete draft", incompleteDraftGraph))).graph.nodes.length, 2, "workflow files must round-trip incomplete drafts");
   const resizedGraph = structuredClone(validGraph);
   resizedGraph.nodes[0].size = { width: 360, height: 280 };
   assert.equal(validateCanvasGraph(resizedGraph).valid, true, "valid custom node dimensions should pass graph validation");
   const oversizedGraph = structuredClone(resizedGraph);
   oversizedGraph.nodes[0].size.width = 721;
   assert.match(validateCanvasGraph(oversizedGraph).errors.join(" "), /190x120.*720x900/i, "out-of-range node dimensions must fail graph validation");
+  assert.match(validateCanvasGraphForPersistence(oversizedGraph).errors.join(" "), /190x120.*720x900/i, "persistence must still reject out-of-range node dimensions");
   assert.deepEqual(buildCanvasRunPlan(validGraph, ["gpt"]).includedNodeIds, ["text", "gpt"], "selected-node plan should include ancestors");
   assert.deepEqual(buildCanvasRunPlan(validGraph, ["gpt"]).capabilities, ["text_model"]);
   const bypassGraph = structuredClone(validGraph);
@@ -444,6 +456,7 @@ try {
   const cyclic = structuredClone(validGraph);
   cyclic.edges.push({ id: "e2", source: "gpt", sourcePort: "text", target: "text", targetPort: "missing" });
   assert.match(validateCanvasGraph(cyclic).errors.join(" "), /cycles/i);
+  assert.match(validateCanvasGraphForPersistence(cyclic).errors.join(" "), /cycles/i, "persistence must still reject cycles");
   const dangling = structuredClone(validGraph);
   dangling.edges[0].source = "missing";
   assert.match(validateCanvasGraph(dangling).errors.join(" "), /missing node/i);
@@ -455,6 +468,7 @@ try {
   wrongType.edges[0].source = "images";
   wrongType.edges[0].sourcePort = "images";
   assert.match(validateCanvasGraph(wrongType).errors.join(" "), /incompatible/i);
+  assert.match(validateCanvasGraphForPersistence(wrongType).errors.join(" "), /incompatible/i, "persistence must still reject incompatible ports");
 
   const clipboardPayload = createCanvasClipboardPayload(validGraph.nodes, validGraph.edges, ["text", "gpt"]);
   assert.equal(clipboardPayload.nodes.length, 2, "clipboard should include selected nodes");
@@ -653,7 +667,7 @@ for (const table of ["canvas_workflows", "canvas_schedules", "canvas_runs", "can
 requireText(schema, ["revision = $8", "FOR UPDATE SKIP LOCKED", "requeueCanvasRunQueueItem", "requeueExpiredCanvasRunQueueItemsWithProviderTasks", "providerTaskId", "json_extract", "listCanvasSuccessfulNodeRunsForWorkflowFromDb", "JOIN canvas_runs"], "canvas persistence");
 
 const workflows = read("src/lib/canvas/workflows.ts");
-requireText(workflows, ["filterWorkspaceOwnedRecords", "assertCanAccessWorkspaceRecord", "CanvasRevisionConflictError", "structuredClone(graph)"], "workflow service");
+requireText(workflows, ["filterWorkspaceOwnedRecords", "assertCanAccessWorkspaceRecord", "CanvasRevisionConflictError", "structuredClone(graph)", "validateCanvasGraphForPersistence", "decodeCanvasGraph(input.graph)"], "workflow service");
 
 const runs = read("src/lib/canvas/runs.ts");
 requireText(runs, ["structuredClone(workflow.graph)", "runMode", "isolated", "inputFingerprint", "reusedFrom", "bypassed", "disabled", "Missing required input", "cancelRequestedAt", "collectDescendants", "previousNodeRun", "resumableNodeRun", "onProviderTaskUpdate", "providerTaskRoute", "result.providerTaskId || nodeRun.providerTaskId", "finalRun.status === \"running\"", "requeueCanvasRunQueueItem(finalRun.id, 30_000)", "setTimeout(ensureCanvasRunWorker, 30_000)", "requeueExpiredCanvasRunQueueItemsWithProviderTasks", "listCanvasRunHistory", "listCanvasSuccessfulNodeRunsForWorkflowFromDb", "latestSuccessfulNodeRuns", "workflowRevision", "nodeConfig", "concurrencyConfig.canvasRun", "activeWorkers", "storedQueueState.activeWorkers ??= 0"], "DAG scheduler and latest-success projection");

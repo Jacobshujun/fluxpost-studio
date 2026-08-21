@@ -73,6 +73,12 @@ An external API version change is a change-propagation task, not a one-call-site
 - Regression coverage must include a technically successful response whose read-back fields are blank.
 - Build round-trip fixtures from observed reads, not writes. If a CLI returns a one-item array for a scalar single-select write, normalize only that shape; empty, multi-item, and wrong-value reads must fail.
 
+### Persistence Validity Is Not Execution Readiness
+
+- Editable workflows often need to persist incomplete drafts; missing required content or wiring should block execution, not saving.
+- Keep structural decoding at the API/service boundary so draft support does not admit malformed JSON, unknown types, bad references, or cycles.
+- Test both contracts: an incomplete draft must round-trip through real storage, and the same draft must fail execution readiness with actionable errors.
+
 ### Mistake 1: Implicit Format Assumptions
 
 **Bad**: Assuming date format without checking

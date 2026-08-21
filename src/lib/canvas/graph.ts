@@ -6,6 +6,14 @@ import { validateSeedanceGraphNode } from "./seedance-references";
 const schedulerRoles = new Set<CanvasSchedulerRole>(CANVAS_SCHEDULER_ROLES);
 
 export function validateCanvasGraph(graph: CanvasGraph): CanvasGraphValidation {
+  return validateCanvasGraphWithMode(graph, true);
+}
+
+export function validateCanvasGraphForPersistence(graph: CanvasGraph): CanvasGraphValidation {
+  return validateCanvasGraphWithMode(graph, false);
+}
+
+function validateCanvasGraphWithMode(graph: CanvasGraph, validateExecution: boolean): CanvasGraphValidation {
   const errors: string[] = [];
   if (!graph || !Array.isArray(graph.nodes) || !Array.isArray(graph.edges)) {
     return { valid: false, errors: ["Canvas graph must contain nodes and edges."], order: [] };
@@ -32,7 +40,9 @@ export function validateCanvasGraph(graph: CanvasGraph): CanvasGraphValidation {
     const schedulerBoundImageInput = (node.schedulerRole === "scene-input" || node.schedulerRole === "vehicle-input")
       && (node.type === "input.images" || node.type === "input.library-images");
     const schedulerBoundCopyInput = node.schedulerRole === "copy-input" && node.type === "input.copy-library";
-    if (executionMode === "enabled" && !schedulerBoundImageInput && !schedulerBoundCopyInput) errors.push(...validateCanvasNodeConfig(node.type, node.config || {}, node.version));
+    if (validateExecution && executionMode === "enabled" && !schedulerBoundImageInput && !schedulerBoundCopyInput) {
+      errors.push(...validateCanvasNodeConfig(node.type, node.config || {}, node.version));
+    }
     if (executionMode === "bypass" && !definition.bypass) errors.push(`${definition.label} does not support bypass mode.`);
     if (!Number.isFinite(node.position?.x) || !Number.isFinite(node.position?.y)) errors.push(`Node ${node.id} has an invalid position.`);
     if (node.size !== undefined && !isCanvasNodeSize(node.size)) {
@@ -78,7 +88,7 @@ export function validateCanvasGraph(graph: CanvasGraph): CanvasGraphValidation {
   for (const node of graph.nodes) {
     const definition = getCanvasNodeDefinition(node.type, node.version);
     const executionMode = getCanvasNodeExecutionMode(node);
-    const requiredInputs = executionMode === "disabled"
+    const requiredInputs = !validateExecution || executionMode === "disabled"
       ? []
       : executionMode === "bypass"
         ? (definition?.inputs || []).filter((input) => input.id === definition?.bypass?.inputPort)
@@ -88,7 +98,7 @@ export function validateCanvasGraph(graph: CanvasGraph): CanvasGraphValidation {
         errors.push(`${definition?.label || node.id} requires input ${input.label}.`);
       }
     }
-    if (node.type === "model.seedance" && executionMode === "enabled") errors.push(...validateSeedanceGraphNode(graph, node));
+    if (validateExecution && node.type === "model.seedance" && executionMode === "enabled") errors.push(...validateSeedanceGraphNode(graph, node));
   }
 
   const order = topologicalOrder(graph, nodes);

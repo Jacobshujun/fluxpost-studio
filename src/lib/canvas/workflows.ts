@@ -13,8 +13,9 @@ import {
   scopeWorkspaceOwner,
   type WorkspaceAccessActor,
 } from "../workspace-ownership";
-import { validateCanvasGraph } from "./graph";
+import { validateCanvasGraphForPersistence } from "./graph";
 import { upgradeCanvasGraph } from "./registry";
+import { decodeCanvasGraph } from "./serialization";
 import type { CanvasGraph, CanvasWorkflow } from "./types";
 import { createCanvasWorkflowTemplateGraph, type CanvasWorkflowTemplateKey } from "./templates";
 
@@ -42,7 +43,7 @@ export async function createCanvasWorkflow(
   input: { name?: string; graph?: CanvasGraph; isTemplate?: boolean; sourceWorkflowId?: string; templateKey?: CanvasWorkflowTemplateKey } = {},
 ) {
   const template = input.templateKey ? createCanvasWorkflowTemplateGraph(input.templateKey) : undefined;
-  const graph = input.graph ? upgradeCanvasGraph(input.graph) : template?.graph || emptyCanvasGraph();
+  const graph = input.graph ? upgradeCanvasGraph(decodeCanvasGraph(input.graph)) : template?.graph || emptyCanvasGraph();
   assertValidGraph(graph);
   const now = new Date().toISOString();
   const workflow: CanvasWorkflow = {
@@ -68,7 +69,7 @@ export async function updateCanvasWorkflow(
   if (!current) throw new Error("Canvas workflow not found");
   assertCanAccessWorkspaceRecord(account, current, "Canvas workflow not found");
   if (!Number.isInteger(input.revision) || input.revision !== current.revision) throw new CanvasRevisionConflictError();
-  const graph = input.graph ? upgradeCanvasGraph(input.graph) : upgradeCanvasGraph(current.graph);
+  const graph = input.graph ? upgradeCanvasGraph(decodeCanvasGraph(input.graph)) : upgradeCanvasGraph(current.graph);
   assertValidGraph(graph);
   const workflow: CanvasWorkflow = {
     ...current,
@@ -110,7 +111,7 @@ export function emptyCanvasGraph(): CanvasGraph {
 }
 
 function assertValidGraph(graph: CanvasGraph) {
-  const validation = validateCanvasGraph(graph);
+  const validation = validateCanvasGraphForPersistence(graph);
   if (!validation.valid) throw new Error(validation.errors.join(" "));
 }
 

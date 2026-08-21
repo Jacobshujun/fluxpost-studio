@@ -1,4 +1,4 @@
-import { validateCanvasGraph } from "./graph";
+import { validateCanvasGraphForPersistence } from "./graph";
 import { upgradeCanvasGraph } from "./registry";
 import { decodeCanvasGraph } from "./serialization";
 import type { CanvasGraph } from "./types";
@@ -59,7 +59,7 @@ export function canvasWorkflowFileName(name: string) {
 }
 
 function assertValidCanvasWorkflowGraph(graph: CanvasGraph) {
-  const validation = validateCanvasGraph(graph);
+  const validation = validateCanvasGraphForPersistence(graph);
   if (!validation.valid) throw new Error(validation.errors.join(" "));
 }
 
