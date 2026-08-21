@@ -3,6 +3,11 @@ import json
 import sys
 
 
+def write_json_output(value):
+    sys.stdout.reconfigure(encoding="utf-8")
+    json.dump(value, sys.stdout, ensure_ascii=False)
+
+
 def parse_args():
     parser = argparse.ArgumentParser()
     parser.add_argument("--video", required=True)
@@ -55,15 +60,13 @@ def main():
         if words:
             output.append({"text": segment.text, "words": words})
 
-    json.dump(
+    write_json_output(
         {
             "engine": "faster-whisper",
             "language": info.language,
             "durationMs": round(info.duration * 1000),
             "segments": output,
-        },
-        sys.stdout,
-        ensure_ascii=False,
+        }
     )
     return 0
 

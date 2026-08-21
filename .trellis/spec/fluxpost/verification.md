@@ -1,6 +1,6 @@
 # Verification
 
-Last updated: 2026-08-20
+Last updated: 2026-08-21
 
 ## Baseline Command
 
@@ -45,7 +45,7 @@ Do not deploy a dirty worktree, branch name, abbreviated SHA, local runtime rows
 
 ## Recent Verification
 
-- 2026-08-20: Canvas subtitle v3 errors/timing/cache, rotated dimensions, delayed audio, full-duration H.264/AAC, real Faster Whisper `1.2.1`, desktop/mobile Chromium, lint, TypeScript, build, smoke, and the offline baseline passed without text disclosure or paid calls.
+- 2026-08-21: Canvas subtitle v4 UTF-8 Python-to-Node transport, v3 cache/output invalidation, focused checks, lint, TypeScript, build, HTTP/SQLite smoke, and the offline baseline passed without external calls.
 - 2026-08-20: Clean committed SHA `0909776383c05eab37a2f66a0b2443dde693e2da` activated on both managed slots; a controlled inactive-slot missing-`BUILD_ID` failure restored the prior slot, identity, state marker, and full HTTP smoke before final healthy activation on `.next-local-b`.
 - 2026-08-20: Canvas video-loader MP4/MOV/WebM and failure cleanup checks used local FFmpeg/FFprobe with mocked persistence; workflow/scheduler, mocked Chromium 1440x900/390x844, lint, TypeScript, build, smoke, and the full offline baseline passed.
 Older evidence is preserved in `.trellis/spec/fluxpost/archive/verification-history.md`.

@@ -130,7 +130,7 @@ const localTimeline = loadTsModule("src/lib/canvas/local-subtitle-timeline.ts", 
   "./media-tools": { CanvasMediaNeedsConfigError: NeedsConfigError },
   "./types": {},
 });
-assert.equal(localTimeline.CANVAS_SUBTITLE_TIMELINE_PROTOCOL_VERSION, 3);
+assert.equal(localTimeline.CANVAS_SUBTITLE_TIMELINE_PROTOCOL_VERSION, 4);
 assert.match(localTimelineSource, /faster-whisper/);
 const recognizerSettings = localTimeline.canvasSubtitleRecognizerSettings();
 assert.deepEqual(JSON.parse(JSON.stringify(recognizerSettings)), {
@@ -203,7 +203,13 @@ assert.throws(() => localTimeline.normalizeCanvasLocalSubtitleTimeline({ engine:
 assert.throws(() => localTimeline.normalizeCanvasLocalSubtitleTimeline({ engine: "faster-whisper", segments: [{ text: "A", words: [{ startMs: 100, endMs: 300, text: "A" }, { startMs: 250, endMs: 400, text: "B" }] }] }, { durationSeconds: 2, audioStartSeconds: 0, mediaStartSeconds: 0 }), /word 2 overlaps or is out of order/);
 assert.equal(read("requirements/canvas-subtitles.txt").trim(), "faster-whisper==1.2.1");
 const pythonRecognizer = read("scripts/canvas/faster_whisper_subtitles.py");
-for (const snippet of ["WhisperModel", "word_timestamps=True", "vad_filter=True", "task=args.task", "beam_size=args.beam_size", "local_files_only=True"]) assert.ok(pythonRecognizer.includes(snippet), `Python recognizer is missing ${snippet}`);
+for (const snippet of ["WhisperModel", "word_timestamps=True", "vad_filter=True", "task=args.task", "beam_size=args.beam_size", "local_files_only=True", 'sys.stdout.reconfigure(encoding="utf-8")', "write_json_output("]) assert.ok(pythonRecognizer.includes(snippet), `Python recognizer is missing ${snippet}`);
+const unicodeProbe = run("python", [
+  "-B",
+  "-c",
+  'from scripts.canvas.faster_whisper_subtitles import write_json_output; write_json_output({"text": "\\u4e2d\\u6587\\u5b57\\u5e55\\u6d4b\\u8bd5"})',
+], root);
+assert.deepEqual(JSON.parse(unicodeProbe), { text: "中文字幕测试" }, "Python recognizer stdout must round-trip non-ASCII JSON as UTF-8");
 
 const recognitionInput = { videoPath: "private-input.mp4", durationSeconds: 2, mediaStartSeconds: 0, audioStartSeconds: 0 };
 function timelineWithExecFile(execFile, timeoutMs = 1_800_000) {
@@ -246,7 +252,7 @@ const videoSubtitles = loadTsModule("src/lib/canvas/video-subtitles.ts", {
   "../database": {},
   "../runtime-media-materializer": {},
   "../runtime-media-storage": {},
-  "./local-subtitle-timeline": { CANVAS_SUBTITLE_TIMELINE_PROTOCOL_VERSION: 3 },
+  "./local-subtitle-timeline": { CANVAS_SUBTITLE_TIMELINE_PROTOCOL_VERSION: 4 },
   "./subtitle-fonts": {},
   "./subtitle-style": styleModule,
   "./media-tools": { CanvasMediaNeedsConfigError: class extends Error {} },
@@ -255,6 +261,7 @@ const videoSubtitles = loadTsModule("src/lib/canvas/video-subtitles.ts", {
 const videoSubtitlesSource = read("src/lib/canvas/video-subtitles.ts");
 assert.ok(!videoSubtitlesSource.includes('"-shortest"'), "subtitle encoding must preserve the source video duration when audio ends first");
 assert.ok(!videoSubtitlesSource.includes("arkVideoSubtitle"), "Canvas subtitle rendering must not depend on Ark timing config");
+assert.ok(videoSubtitlesSource.includes('"video-subtitles-v4"'), "subtitle output identity must change with the UTF-8 protocol fix");
 assert.match(videoSubtitlesSource, /settingsHash[\s\S]*?protocolVersion: CANVAS_SUBTITLE_TIMELINE_PROTOCOL_VERSION/, "local recognizer settings and protocol must participate in cache identity");
 const cacheIdentity = { ownerUserId: "owner-1", videoSha256: "video-hash", engine: "faster-whisper", model: "small", settingsHash: "settings-a" };
 const cacheId = videoSubtitles.buildCanvasSubtitleTimelineCacheId(cacheIdentity);
@@ -262,7 +269,8 @@ assert.notEqual(cacheId, videoSubtitles.buildCanvasSubtitleTimelineCacheId({ ...
 assert.notEqual(cacheId, videoSubtitles.buildCanvasSubtitleTimelineCacheId({ ...cacheIdentity, videoSha256: "other-video" }));
 assert.notEqual(cacheId, videoSubtitles.buildCanvasSubtitleTimelineCacheId({ ...cacheIdentity, model: "medium" }));
 assert.notEqual(cacheId, videoSubtitles.buildCanvasSubtitleTimelineCacheId({ ...cacheIdentity, settingsHash: "settings-b" }));
-assert.notEqual(cacheId, videoSubtitles.buildCanvasSubtitleTimelineCacheId({ ...cacheIdentity, protocolVersion: 2 }), "v3 must not reuse v2/Ark cache identities");
+assert.notEqual(cacheId, videoSubtitles.buildCanvasSubtitleTimelineCacheId({ ...cacheIdentity, protocolVersion: 3 }), "v4 must not reuse v3 timelines that may contain mojibake");
+assert.notEqual(cacheId, videoSubtitles.buildCanvasSubtitleTimelineCacheId({ ...cacheIdentity, protocolVersion: 2 }), "v4 must not reuse v2/Ark cache identities");
 const ass = videoSubtitles.buildCanvasSubtitleAss({
   segments: timeline,
   style: { ...defaultStyle, fontFamily: "Arial", backgroundEnabled: true, maxCharsPerLine: 4 },

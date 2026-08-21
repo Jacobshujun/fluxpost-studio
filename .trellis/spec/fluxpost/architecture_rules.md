@@ -1354,8 +1354,8 @@ config.mentionUrls = [personUrl, carUrl];
 
 ### 3. Contracts
 
-- Faster Whisper uses automatic language detection, `task=transcribe`, VAD, word timestamps, cached local model files, CPU/int8 defaults, and no translation. Each subtitle segment uses its first/last valid word boundary; Node owns timeout, JSON validation, sanitized errors, and `localVideo` concurrency.
-- Timeline protocol v3 shifts audio-relative timestamps by `audioStartSeconds - mediaStartSeconds`, requires positive ordered/non-overlapping integer-millisecond segments, and may clip only the final `endMs` overflow of at most `100ms`. Diagnostics and verification evidence never include subtitle text.
+- Faster Whisper uses automatic language detection, `task=transcribe`, VAD, word timestamps, cached local model files, CPU/int8 defaults, and no translation. Python stdout and Node decoding are explicitly UTF-8. Each segment uses its first/last valid word boundary; Node owns timeout, JSON validation, sanitized errors, and `localVideo` concurrency.
+- Timeline protocol v4 shifts audio-relative timestamps by `audioStartSeconds - mediaStartSeconds`, requires positive ordered/non-overlapping integer-millisecond segments, and may clip only the final `endMs` overflow of at most `100ms`. Diagnostics and verification evidence never include subtitle text.
 - Successful timelines cache by owner, video SHA-256, engine, model, inference-settings hash, and protocol version. Style is excluded from timing identity; protocol/model/settings changes and historical Ark v1/v2 rows cannot be reused.
 - `probeCanvasMediaFile(...)` owns coded dimensions, normalized `rotation`, displayed `width/height`, format/video/audio starts, duration, audio presence, format, and byte size. `90/270` degrees swaps displayed dimensions; Canvas media references, preview metadata, ASS `PlayResX/PlayResY`, fingerprints, and output metadata all use displayed dimensions.
 - Style is a node snapshot. Three built-ins are read-only; stored names are owner-unique after NFKC/whitespace/case normalization. Operators access their own rows; admins access all with owner attribution. Revision is required for update/delete.
@@ -1379,13 +1379,13 @@ config.mentionUrls = [personUrl, carUrl];
 
 ### 5. Good/Base/Bad Cases
 
-- Good: first run derives word-level acoustic timing, maps the audio origin onto the video timeline, caches protocol-v3 timing, and renders ASS at normalized displayed dimensions; a style-only rerun reuses timing and only re-encodes locally.
+- Good: first run derives word-level acoustic timing, maps the audio origin onto the video timeline, caches protocol-v4 UTF-8 timing, and renders ASS at normalized displayed dimensions; a style-only rerun reuses timing and only re-encodes locally.
 - Base: loading a built-in or stored preset copies its style into node config; later preset changes do not mutate the node.
 - Bad: estimate timing from generated text, ignore rotation/stream origins, clip an intermediate segment, cache across owners/settings/protocols, translate speech, expose recognized text in diagnostics, save resolution as style config, substitute a font, or return the unmodified video as success.
 
 ### 6. Tests Required
 
-- `.trellis/verification/canvas_video_subtitles_check.mjs` covers local settings, process/config/timeout/JSON/no-speech errors, word/timeline boundaries, origin shifts, exact `100ms` final clipping, diagnostic secrecy, v3 cache isolation, presets, displayed ASS dimensions, and real landscape/portrait/rotate-90 H.264/AAC outputs with complete duration and preserved stream offsets.
+- `.trellis/verification/canvas_video_subtitles_check.mjs` covers UTF-8 process output, local settings, process/config/timeout/JSON/no-speech errors, word/timeline boundaries, origin shifts, exact `100ms` final clipping, diagnostic secrecy, v4 cache isolation, presets, displayed ASS dimensions, and real landscape/portrait/rotate-90 H.264/AAC outputs with complete duration and preserved stream offsets.
 - `.trellis/verification/canvas_video_loader_check.mjs` covers coded/displayed rotation dimensions and real delayed-audio FFprobe origins. Mocked Chromium covers stale snapshot correction, actual video background, landscape/portrait geometry, neutral failure state, and desktop/mobile containment. TypeScript, lint, build, HTTP/SQLite smoke, and the full offline baseline must pass.
 
 ### 7. Wrong vs Correct
@@ -1394,7 +1394,7 @@ config.mentionUrls = [personUrl, carUrl];
 // Wrong: estimate timestamps with a text generation model or clamp every segment.
 const estimated = await generateSubtitleTimelineWithArk(video);
 
-// Correct: map local word timestamps onto probed media origins and validate v3 bounds.
+// Correct: map local word timestamps onto probed media origins and validate v4 bounds.
 const normalizedSegments = normalizeCanvasLocalSubtitleTimeline(await recognizeLocally(video), mediaProbe);
 
 // Wrong: compose rotated video against coded dimensions.

@@ -53,7 +53,7 @@ export async function addCanvasVideoSubtitles(input: { source: CanvasMediaRefere
       mediaStartSeconds: metadata.mediaStartSeconds,
       audioStartSeconds: metadata.audioStartSeconds,
     });
-    const fingerprint = sha256(JSON.stringify({ kind: "video-subtitles-v3", videoSha256, segments, style, width: metadata.width, height: metadata.height, rotation: metadata.rotation })).slice(0, 32);
+    const fingerprint = sha256(JSON.stringify({ kind: "video-subtitles-v4", videoSha256, segments, style, width: metadata.width, height: metadata.height, rotation: metadata.rotation })).slice(0, 32);
     const publicPath = `/generated/canvas-tools/${fingerprint}.mp4`;
     const existing = await existingOutput(publicPath);
     if (existing) return subtitleResult(existing, metadata, segments);

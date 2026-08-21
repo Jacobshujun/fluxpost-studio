@@ -339,7 +339,7 @@
       "evidence": [
         "2026-08-19 Seedance structured mentions, canonical image ordering, TOS gating, resolved-input resume, full offline baseline, and mocked Chromium desktop/mobile checks passed without Ark or TOS calls.",
         "2026-08-20 video-loader real local FFmpeg/FFprobe upload, selected output, frozen scheduling, full offline baseline, and mocked Chromium desktop/mobile queue checks passed without external services.",
-        "2026-08-20 Faster Whisper v3 timing/cache/errors, rotated dimensions, delayed audio, landscape/portrait ASS, real 16.136-second boundaries, Chromium previews, and the offline baseline passed without paid calls or text disclosure."
+        "2026-08-21 Faster Whisper v4 UTF-8 transport/cache/output identity, v3 invalidation, timing/errors, dimensions/origins, real acoustic boundaries, Chromium previews, and the offline baseline passed without external calls or text disclosure."
       ],
       "notes": "Keep ready_for_review until Seedance/Feishu/provider runs and PostgreSQL multi-user concurrency are live-verified; one recent subtitle input is acoustically verified."
     },

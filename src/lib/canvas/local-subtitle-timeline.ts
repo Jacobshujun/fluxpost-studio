@@ -6,7 +6,7 @@ import { appConfig } from "../config";
 import { CanvasMediaNeedsConfigError } from "./media-tools";
 import type { CanvasSubtitleSegment } from "./types";
 
-export const CANVAS_SUBTITLE_TIMELINE_PROTOCOL_VERSION = 3;
+export const CANVAS_SUBTITLE_TIMELINE_PROTOCOL_VERSION = 4;
 
 const finalEndOverflowToleranceMs = 100;
 const recognizerScript = path.join(/*turbopackIgnore: true*/ process.cwd(), "scripts", "canvas", "faster_whisper_subtitles.py");
@@ -151,7 +151,7 @@ function runLocalRecognizer(videoPath: string, settings: ReturnType<typeof canva
       "--compute-type", settings.computeType,
       "--task", settings.task,
       "--beam-size", String(settings.beamSize),
-    ], { timeout: appConfig.canvasSubtitleWhisperTimeoutMs, maxBuffer: 8 * 1024 * 1024, windowsHide: true }, (error, stdout, stderr) => {
+    ], { encoding: "utf8", timeout: appConfig.canvasSubtitleWhisperTimeoutMs, maxBuffer: 8 * 1024 * 1024, windowsHide: true }, (error, stdout, stderr) => {
       if (error) {
         const code = (error as NodeJS.ErrnoException).code;
         if (code === "ENOENT") return reject(new CanvasMediaNeedsConfigError("The configured Canvas subtitle Python interpreter is unavailable."));
