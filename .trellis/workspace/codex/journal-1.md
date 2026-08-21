@@ -1491,3 +1491,37 @@ Replaced Canvas Ark-estimated subtitle timing with local Faster Whisper v3 word 
 ### Next Steps
 
 - None - task complete
+
+
+## Session 45: Fix Canvas subtitle UTF-8 encoding
+
+**Date**: 2026-08-21
+**Task**: Fix Canvas subtitle UTF-8 encoding
+**Branch**: `main`
+
+### Summary
+
+Forced Faster Whisper JSON stdout to UTF-8 on Windows, upgraded Canvas subtitle cache/output identity to v4, added a real non-ASCII Python-to-Node regression probe, passed the full offline baseline, and activated the clean port-3001 candidate.
+
+### Main Changes
+
+(Add details)
+
+### Git Commits
+
+| Hash | Message |
+|------|---------|
+| `6760804` | (see git log) |
+| `44de559` | (see git log) |
+
+### Testing
+
+- [OK] (Add test results)
+
+### Status
+
+[OK] **Completed**
+
+### Next Steps
+
+- None - task complete
