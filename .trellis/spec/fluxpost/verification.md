@@ -19,7 +19,7 @@ The baseline verifies:
 
 - Trellis file existence, context budgets, latest markers, JSON validity, and feature evidence limits.
 - PostgreSQL schema, accounts/ownership, libraries, configuration, TOS, v4 deployment/image-retention/timer scripts, execution logs, platform mappings, media, video, concurrency, queues, Feishu boundaries, source imports, review flows, and row-level persistence.
-- Infinite Canvas graph/API/DAG, common nodes, local subtitle process/timing/cache/rotation/FFmpeg/presets, media, provider resume, scheduler, copy-library, and original-batch contracts without paid calls.
+- Infinite Canvas graph/API/DAG, common nodes, subtitle recognition/render/revision/waveform/cache contracts, media, provider resume, scheduler, copy-library, and original-batch behavior without paid calls.
 - Canvas local video-loader snapshot, streaming upload/FFprobe, selected-literal output, frozen V2 queue, and single-video task contracts without external storage calls.
 - Finished-body Unicode counting, 800-target prompts, one-repair fallback, history promotion, persistence consistency, editor clamping, Canvas composition, and Feishu exemptions without paid calls.
 - Runtime identity/secrecy, manifest-derived activation identity, candidate-only local startup, loopback/LAN bindings, and parity command contracts.
@@ -45,7 +45,7 @@ Do not deploy a dirty worktree, branch name, abbreviated SHA, local runtime rows
 
 ## Recent Verification
 
-- 2026-08-21: Canvas subtitle v4 UTF-8 Python-to-Node transport, v3 cache/output invalidation, focused checks, lint, TypeScript, build, HTTP/SQLite smoke, and the offline baseline passed without external calls.
+- 2026-08-21: Canvas subtitle manual editor, revision API/schema, snapshot recognition bypass/mismatch, waveform/cache/concurrency/errors, focused lint/TypeScript, build, two full offline baselines, and mocked Chromium at 1440x960/390x844 passed; clean `af6e12b1cbacf9b9651b2f78a3e9b6fe2980e3f3` activated on port 3001 with matching identity.
 - 2026-08-20: Clean committed SHA `0909776383c05eab37a2f66a0b2443dde693e2da` activated on both managed slots; a controlled inactive-slot missing-`BUILD_ID` failure restored the prior slot, identity, state marker, and full HTTP smoke before final healthy activation on `.next-local-b`.
 - 2026-08-20: Canvas video-loader MP4/MOV/WebM and failure cleanup checks used local FFmpeg/FFprobe with mocked persistence; workflow/scheduler, mocked Chromium 1440x900/390x844, lint, TypeScript, build, smoke, and the full offline baseline passed.
 Older evidence is preserved in `.trellis/spec/fluxpost/archive/verification-history.md`.

@@ -122,18 +122,15 @@ def desktop_check(browser, video_bytes):
     dialog = open_editor(page)
     assert dialog.locator("video").get_attribute("src") == "/subtitle-editor.mp4"
     assert_waveform_pixels(page)
-    dialog.locator("video").evaluate("""video => {
-      video.currentTime = 0.3;
-      video.dispatchEvent(new Event('timeupdate'));
-    }""")
-    page.locator(".canvas-subtitle-blocks button").first.wait_for()
+    dialog.locator("button[aria-label='播放或暂停']").click()
+    page.wait_for_function("document.querySelector('.canvas-subtitle-blocks button')?.classList.contains('is-active')")
     assert "is-active" in (page.locator(".canvas-subtitle-blocks button").first.get_attribute("class") or "")
     assert "第一段字幕" in page.locator(".canvas-subtitle-live-overlay span").inner_text()
     first = page.locator(".canvas-subtitle-blocks button").first
     before = first.bounding_box()
     first.hover()
     page.mouse.down()
-    page.mouse.move(before["x"] + 30, before["y"] + 4)
+    page.mouse.move(before["x"] + before["width"] / 2 + 30, before["y"] + before["height"] / 2)
     page.mouse.up()
     after = first.bounding_box()
     assert after["x"] > before["x"] + 10, {"before": before, "after": after}
@@ -149,7 +146,7 @@ def desktop_check(browser, video_bytes):
     page.locator('button[aria-label="关闭字幕编辑器"]').click()
     assert dialog.is_visible(), "dismissed dirty-close confirmation must keep the editor open"
     page.once("dialog", lambda prompt: prompt.accept())
-    page.locator('button[aria-label="关闭字幕编辑器"]').click()
+    page.locator('button[aria-label="关闭字幕编辑器"]').dispatch_event("click")
     dialog.wait_for(state="detached")
     assert not errors, errors
     page.close()
