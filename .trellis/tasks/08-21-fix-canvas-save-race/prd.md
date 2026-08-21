@@ -22,12 +22,12 @@
 
 ## Acceptance Criteria
 
-- [ ] 慢自动保存期间继续编辑会串行发送第二次 PATCH，第二次使用第一次响应 revision 和最新图。
-- [ ] 自动保存等待期点击手动保存只发送一次最新 PATCH，并明确显示保存完成。
-- [ ] 保存进行中点击手动保存不会丢弃意图，也不会并发发送相同 revision。
-- [ ] 409/失败保留 dirty 和错误信息，随后由用户再次保存，不产生自动重试循环。
-- [ ] 现有 Canvas 工作流检查、竞态浏览器检查、TypeScript、lint、build 和完整 Trellis baseline 通过。
-- [ ] 提交后用 `npm run local` 激活，端口 3001 `/api/version` 与最终 clean HEAD 一致且 `/canvas` 返回 200。
+- [x] 慢自动保存期间继续编辑会串行发送第二次 PATCH，第二次使用第一次响应 revision 和最新图。
+- [x] 自动保存等待期点击手动保存只发送一次最新 PATCH，并明确显示保存完成。
+- [x] 保存进行中点击手动保存不会丢弃意图，也不会并发发送相同 revision。
+- [x] 409/失败保留 dirty 和错误信息，随后由用户再次保存，不产生自动重试循环。
+- [x] 现有 Canvas 工作流检查、竞态浏览器检查、TypeScript、lint、build 和完整 Trellis baseline 通过。
+- [x] 提交后用 `npm run local` 激活，端口 3001 `/api/version` 与最终 clean HEAD 一致且 `/canvas` 返回 200。
 
 ## Out Of Scope
 

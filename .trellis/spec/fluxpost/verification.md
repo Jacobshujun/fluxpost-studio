@@ -45,7 +45,7 @@ Do not deploy a dirty worktree, branch name, abbreviated SHA, local runtime rows
 
 ## Recent Verification
 
-- 2026-08-21: Canvas workflow save serialization, delayed automatic/manual intent merging, revision chaining, failure blocking/manual retry, TypeScript, lint, build, and the full offline baseline passed; mocked browser race awaits the clean port-3001 candidate.
+- 2026-08-21: Canvas workflow save serialization, delayed automatic/manual intent merging, revision chaining, failure blocking/manual retry, TypeScript, lint, build, full offline baseline, and mocked Chromium against clean port 3001 passed; candidate identity matched and `/canvas` returned 200.
 - 2026-08-21: Canvas subtitle manual editor, revision API/schema, snapshot recognition bypass/mismatch, waveform/cache/concurrency/errors, focused lint/TypeScript, build, two full offline baselines, and mocked Chromium at 1440x960/390x844 passed; clean `af6e12b1cbacf9b9651b2f78a3e9b6fe2980e3f3` activated on port 3001 with matching identity.
 - 2026-08-20: Clean committed SHA `0909776383c05eab37a2f66a0b2443dde693e2da` activated on both managed slots; a controlled inactive-slot missing-`BUILD_ID` failure restored the prior slot, identity, state marker, and full HTTP smoke before final healthy activation on `.next-local-b`.
 Older evidence is preserved in `.trellis/spec/fluxpost/archive/verification-history.md`.
