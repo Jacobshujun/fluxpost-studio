@@ -22,7 +22,7 @@ Make the infinite Canvas video-subtitle node preserve recognized Chinese and oth
 - [x] A deterministic Windows-capable recognizer probe round-trips Chinese JSON text through the Python-to-Node process boundary without replacement characters or mojibake.
 - [x] The Canvas subtitle protocol is v4, and the cache-identity check proves v3 does not match v4.
 - [x] Focused Canvas subtitle verification, TypeScript, lint, production build, and the complete offline Trellis baseline pass.
-- [ ] The fix is committed before the clean port-3001 candidate is activated; `/api/version` matches the activated commit and `/canvas` is healthy.
+- [x] The fix is committed before the clean port-3001 candidate is activated; `/api/version` matches the activated commit and `/canvas` is healthy.
 
 ## Out Of Scope
 
