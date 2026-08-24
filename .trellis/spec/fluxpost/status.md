@@ -4,7 +4,7 @@ Last updated: 2026-08-24
 
 ## One-Line Status
 
-Per-image Canvas GPT reconstruction supports shared reference images and has passed complete offline verification; candidate activation is pending.
+Per-image Canvas GPT reconstruction supports shared reference images and is verified and active on port 3001 from the clean committed candidate.
 
 ## Current Focus
 
@@ -14,11 +14,11 @@ Per-image Canvas GPT reconstruction supports shared reference images and has pas
 
 ## Next Entry
 
-Activate the clean port-3001 candidate. Do not push or deploy without approval.
+Use the port-3001 Canvas candidate for operator review. Do not push or deploy without approval.
 
 ## Recent Verification
 
-- 2026-08-24: Shared-reference per-image checks, Canvas checks, TypeScript, lint, build, isolated smoke, and full baseline passed.
+- 2026-08-24: Shared-reference per-image checks, full baseline, clean candidate activation, matching version identity, and `/canvas` HTTP 200 passed.
 - 2026-08-24: Original per-image node, provider resume, publish guards, scheduler compatibility, baseline, candidate activation, and HTTP smoke passed.
 - 2026-08-21: Standalone GPT text checks, baseline, candidate activation, and authenticated draft refresh passed.
 

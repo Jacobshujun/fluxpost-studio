@@ -19,4 +19,4 @@
 2. [x] 扩展 `canvas_image_each_check.mjs`，覆盖请求顺序、去重、边界、指纹失效、恢复、迁移、跳过和调度兼容。
 3. [x] 运行 focused check、`npx --no-install tsc --noEmit`、`npm run lint`、`npm run build` 和完整离线 baseline。
 4. [x] 更新 FluxPost status/feature evidence，完成 Trellis 检查并提交。
-5. [ ] 在干净提交上运行 `npm run local`，确认端口 3001 候选身份及 `/canvas` HTTP 状态；不调用真实 provider。
+5. [x] 在干净提交上运行 `npm run local`，确认端口 3001 候选身份及 `/canvas` HTTP 状态；不调用真实 provider。
