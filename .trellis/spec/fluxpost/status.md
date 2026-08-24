@@ -4,7 +4,7 @@ Last updated: 2026-08-24
 
 ## One-Line Status
 
-Standalone Canvas GPT text and the per-image GPT reconstruction Canvas node are implemented and verified offline; no port-3001 candidate has been activated for this task.
+Standalone Canvas GPT text and the per-image GPT reconstruction Canvas node are implemented, verified, and activated on port 3001 from the current clean committed HEAD.
 
 ## Current Focus
 
@@ -14,11 +14,11 @@ Standalone Canvas GPT text and the per-image GPT reconstruction Canvas node are 
 
 ## Next Entry
 
-The implementation is ready for clean candidate activation; do not push or deploy without separate approval.
+Use the port-3001 Canvas candidate for operator review; do not push or deploy without separate approval.
 
 ## Recent Verification
 
-- 2026-08-24: Per-image GPT reconstruction node, provider resume, partial-draft/publish guard, V2 scheduler compatibility, focused mock-provider checks, and the full offline baseline passed without live providers.
+- 2026-08-24: Per-image GPT reconstruction node, provider resume, partial-draft/publish guard, V2 scheduler compatibility, focused mock-provider checks, full offline baseline, clean candidate activation, and local HTTP smoke passed without live providers.
 - 2026-08-21: Standalone GPT text planning, prompt assembly, validation, bypass, build, smoke, and the offline baseline passed without live providers.
 - 2026-08-21: Clean candidate activation and authenticated PostgreSQL draft refresh passed; fixtures were removed.
 
