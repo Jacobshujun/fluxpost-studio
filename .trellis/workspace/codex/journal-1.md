@@ -1627,3 +1627,37 @@ Separated Canvas persistence validation from execution readiness, added draft ro
 ### Next Steps
 
 - None - task complete
+
+
+## Session 49: Canvas shared references for per-image reconstruction
+
+**Date**: 2026-08-24
+**Task**: Canvas shared references for per-image reconstruction
+**Branch**: `local`
+
+### Summary
+
+Added model.gpt-image-each V2 shared reference input, ordered per-source requests, V1 migration and metadata compatibility, progress counts, deterministic coverage, full offline verification, and port-3001 candidate activation.
+
+### Main Changes
+
+(Add details)
+
+### Git Commits
+
+| Hash | Message |
+|------|---------|
+| `5b8dfa6` | (see git log) |
+| `8082206` | (see git log) |
+
+### Testing
+
+- [OK] (Add test results)
+
+### Status
+
+[OK] **Completed**
+
+### Next Steps
+
+- None - task complete
