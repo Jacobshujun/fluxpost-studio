@@ -602,7 +602,7 @@ const textSplitV2Definition: CanvasNodeDefinition = {
   defaultConfig: { mode: "first-line", delimiter: "---", delimiterIndex: 1 },
 };
 
-const gptImageEachDefinition: CanvasNodeDefinition = {
+const gptImageEachV1Definition: CanvasNodeDefinition = {
   type: "model.gpt-image-each",
   version: 1,
   label: "逐图 GPT 重构",
@@ -638,6 +638,17 @@ const gptImageEachDefinition: CanvasNodeDefinition = {
   bypass: { inputPort: "images", outputPort: "images" },
 };
 
+const gptImageEachV2Definition: CanvasNodeDefinition = {
+  ...gptImageEachV1Definition,
+  version: 2,
+  description: "逐张处理原图，并为每次 GPT-Image-2 请求附加同一组共享参考图。",
+  inputs: [
+    { id: "images", label: "待重构图片组", kind: "images", required: true, multiple: true },
+    { id: "references", label: "共享参考图", kind: "images", multiple: true },
+    { id: "prompt", label: "共享提示词", kind: "text", required: true, multiple: true },
+  ],
+};
+
 const feishuPublishV2Definition: CanvasNodeDefinition = {
   type: "publish.feishu",
   version: 2,
@@ -663,11 +674,11 @@ export const canvasNodeDefinitions = canvasNodeDefinitionVersions.map((definitio
     : definition.type === "publish.feishu"
       ? feishuPublishV2Definition
       : definition,
-).concat(gptImageEachDefinition);
+).concat(gptImageEachV2Definition);
 
 const definitionMap = new Map(canvasNodeDefinitions.map((definition) => [definition.type, definition]));
 const definitionVersionMap = new Map(
-  [...canvasNodeDefinitionVersions, gptImageV2Definition, gptImageEachDefinition, promptSwitchV2Definition, textSplitV2Definition, feishuPublishV2Definition].map((definition) => [`${definition.type}@${definition.version}`, definition]),
+  [...canvasNodeDefinitionVersions, gptImageV2Definition, gptImageEachV1Definition, gptImageEachV2Definition, promptSwitchV2Definition, textSplitV2Definition, feishuPublishV2Definition].map((definition) => [`${definition.type}@${definition.version}`, definition]),
 );
 
 export function getCanvasNodeDefinition(type: CanvasNodeType, version?: number) {
@@ -846,6 +857,14 @@ export function validateCanvasNodeConfig(type: CanvasNodeType, config: CanvasNod
 }
 
 export function upgradeCanvasNode(node: CanvasNode): CanvasNode {
+  if (node.type === "model.gpt-image-each" && node.version === 1) {
+    return {
+      ...structuredClone(node),
+      version: 2,
+      executionMode: getCanvasNodeExecutionMode(node),
+      config: { ...gptImageEachV2Definition.defaultConfig, ...structuredClone(node.config) },
+    };
+  }
   if (node.type === "publish.feishu" && node.version === 1) {
     return {
       ...structuredClone(node),

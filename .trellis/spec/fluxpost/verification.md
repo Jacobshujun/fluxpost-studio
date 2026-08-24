@@ -45,7 +45,7 @@ Do not deploy a dirty worktree, branch name, abbreviated SHA, local runtime rows
 
 ## Recent Verification
 
-- 2026-08-21: Optional-upstream Canvas GPT text checks covered planning, confirmation, validation, bypass, prompt assembly, build, smoke, and the offline baseline without live GPT calls.
+- 2026-08-24: Shared-reference per-image GPT reconstruction request ordering, limits, V1/V2 migration, provider resume, failed-only retry, Canvas persistence/schedulers, TypeScript, lint, build, isolated smoke, and full offline baseline passed without live providers.
 - 2026-08-21: Clean `b672f9a577b4f981b9cb3d4a80527af795a49c95` activated on loopback port 3001 with matching `/api/version` identity and `/canvas` HTTP 200. An isolated authenticated browser used the same candidate and real PostgreSQL to create, update to revision 2, refresh, and read back an incomplete draft; cleanup left zero fixture workflows, sessions, and accounts.
 - 2026-08-21: Canvas draft persistence now separates structural save validation from execution readiness; isolated SQLite create/update/read/delete, malformed-config rejection, Canvas focused checks, TypeScript, lint, build, and the full offline baseline passed.
 - 2026-08-21: Canvas workflow save serialization, delayed automatic/manual intent merging, revision chaining, failure blocking/manual retry, TypeScript, lint, build, full offline baseline, and mocked Chromium against clean port 3001 passed; candidate identity matched and `/canvas` returned 200.

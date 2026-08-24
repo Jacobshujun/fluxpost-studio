@@ -4535,8 +4535,12 @@ function RunSummary({ value, onRetry }: { value: CanvasRunWithNodes; onRetry?: (
 }
 
 function CanvasImageEachProgress({ metadata }: { metadata: NonNullable<NonNullable<CanvasNodeRun["internalMetadata"]>["imageEach"]> }) {
+  const requestCounts = metadata.schemaVersion === 2 ? metadata.referencesPerRequest : [1];
+  const minRequestCount = Math.min(...requestCounts);
+  const maxRequestCount = Math.max(...requestCounts);
+  const requestCountLabel = minRequestCount === maxRequestCount ? String(minRequestCount) : `${minRequestCount}–${maxRequestCount}`;
   return <div className="canvas-image-each-progress">
-    <div><span>成功 {metadata.succeeded}</span><span>处理中 {metadata.pending}</span><span>失败 {metadata.failed}</span></div>
+    <div><span>成功 {metadata.succeeded}</span><span>处理中 {metadata.pending}</span><span>失败 {metadata.failed}</span><span>共享参考 {metadata.schemaVersion === 2 ? metadata.sharedReferenceCount : 0}</span><span>每次输入 {requestCountLabel}</span></div>
     <progress max={Math.max(1, metadata.total)} value={metadata.succeeded + metadata.failed} />
     {metadata.failedIndices.length ? <small>失败序号：{metadata.failedIndices.join("、")}</small> : null}
   </div>;

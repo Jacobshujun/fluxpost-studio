@@ -343,23 +343,31 @@ async function executeGptImage(context: CanvasNodeExecutionContext): Promise<Can
 }
 
 const canvasImageEachMaxImages = 18;
+const canvasImageEachMaxSharedReferences = 15;
 
 async function executeGptImageEach(context: CanvasNodeExecutionContext): Promise<CanvasNodeExecutionResult> {
   const { node, inputs, previousNodeRun, onInternalMetadataUpdate } = context;
   const sources = imageItems(inputs.images);
+  const sharedReferences = node.version >= 2
+    ? Array.from(new Set(imageItems(inputs.references).map((item) => item.url.trim()).filter(Boolean)))
+    : [];
   const prompt = textValues(inputs.prompt).join("\n\n").trim();
   const concurrency = Number(node.config.concurrency ?? 8);
   if (!prompt) throw new Error("逐图 GPT 重构需要非空共享提示词。");
   if (!sources.length || sources.length > canvasImageEachMaxImages) {
     throw new Error(`逐图 GPT 重构仅接受 1 到 ${canvasImageEachMaxImages} 张图片；当前为 ${sources.length} 张。`);
   }
+  if (sharedReferences.length > canvasImageEachMaxSharedReferences) {
+    throw new Error(`逐图 GPT 重构最多接受 ${canvasImageEachMaxSharedReferences} 张共享参考图；当前为 ${sharedReferences.length} 张。`);
+  }
   if (!Number.isInteger(concurrency) || concurrency < 1 || concurrency > 20) {
     throw new Error("逐图 GPT 重构并发数必须是 1 到 20 的整数。");
   }
 
-  const inputFingerprint = hashCanvasImageEachInput(node, prompt, sources);
+  const metadataSchemaVersion = node.version >= 2 ? 2 : 1;
+  const inputFingerprint = hashCanvasImageEachInput(node, prompt, sources, sharedReferences);
   const previous = previousNodeRun?.internalMetadata?.imageEach;
-  const canResume = previous?.schemaVersion === 1 && previous.inputFingerprint === inputFingerprint;
+  const canResume = previous?.schemaVersion === metadataSchemaVersion && previous.inputFingerprint === inputFingerprint;
   const retryFailures = canResume && previousNodeRun?.status !== "running";
   const previousChildren = new Map((canResume ? previous.children : []).map((child) => [child.fingerprint, child]));
   const now = new Date().toISOString();
@@ -372,9 +380,9 @@ async function executeGptImageEach(context: CanvasNodeExecutionContext): Promise
     }
     return { ...structuredClone(stored), source: structuredClone(source) };
   });
-  let metadata = summarizeCanvasImageEach(inputFingerprint, concurrency, children, "running");
+  let metadata = summarizeCanvasImageEach(inputFingerprint, concurrency, children, "running", metadataSchemaVersion, sharedReferences);
   const persistMetadata = async (providerState?: { taskId: string; route: "primary" | "backup"; status: string }) => {
-    metadata = summarizeCanvasImageEach(inputFingerprint, concurrency, children, "running");
+    metadata = summarizeCanvasImageEach(inputFingerprint, concurrency, children, "running", metadataSchemaVersion, sharedReferences);
     await onInternalMetadataUpdate?.({ imageEach: structuredClone(metadata) }, providerState);
   };
   await persistMetadata();
@@ -392,7 +400,7 @@ async function executeGptImageEach(context: CanvasNodeExecutionContext): Promise
     try {
       const ratio = String(node.config.ratio || "1:1");
       const resolution = String(node.config.resolution || "1k") as "1k" | "2k" | "4k";
-      const result = await generateCanvasGptImages(prompt, 1, [child.source.url], {
+      const result = await generateCanvasGptImages(prompt, 1, canvasImageEachRequestReferences(child.source.url, sharedReferences), {
         size: pixelSizeForRatio(ratio, resolution),
         ratio,
         resolution,
@@ -438,7 +446,7 @@ async function executeGptImageEach(context: CanvasNodeExecutionContext): Promise
 
   const pendingChild = children.find((child) => child.status === "pending" || child.status === "running" || child.status === "queued");
   if (pendingChild) {
-    metadata = summarizeCanvasImageEach(inputFingerprint, concurrency, children, "running");
+    metadata = summarizeCanvasImageEach(inputFingerprint, concurrency, children, "running", metadataSchemaVersion, sharedReferences);
     return {
       outputs: {},
       internalMetadata: { imageEach: metadata },
@@ -452,7 +460,7 @@ async function executeGptImageEach(context: CanvasNodeExecutionContext): Promise
   const successful = children.filter((child): child is CanvasImageEachChild & { outputUrl: string } => child.status === "completed" && Boolean(child.outputUrl));
   const needsConfig = children.filter((child) => child.status === "needs_config");
   const terminalStatus = successful.length === children.length ? "completed" : "partial";
-  metadata = summarizeCanvasImageEach(inputFingerprint, concurrency, children, terminalStatus);
+  metadata = summarizeCanvasImageEach(inputFingerprint, concurrency, children, terminalStatus, metadataSchemaVersion, sharedReferences);
   await onInternalMetadataUpdate?.({ imageEach: structuredClone(metadata) });
   if (!successful.length) {
     if (needsConfig.length) throw new CanvasNeedsConfigError(needsConfig[0].error || "GPT-Image-2 未配置。");
@@ -484,11 +492,12 @@ function summarizeCanvasImageEach(
   concurrency: number,
   children: CanvasImageEachChild[],
   status: CanvasImageEachRunMetadata["status"],
+  schemaVersion: CanvasImageEachRunMetadata["schemaVersion"],
+  sharedReferences: string[],
 ): CanvasImageEachRunMetadata {
   const succeeded = children.filter((child) => child.status === "completed" && child.outputUrl).length;
   const failedChildren = children.filter((child) => child.status === "failed" || child.status === "needs_config" || child.status === "cancelled");
-  return {
-    schemaVersion: 1,
+  const summary = {
     inputFingerprint,
     status,
     total: children.length,
@@ -499,6 +508,14 @@ function summarizeCanvasImageEach(
     concurrency,
     children: structuredClone(children),
   };
+  return schemaVersion === 2
+    ? {
+      ...summary,
+      schemaVersion: 2,
+      sharedReferenceCount: sharedReferences.length,
+      referencesPerRequest: children.map((child) => canvasImageEachRequestReferences(child.source.url, sharedReferences).length),
+    }
+    : { ...summary, schemaVersion: 1 };
 }
 
 function buildCanvasImageEachReport(metadata: CanvasImageEachRunMetadata) {
@@ -506,8 +523,8 @@ function buildCanvasImageEachReport(metadata: CanvasImageEachRunMetadata) {
   return `逐图重构完成：成功 ${metadata.succeeded}/${metadata.total}，失败 ${metadata.failed}${failed}。`;
 }
 
-function hashCanvasImageEachInput(node: CanvasNode, prompt: string, sources: CanvasMediaReference[]) {
-  return hashValue({
+function hashCanvasImageEachInput(node: CanvasNode, prompt: string, sources: CanvasMediaReference[], sharedReferences: string[]) {
+  const value = {
     prompt,
     sources: sources.map((source, index) => ({ index, url: source.url })),
     config: {
@@ -517,7 +534,12 @@ function hashCanvasImageEachInput(node: CanvasNode, prompt: string, sources: Can
       outputFormat: node.config.outputFormat,
       outputCompression: node.config.outputCompression,
     },
-  });
+  };
+  return hashValue(node.version >= 2 ? { ...value, version: node.version, sharedReferences } : value);
+}
+
+function canvasImageEachRequestReferences(sourceUrl: string, sharedReferences: string[]) {
+  return [sourceUrl, ...sharedReferences.filter((url) => url !== sourceUrl)];
 }
 
 function hashValue(value: unknown) {

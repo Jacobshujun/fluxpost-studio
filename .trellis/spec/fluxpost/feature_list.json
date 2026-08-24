@@ -338,7 +338,7 @@
         "A per-image GPT reconstruction node durably fans out 1-18 images, resumes accepted provider tasks, aggregates ordered partial results, retries failures only, and blocks partial drafts from publishing"
       ],
       "evidence": [
-        "2026-08-24 per-image GPT reconstruction concurrency, ordering, provider resume, failed-only retry, partial draft/publish guards, scheduler compatibility, build, smoke, and full offline baseline passed without live providers.",
+        "2026-08-24 shared-reference per-image GPT reconstruction order, limits, V1/V2 migration, resume, retry, persistence, schedulers, build, smoke, and offline baseline passed without live providers.",
         "2026-08-20 video-loader real local FFmpeg/FFprobe upload, selected output, frozen scheduling, full offline baseline, and mocked Chromium desktop/mobile queue checks passed without external services.",
         "2026-08-21 Faster Whisper v4 UTF-8 plus manual revisions, optimistic locking, frozen hash gating, isolated re-render, waveform/cache checks, two baselines, and desktop/mobile mocked Chromium passed without external calls or text disclosure."
       ],

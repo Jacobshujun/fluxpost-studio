@@ -291,8 +291,7 @@ export type CanvasImageBatchSummary = {
   failedIndices: number[];
 };
 
-export type CanvasImageEachRunMetadata = {
-  schemaVersion: 1;
+type CanvasImageEachRunMetadataBase = {
   inputFingerprint: string;
   status: "running" | "completed" | "partial";
   total: number;
@@ -303,6 +302,11 @@ export type CanvasImageEachRunMetadata = {
   concurrency: number;
   children: CanvasImageEachChild[];
 };
+
+export type CanvasImageEachRunMetadata = CanvasImageEachRunMetadataBase & (
+  | { schemaVersion: 1 }
+  | { schemaVersion: 2; sharedReferenceCount: number; referencesPerRequest: number[] }
+);
 
 export type CanvasNodeRunInternalMetadata = {
   subtitle?: CanvasSubtitleRunMetadata;

@@ -4,23 +4,23 @@ Last updated: 2026-08-24
 
 ## One-Line Status
 
-Standalone Canvas GPT text and the per-image GPT reconstruction Canvas node are implemented, verified, and activated on port 3001 from the current clean committed HEAD.
+Per-image Canvas GPT reconstruction supports shared reference images and has passed complete offline verification; candidate activation is pending.
 
 ## Current Focus
 
-- `model.gpt-image-each@1` fans out 1-18 source images with default concurrency 8 (configurable 1-20), submits one reference image with `count=1`, persists child/provider state, aggregates ordered successes, and retries failed children only.
-- Partial results update the original Canvas review draft with failure indices and are blocked from Feishu publishing; V2 scheduler image targets accept the new node.
-- Focused checks and the full offline baseline passed without live providers.
+- `model.gpt-image-each@2` sends `[current source, ...shared references]` for each of 1-18 source images, with at most 15 shared references.
+- V1/V2 migration, ordering, limits, provider resume, failed-only retry, workflow persistence, schedulers, build, smoke, and full baseline passed without live providers.
+- Partial results keep their existing review-draft and Feishu publish guards.
 
 ## Next Entry
 
-Use the port-3001 Canvas candidate for operator review; do not push or deploy without separate approval.
+Activate the clean port-3001 candidate. Do not push or deploy without approval.
 
 ## Recent Verification
 
-- 2026-08-24: Per-image GPT reconstruction node, provider resume, partial-draft/publish guard, V2 scheduler compatibility, focused mock-provider checks, full offline baseline, clean candidate activation, and local HTTP smoke passed without live providers.
-- 2026-08-21: Standalone GPT text planning, prompt assembly, validation, bypass, build, smoke, and the offline baseline passed without live providers.
-- 2026-08-21: Clean candidate activation and authenticated PostgreSQL draft refresh passed; fixtures were removed.
+- 2026-08-24: Shared-reference per-image checks, Canvas checks, TypeScript, lint, build, isolated smoke, and full baseline passed.
+- 2026-08-24: Original per-image node, provider resume, publish guards, scheduler compatibility, baseline, candidate activation, and HTTP smoke passed.
+- 2026-08-21: Standalone GPT text checks, baseline, candidate activation, and authenticated draft refresh passed.
 
 ## Risks And Unknowns
 
