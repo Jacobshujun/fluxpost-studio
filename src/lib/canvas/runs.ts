@@ -520,12 +520,13 @@ async function executeCanvasRun(run: CanvasRun) {
   const hasPendingProvider = relevant.some((item) => item.status === "running" && item.providerTaskId);
   const failures = relevant.filter((item) => isFailure(item.status));
   const completed = relevant.filter((item) => isSuccessfulNodeStatus(item.status));
+  const hasPartialResult = relevant.some((item) => item.status === "partial");
   const finishedAt = new Date().toISOString();
   const status: CanvasRun["status"] = hasPendingProvider
     ? "running"
     : failures.length
       ? completed.length ? "partial" : "failed"
-      : completed.length === plan.includedNodeIds.length ? "completed" : "failed";
+      : completed.length === plan.includedNodeIds.length ? hasPartialResult ? "partial" : "completed" : "failed";
   return saveCanvasRunToDb({
     ...run,
     status,
@@ -662,6 +663,14 @@ async function runReadyNode(
     updatedAt: startedAt,
     startedAt,
   });
+  let interimSave = Promise.resolve();
+  const queueInterimSave = (update: (current: CanvasNodeRun) => CanvasNodeRun) => {
+    interimSave = interimSave.then(async () => {
+      nodeRun = update(nodeRun);
+      await saveCanvasNodeRunToDb(nodeRun);
+    });
+    return interimSave;
+  };
   try {
     const result = await executeCanvasNode({
       runId: run.id,
@@ -670,22 +679,33 @@ async function runReadyNode(
       account: { id: run.ownerUserId, displayName: run.ownerDisplayName, role: "operator" },
       previousNodeRun,
       onProviderTaskUpdate: async (state) => {
-        const updatedAt = new Date().toISOString();
-        nodeRun = {
-          ...nodeRun,
-          inputs: state.resolvedInputs || nodeRun.inputs,
+        await queueInterimSave((current) => ({
+          ...current,
+          inputs: state.resolvedInputs || current.inputs,
           providerTaskId: state.taskId,
           providerTaskRoute: state.route,
           providerStatus: state.status,
-          updatedAt,
-        };
-        await saveCanvasNodeRunToDb(nodeRun);
+          updatedAt: new Date().toISOString(),
+        }));
+      },
+      onInternalMetadataUpdate: async (metadata, providerState) => {
+        await queueInterimSave((current) => ({
+          ...current,
+          internalMetadata: metadata,
+          ...(providerState ? {
+            providerTaskId: providerState.taskId,
+            providerTaskRoute: providerState.route,
+            providerStatus: providerState.status,
+          } : {}),
+          updatedAt: new Date().toISOString(),
+        }));
       },
     });
+    await interimSave;
     const endedAt = new Date().toISOString();
     nodeRun = await saveCanvasNodeRunToDb({
       ...nodeRun,
-      status: result.pending ? "running" : "completed",
+      status: result.pending ? "running" : result.partial ? "partial" : "completed",
       inputs: result.resolvedInputs || (resumableNodeRun ? nodeRun.inputs : inputs),
       outputs: result.outputs,
       internalMetadata: result.internalMetadata,
@@ -697,6 +717,7 @@ async function runReadyNode(
       ...(result.pending ? {} : { completedAt: endedAt }),
     });
   } catch (error) {
+    await interimSave;
     const endedAt = new Date().toISOString();
     nodeRun = await saveCanvasNodeRunToDb({
       ...nodeRun,
@@ -776,7 +797,13 @@ function mergeArtifacts(artifacts: CanvasArtifact[]): CanvasArtifact | undefined
     return { kind: "text", value: artifacts.map((artifact) => artifact.kind === "text" ? artifact.value : "").filter(Boolean).join("\n\n") };
   }
   if (first.kind === "images") {
-    return { kind: "images", items: artifacts.flatMap((artifact) => artifact.kind === "images" ? artifact.items : []) };
+    const imageArtifacts = artifacts.filter((artifact): artifact is Extract<CanvasArtifact, { kind: "images" }> => artifact.kind === "images");
+    const imageBatch = mergeCanvasImageBatchSummaries(imageArtifacts.map((artifact) => artifact.imageBatch));
+    return {
+      kind: "images",
+      items: imageArtifacts.flatMap((artifact) => artifact.items),
+      ...(imageBatch ? { imageBatch } : {}),
+    };
   }
   if (first.kind === "videos") {
     return { kind: "videos", items: artifacts.flatMap((artifact) => artifact.kind === "videos" ? artifact.items : []) };
@@ -855,7 +882,22 @@ function isFailure(status?: CanvasNodeRunStatus) {
 }
 
 function isOutputStatus(status?: CanvasNodeRunStatus) {
-  return status === "completed" || status === "reused" || status === "bypassed";
+  return status === "completed" || status === "partial" || status === "reused" || status === "bypassed";
+}
+
+function mergeCanvasImageBatchSummaries(values: Array<Extract<CanvasArtifact, { kind: "images" }>["imageBatch"]>) {
+  const batches = values.filter((value): value is NonNullable<typeof value> => Boolean(value));
+  if (!batches.length) return undefined;
+  let offset = 0;
+  const failedIndices: number[] = [];
+  for (const batch of batches) {
+    failedIndices.push(...batch.failedIndices.map((index) => index + offset));
+    offset += batch.total;
+  }
+  const total = batches.reduce((sum, batch) => sum + batch.total, 0);
+  const succeeded = batches.reduce((sum, batch) => sum + batch.succeeded, 0);
+  const failed = batches.reduce((sum, batch) => sum + batch.failed, 0);
+  return { status: failed ? "partial" as const : "completed" as const, total, succeeded, failed, failedIndices };
 }
 
 function isSuccessfulNodeStatus(status?: CanvasNodeRunStatus) {

@@ -1,8 +1,9 @@
-import { randomUUID } from "node:crypto";
+import { createHash, randomUUID } from "node:crypto";
+import { mapWithConcurrency } from "../concurrency";
 import { enqueueFeishuPublishJob, ensureFeishuPublishQueueWorker } from "../feishu-publish-queue";
 import { normalizeFeishuPublishMode } from "../feishu-publish-mode";
 import { FINISHED_BODY_POLICY_VERSION, truncateFinishedBody } from "../finished-body-policy";
-import { saveGeneratedPost } from "../generated-posts";
+import { getGeneratedPost, saveGeneratedPost, updateGeneratedPost } from "../generated-posts";
 import { generateCanvasGptImages, generateImagesFromPrompt } from "../image-generation";
 import { callOpenAIForText, callOpenAIForVisionText } from "../openai";
 import type { GeneratedPost, SourceImageTask } from "../types";
@@ -16,7 +17,16 @@ import { CANVAS_SAVE_IMAGE_MAX_ITEMS } from "./save-images";
 import { canvasSourceVideoSnapshotFromConfig, isCanvasSourceVideoSnapshotCurrent } from "./source-video-contract";
 import { canvasSubtitleStyleFromConfig } from "./subtitle-style";
 import { decodeCanvasSubtitleRevisionSnapshot } from "./subtitle-editor";
-import type { CanvasArtifact, CanvasMediaReference, CanvasNode, CanvasNodeRun, CanvasSubtitleRunMetadata } from "./types";
+import type {
+  CanvasArtifact,
+  CanvasImageBatchSummary,
+  CanvasImageEachChild,
+  CanvasImageEachRunMetadata,
+  CanvasMediaReference,
+  CanvasNode,
+  CanvasNodeRun,
+  CanvasNodeRunInternalMetadata,
+} from "./types";
 import { addCanvasVideoSubtitles } from "./video-subtitles";
 import { selectedCanvasVideo } from "./video-loader";
 
@@ -39,16 +49,21 @@ export type CanvasNodeExecutionContext = {
     status: string;
     resolvedInputs?: Record<string, CanvasArtifact[]>;
   }) => Promise<void>;
+  onInternalMetadataUpdate?: (
+    metadata: CanvasNodeRunInternalMetadata,
+    providerState?: { taskId: string; route: "primary" | "backup"; status: string },
+  ) => Promise<void>;
 };
 
 export type CanvasNodeExecutionResult = {
   outputs: Record<string, CanvasArtifact>;
-  internalMetadata?: { subtitle?: CanvasSubtitleRunMetadata };
+  internalMetadata?: CanvasNodeRunInternalMetadata;
   resolvedInputs?: Record<string, CanvasArtifact[]>;
   providerTaskId?: string;
   providerTaskRoute?: "primary" | "backup";
   providerStatus?: string;
   pending?: boolean;
+  partial?: boolean;
 };
 
 type CanvasNodeExecutor = (context: CanvasNodeExecutionContext) => Promise<CanvasNodeExecutionResult>;
@@ -64,6 +79,7 @@ const executors: Record<CanvasNode["type"], CanvasNodeExecutor> = {
   "input.copy-library": executeLiteralNode,
   "model.gpt-text": executeGptText,
   "model.gpt-image": executeGptImage,
+  "model.gpt-image-each": executeGptImageEach,
   "model.gpt-vision": executeGptVision,
   "model.seedance": executeSeedance,
   "utility.image-preview": executeImagePreview,
@@ -94,7 +110,7 @@ async function executeLiteralNode({ node }: CanvasNodeExecutionContext) {
 
 export function resolveCanvasLiteralOutputs(node: CanvasNode): Record<string, CanvasArtifact> | undefined {
   if (node.type === "input.text") return { text: { kind: "text", value: String(node.config.text || "").trim() } };
-  if (node.type === "input.images") return { images: imageArtifact(normalizeUrlList(node.config.urls)) };
+  if (node.type === "input.images") return { images: imageArtifact(normalizeUrlList(node.config.urls), decodeCanvasImageBatch(node.config.imageBatch)) };
   if (node.type === "input.videos") return { videos: videoArtifact(normalizeUrlList(node.config.urls)) };
   if (node.type === "input.video-loader") {
     const video = selectedCanvasVideo(node.config);
@@ -136,7 +152,8 @@ export function resolveCanvasLiteralOutputs(node: CanvasNode): Record<string, Ca
 async function executeImagePreview({ inputs }: CanvasNodeExecutionContext) {
   const items = (inputs.images || []).flatMap((artifact) => artifact.kind === "images" ? artifact.items : []);
   if (!items.length) throw new Error("Image preview requires a successful upstream image result.");
-  return { outputs: { images: { kind: "images" as const, items: structuredClone(items) } } };
+  const imageBatch = inputs.images?.flatMap((artifact) => artifact.kind === "images" && artifact.imageBatch ? [artifact.imageBatch] : [])[0];
+  return { outputs: { images: { kind: "images" as const, items: structuredClone(items), ...(imageBatch ? { imageBatch } : {}) } } };
 }
 
 async function executeSaveImages({ inputs }: CanvasNodeExecutionContext) {
@@ -224,13 +241,15 @@ async function executeImageSelect({ node, inputs }: CanvasNodeExecutionContext) 
   const indices = parseCanvasImageSelection(node.config.indices);
   const invalid = indices.find((index) => index > items.length);
   if (invalid !== undefined) throw new Error(`Image selection index ${invalid} exceeds the ${items.length} available images.`);
-  return { outputs: { images: { kind: "images" as const, items: indices.map((index) => structuredClone(items[index - 1])) } } };
+  const imageBatch = inputs.images?.flatMap((artifact) => artifact.kind === "images" && artifact.imageBatch ? [artifact.imageBatch] : [])[0];
+  return { outputs: { images: { kind: "images" as const, items: indices.map((index) => structuredClone(items[index - 1])), ...(imageBatch ? { imageBatch } : {}) } } };
 }
 
 async function executeImageTransform({ node, inputs }: CanvasNodeExecutionContext) {
   try {
     const items = await transformCanvasImages(imageItems(inputs.images), node.config);
-    return { outputs: { images: { kind: "images" as const, items } } };
+    const imageBatch = inputs.images?.flatMap((artifact) => artifact.kind === "images" && artifact.imageBatch ? [artifact.imageBatch] : [])[0];
+    return { outputs: { images: { kind: "images" as const, items, ...(imageBatch ? { imageBatch } : {}) } } };
   } catch (error) {
     if (error instanceof CanvasMediaNeedsConfigError) throw new CanvasNeedsConfigError(error.message);
     throw error;
@@ -323,6 +342,188 @@ async function executeGptImage(context: CanvasNodeExecutionContext): Promise<Can
   };
 }
 
+const canvasImageEachMaxImages = 18;
+
+async function executeGptImageEach(context: CanvasNodeExecutionContext): Promise<CanvasNodeExecutionResult> {
+  const { node, inputs, previousNodeRun, onInternalMetadataUpdate } = context;
+  const sources = imageItems(inputs.images);
+  const prompt = textValues(inputs.prompt).join("\n\n").trim();
+  const concurrency = Number(node.config.concurrency ?? 8);
+  if (!prompt) throw new Error("逐图 GPT 重构需要非空共享提示词。");
+  if (!sources.length || sources.length > canvasImageEachMaxImages) {
+    throw new Error(`逐图 GPT 重构仅接受 1 到 ${canvasImageEachMaxImages} 张图片；当前为 ${sources.length} 张。`);
+  }
+  if (!Number.isInteger(concurrency) || concurrency < 1 || concurrency > 20) {
+    throw new Error("逐图 GPT 重构并发数必须是 1 到 20 的整数。");
+  }
+
+  const inputFingerprint = hashCanvasImageEachInput(node, prompt, sources);
+  const previous = previousNodeRun?.internalMetadata?.imageEach;
+  const canResume = previous?.schemaVersion === 1 && previous.inputFingerprint === inputFingerprint;
+  const retryFailures = canResume && previousNodeRun?.status !== "running";
+  const previousChildren = new Map((canResume ? previous.children : []).map((child) => [child.fingerprint, child]));
+  const now = new Date().toISOString();
+  const children: CanvasImageEachChild[] = sources.map((source, index) => {
+    const fingerprint = hashValue({ index, url: source.url });
+    const stored = previousChildren.get(fingerprint);
+    if (!stored) return { id: `image-${index + 1}-${fingerprint.slice(0, 10)}`, index, source: structuredClone(source), fingerprint, status: "queued", attempt: 0, updatedAt: now };
+    if ((stored.status === "failed" || stored.status === "needs_config") && retryFailures) {
+      return { ...structuredClone(stored), source: structuredClone(source), status: "queued", error: undefined, providerTaskId: undefined, providerTaskRoute: undefined, providerStatus: undefined, updatedAt: now };
+    }
+    return { ...structuredClone(stored), source: structuredClone(source) };
+  });
+  let metadata = summarizeCanvasImageEach(inputFingerprint, concurrency, children, "running");
+  const persistMetadata = async (providerState?: { taskId: string; route: "primary" | "backup"; status: string }) => {
+    metadata = summarizeCanvasImageEach(inputFingerprint, concurrency, children, "running");
+    await onInternalMetadataUpdate?.({ imageEach: structuredClone(metadata) }, providerState);
+  };
+  await persistMetadata();
+
+  const runnable = children.filter((child) => child.status === "queued" || child.status === "running" || child.status === "pending");
+  await mapWithConcurrency(runnable, concurrency, async (child) => {
+    const resumeTask = child.providerTaskId && child.providerStatus !== "failed" ? child : undefined;
+    child.status = "running";
+    if (!resumeTask) child.attempt += 1;
+    child.error = undefined;
+    child.updatedAt = new Date().toISOString();
+    await persistMetadata(resumeTask?.providerTaskId && resumeTask.providerTaskRoute
+      ? { taskId: resumeTask.providerTaskId, route: resumeTask.providerTaskRoute, status: resumeTask.providerStatus || "running" }
+      : undefined);
+    try {
+      const ratio = String(node.config.ratio || "1:1");
+      const resolution = String(node.config.resolution || "1k") as "1k" | "2k" | "4k";
+      const result = await generateCanvasGptImages(prompt, 1, [child.source.url], {
+        size: pixelSizeForRatio(ratio, resolution),
+        ratio,
+        resolution,
+        quality: String(node.config.quality || "medium") as "low" | "medium" | "high",
+        outputFormat: node.config.outputFormat === "jpeg" ? "jpeg" : "png",
+        outputCompression: Number(node.config.outputCompression ?? 100),
+      }, {
+        resumeTaskId: resumeTask?.providerTaskId,
+        resumeTaskRoute: resumeTask?.providerTaskRoute,
+        resumeStatus: resumeTask?.providerStatus,
+        onTaskUpdate: async (state) => {
+          child.providerTaskId = state.taskId;
+          child.providerTaskRoute = state.route;
+          child.providerStatus = state.status;
+          child.status = "pending";
+          child.updatedAt = new Date().toISOString();
+          await persistMetadata(state);
+        },
+      });
+      if (result.status === "needs_config") {
+        child.status = "needs_config";
+        child.error = result.message || "GPT-Image-2 未配置。";
+      } else if (result.status === "pending") {
+        child.status = "pending";
+        child.providerTaskId = result.providerTaskId;
+        child.providerTaskRoute = result.providerTaskRoute;
+        child.providerStatus = result.providerStatus;
+      } else {
+        child.status = "completed";
+        child.outputUrl = result.imageUrls[0];
+        child.providerStatus = "completed";
+      }
+    } catch (error) {
+      child.status = "failed";
+      child.error = error instanceof Error ? error.message : "逐图重构失败。";
+      child.providerStatus = "failed";
+    }
+    child.updatedAt = new Date().toISOString();
+    await persistMetadata(child.providerTaskId && child.providerTaskRoute
+      ? { taskId: child.providerTaskId, route: child.providerTaskRoute, status: child.providerStatus || child.status }
+      : undefined);
+  });
+
+  const pendingChild = children.find((child) => child.status === "pending" || child.status === "running" || child.status === "queued");
+  if (pendingChild) {
+    metadata = summarizeCanvasImageEach(inputFingerprint, concurrency, children, "running");
+    return {
+      outputs: {},
+      internalMetadata: { imageEach: metadata },
+      providerTaskId: pendingChild.providerTaskId,
+      providerTaskRoute: pendingChild.providerTaskRoute,
+      providerStatus: pendingChild.providerStatus || pendingChild.status,
+      pending: true,
+    };
+  }
+
+  const successful = children.filter((child): child is CanvasImageEachChild & { outputUrl: string } => child.status === "completed" && Boolean(child.outputUrl));
+  const needsConfig = children.filter((child) => child.status === "needs_config");
+  const terminalStatus = successful.length === children.length ? "completed" : "partial";
+  metadata = summarizeCanvasImageEach(inputFingerprint, concurrency, children, terminalStatus);
+  await onInternalMetadataUpdate?.({ imageEach: structuredClone(metadata) });
+  if (!successful.length) {
+    if (needsConfig.length) throw new CanvasNeedsConfigError(needsConfig[0].error || "GPT-Image-2 未配置。");
+    throw new Error(buildCanvasImageEachReport(metadata));
+  }
+  const imageBatch: CanvasImageBatchSummary = {
+    status: terminalStatus,
+    total: metadata.total,
+    succeeded: metadata.succeeded,
+    failed: metadata.failed,
+    failedIndices: metadata.failedIndices,
+  };
+  return {
+    outputs: {
+      images: {
+        kind: "images",
+        items: successful.sort((left, right) => left.index - right.index).map((child) => ({ url: child.outputUrl, name: child.source.name || `重构图片 ${child.index + 1}` })),
+        imageBatch,
+      },
+      report: { kind: "text", value: buildCanvasImageEachReport(metadata) },
+    },
+    internalMetadata: { imageEach: metadata },
+    partial: terminalStatus === "partial",
+  };
+}
+
+function summarizeCanvasImageEach(
+  inputFingerprint: string,
+  concurrency: number,
+  children: CanvasImageEachChild[],
+  status: CanvasImageEachRunMetadata["status"],
+): CanvasImageEachRunMetadata {
+  const succeeded = children.filter((child) => child.status === "completed" && child.outputUrl).length;
+  const failedChildren = children.filter((child) => child.status === "failed" || child.status === "needs_config" || child.status === "cancelled");
+  return {
+    schemaVersion: 1,
+    inputFingerprint,
+    status,
+    total: children.length,
+    succeeded,
+    failed: failedChildren.length,
+    failedIndices: failedChildren.map((child) => child.index + 1),
+    pending: children.length - succeeded - failedChildren.length,
+    concurrency,
+    children: structuredClone(children),
+  };
+}
+
+function buildCanvasImageEachReport(metadata: CanvasImageEachRunMetadata) {
+  const failed = metadata.failedIndices.length ? `；失败序号：${metadata.failedIndices.join("、")}` : "";
+  return `逐图重构完成：成功 ${metadata.succeeded}/${metadata.total}，失败 ${metadata.failed}${failed}。`;
+}
+
+function hashCanvasImageEachInput(node: CanvasNode, prompt: string, sources: CanvasMediaReference[]) {
+  return hashValue({
+    prompt,
+    sources: sources.map((source, index) => ({ index, url: source.url })),
+    config: {
+      ratio: node.config.ratio,
+      resolution: node.config.resolution,
+      quality: node.config.quality,
+      outputFormat: node.config.outputFormat,
+      outputCompression: node.config.outputCompression,
+    },
+  });
+}
+
+function hashValue(value: unknown) {
+  return createHash("sha256").update(JSON.stringify(value)).digest("hex");
+}
+
 function resolveCanvasGptImageReferences(directReferences: string[], upstreamArtifacts: CanvasArtifact[]) {
   const ordered = [
     ...directReferences,
@@ -409,12 +610,25 @@ async function executeSeedance({ node, inputs, previousNodeRun, onProviderTaskUp
   }
 }
 
-async function executeComposition({ node, inputs, runId, account }: CanvasNodeExecutionContext) {
+async function executeComposition({ node, inputs, runId, account, previousNodeRun }: CanvasNodeExecutionContext) {
   const bodies = textValues(inputs.body);
   const titles = textValues(inputs.title);
   const imageUrls = mediaUrls(inputs.images, "images");
   const videoUrls = mediaUrls(inputs.videos, "videos");
   const now = new Date().toISOString();
+  const imageBatch = aggregateCanvasImageBatch(inputs.images);
+  const previousArtifact = previousNodeRun ? Object.values(previousNodeRun.outputs)
+    .find((artifact): artifact is Extract<CanvasArtifact, { kind: "socialPost" }> => artifact.kind === "socialPost") : undefined;
+  const previousPost = previousArtifact ? await getGeneratedPost(previousArtifact.postId, account) : undefined;
+  if (previousPost) {
+    const saved = await updateGeneratedPost(previousPost.id, {
+      imageUrls,
+      videoUrls,
+      canvasImageBatch: imageBatch,
+      aiNotes: Array.from(new Set([...previousPost.aiNotes, `由无限画布运行 ${runId} 更新图片结果`])),
+    }, account);
+    return { outputs: { post: { kind: "socialPost" as const, postId: saved.id, post: saved } } };
+  }
   const post: GeneratedPost = {
     id: `canvas-post-${Date.now()}-${randomUUID().slice(0, 8)}`,
     ownerUserId: account.id,
@@ -433,10 +647,26 @@ async function executeComposition({ node, inputs, runId, account }: CanvasNodeEx
     materialPaths: [],
     status: "draft",
     aiNotes: [`由无限画布运行 ${runId} 组装`],
+    canvasImageBatch: imageBatch,
     updatedAt: now,
   };
   const saved = await saveGeneratedPost(post, account);
   return { outputs: { post: { kind: "socialPost" as const, postId: saved.id, post: saved } } };
+}
+
+function aggregateCanvasImageBatch(artifacts: CanvasArtifact[] | undefined): CanvasImageBatchSummary | undefined {
+  const batches = (artifacts || []).flatMap((artifact) => artifact.kind === "images" && artifact.imageBatch ? [artifact.imageBatch] : []);
+  if (!batches.length) return undefined;
+  let offset = 0;
+  const failedIndices: number[] = [];
+  for (const batch of batches) {
+    failedIndices.push(...batch.failedIndices.map((index) => index + offset));
+    offset += batch.total;
+  }
+  const total = batches.reduce((sum, batch) => sum + batch.total, 0);
+  const succeeded = batches.reduce((sum, batch) => sum + batch.succeeded, 0);
+  const failed = batches.reduce((sum, batch) => sum + batch.failed, 0);
+  return { status: failed ? "partial" : "completed", total, succeeded, failed, failedIndices };
 }
 
 function resolveCanvasCompositionVehicle(node: CanvasNode, artifacts: CanvasArtifact[] | undefined) {
@@ -446,6 +676,9 @@ function resolveCanvasCompositionVehicle(node: CanvasNode, artifacts: CanvasArti
 async function executeFeishuPublish({ node, inputs, runId, account }: CanvasNodeExecutionContext) {
   const artifacts = (inputs.post || []).filter((artifact): artifact is Extract<CanvasArtifact, { kind: "socialPost" }> => artifact.kind === "socialPost");
   if (!artifacts.length) throw new Error("Feishu publish requires a social post artifact.");
+  if (artifacts.some((artifact) => artifact.post.canvasImageBatch?.status === "partial")) {
+    throw new Error("逐图重构仍为部分完成，必须重试失败图片并完成审核后才能发布。");
+  }
   const publishMode = normalizeFeishuPublishMode(node.config.publishMode);
   const job = await enqueueFeishuPublishJob(artifacts.map((artifact) => artifact.post), {
     ownerUserId: account.id,
@@ -478,8 +711,25 @@ function videoItems(artifacts: CanvasArtifact[] | undefined) {
   return (artifacts || []).flatMap((artifact) => artifact.kind === "videos" ? artifact.items : []);
 }
 
-function imageArtifact(urls: string[]): Extract<CanvasArtifact, { kind: "images" }> {
-  return { kind: "images", items: urls.map((url) => ({ url })) };
+function imageArtifact(urls: string[], imageBatch?: CanvasImageBatchSummary): Extract<CanvasArtifact, { kind: "images" }> {
+  return { kind: "images", items: urls.map((url) => ({ url })), ...(imageBatch ? { imageBatch } : {}) };
+}
+
+function decodeCanvasImageBatch(value: unknown): CanvasImageBatchSummary | undefined {
+  if (!value || typeof value !== "object" || Array.isArray(value)) return undefined;
+  const batch = value as Partial<CanvasImageBatchSummary>;
+  if ((batch.status !== "completed" && batch.status !== "partial")
+    || !Number.isInteger(batch.total) || Number(batch.total) < 1
+    || !Number.isInteger(batch.succeeded) || Number(batch.succeeded) < 0
+    || !Number.isInteger(batch.failed) || Number(batch.failed) < 0
+    || !Array.isArray(batch.failedIndices) || !batch.failedIndices.every((index) => Number.isInteger(index) && index > 0)) return undefined;
+  return {
+    status: batch.status,
+    total: Number(batch.total),
+    succeeded: Number(batch.succeeded),
+    failed: Number(batch.failed),
+    failedIndices: [...batch.failedIndices],
+  };
 }
 
 function videoArtifact(urls: string[]): Extract<CanvasArtifact, { kind: "videos" }> {

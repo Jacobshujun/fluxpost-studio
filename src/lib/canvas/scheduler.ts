@@ -1265,7 +1265,7 @@ async function reconcileCanvasScheduleV2(current: CanvasSchedule) {
       if (main.status !== status) { main.status = status; changed = true; }
       continue;
     }
-    const successfulChildren = main.childTasks.filter((child) => child.status === "completed" && child.resultArtifacts.length);
+    const successfulChildren = main.childTasks.filter((child) => (child.status === "completed" || child.status === "partial") && child.resultArtifacts.length);
     const policySatisfied = definition.aggregationPolicy === "all"
       ? successfulChildren.length === main.childTasks.length
       : successfulChildren.length > 0;
@@ -1723,10 +1723,11 @@ function assertRoleNodeType(role: CanvasSchedulerRole, node: CanvasNode) {
     throw new Error("调度角色 copy-input 只能绑定文案库节点。");
   }
   const expected = role === "prompt-switch" ? "utility.prompt-switch"
-    : role === "image-target" ? "model.gpt-image"
-      : role === "content-target" ? "compose.social-post" : undefined;
+    : role === "content-target" ? "compose.social-post" : undefined;
   if (expected && node.type !== expected) throw new Error(`调度角色 ${role} 必须绑定 ${expected} 节点。`);
-  if (role === "image-target" && node.version < 2) throw new Error("图片目标必须使用 GPT-Image-2 V2 节点。");
+  if (role === "image-target" && node.type !== "model.gpt-image-each" && (node.type !== "model.gpt-image" || node.version < 2)) {
+    throw new Error("图片目标必须使用 GPT-Image-2 V2 或逐图 GPT 重构节点。");
+  }
 }
 
 function hasGraphPath(graph: CanvasGraph, sourceId: string, targetId: string) {
@@ -1824,7 +1825,8 @@ function canvasScheduleV2CandidateImageUrls(main: CanvasScheduleV2MainTask) {
 
 function scheduleTaskStatusFromRun(status: CanvasRun["status"]): CanvasScheduleImageTask["status"] {
   if (status === "completed") return "completed";
-  if (status === "failed" || status === "partial") return "failed";
+  if (status === "partial") return "partial";
+  if (status === "failed") return "failed";
   if (status === "cancelled") return "cancelled";
   return status === "running" ? "running" : "queued";
 }

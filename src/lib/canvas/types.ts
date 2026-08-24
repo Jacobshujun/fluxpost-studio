@@ -140,7 +140,7 @@ export type CanvasSubtitleTranscriptCacheEntry = {
 
 export type CanvasArtifact =
   | { kind: "text"; value: string }
-  | { kind: "images"; items: CanvasMediaReference[] }
+  | { kind: "images"; items: CanvasMediaReference[]; imageBatch?: CanvasImageBatchSummary }
   | { kind: "videos"; items: CanvasMediaReference[]; providerTaskId?: string; providerStatus?: string }
   | { kind: "socialPost"; postId: string; post: GeneratedPost }
   | { kind: "publishJobRef"; jobId: string; status: string };
@@ -156,6 +156,7 @@ export type CanvasNodeType =
   | "input.copy-library"
   | "model.gpt-text"
   | "model.gpt-image"
+  | "model.gpt-image-each"
   | "model.gpt-vision"
   | "model.seedance"
   | "utility.image-preview"
@@ -191,7 +192,7 @@ export const CANVAS_SCHEDULER_ROLE_LABELS: Record<CanvasSchedulerRole, string> =
   "copy-input": "文案库输入",
 };
 
-export type CanvasConfigValue = string | number | boolean | string[] | CanvasVideoSnapshot[] | CanvasSubtitleRevisionSnapshot | null | undefined;
+export type CanvasConfigValue = string | number | boolean | string[] | CanvasVideoSnapshot[] | CanvasSubtitleRevisionSnapshot | CanvasImageBatchSummary | null | undefined;
 export type CanvasNodeConfig = Record<string, CanvasConfigValue>;
 
 export type CanvasPosition = { x: number; y: number };
@@ -263,7 +264,50 @@ export type CanvasWorkflow = {
 };
 
 export type CanvasRunStatus = "queued" | "running" | "completed" | "partial" | "failed" | "cancelled";
-export type CanvasNodeRunStatus = "queued" | "running" | "completed" | "reused" | "bypassed" | "disabled" | "failed" | "blocked" | "cancelled" | "needs_config";
+export type CanvasNodeRunStatus = "queued" | "running" | "completed" | "partial" | "reused" | "bypassed" | "disabled" | "failed" | "blocked" | "cancelled" | "needs_config";
+
+export type CanvasImageEachChildStatus = "queued" | "running" | "pending" | "completed" | "failed" | "needs_config" | "cancelled";
+
+export type CanvasImageEachChild = {
+  id: string;
+  index: number;
+  source: CanvasMediaReference;
+  fingerprint: string;
+  status: CanvasImageEachChildStatus;
+  attempt: number;
+  outputUrl?: string;
+  error?: string;
+  providerTaskId?: string;
+  providerTaskRoute?: "primary" | "backup";
+  providerStatus?: string;
+  updatedAt: string;
+};
+
+export type CanvasImageBatchSummary = {
+  status: "completed" | "partial";
+  total: number;
+  succeeded: number;
+  failed: number;
+  failedIndices: number[];
+};
+
+export type CanvasImageEachRunMetadata = {
+  schemaVersion: 1;
+  inputFingerprint: string;
+  status: "running" | "completed" | "partial";
+  total: number;
+  succeeded: number;
+  failed: number;
+  failedIndices: number[];
+  pending: number;
+  concurrency: number;
+  children: CanvasImageEachChild[];
+};
+
+export type CanvasNodeRunInternalMetadata = {
+  subtitle?: CanvasSubtitleRunMetadata;
+  imageEach?: CanvasImageEachRunMetadata;
+};
 
 export type CanvasRunStepAction = "execute" | "reuse" | "bypass" | "disabled" | "blocked";
 
@@ -325,9 +369,7 @@ export type CanvasNodeRun = {
   status: CanvasNodeRunStatus;
   inputs: Record<string, CanvasArtifact[]>;
   outputs: Record<string, CanvasArtifact>;
-  internalMetadata?: {
-    subtitle?: CanvasSubtitleRunMetadata;
-  };
+  internalMetadata?: CanvasNodeRunInternalMetadata;
   providerTaskId?: string;
   providerTaskRoute?: "primary" | "backup";
   providerStatus?: string;

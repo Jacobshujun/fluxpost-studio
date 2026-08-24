@@ -47,6 +47,7 @@ import {
   FileText,
   FileUp,
   FileVideo2,
+  GalleryHorizontalEnd,
   ExternalLink,
   GitBranch,
   Home,
@@ -1246,7 +1247,7 @@ export default function CanvasPage() {
       setLatestSuccessfulNodeRuns((current) => {
         const next = new Map(current);
         for (const nodeRun of latestAttempts(data.nodeRuns).values()) {
-          if (nodeRun.status !== "completed" || !Object.keys(nodeRun.outputs).length) continue;
+          if ((nodeRun.status !== "completed" && nodeRun.status !== "partial") || !Object.keys(nodeRun.outputs).length) continue;
           const previous = next.get(nodeRun.nodeId);
           if (!previous || Date.parse(previous.runCreatedAt) <= Date.parse(data.run.createdAt)) {
             next.set(nodeRun.nodeId, {
@@ -1279,6 +1280,22 @@ export default function CanvasPage() {
       setMessage(errorMessage(error));
     } finally {
       setBusy(false);
+    }
+  }
+
+  async function retryRunNode(runId: string, nodeId: string) {
+    setTaskCenterBusy(true);
+    setTaskCenterError("");
+    try {
+      await api(`/api/canvas/runs/${runId}`, {
+        method: "PATCH",
+        body: JSON.stringify({ action: "retry", nodeId }),
+      });
+      await loadTaskRun(runId);
+    } catch (error) {
+      setTaskCenterError(errorMessage(error));
+    } finally {
+      setTaskCenterBusy(false);
     }
   }
 
@@ -1606,6 +1623,7 @@ export default function CanvasPage() {
         onClose={() => setTaskCenterOpen(false)}
         onRefresh={() => void loadTaskCenterRuns(selectedTaskRunId)}
         onSelect={(runId) => void loadTaskRun(runId)}
+        onRetryNode={(runId, nodeId) => void retryRunNode(runId, nodeId)}
         onOpenScheduler={() => { setTaskCenterOpen(false); setScheduleCenterOpen(true); }}
       /> : null}
 
@@ -2087,6 +2105,7 @@ function CanvasModelNodeResult({
     {latestSuccessful && artifactRun.id === latestSuccessful.nodeRun.id ? <div className="canvas-node-result-history">最近成功结果 · r{latestSuccessful.workflowRevision} · {new Date(latestSuccessful.runCreatedAt).toLocaleString()}</div> : null}
     {isFailure ? <p>{nodeRun?.error || statusLabel}</p> : null}
     {artifactRun.status === "completed" && !artifact ? <div className="canvas-node-result-empty">运行完成，但没有可预览内容</div> : null}
+    {node.type === "model.gpt-image-each" && artifactRun.internalMetadata?.imageEach ? <CanvasImageEachProgress metadata={artifactRun.internalMetadata.imageEach} /> : null}
     {artifact ? <div className="canvas-node-result-label">生成结果</div> : null}
     {showArtifact && artifact?.kind === "text" ? <div className="canvas-node-text-result">
       <p>{artifact.value}</p>
@@ -2094,8 +2113,8 @@ function CanvasModelNodeResult({
     </div> : null}
     {showArtifact && artifact?.kind === "images" ? <CanvasResultImageGallery
       items={artifact.items}
-      ratio={node.type === "model.gpt-image" ? String(resultNode.config.ratio || legacyNodeRatio(resultNode)) : undefined}
-      resolution={node.type === "model.gpt-image" ? String(resultNode.config.resolution || legacyNodeResolution(resultNode)) : undefined}
+      ratio={node.type === "model.gpt-image" || node.type === "model.gpt-image-each" ? String(resultNode.config.ratio || legacyNodeRatio(resultNode)) : undefined}
+      resolution={node.type === "model.gpt-image" || node.type === "model.gpt-image-each" ? String(resultNode.config.resolution || legacyNodeResolution(resultNode)) : undefined}
       onPreview={onPreview}
     /> : null}
     {showArtifact && artifact?.kind === "videos" ? <CanvasResultVideoPreview items={artifact.items} onPreview={onPreview} /> : null}
@@ -2619,6 +2638,7 @@ function resolveCanvasSubtitlePreviewMedia(
     const video = selectedCanvasVideo(upstream.config);
     return video ? { url: video.url, name: video.filename, mimeType: video.mimeType, width: video.width, height: video.height, durationSeconds: video.durationSeconds } : undefined;
   }
+
   if (upstream.type === "input.source-video") {
     const source = canvasSourceVideoSnapshotFromConfig(upstream.config);
     return source ? { url: source.url, name: source.title, width: source.width, height: source.height, durationSeconds: source.durationSeconds } : undefined;
@@ -4405,6 +4425,7 @@ function CanvasTaskCenter({
   onClose,
   onRefresh,
   onSelect,
+  onRetryNode,
   onOpenScheduler,
 }: {
   runs: CanvasRun[];
@@ -4416,6 +4437,7 @@ function CanvasTaskCenter({
   onClose: () => void;
   onRefresh: () => void;
   onSelect: (runId: string) => void;
+  onRetryNode: (runId: string, nodeId: string) => void;
   onOpenScheduler: () => void;
 }) {
   const [filter, setFilter] = useState<CanvasTaskFilter>("all");
@@ -4488,7 +4510,7 @@ function CanvasTaskCenter({
               <div><dt>完成时间</dt><dd>{selectedRun.run.completedAt ? formatCanvasRunTime(selectedRun.run.completedAt) : "-"}</dd></div>
             </dl>
             {selectedRun.run.error ? <div className="canvas-task-detail-error"><AlertTriangle />{selectedRun.run.error}</div> : null}
-            <RunSummary value={selectedRun} />
+            <RunSummary value={selectedRun} onRetry={(nodeId) => onRetryNode(selectedRun.run.id, nodeId)} />
           </> : <div className="canvas-task-empty"><History /><span>选择任务查看节点详情</span></div>}
         </section>
       </div>
@@ -4505,9 +4527,18 @@ function RunSummary({ value, onRetry }: { value: CanvasRunWithNodes; onRetry?: (
       {nodeRun.providerTaskId ? <code>{nodeRun.providerTaskId}</code> : null}
       {nodeRun.reusedFrom ? <small>复用 r{nodeRun.reusedFrom.workflowRevision} · {nodeRun.reusedFrom.nodeRunId}</small> : null}
       {nodeRun.error ? <p>{nodeRun.error}</p> : null}
+      {nodeRun.internalMetadata?.imageEach ? <CanvasImageEachProgress metadata={nodeRun.internalMetadata.imageEach} /> : null}
       {Object.values(nodeRun.outputs).map((artifact, index) => <ArtifactPreview key={index} artifact={artifact} />)}
-      {onRetry && ["failed", "blocked", "needs_config", "running"].includes(nodeRun.status) ? <button type="button" onClick={() => onRetry(nodeRun.nodeId)}><RotateCcw />重试</button> : null}
+      {onRetry && (["failed", "blocked", "needs_config", "running"].includes(nodeRun.status) || (nodeRun.status === "partial" && nodeRun.nodeType === "model.gpt-image-each")) ? <button type="button" onClick={() => onRetry(nodeRun.nodeId)}><RotateCcw />{nodeRun.status === "partial" ? "重试失败图片" : "重试"}</button> : null}
     </div>)}</div>
+  </div>;
+}
+
+function CanvasImageEachProgress({ metadata }: { metadata: NonNullable<NonNullable<CanvasNodeRun["internalMetadata"]>["imageEach"]> }) {
+  return <div className="canvas-image-each-progress">
+    <div><span>成功 {metadata.succeeded}</span><span>处理中 {metadata.pending}</span><span>失败 {metadata.failed}</span></div>
+    <progress max={Math.max(1, metadata.total)} value={metadata.succeeded + metadata.failed} />
+    {metadata.failedIndices.length ? <small>失败序号：{metadata.failedIndices.join("、")}</small> : null}
   </div>;
 }
 
@@ -5247,6 +5278,7 @@ function canvasNodeRunStatusLabel(status: CanvasNodeRun["status"]) {
     queued: "排队中",
     running: "生成中",
     completed: "已完成",
+    partial: "部分完成",
     reused: "已复用",
     bypassed: "已跳过",
     disabled: "已禁用",
@@ -5318,6 +5350,7 @@ function schedulerRolesForNode(node: CanvasNode): CanvasSchedulerRole[] {
   if (node.type === "input.images" || node.type === "input.library-images") return ["scene-input", "vehicle-input"];
   if (node.type === "utility.prompt-switch") return ["prompt-switch"];
   if (node.type === "model.gpt-image" && node.version >= 2) return ["image-target"];
+  if (node.type === "model.gpt-image-each") return ["image-target"];
   if (node.type === "compose.social-post") return ["content-target"];
   if (node.type === "input.copy-library") return ["copy-input"];
   return [];
@@ -5572,6 +5605,7 @@ function iconForNode(type: CanvasNodeType) {
   if (type === "input.copy-library") return <BookOpenText {...props} />;
   if (type === "model.gpt-text") return <Sparkles {...props} />;
   if (type === "model.gpt-image") return <WandSparkles {...props} />;
+  if (type === "model.gpt-image-each") return <GalleryHorizontalEnd {...props} />;
   if (type === "model.gpt-vision") return <Search {...props} />;
   if (type === "model.seedance") return <Clapperboard {...props} />;
   if (type === "utility.image-preview") return <Images {...props} />;

@@ -499,7 +499,9 @@ function aggregateLiteralNode(
     return { ...node, type: "input.text", version: 1, config: { text: artifacts.flatMap((artifact) => artifact.kind === "text" ? [artifact.value] : []).join("\n\n") }, executionMode: "enabled", schedulerRole: undefined };
   }
   if (kind === "images") {
-    return { ...node, type: "input.images", version: 1, config: { urls: uniqueStrings(artifacts.flatMap((artifact) => artifact.kind === "images" ? artifact.items.map((item) => item.url) : [])) }, executionMode: "enabled", schedulerRole: undefined };
+    const imageArtifacts = artifacts.filter((artifact): artifact is Extract<CanvasArtifact, { kind: "images" }> => artifact.kind === "images");
+    const imageBatch = aggregateScheduledImageBatches(imageArtifacts);
+    return { ...node, type: "input.images", version: 1, config: { urls: uniqueStrings(imageArtifacts.flatMap((artifact) => artifact.items.map((item) => item.url))), ...(imageBatch ? { imageBatch } : {}) }, executionMode: "enabled", schedulerRole: undefined };
   }
   return { ...node, type: "input.videos", version: 1, config: { urls: uniqueStrings(artifacts.flatMap((artifact) => artifact.kind === "videos" ? artifact.items.map((item) => item.url) : [])) }, executionMode: "enabled", schedulerRole: undefined };
 }
@@ -509,9 +511,24 @@ function sharedLiteralNode(node: CanvasNode, artifact: CanvasScheduleAggregateAr
     return { ...node, type: "input.text", version: 1, config: { text: artifact.value }, executionMode: "enabled", schedulerRole: undefined };
   }
   if (artifact.kind === "images") {
-    return { ...node, type: "input.images", version: 1, config: { urls: artifact.items.map((item) => item.url) }, executionMode: "enabled", schedulerRole: undefined };
+    return { ...node, type: "input.images", version: 1, config: { urls: artifact.items.map((item) => item.url), ...(artifact.imageBatch ? { imageBatch: artifact.imageBatch } : {}) }, executionMode: "enabled", schedulerRole: undefined };
   }
   return { ...node, type: "input.videos", version: 1, config: { urls: artifact.items.map((item) => item.url) }, executionMode: "enabled", schedulerRole: undefined };
+}
+
+function aggregateScheduledImageBatches(artifacts: Array<Extract<CanvasArtifact, { kind: "images" }>>) {
+  const batches = artifacts.flatMap((artifact) => artifact.imageBatch ? [artifact.imageBatch] : []);
+  if (!batches.length) return undefined;
+  let offset = 0;
+  const failedIndices: number[] = [];
+  for (const batch of batches) {
+    failedIndices.push(...batch.failedIndices.map((index) => index + offset));
+    offset += batch.total;
+  }
+  const total = batches.reduce((sum, batch) => sum + batch.total, 0);
+  const succeeded = batches.reduce((sum, batch) => sum + batch.succeeded, 0);
+  const failed = batches.reduce((sum, batch) => sum + batch.failed, 0);
+  return { status: failed ? "partial" as const : "completed" as const, total, succeeded, failed, failedIndices };
 }
 
 function hasCanvasGraphPath(graph: CanvasGraph, sourceId: string, targetId: string) {

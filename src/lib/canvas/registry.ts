@@ -602,6 +602,42 @@ const textSplitV2Definition: CanvasNodeDefinition = {
   defaultConfig: { mode: "first-line", delimiter: "---", delimiterIndex: 1 },
 };
 
+const gptImageEachDefinition: CanvasNodeDefinition = {
+  type: "model.gpt-image-each",
+  version: 1,
+  label: "逐图 GPT 重构",
+  description: "将 1–18 张图片分别提交给 GPT-Image-2，按原顺序聚合成功结果。",
+  category: "model",
+  icon: "GalleryHorizontalEnd",
+  color: "#c0265e",
+  inputs: [
+    { id: "images", label: "图片组", kind: "images", required: true, multiple: true },
+    { id: "prompt", label: "共享提示词", kind: "text", required: true, multiple: true },
+  ],
+  outputs: [
+    { id: "images", label: "重构图片", kind: "images" },
+    { id: "report", label: "处理报告", kind: "text" },
+  ],
+  fields: [
+    { key: "concurrency", label: "并发数", kind: "number", min: 1, max: 20 },
+    { key: "ratio", label: "比例", kind: "select", options: toApisImageRatios.map((value) => ({ value, label: value })) },
+    { key: "resolution", label: "分辨率", kind: "select", options: ["1k", "2k", "4k"].map((value) => ({ value, label: value.toUpperCase() })) },
+    { key: "quality", label: "质量", kind: "select", options: ["low", "medium", "high"].map((value) => ({ value, label: value })) },
+    { key: "outputFormat", label: "格式", kind: "select", options: [{ value: "png", label: "PNG" }, { value: "jpeg", label: "JPEG" }] },
+    { key: "outputCompression", label: "JPEG 压缩", kind: "number", min: 0, max: 100 },
+  ],
+  defaultConfig: {
+    concurrency: 8,
+    ratio: "1:1",
+    resolution: "1k",
+    quality: "medium",
+    outputFormat: "png",
+    outputCompression: 100,
+  },
+  capability: "image_model",
+  bypass: { inputPort: "images", outputPort: "images" },
+};
+
 const feishuPublishV2Definition: CanvasNodeDefinition = {
   type: "publish.feishu",
   version: 2,
@@ -627,11 +663,11 @@ export const canvasNodeDefinitions = canvasNodeDefinitionVersions.map((definitio
     : definition.type === "publish.feishu"
       ? feishuPublishV2Definition
       : definition,
-);
+).concat(gptImageEachDefinition);
 
 const definitionMap = new Map(canvasNodeDefinitions.map((definition) => [definition.type, definition]));
 const definitionVersionMap = new Map(
-  [...canvasNodeDefinitionVersions, gptImageV2Definition, promptSwitchV2Definition, textSplitV2Definition, feishuPublishV2Definition].map((definition) => [`${definition.type}@${definition.version}`, definition]),
+  [...canvasNodeDefinitionVersions, gptImageV2Definition, gptImageEachDefinition, promptSwitchV2Definition, textSplitV2Definition, feishuPublishV2Definition].map((definition) => [`${definition.type}@${definition.version}`, definition]),
 );
 
 export function getCanvasNodeDefinition(type: CanvasNodeType, version?: number) {
@@ -792,6 +828,19 @@ export function validateCanvasNodeConfig(type: CanvasNodeType, config: CanvasNod
   if (type === "model.seedance") {
     errors.push(...validateSeedanceReferenceConfig(config));
     if (config.complianceRisk === "high") errors.push("Seedance 高合规风险任务禁止提交。");
+  }
+  if (type === "model.gpt-image-each") {
+    const concurrency = Number(config.concurrency);
+    if (!Number.isInteger(concurrency) || concurrency < 1 || concurrency > 20) {
+      errors.push("逐图 GPT 重构并发数必须是 1 到 20 的整数。");
+    }
+    if (config.resolution === "4k" && !toApis4kImageRatios.includes(String(config.ratio) as (typeof toApis4kImageRatios)[number])) {
+      errors.push(`逐图 GPT 重构 4K 不支持比例 ${String(config.ratio)}。`);
+    }
+    if (config.outputFormat === "jpeg") {
+      const compression = Number(config.outputCompression);
+      if (!Number.isInteger(compression) || compression < 0 || compression > 100) errors.push("逐图 GPT 重构 JPEG 压缩必须是 0 到 100 的整数。");
+    }
   }
   return errors;
 }

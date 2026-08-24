@@ -817,6 +817,7 @@ export default function ReviewPage() {
                           <p className="mt-1 line-clamp-2 text-xs leading-5 text-[var(--text-muted)]">{post.body || post.imagePrompt}</p>
                           <div className="mt-2 flex flex-wrap gap-1.5">
                             <StatusBadge status={post.status} />
+                            {post.canvasImageBatch?.status === "partial" ? <span className="status-badge text-[10px] text-[var(--amber)]">图片部分完成</span> : null}
                             <span className="status-badge text-[10px] text-[var(--text-muted)]">{platformLabels[post.platform] || post.platform}</span>
                             <span className="status-badge text-[10px] text-[var(--text-muted)]">{countPostMedia([post])} 素材</span>
                           </div>
@@ -841,6 +842,7 @@ export default function ReviewPage() {
                   </div>
                   <div className="flex flex-wrap gap-1.5">
                     <StatusBadge status={draft.status} />
+                    {draft.canvasImageBatch?.status === "partial" ? <span className="status-badge text-[11px] text-[var(--amber)]">图片部分完成 · 失败序号 {draft.canvasImageBatch.failedIndices.join("、")}</span> : null}
                     <span className="status-badge text-[11px] text-[var(--text-muted)]">V{draft.version || 1}</span>
                     <span className="status-badge text-[11px] text-[var(--text-muted)]">{formatShortTime(draft.updatedAt)}</span>
                   </div>
@@ -987,7 +989,7 @@ export default function ReviewPage() {
                     {busy === "approve" ? <Loader2 className="h-4 w-4 animate-spin" /> : <ShieldCheck className="h-4 w-4 text-[var(--mint)]" />}
                     审查通过
                   </button>
-                  <button className="primary-button inline-flex h-11 items-center justify-center gap-2 px-4 text-xs font-black" type="button" onClick={publishSelected} disabled={Boolean(busy)}>
+                  <button className="primary-button inline-flex h-11 items-center justify-center gap-2 px-4 text-xs font-black" type="button" onClick={publishSelected} disabled={Boolean(busy) || selectedPosts.some((post) => post.canvasImageBatch?.status === "partial") || draft.canvasImageBatch?.status === "partial"} title={draft.canvasImageBatch?.status === "partial" ? "请先在画布中重试失败图片" : undefined}>
                     {busy === "publish" ? <Loader2 className="h-4 w-4 animate-spin" /> : <Send className="h-4 w-4" />}
                     {selectedPosts.length > 1 ? `写入飞书 ${selectedPosts.length}` : "写入飞书"}
                   </button>

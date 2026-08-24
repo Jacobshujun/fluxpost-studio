@@ -2712,7 +2712,7 @@ export async function listCanvasSuccessfulNodeRunsForWorkflowFromDb(workflowId: 
        FROM canvas_node_runs AS node_runs
        JOIN canvas_runs ON canvas_runs.id = node_runs.run_id
        WHERE canvas_runs.workflow_id = $1
-         AND node_runs.status IN ('completed', 'reused', 'bypassed')
+         AND node_runs.status IN ('completed', 'partial', 'reused', 'bypassed')
        ORDER BY canvas_runs.created_at DESC, node_runs.attempt DESC`,
       [workflowId],
     );
@@ -2726,7 +2726,7 @@ export async function listCanvasSuccessfulNodeRunsForWorkflowFromDb(workflowId: 
      FROM canvas_node_runs AS node_runs
      JOIN canvas_runs ON canvas_runs.id = node_runs.run_id
      WHERE canvas_runs.workflow_id = ?
-       AND node_runs.status IN ('completed', 'reused', 'bypassed')
+       AND node_runs.status IN ('completed', 'partial', 'reused', 'bypassed')
      ORDER BY canvas_runs.created_at DESC, node_runs.attempt DESC`,
   ).all(workflowId) as SuccessfulNodeRunRow[];
   return rows.map((row) => ({

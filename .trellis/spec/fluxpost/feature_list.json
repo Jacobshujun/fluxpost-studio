@@ -334,10 +334,11 @@
         "Batch scheduler V1 freezes multi-batch asset and copy samples, launches image children atomically, aggregates one review draft per scene, and supports pause, cancel, retry, and explicit candidate acceptance",
         "Copy-library inputs freeze independent title/body/tag snapshots and the standard batch skeleton performs separate title and body text-model calls before content composition",
         "Batch scheduler V2 lets users define typed main/child parameters, source filters, fixed/full/random expansion with exact or inclusive-range counts, main-once and child-per-main preview-frozen no-replacement selection, cartesian/zip composition, explicit node-field bindings, partial/strict aggregation, custom names for same-type Canvas nodes, and explicit main-task shared upstream results",
-        "A local video-loader node keeps up to 200 ordered MP4/MOV/WebM snapshots, emits only the selected video in ordinary runs, and freezes one video per V2 scheduled task"
+        "A local video-loader node keeps up to 200 ordered MP4/MOV/WebM snapshots, emits only the selected video in ordinary runs, and freezes one video per V2 scheduled task",
+        "A per-image GPT reconstruction node durably fans out 1-18 images, resumes accepted provider tasks, aggregates ordered partial results, retries failures only, and blocks partial drafts from publishing"
       ],
       "evidence": [
-        "2026-08-19 Seedance structured mentions, canonical image ordering, TOS gating, resolved-input resume, full offline baseline, and mocked Chromium desktop/mobile checks passed without Ark or TOS calls.",
+        "2026-08-24 per-image GPT reconstruction concurrency, ordering, provider resume, failed-only retry, partial draft/publish guards, scheduler compatibility, build, smoke, and full offline baseline passed without live providers.",
         "2026-08-20 video-loader real local FFmpeg/FFprobe upload, selected output, frozen scheduling, full offline baseline, and mocked Chromium desktop/mobile queue checks passed without external services.",
         "2026-08-21 Faster Whisper v4 UTF-8 plus manual revisions, optimistic locking, frozen hash gating, isolated re-render, waveform/cache checks, two baselines, and desktop/mobile mocked Chromium passed without external calls or text disclosure."
       ],
