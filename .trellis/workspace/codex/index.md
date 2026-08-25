@@ -8,7 +8,7 @@
 
 <!-- @@@auto:current-status -->
 - **Active File**: `journal-1.md`
-- **Total Sessions**: 51
+- **Total Sessions**: 52
 - **Last Active**: 2026-08-25
 <!-- @@@/auto:current-status -->
 
@@ -19,7 +19,7 @@
 <!-- @@@auto:active-documents -->
 | File | Lines | Status |
 |------|-------|--------|
-| `journal-1.md` | ~1731 | Active |
+| `journal-1.md` | ~1764 | Active |
 <!-- @@@/auto:active-documents -->
 
 ---
@@ -29,6 +29,7 @@
 <!-- @@@auto:session-history -->
 | # | Date | Title | Commits | Branch |
 |---|------|-------|---------|--------|
+| 52 | 2026-08-25 | Remove Canvas batch concurrency gate | `7d68805` | `local` |
 | 51 | 2026-08-25 | Fix image generation through local Xray | `83a6b43` | `local` |
 | 50 | 2026-08-25 | Excel competitor workbook Canvas batch workflow | `1c35187`, `52f5fc8`, `74ed0de` | `local` |
 | 49 | 2026-08-24 | Canvas shared references for per-image reconstruction | `5b8dfa6`, `8082206` | `local` |

@@ -1729,3 +1729,36 @@ Routed remote image traffic through explicit local Xray, added free transport he
 ### Next Steps
 
 - None - task complete
+
+
+## Session 52: Remove Canvas batch concurrency gate
+
+**Date**: 2026-08-25
+**Task**: Remove Canvas batch concurrency gate
+**Branch**: `local`
+
+### Summary
+
+Removed the Canvas V2 default-2/maximum-5 schedule admission gate, made historical taskConcurrency values inert, preserved shared Canvas/image/local-image pool boundaries, and passed the full offline baseline.
+
+### Main Changes
+
+(Add details)
+
+### Git Commits
+
+| Hash | Message |
+|------|---------|
+| `7d68805` | (see git log) |
+
+### Testing
+
+- [OK] (Add test results)
+
+### Status
+
+[OK] **Completed**
+
+### Next Steps
+
+- None - task complete
