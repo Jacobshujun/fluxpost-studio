@@ -14,11 +14,11 @@ Canvas partial state is isolated to run diagnostics; review drafts and Feishu pu
 
 ## Next Entry
 
-Commit and activate the verified candidate, then clean the legacy generated-post key and check the review desk without publishing.
+Continue normal local use from the clean port-3001 candidate; keep Canvas partial state internal when extending Excel or review workflows.
 
 ## Recent Verification
 
-- 2026-08-25: Excel/generic aggregation parity, review/publish isolation, failed-only retry, SQLite/PostgreSQL cleanup contracts, lint, TypeScript, build, isolated smoke, and the full baseline passed without live providers or Feishu.
+- 2026-08-25: Candidate `d61d3966ae6afae5916ff82bccfcc97170d27c56` passed the full offline baseline and ran on port 3001. Cleanup removed 7 legacy keys and then matched 0; desktop/mobile review checks kept single/batch Feishu buttons enabled without publishing.
 - 2026-08-25: Earlier Xray and competitor-workbook candidates passed offline baseline, identity, port-3001 smoke, and mocked desktop/mobile checks.
 
 ## Risks And Unknowns

@@ -18,15 +18,15 @@ Excel 节点只负责工作簿解析、行/卡片展开和生成审查稿，不�
 
 ## Acceptance Criteria
 
-- [ ] Excel 与普通 V2 聚合行为一致，`at-least-one` 与 `all` 分别满足上述规则。
-- [ ] 新生成和候选同步的审查稿不包含 `canvasImageBatch`。
-- [ ] 审查台无 partial/失败序号警告，单条和批量写入按钮不受历史 partial 字段影响。
-- [ ] 飞书三种模式不因遗留 `canvasImageBatch` 拒绝，同时原有业务校验仍通过测试。
-- [ ] partial 专用重试入口和服务判定消失，普通失败重试仍可用。
-- [ ] 清理命令的 SQLite dry-run/apply 有隔离测试；PostgreSQL 使用事务化 JSONB key removal 并有静态验证。
-- [ ] 完成 focused checks、TypeScript、lint、build 和 Trellis baseline。
-- [ ] 提交后用干净 HEAD 激活端口 3001，再执行清理 dry-run/apply 并确认遗留字段为 0。
-- [ ] 桌面和移动端验证审查台按钮状态，不触发真实发布。
+- [x] Excel 与普通 V2 聚合行为一致，`at-least-one` 与 `all` 分别满足上述规则。
+- [x] 新生成和候选同步的审查稿不包含 `canvasImageBatch`。
+- [x] 审查台无 partial/失败序号警告，单条和批量写入按钮不受历史 partial 字段影响。
+- [x] 飞书三种模式不因遗留 `canvasImageBatch` 拒绝，同时原有业务校验仍通过测试。
+- [x] partial 专用重试入口和服务判定消失，普通失败重试仍可用。
+- [x] 清理命令的 SQLite dry-run/apply 有隔离测试；PostgreSQL 使用事务化 JSONB key removal 并有静态验证。
+- [x] 完成 focused checks、TypeScript、lint、build 和 Trellis baseline。
+- [x] 提交后用干净 HEAD 激活端口 3001，再执行清理 dry-run/apply 并确认遗留字段为 0。
+- [x] 桌面和移动端验证审查台按钮状态，不触发真实发布。
 
 ## Constraints
 
