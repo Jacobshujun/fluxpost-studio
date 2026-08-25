@@ -7,129 +7,6 @@ param(
 
 $ErrorActionPreference = "Stop"
 
-function ConvertTo-NodeProxyUri {
-  param([string]$Value)
-
-  $proxyValue = ([string]$Value).Trim()
-  if (-not $proxyValue) {
-    return ""
-  }
-  if ($proxyValue -notmatch '^[a-z][a-z0-9+.-]*://') {
-    $proxyValue = "http://$proxyValue"
-  }
-
-  try {
-    $proxyUri = [Uri]$proxyValue
-  } catch {
-    return ""
-  }
-  if (-not $proxyUri.IsAbsoluteUri -or
-      @("http", "https") -notcontains $proxyUri.Scheme.ToLowerInvariant() -or
-      -not $proxyUri.Host) {
-    return ""
-  }
-
-  return $proxyUri.AbsoluteUri
-}
-
-function Get-WindowsProxyEnvironment {
-  try {
-    $internetSettings = Get-ItemProperty `
-      -LiteralPath "HKCU:\Software\Microsoft\Windows\CurrentVersion\Internet Settings" `
-      -Name @("ProxyEnable", "ProxyServer") `
-      -ErrorAction Stop
-  } catch {
-    return $null
-  }
-
-  if ([int]$internetSettings.ProxyEnable -ne 1) {
-    return $null
-  }
-  $proxyServer = ([string]$internetSettings.ProxyServer).Trim()
-  if (-not $proxyServer) {
-    return $null
-  }
-
-  if (-not $proxyServer.Contains("=")) {
-    $proxyUri = ConvertTo-NodeProxyUri -Value $proxyServer
-    if (-not $proxyUri) {
-      return $null
-    }
-    return [pscustomobject]@{ Http = $proxyUri; Https = $proxyUri }
-  }
-
-  $protocolProxies = @{}
-  foreach ($entry in ($proxyServer -split ";")) {
-    if ($entry -match '^\s*(http|https)\s*=\s*(.+?)\s*$') {
-      $proxyUri = ConvertTo-NodeProxyUri -Value $Matches[2]
-      if ($proxyUri) {
-        $protocolProxies[$Matches[1].ToLowerInvariant()] = $proxyUri
-      }
-    }
-  }
-  if (-not $protocolProxies.Count) {
-    return $null
-  }
-
-  return [pscustomobject]@{
-    Http = [string]$protocolProxies["http"]
-    Https = [string]$protocolProxies["https"]
-  }
-}
-
-function Set-LocalProxyEnvironment {
-  $explicitProxyNames = @("HTTP_PROXY", "HTTPS_PROXY", "http_proxy", "https_proxy")
-  $hasExplicitProxy = $false
-  foreach ($proxyName in $explicitProxyNames) {
-    if ([Environment]::GetEnvironmentVariable($proxyName, "Process")) {
-      $hasExplicitProxy = $true
-      break
-    }
-  }
-
-  if (-not $hasExplicitProxy) {
-    $windowsProxy = Get-WindowsProxyEnvironment
-    if ($windowsProxy) {
-      if ($windowsProxy.Http) {
-        $env:HTTP_PROXY = $windowsProxy.Http
-      }
-      if ($windowsProxy.Https) {
-        $env:HTTPS_PROXY = $windowsProxy.Https
-      }
-    }
-  }
-
-  $hasEffectiveProxy = $false
-  foreach ($proxyName in $explicitProxyNames) {
-    if ([Environment]::GetEnvironmentVariable($proxyName, "Process")) {
-      $hasEffectiveProxy = $true
-      break
-    }
-  }
-  if ($hasEffectiveProxy) {
-    $env:NODE_USE_ENV_PROXY = "1"
-  }
-
-  $existingNoProxyEntries = @()
-  foreach ($noProxyName in @("NO_PROXY", "no_proxy")) {
-    $noProxyValue = [Environment]::GetEnvironmentVariable($noProxyName, "Process")
-    if ($noProxyValue) {
-      $existingNoProxyEntries += @($noProxyValue -split "[,;]" | ForEach-Object { $_.Trim() } | Where-Object { $_ })
-    }
-  }
-  $mergedNoProxyEntries = @()
-  foreach ($noProxyEntry in @($existingNoProxyEntries) + @("localhost", "127.0.0.1", "::1")) {
-    if (-not ($mergedNoProxyEntries | Where-Object { $_ -ieq $noProxyEntry })) {
-      $mergedNoProxyEntries += $noProxyEntry
-    }
-  }
-  if ($mergedNoProxyEntries.Count) {
-    $mergedNoProxy = $mergedNoProxyEntries -join ","
-    $env:NO_PROXY = $mergedNoProxy
-    $env:no_proxy = $mergedNoProxy
-  }
-}
-
 $controllerRoot = [IO.Path]::GetFullPath((Join-Path $PSScriptRoot "..\.."))
 if (-not $ProjectRoot) {
   $ProjectRoot = $controllerRoot
@@ -173,7 +50,6 @@ if ($ConfigFile) {
 }
 $env:FLUXPOST_RUNTIME_MODE = "candidate"
 $env:FLUXPOST_RELEASE_SHA = $ReleaseSha
-Set-LocalProxyEnvironment
 
 $statePath = Join-Path $projectRoot ".fluxpost-local-candidate.json"
 $slotNames = @(".next-local-a", ".next-local-b")

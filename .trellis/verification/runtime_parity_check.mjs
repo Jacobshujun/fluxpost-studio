@@ -1,8 +1,6 @@
 import assert from "node:assert/strict";
-import { existsSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
+import { existsSync, readFileSync } from "node:fs";
 import path from "node:path";
-import { tmpdir } from "node:os";
-import { spawnSync } from "node:child_process";
 import vm from "node:vm";
 import ts from "typescript";
 
@@ -80,9 +78,6 @@ assert.equal(existsSync(path.join(projectRoot, "scripts/local/start-dev.mjs")), 
 assert.equal(existsSync(path.join(projectRoot, "scripts/local/restart-dev.ps1")), false);
 
 const restart = read("scripts/local/restart.ps1");
-const proxyUriFunction = extractPowerShellFunction(restart, "ConvertTo-NodeProxyUri");
-const windowsProxyFunction = extractPowerShellFunction(restart, "Get-WindowsProxyEnvironment");
-const localProxyFunction = extractPowerShellFunction(restart, "Set-LocalProxyEnvironment");
 const nextConfig = read("next.config.ts");
 const gitignore = read(".gitignore");
 const eslintConfig = read("eslint.config.mjs");
@@ -105,33 +100,6 @@ assert.match(eslintConfig, /\.next-local-b\/\*\*/);
 assert.match(restart, /\[string\]\$HostName\s*=\s*"127\.0\.0\.1"/);
 assert.match(restart, /FLUXPOST_RUNTIME_MODE\s*=\s*"candidate"/);
 assert.match(restart, /FLUXPOST_RELEASE_SHA\s*=\s*\$ReleaseSha/);
-assert.match(proxyUriFunction, /"http:\/\/\$proxyValue"/);
-assert.match(proxyUriFunction, /@\("http",\s*"https"\)\s*-notcontains/);
-assert.match(localProxyFunction, /\$explicitProxyNames\s*=\s*@\("HTTP_PROXY",\s*"HTTPS_PROXY",\s*"http_proxy",\s*"https_proxy"\)/);
-assert.doesNotMatch(localProxyFunction, /ALL_PROXY|all_proxy/);
-assert.match(localProxyFunction, /GetEnvironmentVariable\(\$proxyName,\s*"Process"\)/);
-assert.match(localProxyFunction, /if \(-not \$hasExplicitProxy\)[\s\S]*Get-WindowsProxyEnvironment/);
-assertOrder(localProxyFunction, "if (-not $hasExplicitProxy)", "$env:HTTP_PROXY = $windowsProxy.Http");
-assertOrder(localProxyFunction, "if (-not $hasExplicitProxy)", "$env:HTTPS_PROXY = $windowsProxy.Https");
-assert.match(windowsProxyFunction, /HKCU:\\Software\\Microsoft\\Windows\\CurrentVersion\\Internet Settings/);
-assert.match(windowsProxyFunction, /\[int\]\$internetSettings\.ProxyEnable\s+-ne\s+1/);
-assert.match(windowsProxyFunction, /\$internetSettings\.ProxyServer/);
-assert.match(windowsProxyFunction, /Http\s*=\s*\$proxyUri;\s*Https\s*=\s*\$proxyUri/);
-assert.match(windowsProxyFunction, /\$proxyServer\.Contains\("="\)[\s\S]*-split\s+";"/);
-assert.match(windowsProxyFunction, /\^\\s\*\(http\|https\)\\s\*=\\s\*/);
-assert.match(windowsProxyFunction, /Http\s*=\s*\[string\]\$protocolProxies\["http"\][\s\S]*Https\s*=\s*\[string\]\$protocolProxies\["https"\]/);
-assert.match(localProxyFunction, /\$env:HTTP_PROXY\s*=\s*\$windowsProxy\.Http/);
-assert.match(localProxyFunction, /\$env:HTTPS_PROXY\s*=\s*\$windowsProxy\.Https/);
-assert.match(localProxyFunction, /\$env:NODE_USE_ENV_PROXY\s*=\s*"1"/);
-assert.match(localProxyFunction, /@\("NO_PROXY",\s*"no_proxy"\)/);
-for (const localBypass of ["localhost", "127.0.0.1", "::1"]) {
-  assert.match(localProxyFunction, new RegExp(`"${escapeRegex(localBypass)}"`));
-}
-assert.match(localProxyFunction, /\$existingNoProxyEntries\s*\+=/);
-assert.match(localProxyFunction, /\$mergedNoProxyEntries[\s\S]*\$env:NO_PROXY\s*=\s*\$mergedNoProxy[\s\S]*\$env:no_proxy\s*=\s*\$mergedNoProxy/);
-assertOrder(restart, "Set-LocalProxyEnvironment", "Start-Process");
-assert.doesNotMatch(localProxyFunction, /Write-(?:Host|Output|Verbose|Debug)[\s\S]*(?:windowsProxy|HTTP_PROXY|HTTPS_PROXY|ALL_PROXY)/i);
-runWindowsProxyProbe({ proxyUriFunction, windowsProxyFunction, localProxyFunction });
 assert.match(restart, /ProjectRoot/);
 assert.match(restart, /rev-parse --path-format=absolute --git-common-dir/);
 assert.match(restart, /Local candidate must run from the primary Git worktree/);
@@ -190,112 +158,4 @@ function assertOrder(source, first, second) {
   const secondIndex = source.indexOf(second);
   assert.ok(firstIndex >= 0, `Missing ordered marker: ${first}`);
   assert.ok(secondIndex > firstIndex, `${second} must appear after ${first}`);
-}
-
-function escapeRegex(value) {
-  return value.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
-}
-
-function extractPowerShellFunction(source, name) {
-  const marker = `function ${name}`;
-  const start = source.indexOf(marker);
-  assert.ok(start >= 0, `Missing PowerShell function: ${name}`);
-  const bodyStart = source.indexOf("{", start + marker.length);
-  assert.ok(bodyStart >= 0, `Missing PowerShell function body: ${name}`);
-  let depth = 0;
-  for (let index = bodyStart; index < source.length; index += 1) {
-    if (source[index] === "{") depth += 1;
-    if (source[index] === "}") depth -= 1;
-    if (depth === 0) return source.slice(start, index + 1);
-  }
-  assert.fail(`Unclosed PowerShell function body: ${name}`);
-}
-
-function runWindowsProxyProbe({ proxyUriFunction, windowsProxyFunction, localProxyFunction }) {
-  if (process.platform !== "win32") return;
-
-  const temp = mkdtempSync(path.join(tmpdir(), "fluxpost-proxy-check-"));
-  const probePath = path.join(temp, "probe.ps1");
-  const probe = `
-$ErrorActionPreference = "Stop"
-${proxyUriFunction}
-${windowsProxyFunction}
-${localProxyFunction}
-
-function Assert-Equal([string]$Actual, [string]$Expected, [string]$Message) {
-  if ($Actual -cne $Expected) { throw "$Message (actual='$Actual')" }
-}
-function Assert-NoProxyEntry([string]$Value, [string]$Expected) {
-  $entries = @($Value -split "[,;]" | ForEach-Object { $_.Trim() })
-  if (-not ($entries | Where-Object { $_ -ieq $Expected })) { throw "NO_PROXY is missing a required entry" }
-}
-function Clear-ProxyEnvironment {
-  foreach ($name in @("HTTP_PROXY", "HTTPS_PROXY", "ALL_PROXY", "http_proxy", "https_proxy", "all_proxy", "NO_PROXY", "no_proxy", "NODE_USE_ENV_PROXY")) {
-    Remove-Item "Env:$name" -ErrorAction SilentlyContinue
-  }
-}
-
-$script:discoveryCalls = 0
-$script:proxySetting = "simple-proxy.invalid:9123"
-function Get-ItemProperty {
-  $script:discoveryCalls += 1
-  [pscustomobject]@{ ProxyEnable = 1; ProxyServer = $script:proxySetting }
-}
-
-foreach ($explicitProxyName in @("HTTP_PROXY", "HTTPS_PROXY", "http_proxy", "https_proxy")) {
-  Clear-ProxyEnvironment
-  [Environment]::SetEnvironmentVariable($explicitProxyName, "http://explicit-proxy.invalid:8123", "Process")
-  [Environment]::SetEnvironmentVariable("no_proxy", "existing.internal", "Process")
-  Set-LocalProxyEnvironment
-  Assert-Equal ([Environment]::GetEnvironmentVariable($explicitProxyName, "Process")) "http://explicit-proxy.invalid:8123" "Explicit proxy must retain precedence"
-  Assert-Equal "$script:discoveryCalls" "0" "Explicit proxy must skip Windows proxy discovery"
-  Assert-Equal $env:NODE_USE_ENV_PROXY "1" "Explicit proxy must enable Node environment proxy support"
-  foreach ($entry in @("existing.internal", "localhost", "127.0.0.1", "::1")) { Assert-NoProxyEntry $env:NO_PROXY $entry }
-}
-
-Clear-ProxyEnvironment
-$script:proxyEnabled = 0
-function Get-ItemProperty {
-  $script:discoveryCalls += 1
-  [pscustomobject]@{ ProxyEnable = $script:proxyEnabled; ProxyServer = $script:proxySetting }
-}
-Set-LocalProxyEnvironment
-Assert-Equal $env:HTTP_PROXY "" "Disabled WinINET proxy must not populate HTTP_PROXY"
-Assert-Equal $env:HTTPS_PROXY "" "Disabled WinINET proxy must not populate HTTPS_PROXY"
-Assert-Equal $env:NODE_USE_ENV_PROXY "" "Disabled WinINET proxy must not enable Node environment proxy support"
-
-Clear-ProxyEnvironment
-$script:proxyEnabled = 1
-$env:ALL_PROXY = "http://unsupported-all-proxy.invalid:8123"
-Set-LocalProxyEnvironment
-Assert-Equal $env:HTTP_PROXY "http://simple-proxy.invalid:9123/" "Unsupported ALL_PROXY must not block Windows proxy discovery"
-Assert-Equal $env:HTTPS_PROXY "http://simple-proxy.invalid:9123/" "Unsupported ALL_PROXY must not block Windows proxy discovery"
-
-Clear-ProxyEnvironment
-$env:NO_PROXY = "first.internal,second.internal"
-Set-LocalProxyEnvironment
-Assert-Equal $env:HTTP_PROXY "http://simple-proxy.invalid:9123/" "Simple WinINET proxy must populate HTTP_PROXY"
-Assert-Equal $env:HTTPS_PROXY "http://simple-proxy.invalid:9123/" "Simple WinINET proxy must populate HTTPS_PROXY"
-Assert-Equal $env:NODE_USE_ENV_PROXY "1" "Discovered proxy must enable Node environment proxy support"
-foreach ($entry in @("first.internal", "second.internal", "localhost", "127.0.0.1", "::1")) { Assert-NoProxyEntry $env:NO_PROXY $entry }
-
-$script:proxySetting = "http=protocol-http.invalid:7123;https=https://protocol-https.invalid:7443;socks=ignored.invalid:1"
-$protocolProxy = Get-WindowsProxyEnvironment
-Assert-Equal $protocolProxy.Http "http://protocol-http.invalid:7123/" "Protocol-specific HTTP proxy must be parsed"
-Assert-Equal $protocolProxy.Https "https://protocol-https.invalid:7443/" "Protocol-specific HTTPS proxy must be parsed"
-Write-Output "Windows proxy environment behavior probe passed."
-`;
-
-  writeFileSync(probePath, probe, "utf8");
-  try {
-    const result = spawnSync("powershell.exe", ["-NoProfile", "-NonInteractive", "-ExecutionPolicy", "Bypass", "-File", probePath], {
-      cwd: projectRoot,
-      encoding: "utf8",
-      env: process.env,
-    });
-    assert.equal(result.status, 0, result.stderr || result.stdout || "Windows proxy environment behavior probe failed.");
-    assert.match(result.stdout, /Windows proxy environment behavior probe passed\./);
-  } finally {
-    rmSync(temp, { recursive: true, force: true });
-  }
 }
