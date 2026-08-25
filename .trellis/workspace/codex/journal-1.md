@@ -1762,3 +1762,38 @@ Removed the Canvas V2 default-2/maximum-5 schedule admission gate, made historic
 ### Next Steps
 
 - None - task complete
+
+
+## Session 53: Canvas schedule partial retry
+
+**Date**: 2026-08-25
+**Task**: Canvas schedule partial retry
+**Branch**: `local`
+
+### Summary
+
+Enabled V1/V2 schedule retries for partial per-image failures while preserving successful images and review drafts; covered child, row, and shared-stage paths with deterministic and mocked Chromium checks, passed the full offline baseline, and activated candidate a460768 on port 3001 without push or deployment.
+
+### Main Changes
+
+(Add details)
+
+### Git Commits
+
+| Hash | Message |
+|------|---------|
+| `259340f` | (see git log) |
+| `a460768` | (see git log) |
+| `fd405ef` | (see git log) |
+
+### Testing
+
+- [OK] (Add test results)
+
+### Status
+
+[OK] **Completed**
+
+### Next Steps
+
+- None - task complete
