@@ -1,5 +1,8 @@
 import assert from "node:assert/strict";
-import { chromium } from "playwright";
+import { execFileSync } from "node:child_process";
+import { pathToFileURL } from "node:url";
+
+const { chromium } = await loadPlaywright();
 
 const baseUrl = process.env.FLUXPOST_BROWSER_BASE_URL || "http://127.0.0.1:3001";
 const now = new Date().toISOString();
@@ -124,8 +127,9 @@ try {
   const v2Retry = page.getByRole("button", { name: "重试失败图片", exact: true });
   await v2Retry.waitFor();
   await page.getByRole("button", { name: "重试本行未完成卡片", exact: true }).waitFor();
+  const v2RetryHandle = await v2Retry.elementHandle();
   const v2Click = v2Retry.click();
-  await page.waitForFunction(() => document.querySelector('button[disabled]')?.textContent?.includes("重试失败图片"));
+  await page.waitForFunction((button) => button.disabled, v2RetryHandle);
   assert.equal(await v2Retry.isDisabled(), true, "V2 retry must stay disabled while its request is pending");
   releaseAction();
   await v2Click;
@@ -135,10 +139,12 @@ try {
 
   await page.setViewportSize({ width: 390, height: 844 });
   await page.getByRole("button", { name: /V1 partial schedule/ }).click();
+  await page.locator(".canvas-schedule-runtime details details > summary").click();
   const v1Retry = page.getByRole("button", { name: "重试失败图片", exact: true });
   await v1Retry.waitFor();
+  const v1RetryHandle = await v1Retry.elementHandle();
   const v1Click = v1Retry.click();
-  await page.waitForFunction(() => document.querySelector('button[disabled]')?.textContent?.includes("重试失败图片"));
+  await page.waitForFunction((button) => button.disabled, v1RetryHandle);
   assert.equal(await v1Retry.isDisabled(), true, "V1 retry must stay disabled while its request is pending");
   releaseAction();
   await v1Click;
@@ -197,4 +203,17 @@ function json(route, body) {
 
 function emptyFilter() {
   return { mode: "manual", assetIds: [], search: "", tags: [] };
+}
+
+async function loadPlaywright() {
+  try {
+    return await import("playwright");
+  } catch (error) {
+    if (error?.code !== "ERR_MODULE_NOT_FOUND") throw error;
+    const driverPath = execFileSync("python", [
+      "-c",
+      "import pathlib, playwright; print(pathlib.Path(playwright.__file__).parent / 'driver' / 'package' / 'index.mjs')",
+    ], { encoding: "utf8" }).trim();
+    return import(pathToFileURL(driverPath).href);
+  }
 }
