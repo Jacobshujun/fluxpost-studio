@@ -1696,3 +1696,36 @@ Implemented administrator-only xlsx competitor input, composable GPT-Image-2 V2 
 ### Next Steps
 
 - None - task complete
+
+
+## Session 51: Fix image generation through local Xray
+
+**Date**: 2026-08-25
+**Task**: Fix image generation through local Xray
+**Branch**: `local`
+
+### Summary
+
+Routed remote image traffic through explicit local Xray, added free transport health checks, preserved Canvas work across network outages with GET-only provider resume, verified loopback-only v2rayN auto-start, and passed the full offline baseline.
+
+### Main Changes
+
+(Add details)
+
+### Git Commits
+
+| Hash | Message |
+|------|---------|
+| `83a6b43` | (see git log) |
+
+### Testing
+
+- [OK] (Add test results)
+
+### Status
+
+[OK] **Completed**
+
+### Next Steps
+
+- None - task complete
