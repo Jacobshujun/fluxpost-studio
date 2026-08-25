@@ -1,6 +1,6 @@
 # Verification
 
-Last updated: 2026-08-21
+Last updated: 2026-08-25
 
 ## Baseline Command
 
@@ -45,7 +45,8 @@ Do not deploy a dirty worktree, branch name, abbreviated SHA, local runtime rows
 
 ## Recent Verification
 
-- 2026-08-24: Competitor-workbook 200-row/778-card parsing, invalid-input and path-redaction boundaries, hierarchy, shared references, progressive concurrency, retry/partial-draft synchronization, GPT V2 compatibility, TypeScript, lint, build, isolated smoke, and full offline baseline passed without live providers or Feishu.
+- 2026-08-25: Clean competitor-workbook candidate activated on port 3001 with matching identity and HTTP smoke; mocked Chromium at 1440x960 and 390x844 verified the five-node/six-edge preset, workbook editor, hierarchical scheduler fields, concurrency 1-5, disabled preflight launch, and no horizontal overflow without provider calls.
+- 2026-08-24: Competitor-workbook 200-row/778-card parsing, invalid-input/path-redaction boundaries, hierarchy, shared references, progressive concurrency, retry/partial-draft sync, GPT V2 compatibility, TypeScript, lint, build, isolated smoke, and full baseline passed without live providers or Feishu.
 - 2026-08-21: Clean `b672f9a577b4f981b9cb3d4a80527af795a49c95` activated on loopback port 3001 with matching `/api/version` identity and `/canvas` HTTP 200. An isolated authenticated browser used the same candidate and real PostgreSQL to create, update to revision 2, refresh, and read back an incomplete draft; cleanup left zero fixture workflows, sessions, and accounts.
 - 2026-08-21: Canvas draft persistence now separates structural save validation from execution readiness; isolated SQLite create/update/read/delete, malformed-config rejection, Canvas focused checks, TypeScript, lint, build, and the full offline baseline passed.
 Older evidence is preserved in `.trellis/spec/fluxpost/archive/verification-history.md`.
@@ -58,7 +59,7 @@ Older evidence is preserved in `.trellis/spec/fluxpost/archive/verification-hist
 - No default check changes DNS, firewall, Nginx routing, Docker volumes, or external production services.
 - No production image cleanup or systemd timer change is performed by the default baseline; the 2026-08-06 live maintenance evidence was an explicitly authorized operator action.
 - Current production lacks `/api/version`; final parity awaits an approved identity-enabled deployment.
-- The package audit reports eight high-severity transitive advisories; do not run automatic `npm audit fix --force` as part of release verification.
+- The package audit reports nine high-severity transitive advisories; do not run automatic `npm audit fix --force` as part of release verification.
 
 ## Future Check Rules
 
