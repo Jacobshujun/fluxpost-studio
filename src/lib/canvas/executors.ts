@@ -77,6 +77,7 @@ const executors: Record<CanvasNode["type"], CanvasNodeExecutor> = {
   "input.content-pool": executeLiteralNode,
   "input.library-images": executeLiteralNode,
   "input.copy-library": executeLiteralNode,
+  "input.competitor-workbook": executeLiteralNode,
   "model.gpt-text": executeGptText,
   "model.gpt-image": executeGptImage,
   "model.gpt-image-each": executeGptImageEach,
@@ -144,6 +145,36 @@ export function resolveCanvasLiteralOutputs(node: CanvasNode): Record<string, Ca
     return {
       title: { kind: "text", value: String(node.config.snapshotTitle || "").trim() },
       body: { kind: "text", value: String(node.config.snapshotBody || "").trim() },
+    };
+  }
+  if (node.type === "input.competitor-workbook") {
+    const configuredTitle = String(node.config.rowTitle || "").trim();
+    const configuredBody = String(node.config.rowBody || "").trim();
+    const configuredCard = String(node.config.cardText || "").trim();
+    if (configuredTitle || configuredBody || configuredCard) {
+      return {
+        title: { kind: "text", value: configuredTitle },
+        body: { kind: "text", value: configuredBody },
+        card: { kind: "text", value: configuredCard },
+      };
+    }
+    const snapshot = node.config.snapshot;
+    if (!snapshot || typeof snapshot !== "object" || Array.isArray(snapshot) || !("rows" in snapshot)) {
+      throw new Error("Competitor workbook input requires an administrator-frozen snapshot.");
+    }
+    const rows = Array.isArray(snapshot.rows) ? snapshot.rows : [];
+    const requestedRow = Number(node.config.rowNumber || 2);
+    const row = rows.find((candidate) => candidate && typeof candidate === "object" && Number((candidate as { excelRowNumber?: number }).excelRowNumber) === requestedRow)
+      || rows[0];
+    if (!row || typeof row !== "object") throw new Error("Competitor workbook snapshot has no selected row.");
+    const rowValue = row as { title?: string; body?: string; cards?: Array<{ cardIndex?: number; text?: string }> };
+    const cardIndex = Number(node.config.cardIndex || 1);
+    const card = Array.isArray(rowValue.cards) ? rowValue.cards.find((candidate) => Number(candidate.cardIndex) === cardIndex) : undefined;
+    if (!card?.text) throw new Error(`Competitor workbook card ${cardIndex} is empty.`);
+    return {
+      title: { kind: "text", value: String(rowValue.title || "") },
+      body: { kind: "text", value: String(rowValue.body || "") },
+      card: { kind: "text", value: card.text },
     };
   }
   return undefined;

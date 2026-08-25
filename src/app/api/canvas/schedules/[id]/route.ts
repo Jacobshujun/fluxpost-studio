@@ -13,23 +13,25 @@ import {
   resampleCanvasSchedule,
   retryCanvasScheduleImageTask,
   retryCanvasScheduleV2ChildTask,
+  retryCanvasScheduleV2MainTask,
   retryCanvasScheduleV2SharedTask,
   setCanvasSchedulePaused,
   updateCanvasScheduleDraft,
 } from "@/lib/canvas/scheduler";
 import type { CanvasScheduleBatch, CanvasScheduleV2Definition } from "@/lib/canvas/types";
 import { isWorkspaceSignInError, requireWorkspaceAccount } from "@/lib/workspace-accounts";
+import { canvasScheduleResponse } from "@/lib/canvas/schedule-response";
 
 export const runtime = "nodejs";
 type RouteContext = { params: Promise<{ id: string }> };
-type ScheduleAction = "save" | "preflight" | "resample" | "launch" | "duplicate" | "convert-v2" | "pause" | "resume" | "cancel" | "retry" | "retry-shared" | "accept-candidates";
+type ScheduleAction = "save" | "preflight" | "resample" | "launch" | "duplicate" | "convert-v2" | "pause" | "resume" | "cancel" | "retry" | "retry-row" | "retry-shared" | "accept-candidates";
 
 export async function GET(request: Request, context: RouteContext) {
   try {
     const account = await requireWorkspaceAccount(request);
     const schedule = await getCanvasSchedule((await context.params).id, account);
     if (!schedule) return NextResponse.json({ error: "Canvas schedule not found" }, { status: 404 });
-    return NextResponse.json({ schedule });
+    return NextResponse.json({ schedule: canvasScheduleResponse(schedule) });
   } catch (error) {
     return scheduleError(error);
   }
@@ -46,6 +48,7 @@ export async function PATCH(request: Request, context: RouteContext) {
       name?: string;
       batches?: CanvasScheduleBatch[];
       definition?: CanvasScheduleV2Definition;
+      taskConcurrency?: number;
       batchId?: string;
       contentTaskId?: string;
       imageTaskId?: string;
@@ -60,6 +63,7 @@ export async function PATCH(request: Request, context: RouteContext) {
         name: body.name,
         batches: body.batches,
         definition: body.definition,
+        taskConcurrency: body.taskConcurrency,
       });
     } else if (action === "preflight") {
       schedule = await preflightCanvasSchedule(scheduleId, account, Number(body.revision));
@@ -99,6 +103,9 @@ export async function PATCH(request: Request, context: RouteContext) {
     } else if (action === "retry-shared") {
       if (!body.mainTaskId) return badRequest("mainTaskId is required.");
       schedule = await retryCanvasScheduleV2SharedTask(scheduleId, account, { mainTaskId: body.mainTaskId });
+    } else if (action === "retry-row") {
+      if (!body.mainTaskId) return badRequest("mainTaskId is required.");
+      schedule = await retryCanvasScheduleV2MainTask(scheduleId, account, { mainTaskId: body.mainTaskId });
     } else if (action === "accept-candidates") {
       if (body.mainTaskId) {
         schedule = await acceptCanvasScheduleV2Candidates(scheduleId, account, { mainTaskId: body.mainTaskId });
@@ -112,7 +119,7 @@ export async function PATCH(request: Request, context: RouteContext) {
     } else {
       return badRequest("Unknown Canvas schedule action.");
     }
-    return NextResponse.json({ schedule });
+    return NextResponse.json({ schedule: canvasScheduleResponse(schedule) });
   } catch (error) {
     return scheduleError(error, error instanceof CanvasScheduleRevisionConflictError ? 409 : 400);
   }

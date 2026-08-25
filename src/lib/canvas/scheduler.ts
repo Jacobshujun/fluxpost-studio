@@ -12,6 +12,7 @@ import {
   updateCanvasScheduleInDb,
 } from "../database";
 import { getGeneratedPost, updateGeneratedPost } from "../generated-posts";
+import { freezeCompetitorWorkbook } from "../competitor-workbook";
 import { listCopyLibraryEntries } from "../copy-library";
 import { listLibraryAssets } from "../library-assets";
 import { getSourceItemsByIds } from "../content-pool";
@@ -40,6 +41,7 @@ import {
   applyCanvasScheduleV2Parameters,
   createCanvasScheduleV2AggregateGraph,
   createCanvasScheduleV2ChildGraph,
+  expandCompetitorWorkbookScheduleV2,
   expandCanvasScheduleV2,
   extractCanvasScheduleV2Artifacts,
   extractCanvasScheduleV2SharedArtifacts,
@@ -132,6 +134,7 @@ export async function createCanvasSchedule(account: WorkspaceAccessActor, input:
     totalChildTasks: schemaVersion === 2 ? 0 : undefined,
     totalContentTasks: 0,
     totalImageTasks: 0,
+    taskConcurrency: 2,
     createdAt: now,
     updatedAt: now,
   };
@@ -141,7 +144,7 @@ export async function createCanvasSchedule(account: WorkspaceAccessActor, input:
 export async function updateCanvasScheduleDraft(
   scheduleId: string,
   account: WorkspaceAccessActor,
-  input: { revision: number; name?: string; batches?: ScheduleBatchDraft[]; definition?: CanvasScheduleV2Definition },
+  input: { revision: number; name?: string; batches?: ScheduleBatchDraft[]; definition?: CanvasScheduleV2Definition; taskConcurrency?: number },
 ) {
   const current = await requireSchedule(scheduleId, account);
   if (!mutableScheduleStatuses.has(current.status)) throw new Error("Launched schedules are immutable. Duplicate this schedule to edit it.");
@@ -149,12 +152,16 @@ export async function updateCanvasScheduleDraft(
   const now = new Date().toISOString();
   if (isCanvasScheduleV2(current)) {
     if (!input.definition) throw new Error("V2 batch definition is required.");
+    if (input.definition.parameters.some((parameter) => parameter.source.mode === "competitor-workbook") && account.role !== "admin") {
+      throw new Error("Only workspace administrators can configure local workbooks.");
+    }
     const next: CanvasSchedule = {
       ...current,
       name: input.name === undefined ? current.name : normalizeName(input.name, current.name),
       revision: current.revision + 1,
       status: "draft",
       definition: normalizeCanvasScheduleV2Definition(input.definition),
+      taskConcurrency: normalizeInteger(input.taskConcurrency ?? current.taskConcurrency ?? 2, 1, 5, "Task concurrency"),
       mainTasks: [],
       previewRevision: undefined,
       workflowSnapshot: undefined,
@@ -182,6 +189,7 @@ export async function updateCanvasScheduleDraft(
     workflowSnapshot: undefined,
     totalContentTasks: 0,
     totalImageTasks: 0,
+    taskConcurrency: current.taskConcurrency || 2,
     error: undefined,
     updatedAt: now,
   };
@@ -378,6 +386,7 @@ export async function duplicateCanvasSchedule(scheduleId: string, account: Works
     totalChildTasks: isCanvasScheduleV2(source) ? 0 : undefined,
     totalContentTasks: 0,
     totalImageTasks: 0,
+    taskConcurrency: source.taskConcurrency || 2,
     createdAt: now,
     updatedAt: now,
   };
@@ -593,22 +602,13 @@ export async function retryCanvasScheduleV2ChildTask(
   const child = main?.childTasks.find((item) => item.id === input.childTaskId);
   if (!main || !child?.runId) throw new Error("Child task not found");
   if (child.status !== "failed") throw new Error("Only failed child tasks can be retried.");
-  const run = await getCanvasRun(child.runId, account);
-  if (!run) throw new Error("Canvas child run not found");
-  const latest = latestNodeAttempts(run.nodeRuns);
-  const failedNode = [
-    ...(run.run.steps || []).map((step) => latest.get(step.nodeId)).filter((nodeRun): nodeRun is NonNullable<typeof nodeRun> => Boolean(nodeRun)),
-    ...latest.values(),
-  ].find((nodeRun) => ["failed", "blocked", "needs_config"].includes(nodeRun.status));
-  if (!failedNode) throw new Error("No failed Canvas node is available to retry.");
-  await retryCanvasNode(run.run.id, failedNode.nodeId, account);
   const now = new Date().toISOString();
   const preserveGeneratedPost = current.definition.childResult.artifactKind === "images"
     && Boolean(main.generatedPostId || main.resultArtifacts.some((artifact) => artifact.kind === "socialPost"));
   const next: CanvasSchedule = {
     ...current,
     revision: current.revision + 1,
-    status: "running",
+    status: current.status === "paused" ? "paused" : "running",
     completedAt: undefined,
     mainTasks: current.mainTasks!.map((item) => item.id !== main.id ? item : {
       ...item,
@@ -617,11 +617,53 @@ export async function retryCanvasScheduleV2ChildTask(
       resultArtifacts: preserveGeneratedPost ? item.resultArtifacts : [],
       childTasks: item.childTasks.map((candidate) => candidate.id !== child.id ? candidate : {
         ...candidate,
-        status: "queued",
+        status: "pending",
+        retryPending: true,
         resultArtifacts: [],
         error: undefined,
         updatedAt: now,
       }),
+      updatedAt: now,
+    }),
+    updatedAt: now,
+  };
+  await saveUpdatedSchedule(next, current.revision);
+  kickCanvasSchedulerWorker();
+  return next;
+}
+
+export async function retryCanvasScheduleV2MainTask(
+  scheduleId: string,
+  account: WorkspaceAccessActor,
+  input: { mainTaskId: string },
+) {
+  const current = await requireSchedule(scheduleId, account);
+  if (!isCanvasScheduleV2(current)) throw new Error("V2 main task not found");
+  const main = current.mainTasks.find((item) => item.id === input.mainTaskId);
+  if (!main) throw new Error("Main task not found");
+  const failedIds = new Set(main.childTasks.filter((child) => child.status === "failed" && child.runId).map((child) => child.id));
+  if (!failedIds.size) throw new Error("This row has no failed card tasks to retry.");
+  const now = new Date().toISOString();
+  const preserveGeneratedPost = current.definition.childResult.artifactKind === "images" && Boolean(main.generatedPostId);
+  const next: CanvasSchedule = {
+    ...current,
+    revision: current.revision + 1,
+    status: current.status === "paused" ? "paused" : "running",
+    completedAt: undefined,
+    mainTasks: current.mainTasks.map((item) => item.id !== main.id ? item : {
+      ...item,
+      status: "running",
+      mainRunId: preserveGeneratedPost ? item.mainRunId : undefined,
+      resultArtifacts: preserveGeneratedPost ? item.resultArtifacts : [],
+      childTasks: item.childTasks.map((child) => !failedIds.has(child.id) ? child : {
+        ...child,
+        status: "pending",
+        retryPending: true,
+        resultArtifacts: [],
+        error: undefined,
+        updatedAt: now,
+      }),
+      error: undefined,
       updatedAt: now,
     }),
     updatedAt: now,
@@ -657,7 +699,7 @@ export async function retryCanvasScheduleV2SharedTask(
   const next: CanvasSchedule = {
     ...current,
     revision: current.revision + 1,
-    status: "running",
+    status: current.status === "paused" ? "paused" : "running",
     completedAt: undefined,
     mainTasks: current.mainTasks.map((item) => item.id !== main.id ? item : {
       ...item,
@@ -686,7 +728,7 @@ export async function acceptCanvasScheduleV2Candidates(
   const candidateImageUrls = canvasScheduleV2CandidateImageUrls(main);
   const post = await getGeneratedPost(main.generatedPostId, account);
   if (!post) throw new Error("Generated review draft not found");
-  const saved = await updateGeneratedPost(post.id, { imageUrls: candidateImageUrls }, account);
+  const saved = await updateGeneratedPost(post.id, { imageUrls: candidateImageUrls, canvasImageBatch: canvasScheduleV2ImageBatch(main) }, account);
   const now = new Date().toISOString();
   const next: CanvasSchedule = {
     ...current,
@@ -740,11 +782,52 @@ export async function acceptCanvasScheduleCandidates(
 async function preflightCanvasScheduleV2(current: CanvasSchedule, account: WorkspaceAccessActor) {
   const workflow = await requireScheduleWorkflow(current, account, true);
   if (!current.definition) throw new Error("V2 batch definition is required.");
-  const definition = normalizeCanvasScheduleV2Definition(current.definition);
+  let definition = normalizeCanvasScheduleV2Definition(current.definition);
   validateCanvasScheduleV2Definition(workflow.graph, definition);
-  const resolved = await Promise.all(definition.parameters.map((parameter) => resolveCanvasScheduleV2Parameter(account, workflow.graph, parameter)));
+  if (definition.parameters.some((parameter) => parameter.source.mode === "competitor-workbook")) {
+    if (account.role !== "admin") throw new Error("Only workspace administrators can run local workbooks.");
+    const workbookSources = definition.parameters.flatMap((parameter) => parameter.source.mode === "competitor-workbook" ? [parameter.source] : []);
+    assertCompetitorWorkbookSourcesMatch(workbookSources);
+    const first = workbookSources[0];
+    const snapshot = first.snapshot || await freezeCompetitorWorkbook({
+      filePath: first.filePath || "",
+      worksheet: first.worksheet,
+      rowStart: first.rowStart,
+      rowEnd: first.rowEnd,
+    });
+    definition = {
+      ...definition,
+      parameters: definition.parameters.map((parameter) => parameter.source.mode !== "competitor-workbook" ? parameter : {
+        ...parameter,
+        source: {
+          mode: "competitor-workbook" as const,
+          worksheet: snapshot.worksheet,
+          rowStart: snapshot.rowStart,
+          rowEnd: snapshot.rowEnd,
+          snapshot: structuredClone(snapshot),
+          field: parameter.source.field,
+        },
+      }),
+    };
+  }
+  const nonWorkbookParameters = definition.parameters.filter((parameter) => parameter.source.mode !== "competitor-workbook");
+  const resolved = await Promise.all(nonWorkbookParameters.map((parameter) => resolveCanvasScheduleV2Parameter(account, workflow.graph, parameter)));
+  if (definition.parameters.some((parameter) => parameter.source.mode === "competitor-workbook")) {
+    const sharedReferenceCount = resolved.filter((parameter) => parameter.valueType === "image-group")
+      .flatMap((parameter) => parameter.source.values)
+      .reduce<number>((count, value) => count + (Array.isArray(value) ? value.length : 0), 0);
+    const directReferenceCount = workflow.graph.nodes.filter((node) => node.type === "model.gpt-image" && node.version >= 2)
+      .reduce((count, node) => count + uniqueStrings(
+        Array.isArray(node.config.referenceUrls)
+          ? node.config.referenceUrls.filter((value): value is string => typeof value === "string")
+          : [],
+      ).length, 0);
+    if (sharedReferenceCount + directReferenceCount > 16) throw new Error("Competitor workbook GPT-Image-2 batches accept at most 16 frozen reference images.");
+  }
   const now = new Date().toISOString();
-  const expansion = expandCanvasScheduleV2(resolved, definition, now);
+  const expansion = definition.parameters.some((parameter) => parameter.source.mode === "competitor-workbook")
+    ? expandCompetitorWorkbookScheduleV2(definition.parameters, resolved, now)
+    : expandCanvasScheduleV2(resolved, definition, now);
   for (const main of expansion.mainTasks) {
     const graphWithMainParameters = applyCanvasScheduleV2Parameters(
       workflow.graph,
@@ -812,8 +895,8 @@ async function launchCanvasScheduleV2(current: CanvasSchedule, account: Workspac
     mainRunId: undefined,
     childTasks: main.childTasks.map((child) => ({
       ...child,
-      status: hasSharedOutputs ? "pending" as const : "queued" as const,
-      runId: hasSharedOutputs ? undefined : canvasScheduleV2ChildRunId(child.id),
+      status: "pending" as const,
+      runId: undefined,
       resultArtifacts: [],
       error: undefined,
       updatedAt: now,
@@ -855,28 +938,8 @@ async function launchCanvasScheduleV2(current: CanvasSchedule, account: Workspac
       }));
       continue;
     }
-    for (const child of main.childTasks) {
-      const createdAt = new Date(Date.parse(now) + sequence++).toISOString();
-      const graph = applyCanvasScheduleV2Parameters(workflowSnapshot, definition.parameters, {
-        ...main.parameterValues,
-        ...child.parameterValues,
-      });
-      runs.push(prepareCanvasRunFromGraph({
-        id: child.runId!,
-        workflow,
-        graph,
-        targetNodeIds: [definition.childResult.nodeId],
-        batchContext: {
-          schemaVersion: 2,
-          scheduleId: next.id,
-          mainTaskId: main.id,
-          childTaskId: child.id,
-          phase: "child",
-        },
-        createdAt,
-      }));
-    }
   }
+  if (!hasSharedOutputs) runs.push(...prepareCanvasScheduleV2Admissions(next, next.taskConcurrency || 2, now));
   try {
     await launchCanvasScheduleInDb(next, current.revision, runs);
   } catch (error) {
@@ -1214,31 +1277,6 @@ async function reconcileCanvasScheduleV2(current: CanvasSchedule) {
         }
         continue;
       }
-      const childRunCount = main.childTasks.filter((child) => child.runId).length;
-      if (childRunCount && childRunCount !== main.childTasks.length) {
-        main.status = "failed";
-        main.error = "Shared child fan-out is incomplete.";
-        main.updatedAt = now;
-        changed = true;
-        continue;
-      }
-      if (!childRunCount) {
-        main.status = "queued";
-        main.error = undefined;
-        if (current.status === "paused") continue;
-        const runs = prepareCanvasScheduleV2ChildRuns(next, main, now);
-        next.status = deriveAggregateStatus(next.mainTasks!.map((item) => item.status), false);
-        next.revision = current.revision + 1;
-        next.updatedAt = now;
-        try {
-          await fanOutCanvasScheduleV2ChildrenInDb(next, current.revision, runs);
-        } catch (error) {
-          if (error instanceof Error && error.message === "Canvas schedule revision conflict") return;
-          throw error;
-        }
-        ensureCanvasRunWorker();
-        return;
-      }
     }
     for (const child of main.childTasks) {
       if (!child.runId) continue;
@@ -1274,6 +1312,18 @@ async function reconcileCanvasScheduleV2(current: CanvasSchedule) {
       continue;
     }
     const aggregateArtifacts = successfulChildren.flatMap((child) => child.resultArtifacts);
+    if (definition.childResult.artifactKind === "images" && successfulChildren.length < main.childTasks.length) {
+      const firstImage = aggregateArtifacts.find((artifact): artifact is Extract<CanvasArtifact, { kind: "images" }> => artifact.kind === "images");
+      if (firstImage) {
+        firstImage.imageBatch = {
+          status: "partial",
+          total: main.childTasks.length,
+          succeeded: successfulChildren.length,
+          failed: main.childTasks.length - successfulChildren.length,
+          failedIndices: main.childTasks.flatMap((child, index) => successfulChildren.includes(child) ? [] : [index + 1]),
+        };
+      }
+    }
     if (!definition.mainTargetNodeId) {
       const status = successfulChildren.length === main.childTasks.length ? "completed" : "partial";
       if (main.status !== status || stableSerialize(main.resultArtifacts) !== stableSerialize(aggregateArtifacts)) {
@@ -1328,6 +1378,23 @@ async function reconcileCanvasScheduleV2(current: CanvasSchedule) {
       changed = true;
     }
   }
+  if (current.status !== "paused") {
+    if (await activateCanvasScheduleV2Retries(next, next.taskConcurrency || 2, now)) changed = true;
+    const admissionRuns = prepareCanvasScheduleV2Admissions(next, next.taskConcurrency || 2, now);
+    if (admissionRuns.length) {
+      next.status = deriveAggregateStatus(next.mainTasks!.map((item) => item.status), false);
+      next.revision = current.revision + 1;
+      next.updatedAt = now;
+      try {
+        await fanOutCanvasScheduleV2ChildrenInDb(next, current.revision, admissionRuns);
+      } catch (error) {
+        if (error instanceof Error && error.message === "Canvas schedule revision conflict") return;
+        throw error;
+      }
+      ensureCanvasRunWorker();
+      return;
+    }
+  }
   const status = deriveAggregateStatus(next.mainTasks!.map((main) => main.status), current.status === "paused");
   if (next.status !== status) { next.status = status; changed = true; }
   if (["completed", "partial", "failed", "cancelled"].includes(status) && !next.completedAt) {
@@ -1341,7 +1408,18 @@ async function reconcileCanvasScheduleV2(current: CanvasSchedule) {
   }
   const persisted = changed ? next : current;
   for (const main of aggregateRequests) {
-    const successfulArtifacts = main.childTasks.filter((child) => child.status === "completed").flatMap((child) => child.resultArtifacts);
+    const successfulChildren = main.childTasks.filter((child) => child.status === "completed" || child.status === "partial");
+    const successfulArtifacts = successfulChildren.flatMap((child) => child.resultArtifacts);
+    if (persisted.definition!.childResult.artifactKind === "images" && successfulChildren.length < main.childTasks.length) {
+      const firstImage = successfulArtifacts.find((artifact): artifact is Extract<CanvasArtifact, { kind: "images" }> => artifact.kind === "images");
+      if (firstImage) firstImage.imageBatch = {
+        status: "partial",
+        total: main.childTasks.length,
+        succeeded: successfulChildren.length,
+        failed: main.childTasks.length - successfulChildren.length,
+        failedIndices: main.childTasks.flatMap((child, index) => successfulChildren.includes(child) ? [] : [index + 1]),
+      };
+    }
     const graphWithMainParameters = applyCanvasScheduleV2Parameters(
       persisted.workflowSnapshot!,
       persisted.definition!.parameters.filter((parameter) => parameter.scope === "main"),
@@ -1395,7 +1473,7 @@ async function syncGeneratedPostCandidatesV2(
   const post = await getGeneratedPost(main.generatedPostId, actor);
   if (!post) return false;
   if (post.status === "draft" && post.updatedAt === main.generatedPostUpdatedAt) {
-    const saved = await updateGeneratedPost(post.id, { imageUrls: candidateImageUrls }, actor);
+    const saved = await updateGeneratedPost(post.id, { imageUrls: candidateImageUrls, canvasImageBatch: canvasScheduleV2ImageBatch(main) }, actor);
     main.generatedPostUpdatedAt = saved.updatedAt;
     main.candidateFingerprint = imageFingerprint(candidateImageUrls);
     main.pendingCandidateSync = false;
@@ -1494,6 +1572,15 @@ async function resolveCanvasScheduleV2Parameter(
   }
   if (source.mode === "source-video-links") {
     const values = await resolveCanvasSourceVideos({ links: source.links, projectName: source.projectName, account });
+    return resolvedCanvasScheduleV2Parameter(parameter, "manual-list", values);
+  }
+  if (source.mode === "competitor-workbook") {
+    if (!source.snapshot) throw new Error(`${parameter.name}: competitor workbook snapshot is missing.`);
+    const values = source.snapshot.rows.flatMap((row) => source.field === "title"
+      ? [row.title]
+      : source.field === "body"
+        ? [row.body]
+        : row.cards.map((card) => card.text));
     return resolvedCanvasScheduleV2Parameter(parameter, "manual-list", values);
   }
   throw new Error(`${parameter.name}: parameter source is invalid.`);
@@ -1762,7 +1849,7 @@ function scheduleRunIds(schedule: CanvasSchedule) {
   ]);
 }
 
-function prepareCanvasScheduleV2ChildRuns(schedule: CanvasSchedule, main: CanvasScheduleV2MainTask, now: string) {
+function prepareCanvasScheduleV2Admissions(schedule: CanvasSchedule, concurrency: number, now: string) {
   if (!schedule.definition || !schedule.workflowSnapshot) throw new Error("V2 schedule runtime snapshot is missing.");
   const workflow = {
     id: schedule.workflowId,
@@ -1770,7 +1857,15 @@ function prepareCanvasScheduleV2ChildRuns(schedule: CanvasSchedule, main: Canvas
     ownerUserId: schedule.ownerUserId,
     ownerDisplayName: schedule.ownerDisplayName,
   };
-  return main.childTasks.map((child, index) => {
+  const active = schedule.mainTasks?.flatMap((main) => main.childTasks)
+    .filter((child) => child.runId && !terminalRunStatuses.has(child.status)).length || 0;
+  const available = Math.max(0, concurrency - active);
+  if (!available) return [];
+  const candidates = (schedule.mainTasks || []).flatMap((main) => {
+    const sharedReady = !(schedule.definition?.sharedOutputs?.length) || main.sharedStatus === "completed";
+    return sharedReady ? main.childTasks.filter((child) => !child.runId && child.status === "pending").map((child) => ({ main, child })) : [];
+  }).slice(0, available);
+  return candidates.map(({ main, child }, index) => {
     child.runId = canvasScheduleV2ChildRunId(child.id);
     child.status = "queued";
     child.resultArtifacts = [];
@@ -1796,6 +1891,72 @@ function prepareCanvasScheduleV2ChildRuns(schedule: CanvasSchedule, main: Canvas
       createdAt: new Date(Date.parse(now) + index).toISOString(),
     });
   });
+}
+
+function canvasScheduleV2ImageBatch(main: CanvasScheduleV2MainTask) {
+  const successful = main.childTasks.filter((child) => (child.status === "completed" || child.status === "partial") && child.resultArtifacts.length).length;
+  const failedIndices = main.childTasks.flatMap((child, index) => (child.status === "completed" || child.status === "partial") && child.resultArtifacts.length
+    ? []
+    : [child.workbookCard?.cardIndex || index + 1]);
+  return {
+    status: failedIndices.length ? "partial" as const : "completed" as const,
+    total: main.childTasks.length,
+    succeeded: successful,
+    failed: failedIndices.length,
+    failedIndices,
+  };
+}
+
+function assertCompetitorWorkbookSourcesMatch(
+  sources: Array<Extract<CanvasScheduleParameter["source"], { mode: "competitor-workbook" }>>,
+) {
+  if (!sources.length) throw new Error("Competitor workbook parameters are missing.");
+  const fingerprint = (source: (typeof sources)[number]) => source.snapshot
+    ? `snapshot:${source.snapshot.fileSha256}:${source.snapshot.worksheet}:${source.snapshot.rowStart}:${source.snapshot.rowEnd}`
+    : `path:${String(source.filePath || "").toLocaleLowerCase()}:${source.worksheet}:${source.rowStart ?? ""}:${source.rowEnd ?? ""}`;
+  const expected = fingerprint(sources[0]);
+  if (sources.some((source) => fingerprint(source) !== expected)) {
+    throw new Error("Competitor workbook title, body, and card parameters must use the same file, worksheet, and row range.");
+  }
+}
+
+async function activateCanvasScheduleV2Retries(schedule: CanvasSchedule, concurrency: number, now: string) {
+  let active = schedule.mainTasks?.flatMap((main) => main.childTasks)
+    .filter((child) => child.runId && !child.retryPending && !terminalRunStatuses.has(child.status)).length || 0;
+  let changed = false;
+  for (const main of schedule.mainTasks || []) {
+    if (schedule.definition?.sharedOutputs?.length && main.sharedStatus !== "completed") continue;
+    for (const child of main.childTasks) {
+      if (active >= concurrency) return changed;
+      if (!child.retryPending || !child.runId) continue;
+      try {
+        const run = await getCanvasRun(child.runId, ownerActor(schedule));
+        if (!run) throw new Error("Canvas child run not found");
+        const latest = latestNodeAttempts(run.nodeRuns);
+        const failedNode = [
+          ...(run.run.steps || []).map((step) => latest.get(step.nodeId)).filter((nodeRun): nodeRun is NonNullable<typeof nodeRun> => Boolean(nodeRun)),
+          ...latest.values(),
+        ].find((nodeRun) => ["failed", "blocked", "needs_config"].includes(nodeRun.status));
+        if (!failedNode) throw new Error("No failed Canvas node is available to retry.");
+        await retryCanvasNode(run.run.id, failedNode.nodeId, ownerActor(schedule));
+        child.status = "queued";
+        child.retryPending = false;
+        child.error = undefined;
+        child.updatedAt = now;
+        main.status = "running";
+        main.updatedAt = now;
+        active += 1;
+        changed = true;
+      } catch (error) {
+        child.status = "failed";
+        child.retryPending = false;
+        child.error = error instanceof Error ? error.message : "Card retry failed.";
+        child.updatedAt = now;
+        changed = true;
+      }
+    }
+  }
+  return changed;
 }
 
 function latestNodeAttempts(nodeRuns: Awaited<ReturnType<typeof listCanvasNodeRunsFromDb>>) {
@@ -1962,6 +2123,15 @@ function normalizeCanvasScheduleV2ParameterSource(parameter: CanvasScheduleParam
     mode: "source-video-links",
     links: (Array.isArray(source.links) ? source.links : []).map((link) => String(link || "").trim()).filter(Boolean).slice(0, 200),
     projectName: String(source.projectName || "").trim(),
+  };
+  if (source.mode === "competitor-workbook") return {
+    mode: "competitor-workbook",
+    filePath: String(source.filePath || "").trim() || undefined,
+    worksheet: String(source.worksheet || "文案汇总").trim() || "文案汇总",
+    rowStart: source.rowStart === undefined ? undefined : Number(source.rowStart),
+    rowEnd: source.rowEnd === undefined ? undefined : Number(source.rowEnd),
+    snapshot: source.snapshot ? structuredClone(source.snapshot) : undefined,
+    field: source.field === "body" || source.field === "card" ? source.field : "title",
   };
   throw new Error(`${parameter.name}: parameter source is invalid.`);
 }

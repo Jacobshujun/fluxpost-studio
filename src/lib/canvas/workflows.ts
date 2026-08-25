@@ -45,6 +45,7 @@ export async function createCanvasWorkflow(
   const template = input.templateKey ? createCanvasWorkflowTemplateGraph(input.templateKey) : undefined;
   const graph = input.graph ? upgradeCanvasGraph(decodeCanvasGraph(input.graph)) : template?.graph || emptyCanvasGraph();
   assertValidGraph(graph);
+  assertCompetitorWorkbookGraphAccess(graph, account);
   const now = new Date().toISOString();
   const workflow: CanvasWorkflow = {
     id: `canvas-${Date.now()}-${randomUUID().slice(0, 8)}`,
@@ -71,6 +72,7 @@ export async function updateCanvasWorkflow(
   if (!Number.isInteger(input.revision) || input.revision !== current.revision) throw new CanvasRevisionConflictError();
   const graph = input.graph ? upgradeCanvasGraph(decodeCanvasGraph(input.graph)) : upgradeCanvasGraph(current.graph);
   assertValidGraph(graph);
+  assertCompetitorWorkbookGraphAccess(graph, account);
   const workflow: CanvasWorkflow = {
     ...current,
     name: input.name === undefined ? current.name : normalizeWorkflowName(input.name),
@@ -113,6 +115,13 @@ export function emptyCanvasGraph(): CanvasGraph {
 function assertValidGraph(graph: CanvasGraph) {
   const validation = validateCanvasGraphForPersistence(graph);
   if (!validation.valid) throw new Error(validation.errors.join(" "));
+}
+
+function assertCompetitorWorkbookGraphAccess(graph: CanvasGraph, account: WorkspaceAccessActor) {
+  if (account.role === "admin") return;
+  const containsLocalWorkbookState = graph.nodes.some((node) => node.type === "input.competitor-workbook"
+    && (String(node.config.path || "").trim() || node.config.snapshot));
+  if (containsLocalWorkbookState) throw new Error("Only workspace administrators can configure local workbooks.");
 }
 
 function normalizeWorkflowName(value?: string) {

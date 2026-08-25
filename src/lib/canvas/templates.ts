@@ -4,6 +4,7 @@ import type { CanvasEdge, CanvasGraph, CanvasNode } from "./types";
 export const canvasWorkflowTemplateKeys = [
   "video-reconstruct-seedance",
   "video-reconstruct-gpt-image",
+  "competitor-workbook-posts",
 ] as const;
 
 export type CanvasWorkflowTemplateKey = (typeof canvasWorkflowTemplateKeys)[number];
@@ -13,6 +14,27 @@ export function isCanvasWorkflowTemplateKey(value: unknown): value is CanvasWork
 }
 
 export function createCanvasWorkflowTemplateGraph(templateKey: CanvasWorkflowTemplateKey): { name: string; graph: CanvasGraph } {
+  if (templateKey === "competitor-workbook-posts") {
+    const workbook = configuredNode("input.competitor-workbook", "competitor-workbook", { x: 70, y: 180 }, {}, "竞品 Excel 行");
+    const references = configuredNode("input.library-images", "vehicle-references", { x: 70, y: 560 }, {}, "车型参考图");
+    const prompt = configuredNode("utility.prompt-template", "card-prompt", { x: 410, y: 300 }, {
+      preset: "custom",
+      template: "请根据以下参数卡片生成一张汽车导购信息图。严格保留输入中的车型、价格、参数和数字，不添加输入中不存在的数据；车型外观以参考图为准；中文与数字必须清晰可读。\n\n{{input}}",
+    }, "参数卡提示词");
+    const image = configuredNode("model.gpt-image", "card-image", { x: 750, y: 300 }, { count: 1 }, "GPT-Image-2 参数图");
+    const compose = configuredNode("compose.social-post", "review-draft", { x: 1080, y: 240 }, {}, "图文组装");
+    return {
+      name: "竞品 Excel 图文批量生成",
+      graph: graph([workbook, references, prompt, image, compose], [
+        edge("competitor-workbook", "card", "card-prompt", "values"),
+        edge("card-prompt", "text", "card-image", "prompt"),
+        edge("vehicle-references", "images", "card-image", "references"),
+        edge("competitor-workbook", "title", "review-draft", "title"),
+        edge("competitor-workbook", "body", "review-draft", "body"),
+        edge("card-image", "images", "review-draft", "images"),
+      ]),
+    };
+  }
   const source = configuredNode("input.source-video", "source-video", { x: 80, y: 180 }, {}, "源视频");
   source.executionMode = "disabled";
   const prompt = configuredNode("input.text", "replacement-prompt", { x: 80, y: 460 }, {

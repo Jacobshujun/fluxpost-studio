@@ -64,6 +64,9 @@ try {
         return { entries: structuredClone(copyEntries), tags: [] };
       },
     }, { get: (target, key) => target[key] || emptyAsync }),
+    "../competitor-workbook": {
+      freezeCompetitorWorkbook: async () => { throw new Error("Unexpected workbook read in generic scheduler checks."); },
+    },
     "../database": new Proxy({
       createCanvasScheduleInDb: async (schedule) => {
         createdSchedule = structuredClone(schedule);
@@ -860,8 +863,9 @@ try {
     { id: "shared-select-attempt", nodeId: "shared-select", attempt: 1, outputs: structuredClone(sharedOutputArtifacts) ["shared-select"] },
   ]);
   const reconciledShared = await scheduler.getCanvasSchedule(storedSchedule.id, account);
-  assert.equal(fannedOutRuns.length, 3, "one completed shared run must fan out all three child runs together");
-  assert.ok(reconciledShared.mainTasks[0].childTasks.every((child) => child.status === "queued" && child.runId), "atomic fan-out must persist every child run id and queued state");
+  assert.equal(fannedOutRuns.length, 2, "default task concurrency must progressively admit two child runs");
+  assert.equal(reconciledShared.mainTasks[0].childTasks.filter((child) => child.status === "queued" && child.runId).length, 2, "atomic fan-out must persist admitted child run ids");
+  assert.equal(reconciledShared.mainTasks[0].childTasks.filter((child) => child.status === "pending" && !child.runId).length, 1, "unadmitted child work must remain pending");
   assert.deepEqual(reconciledShared.mainTasks[0].sharedArtifacts, frozenSharedArtifacts, "reconciliation must persist the complete frozen shared artifact records");
   for (const childRun of fannedOutRuns) {
     assert.equal(childRun.batchContext.phase, "child");
@@ -995,6 +999,31 @@ try {
   assert.equal(launchedSchedule.definition.parameters[1].randomCount, 2, "launch must not rewrite an existing frozen definition");
   assert.equal("sampleCount" in launchedSchedule.definition.parameters[1], false, "launch must preserve the legacy preview fingerprint shape");
 
+  storedSchedule = { ...legacyReady, taskConcurrency: 1 };
+  launchedRuns = undefined;
+  await scheduler.launchCanvasSchedule(storedSchedule.id, account, {
+    revision: storedSchedule.revision,
+    previewRevision: storedSchedule.previewRevision,
+  });
+  assert.equal(launchedRuns.length, 1, "task concurrency 1 must admit one child run at launch");
+
+  const fiveSlotReady = {
+    ...legacyReady,
+    id: "schedule-v2-five-slots",
+    definition: structuredClone(v2Definition),
+    mainTasks: structuredClone(v2Expansion.mainTasks),
+    workflowSnapshot: structuredClone(graph),
+    taskConcurrency: 5,
+  };
+  fiveSlotReady.previewRevision = v2PreviewFingerprint(fiveSlotReady.definition, fiveSlotReady.mainTasks);
+  storedSchedule = fiveSlotReady;
+  launchedRuns = undefined;
+  await scheduler.launchCanvasSchedule(storedSchedule.id, account, {
+    revision: storedSchedule.revision,
+    previewRevision: storedSchedule.previewRevision,
+  });
+  assert.equal(launchedRuns.length, 3, "task concurrency 5 must admit every available child when fewer than five remain");
+
   storedSchedule = legacyReady;
   createdSchedule = undefined;
   const copyNameSources = [
@@ -1092,12 +1121,22 @@ try {
     updatedAt: createdAt,
   };
   const retriedV2 = await scheduler.retryCanvasScheduleV2ChildTask(storedSchedule.id, account, { mainTaskId: "main-1", childTaskId: "child-1" });
-  assert.deepEqual(retriedNode, { runId: "child-run-1", nodeId: "failed-node" });
+  assert.equal(retriedNode, undefined, "a retry request must wait for a schedule concurrency slot");
+  assert.equal(retriedV2.mainTasks[0].childTasks[0].retryPending, true);
+  assert.equal(retriedV2.mainTasks[0].childTasks[0].status, "pending");
   assert.equal(retriedV2.mainTasks[0].mainRunId, "aggregate-run-1", "image-result retries must preserve an existing generated-post run");
   assert.equal(retriedV2.mainTasks[0].resultArtifacts[0].postId, postId, "image-result retries must preserve the existing review draft artifact");
-  retriedV2.mainTasks[0].childTasks[0].resultArtifacts = [{ kind: "images", items: [{ url: "/new-result.jpg" }] }];
-  retriedV2.mainTasks[0].pendingCandidateSync = true;
   storedSchedule = retriedV2;
+  listedSchedules = [structuredClone(retriedV2)];
+  canvasRunsById.set("child-run-1", { id: "child-run-1", status: "failed", error: "image failed" });
+  const activatedRetry = await scheduler.getCanvasSchedule(storedSchedule.id, account);
+  assert.deepEqual(retriedNode, { runId: "child-run-1", nodeId: "failed-node" }, "the scheduler must activate the retry when a slot is available");
+  assert.equal(activatedRetry.mainTasks[0].childTasks[0].retryPending, false);
+  assert.equal(activatedRetry.mainTasks[0].childTasks[0].status, "queued");
+  activatedRetry.mainTasks[0].childTasks[0].resultArtifacts = [{ kind: "images", items: [{ url: "/new-result.jpg" }] }];
+  activatedRetry.mainTasks[0].pendingCandidateSync = true;
+  storedSchedule = activatedRetry;
+  listedSchedules = [];
   const acceptedV2 = await scheduler.acceptCanvasScheduleV2Candidates(storedSchedule.id, account, { mainTaskId: "main-1" });
   assert.deepEqual(generatedPosts.get(postId).imageUrls, ["/new-result.jpg"], "accepting V2 candidates must update the existing review draft");
   assert.equal(acceptedV2.mainTasks[0].pendingCandidateSync, false);
@@ -1201,8 +1240,8 @@ try {
   );
   assert.match(
     schedulerSource,
-    /await fanOutCanvasScheduleV2ChildrenInDb\(next, current\.revision, runs\)[\s\S]*ensureCanvasRunWorker\(\)[\s\S]*return;/,
-    "shared completion must persist the revised schedule and every child run before waking workers",
+    /await fanOutCanvasScheduleV2ChildrenInDb\(next, current\.revision, admissionRuns\)[\s\S]*ensureCanvasRunWorker\(\)[\s\S]*return;/,
+    "progressive admission must persist the revised schedule and admitted child runs before waking workers",
   );
   assert.match(
     schedulerSource,
@@ -1218,7 +1257,7 @@ try {
   const collectionRoute = read("src/app/api/canvas/schedules/route.ts");
   const detailRoute = read("src/app/api/canvas/schedules/[id]/route.ts");
   assert.ok(collectionRoute.includes("requireWorkspaceAccount(request)"));
-  for (const action of ["preflight", "resample", "launch", "duplicate", "convert-v2", "pause", "resume", "cancel", "retry", "retry-shared", "accept-candidates"]) {
+  for (const action of ["preflight", "resample", "launch", "duplicate", "convert-v2", "pause", "resume", "cancel", "retry", "retry-row", "retry-shared", "accept-candidates"]) {
     assert.ok(detailRoute.includes(`\"${action}\"`), `detail route is missing ${action}`);
   }
   assert.match(detailRoute, /action === "retry-shared"[\s\S]*mainTaskId is required[\s\S]*retryCanvasScheduleV2SharedTask/);

@@ -349,7 +349,7 @@ export function extractCanvasScheduleV2Artifacts(
 
 function validateCanvasScheduleParameterSource(parameter: CanvasScheduleParameter) {
   const source = parameter.source;
-  if (!source || !['fixed', 'manual-list', 'library-filter', 'copy-filter', 'video-loader-queue', 'source-video-links'].includes(source.mode)) throw new Error(`${parameter.name}: parameter source is invalid.`);
+  if (!source || !['fixed', 'manual-list', 'library-filter', 'copy-filter', 'video-loader-queue', 'source-video-links', 'competitor-workbook'].includes(source.mode)) throw new Error(`${parameter.name}: parameter source is invalid.`);
   if (source.mode === "fixed" || source.mode === "manual-list") {
     if (!Array.isArray(source.values)) throw new Error(`${parameter.name}: parameter values must be a list.`);
     if (source.mode === "fixed" && source.values.length !== 1) throw new Error(`${parameter.name}: fixed source requires exactly one value.`);
@@ -371,6 +371,13 @@ function validateCanvasScheduleParameterSource(parameter: CanvasScheduleParamete
   }
   if (parameter.valueType === "source-video" && source.mode !== "source-video-links" && source.mode !== "fixed" && source.mode !== "manual-list") {
     throw new Error(`${parameter.name}: source-video parameters require frozen values or source video links.`);
+  }
+  if (source.mode === "competitor-workbook") {
+    if (parameter.valueType !== "text") throw new Error(`${parameter.name}: competitor workbook fields require a text parameter.`);
+    if (source.field === "card" && parameter.scope !== "child") throw new Error(`${parameter.name}: workbook cards must use child scope.`);
+    if (source.field !== "card" && parameter.scope !== "main") throw new Error(`${parameter.name}: workbook title and body must use main scope.`);
+    if (parameter.expansion !== "each") throw new Error(`${parameter.name}: competitor workbook fields must use each expansion.`);
+    if (!source.snapshot && !source.filePath?.trim()) throw new Error(`${parameter.name}: competitor workbook path is required.`);
   }
   if (parameter.valueType === "video" && source.mode !== "video-loader-queue" && source.mode !== "fixed" && source.mode !== "manual-list") {
     throw new Error(`${parameter.name}: video parameters require a loader queue or frozen values.`);
@@ -514,6 +521,67 @@ function sharedLiteralNode(node: CanvasNode, artifact: CanvasScheduleAggregateAr
     return { ...node, type: "input.images", version: 1, config: { urls: artifact.items.map((item) => item.url), ...(artifact.imageBatch ? { imageBatch: artifact.imageBatch } : {}) }, executionMode: "enabled", schedulerRole: undefined };
   }
   return { ...node, type: "input.videos", version: 1, config: { urls: artifact.items.map((item) => item.url) }, executionMode: "enabled", schedulerRole: undefined };
+}
+
+export function expandCompetitorWorkbookScheduleV2(
+  parameters: CanvasScheduleParameter[],
+  resolvedNonWorkbook: ResolvedCanvasScheduleParameter[],
+  now = new Date().toISOString(),
+  createId: (level: "main" | "child") => string = defaultTaskId,
+): CanvasScheduleV2Expansion {
+  const workbookParameters = parameters.filter((parameter) => parameter.source.mode === "competitor-workbook");
+  const snapshots = workbookParameters.flatMap((parameter) => parameter.source.mode === "competitor-workbook" && parameter.source.snapshot ? [parameter.source.snapshot] : []);
+  if (!workbookParameters.length || snapshots.length !== workbookParameters.length) throw new Error("Competitor workbook preflight snapshot is incomplete.");
+  const fingerprint = `${snapshots[0].fileSha256}:${snapshots[0].worksheet}:${snapshots[0].rowStart}:${snapshots[0].rowEnd}`;
+  if (snapshots.some((snapshot) => `${snapshot.fileSha256}:${snapshot.worksheet}:${snapshot.rowStart}:${snapshot.rowEnd}` !== fingerprint)) {
+    throw new Error("Competitor workbook parameters must share one frozen row range.");
+  }
+  if (!workbookParameters.some((parameter) => parameter.source.mode === "competitor-workbook" && parameter.source.field === "card")) {
+    throw new Error("Competitor workbook schedules require a child card binding.");
+  }
+  if (resolvedNonWorkbook.some((parameter) => parameter.expansion !== "fixed")) {
+    throw new Error("Other parameters in a competitor workbook schedule must be fixed and shared.");
+  }
+  const mainFixed = expandCanvasParameterAssignments(resolvedNonWorkbook, "main", "cartesian")[0] || {};
+  const childFixed = expandCanvasParameterAssignments(resolvedNonWorkbook, "child", "cartesian")[0] || {};
+  let totalChildTasks = 0;
+  const mainTasks = snapshots[0].rows.map((row): CanvasScheduleV2MainTask => {
+    const parameterValues = structuredClone(mainFixed);
+    for (const parameter of workbookParameters) {
+      if (parameter.source.mode !== "competitor-workbook" || parameter.source.field === "card") continue;
+      parameterValues[parameter.id] = parameter.source.field === "body" ? row.body : row.title;
+    }
+    const childTasks = row.cards.map((card): CanvasScheduleV2ChildTask => {
+      const childValues = structuredClone(childFixed);
+      for (const parameter of workbookParameters) {
+        if (parameter.source.mode === "competitor-workbook" && parameter.source.field === "card") childValues[parameter.id] = card.text;
+      }
+      return {
+        id: createId("child"),
+        parameterValues: childValues,
+        status: "pending",
+        resultArtifacts: [],
+        createdAt: now,
+        updatedAt: now,
+        workbookCard: structuredClone(card),
+      };
+    });
+    totalChildTasks += childTasks.length;
+    if (totalChildTasks > maxCanvasScheduleV2Children) {
+      throw new Error(`This schedule expands to ${totalChildTasks} child tasks, exceeding the limit of ${maxCanvasScheduleV2Children}.`);
+    }
+    return {
+      id: createId("main"),
+      parameterValues,
+      childTasks,
+      status: "pending",
+      resultArtifacts: [],
+      createdAt: now,
+      updatedAt: now,
+      workbookRow: structuredClone(row),
+    };
+  });
+  return { mainTasks, totalMainTasks: mainTasks.length, totalChildTasks };
 }
 
 function aggregateScheduledImageBatches(artifacts: Array<Extract<CanvasArtifact, { kind: "images" }>>) {

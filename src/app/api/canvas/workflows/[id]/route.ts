@@ -8,6 +8,7 @@ import {
 } from "@/lib/canvas/workflows";
 import type { CanvasGraph } from "@/lib/canvas/types";
 import { isWorkspaceSignInError, requireWorkspaceAccount } from "@/lib/workspace-accounts";
+import { canvasWorkflowResponse } from "@/lib/canvas/schedule-response";
 
 export const runtime = "nodejs";
 type RouteContext = { params: Promise<{ id: string }> };
@@ -17,7 +18,7 @@ export async function GET(request: Request, context: RouteContext) {
     const account = await requireWorkspaceAccount(request);
     const workflow = await getCanvasWorkflow((await context.params).id, account);
     if (!workflow) return NextResponse.json({ error: "Canvas workflow not found" }, { status: 404 });
-    return NextResponse.json({ workflow });
+    return NextResponse.json({ workflow: canvasWorkflowResponse(workflow) });
   } catch (error) {
     return errorResponse(error);
   }
@@ -42,7 +43,7 @@ export async function PATCH(request: Request, context: RouteContext) {
           revision: Number(body.revision),
           isTemplate: body.isTemplate,
         });
-    return NextResponse.json({ workflow });
+    return NextResponse.json({ workflow: canvasWorkflowResponse(workflow) });
   } catch (error) {
     return errorResponse(error, error instanceof CanvasRevisionConflictError ? 409 : 400);
   }

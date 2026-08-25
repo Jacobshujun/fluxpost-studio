@@ -71,6 +71,7 @@ import {
   RefreshCw,
   RotateCcw,
   Save,
+  Sheet,
   Search,
   Share2,
   Scissors,
@@ -137,6 +138,7 @@ import { getStoredTheme, subscribeTheme } from "@/lib/theme";
 import { selectIdRange } from "@/lib/list-selection";
 import { SubtitleEditorDialog } from "./SubtitleEditorDialog";
 import type { ContentPoolSnapshot, CopyLibraryEntryView, LibraryAsset, LibraryAssetPage, NormalizedSourceItem } from "@/lib/types";
+import type { CompetitorWorkbookInspection, CompetitorWorkbookSnapshot } from "@/lib/competitor-workbook";
 import type {
   CanvasArtifact,
   CanvasEdge,
@@ -302,7 +304,7 @@ export default function CanvasPage() {
           method: "PATCH",
           body: JSON.stringify({ name: snapshot.name, revision: snapshot.revision, graph: snapshot.graph }),
         });
-        return data.workflow;
+        return mergeCanvasWorkflowWorkbookPaths(data.workflow, snapshot.graph);
       },
       onSavingChange: setWorkflowSaving,
       onSaved: (workflow, snapshot, mode) => {
@@ -608,6 +610,7 @@ export default function CanvasPage() {
         method: "PATCH",
         body: JSON.stringify({ name: workflow.name, revision: workflow.revision, graph }),
       });
+      data.workflow = mergeCanvasWorkflowWorkbookPaths(data.workflow, graph);
       if (activeWorkflowIdRef.current !== workflow.id) return undefined;
       setWorkflows((current) => current.map((item) => item.id === data.workflow.id ? data.workflow : item));
       setActiveWorkflow(data.workflow);
@@ -1456,6 +1459,7 @@ export default function CanvasPage() {
           <option value="">模板</option>
           <option value="video-reconstruct-seedance">视频重构 · Seedance</option>
           <option value="video-reconstruct-gpt-image">视频重构 · GPT 图片</option>
+          <option value="competitor-workbook-posts">竞品 Excel 图文</option>
         </select>
         <input className="canvas-name-input" value={activeWorkflow?.name || ""} disabled={!activeWorkflow} aria-label="画布名称" onChange={(event) => {
           setActiveWorkflow((current) => current ? { ...current, name: event.target.value } : current);
@@ -2361,7 +2365,7 @@ function NodeInspector({
       onPreview={onPreviewVideo}
       onChange={(videos, selectedVideoId) => onPatch(canvasVideoLoaderConfig(videos, selectedVideoId))}
     /> : null}
-    {node.type === "utility.video-subtitles" ? <>
+    {node.type === "input.competitor-workbook" ? <CompetitorWorkbookNodeEditor node={node} onPatch={onPatch} /> : node.type === "utility.video-subtitles" ? <>
       <div className="canvas-subtitle-inspector-entry">
         <button type="button" disabled={!subtitleNodeRun || !["completed", "reused"].includes(subtitleNodeRun.status)} onClick={() => subtitleNodeRun && onSubtitleEdit(subtitleNodeRun)}><Captions />校对字幕</button>
         <small>{subtitleNodeRun?.internalMetadata?.subtitle ? "修改文字和时间轴" : subtitleNodeRun ? "该结果需重新运行一次后才能校对" : "首次生成字幕后可校对"}</small>
@@ -2398,6 +2402,55 @@ function NodeInspector({
     })}
     <div className="canvas-port-list"><span>输入</span>{definition.inputs.length ? definition.inputs.map((port) => <small key={port.id}>{port.label} · {portKindLabel(port.kind)}{port.required ? " · 必填" : ""}</small>) : <small>无</small>}</div>
     <div className="canvas-port-list"><span>输出</span>{definition.outputs.length ? definition.outputs.map((port) => <small key={port.id}>{port.label} · {portKindLabel(port.kind)}</small>) : <small>无</small>}</div>
+  </div>;
+}
+
+function CompetitorWorkbookNodeEditor({ node, onPatch }: { node: CanvasNode; onPatch: (patch: CanvasNode["config"]) => void }) {
+  const [busy, setBusy] = useState(false);
+  const [error, setError] = useState("");
+  const snapshot = node.config.snapshot as CompetitorWorkbookSnapshot | undefined;
+  const inspect = async () => {
+    setBusy(true);
+    setError("");
+    try {
+      const rowNumber = Number(node.config.rowNumber || 2);
+      const data = await api<{ workbook: CompetitorWorkbookInspection }>("/api/canvas/competitor-workbook", {
+        method: "POST",
+        body: JSON.stringify({
+          path: String(node.config.path || ""),
+          worksheet: String(node.config.worksheet || "文案汇总"),
+          rowStart: rowNumber,
+          rowEnd: rowNumber,
+        }),
+      });
+      const nextSnapshot: CompetitorWorkbookSnapshot = {
+        schemaVersion: 1,
+        sourceFileName: data.workbook.sourceFileName,
+        fileSha256: data.workbook.fileSha256,
+        worksheet: data.workbook.worksheet,
+        frozenAt: new Date().toISOString(),
+        rowStart: data.workbook.rowStart,
+        rowEnd: data.workbook.rowEnd,
+        rows: data.workbook.previewRows,
+      };
+      onPatch({ worksheet: data.workbook.worksheet, snapshot: nextSnapshot });
+    } catch (inspectError) {
+      setError(errorMessage(inspectError));
+    } finally {
+      setBusy(false);
+    }
+  };
+  const updateSource = (patch: CanvasNode["config"]) => onPatch({ ...patch, snapshot: undefined });
+  return <div className="canvas-workbook-editor">
+    <label><span>本地 .xlsx 路径</span><input value={String(node.config.path || "")} placeholder="仅管理员可用的服务器绝对路径" onChange={(event) => updateSource({ path: event.target.value })} /></label>
+    <label><span>工作表</span><input value={String(node.config.worksheet || "文案汇总")} onChange={(event) => updateSource({ worksheet: event.target.value })} /></label>
+    <div className="canvas-workbook-test-row">
+      <label><span>测试行号</span><input type="number" min={2} value={Number(node.config.rowNumber || 2)} onChange={(event) => updateSource({ rowNumber: Number(event.target.value) })} /></label>
+      <label><span>测试卡片</span><input type="number" min={1} max={6} value={Number(node.config.cardIndex || 1)} onChange={(event) => onPatch({ cardIndex: Number(event.target.value) })} /></label>
+    </div>
+    <button type="button" onClick={() => void inspect()} disabled={busy || !String(node.config.path || "").trim()}>{busy ? <LoaderCircle className="animate-spin" /> : <Sheet />}检查并冻结测试行</button>
+    {snapshot ? <div className="canvas-workbook-summary"><CheckCircle2 /><span><strong>{snapshot.sourceFileName} · {snapshot.worksheet}</strong><small>Excel 第 {snapshot.rows[0]?.excelRowNumber} 行 · {snapshot.rows[0]?.cards.length || 0} 张参数卡 · SHA-256 {snapshot.fileSha256.slice(0, 12)}</small></span></div> : null}
+    {error ? <p className="canvas-picker-error">{error}</p> : null}
   </div>;
 }
 
@@ -3458,8 +3511,9 @@ function CanvasScheduleCenter({ workflow, graph, onSaveBindings, onPreview, onCl
         const revision = current?.id === schedule.id ? current.revision : schedule.revision;
         const data = await api<{ schedule: CanvasSchedule }>(`/api/canvas/schedules/${schedule.id}`, {
           method: "PATCH",
-          body: JSON.stringify({ action: "save", revision, name: schedule.name, batches: schedule.batches, definition: schedule.definition }),
+          body: JSON.stringify({ action: "save", revision, name: schedule.name, batches: schedule.batches, definition: schedule.definition, taskConcurrency: schedule.taskConcurrency }),
         });
+        data.schedule = mergeCanvasScheduleWorkbookPaths(data.schedule, schedule);
         if (editSequenceRef.current === sequence) {
           adoptSchedule(data.schedule);
           resolveSave(data.schedule);
@@ -3676,6 +3730,7 @@ function CanvasScheduleCenter({ workflow, graph, onSaveBindings, onPreview, onCl
                 totalImageTasks: 0,
                 previewRevision: undefined,
               }))}
+              onConcurrencyChange={(taskConcurrency) => patchSelected((schedule) => ({ ...schedule, taskConcurrency }))}
               onAction={(action, payload, saveFirst) => void scheduleAction(action, payload, saveFirst)}
             /> : <>
               <div className="canvas-schedule-batches">
@@ -3709,11 +3764,12 @@ function CanvasScheduleCenter({ workflow, graph, onSaveBindings, onPreview, onCl
   </div>;
 }
 
-function CanvasScheduleV2Editor({ schedule, graph, busy, onDefinitionChange, onAction, onPreview }: {
+function CanvasScheduleV2Editor({ schedule, graph, busy, onDefinitionChange, onConcurrencyChange, onAction, onPreview }: {
   schedule: CanvasSchedule;
   graph: CanvasGraph;
   busy: boolean;
   onDefinitionChange: (definition: CanvasScheduleV2Definition) => void;
+  onConcurrencyChange: (taskConcurrency: number) => void;
   onAction: (action: string, payload?: Record<string, unknown>, saveFirst?: boolean) => void;
   onPreview: (preview: Extract<NonNullable<PreviewState>, { kind: "image" }>) => void;
 }) {
@@ -3796,9 +3852,48 @@ function CanvasScheduleV2Editor({ schedule, graph, busy, onDefinitionChange, onA
       aggregationPolicy: "all",
     });
   };
+  const workbookNode = graph.nodes.find((node) => node.type === "input.competitor-workbook");
+  const workbookImageNode = graph.nodes.find((node) => node.type === "model.gpt-image" && node.version >= 2);
+  const workbookComposeNode = graph.nodes.find((node) => node.type === "compose.social-post");
+  const workbookReferenceNode = graph.nodes.find((node) => node.type === "input.library-images");
+  const applyCompetitorWorkbookPreset = () => {
+    if (!workbookNode || !workbookImageNode || !workbookComposeNode) return;
+    const workbookSource = (field: "title" | "body" | "card") => ({
+      mode: "competitor-workbook" as const,
+      filePath: String(workbookNode.config.path || ""),
+      worksheet: String(workbookNode.config.worksheet || "文案汇总"),
+      rowStart: 2,
+      rowEnd: undefined,
+      field,
+    });
+    const parameters: CanvasScheduleParameter[] = [
+      { id: nextCanvasScheduleParameterId(), name: "Excel 标题", scope: "main", valueType: "text", source: workbookSource("title"), expansion: "each", binding: { nodeId: workbookNode.id, fieldKey: "rowTitle" } },
+      { id: nextCanvasScheduleParameterId(), name: "Excel 正文", scope: "main", valueType: "text", source: workbookSource("body"), expansion: "each", binding: { nodeId: workbookNode.id, fieldKey: "rowBody" } },
+      { id: nextCanvasScheduleParameterId(), name: "参数卡片", scope: "child", valueType: "text", source: workbookSource("card"), expansion: "each", binding: { nodeId: workbookNode.id, fieldKey: "cardText" } },
+    ];
+    if (workbookReferenceNode) parameters.push({
+      id: nextCanvasScheduleParameterId(), name: "全批次车型参考图", scope: "child", valueType: "image-group",
+      source: { mode: "library-filter", role: "vehicle", filter: { ...emptyScheduleFilter(), mode: "manual", assetIds: normalizeConfigUrls(workbookReferenceNode.config.assetIds) } },
+      expansion: "fixed", binding: { nodeId: workbookReferenceNode.id, fieldKey: "assetIds" },
+    });
+    patchDefinition({
+      parameters,
+      expansion: { main: "zip", child: "zip" },
+      childResult: { nodeId: workbookImageNode.id, outputPort: "images", artifactKind: "images" },
+      mainTargetNodeId: workbookComposeNode.id,
+      aggregationPolicy: "at-least-one",
+    });
+  };
+  const workbookSource = definition.parameters.find((parameter) => parameter.source.mode === "competitor-workbook")?.source;
+  const patchWorkbookSource = (patch: Partial<Extract<CanvasScheduleParameterSource, { mode: "competitor-workbook" }>>) => patchDefinition({
+    parameters: definition.parameters.map((parameter) => parameter.source.mode !== "competitor-workbook" ? parameter : {
+      ...parameter,
+      source: { ...parameter.source, ...patch, snapshot: undefined },
+    }),
+  });
   return <div className="canvas-schedule-v2">
     <section className="canvas-scheduler-bindings">
-      <header><span><strong>执行节点</strong><small>子任务输出会在主任务阶段替换为冻结结果</small></span><button type="button" disabled={!sourceVideoNode || !promptNode || !reconstructNode} onClick={applyVideoReconstructPreset}><Video />视频重构预设</button><button type="button" disabled={graph.nodes.filter((node) => getCanvasBatchBindableFields(node).some((field) => field.parameterTypes.includes("image"))).length < 3} onClick={applyPeopleSceneVehiclePreset}><Images />人物场景预设</button></header>
+      <header><span><strong>执行节点</strong><small>子任务输出会在主任务阶段替换为冻结结果</small></span><button type="button" disabled={!workbookNode || !workbookImageNode || !workbookComposeNode} onClick={applyCompetitorWorkbookPreset}><Sheet />竞品 Excel 预设</button><button type="button" disabled={!sourceVideoNode || !promptNode || !reconstructNode} onClick={applyVideoReconstructPreset}><Video />视频重构预设</button><button type="button" disabled={graph.nodes.filter((node) => getCanvasBatchBindableFields(node).some((field) => field.parameterTypes.includes("image"))).length < 3} onClick={applyPeopleSceneVehiclePreset}><Images />人物场景预设</button></header>
       <div>
         <label><span>子任务结果</span><select value={`${definition.childResult.nodeId}::${definition.childResult.outputPort}`} onChange={(event) => {
           const output = childOutputs.find((candidate) => `${candidate.node.id}::${candidate.port.id}` === event.target.value);
@@ -3807,6 +3902,12 @@ function CanvasScheduleV2Editor({ schedule, graph, busy, onDefinitionChange, onA
         <label><span>主任务目标（可选）</span><select value={definition.mainTargetNodeId || ""} onChange={(event) => patchDefinition({ mainTargetNodeId: event.target.value || undefined })}><option value="">仅汇总子任务结果</option>{mainTargets.map((node) => <option key={node.id} value={node.id}>{canvasNodeOptionLabel(node)}</option>)}</select></label>
         <label><span>失败聚合</span><select value={definition.aggregationPolicy} onChange={(event) => patchDefinition({ aggregationPolicy: event.target.value as CanvasScheduleV2Definition["aggregationPolicy"] })}><option value="at-least-one">至少一个成功</option><option value="all">必须全部成功</option></select></label>
       </div>
+      <label><span>任务并发</span><select value={schedule.taskConcurrency || 2} onChange={(event) => onConcurrencyChange(Number(event.target.value))}>{[1, 2, 3, 4, 5].map((value) => <option key={value} value={value}>{value}</option>)}</select></label>
+      {workbookSource?.mode === "competitor-workbook" ? <div className="canvas-workbook-schedule-source">
+        <label><span>工作簿路径</span><input value={workbookSource.filePath || ""} onChange={(event) => patchWorkbookSource({ filePath: event.target.value })} /></label>
+        <label><span>工作表</span><input value={workbookSource.worksheet} onChange={(event) => patchWorkbookSource({ worksheet: event.target.value })} /></label>
+        <div><label><span>起始行</span><input type="number" min={2} value={workbookSource.rowStart || 2} onChange={(event) => patchWorkbookSource({ rowStart: Number(event.target.value) })} /></label><label><span>结束行</span><input type="number" min={2} placeholder="全部" value={workbookSource.rowEnd || ""} onChange={(event) => patchWorkbookSource({ rowEnd: event.target.value ? Number(event.target.value) : undefined })} /></label></div>
+      </div> : null}
       <div className="canvas-schedule-shared-outputs">
         <header><span><strong>主任务共享输出</strong><small>{invalidSharedOutputs.length ? `${invalidSharedOutputs.length} 项选择已失效，请移除后预演` : sharedOutputs.length ? `已选择 ${sharedOutputs.length} 项 · 每个主任务执行一次` : "未启用时保持现有子任务执行方式"}</small></span>{invalidSharedOutputs.length ? <button type="button" onClick={() => patchDefinition({ sharedOutputs: sharedOutputs.filter(isValidSharedOutput) })}><Trash2 />移除失效项</button> : <Share2 />}</header>
         {sharedOutputCandidates.length ? <div role="group" aria-label="主任务共享输出">
@@ -3930,6 +4031,9 @@ function CanvasScheduleSampleCountEditor({ parameter, sampleCount, onChange }: {
 }
 
 function CanvasScheduleParameterSourceEditor({ parameter, graph, onChange, onPreview }: { parameter: CanvasScheduleParameter; graph: CanvasGraph; onChange: (parameter: CanvasScheduleParameter) => void; onPreview: (preview: Extract<NonNullable<PreviewState>, { kind: "image" }>) => void }) {
+  if (parameter.source.mode === "competitor-workbook") {
+    return <div className="canvas-schedule-parameter-source canvas-workbook-parameter-source"><Sheet /><span><strong>{parameter.source.field === "title" ? "标题" : parameter.source.field === "body" ? "正文" : "参数卡片"}</strong><small>预演时按工作簿行冻结，路径与行区间在上方统一配置</small></span></div>;
+  }
   if (parameter.valueType === "video") {
     const nodeId = parameter.source.mode === "video-loader-queue" ? parameter.source.nodeId : parameter.binding.nodeId;
     const node = graph.nodes.find((candidate) => candidate.id === nodeId && candidate.type === "input.video-loader");
@@ -3970,7 +4074,7 @@ function ScheduleV2Preview({ schedule, onPreview }: {
   onPreview: (preview: Extract<NonNullable<PreviewState>, { kind: "image" }>) => void;
 }) {
   const hasSharedOutputs = Boolean(schedule.definition?.sharedOutputs?.length);
-  return <div className="canvas-schedule-preview canvas-schedule-v2-preview"><header><span>展开预览 · {schedule.totalMainTasks || 0} 主任务 · {schedule.totalChildTasks || 0} 子任务</span></header><div>{(schedule.mainTasks || []).map((main, index) => <article key={main.id}><div className="canvas-schedule-v2-main-task"><ScheduleV2PreviewImages values={main.parameterValues} label={`主任务 ${index + 1}`} onPreview={onPreview} /><span><strong>主任务 {index + 1} · {main.childTasks.length} 子任务</strong><small>{formatCanvasScheduleParameterValues(main.parameterValues)}</small></span></div>{hasSharedOutputs ? <CanvasScheduleSharedStage main={main} preview /> : null}<div>{main.childTasks.map((child, childIndex) => <span className="canvas-schedule-v2-child-task" key={child.id}><ScheduleV2PreviewImages values={child.parameterValues} label={`子任务 ${childIndex + 1}`} onPreview={onPreview} /><strong>子任务 {childIndex + 1}</strong><small>{formatCanvasScheduleParameterValues(child.parameterValues)}</small></span>)}</div></article>)}</div></div>;
+  return <div className="canvas-schedule-preview canvas-schedule-v2-preview"><header><span>展开预览 · {schedule.totalMainTasks || 0} 主任务 · {schedule.totalChildTasks || 0} 子任务</span></header><div>{(schedule.mainTasks || []).map((main, index) => <article key={main.id}><div className="canvas-schedule-v2-main-task"><ScheduleV2PreviewImages values={main.parameterValues} label={`主任务 ${index + 1}`} onPreview={onPreview} /><span><strong>{main.workbookRow ? `Excel 第 ${main.workbookRow.excelRowNumber} 行` : `主任务 ${index + 1}`} · {main.childTasks.length} 子任务</strong><small>{main.workbookRow?.title || formatCanvasScheduleParameterValues(main.parameterValues)}</small></span></div>{hasSharedOutputs ? <CanvasScheduleSharedStage main={main} preview /> : null}<div>{main.childTasks.map((child, childIndex) => <span className="canvas-schedule-v2-child-task" key={child.id}><ScheduleV2PreviewImages values={child.parameterValues} label={`子任务 ${childIndex + 1}`} onPreview={onPreview} /><strong>{child.workbookCard ? `参数卡片 ${child.workbookCard.cardIndex}` : `子任务 ${childIndex + 1}`}</strong><small>{child.workbookCard?.text || formatCanvasScheduleParameterValues(child.parameterValues)}</small></span>)}</div></article>)}</div></div>;
 }
 
 function ScheduleV2PreviewImages({ values, label, onPreview }: {
@@ -4003,13 +4107,16 @@ function ScheduleV2RuntimeTree({ schedule, busy, onAction }: { schedule: CanvasS
       {["queued", "running", "paused"].includes(schedule.status) ? <button className="danger" type="button" onClick={() => onAction("cancel")} disabled={busy}><X />取消</button> : null}
       <span>{completed}/{mainTasks.length} 主任务完成</span>
     </div>
-    {mainTasks.map((main, index) => <details key={main.id} open><summary><StatusIcon status={main.status} /><strong>主任务 {index + 1} · {formatCanvasScheduleParameterValues(main.parameterValues)}</strong><span>{main.childTasks.filter((child) => child.status === "completed").length}/{main.childTasks.length}</span><em>{canvasScheduleStatusLabel(main.status)}</em></summary><div className="canvas-schedule-runtime-content">
+    {mainTasks.map((main, index) => <details key={main.id} open><summary><StatusIcon status={main.status} /><strong>{main.workbookRow ? `Excel 第 ${main.workbookRow.excelRowNumber} 行 · ${main.workbookRow.title}` : `主任务 ${index + 1} · ${formatCanvasScheduleParameterValues(main.parameterValues)}`}</strong><span>{main.childTasks.filter((child) => child.status === "completed").length}/{main.childTasks.length}</span><em>{canvasScheduleStatusLabel(main.status)}</em></summary><div className="canvas-schedule-runtime-content">
       {schedule.definition?.sharedOutputs?.length || main.sharedStatus ? <CanvasScheduleSharedStage main={main} busy={busy} onRetry={() => onAction("retry-shared", { mainTaskId: main.id })} /> : null}
       {main.resultArtifacts.length ? <CanvasScheduleArtifactSummary artifacts={main.resultArtifacts} /> : null}
+      {main.generatedPostId ? <Link href={`/review?postId=${encodeURIComponent(main.generatedPostId)}`}>打开评审草稿</Link> : null}
+      {main.workbookRow ? <p className="canvas-workbook-review-note"><AlertTriangle />请人工核对图片中的中文、数字和参数。原始正文已冻结保留。</p> : null}
       {["completed", "partial"].includes(main.status) && main.mainRunId ? <CanvasScheduleMainImageDownload runId={main.mainRunId} /> : null}
       {main.pendingCandidateSync ? <button type="button" onClick={() => onAction("accept-candidates", { mainTaskId: main.id })} disabled={busy}>接受新增候选图</button> : null}
+      {main.childTasks.some((child) => child.status === "failed") ? <button type="button" onClick={() => onAction("retry-row", { mainTaskId: main.id })} disabled={busy}><RotateCcw />重试本行失败卡片</button> : null}
       {main.error ? <p>{main.error}</p> : null}
-      <ul>{main.childTasks.map((child, childIndex) => <li key={child.id}><StatusIcon status={child.status} /><span>子任务 {childIndex + 1} · {formatCanvasScheduleParameterValues(child.parameterValues)}</span><em>{canvasScheduleStatusLabel(child.status)}</em>{child.error ? <small>{child.error}</small> : null}{child.status === "failed" ? <button type="button" onClick={() => onAction("retry", { mainTaskId: main.id, childTaskId: child.id })} disabled={busy}><RotateCcw />重试</button> : null}</li>)}</ul>
+      <ul>{main.childTasks.map((child, childIndex) => <li key={child.id}><StatusIcon status={child.status} /><span>{child.workbookCard ? `参数卡片 ${child.workbookCard.cardIndex} · ${child.workbookCard.text}` : `子任务 ${childIndex + 1} · ${formatCanvasScheduleParameterValues(child.parameterValues)}`}</span><em>{canvasScheduleStatusLabel(child.status)}</em>{child.error ? <small>{child.error}</small> : null}{child.status === "failed" ? <button type="button" onClick={() => onAction("retry", { mainTaskId: main.id, childTaskId: child.id })} disabled={busy}><RotateCcw />重试</button> : null}</li>)}</ul>
     </div></details>)}
   </div>;
 }
@@ -5564,6 +5671,39 @@ function emptyScheduleFilter(): CanvasScheduleAssetFilter {
   return { mode: "manual", assetIds: [], search: "", tags: [] };
 }
 
+function mergeCanvasScheduleWorkbookPaths(response: CanvasSchedule, local: CanvasSchedule) {
+  if (!response.definition || !local.definition) return response;
+  const localById = new Map(local.definition.parameters.map((parameter) => [parameter.id, parameter]));
+  return {
+    ...response,
+    definition: {
+      ...response.definition,
+      parameters: response.definition.parameters.map((parameter) => {
+        if (parameter.source.mode !== "competitor-workbook") return parameter;
+        const localParameter = localById.get(parameter.id);
+        const filePath = localParameter?.source.mode === "competitor-workbook" ? localParameter.source.filePath : undefined;
+        return { ...parameter, source: { ...parameter.source, filePath } };
+      }),
+    },
+  };
+}
+
+function mergeCanvasWorkflowWorkbookPaths(response: CanvasWorkflow, localGraph: CanvasGraph) {
+  const localById = new Map(localGraph.nodes.map((node) => [node.id, node]));
+  return {
+    ...response,
+    graph: {
+      ...response.graph,
+      nodes: response.graph.nodes.map((node) => {
+        if (node.type !== "input.competitor-workbook") return node;
+        const localNode = localById.get(node.id);
+        const filePath = localNode?.type === "input.competitor-workbook" ? String(localNode.config.path || "") : "";
+        return { ...node, config: { ...node.config, path: filePath } };
+      }),
+    },
+  };
+}
+
 function emptyScheduleCopyFilter(): CanvasScheduleCopyFilter {
   return { mode: "manual", entryIds: [], search: "", tags: [] };
 }
@@ -5607,6 +5747,7 @@ function iconForNode(type: CanvasNodeType) {
   if (type === "input.content-pool") return <Layers3 {...props} />;
   if (type === "input.library-images") return <Images {...props} />;
   if (type === "input.copy-library") return <BookOpenText {...props} />;
+  if (type === "input.competitor-workbook") return <Sheet {...props} />;
   if (type === "model.gpt-text") return <Sparkles {...props} />;
   if (type === "model.gpt-image") return <WandSparkles {...props} />;
   if (type === "model.gpt-image-each") return <GalleryHorizontalEnd {...props} />;

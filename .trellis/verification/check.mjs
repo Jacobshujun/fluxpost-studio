@@ -91,6 +91,7 @@ const nodeChecks = [
   ["Seedance prompt assistant check", "seedance_prompt_assistant_check.mjs"],
   ["Seedance runtime skill check", "seedance_runtime_skill_check.mjs"],
   ["Canvas batch scheduler check", "canvas_scheduler_check.mjs"],
+  ["Competitor workbook Canvas check", "competitor_workbook_canvas_check.mjs"],
   ["Copy library check", "copy_library_check.mjs"],
   ["Source tagging image check", "source_tagging_image_check.mjs"],
   ["Content projects row-level mutation check", "content_projects_upsert_check.mjs"],

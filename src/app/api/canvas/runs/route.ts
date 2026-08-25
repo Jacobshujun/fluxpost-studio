@@ -8,6 +8,7 @@ import {
 } from "@/lib/canvas/runs";
 import type { CanvasRunMode } from "@/lib/canvas/types";
 import { isWorkspaceSignInError, requireWorkspaceAccount } from "@/lib/workspace-accounts";
+import { canvasRunHistoryResponse, canvasRunResponse } from "@/lib/canvas/schedule-response";
 
 export const runtime = "nodejs";
 
@@ -16,7 +17,7 @@ export async function GET(request: Request) {
     const account = await requireWorkspaceAccount(request);
     ensureCanvasRunWorker();
     const workflowId = new URL(request.url).searchParams.get("workflowId") || undefined;
-    return NextResponse.json(await listCanvasRunHistory(account, workflowId));
+    return NextResponse.json(canvasRunHistoryResponse(await listCanvasRunHistory(account, workflowId)));
   } catch (error) {
     return errorResponse(error);
   }
@@ -40,7 +41,7 @@ export async function POST(request: Request) {
       return NextResponse.json({ plan });
     }
     const run = await createCanvasRun(workflowId, account, body);
-    return NextResponse.json({ run }, { status: 201 });
+    return NextResponse.json({ run: canvasRunResponse(run) }, { status: 201 });
   } catch (error) {
     if (error instanceof CanvasConfirmationRequiredError) {
       return NextResponse.json({ error: error.message, confirmationRequired: true, plan: error.plan }, { status: 409 });

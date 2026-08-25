@@ -11,6 +11,7 @@ if (requestedDistDir && !localBuildSlots.has(requestedDistDir)) {
 const nextConfig: NextConfig = {
   distDir: requestedDistDir,
   output: standaloneBuild ? "standalone" : undefined,
+  serverExternalPackages: ["read-excel-file", "unzipper"],
   outputFileTracingExcludes: {
     "*": ["public/generated/**/*", "public/media/**/*", "data/**/*", "test-artifacts/**/*"],
   },

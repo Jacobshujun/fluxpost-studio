@@ -64,6 +64,9 @@ export async function planCanvasRunWithMode(
 ) {
   const workflow = await getCanvasWorkflow(workflowId, account);
   if (!workflow) throw new Error("Canvas workflow not found");
+  if (account.role !== "admin" && workflow.graph.nodes.some((node) => node.type === "input.competitor-workbook")) {
+    throw new Error("Only workspace administrators can run local workbooks.");
+  }
   runMode = runMode === "isolated" ? "isolated" : "with-upstream";
   const plan = await resolveCanvasRunPlan(workflow.graph, workflow.id, targetNodeIds, runMode);
   const details = [] as NonNullable<CanvasRunPlan["confirmationDetails"]>;

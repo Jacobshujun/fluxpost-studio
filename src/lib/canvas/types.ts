@@ -1,4 +1,5 @@
 import type { GeneratedPost, Platform } from "../types";
+import type { CompetitorWorkbookCardSnapshot, CompetitorWorkbookRowSnapshot, CompetitorWorkbookSnapshot } from "../competitor-workbook";
 
 export type CanvasArtifactKind = "text" | "images" | "videos" | "socialPost" | "publishJobRef";
 export type CanvasPortKind = CanvasArtifactKind | "any" | "visual";
@@ -154,6 +155,7 @@ export type CanvasNodeType =
   | "input.content-pool"
   | "input.library-images"
   | "input.copy-library"
+  | "input.competitor-workbook"
   | "model.gpt-text"
   | "model.gpt-image"
   | "model.gpt-image-each"
@@ -192,7 +194,7 @@ export const CANVAS_SCHEDULER_ROLE_LABELS: Record<CanvasSchedulerRole, string> =
   "copy-input": "文案库输入",
 };
 
-export type CanvasConfigValue = string | number | boolean | string[] | CanvasVideoSnapshot[] | CanvasSubtitleRevisionSnapshot | CanvasImageBatchSummary | null | undefined;
+export type CanvasConfigValue = string | number | boolean | string[] | CanvasVideoSnapshot[] | CanvasSubtitleRevisionSnapshot | CanvasImageBatchSummary | CompetitorWorkbookSnapshot | CompetitorWorkbookRowSnapshot | CompetitorWorkbookCardSnapshot | null | undefined;
 export type CanvasNodeConfig = Record<string, CanvasConfigValue>;
 
 export type CanvasPosition = { x: number; y: number };
@@ -534,7 +536,17 @@ export type CanvasScheduleParameterSource =
   | { mode: "library-filter"; role: "reference" | "vehicle"; filter: CanvasScheduleAssetFilter }
   | { mode: "copy-filter"; filter: CanvasScheduleCopyFilter }
   | { mode: "video-loader-queue"; nodeId: string }
-  | { mode: "source-video-links"; links: string[]; projectName: string };
+  | { mode: "source-video-links"; links: string[]; projectName: string }
+  | {
+      mode: "competitor-workbook";
+      filePath?: string;
+      worksheet: string;
+      rowStart?: number;
+      rowEnd?: number;
+      snapshot?: CompetitorWorkbookSnapshot;
+      field: "title" | "body" | "card";
+    };
+
 
 export type CanvasScheduleParameterBinding = {
   nodeId: string;
@@ -590,8 +602,10 @@ export type CanvasScheduleV2ChildTask = {
   runId?: string;
   resultArtifacts: CanvasScheduleAggregateArtifact[];
   error?: string;
+  retryPending?: boolean;
   createdAt: string;
   updatedAt: string;
+  workbookCard?: CompetitorWorkbookCardSnapshot;
 };
 
 export type CanvasScheduleV2MainTask = {
@@ -612,6 +626,7 @@ export type CanvasScheduleV2MainTask = {
   error?: string;
   createdAt: string;
   updatedAt: string;
+  workbookRow?: CompetitorWorkbookRowSnapshot;
 };
 
 export type CanvasBatchBindingAdapter = "config-value" | "image-input" | "video-input" | "copy-input" | "source-video-input";
@@ -696,4 +711,5 @@ export type CanvasSchedule = {
   updatedAt: string;
   launchedAt?: string;
   completedAt?: string;
+  taskConcurrency?: number;
 };

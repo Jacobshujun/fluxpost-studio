@@ -127,6 +127,28 @@ const canvasNodeDefinitionVersions: CanvasNodeDefinition[] = [
     defaultConfig: { entryId: "", entryTitle: "", snapshotTitle: "", snapshotBody: "", snapshotTags: [], snapshotAt: "" },
   },
   {
+    type: "input.competitor-workbook",
+    version: 1,
+    label: "竞品 Excel",
+    description: "读取冻结的竞品工作簿行、正文和参数卡片。",
+    category: "input",
+    icon: "Sheet",
+    color: "#0f766e",
+    inputs: [],
+    outputs: [
+      { id: "title", label: "标题", kind: "text" },
+      { id: "body", label: "正文", kind: "text" },
+      { id: "card", label: "参数卡片", kind: "text" },
+    ],
+    fields: [
+      { key: "path", label: "本地 .xlsx 路径", kind: "text", placeholder: "仅管理员可用的服务器绝对路径" },
+      { key: "worksheet", label: "工作表", kind: "text", placeholder: "文案汇总" },
+      { key: "rowNumber", label: "测试行号", kind: "number", min: 2, max: 100000 },
+      { key: "cardIndex", label: "测试卡片", kind: "number", min: 1, max: 6 },
+    ],
+    defaultConfig: { path: "", worksheet: "文案汇总", rowNumber: 2, cardIndex: 1, snapshot: undefined, rowTitle: "", rowBody: "", cardText: "" },
+  },
+  {
     type: "model.gpt-text",
     version: 1,
     label: "GPT 文本",
@@ -691,6 +713,13 @@ export function getCanvasBatchBindableFields(node: Pick<CanvasNode, "type" | "ve
   if (node.type === "input.video-loader") {
     return [{ key: "videos", label: "视频队列", parameterTypes: ["video"], adapter: "video-input" }];
   }
+  if (node.type === "input.competitor-workbook") {
+    return [
+      { key: "rowTitle", label: "竞品标题", parameterTypes: ["text"], adapter: "config-value" },
+      { key: "rowBody", label: "竞品正文", parameterTypes: ["text"], adapter: "config-value" },
+      { key: "cardText", label: "参数卡片", parameterTypes: ["text"], adapter: "config-value" },
+    ];
+  }
   return definition.fields.flatMap((field): CanvasBatchBindableField[] => {
     if (node.type === "input.source-video" && field.key === "sourceUrl") {
       return [{ key: field.key, label: field.label, parameterTypes: ["source-video"], adapter: "source-video-input" }];
@@ -813,6 +842,12 @@ export function validateCanvasNodeConfig(type: CanvasNodeType, config: CanvasNod
   }
   if (type === "utility.video-frames") {
     try { parseCanvasVideoTimestamps(config); } catch (error) { errors.push(error instanceof Error ? error.message : "Video frame settings are invalid."); }
+  }
+  if (type === "input.competitor-workbook") {
+    const snapshot = config.snapshot;
+    const hasSnapshot = Boolean(snapshot && typeof snapshot === "object" && !Array.isArray(snapshot) && "rows" in snapshot);
+    const hasInjectedValues = [config.rowTitle, config.rowBody, config.cardText].some((value) => String(value || "").trim());
+    if (!hasSnapshot && !hasInjectedValues) errors.push("Competitor workbook input requires a frozen test row or batch values.");
   }
   if (type === "utility.video-subtitles") {
     errors.push(...validateCanvasSubtitleStyle(config));
