@@ -13,11 +13,11 @@ Canvas Excel ordinary-run readiness and durable latest-attempt display are verif
 
 ## Next Entry
 
-Commit and activate the verified candidate on port 3001, then run mocked desktop/mobile Canvas checks.
+Continue local Canvas use from the clean port-3001 candidate; repair Xray separately if image nodes remain waiting.
 
 ## Recent Verification
 
-- 2026-08-25: Excel readiness, save/run feedback, workflow-first history, dual projections, redaction, Xray wait UI, build, smoke, and full offline baseline passed without external calls.
+- 2026-08-25: Candidate `4668adc29742bbd1f114effd08b5aa35ba8e11ea` passed Excel readiness, dual-history projection, full offline baseline, port-3001 smoke, and mocked 1440x960/390x844 Canvas checks; no Run/provider/Feishu call was created and mobile overflow was 0.
 
 ## Risks And Unknowns
 

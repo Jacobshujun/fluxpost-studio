@@ -338,7 +338,7 @@
         "A per-image GPT reconstruction node durably fans out 1-18 images, resumes accepted provider tasks, and retains ordered partial diagnostics inside Canvas without changing review or Feishu publish policy"
       ],
       "evidence": [
-        "2026-08-25 ordinary Excel run readiness now blocks before Run/provider creation with an actionable frozen-row/card prompt; workflow-first history and dual latest-attempt/latest-success projections preserve failed/waiting state plus older previews. Focused checks and the full offline baseline passed without provider or Feishu calls.",
+        "2026-08-25 ordinary Excel readiness blocks before Run/provider creation; workflow-first dual projections preserve failed/waiting state plus older previews. Focused/full offline checks and mocked desktop/mobile Canvas passed with no external calls or overflow.",
         "2026-08-25 Excel and generic V2 aggregation share at-least-one/all policy; generated drafts and Feishu modes ignore Canvas partial metadata, only failed tasks retry, and dry-run/apply cleanup covers SQLite plus transactional PostgreSQL. Focused checks, TypeScript, lint, build, isolated smoke, and full baseline passed.",
         "2026-08-24 competitor-workbook 200/778 parsing, admin/redaction boundaries, ordered hierarchy, shared GPT references, concurrency, retry/partial draft synchronization, build, smoke, and full offline baseline passed without live providers or Feishu."
       ],
