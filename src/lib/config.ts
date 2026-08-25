@@ -62,6 +62,7 @@ function readAppConfig() {
   openaiImageBackupApiProfile: parseOptionalImageProviderProfile("OPENAI_IMAGE_BACKUP_API_PROFILE", process.env.OPENAI_IMAGE_BACKUP_API_PROFILE),
   openaiImageModel: process.env.OPENAI_IMAGE_MODEL || "gpt-image-2",
   openaiImageBackupModel: process.env.OPENAI_IMAGE_BACKUP_MODEL || process.env.OPENAI_IMAGE_MODEL || "gpt-image-2",
+  openaiImageProxyUrl: normalizeImageProxyUrl(process.env.OPENAI_IMAGE_PROXY_URL ?? (process.platform === "win32" ? "http://127.0.0.1:10808" : "")),
   openaiImageRequestTimeoutMs: numberOrDefault(process.env.OPENAI_IMAGE_REQUEST_TIMEOUT_MS, 180_000),
   viralImageImitationPrompt: stringOrDefault(process.env.VIRAL_IMAGE_IMITATION_PROMPT, defaultViralImageImitationPrompt),
   comfyUiKleinEnabled: booleanOrDefault(process.env.COMFYUI_KLEIN_ENABLED, false),
@@ -186,6 +187,7 @@ export function getConfigStatus(): ConfigStatus {
     openaiImagePrimaryProfile: openaiImageRouteConfig("primary").profile,
     openaiImageBackupProfile: openaiImageRouteConfig("backup").profile,
     openaiImageBackupModel: appConfig.openaiImageBackupModel,
+    openaiImageProxyConfigured: Boolean(appConfig.openaiImageProxyUrl),
     openaiImageRequestTimeoutMs: appConfig.openaiImageRequestTimeoutMs,
     openaiBaseUrl: appConfig.openaiBaseUrl,
     openaiTextBaseUrl: appConfig.openaiTextBaseUrl,
@@ -301,6 +303,19 @@ function normalizeBaseUrl(value: string) {
 function normalizeOptionalBaseUrl(value: string) {
   const trimmed = value.trim();
   return trimmed ? normalizeBaseUrl(trimmed) : "";
+}
+
+function normalizeImageProxyUrl(value: string) {
+  const trimmed = value.trim();
+  if (!trimmed) return "";
+  const parsed = new URL(trimmed);
+  if (parsed.protocol !== "http:" && parsed.protocol !== "https:") {
+    throw new Error("OPENAI_IMAGE_PROXY_URL must use http:// or https://.");
+  }
+  if (parsed.username || parsed.password) {
+    throw new Error("OPENAI_IMAGE_PROXY_URL must not contain credentials.");
+  }
+  return parsed.toString().replace(/\/$/, "");
 }
 
 function openaiImageBaseUrlForRoute(route: OpenaiImageApiRoute) {
@@ -513,6 +528,9 @@ const advancedConfigGroups: ConfigDefinitionGroup[] = [
       }),
       configField("OPENAI_IMAGE_BACKUP_MODEL", "备用图片模型", "留空时使用主通道图片模型。", "text", "openai-image", {
         read: () => appConfig.openaiImageBackupModel,
+      }),
+      configField("OPENAI_IMAGE_PROXY_URL", "图片代理地址", "仅远程图片请求使用；Windows 本地默认 http://127.0.0.1:10808。", "text", "openai-image", {
+        read: () => appConfig.openaiImageProxyUrl,
       }),
       configField("OPENAI_IMAGE_ENDPOINT", "图片接口形态", "images 为 Images API；responses 为兼容旧通道。", "select", "openai-image", {
         options: ["images", "responses"],

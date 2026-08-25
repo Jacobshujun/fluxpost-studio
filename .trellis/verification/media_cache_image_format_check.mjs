@@ -266,6 +266,11 @@ try {
     },
     "./creation-controls": { buildSingleImageTaskPrompt: () => "" },
     "./image-format": imageFormat,
+    "./image-transport": {
+      fetchImageTransport: (url, init) => fetch(url, init),
+      isImageNetworkUnavailableError: () => false,
+      toImageTransportUnavailableError: (error) => error,
+    },
     "./image-normalization": realImageNormalization,
     "./image-size-options": { defaultImageGenerationSize: "1024x1024", normalizeImageGenerationSize: (value) => value || "1024x1024" },
     "./media-request": { buildMediaRequestHeaders: () => ({}) },

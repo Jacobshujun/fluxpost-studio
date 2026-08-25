@@ -8,6 +8,7 @@ import { appConfig, isOpenaiImageRouteConfigured, openaiImageApiKey, openaiImage
 import { concurrencyConfig, mapWithConcurrency, runWithConcurrencyPool } from "./concurrency";
 import { buildSingleImageTaskPrompt } from "./creation-controls";
 import { sniffImageFormat } from "./image-format";
+import { fetchImageTransport, isImageNetworkUnavailableError, toImageTransportUnavailableError } from "./image-transport";
 import { convertHeicBufferToJpeg, normalizeHeicFileToJpeg } from "./image-normalization";
 import { defaultImageGenerationSize, normalizeImageGenerationSize } from "./image-size-options";
 import { buildMediaRequestHeaders } from "./media-request";
@@ -100,6 +101,7 @@ type AsyncImageTaskState = {
   taskId: string;
   route: OpenaiImageApiRoute;
   status: string;
+  waitingForNetwork?: boolean;
 };
 
 type AsyncImageTaskControl = {
@@ -357,6 +359,7 @@ export async function generateCanvasGptImages(
         providerTaskId: error.state.taskId,
         providerTaskRoute: error.state.route,
         providerStatus: error.state.status,
+        waitingForNetwork: error.state.waitingForNetwork,
         message: error.message,
       };
     }
@@ -1096,6 +1099,7 @@ async function requestSingleStandardImagesApiWithRetryForRoute(
         openaiImageUrl(endpointPath, route),
         await buildStandardImagesApiRequest(route, sizeConstrainedPrompt, count, options, referenceImages.files, sendQuality, sendInputFidelity),
         getRemainingTimeoutMs(deadline),
+        fetchImageTransport,
       );
     } catch (error) {
       lastProviderError = toImageProviderTransportError(error);
@@ -1525,7 +1529,7 @@ async function pollToApisImageTask(
         durationMs: Date.now() - startedAt,
         details: { taskId, route },
       });
-      if (resumed) return throwOrPreservePendingToApisTask(taskId, route, task.status, asyncTask);
+      if (resumed) return throwOrPreservePendingToApisTask(taskId, route, task.status, asyncTask, isImageNetworkUnavailableError(error));
       continue;
     }
     const body = await response.text();
@@ -1570,11 +1574,12 @@ function throwOrPreservePendingToApisTask(
   route: OpenaiImageApiRoute,
   status: string | undefined,
   asyncTask?: AsyncImageTaskControl,
+  waitingForNetwork = false,
 ): never {
   const normalizedStatus = normalizeToApisPendingStatus(status);
   if (asyncTask?.returnPendingOnTimeout) {
     throw new ImageProviderTaskPendingError(
-      { taskId, route, status: normalizedStatus },
+      { taskId, route, status: normalizedStatus, waitingForNetwork },
       `ToAPIs image task remains ${normalizedStatus}; polling will resume without resubmission.`,
     );
   }
@@ -1732,6 +1737,14 @@ function parseJsonResponse<T>(body: string, response: Response, label: string, c
 
 function toImageProviderTransportError(error: unknown) {
   if (error instanceof ImageProviderError) return error;
+  if (isImageNetworkUnavailableError(error)) {
+    return new ImageProviderError("图片网络不可用，请检查 Xray 是否正在运行。", {
+      category: "network",
+      retryable: true,
+      failoverAllowed: true,
+      cause: error,
+    });
+  }
   const message = compactError(error);
   if (/Images API (?:returned non-SSE|SSE|stream)/i.test(message)) {
     return new ImageProviderError("Image provider returned an incompatible streaming response.", {
@@ -2370,15 +2383,15 @@ async function fetchWithTimeout(url: string, init: RequestInit, timeoutMs = imag
   const controller = new AbortController();
   const timer = setTimeout(() => controller.abort(), timeoutMs);
   try {
-    return await fetch(url, {
+    return await fetchImageTransport(url, {
       ...init,
       signal: controller.signal,
     });
   } catch (error) {
     if (error instanceof Error && error.name === "AbortError") {
-      throw new Error(`Request timed out after ${Math.round(timeoutMs / 1000)}s: ${url}`);
+      throw toImageTransportUnavailableError(error, true);
     }
-    throw error;
+    throw toImageTransportUnavailableError(error);
   } finally {
     clearTimeout(timer);
   }

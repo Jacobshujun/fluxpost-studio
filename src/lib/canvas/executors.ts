@@ -5,6 +5,7 @@ import { normalizeFeishuPublishMode } from "../feishu-publish-mode";
 import { FINISHED_BODY_POLICY_VERSION, truncateFinishedBody } from "../finished-body-policy";
 import { getGeneratedPost, saveGeneratedPost, updateGeneratedPost } from "../generated-posts";
 import { generateCanvasGptImages, generateImagesFromPrompt } from "../image-generation";
+import { IMAGE_NETWORK_WAIT_REASON, isImageNetworkUnavailableError } from "../image-transport";
 import { callOpenAIForText, callOpenAIForVisionText } from "../openai";
 import type { GeneratedPost, SourceImageTask } from "../types";
 import type { WorkspaceAccessActor } from "../workspace-ownership";
@@ -64,6 +65,7 @@ export type CanvasNodeExecutionResult = {
   providerStatus?: string;
   pending?: boolean;
   partial?: boolean;
+  waitReason?: string;
 };
 
 type CanvasNodeExecutor = (context: CanvasNodeExecutionContext) => Promise<CanvasNodeExecutionResult>;
@@ -362,6 +364,7 @@ async function executeGptImage(context: CanvasNodeExecutionContext): Promise<Can
       providerTaskRoute: result.providerTaskRoute,
       providerStatus: result.providerStatus,
       pending: true,
+      waitReason: result.waitingForNetwork ? IMAGE_NETWORK_WAIT_REASON : undefined,
     };
   }
   return {
@@ -424,6 +427,7 @@ async function executeGptImageEach(context: CanvasNodeExecutionContext): Promise
     child.status = "running";
     if (!resumeTask) child.attempt += 1;
     child.error = undefined;
+    child.waitReason = undefined;
     child.updatedAt = new Date().toISOString();
     await persistMetadata(resumeTask?.providerTaskId && resumeTask.providerTaskRoute
       ? { taskId: resumeTask.providerTaskId, route: resumeTask.providerTaskRoute, status: resumeTask.providerStatus || "running" }
@@ -459,14 +463,27 @@ async function executeGptImageEach(context: CanvasNodeExecutionContext): Promise
         child.providerTaskId = result.providerTaskId;
         child.providerTaskRoute = result.providerTaskRoute;
         child.providerStatus = result.providerStatus;
+        child.waitReason = result.waitingForNetwork ? IMAGE_NETWORK_WAIT_REASON : undefined;
       } else {
         child.status = "completed";
         child.outputUrl = result.imageUrls[0];
         child.providerStatus = "completed";
       }
     } catch (error) {
+      if (isImageNetworkUnavailableError(error)) {
+        child.status = child.providerTaskId ? "pending" : "queued";
+        child.error = undefined;
+        child.waitReason = IMAGE_NETWORK_WAIT_REASON;
+        child.providerStatus = child.providerTaskId ? child.providerStatus : "waiting_for_network";
+        child.updatedAt = new Date().toISOString();
+        await persistMetadata(child.providerTaskId && child.providerTaskRoute
+          ? { taskId: child.providerTaskId, route: child.providerTaskRoute, status: child.providerStatus || "pending" }
+          : undefined);
+        return;
+      }
       child.status = "failed";
       child.error = error instanceof Error ? error.message : "逐图重构失败。";
+      child.waitReason = undefined;
       child.providerStatus = "failed";
     }
     child.updatedAt = new Date().toISOString();
@@ -485,6 +502,7 @@ async function executeGptImageEach(context: CanvasNodeExecutionContext): Promise
       providerTaskRoute: pendingChild.providerTaskRoute,
       providerStatus: pendingChild.providerStatus || pendingChild.status,
       pending: true,
+      waitReason: children.some((child) => child.waitReason === IMAGE_NETWORK_WAIT_REASON) ? IMAGE_NETWORK_WAIT_REASON : undefined,
     };
   }
 

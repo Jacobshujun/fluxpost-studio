@@ -1263,6 +1263,7 @@ export type ConfigStatus = {
   openaiImagePrimaryProfile: ImageProviderProfile;
   openaiImageBackupProfile: ImageProviderProfile;
   openaiImageBackupModel: string;
+  openaiImageProxyConfigured: boolean;
   openaiImageRequestTimeoutMs: number;
   openaiBaseUrl: string;
   openaiTextBaseUrl: string;
@@ -1296,6 +1297,23 @@ export type ImageProviderProbeResult = {
   model: string;
   generation: ImageProviderProbeStepResult;
   edit: ImageProviderProbeStepResult;
+};
+
+export type ImageTransportRouteHealth = {
+  configured: boolean;
+  reachable: boolean;
+  durationMs?: number;
+  error?: string;
+};
+
+export type ImageTransportHealth = {
+  ok: boolean;
+  checkedAt: string;
+  durationMs: number;
+  proxy: ImageTransportRouteHealth & { endpoint: string };
+  primary: ImageTransportRouteHealth;
+  backup: ImageTransportRouteHealth;
+  duplicateOrigins: boolean;
 };
 
 export type TosStorageProbeResult = {

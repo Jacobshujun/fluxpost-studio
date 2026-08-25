@@ -20,6 +20,7 @@ import {
   type WorkspaceAccessActor,
 } from "../workspace-ownership";
 import { concurrencyConfig } from "../concurrency";
+import { IMAGE_NETWORK_WAIT_REASON, isImageNetworkUnavailableError } from "../image-transport";
 import { CanvasNeedsConfigError, executeCanvasNode, resolveCanvasLiteralOutputs } from "./executors";
 import { ArkSeedanceNeedsConfigError, getArkSeedanceReadiness } from "./seedance";
 import { buildCanvasRunPlan, collectDescendants } from "./graph";
@@ -520,7 +521,8 @@ async function executeCanvasRun(run: CanvasRun) {
   }
 
   const relevant = plan.includedNodeIds.map((id) => latest.get(id)).filter((item): item is CanvasNodeRun => Boolean(item));
-  const hasPendingProvider = relevant.some((item) => item.status === "running" && item.providerTaskId);
+  const pendingNode = relevant.find((item) => item.status === "running");
+  const hasPendingProvider = Boolean(pendingNode);
   const failures = relevant.filter((item) => isFailure(item.status));
   const completed = relevant.filter((item) => isSuccessfulNodeStatus(item.status));
   const hasPartialResult = relevant.some((item) => item.status === "partial");
@@ -537,6 +539,7 @@ async function executeCanvasRun(run: CanvasRun) {
     error: status === "running"
       ? undefined
       : failures[0]?.error || (status === "failed" ? "Canvas run could not make progress." : undefined),
+    waitReason: status === "running" ? pendingNode?.waitReason : undefined,
     updatedAt: finishedAt,
     ...(status === "running" ? {} : { completedAt: finishedAt }),
   });
@@ -715,6 +718,7 @@ async function runReadyNode(
       providerTaskId: result.providerTaskId || nodeRun.providerTaskId,
       providerTaskRoute: result.providerTaskRoute || nodeRun.providerTaskRoute,
       providerStatus: result.providerStatus || nodeRun.providerStatus,
+      waitReason: result.pending ? result.waitReason : undefined,
       inputFingerprint: fingerprintCanvasNodeExecution(node, inputs),
       updatedAt: endedAt,
       ...(result.pending ? {} : { completedAt: endedAt }),
@@ -722,10 +726,23 @@ async function runReadyNode(
   } catch (error) {
     await interimSave;
     const endedAt = new Date().toISOString();
+    if (isImageNetworkUnavailableError(error) && (node.type === "model.gpt-image" || node.type === "model.gpt-image-each")) {
+      nodeRun = await saveCanvasNodeRunToDb({
+        ...nodeRun,
+        status: "running",
+        error: undefined,
+        waitReason: IMAGE_NETWORK_WAIT_REASON,
+        providerStatus: nodeRun.providerStatus || "waiting_for_network",
+        updatedAt: endedAt,
+        completedAt: undefined,
+      });
+      return { nodeId: node.id, nodeRun };
+    }
     nodeRun = await saveCanvasNodeRunToDb({
       ...nodeRun,
       status: error instanceof CanvasNeedsConfigError ? "needs_config" : "failed",
       error: error instanceof Error ? error.message : "Canvas node failed",
+      waitReason: undefined,
       updatedAt: endedAt,
       completedAt: endedAt,
     });

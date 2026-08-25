@@ -4575,7 +4575,7 @@ function CanvasTaskCenter({
     >
       <StatusIcon status={run.status} />
       <span><strong>{workflowNames.get(run.workflowId) || "已删除画布"}</strong><small>{formatCanvasRunTime(run.createdAt)} · r{run.workflowRevision}</small></span>
-      <em>{canvasRunStatusLabel(run.status)}</em>
+      <em>{run.waitReason || canvasRunStatusLabel(run.status)}</em>
     </button>
   ));
 
@@ -4617,6 +4617,7 @@ function CanvasTaskCenter({
               <div><dt>完成时间</dt><dd>{selectedRun.run.completedAt ? formatCanvasRunTime(selectedRun.run.completedAt) : "-"}</dd></div>
             </dl>
             {selectedRun.run.error ? <div className="canvas-task-detail-error"><AlertTriangle />{selectedRun.run.error}</div> : null}
+            {selectedRun.run.waitReason ? <div className="canvas-task-detail-error"><LoaderCircle className="animate-spin" />{selectedRun.run.waitReason}</div> : null}
             <RunSummary value={selectedRun} onRetry={(nodeId) => onRetryNode(selectedRun.run.id, nodeId)} />
           </> : <div className="canvas-task-empty"><History /><span>选择任务查看节点详情</span></div>}
         </section>
@@ -4634,6 +4635,7 @@ function RunSummary({ value, onRetry }: { value: CanvasRunWithNodes; onRetry?: (
       {nodeRun.providerTaskId ? <code>{nodeRun.providerTaskId}</code> : null}
       {nodeRun.reusedFrom ? <small>复用 r{nodeRun.reusedFrom.workflowRevision} · {nodeRun.reusedFrom.nodeRunId}</small> : null}
       {nodeRun.error ? <p>{nodeRun.error}</p> : null}
+      {nodeRun.waitReason ? <p>{nodeRun.waitReason}</p> : null}
       {nodeRun.internalMetadata?.imageEach ? <CanvasImageEachProgress metadata={nodeRun.internalMetadata.imageEach} /> : null}
       {Object.values(nodeRun.outputs).map((artifact, index) => <ArtifactPreview key={index} artifact={artifact} />)}
       {onRetry && (["failed", "blocked", "needs_config", "running"].includes(nodeRun.status) || (nodeRun.status === "partial" && nodeRun.nodeType === "model.gpt-image-each")) ? <button type="button" onClick={() => onRetry(nodeRun.nodeId)}><RotateCcw />{nodeRun.status === "partial" ? "重试失败图片" : "重试"}</button> : null}

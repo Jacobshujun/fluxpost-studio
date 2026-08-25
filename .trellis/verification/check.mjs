@@ -79,6 +79,7 @@ const nodeChecks = [
   ["Image task fallback check", "image_task_fallback_check.mjs"],
   ["ToAPIs GPT-Image-2 adapter check", "toapis_image_api_check.mjs"],
   ["Image provider profiles check", "image_provider_profiles_check.mjs"],
+  ["Image transport and Xray recovery check", "image_transport_check.mjs"],
   ["GPT image size request check", "gpt_image_size_request_check.mjs"],
   ["ComfyUI Klein integration check", "comfyui_klein_check.mjs"],
   ["Infinite canvas workflows check", "canvas_workflows_check.mjs"],

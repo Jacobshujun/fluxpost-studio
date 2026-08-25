@@ -32,6 +32,7 @@ import type {
   ContentSafetyPolicy,
   GeneratedMediaRepairBatchResult,
   ImageProviderProbeResult,
+  ImageTransportHealth,
   SourceSafetyAssessment,
   TosStorageProbeResult,
   WorkspaceAccount,
@@ -45,6 +46,11 @@ type AccountSessionResponse = {
 type ConfigResponse = {
   status?: ConfigStatus;
   advanced?: AdvancedConfigSnapshot;
+  error?: string;
+};
+
+type ImageTransportHealthResponse = {
+  health?: ImageTransportHealth;
   error?: string;
 };
 
@@ -88,7 +94,8 @@ export default function AdvancedConfigPage() {
   const [draft, setDraft] = useState<Record<string, DraftField>>({});
   const [activeGroupId, setActiveGroupId] = useState("");
   const [message, setMessage] = useState("");
-  const [busy, setBusy] = useState<"load" | "save" | "policy-save" | "policy-reset" | "policy-local-test" | "policy-model-test" | "tos-check" | "tos-reconcile" | "media-scan" | "media-repair" | "image-primary-check" | "image-backup-check" | null>("load");
+  const [imageTransportHealth, setImageTransportHealth] = useState<ImageTransportHealth | null>(null);
+  const [busy, setBusy] = useState<"load" | "save" | "policy-save" | "policy-reset" | "policy-local-test" | "policy-model-test" | "tos-check" | "tos-reconcile" | "media-scan" | "media-repair" | "image-transport-check" | "image-primary-check" | "image-backup-check" | null>("load");
 
   const fieldsByKey = useMemo(() => {
     const map = new Map<string, AdvancedConfigField>();
@@ -151,6 +158,9 @@ export default function AdvancedConfigPage() {
       const configData = (await configRes.json()) as ConfigResponse;
       if (!configRes.ok || !configData.advanced || !configData.status) throw new Error(configData.error || "高级配置读取失败");
       applySnapshot(configData.advanced, configData.status);
+      const healthRes = await fetch("/api/config/image-transport-health");
+      const healthData = (await healthRes.json()) as ImageTransportHealthResponse;
+      setImageTransportHealth(healthData.health || null);
       setMessage("高级配置已加载。");
     } catch (error) {
       setMessage(error instanceof Error ? error.message : "高级配置读取失败");
@@ -393,6 +403,22 @@ export default function AdvancedConfigPage() {
     }
   }
 
+  async function checkImageTransport() {
+    setBusy("image-transport-check");
+    setMessage("");
+    try {
+      const res = await fetch("/api/config/image-transport-health");
+      const data = (await res.json()) as ImageTransportHealthResponse;
+      if (!data.health) throw new Error(data.error || "图片网络检测失败");
+      setImageTransportHealth(data.health);
+      setMessage(data.health.ok ? "Xray 与图片通道连接正常。" : imageTransportHealthMessage(data.health));
+    } catch (error) {
+      setMessage(error instanceof Error ? error.message : "图片网络检测失败");
+    } finally {
+      setBusy(null);
+    }
+  }
+
   const pageReady = Boolean(account && policyDraft && (account.role !== "admin" || snapshot));
   const policyActive = activeGroupId === "content-safety";
 
@@ -562,6 +588,16 @@ export default function AdvancedConfigPage() {
                     <button
                       className="soft-button inline-flex h-11 items-center justify-center gap-2 px-4 text-sm"
                       type="button"
+                      onClick={checkImageTransport}
+                      disabled={Boolean(busy) || dirtyCount > 0}
+                      title="免费检测 Xray 与图片通道，不生成图片"
+                    >
+                      {busy === "image-transport-check" ? <Loader2 className="h-4 w-4 animate-spin" /> : <RefreshCw className="h-4 w-4" />}
+                      检测图片网络
+                    </button>
+                    <button
+                      className="soft-button inline-flex h-11 items-center justify-center gap-2 px-4 text-sm"
+                      type="button"
                       onClick={() => testImageProvider("primary")}
                       disabled={Boolean(busy) || dirtyCount > 0 || !config?.openaiImageConfigured}
                       title={dirtyCount > 0 ? "请先保存图片通道配置" : "测试主图片通道"}
@@ -586,6 +622,15 @@ export default function AdvancedConfigPage() {
                   {dirtyCount ? `保存 ${dirtyCount} 项` : "无改动"}
                 </button>
               </div>
+
+              {activeGroup?.id === "openai-image" && imageTransportHealth ? (
+                <div className="config-status-strip">
+                  <StatusTile label="Xray" ok={imageTransportHealth.proxy.reachable} meta={imageTransportHealth.proxy.endpoint} />
+                  <StatusTile label="图片主线路" ok={imageTransportHealth.primary.reachable} />
+                  <StatusTile label="图片备用线路" ok={!imageTransportHealth.backup.configured || imageTransportHealth.backup.reachable} meta={imageTransportHealth.backup.configured ? undefined : "未配置"} />
+                  <StatusTile label="主备线路" ok={!imageTransportHealth.duplicateOrigins} meta={imageTransportHealth.duplicateOrigins ? "地址相同" : "独立"} />
+                </div>
+              ) : null}
 
               <div className="config-field-list">
                 {activeGroup?.fields.map((field) => (
@@ -1078,6 +1123,14 @@ function StatusTile({ label, ok, meta }: { label: string; ok: boolean; meta?: st
       {meta ? <small>{meta}</small> : null}
     </div>
   );
+}
+
+function imageTransportHealthMessage(health: ImageTransportHealth) {
+  if (!health.proxy.reachable) return "Xray 未运行，请启动 v2rayN 后重试。";
+  if (health.duplicateOrigins) return "图片主线路和备用线路地址相同，当前没有真正的备用通道。";
+  if (!health.primary.reachable) return "图片主线路网络不可达。";
+  if (health.backup.configured && !health.backup.reachable) return "图片备用线路网络不可达。";
+  return "图片网络配置需要检查。";
 }
 
 function ConfigFieldRow({

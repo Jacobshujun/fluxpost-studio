@@ -50,6 +50,7 @@ if ($ConfigFile) {
 }
 $env:FLUXPOST_RUNTIME_MODE = "candidate"
 $env:FLUXPOST_RELEASE_SHA = $ReleaseSha
+Remove-Item Env:NODE_TLS_REJECT_UNAUTHORIZED -ErrorAction SilentlyContinue
 
 $statePath = Join-Path $projectRoot ".fluxpost-local-candidate.json"
 $slotNames = @(".next-local-a", ".next-local-b")

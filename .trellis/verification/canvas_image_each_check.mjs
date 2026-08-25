@@ -92,6 +92,7 @@ async function mockGenerate(prompt, count, references, _options, asyncTask) {
       return { status: "pending", imageUrls: [], providerTaskId: taskId, providerTaskRoute: "primary", providerStatus: "processing" };
     }
     if (providerMode === "fail-second" && source.endsWith("2")) throw new Error("mock image failure");
+    if (providerMode === "network") throw Object.assign(new Error("connect refused"), { code: "ECONNREFUSED" });
     return { status: "completed", imageUrls: [`out-${source}`] };
   } finally {
     active -= 1;
@@ -123,6 +124,7 @@ const stubs = {
   "../finished-body-policy": { FINISHED_BODY_POLICY_VERSION: 1, truncateFinishedBody: (value) => value },
   "../generated-posts": { getGeneratedPost: noopAsync, saveGeneratedPost: async (post) => post, updateGeneratedPost: async (_id, patch) => patch },
   "../image-generation": { generateCanvasGptImages: mockGenerate, generateImagesFromPrompt: noopAsync },
+  "../image-transport": { IMAGE_NETWORK_WAIT_REASON: "等待图片网络恢复", isImageNetworkUnavailableError: (error) => error?.code === "ECONNREFUSED" },
   "../openai": { callOpenAIForText: noopAsync, callOpenAIForVisionText: noopAsync },
   "./seedance": { ArkSeedanceNeedsConfigError: class extends Error {}, queryArkSeedanceVideo: noopAsync, submitArkSeedanceVideo: noopAsync },
   "./seedance-references": { resolveSeedanceInput: () => ({ prompt: "", images: [] }) },
@@ -237,6 +239,39 @@ assert.equal(resumed.pending, undefined);
 assert.equal(providerCalls.length, 3);
 assert.ok(providerCalls.every((call) => call.resumeTaskId === pendingIds.get(call.source)), "Accepted tasks must resume with their original provider task ids.");
 assert.ok(providerCalls.every((call) => call.references[1] === "ref-a"), "Resumed tasks must keep the original shared references.");
+
+providerCalls = [];
+providerMode = "network";
+const waitingBeforeAcceptance = await executeCanvasNode(context(["img-1", "img-2"]));
+assert.equal(waitingBeforeAcceptance.pending, true);
+assert.equal(waitingBeforeAcceptance.waitReason, "等待图片网络恢复");
+assert.ok(waitingBeforeAcceptance.internalMetadata.imageEach.children.every((child) => child.status === "queued" && child.waitReason === "等待图片网络恢复"));
+providerCalls = [];
+providerMode = "success";
+const recoveredBeforeAcceptance = await executeCanvasNode(context(["img-1", "img-2"], {
+  status: "running",
+  internalMetadata: waitingBeforeAcceptance.internalMetadata,
+}));
+assert.equal(recoveredBeforeAcceptance.pending, undefined);
+assert.equal(providerCalls.length, 2, "Proxy recovery must continue the original waiting node.");
+
+providerCalls = [];
+providerMode = "network";
+const waitingAfterAcceptance = await executeCanvasNode(context(["img-1", "img-2", "img-3"], {
+  status: "running",
+  internalMetadata: pending.internalMetadata,
+}, ["ref-a"]));
+assert.equal(waitingAfterAcceptance.pending, true);
+assert.equal(waitingAfterAcceptance.waitReason, "等待图片网络恢复");
+assert.ok(providerCalls.every((call) => call.resumeTaskId === pendingIds.get(call.source)), "Network recovery must query accepted task ids instead of creating replacements.");
+providerCalls = [];
+providerMode = "success";
+const recoveredAfterAcceptance = await executeCanvasNode(context(["img-1", "img-2", "img-3"], {
+  status: "running",
+  internalMetadata: waitingAfterAcceptance.internalMetadata,
+}, ["ref-a"]));
+assert.equal(recoveredAfterAcceptance.pending, undefined);
+assert.ok(providerCalls.every((call) => call.resumeTaskId === pendingIds.get(call.source)), "Recovered accepted tasks must retain their original ids.");
 
 providerCalls = [];
 providerMode = "fail-second";

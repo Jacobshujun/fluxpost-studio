@@ -204,6 +204,7 @@ try {
     "../finished-body-policy": finishedBodyPolicy,
     "../generated-posts": {},
     "../image-generation": {},
+    "../image-transport": { IMAGE_NETWORK_WAIT_REASON: "等待图片网络恢复", isImageNetworkUnavailableError: () => false },
     "../openai": {},
     "./seedance": {},
     "./seedance-references": require(path.join(temp, "seedance-references.js")),

@@ -279,6 +279,7 @@ export type CanvasImageEachChild = {
   attempt: number;
   outputUrl?: string;
   error?: string;
+  waitReason?: string;
   providerTaskId?: string;
   providerTaskRoute?: "primary" | "backup";
   providerStatus?: string;
@@ -360,6 +361,7 @@ export type CanvasRun = {
   confirmation: CanvasRunConfirmation;
   cancelRequestedAt?: string;
   error?: string;
+  waitReason?: string;
   createdAt: string;
   updatedAt: string;
   startedAt?: string;
@@ -386,6 +388,7 @@ export type CanvasNodeRun = {
     workflowRevision: number;
   };
   error?: string;
+  waitReason?: string;
   createdAt: string;
   updatedAt: string;
   startedAt?: string;

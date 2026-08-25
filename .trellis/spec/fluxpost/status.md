@@ -4,20 +4,21 @@ Last updated: 2026-08-25
 
 ## One-Line Status
 
-Excel competitor-workbook Canvas generation is verified and active on port 3001 from the clean committed candidate.
+The Xray image fix is verified; port 3001 remains on the prior candidate until this fix is committed.
 
 ## Current Focus
 
-- `input.competitor-workbook@1` freezes local `.xlsx` rows/cards for administrator-only Canvas V2 schedules and reuses prompt-template, GPT-Image-2 V2, shared references, and social-post composition.
-- Hierarchical row/card scheduling supports concurrency `1-5`, progressive admission, pause/resume/cancel/restart, partial drafts, and card/row retry into the original draft.
-- Deterministic 200-row/778-card parsing, redaction, scheduler, full baseline, and mocked desktop/mobile Canvas checks passed without live providers or Feishu.
+- Remote image requests use `127.0.0.1:10808`; unrelated and loopback traffic remains direct.
+- Canvas waits through outages and resumes accepted ToAPIs ids without duplicate submission.
+- One restartable v2rayN logon task remains; Xray is loopback-only.
 
 ## Next Entry
 
-Use the port-3001 Canvas candidate for operator review. Do not push or deploy without approval.
+Commit the verified fix, then replace the port-3001 listener through `npm run local` and verify `/canvas` plus version identity. Do not push or deploy without approval.
 
 ## Recent Verification
 
+- 2026-08-25: Full offline baseline passed with image transport/Canvas/ToAPIs regression checks, lint, TypeScript, production build, and isolated HTTP smoke; credential-free primary/backup HTTPS handshakes through Xray passed.
 - 2026-08-25: Competitor-workbook candidate activation, matching version identity, `/canvas` HTTP smoke, and mocked 1440x960/390x844 workflow, scheduler, and overflow checks passed.
 - 2026-08-24: Competitor-workbook 200/778 parsing, hierarchy, redaction, retry/partial-draft, TypeScript, lint, build, isolated smoke, and full baseline passed.
 - 2026-08-24: Prior per-image reconstruction, provider resume, publish guards, clean candidate activation, and HTTP smoke passed.
