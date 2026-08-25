@@ -4,7 +4,7 @@ Last updated: 2026-08-25
 
 ## One-Line Status
 
-Canvas batch schedules now enqueue every eligible image child without the temporary default-2 schedule gate; activation on LAN port 3001 is pending the clean committed candidate switch.
+Canvas batch schedules now enqueue every eligible image child without the temporary default-2 schedule gate, active on loopback port 3001 from the clean committed candidate.
 
 ## Current Focus
 
@@ -20,9 +20,9 @@ Use the LAN Canvas candidate for operator review. Do not push or deploy without 
 ## Recent Verification
 
 - 2026-08-25: Unrestricted Canvas child admission, legacy concurrency compatibility, retry/shared-stage fan-out, TypeScript, lint, build, isolated HTTP/SQLite smoke, and the full offline baseline passed without live provider calls.
+- 2026-08-25: Clean unrestricted-Canvas candidate activation, matching version identity, and port-3001 HTTP smoke passed.
 - 2026-08-25: Full offline baseline, Xray primary/backup handshakes, clean LAN candidate activation, version identity, and port-3001 HTTP smoke passed.
 - 2026-08-25: Competitor-workbook candidate activation, matching version identity, `/canvas` HTTP smoke, and mocked 1440x960/390x844 workflow, scheduler, and overflow checks passed.
-- 2026-08-24: Competitor-workbook 200/778 parsing, hierarchy, redaction, retry/partial-draft, TypeScript, lint, build, isolated smoke, and full baseline passed.
 
 ## Risks And Unknowns
 
