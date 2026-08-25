@@ -1,6 +1,6 @@
 # Pitfalls
 
-Last updated: 2026-07-20
+Last updated: 2026-08-25
 
 ## Known Project Pitfalls
 
@@ -30,6 +30,7 @@ Last updated: 2026-07-20
 - Do not create real whitelist credentials or local account-table credentials in automated verification. Verification should use static checks and read-only `/api/accounts/session` unless the user explicitly asks for a live credential test.
 - Do not nest long-running work inside the same provider pool that its child HTTP calls need. For example, platform crawl fan-out should not hold a crawl-pool slot while the nested TikHub requests are waiting for crawl-pool slots.
 - The SQLite implementation uses Node.js built-in `node:sqlite`, so the app requires Node.js 24+ for the current local database path.
+- Node 24 built-in `fetch` does not automatically inherit the enabled Windows WinINET user proxy, and `ALL_PROXY` alone is not consumed by its environment-proxy support. The port-3001 launcher must preserve explicit `HTTP_PROXY`/`HTTPS_PROXY` variables or adopt valid enabled WinINET settings, set `NODE_USE_ENV_PROXY=1`, and merge localhost into `NO_PROXY`; never disable TLS verification to make a relay appear reachable.
 - PostgreSQL migration copies database rows only. It does not move crawled/generated media files under `public/media/` or `public/generated/`.
 - Concurrent simple-run production for the same owner/project can still create PostgreSQL contention in `markSourceRewritten(...)`, because it reads and rewrites the content-project JSON row after generated-post persistence. The simple workflow now records the generated post in the run snapshot before source-status sync, and `markSourceRewritten(...)` retries PostgreSQL `40P01`/`40001` conflicts. If source-status sync still fails after retries, the draft should remain visible and Feishu publish enqueue should continue; the remaining symptom is a source-item usage/status warning, not a hidden generated draft.
 - Do not change simple-run publish preparation back to `Promise.all(approvedPosts.map(...))`. A real 小鹏P7+ link-mode run (`simple-1781160663254`) generated 10 drafts but failed before Feishu enqueue with PostgreSQL `检测到死锁` when approved-post local persistence was fanned out concurrently.

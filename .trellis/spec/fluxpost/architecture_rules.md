@@ -1526,6 +1526,7 @@ const segments = resolveCanvasSubtitleRevisionSegments(node.config.revisionSnaps
 - Loopback activation: `npm run local`.
 - LAN activation: `npm run local:lan`.
 - Launcher: `scripts/local/restart.ps1 [-Port 3001] [-HostName 127.0.0.1|0.0.0.0] [-ConfigFile <path>] [-ProjectRoot <primary-worktree>]`.
+- Proxy inputs: explicit process `HTTP_PROXY`/`HTTPS_PROXY` or lowercase equivalents; otherwise enabled HKCU WinINET `ProxyServer`. The launcher exports `NODE_USE_ENV_PROXY=1` and merged `NO_PROXY`/`no_proxy` only when preparing the local candidate process.
 - Next output selector: `FLUXPOST_NEXT_DIST_DIR=.next-local-a|.next-local-b`; unset ordinary builds retain `.next`.
 - Local state: `.fluxpost-local-candidate.json` contains `{ "slot": string, "commit": fullSha }`; each valid slot contains `.fluxpost-commit` with the same SHA.
 
@@ -1534,6 +1535,8 @@ const segments = resolveCanvasSubtitleRevisionSegments(node.config.revisionSnaps
 - Reject a dirty worktree, invalid full HEAD SHA, or non-primary worktree before building or stopping a listener.
 - Select only the inactive fixed slot, build committed HEAD there, verify the worktree remains clean, and write the slot commit marker before listener replacement.
 - Stop port 3001 only after build success. Start the selected slot with `FLUXPOST_RUNTIME_MODE=candidate` and `FLUXPOST_RELEASE_SHA=<HEAD>`.
+- Preserve explicit HTTP(S) proxy variables. If none are present, normalize an enabled Windows user proxy in simple `host:port` or protocol-specific `http=...;https=...` form into Node's standard proxy variables. Never log proxy values.
+- When an effective HTTP(S) proxy exists, set `NODE_USE_ENV_PROXY=1` and merge `localhost`, `127.0.0.1`, and `::1` into both `NO_PROXY` spellings so port 3001, health checks, and local providers remain direct. Node 24 built-in fetch does not treat `ALL_PROXY` as a supported substitute.
 - Commit active state atomically only after `/api/version` and the existing HTTP smoke pass. Normal background workers remain enabled.
 - `.next-local-a`, `.next-local-b`, slot state, and temporary state are Git-ignored; ESLint ignores both generated slot trees. `tsconfig.json` permanently includes both slots' generated type paths so alternating builds do not mutate tracked configuration.
 
@@ -1549,18 +1552,22 @@ const segments = resolveCanvasSubtitleRevisionSegments(node.config.revisionSnaps
 | First migration with a valid primary-worktree `.next` candidate | Use it as the one-time rollback source; never use a sibling worktree |
 | No valid managed or legacy primary-worktree candidate | Report explicit activation failure |
 | State write fails after startup | Treat activation as failed and restore the prior valid slot |
+| Explicit HTTP(S) proxy exists | Preserve it, skip WinINET discovery, enable Node environment-proxy support, and merge local bypass entries |
+| No explicit proxy and WinINET proxy is enabled and valid | Normalize it into `HTTP_PROXY`/`HTTPS_PROXY`; never expose the value in logs |
+| WinINET proxy is disabled, absent, or invalid | Do not invent a proxy or enable Node proxy support |
+| Only `ALL_PROXY` is set | Do not treat it as a supported Node fetch proxy; continue WinINET discovery |
 
 ### 5. Good/Base/Bad Cases
 
 - Good: slot A serves 3001, development and verification use `.next`, then `npm run local` builds clean HEAD into slot B and switches only after health passes.
 - Base: the first managed activation builds slot A while an older primary-worktree `.next` candidate remains available, then records slot A after successful smoke.
-- Bad: build over the active slot, start a second port, create a sibling candidate directory/worktree, bypass the clean-tree guard, record state before health passes, or expose intermediate commits as operator-managed versions.
+- Bad: build over the active slot, start a second port, create a sibling candidate directory/worktree, bypass the clean-tree guard, record state before health passes, expose intermediate commits as operator-managed versions, overwrite an explicit proxy, proxy localhost, or assume Node inherits WinINET automatically.
 
 ### 6. Tests Required
 
-- `.trellis/verification/runtime_parity_check.mjs` asserts fixed-slot allow-listing, ignores, generated type paths, primary-worktree and clean-tree guards, build-before-stop ordering, SHA markers, atomic state, rollback markers, identity, and HTTP smoke wiring.
+- `.trellis/verification/runtime_parity_check.mjs` asserts fixed-slot allow-listing, ignores, generated type paths, primary-worktree and clean-tree guards, build-before-stop ordering, SHA markers, atomic state, rollback markers, identity, HTTP smoke wiring, proxy precedence, enabled/disabled WinINET behavior, simple/protocol parsing, Node opt-in, and local bypass merging without network calls.
 - Run PowerShell parser validation, lint, TypeScript, a real build in both slots without `tsconfig.json` churn, and the complete offline baseline with isolated HTTP smoke.
-- After commit, run `npm run local` and verify port 3001 reports the exact committed SHA from the primary worktree and the state/slot markers agree.
+- After commit, run `npm run local` and verify port 3001 reports the exact committed SHA from the primary worktree, the state/slot markers agree, localhost health remains direct, and a bounded unauthenticated Node handshake reaches the configured relay without exposing credentials.
 
 ### 7. Wrong vs Correct
 
@@ -1573,6 +1580,14 @@ Stop-PortListener -Port 3001
 $env:FLUXPOST_NEXT_DIST_DIR = $targetSlot
 npm.cmd run build
 Stop-PortListener -Port 3001
+Start-CandidateServer -Slot $targetSlot -Commit $ReleaseSha
+
+# Wrong: Node fetch does not automatically inherit the enabled Windows user proxy.
+Start-Process npm.cmd -ArgumentList @("run", "start")
+
+# Correct: preserve explicit HTTP(S) proxy settings or adopt valid WinINET settings,
+# enable Node environment-proxy support, and keep local services in NO_PROXY.
+Set-LocalProxyEnvironment
 Start-CandidateServer -Slot $targetSlot -Commit $ReleaseSha
 ```
 

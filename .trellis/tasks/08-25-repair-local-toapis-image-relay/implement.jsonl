@@ -1,0 +1,3 @@
+{"_example": "Fill with {\"file\": \"<path>\", \"reason\": \"<why>\"}. Put spec/research files only — no code paths. Run `python .trellis/scripts/get_context.py --mode packages` to list available specs. Delete this line once real entries are added."}
+{"file": ".trellis/spec/fluxpost/rules.md", "reason": "FluxPost quality and external-service boundaries"}
+{"file": ".trellis/spec/fluxpost/architecture_rules.md", "reason": "Local runtime and configuration ownership boundaries"}
