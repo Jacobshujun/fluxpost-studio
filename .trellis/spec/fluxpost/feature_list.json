@@ -338,7 +338,7 @@
         "A per-image GPT reconstruction node durably fans out 1-18 images, resumes accepted provider tasks, aggregates ordered partial results, retries failures only, and blocks partial drafts from publishing"
       ],
       "evidence": [
-        "2026-08-25 Canvas V2 schedules stopped applying the temporary default-2/maximum-5 admission gate; all eligible children enqueue durably while existing Canvas/image/local-image pools retain execution protection. Focused checks and the full offline baseline passed without live providers.",
+        "2026-08-25 Canvas V2 schedules enqueue all eligible children; V1/V2 partial per-image child, row, and shared-stage retries reuse original runs while preserving successes and review drafts. Focused checks, full offline baseline, mocked Chromium at 1440x960/390x844, and clean port-3001 candidate identity/HTTP passed without live providers or Feishu.",
         "2026-08-24 competitor-workbook 200/778 parsing, admin/redaction boundaries, ordered hierarchy, shared GPT references, concurrency, retry/partial draft synchronization, build, smoke, and full offline baseline passed without live providers or Feishu.",
         "2026-08-20/21 video-loader local FFmpeg/FFprobe upload, selected/frozen scheduling, Faster Whisper v4 UTF-8 revisions, optimistic locking, hash-gated isolated re-render, waveform/cache checks, full offline baselines, and desktop/mobile mocked Chromium passed without external calls or text disclosure."
       ],

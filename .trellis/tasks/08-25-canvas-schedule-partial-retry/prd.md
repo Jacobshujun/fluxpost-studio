@@ -21,13 +21,13 @@ Restore Canvas batch retry when per-image GPT reconstruction is partially comple
 
 ## Acceptance Criteria
 
-- [ ] A V1 partial per-image task shows `重试失败图片` and queues its existing run.
-- [ ] A V2 partial child task supports single-child retry; a row action retries every failed or retryable partial child and leaves completed children unchanged.
-- [ ] A partial shared stage retries only before artifacts freeze or children launch.
-- [ ] A `partial` task without a failed `model.gpt-image-each` child remains non-retryable and returns a clear validation error if requested directly.
-- [ ] Per-image retry submits only failed children and preserves ordered successes.
-- [ ] Deterministic scheduler and image-each checks, TypeScript, lint, production build, and the full offline Trellis baseline pass without provider or Feishu calls.
-- [ ] The verified change is committed before the clean current HEAD is activated on port `3001`; HTTP smoke passes and no push or deployment occurs.
+- [x] A V1 partial per-image task shows `重试失败图片` and queues its existing run.
+- [x] A V2 partial child task supports single-child retry; a row action retries every failed or retryable partial child and leaves completed children unchanged.
+- [x] A partial shared stage retries only before artifacts freeze or children launch.
+- [x] A `partial` task without a failed `model.gpt-image-each` child remains non-retryable and returns a clear validation error if requested directly.
+- [x] Per-image retry submits only failed children and preserves ordered successes.
+- [x] Deterministic scheduler and image-each checks, TypeScript, lint, production build, and the full offline Trellis baseline pass without provider or Feishu calls.
+- [x] The verified change is committed before the clean current HEAD is activated on port `3001`; HTTP smoke passes and no push or deployment occurs.
 
 ## Out Of Scope
 
