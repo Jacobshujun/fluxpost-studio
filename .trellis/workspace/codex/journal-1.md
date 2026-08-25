@@ -1797,3 +1797,37 @@ Enabled V1/V2 schedule retries for partial per-image failures while preserving s
 ### Next Steps
 
 - None - task complete
+
+
+## Session 54: Isolate Excel review policy
+
+**Date**: 2026-08-25
+**Task**: Isolate Excel review policy
+**Branch**: `local`
+
+### Summary
+
+Removed Excel/Canvas partial policy from review and Feishu, restored failed-only retries and shared V2 aggregation, added PostgreSQL/SQLite legacy-key cleanup, verified cleanup 7 to 0 and desktop/mobile review controls, and activated a clean local candidate.
+
+### Main Changes
+
+(Add details)
+
+### Git Commits
+
+| Hash | Message |
+|------|---------|
+| `d61d3966ae6afae5916ff82bccfcc97170d27c56` | (see git log) |
+| `00605bf` | (see git log) |
+
+### Testing
+
+- [OK] (Add test results)
+
+### Status
+
+[OK] **Completed**
+
+### Next Steps
+
+- None - task complete
