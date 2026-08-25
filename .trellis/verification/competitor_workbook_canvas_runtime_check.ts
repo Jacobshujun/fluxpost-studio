@@ -225,7 +225,6 @@ function scheduleFixture(workflow: CanvasWorkflow, snapshot: CompetitorWorkbookS
     totalChildTasks: 0,
     totalContentTasks: 0,
     totalImageTasks: 0,
-    taskConcurrency: 2,
     createdAt: "2026-08-24T00:00:00.000Z",
     updatedAt: "2026-08-24T00:00:00.000Z",
   };

@@ -134,7 +134,6 @@ export async function createCanvasSchedule(account: WorkspaceAccessActor, input:
     totalChildTasks: schemaVersion === 2 ? 0 : undefined,
     totalContentTasks: 0,
     totalImageTasks: 0,
-    taskConcurrency: 2,
     createdAt: now,
     updatedAt: now,
   };
@@ -144,7 +143,7 @@ export async function createCanvasSchedule(account: WorkspaceAccessActor, input:
 export async function updateCanvasScheduleDraft(
   scheduleId: string,
   account: WorkspaceAccessActor,
-  input: { revision: number; name?: string; batches?: ScheduleBatchDraft[]; definition?: CanvasScheduleV2Definition; taskConcurrency?: number },
+  input: { revision: number; name?: string; batches?: ScheduleBatchDraft[]; definition?: CanvasScheduleV2Definition },
 ) {
   const current = await requireSchedule(scheduleId, account);
   if (!mutableScheduleStatuses.has(current.status)) throw new Error("Launched schedules are immutable. Duplicate this schedule to edit it.");
@@ -161,7 +160,6 @@ export async function updateCanvasScheduleDraft(
       revision: current.revision + 1,
       status: "draft",
       definition: normalizeCanvasScheduleV2Definition(input.definition),
-      taskConcurrency: normalizeInteger(input.taskConcurrency ?? current.taskConcurrency ?? 2, 1, 5, "Task concurrency"),
       mainTasks: [],
       previewRevision: undefined,
       workflowSnapshot: undefined,
@@ -189,7 +187,6 @@ export async function updateCanvasScheduleDraft(
     workflowSnapshot: undefined,
     totalContentTasks: 0,
     totalImageTasks: 0,
-    taskConcurrency: current.taskConcurrency || 2,
     error: undefined,
     updatedAt: now,
   };
@@ -386,7 +383,6 @@ export async function duplicateCanvasSchedule(scheduleId: string, account: Works
     totalChildTasks: isCanvasScheduleV2(source) ? 0 : undefined,
     totalContentTasks: 0,
     totalImageTasks: 0,
-    taskConcurrency: source.taskConcurrency || 2,
     createdAt: now,
     updatedAt: now,
   };
@@ -939,7 +935,7 @@ async function launchCanvasScheduleV2(current: CanvasSchedule, account: Workspac
       continue;
     }
   }
-  if (!hasSharedOutputs) runs.push(...prepareCanvasScheduleV2Admissions(next, next.taskConcurrency || 2, now));
+  if (!hasSharedOutputs) runs.push(...prepareCanvasScheduleV2PendingChildRuns(next, now));
   try {
     await launchCanvasScheduleInDb(next, current.revision, runs);
   } catch (error) {
@@ -1379,8 +1375,8 @@ async function reconcileCanvasScheduleV2(current: CanvasSchedule) {
     }
   }
   if (current.status !== "paused") {
-    if (await activateCanvasScheduleV2Retries(next, next.taskConcurrency || 2, now)) changed = true;
-    const admissionRuns = prepareCanvasScheduleV2Admissions(next, next.taskConcurrency || 2, now);
+    if (await activateCanvasScheduleV2Retries(next, now)) changed = true;
+    const admissionRuns = prepareCanvasScheduleV2PendingChildRuns(next, now);
     if (admissionRuns.length) {
       next.status = deriveAggregateStatus(next.mainTasks!.map((item) => item.status), false);
       next.revision = current.revision + 1;
@@ -1849,7 +1845,7 @@ function scheduleRunIds(schedule: CanvasSchedule) {
   ]);
 }
 
-function prepareCanvasScheduleV2Admissions(schedule: CanvasSchedule, concurrency: number, now: string) {
+function prepareCanvasScheduleV2PendingChildRuns(schedule: CanvasSchedule, now: string) {
   if (!schedule.definition || !schedule.workflowSnapshot) throw new Error("V2 schedule runtime snapshot is missing.");
   const workflow = {
     id: schedule.workflowId,
@@ -1857,14 +1853,10 @@ function prepareCanvasScheduleV2Admissions(schedule: CanvasSchedule, concurrency
     ownerUserId: schedule.ownerUserId,
     ownerDisplayName: schedule.ownerDisplayName,
   };
-  const active = schedule.mainTasks?.flatMap((main) => main.childTasks)
-    .filter((child) => child.runId && !terminalRunStatuses.has(child.status)).length || 0;
-  const available = Math.max(0, concurrency - active);
-  if (!available) return [];
   const candidates = (schedule.mainTasks || []).flatMap((main) => {
     const sharedReady = !(schedule.definition?.sharedOutputs?.length) || main.sharedStatus === "completed";
     return sharedReady ? main.childTasks.filter((child) => !child.runId && child.status === "pending").map((child) => ({ main, child })) : [];
-  }).slice(0, available);
+  });
   return candidates.map(({ main, child }, index) => {
     child.runId = canvasScheduleV2ChildRunId(child.id);
     child.status = "queued";
@@ -1920,14 +1912,11 @@ function assertCompetitorWorkbookSourcesMatch(
   }
 }
 
-async function activateCanvasScheduleV2Retries(schedule: CanvasSchedule, concurrency: number, now: string) {
-  let active = schedule.mainTasks?.flatMap((main) => main.childTasks)
-    .filter((child) => child.runId && !child.retryPending && !terminalRunStatuses.has(child.status)).length || 0;
+async function activateCanvasScheduleV2Retries(schedule: CanvasSchedule, now: string) {
   let changed = false;
   for (const main of schedule.mainTasks || []) {
     if (schedule.definition?.sharedOutputs?.length && main.sharedStatus !== "completed") continue;
     for (const child of main.childTasks) {
-      if (active >= concurrency) return changed;
       if (!child.retryPending || !child.runId) continue;
       try {
         const run = await getCanvasRun(child.runId, ownerActor(schedule));
@@ -1945,7 +1934,6 @@ async function activateCanvasScheduleV2Retries(schedule: CanvasSchedule, concurr
         child.updatedAt = now;
         main.status = "running";
         main.updatedAt = now;
-        active += 1;
         changed = true;
       } catch (error) {
         child.status = "failed";

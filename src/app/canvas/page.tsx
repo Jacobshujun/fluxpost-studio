@@ -3511,7 +3511,7 @@ function CanvasScheduleCenter({ workflow, graph, onSaveBindings, onPreview, onCl
         const revision = current?.id === schedule.id ? current.revision : schedule.revision;
         const data = await api<{ schedule: CanvasSchedule }>(`/api/canvas/schedules/${schedule.id}`, {
           method: "PATCH",
-          body: JSON.stringify({ action: "save", revision, name: schedule.name, batches: schedule.batches, definition: schedule.definition, taskConcurrency: schedule.taskConcurrency }),
+          body: JSON.stringify({ action: "save", revision, name: schedule.name, batches: schedule.batches, definition: schedule.definition }),
         });
         data.schedule = mergeCanvasScheduleWorkbookPaths(data.schedule, schedule);
         if (editSequenceRef.current === sequence) {
@@ -3730,7 +3730,6 @@ function CanvasScheduleCenter({ workflow, graph, onSaveBindings, onPreview, onCl
                 totalImageTasks: 0,
                 previewRevision: undefined,
               }))}
-              onConcurrencyChange={(taskConcurrency) => patchSelected((schedule) => ({ ...schedule, taskConcurrency }))}
               onAction={(action, payload, saveFirst) => void scheduleAction(action, payload, saveFirst)}
             /> : <>
               <div className="canvas-schedule-batches">
@@ -3764,12 +3763,11 @@ function CanvasScheduleCenter({ workflow, graph, onSaveBindings, onPreview, onCl
   </div>;
 }
 
-function CanvasScheduleV2Editor({ schedule, graph, busy, onDefinitionChange, onConcurrencyChange, onAction, onPreview }: {
+function CanvasScheduleV2Editor({ schedule, graph, busy, onDefinitionChange, onAction, onPreview }: {
   schedule: CanvasSchedule;
   graph: CanvasGraph;
   busy: boolean;
   onDefinitionChange: (definition: CanvasScheduleV2Definition) => void;
-  onConcurrencyChange: (taskConcurrency: number) => void;
   onAction: (action: string, payload?: Record<string, unknown>, saveFirst?: boolean) => void;
   onPreview: (preview: Extract<NonNullable<PreviewState>, { kind: "image" }>) => void;
 }) {
@@ -3902,7 +3900,6 @@ function CanvasScheduleV2Editor({ schedule, graph, busy, onDefinitionChange, onC
         <label><span>主任务目标（可选）</span><select value={definition.mainTargetNodeId || ""} onChange={(event) => patchDefinition({ mainTargetNodeId: event.target.value || undefined })}><option value="">仅汇总子任务结果</option>{mainTargets.map((node) => <option key={node.id} value={node.id}>{canvasNodeOptionLabel(node)}</option>)}</select></label>
         <label><span>失败聚合</span><select value={definition.aggregationPolicy} onChange={(event) => patchDefinition({ aggregationPolicy: event.target.value as CanvasScheduleV2Definition["aggregationPolicy"] })}><option value="at-least-one">至少一个成功</option><option value="all">必须全部成功</option></select></label>
       </div>
-      <label><span>任务并发</span><select value={schedule.taskConcurrency || 2} onChange={(event) => onConcurrencyChange(Number(event.target.value))}>{[1, 2, 3, 4, 5].map((value) => <option key={value} value={value}>{value}</option>)}</select></label>
       {workbookSource?.mode === "competitor-workbook" ? <div className="canvas-workbook-schedule-source">
         <label><span>工作簿路径</span><input value={workbookSource.filePath || ""} onChange={(event) => patchWorkbookSource({ filePath: event.target.value })} /></label>
         <label><span>工作表</span><input value={workbookSource.worksheet} onChange={(event) => patchWorkbookSource({ worksheet: event.target.value })} /></label>

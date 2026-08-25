@@ -48,7 +48,6 @@ export async function PATCH(request: Request, context: RouteContext) {
       name?: string;
       batches?: CanvasScheduleBatch[];
       definition?: CanvasScheduleV2Definition;
-      taskConcurrency?: number;
       batchId?: string;
       contentTaskId?: string;
       imageTaskId?: string;
@@ -63,7 +62,6 @@ export async function PATCH(request: Request, context: RouteContext) {
         name: body.name,
         batches: body.batches,
         definition: body.definition,
-        taskConcurrency: body.taskConcurrency,
       });
     } else if (action === "preflight") {
       schedule = await preflightCanvasSchedule(scheduleId, account, Number(body.revision));

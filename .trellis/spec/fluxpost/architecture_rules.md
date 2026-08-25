@@ -992,7 +992,7 @@ if (!field?.parameterTypes.includes(parameter.valueType)) throw new Error("Incom
 - Admin API: `POST /api/canvas/competitor-workbook` accepts `{ path, worksheet?, rowStart?, rowEnd? }` and returns `{ workbook: CompetitorWorkbookInspection }` without the submitted path.
 - Parser: `inspectCompetitorWorkbook(...)`, `freezeCompetitorWorkbook(...)`, and `readCompetitorWorkbookSelection(...)` use `read-excel-file/node`.
 - V2 source: `{ mode: "competitor-workbook", filePath?, worksheet, rowStart?, rowEnd?, snapshot?, field: "title" | "body" | "card" }`.
-- Schedule: `CanvasSchedule.taskConcurrency?: number`; V2 draft save normalizes it to `1..5`, default `2`. `PATCH /api/canvas/schedules/:id` supports `retry` with `mainTaskId + childTaskId` and `retry-row` with `mainTaskId`.
+- Schedule: V2 batch execution has no per-schedule concurrency control. Historical `CanvasSchedule.taskConcurrency` values are inert compatibility data. `PATCH /api/canvas/schedules/:id` supports `retry` with `mainTaskId + childTaskId` and `retry-row` with `mainTaskId`.
 
 ### 3. Contracts
 
@@ -1001,7 +1001,7 @@ if (!field?.parameterTypes.includes(parameter.valueType)) throw new Error("Incom
 - Preflight freezes SHA-256 of the consumed bytes, filename, worksheet, inclusive row range, Excel row number, sequence, full title/body, and ordered non-empty card snapshots. A range may select at most 300 retained rows; later workbook edits cannot change launched work.
 - Title/body workbook parameters use main scope and card uses child scope; all use `each` and one matching snapshot. Every other parameter is fixed/shared. Each row becomes one main task and each card becomes one child task in Excel column order.
 - Shared image references are frozen through existing asset snapshots. Direct plus bound GPT references may total at most 16. `model.gpt-image@2` configuration and execution contracts remain unchanged.
-- The scheduler admits only enough non-terminal child runs to fill `taskConcurrency`. Pause blocks admission, resume continues from persisted tasks, cancel uses existing run cancellation, and restart reconciliation reads the frozen schedule.
+- The scheduler atomically enqueues every eligible child run. Pause defers queued work, resume releases it, cancel uses existing run cancellation, and restart reconciliation reads the frozen schedule. Execution remains bounded by the shared Canvas worker and provider pools rather than a second schedule-level gate.
 - At least one successful card permits one `partial` review draft; all failed cards fail the row. Card/row retries preserve the row's `generatedPostId` and synchronize ordered images into that draft instead of creating another. Frozen body text remains complete; `compose.social-post` applies the existing 20-visible-character title and governed 1000-character body persistence policies.
 
 ### 4. Validation & Error Matrix
@@ -1013,13 +1013,13 @@ if (!field?.parameterTypes.includes(parameter.valueType)) throw new Error("Incom
 | Missing sheet/header, retained row without title/body/cards, invalid bounds, empty range, or over 300 selected rows | Preflight HTTP `400`; no tasks inserted |
 | Workbook parameters disagree on file/sheet/range or lack a child card binding | Preflight HTTP `400` |
 | Non-fixed companion parameter or more than 16 frozen GPT references | Preflight HTTP `400` before provider work |
-| `taskConcurrency` outside `1..5` or retrying a non-failed/missing card/row | HTTP `400` |
+| Retrying a non-failed/missing card/row | HTTP `400` |
 | One or more card successes | One completed/partial review draft with ordered successful images |
 | Every card fails | Failed row and no successful aggregate draft |
 
 ### 5. Good/Base/Bad Cases
 
-- Good: 200 retained rows and 778 non-empty cards freeze into 200 main tasks and 778 children, all sharing one immutable reference set while only two child runs are admitted by default.
+- Good: 200 retained rows and 778 non-empty cards freeze into 200 main tasks and 778 children, all sharing one immutable reference set; every eligible child is durably enqueued while Canvas workers and the shared image pool control execution pressure.
 - Good: a failed card is retried after a partial draft exists; its successful image is inserted at the original card position in the same draft.
 - Base: an administrator selects one row and one non-empty card for an ordinary node test without creating a batch.
 - Bad: reread the desktop workbook during child execution, trust a historical JSON path from another sheet, log or serialize the absolute path, flatten cards into unrelated main tasks, regenerate title/body with a text model, or create another draft on retry.
@@ -1027,7 +1027,7 @@ if (!field?.parameterTypes.includes(parameter.valueType)) throw new Error("Incom
 ### 6. Tests Required
 
 - `.trellis/verification/competitor_workbook_canvas_check.mjs` covers deterministic 200/778 parsing, ignored history-sheet paths, missing/blank/invalid/oversized/range cases, ordered hierarchy, shared 16-reference behavior, full long-body snapshots, GPT V2 compatibility, and API response redaction.
-- `.trellis/verification/competitor_workbook_canvas_runtime_check.ts` and `canvas_scheduler_check.mjs` cover progressive concurrency `1/2/5`, pause/resume/restart state, partial/all-failed rows, card/row retry, ordered aggregation, and original-draft synchronization without provider calls.
+- `.trellis/verification/competitor_workbook_canvas_runtime_check.ts` and `canvas_scheduler_check.mjs` cover unrestricted eligible-child admission, inert historical concurrency values, pause/resume/restart state, partial/all-failed rows, card/row retry, ordered aggregation, and original-draft synchronization without provider calls.
 - TypeScript, lint, build, complete isolated baseline, and post-commit desktop/mobile `/canvas` browser checks must pass. Automated checks must not call GPT, image providers, or Feishu.
 
 ### 7. Wrong vs Correct
