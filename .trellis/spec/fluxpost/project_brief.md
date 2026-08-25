@@ -35,23 +35,19 @@ Last updated: 2026-08-20
 - Framework: Next.js 16.2.6 App Router.
 - UI/runtime: React 19.2.4, TypeScript, Tailwind/PostCSS, `lucide-react`.
 - Database driver: `pg` is installed for optional PostgreSQL runtime storage.
-- Package manager: npm, confirmed by `package-lock.json`.
+- Package manager: npm (`package-lock.json`).
 - Scripts from `package.json`:
-  - `npm run local`: build the clean current HEAD in an inactive local slot, then run it as the only local versioned candidate on `127.0.0.1:3001`, with normal background workers, full-SHA identity, and previous-slot restoration on activation failure.
-  - `npm run local:lan`: same candidate on `0.0.0.0:3001`; compatibility aliases are `local:restart` and `start:lan`.
+  - `npm run local`: build clean current HEAD in an inactive slot, then activate the sole local candidate on `127.0.0.1:3001` with normal workers and full-SHA identity; restore the prior slot if activation fails.
+  - `npm run local:lan`: bind that candidate to `0.0.0.0:3001`; aliases: `local:restart`, `start:lan`.
   - `npm run build`: Next production build.
   - `npm run start`: Next production server.
   - `npm run local:parity`: require exact equality among clean local HEAD/runtime, GitHub `origin/main`, and production identity.
   - `npm run lark:tasks`: poll configured Feishu/Lark chats through `lark-cli` and submit explicit task commands to the local app.
   - `npm run lark:events`: consume real-time Feishu/Lark `im.message.receive_v1` events through `lark-cli event consume` and submit explicit task commands to the local app.
-  - `npm run db:diagnose`: run read-only local PostgreSQL diagnostics through `FLUXPOST_DIAG_DATABASE_URL`, showing queue state, recent logs, active sessions, lock blockers, and key PostgreSQL settings without printing the connection string.
+  - `npm run db:diagnose`: use `FLUXPOST_DIAG_DATABASE_URL` for read-only queue, log, session, lock, and PostgreSQL-setting diagnostics without printing the connection string.
   - `npm run db:migrate:postgres`: copy current SQLite runtime rows into a PostgreSQL database configured by `DATABASE_URL`.
   - `npm run lint`: ESLint.
-- Local setup confirmed by README:
-  - `npm install`
-  - create `.env.local` from the README Environment section
-  - commit the verified worktree, then run `npm run local`
-  - open `http://127.0.0.1:3001`
+- Local setup: run `npm install`, create `.env.local` from README, commit the verified worktree, run `npm run local`, then open `http://127.0.0.1:3001`.
 
 ## Page, API, CLI Entrypoints
 

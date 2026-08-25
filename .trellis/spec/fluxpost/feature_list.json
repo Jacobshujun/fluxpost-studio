@@ -340,8 +340,7 @@
       "evidence": [
         "2026-08-25 Canvas V2 schedules stopped applying the temporary default-2/maximum-5 admission gate; all eligible children enqueue durably while existing Canvas/image/local-image pools retain execution protection. Focused checks and the full offline baseline passed without live providers.",
         "2026-08-24 competitor-workbook 200/778 parsing, admin/redaction boundaries, ordered hierarchy, shared GPT references, concurrency, retry/partial draft synchronization, build, smoke, and full offline baseline passed without live providers or Feishu.",
-        "2026-08-20 video-loader real local FFmpeg/FFprobe upload, selected output, frozen scheduling, full offline baseline, and mocked Chromium desktop/mobile queue checks passed without external services.",
-        "2026-08-21 Faster Whisper v4 UTF-8 plus manual revisions, optimistic locking, frozen hash gating, isolated re-render, waveform/cache checks, two baselines, and desktop/mobile mocked Chromium passed without external calls or text disclosure."
+        "2026-08-20/21 video-loader local FFmpeg/FFprobe upload, selected/frozen scheduling, Faster Whisper v4 UTF-8 revisions, optimistic locking, hash-gated isolated re-render, waveform/cache checks, full offline baselines, and desktop/mobile mocked Chromium passed without external calls or text disclosure."
       ],
       "notes": "Keep ready_for_review until unrestricted Canvas image admission, Seedance/Feishu/provider runs, and PostgreSQL multi-user concurrency are live-verified; one recent subtitle input is acoustically verified."
     },
