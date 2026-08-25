@@ -1,6 +1,6 @@
 # Trellis Rules
 
-Last updated: 2026-07-01
+Last updated: 2026-08-25
 
 ## Context Budgets
 
@@ -9,6 +9,11 @@ Last updated: 2026-07-01
 - Default startup files are `AGENTS.md`, `.trellis/spec/fluxpost/status.md`, `.trellis/spec/fluxpost/feature_list.json`, and `.trellis/spec/fluxpost/rules.md`.
 - Typical code-task files are the default startup files plus `.trellis/spec/fluxpost/project_brief.md` when product scope, users, product behavior, or technical stack are involved, and `.trellis/spec/fluxpost/verification.md` before claiming completion.
 - Read `pitfalls.md`, `architecture_rules.md`, `decisions.md`, or archive files only by relevant section, heading, date, keyword, feature id, or explicit need.
+
+## User Decisions
+
+- Use brief, beginner-friendly language; explain unavoidable jargon plainly.
+- State each option's impact, recommend one with a reason, and require no implementation knowledge.
 
 ## Handoff And Progress Reading
 
