@@ -4,28 +4,27 @@ Last updated: 2026-08-24
 
 ## One-Line Status
 
-Per-image Canvas GPT reconstruction supports shared reference images and is verified and active on port 3001 from the clean committed candidate.
+Excel competitor-workbook Canvas generation is implemented and offline-verified; commit approval and the clean port-3001 browser gate remain.
 
 ## Current Focus
 
-- `model.gpt-image-each@2` sends `[current source, ...shared references]` for each of 1-18 source images, with at most 15 shared references.
-- V1/V2 migration, ordering, limits, provider resume, failed-only retry, workflow persistence, schedulers, build, smoke, and full baseline passed without live providers.
-- Partial results keep their existing review-draft and Feishu publish guards.
+- `input.competitor-workbook@1` freezes local `.xlsx` rows/cards for administrator-only Canvas V2 schedules and reuses prompt-template, GPT-Image-2 V2, shared references, and social-post composition.
+- Hierarchical row/card scheduling supports concurrency `1-5`, progressive admission, pause/resume/cancel/restart, partial drafts, and card/row retry into the original draft.
+- Deterministic 200-row/778-card parsing, redaction, scheduler, TypeScript, lint, build, and full isolated baseline passed without live providers or Feishu.
 
 ## Next Entry
 
-Use the port-3001 Canvas candidate for operator review. Do not push or deploy without approval.
+Present the commit grouping for approval. After an approved commit, activate the clean candidate with `npm run local` and complete desktop/mobile `/canvas` checks on port 3001.
 
 ## Recent Verification
 
-- 2026-08-24: Shared-reference per-image checks, full baseline, clean candidate activation, matching version identity, and `/canvas` HTTP 200 passed.
-- 2026-08-24: Original per-image node, provider resume, publish guards, scheduler compatibility, baseline, candidate activation, and HTTP smoke passed.
-- 2026-08-21: Standalone GPT text checks, baseline, candidate activation, and authenticated draft refresh passed.
+- 2026-08-24: Competitor-workbook 200/778 parsing, hierarchy, shared-reference/redaction, retry/partial-draft, TypeScript, lint, build, isolated HTTP smoke, and full offline baseline passed.
+- 2026-08-24: Prior per-image reconstruction, provider resume, publish guards, clean candidate activation, and HTTP smoke passed.
 
 ## Risks And Unknowns
 
 - Nine high-severity transitive package advisories remain; do not run npm audit fix --force during routine releases.
-- Historical local-only media not present in TOS could not be recovered from NTFS without corruption; PostgreSQL rows remain intact and missing files may require source recache or regeneration.
+- The workbook candidate has not replaced port 3001 because local activation requires a clean committed worktree; responsive browser evidence is pending that gate.
 - Archive refs are local only and intentionally not pushed because they include local task screenshots/evidence.
 
 ## History

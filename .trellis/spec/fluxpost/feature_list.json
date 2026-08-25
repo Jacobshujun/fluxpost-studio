@@ -331,14 +331,14 @@
         "Default deterministic verification covers graph, persistence, API, desktop, and mobile contracts without paid provider or Feishu writes",
         "A passive save-images node freezes 1-30 references for explicit signed-in desktop downloads without server paths or new persistence",
         "Desktop fragments preserve internal edges, configuration, layout, execution mode, and scheduler roles across workflows, while versioned FluxPost JSON exports current edit state and imports as a new owner-scoped workflow",
-        "Batch scheduler V1 freezes multi-batch asset and copy samples, launches image children atomically, aggregates one review draft per scene, and supports pause, cancel, retry, and explicit candidate acceptance",
-        "Copy-library inputs freeze independent title/body/tag snapshots and the standard batch skeleton performs separate title and body text-model calls before content composition",
-        "Batch scheduler V2 lets users define typed main/child parameters, source filters, fixed/full/random expansion with exact or inclusive-range counts, main-once and child-per-main preview-frozen no-replacement selection, cartesian/zip composition, explicit node-field bindings, partial/strict aggregation, custom names for same-type Canvas nodes, and explicit main-task shared upstream results",
+        "Batch schedulers freeze asset/copy samples, support pause/cancel/retry, and aggregate one review draft per main task; copy inputs keep independent title/body/tag snapshots",
+        "Scheduler V2 supports typed main/child parameters, fixed/each/random cartesian or zip expansion, stable field bindings, shared main outputs, partial/strict aggregation, and custom node names",
+        "Administrator-only xlsx sources freeze selected rows and ordered card children, reuse GPT-Image-2 V2 plus shared references, and retain one local review draft per row across retries",
         "A local video-loader node keeps up to 200 ordered MP4/MOV/WebM snapshots, emits only the selected video in ordinary runs, and freezes one video per V2 scheduled task",
         "A per-image GPT reconstruction node durably fans out 1-18 images, resumes accepted provider tasks, aggregates ordered partial results, retries failures only, and blocks partial drafts from publishing"
       ],
       "evidence": [
-        "2026-08-24 shared-reference per-image GPT reconstruction order, limits, V1/V2 migration, resume, retry, persistence, schedulers, build, smoke, and offline baseline passed without live providers.",
+        "2026-08-24 competitor-workbook 200/778 parsing, admin/redaction boundaries, ordered hierarchy, shared GPT references, concurrency, retry/partial draft synchronization, build, smoke, and full offline baseline passed without live providers or Feishu.",
         "2026-08-20 video-loader real local FFmpeg/FFprobe upload, selected output, frozen scheduling, full offline baseline, and mocked Chromium desktop/mobile queue checks passed without external services.",
         "2026-08-21 Faster Whisper v4 UTF-8 plus manual revisions, optimistic locking, frozen hash gating, isolated re-render, waveform/cache checks, two baselines, and desktop/mobile mocked Chromium passed without external calls or text disclosure."
       ],

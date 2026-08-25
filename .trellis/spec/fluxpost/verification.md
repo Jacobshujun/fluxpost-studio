@@ -19,7 +19,7 @@ The baseline verifies:
 
 - Trellis file existence, context budgets, latest markers, JSON validity, and feature evidence limits.
 - PostgreSQL schema, accounts/ownership, libraries, configuration, TOS, v4 deployment/image-retention/timer scripts, execution logs, platform mappings, media, video, concurrency, queues, Feishu boundaries, source imports, review flows, and row-level persistence.
-- Infinite Canvas graph/API/DAG, incomplete-draft persistence, execution readiness, common nodes, subtitle recognition/render/revision/waveform/cache contracts, media, provider resume, scheduler, copy-library, and original-batch behavior without paid calls.
+- Infinite Canvas graph/API/DAG, incomplete-draft persistence, execution readiness, common nodes, competitor-workbook parsing/redaction/hierarchical scheduling, subtitle recognition/render/revision/waveform/cache contracts, media, provider resume, scheduler, copy-library, and original-batch behavior without paid calls.
 - Canvas local video-loader snapshot, streaming upload/FFprobe, selected-literal output, frozen V2 queue, and single-video task contracts without external storage calls.
 - Finished-body Unicode counting, 800-target prompts, one-repair fallback, history promotion, persistence consistency, editor clamping, Canvas composition, and Feishu exemptions without paid calls.
 - Runtime identity/secrecy, manifest-derived activation identity, candidate-only local startup, loopback/LAN bindings, and parity command contracts.
@@ -45,10 +45,9 @@ Do not deploy a dirty worktree, branch name, abbreviated SHA, local runtime rows
 
 ## Recent Verification
 
-- 2026-08-24: Shared-reference per-image GPT reconstruction request ordering, limits, V1/V2 migration, provider resume, failed-only retry, Canvas persistence/schedulers, TypeScript, lint, build, isolated smoke, and full offline baseline passed without live providers.
+- 2026-08-24: Competitor-workbook 200-row/778-card parsing, invalid-input and path-redaction boundaries, hierarchy, shared references, progressive concurrency, retry/partial-draft synchronization, GPT V2 compatibility, TypeScript, lint, build, isolated smoke, and full offline baseline passed without live providers or Feishu.
 - 2026-08-21: Clean `b672f9a577b4f981b9cb3d4a80527af795a49c95` activated on loopback port 3001 with matching `/api/version` identity and `/canvas` HTTP 200. An isolated authenticated browser used the same candidate and real PostgreSQL to create, update to revision 2, refresh, and read back an incomplete draft; cleanup left zero fixture workflows, sessions, and accounts.
 - 2026-08-21: Canvas draft persistence now separates structural save validation from execution readiness; isolated SQLite create/update/read/delete, malformed-config rejection, Canvas focused checks, TypeScript, lint, build, and the full offline baseline passed.
-- 2026-08-21: Canvas workflow save serialization, delayed automatic/manual intent merging, revision chaining, failure blocking/manual retry, TypeScript, lint, build, full offline baseline, and mocked Chromium against clean port 3001 passed; candidate identity matched and `/canvas` returned 200.
 Older evidence is preserved in `.trellis/spec/fluxpost/archive/verification-history.md`.
 
 ## Missing Coverage
