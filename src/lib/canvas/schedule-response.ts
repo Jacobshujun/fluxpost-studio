@@ -1,4 +1,4 @@
-import type { CanvasGraph, CanvasLatestSuccessfulNodeRun, CanvasRun, CanvasSchedule, CanvasWorkflow } from "./types";
+import type { CanvasGraph, CanvasLatestNodeAttempt, CanvasLatestSuccessfulNodeRun, CanvasRun, CanvasSchedule, CanvasWorkflow } from "./types";
 
 export function canvasScheduleResponse(schedule: CanvasSchedule) {
   const response = structuredClone(schedule);
@@ -22,16 +22,23 @@ export function canvasRunResponse(run: CanvasRun) {
   return { ...structuredClone(run), graphSnapshot: redactCompetitorWorkbookGraph(run.graphSnapshot) };
 }
 
-export function canvasRunHistoryResponse(history: { runs: CanvasRun[]; latestSuccessfulNodeRuns: CanvasLatestSuccessfulNodeRun[] }) {
-  const workbookNodeIds = new Set(history.runs.flatMap((run) => run.graphSnapshot.nodes
-    .filter((node) => node.type === "input.competitor-workbook")
-    .map((node) => node.id)));
+export function canvasRunHistoryResponse(history: {
+  runs: CanvasRun[];
+  latestNodeAttempts: CanvasLatestNodeAttempt[];
+  latestSuccessfulNodeRuns: CanvasLatestSuccessfulNodeRun[];
+}) {
   return {
     runs: history.runs.map(canvasRunResponse),
-    latestSuccessfulNodeRuns: history.latestSuccessfulNodeRuns.map((item) => workbookNodeIds.has(item.nodeRun.nodeId) ? {
-      ...structuredClone(item),
-      nodeConfig: { ...structuredClone(item.nodeConfig), path: "" },
-    } : structuredClone(item)),
+    latestNodeAttempts: history.latestNodeAttempts.map(redactCanvasNodeRunProjection),
+    latestSuccessfulNodeRuns: history.latestSuccessfulNodeRuns.map(redactCanvasNodeRunProjection),
+  };
+}
+
+function redactCanvasNodeRunProjection<T extends CanvasLatestNodeAttempt>(item: T): T {
+  if (item.nodeRun.nodeType !== "input.competitor-workbook") return structuredClone(item);
+  return {
+    ...structuredClone(item),
+    nodeConfig: { ...structuredClone(item.nodeConfig), path: "" },
   };
 }
 

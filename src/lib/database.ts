@@ -2703,6 +2703,51 @@ export async function listCanvasRunsFromDb(limit = 40) {
   return rows.map((row) => fromJson<CanvasRun>(row.data_json));
 }
 
+export async function listCanvasRunsForWorkflowFromDb(workflowId: string, limit = 40) {
+  await ensureDatabaseReady();
+  if (getDatabaseBackend() === "postgres") {
+    const result = await getPostgresPool().query<JsonRow>(
+      "SELECT data_json FROM canvas_runs WHERE workflow_id = $1 ORDER BY created_at DESC LIMIT $2",
+      [workflowId, limit],
+    );
+    return result.rows.map((row) => fromJson<CanvasRun>(row.data_json));
+  }
+  const rows = getSqliteDatabase().prepare(
+    "SELECT data_json FROM canvas_runs WHERE workflow_id = ? ORDER BY created_at DESC LIMIT ?",
+  ).all(workflowId, limit) as JsonRow[];
+  return rows.map((row) => fromJson<CanvasRun>(row.data_json));
+}
+
+export async function listCanvasNodeRunsForWorkflowFromDb(workflowId: string) {
+  await ensureDatabaseReady();
+  type NodeRunRow = { node_run_json: unknown; run_json: unknown };
+  if (getDatabaseBackend() === "postgres") {
+    const result = await getPostgresPool().query<NodeRunRow>(
+      `SELECT node_runs.data_json AS node_run_json, canvas_runs.data_json AS run_json
+       FROM canvas_node_runs AS node_runs
+       JOIN canvas_runs ON canvas_runs.id = node_runs.run_id
+       WHERE canvas_runs.workflow_id = $1
+       ORDER BY node_runs.updated_at DESC, canvas_runs.created_at DESC, node_runs.attempt DESC`,
+      [workflowId],
+    );
+    return result.rows.map((row) => ({
+      run: fromJson<CanvasRun>(row.run_json),
+      nodeRun: fromJson<CanvasNodeRun>(row.node_run_json),
+    }));
+  }
+  const rows = getSqliteDatabase().prepare(
+    `SELECT node_runs.data_json AS node_run_json, canvas_runs.data_json AS run_json
+     FROM canvas_node_runs AS node_runs
+     JOIN canvas_runs ON canvas_runs.id = node_runs.run_id
+     WHERE canvas_runs.workflow_id = ?
+     ORDER BY node_runs.updated_at DESC, canvas_runs.created_at DESC, node_runs.attempt DESC`,
+  ).all(workflowId) as NodeRunRow[];
+  return rows.map((row) => ({
+    run: fromJson<CanvasRun>(row.run_json),
+    nodeRun: fromJson<CanvasNodeRun>(row.node_run_json),
+  }));
+}
+
 export async function listCanvasSuccessfulNodeRunsForWorkflowFromDb(workflowId: string) {
   await ensureDatabaseReady();
   type SuccessfulNodeRunRow = { node_run_json: unknown; run_json: unknown };

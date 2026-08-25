@@ -989,7 +989,9 @@ if (!field?.parameterTypes.includes(parameter.valueType)) throw new Error("Incom
 ### 2. Signatures
 
 - Node: `input.competitor-workbook@1` has no inputs and emits `title`, `body`, and `card` text. Ordinary execution reads one configured row/card or preflight-injected `rowTitle`, `rowBody`, and `cardText`.
+- `planCanvasRunWithMode(...)` blocks an included enabled workbook without a frozen row/card using `{ code: "competitor_workbook_snapshot_required" }` before Run/provider work.
 - Admin API: `POST /api/canvas/competitor-workbook` accepts `{ path, worksheet?, rowStart?, rowEnd? }` and returns `{ workbook: CompetitorWorkbookInspection }` without the submitted path.
+- `GET /api/canvas/runs?workflowId=...` adds `latestNodeAttempts`; `latestSuccessfulNodeRuns` remains the artifact/reuse source.
 - Parser: `inspectCompetitorWorkbook(...)`, `freezeCompetitorWorkbook(...)`, and `readCompetitorWorkbookSelection(...)` use `read-excel-file/node`.
 - V2 source: `{ mode: "competitor-workbook", filePath?, worksheet, rowStart?, rowEnd?, snapshot?, field: "title" | "body" | "card" }`.
 - Schedule: V2 batch execution has no per-schedule concurrency control. Historical `CanvasSchedule.taskConcurrency` values are inert compatibility data. `PATCH /api/canvas/schedules/:id` supports `retry` with `mainTaskId + childTaskId` and `retry-row` with `mainTaskId`.
@@ -997,6 +999,8 @@ if (!field?.parameterTypes.includes(parameter.valueType)) throw new Error("Incom
 ### 3. Contracts
 
 - Only administrators may inspect, configure, preflight, or normally run a fixed local workbook path. The path must be absolute, end in `.xlsx`, point to a file no larger than 25 MB, and is never returned by workflow, schedule, run, or run-history DTOs.
+- `运行全部` remains one row/card. It accepts frozen literals or the exact snapshot row/card; otherwise it selects the node and exposes freeze/batch actions. Run intent awaits autosave and deduplicates.
+- History SQL filters by workflow before limiting. All-status attempts order by update time; separate successes preserve older previews. Both redact workbook paths.
 - The default sheet is `文案汇总`. Required columns are `序号`, `标题`, `正文`, and `参数卡片1` through `参数卡片6`. Fully blank data rows are skipped; every retained row needs title, body, and at least one card.
 - Preflight freezes SHA-256 of the consumed bytes, filename, worksheet, inclusive row range, Excel row number, sequence, full title/body, and ordered non-empty card snapshots. A range may select at most 300 retained rows; later workbook edits cannot change launched work.
 - Title/body workbook parameters use main scope and card uses child scope; all use `each` and one matching snapshot. Every other parameter is fixed/shared. Each row becomes one main task and each card becomes one child task in Excel column order.
@@ -1012,6 +1016,9 @@ if (!field?.parameterTypes.includes(parameter.valueType)) throw new Error("Incom
 | Empty, relative, missing, non-file, non-`.xlsx`, empty, invalid, unreadable, or over-25-MB source | Explicit sanitized error; no path echo |
 | Missing sheet/header, retained row without title/body/cards, invalid bounds, empty range, or over 300 selected rows | Preflight HTTP `400`; no tasks inserted |
 | Workbook parameters disagree on file/sheet/range or lack a child card binding | Preflight HTTP `400` |
+| Included enabled workbook lacks one frozen test row/card | Plan blocker code `competitor_workbook_snapshot_required`; no Run or provider request |
+| Run intent arrives during autosave | Await the coordinated save, show immediate save/preflight feedback, then plan once |
+| Latest image attempt waits for network | Keep queued/running attempt and show `waitReason` plus Xray guidance; retain an older successful preview when present |
 | Non-fixed companion parameter or more than 16 frozen GPT references | Preflight HTTP `400` before provider work |
 | Retrying a non-failed/missing card/row | HTTP `400` |
 | One or more card successes | One completed/partial review draft with ordered successful images |
@@ -1022,11 +1029,12 @@ if (!field?.parameterTypes.includes(parameter.valueType)) throw new Error("Incom
 - Good: 200 retained rows and 778 non-empty cards freeze into 200 main tasks and 778 children, all sharing one immutable reference set; every eligible child is durably enqueued while Canvas workers and the shared image pool control execution pressure.
 - Good: a failed card is retried after a partial draft exists; its successful image is inserted at the original card position in the same draft.
 - Base: an administrator selects one row and one non-empty card for an ordinary node test without creating a batch.
-- Bad: reread the desktop workbook during child execution, trust a historical JSON path from another sheet, log or serialize the absolute path, flatten cards into unrelated main tasks, regenerate title/body with a text model, or create another draft on retry.
+- Bad: disable `运行全部` merely because autosave is active, create a Run before workbook readiness succeeds, globally limit runs before workflow filtering, hide a failed attempt behind a successful-only projection, or reread the desktop workbook during child execution.
 
 ### 6. Tests Required
 
-- `.trellis/verification/competitor_workbook_canvas_check.mjs` covers deterministic 200/778 parsing, ignored history-sheet paths, missing/blank/invalid/oversized/range cases, ordered hierarchy, shared 16-reference behavior, full long-body snapshots, GPT V2 compatibility, and API response redaction.
+- `.trellis/verification/competitor_workbook_canvas_check.mjs` covers deterministic 200/778 parsing, ignored history-sheet paths, missing/blank/invalid/oversized/range cases, ordered hierarchy, shared 16-reference behavior, full long-body snapshots, GPT V2 compatibility, and path redaction for runs plus both node projections.
+- `canvas_workflows_check.mjs` covers the blocker/pass cases, workflow-first history, dual projections, save feedback, waits, and artifact fallback.
 - `.trellis/verification/competitor_workbook_canvas_runtime_check.ts` and `canvas_scheduler_check.mjs` cover unrestricted eligible-child admission, inert historical concurrency values, pause/resume/restart state, partial/all-failed rows, card/row retry, ordered aggregation, and original-draft synchronization without provider calls.
 - TypeScript, lint, build, complete isolated baseline, and post-commit desktop/mobile `/canvas` browser checks must pass. Automated checks must not call GPT, image providers, or Feishu.
 

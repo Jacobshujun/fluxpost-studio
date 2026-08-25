@@ -143,6 +143,7 @@ import type {
   CanvasArtifact,
   CanvasEdge,
   CanvasGraph,
+  CanvasLatestNodeAttempt,
   CanvasLatestSuccessfulNodeRun,
   CanvasMediaReference,
   CanvasNode,
@@ -186,6 +187,11 @@ type QuickAddState = { screen: { x: number; y: number }; position: { x: number; 
 type QuickAddChoice = { definition: (typeof canvasNodeDefinitions)[number]; port?: CanvasPortDefinition };
 type CanvasCopyLibraryResponse = { entries: CopyLibraryEntryView[]; tags: string[] };
 type CanvasTaskFilter = "all" | "active" | "history" | "failed";
+type CanvasRunNotice = {
+  kind: "competitor-workbook-snapshot-required";
+  nodeId: string;
+  message: string;
+};
 type CanvasViewportDetail = "full" | "reduced" | "overview";
 type CanvasEditableConfigValue = Exclude<CanvasNode["config"][string], null | undefined>;
 type CanvasVideoUploadTask = {
@@ -203,6 +209,7 @@ type PreviewState =
   | null;
 type CanvasNodeInteraction = {
   activeRun?: CanvasRunWithNodes;
+  displayingExplicitRun: boolean;
   latestNodeRuns: Map<string, CanvasNodeRun>;
   latestSuccessfulNodeRuns: Map<string, CanvasLatestSuccessfulNodeRun>;
   selectedNodeId?: string;
@@ -234,11 +241,15 @@ export default function CanvasPage() {
   const [viewport, setViewport] = useState<Viewport>({ x: 0, y: 0, zoom: 1 });
   const [selectedNodeId, setSelectedNodeId] = useState<string>();
   const [activeRun, setActiveRun] = useState<CanvasRunWithNodes>();
+  const [latestNodeAttempts, setLatestNodeAttempts] = useState<Map<string, CanvasLatestNodeAttempt>>(new Map());
   const [latestSuccessfulNodeRuns, setLatestSuccessfulNodeRuns] = useState<Map<string, CanvasLatestSuccessfulNodeRun>>(new Map());
   const [sourceVideoBusyNodeId, setSourceVideoBusyNodeId] = useState<string>();
   const [message, setMessage] = useState("正在载入画布...");
   const [busy, setBusy] = useState(false);
   const [workflowSaving, setWorkflowSaving] = useState(false);
+  const [runRequestPending, setRunRequestPending] = useState(false);
+  const [runNotice, setRunNotice] = useState<CanvasRunNotice>();
+  const [displayingExplicitRun, setDisplayingExplicitRun] = useState(false);
   const [manualSaveAcknowledged, setManualSaveAcknowledged] = useState(false);
   const [dirty, setDirty] = useState(false);
   const [paletteVisible, setPaletteVisible] = useState(true);
@@ -270,6 +281,7 @@ export default function CanvasPage() {
   const loadRunsRequestRef = useRef(0);
   const selectedRunIdRef = useRef<string | undefined>(undefined);
   const runSelectionIsExplicitRef = useRef(false);
+  const runRequestPendingRef = useRef(false);
   const taskCenterRequestRef = useRef(0);
   const dirtyVersionRef = useRef(0);
   const activeWorkflowRef = useRef<CanvasWorkflow | null>(null);
@@ -338,7 +350,10 @@ export default function CanvasPage() {
   const selectedSeedanceReferences = useMemo(() => selectedCanvasNode?.type === "model.seedance"
     ? resolveSeedanceFixedReferences(editableGraph, selectedCanvasNode.id)
     : [], [editableGraph, selectedCanvasNode?.id, selectedCanvasNode?.type]);
-  const latestNodeRuns = useMemo(() => latestAttempts(activeRun?.nodeRuns || []), [activeRun?.nodeRuns]);
+  const latestNodeRuns = useMemo(() => displayingExplicitRun
+    ? latestAttempts(activeRun?.nodeRuns || [])
+    : new Map(Array.from(latestNodeAttempts, ([nodeId, attempt]) => [nodeId, attempt.nodeRun])),
+  [activeRun?.nodeRuns, displayingExplicitRun, latestNodeAttempts]);
   const selectedSubtitlePreviewMedia = useMemo(() => selectedCanvasNode?.type === "utility.video-subtitles"
     ? resolveCanvasSubtitlePreviewMedia(selectedCanvasNode, editableGraph, latestNodeRuns, latestSuccessfulNodeRuns)
     : undefined, [editableGraph, latestNodeRuns, latestSuccessfulNodeRuns, selectedCanvasNode]);
@@ -347,6 +362,7 @@ export default function CanvasPage() {
     ? taskRuns.filter((run) => isActiveCanvasRun(run.status)).length
     : activeRun && isActiveCanvasRun(activeRun.run.status) ? 1 : 0;
   const canvasBusy = busy || workflowSaving;
+  const runControlsBusy = busy || runRequestPending;
   const openImagePreview = useCallback((url: string, index: number) => setPreview({ kind: "image", url, index }), []);
   const markDirty = useCallback(() => {
     dirtyVersionRef.current += 1;
@@ -412,9 +428,13 @@ export default function CanvasPage() {
   }, [markDirty]);
   const focusCanvasNode = useCallback((nodeId: string) => {
     setSelectedNodeId(nodeId);
+    setMobilePalette(false);
+    const target = nodesRef.current.find((node) => node.id === nodeId);
+    if (target) void reactFlowRef.current?.fitView({ nodes: [target], padding: 0.8, duration: 260 });
   }, []);
   const nodeInteraction = useMemo<CanvasNodeInteraction>(() => ({
     activeRun,
+    displayingExplicitRun,
     latestNodeRuns,
     latestSuccessfulNodeRuns,
     selectedNodeId,
@@ -425,7 +445,7 @@ export default function CanvasPage() {
     onNodeFocus: focusCanvasNode,
     onPreview: setPreview,
     onSubtitleEdit: (node, nodeRun) => setSubtitleEditor({ nodeId: node.id, nodeRunId: nodeRun.id }),
-  }), [activeRun, activeWorkflow?.revision, focusCanvasNode, isMobile, latestNodeRuns, latestSuccessfulNodeRuns, selectedNodeId, updateNodeConfig, updateNodeExecutionMode]);
+  }), [activeRun, activeWorkflow?.revision, displayingExplicitRun, focusCanvasNode, isMobile, latestNodeRuns, latestSuccessfulNodeRuns, selectedNodeId, updateNodeConfig, updateNodeExecutionMode]);
 
   useEffect(() => {
     const query = window.matchMedia("(max-width: 820px)");
@@ -520,10 +540,13 @@ export default function CanvasPage() {
     setViewport(workflow.graph.viewport);
     setSelectedNodeId(undefined);
     setActiveRun(undefined);
+    setLatestNodeAttempts(new Map());
     setLatestSuccessfulNodeRuns(new Map());
+    setRunNotice(undefined);
     setQuickAdd(null);
     selectedRunIdRef.current = undefined;
     runSelectionIsExplicitRef.current = false;
+    setDisplayingExplicitRun(false);
     dirtyVersionRef.current = 0;
     setDirty(false);
     setManualSaveAcknowledged(false);
@@ -1068,23 +1091,43 @@ export default function CanvasPage() {
   }
 
   async function requestRun(targetNodeIds?: string[], runMode: CanvasRunMode = "with-upstream") {
-    if (!activeWorkflow) return;
-    if (dirty) {
-      const saved = await saveWorkflow(false);
-      if (!saved) return;
-    }
-    setBusy(true);
+    if (!activeWorkflow || busy || runRequestPendingRef.current) return;
+    runRequestPendingRef.current = true;
+    setRunRequestPending(true);
+    setRunNotice(undefined);
+    setMessage(dirty || workflowSaving ? "正在保存并检查运行条件" : "正在检查运行条件");
     try {
+      if (dirty || workflowSaving) {
+        const saved = await saveWorkflow(false);
+        if (!saved) return;
+        setMessage("画布已保存，正在检查运行条件");
+      }
+      setBusy(true);
       const data = await api<{ plan: CanvasRunPlan }>("/api/canvas/runs", {
         method: "POST",
         body: JSON.stringify({ action: "plan", workflowId: activeWorkflow.id, targetNodeIds, runMode }),
       });
-      if (data.plan.preflightBlocked) throw new Error(data.plan.blockers[0]?.message || "运行预检未通过");
+      if (data.plan.preflightBlocked) {
+        const workbookBlocker = data.plan.blockers.find((blocker) => blocker.code === "competitor_workbook_snapshot_required");
+        if (workbookBlocker) {
+          focusCanvasNode(workbookBlocker.nodeId);
+          setRunNotice({
+            kind: "competitor-workbook-snapshot-required",
+            nodeId: workbookBlocker.nodeId,
+            message: workbookBlocker.message,
+          });
+          setMessage("Excel 测试行尚未冻结，未创建运行任务");
+          return;
+        }
+        throw new Error(data.plan.blockers[0]?.message || "运行预检未通过");
+      }
       await startRun(data.plan, targetNodeIds, runMode);
     } catch (error) {
       setMessage(errorMessage(error));
     } finally {
       setBusy(false);
+      runRequestPendingRef.current = false;
+      setRunRequestPending(false);
     }
   }
 
@@ -1104,6 +1147,8 @@ export default function CanvasPage() {
       });
       selectedRunIdRef.current = data.run.id;
       runSelectionIsExplicitRef.current = false;
+      setDisplayingExplicitRun(false);
+      setRunNotice(undefined);
       await loadRuns(activeWorkflow.id);
       await refreshRun(data.run.id);
       setMessage("运行已加入队列");
@@ -1151,6 +1196,7 @@ export default function CanvasPage() {
       });
       selectedRunIdRef.current = started.run.id;
       runSelectionIsExplicitRef.current = false;
+      setDisplayingExplicitRun(false);
       await loadRuns(saved.workflow.id);
       await refreshRun(started.run.id, saved.workflow.id);
       setMessage("字幕修订已保存，仅字幕节点已加入重新烧录队列。");
@@ -1162,13 +1208,21 @@ export default function CanvasPage() {
   async function loadRuns(workflowId: string) {
     const requestId = ++loadRunsRequestRef.current;
     try {
-      const data = await api<{ runs: CanvasRun[]; latestSuccessfulNodeRuns: CanvasLatestSuccessfulNodeRun[] }>(`/api/canvas/runs?workflowId=${encodeURIComponent(workflowId)}`);
+      const data = await api<{
+        runs: CanvasRun[];
+        latestNodeAttempts: CanvasLatestNodeAttempt[];
+        latestSuccessfulNodeRuns: CanvasLatestSuccessfulNodeRun[];
+      }>(`/api/canvas/runs?workflowId=${encodeURIComponent(workflowId)}`);
       if (activeWorkflowIdRef.current !== workflowId || loadRunsRequestRef.current !== requestId) return;
+      setLatestNodeAttempts(new Map(data.latestNodeAttempts.map((item) => [item.nodeRun.nodeId, item])));
       setLatestSuccessfulNodeRuns(new Map(data.latestSuccessfulNodeRuns.map((item) => [item.nodeRun.nodeId, item])));
       const explicitRun = runSelectionIsExplicitRef.current
         ? data.runs.find((run) => run.id === selectedRunIdRef.current)
         : undefined;
       const selectedRun = explicitRun || data.runs[0];
+      const isExplicit = Boolean(explicitRun);
+      runSelectionIsExplicitRef.current = isExplicit;
+      setDisplayingExplicitRun(isExplicit);
       if (selectedRun) {
         selectedRunIdRef.current = selectedRun.id;
         await refreshRun(selectedRun.id, workflowId);
@@ -1230,6 +1284,7 @@ export default function CanvasPage() {
       if (data.run.workflowId === activeWorkflowIdRef.current) {
         selectedRunIdRef.current = data.run.id;
         runSelectionIsExplicitRef.current = true;
+        setDisplayingExplicitRun(true);
         setActiveRun(data);
       }
     } catch (error) {
@@ -1247,6 +1302,9 @@ export default function CanvasPage() {
       setSelectedTaskRun((current) => current?.run.id === data.run.id ? data : current);
       if (selectedRunIdRef.current !== runId) return;
       setActiveRun(data);
+      if (!runSelectionIsExplicitRef.current) {
+        setLatestNodeAttempts((current) => mergeLatestNodeAttemptProjections(current, data));
+      }
       setLatestSuccessfulNodeRuns((current) => {
         const next = new Map(current);
         for (const nodeRun of latestAttempts(data.nodeRuns).values()) {
@@ -1382,7 +1440,7 @@ export default function CanvasPage() {
       }
       if (commandKey && !event.altKey && !event.shiftKey && event.key === "Enter") {
         event.preventDefault();
-        if (activeWorkflow && nodes.length && !canvasBusy) void requestRun();
+        if (activeWorkflow && nodes.length && !runControlsBusy) void requestRun();
         return;
       }
       if (commandKey && !event.altKey && event.key.toLowerCase() === "s") {
@@ -1604,12 +1662,19 @@ export default function CanvasPage() {
 
       <section className="canvas-run-dock">
         <div className="canvas-run-actions">
-          <button type="button" onClick={() => void requestRun()} disabled={!activeWorkflow || !nodes.length || canvasBusy} aria-keyshortcuts="Control+Enter Meta+Enter"><Play />运行全部</button>
-          <button type="button" onClick={() => selectedNodeId && void requestRun([selectedNodeId], "isolated")} disabled={!selectedNodeId || canvasBusy}><Square />仅运行此节点</button>
-          <button type="button" onClick={() => selectedNodeId && void requestRun([selectedNodeId], "with-upstream")} disabled={!selectedNodeId || canvasBusy}><Play />运行到此节点</button>
+          <button type="button" onClick={() => void requestRun()} disabled={!activeWorkflow || !nodes.length || runControlsBusy} aria-keyshortcuts="Control+Enter Meta+Enter">{runRequestPending ? <LoaderCircle className="animate-spin" /> : <Play />}{runRequestPending ? "正在检查" : "运行全部"}</button>
+          <button type="button" onClick={() => selectedNodeId && void requestRun([selectedNodeId], "isolated")} disabled={!selectedNodeId || runControlsBusy}><Square />仅运行此节点</button>
+          <button type="button" onClick={() => selectedNodeId && void requestRun([selectedNodeId], "with-upstream")} disabled={!selectedNodeId || runControlsBusy}><Play />运行到此节点</button>
           {activeRun && !terminalStatuses.has(activeRun.run.status) ? <button type="button" onClick={() => void runAction("cancel")} disabled={canvasBusy} aria-keyshortcuts="Control+Alt+Enter Meta+Alt+Enter"><X />取消</button> : null}
         </div>
-        <div className="canvas-message"><span className={dirty ? "is-dirty" : ""} />{message}</div>
+        <div className="canvas-message" role="status"><span className={dirty ? "is-dirty" : ""} />{message}</div>
+        {runNotice ? <div className="canvas-run-notice" role="alert">
+          <AlertTriangle />
+          <span>{runNotice.message}</span>
+          <button type="button" onClick={() => focusCanvasNode(runNotice.nodeId)}><Sheet />检查并冻结测试行</button>
+          <button type="button" onClick={() => void openScheduleCenter()}><ListChecks />打开批量调度</button>
+          <button type="button" onClick={() => setRunNotice(undefined)} aria-label="关闭运行提示" title="关闭"><X /></button>
+        </div> : null}
         {activeRun ? <div className={`canvas-current-run is-${activeRun.run.status}`}><StatusIcon status={activeRun.run.status} /><span>{canvasRunStatusLabel(activeRun.run.status)}</span><small>r{activeRun.run.workflowRevision}</small></div> : <div className="canvas-current-run is-empty"><History /><span>暂无运行</span></div>}
         <div className="canvas-center-buttons">
           <button className="canvas-task-center-button" type="button" onClick={() => void openScheduleCenter()} disabled={!activeWorkflow} aria-haspopup="dialog" aria-label="批量调度" title="批量调度"><ListChecks /><span>批量调度</span></button>
@@ -1673,9 +1738,23 @@ function CanvasFlowNode({ data, selected }: NodeProps<FlowNode>) {
   const currentLoadedVideo = node.type === "input.video-loader" ? selectedCanvasVideo(node.config) : undefined;
   const nodeRun = interaction?.latestNodeRuns.get(node.id);
   const latestSuccessful = interaction?.latestSuccessfulNodeRuns.get(node.id);
-  const historicalRevision = interaction?.activeRun && interaction.workflowRevision !== interaction.activeRun.run.workflowRevision
+  const historicalRevision = interaction?.displayingExplicitRun && interaction.activeRun && interaction.workflowRevision !== interaction.activeRun.run.workflowRevision
     ? interaction.activeRun.run.workflowRevision
     : undefined;
+  const hasDetailedResult = node.type.startsWith("model.") || [
+    "utility.prompt-template",
+    "utility.text-concatenate",
+    "utility.image-select",
+    "utility.image-transform",
+    "utility.video-frames",
+    "utility.video-reconstruct",
+    "utility.video-subtitles",
+    "utility.text-split",
+    "utility.image-preview",
+    "utility.save-images",
+    "utility.display-any",
+    "compose.social-post",
+  ].includes(node.type);
   const executionMode = node.executionMode === "bypass" || node.executionMode === "disabled" ? node.executionMode : "enabled";
   const isSelected = selected || interaction?.selectedNodeId === node.id;
   const hasEditableSize = Boolean(node.size && interaction?.canResize);
@@ -1730,6 +1809,7 @@ function CanvasFlowNode({ data, selected }: NodeProps<FlowNode>) {
       onChange={(key, value) => interaction?.onConfigChange(node.id, key, value)}
       onFocus={() => interaction?.onNodeFocus(node.id)}
     /> : null}
+    {!hasDetailedResult && nodeRun ? <CanvasNodeAttemptSummary nodeRun={nodeRun} /> : null}
     {visibleImageUrls.length ? <div className={`canvas-node-image-grid is-count-${visibleImageUrls.length}`}>
       {visibleImageUrls.map((url, index) => <button className="nodrag nopan nowheel" type="button" key={`${url}-${index}`} onClick={(event) => {
         event.stopPropagation();
@@ -1894,6 +1974,38 @@ function CanvasTextConcatenateControls({
   </div>;
 }
 
+function CanvasNodeAttemptSummary({ nodeRun }: { nodeRun: CanvasNodeRun }) {
+  return <div className={`canvas-node-result canvas-node-attempt-summary is-${nodeRun.status} nodrag nopan nowheel`}>
+    <CanvasNodeAttemptHeader nodeRun={nodeRun} />
+    <CanvasNodeAttemptDetail nodeRun={nodeRun} />
+  </div>;
+}
+
+function CanvasNodeAttemptHeader({ nodeRun, detail }: { nodeRun?: CanvasNodeRun; detail?: string }) {
+  if (!nodeRun) return null;
+  const isPending = nodeRun.status === "queued" || nodeRun.status === "running";
+  const isFailure = ["failed", "blocked", "needs_config", "cancelled"].includes(nodeRun.status);
+  return <div className="canvas-node-result-status">
+    <span>{isPending ? <LoaderCircle className={nodeRun.status === "running" ? "animate-spin" : ""} /> : isFailure ? <AlertTriangle /> : <CheckCircle2 />}{canvasNodeRunStatusLabel(nodeRun.status)}</span>
+    <small>{detail || `attempt ${nodeRun.attempt}`} · {formatCanvasAttemptTime(nodeRun)}</small>
+  </div>;
+}
+
+function CanvasNodeAttemptDetail({ nodeRun }: { nodeRun?: CanvasNodeRun }) {
+  if (!nodeRun) return null;
+  const detail = nodeRun.waitReason
+    ? `${nodeRun.waitReason}${nodeRun.waitReason.includes("图片网络") ? "，请检查 Xray" : ""}`
+    : nodeRun.error;
+  if (!detail) return null;
+  return <p className={nodeRun.waitReason ? "canvas-node-result-wait" : undefined}>{nodeRun.waitReason ? <LoaderCircle /> : <AlertTriangle />}{detail}</p>;
+}
+
+function formatCanvasAttemptTime(nodeRun: CanvasNodeRun) {
+  const value = nodeRun.completedAt || nodeRun.updatedAt || nodeRun.startedAt || nodeRun.createdAt;
+  const timestamp = Date.parse(value);
+  return Number.isFinite(timestamp) ? new Date(timestamp).toLocaleString([], { month: "2-digit", day: "2-digit", hour: "2-digit", minute: "2-digit" }) : value;
+}
+
 function CanvasImagePreviewNodeResult({
   nodeRun,
   latestSuccessful,
@@ -1905,11 +2017,13 @@ function CanvasImagePreviewNodeResult({
 }) {
   const result = nodeRun && getImagesArtifact(nodeRun) ? nodeRun : latestSuccessful?.nodeRun;
   const artifact = result ? getImagesArtifact(result) : undefined;
-  if (!result || !artifact) return <div className="canvas-node-result is-idle"><small>等待上游图片结果</small></div>;
-  return <div className={`canvas-node-result is-${result.status} nodrag nopan nowheel`}>
-    <div className="canvas-node-result-status"><span><CheckCircle2 />{canvasNodeRunStatusLabel(result.status)}</span><small>{artifact.items.length} 张</small></div>
-    {latestSuccessful && result.id === latestSuccessful.nodeRun.id ? <div className="canvas-node-result-history">最近成功结果 · r{latestSuccessful.workflowRevision} · {new Date(latestSuccessful.runCreatedAt).toLocaleString()}</div> : null}
-    <CanvasResultImageGallery items={artifact.items} onPreview={onPreview} />
+  const attempt = nodeRun || result;
+  if (!attempt) return <div className="canvas-node-result is-idle"><small>等待上游图片结果</small></div>;
+  return <div className={`canvas-node-result is-${attempt.status} nodrag nopan nowheel`}>
+    <CanvasNodeAttemptHeader nodeRun={attempt} detail={artifact ? `${artifact.items.length} 张` : undefined} />
+    <CanvasNodeAttemptDetail nodeRun={attempt} />
+    {latestSuccessful && result?.id === latestSuccessful.nodeRun.id ? <div className="canvas-node-result-history">最近成功结果 · r{latestSuccessful.workflowRevision} · {new Date(latestSuccessful.runCreatedAt).toLocaleString()}</div> : null}
+    {artifact ? <CanvasResultImageGallery items={artifact.items} onPreview={onPreview} /> : null}
   </div>;
 }
 
@@ -1943,7 +2057,6 @@ function CanvasSaveImagesNodeResult({
   }
 
   if (!status) return <div className="canvas-node-result is-idle"><small>等待上游图片结果</small></div>;
-  const isPending = status === "queued" || status === "running";
   const isFailure = ["failed", "blocked", "needs_config", "cancelled"].includes(status);
   return <div
     className={`canvas-node-result is-${status} nodrag nopan nowheel`}
@@ -1954,10 +2067,8 @@ function CanvasSaveImagesNodeResult({
     onKeyUp={(event) => event.stopPropagation()}
     onWheel={(event) => event.stopPropagation()}
   >
-    <div className="canvas-node-result-status">
-      <span>{isPending ? <LoaderCircle className={status === "running" ? "animate-spin" : ""} /> : isFailure ? <AlertTriangle /> : <CheckCircle2 />}{canvasNodeRunStatusLabel(status)}</span>
-      <small>{artifact ? `${artifact.items.length} 张` : `attempt ${nodeRun?.attempt || result?.attempt || 1}`}</small>
-    </div>
+    <CanvasNodeAttemptHeader nodeRun={nodeRun || result} detail={artifact ? `${artifact.items.length} 张` : undefined} />
+    <CanvasNodeAttemptDetail nodeRun={nodeRun || result} />
     {latestSuccessful && result?.id === latestSuccessful.nodeRun.id ? <div className="canvas-node-result-history">最近成功结果 · r{latestSuccessful.workflowRevision} · {new Date(latestSuccessful.runCreatedAt).toLocaleString()}</div> : null}
     {artifact ? <div className="canvas-save-images-actions">
       <button type="button" disabled={busy} onClick={() => void downloadAll()}>
@@ -1966,7 +2077,7 @@ function CanvasSaveImagesNodeResult({
       </button>
       {feedback ? <small className="canvas-save-images-feedback" role="status">{feedback}</small> : null}
     </div> : null}
-    {!artifact && isFailure ? <p>{nodeRun?.error || "没有可下载的图片结果"}</p> : null}
+    {!artifact && isFailure && !nodeRun?.error && !nodeRun?.waitReason ? <p>没有可下载的图片结果</p> : null}
   </div>;
 }
 
@@ -1987,7 +2098,6 @@ function CanvasDisplayAnyNodeResult({
   const artifact = selectedArtifact || getDisplayAnyArtifact(artifactRun);
   const currentStatus = nodeRun?.status || artifactRun.status;
   const statusLabel = canvasNodeRunStatusLabel(currentStatus);
-  const isPending = currentStatus === "queued" || currentStatus === "running";
   const isFailure = ["failed", "blocked", "needs_config", "cancelled"].includes(currentStatus);
   return <div
     className={`canvas-node-result canvas-display-any-result is-${currentStatus} nodrag nopan nowheel`}
@@ -1998,13 +2108,11 @@ function CanvasDisplayAnyNodeResult({
     onKeyUp={(event) => event.stopPropagation()}
     onWheel={(event) => event.stopPropagation()}
   >
-    <div className="canvas-node-result-status">
-      <span>{isPending ? <LoaderCircle className={currentStatus === "running" ? "animate-spin" : ""} /> : isFailure ? <AlertTriangle /> : <CheckCircle2 />}{statusLabel}</span>
-      <small>{artifact ? portKindLabel(artifact.kind) : `attempt ${artifactRun.attempt}`}</small>
-    </div>
+    <CanvasNodeAttemptHeader nodeRun={nodeRun || artifactRun} detail={artifact ? portKindLabel(artifact.kind) : undefined} />
+    <CanvasNodeAttemptDetail nodeRun={nodeRun || artifactRun} />
     {historicalRevision !== undefined ? <div className="canvas-node-result-history">历史版本 r{historicalRevision}</div> : null}
     {latestSuccessful && artifactRun.id === latestSuccessful.nodeRun.id ? <div className="canvas-node-result-history">最近成功结果 · r{latestSuccessful.workflowRevision} · {new Date(latestSuccessful.runCreatedAt).toLocaleString()}</div> : null}
-    {isFailure ? <p>{nodeRun?.error || statusLabel}</p> : null}
+    {isFailure && !nodeRun?.error && !nodeRun?.waitReason ? <p>{statusLabel}</p> : null}
     {artifactRun.status === "completed" && !artifact ? <div className="canvas-node-result-empty">运行完成，但没有可预览内容</div> : null}
     {artifact ? <CanvasDisplayAnyArtifact artifact={artifact} onPreview={onPreview} /> : null}
   </div>;
@@ -2039,11 +2147,14 @@ function CanvasDisplayAnyArtifact({ artifact, onPreview }: {
 function CanvasCompositionNodeResult({ nodeRun, latestSuccessful }: { nodeRun?: CanvasNodeRun; latestSuccessful?: CanvasLatestSuccessfulNodeRun }) {
   const result = nodeRun && getSocialPostArtifact(nodeRun) ? nodeRun : latestSuccessful?.nodeRun;
   const artifact = result ? getSocialPostArtifact(result) : undefined;
-  if (!artifact) return null;
-  return <div className={`canvas-node-result is-${result?.status || "completed"} nodrag nopan nowheel`}>
-    <div className="canvas-node-result-status"><span><CheckCircle2 />{canvasNodeRunStatusLabel(result?.status || "completed")}</span><small>{artifact.post.imageUrls.length} 图 · {artifact.post.videoUrls?.length || 0} 视频</small></div>
-    <p className="canvas-artifact-text">{artifact.post.title}</p>
-    <Link href={`/review?postId=${encodeURIComponent(artifact.postId)}`}>打开评审</Link>
+  const attempt = nodeRun || result;
+  if (!attempt) return null;
+  return <div className={`canvas-node-result is-${attempt.status} nodrag nopan nowheel`}>
+    <CanvasNodeAttemptHeader nodeRun={attempt} detail={artifact ? `${artifact.post.imageUrls.length} 图 · ${artifact.post.videoUrls?.length || 0} 视频` : undefined} />
+    <CanvasNodeAttemptDetail nodeRun={attempt} />
+    {latestSuccessful && result?.id === latestSuccessful.nodeRun.id ? <div className="canvas-node-result-history">最近成功结果 · r{latestSuccessful.workflowRevision} · {new Date(latestSuccessful.runCreatedAt).toLocaleString()}</div> : null}
+    {artifact ? <p className="canvas-artifact-text">{artifact.post.title}</p> : null}
+    {artifact ? <Link href={`/review?postId=${encodeURIComponent(artifact.postId)}`}>打开评审</Link> : null}
   </div>;
 }
 
@@ -2089,7 +2200,6 @@ function CanvasModelNodeResult({
     : node;
   const currentStatus = nodeRun?.status || artifactRun.status;
   const statusLabel = canvasNodeRunStatusLabel(currentStatus);
-  const isPending = currentStatus === "queued" || currentStatus === "running";
   const isFailure = ["failed", "blocked", "needs_config", "cancelled"].includes(currentStatus);
   const showArtifact = Boolean(artifact);
   return <div
@@ -2101,13 +2211,11 @@ function CanvasModelNodeResult({
     onKeyUp={(event) => event.stopPropagation()}
     onWheel={(event) => event.stopPropagation()}
   >
-    <div className="canvas-node-result-status">
-      <span>{isPending ? <LoaderCircle className={currentStatus === "running" ? "animate-spin" : ""} /> : isFailure ? <AlertTriangle /> : <CheckCircle2 />}{statusLabel}</span>
-      <small>attempt {artifactRun.attempt}</small>
-    </div>
+    <CanvasNodeAttemptHeader nodeRun={nodeRun || artifactRun} />
+    <CanvasNodeAttemptDetail nodeRun={nodeRun || artifactRun} />
     {historicalRevision !== undefined ? <div className="canvas-node-result-history">历史版本 r{historicalRevision}</div> : null}
     {latestSuccessful && artifactRun.id === latestSuccessful.nodeRun.id ? <div className="canvas-node-result-history">最近成功结果 · r{latestSuccessful.workflowRevision} · {new Date(latestSuccessful.runCreatedAt).toLocaleString()}</div> : null}
-    {isFailure ? <p>{nodeRun?.error || statusLabel}</p> : null}
+    {isFailure && !nodeRun?.error && !nodeRun?.waitReason ? <p>{statusLabel}</p> : null}
     {artifactRun.status === "completed" && !artifact ? <div className="canvas-node-result-empty">运行完成，但没有可预览内容</div> : null}
     {node.type === "model.gpt-image-each" && artifactRun.internalMetadata?.imageEach ? <CanvasImageEachProgress metadata={artifactRun.internalMetadata.imageEach} /> : null}
     {artifact ? <div className="canvas-node-result-label">生成结果</div> : null}
@@ -2148,7 +2256,6 @@ function CanvasTextSplitNodeResult({
   const body = getTextOutputArtifact(artifactRun, "tail");
   const currentStatus = nodeRun?.status || artifactRun.status;
   const statusLabel = canvasNodeRunStatusLabel(currentStatus);
-  const isPending = currentStatus === "queued" || currentStatus === "running";
   const isFailure = ["failed", "blocked", "needs_config", "cancelled"].includes(currentStatus);
   const isFallback = Boolean(body && !title);
   return <div
@@ -2160,13 +2267,11 @@ function CanvasTextSplitNodeResult({
     onKeyUp={(event) => event.stopPropagation()}
     onWheel={(event) => event.stopPropagation()}
   >
-    <div className="canvas-node-result-status">
-      <span>{isPending ? <LoaderCircle className={currentStatus === "running" ? "animate-spin" : ""} /> : isFailure ? <AlertTriangle /> : <CheckCircle2 />}{statusLabel}</span>
-      <small>attempt {artifactRun.attempt}</small>
-    </div>
+    <CanvasNodeAttemptHeader nodeRun={nodeRun || artifactRun} />
+    <CanvasNodeAttemptDetail nodeRun={nodeRun || artifactRun} />
     {historicalRevision !== undefined ? <div className="canvas-node-result-history">历史版本 r{historicalRevision}</div> : null}
     {latestSuccessful && artifactRun.id === latestSuccessful.nodeRun.id ? <div className="canvas-node-result-history">最近成功结果 · r{latestSuccessful.workflowRevision} · {new Date(latestSuccessful.runCreatedAt).toLocaleString()}</div> : null}
-    {isFailure ? <p>{nodeRun?.error || statusLabel}</p> : null}
+    {isFailure && !nodeRun?.error && !nodeRun?.waitReason ? <p>{statusLabel}</p> : null}
     {isFallback ? <div className="canvas-text-split-fallback"><AlertTriangle />未匹配，已全部作为正文</div> : null}
     {title ? <CanvasTextSplitOutput label="标题" artifact={title} onPreview={onPreview} />
       : body ? <div className="canvas-text-split-empty"><span>标题</span><small>为空</small></div> : null}
@@ -5426,6 +5531,30 @@ function isActiveCanvasRun(status: CanvasRun["status"]) {
 
 function isFailedCanvasRun(status: CanvasRun["status"]) {
   return status === "partial" || status === "failed";
+}
+
+function mergeLatestNodeAttemptProjections(
+  current: Map<string, CanvasLatestNodeAttempt>,
+  data: CanvasRunWithNodes,
+) {
+  const next = new Map(current);
+  for (const nodeRun of latestAttempts(data.nodeRuns).values()) {
+    const previous = next.get(nodeRun.nodeId);
+    const previousTime = previous ? Date.parse(previous.nodeRun.updatedAt || previous.runCreatedAt) : Number.NEGATIVE_INFINITY;
+    const nextTime = Date.parse(nodeRun.updatedAt || data.run.createdAt);
+    if (previous && previousTime > nextTime) continue;
+    const snapshotNode = data.run.graphSnapshot.nodes.find((item) => item.id === nodeRun.nodeId);
+    if (!snapshotNode) continue;
+    next.set(nodeRun.nodeId, {
+      runId: data.run.id,
+      workflowRevision: data.run.workflowRevision,
+      runCreatedAt: data.run.createdAt,
+      nodeVersion: snapshotNode.version,
+      nodeConfig: structuredClone(snapshotNode.config),
+      nodeRun,
+    });
+  }
+  return next;
 }
 
 function canvasRunStatusLabel(status: CanvasRun["status"]) {

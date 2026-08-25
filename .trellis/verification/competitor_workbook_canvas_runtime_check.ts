@@ -140,17 +140,34 @@ async function main() {
     updatedAt: "2026-08-24T00:00:00.000Z",
   };
   assert.equal(canvasRunResponse(run).graphSnapshot.nodes[0].config.path, "");
+  const workbookNodeRun = {
+    id: "node-run",
+    runId: run.id,
+    nodeId: "workbook",
+    nodeType: "input.competitor-workbook" as const,
+    attempt: 1,
+    status: "completed" as const,
+    inputs: {},
+    outputs: {},
+    createdAt: run.createdAt,
+    updatedAt: run.updatedAt,
+    startedAt: run.createdAt,
+    completedAt: run.updatedAt,
+  };
+  const workbookProjection = {
+    runId: run.id,
+    workflowRevision: run.workflowRevision,
+    runCreatedAt: run.createdAt,
+    nodeVersion: 1,
+    nodeConfig: workflow.graph.nodes[0].config,
+    nodeRun: workbookNodeRun,
+  };
   const runHistory = canvasRunHistoryResponse({
     runs: [run],
-    latestSuccessfulNodeRuns: [{
-      runId: run.id,
-      workflowRevision: run.workflowRevision,
-      runCreatedAt: run.createdAt,
-      nodeVersion: 1,
-      nodeConfig: workflow.graph.nodes[0].config,
-      nodeRun: { id: "node-run", runId: run.id, nodeId: "workbook", attempt: 1, status: "completed", inputs: {}, outputs: {}, startedAt: run.createdAt, completedAt: run.updatedAt },
-    }],
+    latestNodeAttempts: [workbookProjection],
+    latestSuccessfulNodeRuns: [workbookProjection],
   });
+  assert.equal(runHistory.latestNodeAttempts[0].nodeConfig.path, "");
   assert.equal(runHistory.latestSuccessfulNodeRuns[0].nodeConfig.path, "");
 
   console.log("Competitor workbook Canvas runtime checks passed.");

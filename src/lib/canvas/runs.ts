@@ -6,7 +6,9 @@ import {
   getCanvasNodeRunFromDb,
   getCanvasRunFromDb,
   heartbeatCanvasRunQueueItem,
+  listCanvasNodeRunsForWorkflowFromDb,
   listCanvasNodeRunsFromDb,
+  listCanvasRunsForWorkflowFromDb,
   listCanvasRunsFromDb,
   listCanvasSuccessfulNodeRunsForWorkflowFromDb,
   requeueExpiredCanvasRunQueueItemsWithProviderTasks,
@@ -29,6 +31,7 @@ import type {
   CanvasArtifact,
   CanvasEdge,
   CanvasGraph,
+  CanvasLatestNodeAttempt,
   CanvasLatestSuccessfulNodeRun,
   CanvasNode,
   CanvasNodeRun,
@@ -69,7 +72,10 @@ export async function planCanvasRunWithMode(
     throw new Error("Only workspace administrators can run local workbooks.");
   }
   runMode = runMode === "isolated" ? "isolated" : "with-upstream";
-  const plan = await resolveCanvasRunPlan(workflow.graph, workflow.id, targetNodeIds, runMode);
+  const plan = withCompetitorWorkbookReadiness(
+    workflow.graph,
+    await resolveCanvasRunPlan(workflow.graph, workflow.id, targetNodeIds, runMode),
+  );
   const details = [] as NonNullable<CanvasRunPlan["confirmationDetails"]>;
   let preflightBlocked = false;
   for (const nodeId of plan.confirmationNodeIds) {
@@ -215,6 +221,43 @@ function isReusableCandidate(
   return currentFingerprint === (sourceNodeRun.inputFingerprint || fingerprintCanvasNodeExecution(sourceNode, sourceNodeRun.inputs));
 }
 
+function withCompetitorWorkbookReadiness(graph: CanvasGraph, plan: CanvasRunPlan): CanvasRunPlan {
+  const blockers = [...plan.blockers];
+  for (const nodeId of plan.includedNodeIds) {
+    const node = graph.nodes.find((candidate) => candidate.id === nodeId);
+    if (!node || node.type !== "input.competitor-workbook" || getCanvasNodeExecutionMode(node) !== "enabled") continue;
+    if (hasFrozenCompetitorWorkbookTestInput(node)) continue;
+    blockers.push({
+      nodeId,
+      code: "competitor_workbook_snapshot_required",
+      message: "竞品 Excel 尚未冻结当前测试行和参数卡片，请在节点属性中点击“检查并冻结测试行”。",
+    });
+  }
+  if (blockers.length === plan.blockers.length) return plan;
+  return { ...plan, blockers, preflightBlocked: true };
+}
+
+function hasFrozenCompetitorWorkbookTestInput(node: CanvasNode) {
+  const frozenTitle = String(node.config.rowTitle || "").trim();
+  const frozenBody = String(node.config.rowBody || "").trim();
+  const frozenCard = String(node.config.cardText || "").trim();
+  if (frozenTitle && frozenBody && frozenCard) return true;
+
+  const snapshot = node.config.snapshot;
+  if (!snapshot || typeof snapshot !== "object" || Array.isArray(snapshot) || !("rows" in snapshot)) return false;
+  const rows = Array.isArray(snapshot.rows) ? snapshot.rows : [];
+  const rowNumber = Number(node.config.rowNumber || 2);
+  const row = rows.find((candidate) => candidate && typeof candidate === "object"
+    && Number((candidate as { excelRowNumber?: number }).excelRowNumber) === rowNumber) as {
+      title?: unknown;
+      body?: unknown;
+      cards?: Array<{ cardIndex?: unknown; text?: unknown }>;
+    } | undefined;
+  if (!row || !String(row.title || "").trim() || !String(row.body || "").trim()) return false;
+  const cardIndex = Number(node.config.cardIndex || 1);
+  return Boolean(row.cards?.some((card) => Number(card.cardIndex) === cardIndex && String(card.text || "").trim()));
+}
+
 function incomingEdgeIdentity(graph: CanvasGraph, nodeId: string) {
   return graph.edges.filter((edge) => edge.target === nodeId)
     .map(({ source, sourcePort, targetPort }) => ({ source, sourcePort, targetPort }));
@@ -331,13 +374,24 @@ export class CanvasConfirmationRequiredError extends Error {
 }
 
 export async function listCanvasRuns(account: WorkspaceAccessActor, workflowId?: string) {
-  return filterWorkspaceOwnedRecords(await listCanvasRunsFromDb(50), account).filter((run) => !workflowId || run.workflowId === workflowId);
+  const runs = workflowId
+    ? await listCanvasRunsForWorkflowFromDb(workflowId, 50)
+    : await listCanvasRunsFromDb(50);
+  return filterWorkspaceOwnedRecords(runs, account);
 }
 
 export async function listCanvasRunHistory(account: WorkspaceAccessActor, workflowId?: string) {
   if (workflowId && !(await getCanvasWorkflow(workflowId, account))) throw new Error("Canvas workflow not found");
   const runs = await listCanvasRuns(account, workflowId);
+  const latestNodeAttempts = new Map<string, CanvasLatestNodeAttempt>();
   const latestSuccessfulNodeRuns = new Map<string, CanvasLatestSuccessfulNodeRun>();
+  if (workflowId) {
+    for (const { run, nodeRun } of await listCanvasNodeRunsForWorkflowFromDb(workflowId)) {
+      if (latestNodeAttempts.has(nodeRun.nodeId)) continue;
+      const projection = projectCanvasNodeRun(run, nodeRun);
+      if (projection) latestNodeAttempts.set(nodeRun.nodeId, projection);
+    }
+  }
   const durableResults = workflowId
     ? await listCanvasSuccessfulNodeRunsForWorkflowFromDb(workflowId)
     : (await Promise.all(runs.map(async (run) => (await listCanvasNodeRunsFromDb(run.id))
@@ -345,18 +399,27 @@ export async function listCanvasRunHistory(account: WorkspaceAccessActor, workfl
       .map((nodeRun) => ({ run, nodeRun }))))).flat();
   for (const { run, nodeRun } of durableResults) {
     if (latestSuccessfulNodeRuns.has(nodeRun.nodeId) || !Object.keys(nodeRun.outputs).length) continue;
-    const snapshotNode = run.graphSnapshot.nodes.find((item) => item.id === nodeRun.nodeId);
-    if (!snapshotNode) continue;
-    latestSuccessfulNodeRuns.set(nodeRun.nodeId, {
-      runId: run.id,
-      workflowRevision: run.workflowRevision,
-      runCreatedAt: run.createdAt,
-      nodeVersion: snapshotNode.version,
-      nodeConfig: structuredClone(snapshotNode.config),
-      nodeRun,
-    });
+    const projection = projectCanvasNodeRun(run, nodeRun);
+    if (projection) latestSuccessfulNodeRuns.set(nodeRun.nodeId, projection);
   }
-  return { runs, latestSuccessfulNodeRuns: Array.from(latestSuccessfulNodeRuns.values()) };
+  return {
+    runs,
+    latestNodeAttempts: Array.from(latestNodeAttempts.values()),
+    latestSuccessfulNodeRuns: Array.from(latestSuccessfulNodeRuns.values()),
+  };
+}
+
+function projectCanvasNodeRun(run: CanvasRun, nodeRun: CanvasNodeRun): CanvasLatestNodeAttempt | undefined {
+  const snapshotNode = run.graphSnapshot.nodes.find((item) => item.id === nodeRun.nodeId);
+  if (!snapshotNode) return undefined;
+  return {
+    runId: run.id,
+    workflowRevision: run.workflowRevision,
+    runCreatedAt: run.createdAt,
+    nodeVersion: snapshotNode.version,
+    nodeConfig: structuredClone(snapshotNode.config),
+    nodeRun,
+  };
 }
 
 export async function getCanvasRun(runId: string, account: WorkspaceAccessActor): Promise<CanvasRunWithNodes | undefined> {

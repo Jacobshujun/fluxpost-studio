@@ -461,7 +461,11 @@ export type CanvasRunPlan = {
   confirmationNodeIds: string[];
   capabilities: CanvasNodeCapability[];
   steps: CanvasRunPlanStep[];
-  blockers: Array<{ nodeId: string; message: string }>;
+  blockers: Array<{
+    nodeId: string;
+    message: string;
+    code?: "competitor_workbook_snapshot_required";
+  }>;
   confirmationDetails?: Array<{
     nodeId: string;
     label: string;
@@ -480,7 +484,7 @@ export type CanvasRunWithNodes = {
   nodeRuns: CanvasNodeRun[];
 };
 
-export type CanvasLatestSuccessfulNodeRun = {
+export type CanvasLatestNodeAttempt = {
   runId: string;
   workflowRevision: number;
   runCreatedAt: string;
@@ -488,6 +492,8 @@ export type CanvasLatestSuccessfulNodeRun = {
   nodeConfig: CanvasNodeConfig;
   nodeRun: CanvasNodeRun;
 };
+
+export type CanvasLatestSuccessfulNodeRun = CanvasLatestNodeAttempt;
 
 export type CanvasScheduleStatus = "draft" | "ready" | "queued" | "running" | "paused" | "completed" | "partial" | "failed" | "cancelled";
 export type CanvasScheduleTaskStatus = "pending" | "queued" | "running" | "completed" | "partial" | "failed" | "cancelled";
