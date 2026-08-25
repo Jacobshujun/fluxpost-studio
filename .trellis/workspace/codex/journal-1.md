@@ -1831,3 +1831,37 @@ Removed Excel/Canvas partial policy from review and Feishu, restored failed-only
 ### Next Steps
 
 - None - task complete
+
+
+## Session 55: Fix Canvas Excel run feedback
+
+**Date**: 2026-08-25
+**Task**: Fix Canvas Excel run feedback
+**Branch**: `local`
+
+### Summary
+
+Blocked unfrozen Excel tests before Run creation, made autosave-aware run feedback visible, projected durable latest node attempts with successful artifact fallback, preserved Xray wait behavior, and verified the clean port-3001 candidate on desktop/mobile without external calls.
+
+### Main Changes
+
+(Add details)
+
+### Git Commits
+
+| Hash | Message |
+|------|---------|
+| `4668adc29742bbd1f114effd08b5aa35ba8e11ea` | (see git log) |
+| `b04c965` | (see git log) |
+
+### Testing
+
+- [OK] (Add test results)
+
+### Status
+
+[OK] **Completed**
+
+### Next Steps
+
+- None - task complete
