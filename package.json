@@ -16,6 +16,7 @@
     "lark:events": "node scripts/lark-task-events.mjs",
     "db:diagnose": "powershell -ExecutionPolicy Bypass -File scripts/local/postgres-diagnose.ps1",
     "db:migrate:postgres": "node scripts/db/migrate-sqlite-to-postgres.mjs",
+    "db:cleanup:canvas-review-policy": "node scripts/db/remove-canvas-image-batch.mjs",
     "library:thumbnails:prewarm": "tsx scripts/library/prewarm-thumbnails.ts",
     "lint": "eslint"
   },

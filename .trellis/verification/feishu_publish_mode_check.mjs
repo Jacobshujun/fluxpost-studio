@@ -68,6 +68,9 @@ assertContains(queue, /job\.publishMode\s*!==\s*publishMode/, "Queue dedupe must
 assertContains(queue, /publishMode === "text"[\s\S]*validateTextPostsForFeishuPublish/, "Text mode must use text-only validation.");
 assertContains(queue, /publishMode === "media"[\s\S]*validateMediaPostsForFeishuPublish/, "Media mode must use media-only validation.");
 assertContains(queue, /job\.publishMode === "full" \? await enrichPostsWithContentTags/, "Only full mode may enrich content tags.");
+if (queue.includes("canvasImageBatch") || executors.includes("canvasImageBatch") || reviewPage.includes("canvasImageBatch")) {
+  throw new Error("Legacy Canvas image-batch metadata must not affect full, text, media, Canvas, or review publishing.");
+}
 assertContains(queue, /if \(!feishuPublishModeIncludesMedia\(job\.publishMode\)\)[\s\S]*repairedPosts\.push\(post\)/, "Text mode must skip runtime media repair.");
 assertContains(queue, /publishPostsToFeishu\(publishablePosts,\s*\{[\s\S]*publishMode:\s*job\.publishMode/, "Queue execution must pass the durable mode into the CLI boundary.");
 

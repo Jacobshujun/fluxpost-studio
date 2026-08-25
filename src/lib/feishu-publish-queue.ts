@@ -568,10 +568,6 @@ async function validatePostsForFeishuPublish(posts: GeneratedPost[], publishMode
   const itemFailures: FeishuPublishItemFailure[] = [];
   const publishableIds = new Set<string>();
   const normalizedPosts = posts.map((post) => {
-    if (post.canvasImageBatch?.status === "partial") {
-      itemFailures.push(partialCanvasImageBatchFailure(post));
-      return post;
-    }
     if (!isFinishedBodyPolicyCompliant(post)) {
       itemFailures.push(finishedBodyValidationFailure(post));
       return post;
@@ -604,10 +600,6 @@ async function validatePostsForFeishuPublish(posts: GeneratedPost[], publishMode
 function validateTextPostsForFeishuPublish(posts: GeneratedPost[]) {
   const itemFailures: FeishuPublishItemFailure[] = [];
   const publishablePosts = posts.filter((post) => {
-    if (post.canvasImageBatch?.status === "partial") {
-      itemFailures.push(partialCanvasImageBatchFailure(post));
-      return false;
-    }
     if (!isFinishedBodyPolicyCompliant(post)) {
       itemFailures.push(finishedBodyValidationFailure(post));
       return false;
@@ -636,10 +628,6 @@ function finishedBodyValidationFailure(post: GeneratedPost): FeishuPublishItemFa
 function validateMediaPostsForFeishuPublish(posts: GeneratedPost[]) {
   const itemFailures: FeishuPublishItemFailure[] = [];
   const publishablePosts = posts.filter((post) => {
-    if (post.canvasImageBatch?.status === "partial") {
-      itemFailures.push(partialCanvasImageBatchFailure(post));
-      return false;
-    }
     if (post.imageUrls.length + (post.videoUrls?.length || 0) > 0) return true;
     itemFailures.push({
       postId: post.id,
@@ -650,15 +638,6 @@ function validateMediaPostsForFeishuPublish(posts: GeneratedPost[]) {
     return false;
   });
   return { posts, publishablePosts, itemFailures };
-}
-
-function partialCanvasImageBatchFailure(post: GeneratedPost): FeishuPublishItemFailure {
-  return {
-    postId: post.id,
-    stage: "validation",
-    error: `Canvas image reconstruction is partial; retry failed image indices ${post.canvasImageBatch?.failedIndices.join(", ") || "unknown"} before publishing.`,
-    retrySafe: true,
-  };
 }
 
 async function findEquivalentQueuedJob(ownerUserId: string, postIds: string[], publishMode: FeishuPublishMode) {

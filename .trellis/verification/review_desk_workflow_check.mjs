@@ -32,6 +32,18 @@ const uploadAdditionSource = reviewPage.match(/async function uploadDraftImageAd
 const addTileSource = reviewPage.match(/function ReviewImageAddTile\([\s\S]*?\r?\n}\r?\n\r?\nfunction /)?.[0];
 const uploadPanelSource = reviewPage.match(/function ReviewImageUploadPanel\([\s\S]*?\r?\n}\r?\n\r?\nfunction /)?.[0];
 
+assertNotContains(
+  reviewPage,
+  /canvasImageBatch|图片部分完成|失败序号/,
+  "Review desk must ignore legacy Canvas partial metadata and keep publish actions available.",
+);
+
+assertContains(
+  reviewPage,
+  /onClick=\{publishSelected\}\s+disabled=\{Boolean\(busy\)\}/,
+  "Review publish availability must depend on the existing busy state rather than Canvas partial metadata.",
+);
+
 if (!approveDraftSource) {
   throw new Error("Review desk should define an approveDraft action.");
 }

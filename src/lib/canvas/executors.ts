@@ -687,7 +687,6 @@ async function executeComposition({ node, inputs, runId, account, previousNodeRu
   const imageUrls = mediaUrls(inputs.images, "images");
   const videoUrls = mediaUrls(inputs.videos, "videos");
   const now = new Date().toISOString();
-  const imageBatch = aggregateCanvasImageBatch(inputs.images);
   const previousArtifact = previousNodeRun ? Object.values(previousNodeRun.outputs)
     .find((artifact): artifact is Extract<CanvasArtifact, { kind: "socialPost" }> => artifact.kind === "socialPost") : undefined;
   const previousPost = previousArtifact ? await getGeneratedPost(previousArtifact.postId, account) : undefined;
@@ -695,7 +694,6 @@ async function executeComposition({ node, inputs, runId, account, previousNodeRu
     const saved = await updateGeneratedPost(previousPost.id, {
       imageUrls,
       videoUrls,
-      canvasImageBatch: imageBatch,
       aiNotes: Array.from(new Set([...previousPost.aiNotes, `由无限画布运行 ${runId} 更新图片结果`])),
     }, account);
     return { outputs: { post: { kind: "socialPost" as const, postId: saved.id, post: saved } } };
@@ -718,26 +716,10 @@ async function executeComposition({ node, inputs, runId, account, previousNodeRu
     materialPaths: [],
     status: "draft",
     aiNotes: [`由无限画布运行 ${runId} 组装`],
-    canvasImageBatch: imageBatch,
     updatedAt: now,
   };
   const saved = await saveGeneratedPost(post, account);
   return { outputs: { post: { kind: "socialPost" as const, postId: saved.id, post: saved } } };
-}
-
-function aggregateCanvasImageBatch(artifacts: CanvasArtifact[] | undefined): CanvasImageBatchSummary | undefined {
-  const batches = (artifacts || []).flatMap((artifact) => artifact.kind === "images" && artifact.imageBatch ? [artifact.imageBatch] : []);
-  if (!batches.length) return undefined;
-  let offset = 0;
-  const failedIndices: number[] = [];
-  for (const batch of batches) {
-    failedIndices.push(...batch.failedIndices.map((index) => index + offset));
-    offset += batch.total;
-  }
-  const total = batches.reduce((sum, batch) => sum + batch.total, 0);
-  const succeeded = batches.reduce((sum, batch) => sum + batch.succeeded, 0);
-  const failed = batches.reduce((sum, batch) => sum + batch.failed, 0);
-  return { status: failed ? "partial" : "completed", total, succeeded, failed, failedIndices };
 }
 
 function resolveCanvasCompositionVehicle(node: CanvasNode, artifacts: CanvasArtifact[] | undefined) {
@@ -747,9 +729,6 @@ function resolveCanvasCompositionVehicle(node: CanvasNode, artifacts: CanvasArti
 async function executeFeishuPublish({ node, inputs, runId, account }: CanvasNodeExecutionContext) {
   const artifacts = (inputs.post || []).filter((artifact): artifact is Extract<CanvasArtifact, { kind: "socialPost" }> => artifact.kind === "socialPost");
   if (!artifacts.length) throw new Error("Feishu publish requires a social post artifact.");
-  if (artifacts.some((artifact) => artifact.post.canvasImageBatch?.status === "partial")) {
-    throw new Error("逐图重构仍为部分完成，必须重试失败图片并完成审核后才能发布。");
-  }
   const publishMode = normalizeFeishuPublishMode(node.config.publishMode);
   const job = await enqueueFeishuPublishJob(artifacts.map((artifact) => artifact.post), {
     ownerUserId: account.id,

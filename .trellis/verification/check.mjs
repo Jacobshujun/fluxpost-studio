@@ -84,6 +84,7 @@ const nodeChecks = [
   ["ComfyUI Klein integration check", "comfyui_klein_check.mjs"],
   ["Infinite canvas workflows check", "canvas_workflows_check.mjs"],
   ["Canvas per-image GPT reconstruction check", "canvas_image_each_check.mjs"],
+  ["Canvas review policy cleanup check", "canvas_review_policy_cleanup_check.mjs"],
   ["Canvas workflow draft persistence check", "canvas_workflow_draft_persistence_check.mjs"],
   ["Canvas image download check", "canvas_image_download_check.mjs"],
   ["Canvas video reconstruction check", "canvas_video_reconstruction_check.mjs"],

@@ -335,10 +335,10 @@
         "Scheduler V2 supports typed main/child parameters, fixed/each/random cartesian or zip expansion, stable field bindings, shared main outputs, partial/strict aggregation, and custom node names",
         "Administrator-only xlsx sources freeze selected rows and ordered card children, reuse GPT-Image-2 V2 plus shared references, and retain one local review draft per row across retries",
         "A local video-loader node keeps up to 200 ordered MP4/MOV/WebM snapshots, emits only the selected video in ordinary runs, and freezes one video per V2 scheduled task",
-        "A per-image GPT reconstruction node durably fans out 1-18 images, resumes accepted provider tasks, aggregates ordered partial results, retries failures only, and blocks partial drafts from publishing"
+        "A per-image GPT reconstruction node durably fans out 1-18 images, resumes accepted provider tasks, and retains ordered partial diagnostics inside Canvas without changing review or Feishu publish policy"
       ],
       "evidence": [
-        "2026-08-25 Canvas V2 schedules enqueue all eligible children; V1/V2 partial per-image child, row, and shared-stage retries reuse original runs while preserving successes and review drafts. Focused checks, full offline baseline, mocked Chromium at 1440x960/390x844, and clean port-3001 candidate identity/HTTP passed without live providers or Feishu.",
+        "2026-08-25 Excel and generic V2 aggregation share at-least-one/all policy; generated drafts and Feishu modes ignore Canvas partial metadata, only failed tasks retry, and dry-run/apply cleanup covers SQLite plus transactional PostgreSQL. Focused checks, TypeScript, lint, build, isolated smoke, and full baseline passed.",
         "2026-08-24 competitor-workbook 200/778 parsing, admin/redaction boundaries, ordered hierarchy, shared GPT references, concurrency, retry/partial draft synchronization, build, smoke, and full offline baseline passed without live providers or Feishu.",
         "2026-08-20/21 video-loader local FFmpeg/FFprobe upload, selected/frozen scheduling, Faster Whisper v4 UTF-8 revisions, optimistic locking, hash-gated isolated re-render, waveform/cache checks, full offline baselines, and desktop/mobile mocked Chromium passed without external calls or text disclosure."
       ],

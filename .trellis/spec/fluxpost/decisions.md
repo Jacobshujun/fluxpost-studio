@@ -353,6 +353,50 @@ await retryCanvasScheduleV2SharedTask(scheduleId, account, { mainTaskId });
 - Wrong: reorder only `data.assets` in React or default a legacy migration through the new team setting.
 - Correct: send the validated sort to the API, paginate with the matching versioned cursor, and make historical privacy explicit at the migration call site.
 
+## Scenario: Canvas partial state and generated-post cleanup
+
+### 1. Scope / Trigger
+
+- Trigger: changing Canvas V1/V2 aggregation, Excel schedule expansion, generated-post composition/synchronization, retry controls, review actions, Feishu validation, or historical Canvas review metadata.
+
+### 2. Signatures
+
+- `GeneratedPost` has no `canvasImageBatch` field; Canvas `CanvasArtifact` and node/run metadata may still carry operational `imageBatch` summaries.
+- `npm run db:cleanup:canvas-review-policy` runs `scripts/db/remove-canvas-image-batch.mjs` in dry-run mode.
+- Add `--apply` to mutate; optional test/maintenance selectors are `--backend postgres|sqlite` and `--sqlite <path>`.
+
+### 3. Contracts
+
+- Excel and generic V2 schedules use only `aggregationPolicy`: `at-least-one` accepts at least one successful artifact and `all` requires every child; neither path synthesizes review-layer partial metadata.
+- `partial`, failed indices, schedules, runs, node runs, and artifact diagnostics stay inside Canvas. Partial V1/V2 children, rows, shared stages, and node cards have no retry action; existing `failed`, `blocked`, and `needs_config` node retry behavior remains.
+- Review UI and Feishu `full`, `text`, and `media` modes do not read a legacy `canvasImageBatch` key. Existing body, vehicle, media, mode, approval, and queue checks remain authoritative.
+- Cleanup selects every generated-post JSON object containing the key. PostgreSQL uses `data_json - 'canvasImageBatch'`; SQLite uses `json_remove`. Both preserve row columns, especially `status`, `created_at`, and `updated_at`, and never touch Canvas history tables.
+
+### 4. Validation & Error Matrix
+
+- Unknown option or backend -> command error before database mutation.
+- PostgreSQL selected without `DATABASE_URL` -> explicit configuration error without printing the connection string.
+- SQLite path missing -> explicit path error; dry-run opens read-only.
+- No matching posts -> success with `matched=0`, `changed=0`; dry-run always reports `changed=0`.
+- Database error during apply -> transaction rollback; no partial key cleanup is accepted.
+
+### 5. Good/Base/Bad Cases
+
+- Good: one V2 child succeeds and one fails under `at-least-one`; the row yields successful images, Canvas remains partial for diagnosis, and the review draft can publish under normal mode validation.
+- Base: a historical partial/completed generated post is readable and publishable before cleanup; dry-run reports its id, and `--apply` removes only the legacy key.
+- Bad: copy failed indices into `GeneratedPost`, disable review buttons from Canvas state, retry a `partial` task, update `updated_at` during cleanup, or auto-run the cleanup at startup.
+
+### 6. Tests Required
+
+- `canvas_scheduler_check.mjs` asserts generic/Excel aggregation parity, unrestricted admission despite historical `taskConcurrency`, no synthesized aggregate `imageBatch`, partial retry rejection, and ordinary failed retry.
+- `canvas_image_each_check.mjs`, `review_desk_workflow_check.mjs`, `feishu_publish_mode_check.mjs`, and `feishu_publish_queue_check.mjs` assert operational diagnostics remain while generated posts, review controls, Canvas publish, and all Feishu modes ignore the legacy key.
+- `canvas_review_policy_cleanup_check.mjs` asserts SQLite dry-run byte stability, apply removal, preservation of content/status/timestamps, idempotence, and static transactional PostgreSQL JSONB removal.
+
+### 7. Wrong vs Correct
+
+- Wrong: `updateGeneratedPost(id, { imageUrls, canvasImageBatch })` or `disabled={post.canvasImageBatch?.status === "partial"}`.
+- Correct: update reviewable media only, keep partial details on Canvas artifacts/runs, and let existing publish-mode validation decide availability.
+
 ## Pending Decisions
 
 - Subtask-level durable simple workflow, image-provider task replay, and Feishu per-post idempotency mapping for safe publish-stage replay: 待确认.

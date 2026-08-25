@@ -45,10 +45,10 @@ Do not deploy a dirty worktree, branch name, abbreviated SHA, local runtime rows
 
 ## Recent Verification
 
+- 2026-08-25: Excel/generic V2 `at-least-one`/`all` parity, absence of review-layer `canvasImageBatch`, failed-only retries, review/Feishu legacy-key tolerance, SQLite dry-run/apply preservation, PostgreSQL transactional JSONB removal, TypeScript, lint, build, isolated HTTP smoke, and the full baseline passed without live providers or Feishu.
 - 2026-08-25: Explicit Xray image transport, loopback/text/ComfyUI isolation, Canvas 30-second network recovery, ToAPIs GET-only resume, admin health UI/API, TypeScript, lint, production build, isolated HTTP smoke, and the full offline baseline passed; local Xray listened only on `127.0.0.1:10808`, and credential-free primary/backup HTTPS handshakes succeeded.
 - 2026-08-25: Clean competitor-workbook candidate activated on port 3001 with matching identity and HTTP smoke; mocked Chromium at 1440x960 and 390x844 verified the five-node/six-edge preset, workbook editor, hierarchical scheduler fields, concurrency 1-5, disabled preflight launch, and no horizontal overflow without provider calls.
 - 2026-08-24: Competitor-workbook 200-row/778-card parsing, invalid-input/path-redaction boundaries, hierarchy, shared references, progressive concurrency, retry/partial-draft sync, GPT V2 compatibility, TypeScript, lint, build, isolated smoke, and full baseline passed without live providers or Feishu.
-- 2026-08-21: Canvas draft persistence now separates structural save validation from execution readiness; isolated SQLite create/update/read/delete, malformed-config rejection, Canvas focused checks, TypeScript, lint, build, and the full offline baseline passed.
 Older evidence is preserved in `.trellis/spec/fluxpost/archive/verification-history.md`.
 
 ## Missing Coverage

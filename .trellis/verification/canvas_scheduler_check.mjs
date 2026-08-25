@@ -1066,6 +1066,60 @@ try {
   );
   assert.equal(savedSchedule, undefined, "insufficient random parameter capacity must fail before saving a preview");
 
+  for (const sourceKind of ["generic", "excel"]) {
+    const resultArtifact = { kind: "images", items: [{ url: `/${sourceKind}-success.jpg` }] };
+    const policySchedule = {
+      id: `schedule-policy-${sourceKind}`,
+      schemaVersion: 2,
+      ownerUserId: account.id,
+      ownerDisplayName: account.displayName,
+      name: `${sourceKind} aggregation policy`,
+      revision: 1,
+      workflowId: workflowRecord.id,
+      workflowRevision: workflowRecord.revision,
+      workflowSnapshot: graph,
+      status: "running",
+      batches: [],
+      definition: { ...v2Definition, mainTargetNodeId: undefined, aggregationPolicy: "at-least-one" },
+      mainTasks: [{
+        id: `main-policy-${sourceKind}`,
+        parameterValues: {},
+        status: "running",
+        resultArtifacts: [],
+        ...(sourceKind === "excel" ? { workbookRow: { excelRowNumber: 2, title: "Workbook title", body: "Workbook body" } } : {}),
+        childTasks: [
+          { id: `child-${sourceKind}-success`, parameterValues: {}, status: "running", runId: `run-${sourceKind}-success`, resultArtifacts: [], ...(sourceKind === "excel" ? { workbookCard: { cardIndex: 1, text: "Card one" } } : {}), createdAt, updatedAt: createdAt },
+          { id: `child-${sourceKind}-failed`, parameterValues: {}, status: "running", runId: `run-${sourceKind}-failed`, resultArtifacts: [], ...(sourceKind === "excel" ? { workbookCard: { cardIndex: 2, text: "Card two" } } : {}), createdAt, updatedAt: createdAt },
+        ],
+        createdAt,
+        updatedAt: createdAt,
+      }],
+      totalMainTasks: 1,
+      totalChildTasks: 2,
+      totalContentTasks: 2,
+      totalImageTasks: 2,
+      createdAt,
+      updatedAt: createdAt,
+    };
+    storedSchedule = structuredClone(policySchedule);
+    listedSchedules = [structuredClone(storedSchedule)];
+    canvasRunsById.set(`run-${sourceKind}-success`, { id: `run-${sourceKind}-success`, status: "completed" });
+    canvasRunsById.set(`run-${sourceKind}-failed`, { id: `run-${sourceKind}-failed`, status: "failed", error: "expected failure" });
+    nodeRunsByRunId.set(`run-${sourceKind}-success`, [{ nodeId: "image", attempt: 1, outputs: { images: structuredClone(resultArtifact) } }]);
+    nodeRunsByRunId.set(`run-${sourceKind}-failed`, [{ nodeId: "image", attempt: 1, outputs: {} }]);
+    const atLeastOne = await scheduler.getCanvasSchedule(storedSchedule.id, account);
+    assert.equal(atLeastOne.mainTasks[0].status, "partial", `${sourceKind} at-least-one must produce a partial operational result`);
+    assert.deepEqual(atLeastOne.mainTasks[0].resultArtifacts, [resultArtifact], `${sourceKind} at-least-one must retain successful child artifacts`);
+    assert.equal(atLeastOne.mainTasks[0].resultArtifacts.some((artifact) => "imageBatch" in artifact), false, `${sourceKind} aggregation must not synthesize review policy metadata`);
+
+    storedSchedule = { ...structuredClone(policySchedule), definition: { ...structuredClone(policySchedule.definition), aggregationPolicy: "all" } };
+    listedSchedules = [structuredClone(storedSchedule)];
+    const allRequired = await scheduler.getCanvasSchedule(storedSchedule.id, account);
+    assert.equal(allRequired.mainTasks[0].status, "failed", `${sourceKind} all policy must reject a failed child`);
+    assert.match(allRequired.mainTasks[0].error, /Not every child task completed successfully/);
+  }
+  assert.doesNotMatch(schedulerSource, /firstImage\.imageBatch\s*=/, "V2 reconciliation must not synthesize aggregate partial image batches");
+
   const postId = "generated-post-1";
   generatedPosts = new Map([[postId, {
     id: postId,
@@ -1116,13 +1170,27 @@ try {
     updatedAt: createdAt,
   };
   retriedNode = undefined;
-  const retriedV1Partial = await scheduler.retryCanvasScheduleImageTask(storedSchedule.id, account, {
+  await assert.rejects(
+    scheduler.retryCanvasScheduleImageTask(storedSchedule.id, account, {
+      batchId: "batch-partial",
+      contentTaskId: "content-partial",
+      imageTaskId: "image-partial",
+    }),
+    /Only failed image tasks can be retried/,
+    "V1 partial image tasks must not expose a partial-specific retry",
+  );
+  storedSchedule.batches[0].contentTasks[0].imageTasks[0].status = "failed";
+  canvasRunFixture = {
+    run: { id: "v1-partial-run", steps: [{ nodeId: "failed-image-node" }] },
+    nodeRuns: [{ nodeId: "failed-image-node", attempt: 1, status: "failed" }],
+  };
+  const retriedV1Failure = await scheduler.retryCanvasScheduleImageTask(storedSchedule.id, account, {
     batchId: "batch-partial",
     contentTaskId: "content-partial",
     imageTaskId: "image-partial",
   });
-  assert.deepEqual(retriedNode, { runId: "v1-partial-run", nodeId: "partial-image-each" }, "V1 partial image tasks must retry the failed per-image children in the existing run");
-  assert.equal(retriedV1Partial.batches[0].contentTasks[0].imageTasks[0].status, "queued");
+  assert.deepEqual(retriedNode, { runId: "v1-partial-run", nodeId: "failed-image-node" }, "ordinary V1 failures must remain retryable");
+  assert.equal(retriedV1Failure.batches[0].contentTasks[0].imageTasks[0].status, "queued");
 
   canvasRunFixture = {
     run: { id: "child-run-1", steps: [{ nodeId: "partial-image-each" }] },
@@ -1179,12 +1247,18 @@ try {
   const retriedV2Row = await scheduler.retryCanvasScheduleV2MainTask(storedSchedule.id, account, { mainTaskId: "main-1" });
   assert.deepEqual(
     retriedV2Row.mainTasks[0].childTasks.map((child) => [child.id, child.status, child.retryPending || false]),
-    [["child-1", "pending", true], ["child-failed", "pending", true], ["child-complete", "completed", false]],
-    "V2 row retry must include partial and failed children while leaving completed children unchanged",
+    [["child-1", "partial", false], ["child-failed", "pending", true], ["child-complete", "completed", false]],
+    "V2 row retry must retry failed children while leaving partial and completed children unchanged",
   );
 
   storedSchedule = structuredClone(rowRetrySchedule);
-  storedSchedule.mainTasks[0].childTasks = [storedSchedule.mainTasks[0].childTasks[0]];
+  storedSchedule.mainTasks[0].childTasks = [storedSchedule.mainTasks[0].childTasks[1]];
+  storedSchedule.mainTasks[0].childTasks[0].id = "child-1";
+  storedSchedule.mainTasks[0].childTasks[0].runId = "child-run-1";
+  canvasRunFixture = {
+    run: { id: "child-run-1", steps: [{ nodeId: "failed-child-node" }] },
+    nodeRuns: [{ nodeId: "failed-child-node", attempt: 1, status: "failed" }],
+  };
   retriedNode = undefined;
   const retriedV2 = await scheduler.retryCanvasScheduleV2ChildTask(storedSchedule.id, account, { mainTaskId: "main-1", childTaskId: "child-1" });
   assert.equal(retriedNode, undefined, "a retry request must persist before scheduler reconciliation activates it");
@@ -1194,10 +1268,10 @@ try {
   assert.equal(retriedV2.mainTasks[0].resultArtifacts[0].postId, postId, "image-result retries must preserve the existing review draft artifact");
   storedSchedule = retriedV2;
   listedSchedules = [structuredClone(retriedV2)];
-  canvasRunsById.set("child-run-1", { id: "child-run-1", status: "partial" });
-  nodeRunsByRunId.set("child-run-1", [structuredClone(partialImageEachNodeRun)]);
+  canvasRunsById.set("child-run-1", { id: "child-run-1", status: "failed" });
+  nodeRunsByRunId.set("child-run-1", [{ nodeId: "failed-child-node", attempt: 1, status: "failed" }]);
   const activatedRetry = await scheduler.getCanvasSchedule(storedSchedule.id, account);
-  assert.deepEqual(retriedNode, { runId: "child-run-1", nodeId: "partial-image-each" }, "the scheduler must activate partial per-image retries without a schedule concurrency gate");
+  assert.deepEqual(retriedNode, { runId: "child-run-1", nodeId: "failed-child-node" }, "the scheduler must activate ordinary failures without a schedule concurrency gate");
   assert.equal(activatedRetry.mainTasks[0].childTasks[0].retryPending, false);
   assert.equal(activatedRetry.mainTasks[0].childTasks[0].status, "queued");
   activatedRetry.mainTasks[0].childTasks[0].resultArtifacts = [{ kind: "images", items: [{ url: "/new-result.jpg" }] }];
@@ -1221,8 +1295,8 @@ try {
   };
   await assert.rejects(
     scheduler.retryCanvasScheduleV2ChildTask(storedSchedule.id, account, { mainTaskId: "main-1", childTaskId: "child-1" }),
-    /No retryable Canvas node is available/,
-    "generic partial nodes without failed children must remain non-retryable",
+    /Only failed child tasks can be retried/,
+    "all partial child tasks must remain non-retryable",
   );
   canvasRunFixture = {
     run: { id: "shared-run-failed", steps: [{ nodeId: "shared-vision" }, { nodeId: "shared-select" }] },
@@ -1269,9 +1343,11 @@ try {
     }],
   };
   retriedNode = undefined;
-  const retriedPartialShared = await scheduler.retryCanvasScheduleV2SharedTask(storedSchedule.id, account, { mainTaskId: "main-1" });
-  assert.deepEqual(retriedNode, { runId: "shared-run-partial", nodeId: "partial-image-each" }, "partial shared stages must retry failed per-image children");
-  assert.equal(retriedPartialShared.mainTasks[0].sharedStatus, "queued");
+  await assert.rejects(
+    scheduler.retryCanvasScheduleV2SharedTask(storedSchedule.id, account, { mainTaskId: "main-1" }),
+    /Only failed shared tasks can be retried/,
+    "partial shared stages must not expose a partial-specific retry",
+  );
   storedSchedule = {
     ...acceptedV2,
     mainTasks: [{ ...acceptedV2.mainTasks[0], sharedRunId: "shared-run-failed", sharedStatus: "failed", sharedArtifacts: [{ nodeId: "shared-select", outputPort: "images", artifactKind: "images", artifact: { kind: "images", items: [{ url: "/already-frozen.jpg" }] } }] }],
@@ -1292,8 +1368,8 @@ try {
   );
   assert.match(
     schedulerSource,
-    /function findRetryableCanvasNode[\s\S]*orderedAttempts[\s\S]*nodeRun\.nodeType === "model\.gpt-image-each"/,
-    "Image-child retry must prefer execution-order failures and support partial per-image nodes.",
+    /function findFailedCanvasNode[\s\S]*orderedAttempts[\s\S]*\["failed", "blocked", "needs_config"\]/,
+    "Image-child retry must prefer execution-order failures without treating partial nodes as retryable.",
   );
   assert.match(
     schedulerSource,
@@ -1371,10 +1447,10 @@ try {
   for (const snippet of ["CanvasScheduleCenter", "CanvasScheduleV2Editor", "CanvasScheduleParameterEditor", "ScheduleV2RuntimeTree", "节点名称", "人物场景预设", "ScheduleAssetFilterEditor", "多个标签，AND", "条件随机", "条件匹配", "批次内随机去重", "随机抽取", "固定个数", "随机范围", "每个主任务随机抽取", "确认并启动", "接受新增候选图", "onBlur={commitLabel}", "onSchedulerRoleChange", "insertSchedulerSkeleton", "Switch 输入", "画布绑定", "onSaveBindings", "saveQueueRef.current = saveQueueRef.current.then", "current?.id === schedule.id ? current.revision : schedule.revision"]) {
     assert.ok(page.includes(snippet), `Canvas UI is missing ${snippet}`);
   }
-  assert.match(page, /function isCanvasScheduleRetryableStatus[\s\S]*status === "failed" \|\| status === "partial"/, "schedule UI must treat failed and partial task rows as retryable");
-  assert.match(page, /child\.status === "partial" \? "重试失败图片" : "重试"/, "V2 partial child tasks must expose the failed-image retry label");
-  assert.match(page, /task\.status === "partial" \? "重试失败图片" : "重试"/, "V1 partial image tasks must expose the failed-image retry label");
-  assert.ok(page.includes("重试本行未完成卡片"), "V2 row retry must describe failed and partial children together");
+  assert.ok(!page.includes("重试失败图片"), "Canvas UI must not expose partial-specific retry copy");
+  assert.match(page, /main\.childTasks\.some\(\(child\) => child\.status === "failed"\)/, "V2 row retry must remain available for failed children");
+  assert.match(page, /content\.imageTasks\.map[\s\S]*task\.status === "failed"/, "V1 image retry must remain available for failed tasks");
+  assert.ok(page.includes("重试本行失败卡片"), "V2 row retry must describe failed children only");
   for (const snippet of ["requestGenerationRef", "queryStringRef", "filterRef", "searchDraftState", "commitSearch", "ScheduleAssetThumbnail", "/thumbnail", "seenCursors", "selectIdRange", "全选当前筛选结果", "清空已选", "加载更多", "预览图片", "上一张图片", "下一张图片"]) {
     assert.ok(page.includes(snippet), `Canvas scheduler image source UI is missing ${snippet}`);
   }
@@ -1420,7 +1496,7 @@ try {
   );
   assert.match(
     schedulerSource,
-    /retryCanvasNode\(run\.run\.id, retryableNode\.nodeId, account, \{ allowScheduledSharedRetry: true \}\)/,
+    /retryCanvasNode\(run\.run\.id, failedNode\.nodeId, account, \{ allowScheduledSharedRetry: true \}\)/,
     "the schedule-level shared retry path must explicitly authorize the coordinated run retry",
   );
   assert.match(

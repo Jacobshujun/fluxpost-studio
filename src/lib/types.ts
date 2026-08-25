@@ -600,13 +600,6 @@ export type GeneratedPost = {
   sourceBatchId?: string;
   sourceBatchItemId?: string;
   xhsSeries?: XhsCardSeries;
-  canvasImageBatch?: {
-    status: "completed" | "partial";
-    total: number;
-    succeeded: number;
-    failed: number;
-    failedIndices: number[];
-  };
   updatedAt: string;
 };
 

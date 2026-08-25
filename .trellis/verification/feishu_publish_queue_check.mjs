@@ -71,6 +71,7 @@ assertContains(queue, /findEquivalentQueuedJob\(ownerUserId,\s*postIds,\s*publis
 assertContains(queue, /prepareFeishuPublishJob[\s\S]*enrichPostsWithContentTags[\s\S]*validatePostsForFeishuPublish[\s\S]*persistPostsSerially/, "Feishu worker must prepare and persist posts before external publishing.");
 assertContains(queue, /if \(publishMode === "text"\) return validateTextPostsForFeishuPublish\(posts\)/, "Text publishing must use text and governed-body preflight.");
 assertContains(queue, /if \(publishMode === "media"\) return validateMediaPostsForFeishuPublish\(posts\)/, "Media publishing must use its body-length-exempt preflight.");
+assertNotContains(queue, /canvasImageBatch/, "Legacy Canvas partial metadata must not block any Feishu publish mode.");
 assertContains(queue, /validatePostsForFeishuPublish[\s\S]*if \(!isFinishedBodyPolicyCompliant\(post\)\)[\s\S]*finishedBodyValidationFailure/, "Full publishing must reject governed over-limit bodies.");
 assertContains(queue, /validateTextPostsForFeishuPublish[\s\S]*if \(!isFinishedBodyPolicyCompliant\(post\)\)[\s\S]*finishedBodyValidationFailure/, "Text publishing must reject governed over-limit bodies.");
 const mediaValidation = queue.match(/function validateMediaPostsForFeishuPublish[\s\S]*?\n\}/)?.[0] || "";

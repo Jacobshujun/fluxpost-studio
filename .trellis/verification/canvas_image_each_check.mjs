@@ -28,7 +28,8 @@ assert.ok(registrySource.includes('if (node.type === "model.gpt-image-each" && n
 assert.ok(registrySource.includes("gptImageEachV1Definition, gptImageEachV2Definition"), "Both image-each versions must remain readable.");
 assert.ok(runsSource.includes('status: result.pending ? "running" : result.partial ? "partial" : "completed"'), "Partial node results must persist distinctly.");
 assert.ok(runsSource.includes("onInternalMetadataUpdate"), "Child metadata updates must be durably persisted by the Canvas runner.");
-assert.ok(queueSource.includes('post.canvasImageBatch?.status === "partial"'), "Feishu preflight must reject partial Canvas image batches.");
+assert.ok(!executorSource.includes("canvasImageBatch"), "Canvas composition must not copy operational image-batch state into review drafts.");
+assert.ok(!queueSource.includes("canvasImageBatch"), "Feishu preflight must ignore legacy Canvas image-batch metadata.");
 
 const transpiledRegistry = ts.transpileModule(registrySource, {
   compilerOptions: { esModuleInterop: true, module: ts.ModuleKind.CommonJS, target: ts.ScriptTarget.ES2022 },
