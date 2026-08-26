@@ -64,6 +64,8 @@ and unrelated VPS services.
 - [ ] The Canvas video-loader check creates a 90-degree metadata fixture on both
       FFmpeg 5.1 and current FFmpeg, and still asserts rotation and display-size
       normalization rather than skipping the case.
+- [ ] The Canvas subtitle check uses the same strict FFmpeg 5.1/current-version
+      rotation fixture compatibility and retains its rotation/display assertions.
 - [ ] The Docker verification target provides Python 3 for the Canvas subtitle
       UTF-8 probe, including the `json` standard library omitted by Debian's
       `python3-minimal`; the probe works with either `python` or `python3` and

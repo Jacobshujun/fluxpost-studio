@@ -16,6 +16,7 @@ const files = {
   domain: read("scripts/deploy/vps-enable-domain.sh"),
   verifier: read("scripts/deploy/vps-verify-candidate.sh"),
   dockerfile: read("Dockerfile"),
+  canvasVideoSubtitles: read(".trellis/verification/canvas_video_subtitles_check.mjs"),
   docs: read("docs/deployment/ubuntu-docker.md"),
 };
 const composeDocument = yaml.load(files.compose);
@@ -138,6 +139,7 @@ assertNotContains(files.verifier, /env\.production|ENV_FILE|docker compose|compo
 assertContains(files.dockerfile, /FROM deps AS verification[\s\S]*RUN node \.trellis\/verification\/check\.mjs/, "Docker must expose the cross-platform offline verification target.");
 assertContains(files.dockerfile, /FROM deps AS verification[\s\S]*apt-get install -y --no-install-recommends[^\n]*\bpython3\s+\\/, "Docker verification must install Python 3 with its standard library for the Canvas subtitle UTF-8 probe.");
 assertNotContains(files.dockerfile, /FROM deps AS verification[\s\S]*python3-minimal[\s\S]*RUN node \.trellis\/verification\/check\.mjs/, "Docker verification must not use python3-minimal because it omits the json standard library.");
+assertContains(files.canvasVideoSubtitles, /function createRotatedFixture[\s\S]*display_rotation[\s\S]*Unrecognized option 'display_rotation[\s\S]*metadata:s:v:0[\s\S]*rotate=/, "Canvas subtitle verification must support both current and Debian 12 FFmpeg rotation metadata syntax.");
 assertContains(files.dockerfile, /FROM node:24-bookworm-slim AS builder[\s\S]*ENV FLUXPOST_STANDALONE_BUILD=1/, "Docker app builds must keep standalone output enabled.");
 
 for (const [name, source] of Object.entries({ deploy: files.deploy, bootstrap: files.bootstrap, domain: files.domain, verifier: files.verifier })) {

@@ -313,7 +313,7 @@ try {
       "-map", "0:v:0", "-map", "1:a:0", "-c:v", "libx264", "-pix_fmt", "yuv420p", "-c:a", "aac", baseSource,
     ], temp);
     if (fixture.rotation) {
-      run("ffmpeg", ["-hide_banner", "-loglevel", "error", "-y", "-display_rotation:v:0", String(fixture.rotation), "-i", baseSource, "-c", "copy", source], temp);
+      createRotatedFixture(baseSource, source, fixture.rotation, temp);
     } else {
       copyFileSync(baseSource, source);
     }
@@ -389,6 +389,24 @@ function findPython(cwd) {
     if (!result.error && result.status === 0) return candidate;
   }
   throw new Error(`Python interpreter with the json standard library is unavailable; tried ${candidates.join(" and ")}.`);
+}
+
+function createRotatedFixture(sourcePath, outputPath, rotation, cwd) {
+  const modern = spawnSync("ffmpeg", [
+    "-hide_banner", "-loglevel", "error", "-y",
+    "-display_rotation:v:0", String(rotation), "-i", sourcePath,
+    "-c", "copy", outputPath,
+  ], { cwd, encoding: "utf8", windowsHide: true });
+  if (modern.status === 0) return;
+
+  const modernError = `${modern.stderr ?? ""}${modern.error?.message ?? ""}`;
+  if (!/Unrecognized option 'display_rotation/.test(modernError)) {
+    throw new Error(`Could not create rotated subtitle fixture: ${modernError}`);
+  }
+  run("ffmpeg", [
+    "-hide_banner", "-loglevel", "error", "-y", "-i", sourcePath,
+    "-c", "copy", "-metadata:s:v:0", `rotate=${rotation}`, outputPath,
+  ], cwd);
 }
 
 function probeMedia(filePath, cwd) {

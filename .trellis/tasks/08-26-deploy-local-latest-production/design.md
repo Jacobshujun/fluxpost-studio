@@ -20,7 +20,10 @@ interpreter but omits the `json` standard library required by the probe, so the
 verification stage installs the full `python3` package; the runner remains
 unchanged. The probe accepts either the Windows `python` command or Debian's
 `python3` command only after proving `import json`, and reports spawn failures
-directly. All changes are committed before restarting every candidate
+directly. The same FFmpeg rotation fixture fallback is applied to the Canvas
+subtitle check, which had an independent direct `-display_rotation` invocation;
+the fallback remains strict and preserves source rotation and output dimension
+assertions. All changes are committed before restarting every candidate
 verification gate so the local candidate, GitHub refs, VPS verifier, and
 production deploy operate on one new immutable full SHA.
 
