@@ -176,3 +176,46 @@
   .customDateRange input{width:100%;font-size:10px}
   .customDateRange button{padding:0 9px}
 }
+
+.batchBar button:disabled{opacity:.5;cursor:not-allowed}
+.batchCollectionPanel{position:relative;z-index:20;display:grid;grid-template-columns:minmax(0,1fr) auto;gap:10px;margin:-7px 0 12px;padding:12px;border:1px solid var(--library-line-strong);border-radius:7px;background:var(--library-panel-strong);box-shadow:var(--shadow-soft);min-width:0}
+.collectionPanelHead{grid-column:1/-1;display:flex;align-items:center;justify-content:space-between;gap:12px;min-width:0}
+.collectionPanelHead>div{display:flex;align-items:baseline;gap:8px;min-width:0}
+.collectionPanelHead strong{color:var(--library-text);font-size:11px}
+.collectionPanelHead span,.collectionPanelHint,.newCollectionForm span{color:var(--library-text-muted);font-size:9px}
+.collectionSearch{grid-column:1/-1;height:34px;display:flex;align-items:center;gap:7px;border:1px solid var(--library-line-strong);border-radius:6px;background:var(--library-panel);color:var(--library-text-muted);padding:0 9px}
+.collectionSearch input{width:100%;min-width:0;border:0;outline:0;background:transparent;color:var(--library-text);font-size:11px}
+.collectionChecklist{grid-column:1/-1;max-height:248px;overflow:auto;border:1px solid var(--library-line);border-radius:6px;background:var(--library-panel)}
+.collectionOption{min-height:42px;display:grid;grid-template-columns:18px minmax(0,1fr) auto;align-items:center;gap:8px;padding:6px 10px;border-bottom:1px solid var(--library-line);color:var(--library-text);cursor:pointer}
+.collectionOption:last-child{border-bottom:0}
+.collectionOption:hover{background:var(--library-subtle)}
+.collectionOption input{width:15px;height:15px;accent-color:var(--library-accent)}
+.collectionOptionMain{min-width:0;display:grid;gap:2px}
+.collectionOptionMain strong,.collectionOptionMain small{overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.collectionOptionMain strong{font-size:10px;font-weight:650}
+.collectionOptionMain small{color:var(--library-text-muted);font-size:9px}
+.collectionMembership{color:var(--library-text-soft);font-size:9px;white-space:nowrap}
+.collectionOptionFull{cursor:default;opacity:.68}
+.collectionOptionFull:hover{background:transparent}
+.collectionEmpty{padding:24px 10px;text-align:center;color:var(--library-text-muted);font-size:10px}
+.collectionPanelActions{display:flex;align-items:center}
+.collectionPanelActions .primaryButton{height:34px;font-size:11px}
+.newCollectionForm{grid-column:1/-1;display:grid;grid-template-columns:minmax(120px,1fr) minmax(180px,2fr) auto;align-items:center;gap:8px;padding-top:10px;border-top:1px solid var(--library-line)}
+.newCollectionForm>div{display:grid;gap:2px}
+.newCollectionForm strong{color:var(--library-text);font-size:10px}
+.newCollectionForm input{min-width:0;height:34px;border:1px solid var(--library-line-strong);border-radius:6px;background:var(--library-panel);color:var(--library-text);padding:0 9px;font-size:11px;outline:0}
+.newCollectionForm button{height:34px;border:1px solid var(--library-line-strong);border-radius:6px;background:var(--library-raised);color:var(--library-text-soft);display:inline-flex;align-items:center;justify-content:center;gap:5px;padding:0 11px;font-size:10px;white-space:nowrap}
+.newCollectionForm button:hover:not(:disabled){background:var(--library-subtle);color:var(--library-text)}
+.newCollectionForm button:disabled,.collectionSearch input:disabled{opacity:.5;cursor:not-allowed}
+.collectionPanelHint{grid-column:1/-1}
+
+@media(max-width:700px){
+  .batchCollectionPanel{grid-template-columns:minmax(0,1fr);margin-top:-5px;padding:10px}
+  .collectionPanelHead>div{display:grid;gap:2px}
+  .collectionChecklist{max-height:34vh}
+  .collectionOption{grid-template-columns:18px minmax(0,1fr);padding-left:8px!important}
+  .collectionMembership{grid-column:2;white-space:normal}
+  .collectionPanelActions,.collectionPanelActions .primaryButton{width:100%}
+  .newCollectionForm{grid-template-columns:minmax(0,1fr)}
+  .newCollectionForm button{width:100%}
+}

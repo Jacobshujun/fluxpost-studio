@@ -1,0 +1,3 @@
+{"file":".trellis/spec/frontend/index.md","reason":"Frontend structure, state, accessibility, type, and quality rules for the gallery UI."}
+{"file":".trellis/spec/fluxpost/decisions.md","reason":"Stable authenticated library role, ownership, tag, selection, and verification contracts."}
+{"file":".trellis/spec/fluxpost/architecture_rules.md","reason":"Library domain ownership and thin API route boundary."}

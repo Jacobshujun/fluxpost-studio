@@ -1233,6 +1233,45 @@ export type LibraryTagBatchResult = {
   failures: LibraryTagBatchFailure[];
 };
 
+export type LibraryCollectionBatchAction =
+  | "add_to_collections"
+  | "create_collection_and_add"
+  | "remove_from_collection";
+
+export type LibraryCollectionBatchRequest =
+  | {
+      action: "add_to_collections";
+      role: LibraryAssetRole;
+      assetIds: string[];
+      collectionIds: string[];
+    }
+  | {
+      action: "create_collection_and_add";
+      role: LibraryAssetRole;
+      assetIds: string[];
+      name: string;
+      parentId?: string;
+    }
+  | {
+      action: "remove_from_collection";
+      role: LibraryAssetRole;
+      assetIds: string[];
+      collectionId: string;
+    };
+
+export type LibraryCollectionBatchFailure = {
+  assetId: string;
+  error: string;
+};
+
+export type LibraryCollectionBatchResult = {
+  action: LibraryCollectionBatchAction;
+  collection?: LibraryCollection;
+  assets: LibraryAsset[];
+  unchangedAssetIds: string[];
+  failures: LibraryCollectionBatchFailure[];
+};
+
 export type ReferenceAssetSelection = {
   assetIds: string[];
 };

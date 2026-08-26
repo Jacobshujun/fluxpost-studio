@@ -226,7 +226,8 @@
         "Reference AI tags and manual vehicle tags preserve distinct contracts and ownership"
       ],
       "evidence": [
-        "Library schema/API/auth/tag/theme/sort/cursor/selection/migration/browser checks and production route health passed."
+        "Library schema/API/auth/tag/theme/sort/cursor/selection/migration/browser checks and production route health passed.",
+        "2026-08-26 batch multi-collection add/create/remove, permissions, idempotency, 65-item selection retention, and mocked desktop/mobile checks passed offline."
       ],
       "notes": "Real production-38 TOS and GPT tag/retry samples remain; retired 104 is not a gate."
     },

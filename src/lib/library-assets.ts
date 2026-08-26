@@ -30,6 +30,8 @@ import type {
   LibraryAssetPage,
   LibraryAssetRole,
   LibraryCollection,
+  LibraryCollectionBatchRequest,
+  LibraryCollectionBatchResult,
   LibraryListSort,
   LibraryManualTagOverrides,
   LibraryTagProfile,
@@ -214,10 +216,12 @@ export async function createLibraryCollection(
     throw new Error("Parent collection not found.");
   }
   const relativePath = parent?.relativePath ? `${parent.relativePath}/${name}` : name;
-  const existing = collections.find((item) => item.ownerUserId === account.id && item.role === role && item.relativePath === relativePath);
+  const owner = parent
+    ? { ownerUserId: parent.ownerUserId, ownerDisplayName: parent.ownerDisplayName }
+    : scopeWorkspaceOwner(account);
+  const existing = collections.find((item) => item.ownerUserId === owner.ownerUserId && item.role === role && item.relativePath === relativePath);
   if (existing) return existing;
   const now = new Date().toISOString();
-  const owner = scopeWorkspaceOwner(account);
   const collection: LibraryCollection = {
     id: `library-collection-${randomUUID()}`,
     ownerUserId: owner.ownerUserId,
@@ -231,6 +235,57 @@ export async function createLibraryCollection(
   };
   await saveLibraryCollectionToDb(collection);
   return collection;
+}
+
+export async function updateLibraryAssetCollections(
+  account: WorkspaceAccessActor,
+  input: LibraryCollectionBatchRequest,
+): Promise<LibraryCollectionBatchResult> {
+  const role = requireRole(input.role);
+  const assetIds = normalizeLibraryBatchIds(input.assetIds, "asset");
+  if (!assetIds.length) throw new Error("Select at least one library asset.");
+
+  if (input.action === "add_to_collections") {
+    const collectionIds = normalizeLibraryBatchIds(input.collectionIds, "collection");
+    if (!collectionIds.length) throw new Error("Select at least one library collection.");
+    await requireManageableCollections(account, collectionIds, role);
+    return updateCollectionMemberships(account, {
+      action: input.action,
+      role,
+      assetIds,
+      collectionIds,
+    });
+  }
+
+  if (input.action === "remove_from_collection") {
+    const [collectionId] = normalizeLibraryBatchIds([input.collectionId], "collection");
+    if (!collectionId) throw new Error("A library collection is required.");
+    await requireManageableCollections(account, [collectionId], role);
+    return updateCollectionMemberships(account, {
+      action: input.action,
+      role,
+      assetIds,
+      collectionIds: [collectionId],
+    });
+  }
+
+  if (input.action === "create_collection_and_add") {
+    const parentId = input.parentId === undefined
+      ? undefined
+      : normalizeLibraryBatchIds([input.parentId], "parent collection")[0];
+    if (input.parentId !== undefined && !parentId) throw new Error("A valid parent collection is required.");
+    if (parentId) await requireManageableCollections(account, [parentId], role);
+    const collection = await createLibraryCollection(account, { name: input.name, role, parentId });
+    const result = await updateCollectionMemberships(account, {
+      action: input.action,
+      role,
+      assetIds,
+      collectionIds: [collection.id],
+    });
+    return { ...result, collection };
+  }
+
+  throw new Error("Invalid library collection batch action.");
 }
 
 export async function importLibraryAsset(account: WorkspaceAccessActor, input: ImportLibraryAssetInput) {
@@ -494,6 +549,97 @@ async function validateCollectionIds(account: WorkspaceAccessActor, ids: string[
     }
   }
   return requested;
+}
+
+async function requireManageableCollections(
+  account: WorkspaceAccessActor,
+  ids: string[],
+  role: LibraryAssetRole,
+) {
+  const collections = await listLibraryCollectionsFromDb();
+  const byId = new Map(collections.map((collection) => [collection.id, collection]));
+  return ids.map((id) => {
+    const collection = byId.get(id);
+    if (!collection) throw new Error(`Library collection not found: ${id}`);
+    if (collection.role !== role) throw new Error(`Library collection does not belong to the selected library: ${id}`);
+    if (!isWorkspaceAdmin(account) && collection.ownerUserId !== account.id) {
+      throw new Error(`Library collection is not manageable: ${id}`);
+    }
+    return collection;
+  });
+}
+
+async function updateCollectionMemberships(
+  account: WorkspaceAccessActor,
+  input: {
+    action: LibraryCollectionBatchRequest["action"];
+    role: LibraryAssetRole;
+    assetIds: string[];
+    collectionIds: string[];
+  },
+): Promise<LibraryCollectionBatchResult> {
+  const result: LibraryCollectionBatchResult = {
+    action: input.action,
+    assets: [],
+    unchangedAssetIds: [],
+    failures: [],
+  };
+  for (const assetId of input.assetIds) {
+    try {
+      const asset = await getLibraryAssetFromDb(assetId);
+      if (!asset) throw new Error("Library asset not found.");
+      if (!canEditAsset(account, asset)) throw new Error("Library asset is read-only.");
+      if (!asset.roles.includes(input.role)) throw new Error("Library asset does not belong to the selected library.");
+      const nextCollectionIds = input.action === "remove_from_collection"
+        ? asset.collectionIds.filter((id) => id !== input.collectionIds[0])
+        : stableCollectionUnion(asset.collectionIds, input.collectionIds);
+      if (sameStringList(asset.collectionIds, nextCollectionIds)) {
+        result.unchangedAssetIds.push(assetId);
+        continue;
+      }
+      const saved = await saveLibraryAssetToDb({
+        ...asset,
+        collectionIds: nextCollectionIds,
+        updatedAt: new Date().toISOString(),
+      });
+      result.assets.push({ ...saved, canEdit: true });
+    } catch (error) {
+      result.failures.push({ assetId, error: errorMessage(error) });
+    }
+  }
+  return result;
+}
+
+function normalizeLibraryBatchIds(values: string[], label: string) {
+  if (!Array.isArray(values)) throw new Error(`Library ${label} ids must be an array.`);
+  const result: string[] = [];
+  const seen = new Set<string>();
+  for (const value of values) {
+    if (typeof value !== "string") throw new Error(`Each library ${label} id must be a string.`);
+    const normalized = value.trim();
+    if (!normalized) throw new Error(`Each library ${label} id must not be empty.`);
+    if (!seen.has(normalized)) {
+      seen.add(normalized);
+      result.push(normalized);
+    }
+  }
+  return result;
+}
+
+function stableCollectionUnion(current: string[], requested: string[]) {
+  const result = [...current];
+  const seen = new Set(current);
+  for (const id of requested) {
+    if (!seen.has(id)) {
+      seen.add(id);
+      result.push(id);
+    }
+  }
+  return result;
+}
+
+function sameStringList(left: string[], right: string[]) {
+  return left.length === right.length && left.every((value, index) => value === right[index]);
 }
 
 function canReadAsset(account: WorkspaceAccessActor, asset: LibraryAsset) {

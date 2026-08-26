@@ -20,6 +20,7 @@ const tags = read("src/lib/library-tags.ts");
 const storage = read("src/lib/runtime-media-storage.ts");
 const page = read("src/app/library/page.tsx");
 const importRoute = read("src/app/api/library/import/route.ts");
+const batchCollectionRoute = read("src/app/api/library/assets/batch/route.ts");
 const css = read("src/app/library/library.module.css");
 const home = read("src/app/page.tsx");
 
@@ -28,7 +29,7 @@ const importAssetEnd = assets.indexOf("export async function patchLibraryAsset",
 assert(importAssetStart >= 0 && importAssetEnd > importAssetStart, "Library import implementation contract is missing.");
 const importAssetContract = assets.slice(importAssetStart, importAssetEnd);
 
-for (const name of ["LibraryAsset", "LibraryCollection", "LibraryListSort", "LibraryTagProfile", "LibraryTaggingJob", "LibraryTagSuggestion", "LibraryTagBatchResult", "ReferenceAssetSelection"]) {
+for (const name of ["LibraryAsset", "LibraryCollection", "LibraryListSort", "LibraryTagProfile", "LibraryTaggingJob", "LibraryTagSuggestion", "LibraryTagBatchResult", "LibraryCollectionBatchRequest", "LibraryCollectionBatchResult", "ReferenceAssetSelection"]) {
   contains(types, new RegExp(`export type ${name}\\b`), `Missing shared type ${name}.`);
 }
 for (const table of ["library_assets", "library_asset_roles", "library_collections", "library_collection_assets", "library_asset_labels", "library_tagging_jobs"]) {
@@ -75,6 +76,7 @@ contains(assets, /Library role is required for added-time filtering\.[\s\S]*Libr
 
 const routeFiles = [
   "src/app/api/library/assets/route.ts",
+  "src/app/api/library/assets/batch/route.ts",
   "src/app/api/library/assets/[id]/route.ts",
   "src/app/api/library/import/route.ts",
   "src/app/api/library/collections/route.ts",
@@ -134,6 +136,20 @@ contains(page, /id: `\$\{Date\.now\(\)\}-\$\{\+\+importItemSequence\.current\}`/
 assert(!/randomUUID/.test(page), "The browser upload queue must not depend on crypto.randomUUID.");
 contains(page, /try \{\s*const form = new FormData\(\)[\s\S]*catch \(error\) \{\s*updateImport\(item\.id, "error"/, "Synchronous upload preparation failures must update the visible import row.");
 contains(page, /BatchTagManager[\s\S]*只读团队资产会跳过/, "Batch tag management and read-only feedback are missing.");
+contains(batchCollectionRoute, /parseLibraryCollectionBatchRequest\(await request\.json\(\)\)[\s\S]*updateLibraryAssetCollections\(account, body\)/, "Batch collection route must authenticate, parse, and delegate to the domain service.");
+contains(batchCollectionRoute, /requireIdArray[\s\S]*every\(\(item\) => typeof item === "string"\)/, "Batch collection route must reject non-string ids instead of filtering them.");
+contains(assets, /requireManageableCollections\(account, collectionIds, role\)[\s\S]*updateCollectionMemberships/, "Every target collection must be validated before asset mutation.");
+contains(assets, /stableCollectionUnion\(asset\.collectionIds, input\.collectionIds\)/, "Batch collection add must preserve existing collection relationships.");
+contains(assets, /sameStringList\(asset\.collectionIds, nextCollectionIds\)[\s\S]*unchangedAssetIds\.push/, "Idempotent batch collection updates must report unchanged assets without writing.");
+contains(assets, /for \(const assetId of input\.assetIds\)[\s\S]*failures\.push/, "Batch collection updates must continue after per-asset failures.");
+assert(!/normalizeStringList\(input\.assetIds,\s*100\)/.test(assets.slice(assets.indexOf("export async function updateLibraryAssetCollections"))), "Batch collection ids must not be truncated by the tag-batch limit.");
+contains(page, /<Folders size=\{14\} \/>管理集合/, "The image batch toolbar must expose collection management.");
+contains(page, /memberCount\}\/\{assets\.length\} 已在集合中/, "Collection targets must show selected-asset membership counts.");
+contains(page, /搜索集合名称或路径[\s\S]*新建并加入/, "Collection manager search and create-and-add controls are incomplete.");
+contains(page, /collectionId \? "移出当前集合" : "移出当前图库"/, "Collection removal and library-role removal must use distinct labels.");
+contains(page, /disabled=\{collectionBusy\}[\s\S]*加入所选集合/, "Batch collection submission must be guarded while busy.");
+contains(css, /\.batchCollectionPanel\{[^}]*min-width:0/, "Batch collection panel styling is missing.");
+contains(css, /@media\(max-width:700px\)[\s\S]*\.collectionOption\{grid-template-columns:18px minmax\(0,1fr\)/, "Batch collection controls must remain bounded on mobile.");
 contains(page, /restoreAi: manualTagKeys/, "Restore AI must clear every manual tag override.");
 contains(page, /role: activeRole, assetIds: \[asset\.id\]/, "Single-asset tag changes must carry the active library role.");
 contains(page, /role, assetIds: \[\.\.\.selected\]/, "Batch tag changes must carry the active library role.");

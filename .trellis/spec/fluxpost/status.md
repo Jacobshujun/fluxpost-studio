@@ -4,23 +4,24 @@ Last updated: 2026-08-26
 
 ## One-Line Status
 
-The verified Canvas retry candidate runs exact SHA `e58b37b0767da79ea365c214945755a0e8a0c16b` on local LAN port `3001`, GitHub `main`, and production `https://flux.lightmoment.net`.
+Library batch collection management is implemented and passes the full offline baseline; commit and clean port-3001 candidate activation remain.
 
 ## Current Focus
 
-- The deployed Canvas candidate restores V2 partial child and row retry only for failed `model.gpt-image-each` children; V1, shared, generic partial, review, and Feishu behavior remains unchanged.
-- Legacy implementation tasks are archived; active product gates live in `feature_list.json` rather than permanent task directories.
-- Production release `20260826-094620-e58b37b0767d` is healthy behind host Nginx, with prior release `20260826-080626-f8e2caa8d97c` and two rescue images retained.
-- Port `3001`, GitHub `main`, and production passed exact-SHA parity at `e58b37b0767da79ea365c214945755a0e8a0c16b` before this completion-only metadata record.
+- Reference and vehicle galleries now batch-add selected assets to multiple collections, create/reuse a collection at the current hierarchy, and remove assets from the current collection through one authenticated batch API.
+- Target validation happens before asset writes; per-asset permission/role failures remain partial, existing collection relationships remain intact, and no-op relationships are reported without writes.
+- The responsive collection panel provides hierarchy search, membership counts, owner attribution, busy guards, and distinct current-collection versus current-library removal commands.
+- Cursor-depth refresh preserves selections larger than the 60-item first page; mocked desktop/mobile coverage exercises 65 selected assets without external services.
 
 ## Next Entry
 
-Operator-review the restored retry against a representative partial image task on the LAN candidate or production. Any later change requires a new immutable candidate and separate production approval.
+Commit the verified task, activate the clean committed candidate on port `3001`, and run the mocked desktop/mobile browser check against that candidate.
 
 ## Risks And Unknowns
 
-- Features still marked `ready_for_review` retain their explicit live/provider/operator gates; task archival does not mark them `done`.
-- Historical image attempts still require working Xray; the UI does not operate it.
+- Real authenticated multi-user PostgreSQL use of the new batch endpoint remains an operator-review gate; default verification uses isolated mocks and does not mutate runtime library data.
+- The existing reference-library live TOS and GPT tag/retry samples remain pending; this task does not call those providers.
+- Production still runs the prior verified Canvas SHA until a separate deployment is explicitly approved.
 - Nine high-severity transitive advisories remain; do not run `npm audit fix --force`.
 
 ## History

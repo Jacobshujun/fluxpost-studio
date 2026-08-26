@@ -1,0 +1,3 @@
+{"file":".trellis/spec/frontend/quality-guidelines.md","reason":"Required responsive UI and complete offline verification gates."}
+{"file":".trellis/spec/fluxpost/verification.md","reason":"Authoritative baseline command and external-service isolation rules."}
+{"file":".trellis/spec/fluxpost/decisions.md","reason":"Library permissions and deterministic-check expectations to review against."}

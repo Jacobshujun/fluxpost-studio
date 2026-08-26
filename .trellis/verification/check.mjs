@@ -13,6 +13,7 @@ const nodeChecks = [
   ["PostgreSQL schema check", "postgres_schema_check.mjs"],
   ["Workspace accounts check", "workspace_accounts_check.mjs"],
   ["Reference library assets check", "library_assets_check.mjs"],
+  ["Library batch collections check", "library_collection_batch_check.mjs"],
   ["Library thumbnail cache check", "library_thumbnails_check.mjs"],
   ["Vehicle library check", "vehicle_library_check.mjs"],
   ["Compact-only workspace check", "compact_only_workspace_check.mjs"],

@@ -98,6 +98,57 @@ if (result.status === "imported") kickLibraryTaggingWorker();
 if (result.job) kickLibraryTaggingWorker();
 ```
 
+## Scenario: Batch library collection management
+
+### 1. Scope / Trigger
+
+- `/library` supports multi-select collection organization for both `reference` and `vehicle` assets without changing roles, tags, visibility, object storage, or unrelated collection relationships.
+
+### 2. Signatures
+
+- `POST /api/library/assets/batch` accepts one of:
+  - `{ action: "add_to_collections", role, assetIds, collectionIds }`
+  - `{ action: "create_collection_and_add", role, assetIds, name, parentId? }`
+  - `{ action: "remove_from_collection", role, assetIds, collectionId }`
+- The response is `{ action, collection?, assets, unchangedAssetIds, failures }`; each failure is `{ assetId, error }`.
+
+### 3. Contracts
+
+- Asset and collection ids are trimmed and deduplicated without silent count truncation. All requested target collections are validated before the first asset write.
+- A target must exist, match the submitted library role, and be manageable by the signed-in owner or administrator. Per-asset missing, role, or edit failures do not block other assets.
+- Add performs a stable union. Remove deletes only the requested relationship. Existing relationships, including historical administrator-assigned cross-owner relationships, are preserved and are not re-authorized as new targets.
+- Same-path create reuses the existing collection. A child created by an administrator under another owner's collection remains in that parent's owner hierarchy.
+- After add or create, the browser refreshes at least the previously loaded cursor depth so selections beyond the first 60-item page remain selected. Removing from the current collection refreshes the view and drops assets no longer visible there.
+
+### 4. Validation & Error Matrix
+
+- Missing session -> `401`; malformed JSON shape, invalid role/action, non-string or empty ids, empty selection, or missing action field -> `400`.
+- Missing, wrong-role, or non-manageable target collection -> request-level `400` before asset mutation.
+- Missing, read-only, or wrong-role asset -> one `failures` entry while eligible siblings continue.
+- Already added or already removed asset -> asset id in `unchangedAssetIds` with no persistence write.
+
+### 5. Good/Base/Bad Cases
+
+- Good: select 65 assets across two pages, add them to multiple collections, and retain all 65 selected after the depth-preserving refresh.
+- Base: add a mixed editable/read-only selection; editable assets update, existing members are unchanged, and read-only assets are reported separately.
+- Bad: validate targets per asset, replace `collectionIds`, silently cap ids, or refresh only page one after a large selection.
+
+### 6. Tests Required
+
+- `library_collection_batch_check.mjs` asserts target-first validation, stable unions, idempotency, partial failures, role/owner/admin boundaries, hierarchy reuse, historical relationship preservation, and more than 100 input ids without truncation.
+- `library_assets_check.mjs` asserts the shared types, authenticated thin route, batch controls, responsive panel, distinct removal labels, and busy guard.
+- `library_collection_batch_browser_check.mjs` mocks authenticated data only and verifies multi-target add, create-and-add, partial feedback, current-collection removal, 65-item cursor refresh, selection retention, and desktop/mobile overflow without live services.
+
+### 7. Wrong vs Correct
+
+```typescript
+// Wrong: page-one refresh drops selected ids loaded from later cursors.
+await loadAssets(true);
+
+// Correct: preserve the loaded depth after non-removing collection updates.
+await loadAssets(true, data.assets.length);
+```
+
 ## Scenario: Canvas V2 main-task shared outputs
 
 ### 1. Scope / Trigger

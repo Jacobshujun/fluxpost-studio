@@ -2,7 +2,7 @@
 /* eslint-disable @next/next/no-img-element */
 
 import {
-  ArrowLeft, CalendarClock, ChevronLeft, ChevronRight, Download, Eye, FileImage, FolderInput, Images, Info, LoaderCircle,
+  ArrowLeft, CalendarClock, ChevronLeft, ChevronRight, Download, Eye, FileImage, FolderInput, Folders, Images, Info, LoaderCircle,
   Maximize2, Minus, Moon, Plus, RefreshCw, RotateCcw, Save, Search, Share2, SortAsc, Sparkles, Sun, Tag, Tags, Trash2,
   Upload, UserRound, UsersRound, X, ZoomIn,
 } from "lucide-react";
@@ -14,7 +14,7 @@ import { getStoredTheme, setStoredTheme, subscribeTheme, type ThemeMode } from "
 import { useLibraryListSort } from "@/lib/use-library-list-sort";
 import { useMarqueeSelection } from "@/lib/use-marquee-selection";
 import type {
-  LibraryAsset, LibraryAssetPage, LibraryAssetRole, LibraryCollection, LibraryTagBatchResult,
+  LibraryAsset, LibraryAssetPage, LibraryAssetRole, LibraryCollection, LibraryCollectionBatchResult, LibraryTagBatchResult,
   LibraryTagSuggestion, LibraryVisibility,
 } from "@/lib/types";
 import styles from "./library.module.css";
@@ -57,6 +57,8 @@ export default function LibraryPage() {
   const [imports, setImports] = useState<ImportItem[]>([]);
   const [dragging, setDragging] = useState(false);
   const [batchTagsOpen, setBatchTagsOpen] = useState(false);
+  const [batchCollectionsOpen, setBatchCollectionsOpen] = useState(false);
+  const [collectionBusy, setCollectionBusy] = useState(false);
   const requestId = useRef(0);
   const importItemSequence = useRef(0);
   const gridRef = useRef<HTMLDivElement>(null);
@@ -96,6 +98,8 @@ export default function LibraryPage() {
       setDetailId(undefined);
       setPreview(undefined);
       setTaggingStatus("");
+      setBatchTagsOpen(false);
+      setBatchCollectionsOpen(false);
     };
     const urlRole = new URL(window.location.href).searchParams.get("role");
     if (urlRole !== "reference" && urlRole !== "vehicle") writeLibraryRoleToUrl("reference", "replace");
@@ -104,17 +108,38 @@ export default function LibraryPage() {
     return () => window.removeEventListener("popstate", applyUrlRole);
   }, []);
 
-  const loadAssets = useCallback(async (quiet = false) => {
+  const loadAssets = useCallback(async (quiet = false, minimumAssetCount = libraryPageSize) => {
     const current = ++requestId.current;
     if (!quiet) setLoading(true);
     try {
-      const response = await fetch(`/api/library/assets?${queryString}`);
-      const result = (await response.json()) as LibraryAssetPage & { error?: string };
-      if (!response.ok) throw new Error(result.error || "图库加载失败");
-      if (current !== requestId.current) return;
-      setData(result);
-      setSelected((value) => new Set([...value].filter((id) => result.assets.some((asset) => asset.id === id))));
-      setDetailId((value) => value && !result.assets.some((asset) => asset.id === value) ? undefined : value);
+      const targetCount = Math.max(libraryPageSize, Math.floor(minimumAssetCount));
+      const refreshed: LibraryAsset[] = [];
+      const knownIds = new Set<string>();
+      const seenCursors = new Set<string>();
+      let cursor: string | undefined;
+      let result: (LibraryAssetPage & { error?: string }) | undefined;
+      do {
+        if (cursor) {
+          if (seenCursors.has(cursor)) throw new Error("图库分页游标重复，无法刷新已载入图片");
+          seenCursors.add(cursor);
+        }
+        const params = new URLSearchParams(queryString);
+        if (cursor) params.set("cursor", cursor);
+        const response = await fetch(`/api/library/assets?${params.toString()}`);
+        result = (await response.json()) as LibraryAssetPage & { error?: string };
+        if (!response.ok) throw new Error(result.error || "图库加载失败");
+        for (const asset of result.assets) {
+          if (!knownIds.has(asset.id)) {
+            knownIds.add(asset.id);
+            refreshed.push(asset);
+          }
+        }
+        cursor = result.nextCursor;
+      } while (cursor && refreshed.length < targetCount);
+      if (current !== requestId.current || !result) return;
+      setData({ ...result, assets: refreshed });
+      setSelected((value) => new Set([...value].filter((id) => knownIds.has(id))));
+      setDetailId((value) => value && !knownIds.has(value) ? undefined : value);
       setMessage("");
     } catch (error) {
       if (current === requestId.current) setMessage(error instanceof Error ? error.message : "图库加载失败");
@@ -346,14 +371,73 @@ export default function LibraryPage() {
     setMessage(`标签${mode === "add" ? `已添加到 ${result.assets.length} 张图片` : `已从 ${result.assets.length} 张图片删除`}${result.failures.length ? `，${result.failures.length} 张只读或更新失败` : ""}`);
   }
 
+  async function addSelectedToCollections(collectionIds: string[]) {
+    if (collectionBusy || !selected.size || !collectionIds.length) return false;
+    setCollectionBusy(true);
+    try {
+      const result = await apiJson<LibraryCollectionBatchResult>("/api/library/assets/batch", {
+        method: "POST",
+        body: JSON.stringify({ action: "add_to_collections", role, assetIds: [...selected], collectionIds }),
+      });
+      await loadAssets(true, data.assets.length);
+      setMessage(formatCollectionBatchResult(result));
+      return true;
+    } catch (error) {
+      setMessage(error instanceof Error ? error.message : "批量加入集合失败");
+      return false;
+    } finally {
+      setCollectionBusy(false);
+    }
+  }
+
+  async function createCollectionAndAdd(name: string) {
+    if (collectionBusy || !selected.size || !name.trim()) return false;
+    setCollectionBusy(true);
+    try {
+      const result = await apiJson<LibraryCollectionBatchResult>("/api/library/assets/batch", {
+        method: "POST",
+        body: JSON.stringify({
+          action: "create_collection_and_add",
+          role,
+          assetIds: [...selected],
+          name,
+          parentId: collectionId || undefined,
+        }),
+      });
+      await loadAssets(true, data.assets.length);
+      setMessage(formatCollectionBatchResult(result));
+      return true;
+    } catch (error) {
+      setMessage(error instanceof Error ? error.message : "新建集合并加入失败");
+      return false;
+    } finally {
+      setCollectionBusy(false);
+    }
+  }
+
   async function batchRemove() {
     const ids = [...selected];
-    if (!ids.length || !window.confirm(`确认将 ${ids.length} 张图片移出当前${collectionId ? "集合" : "视图"}？`)) return;
-    const tasks = ids.map((id) => collectionId
-      ? apiJson(`/api/library/collections/${collectionId}/assets/${id}`, { method: "DELETE" })
-      : apiJson(`/api/library/assets/${id}`, { method: "PATCH", body: JSON.stringify({ removeRole: role }) }));
+    if (!ids.length || collectionBusy || !window.confirm(`确认将 ${ids.length} 张图片移出当前${collectionId ? "集合" : "图库"}？`)) return;
+    if (collectionId) {
+      setCollectionBusy(true);
+      try {
+        const result = await apiJson<LibraryCollectionBatchResult>("/api/library/assets/batch", {
+          method: "POST",
+          body: JSON.stringify({ action: "remove_from_collection", role, assetIds: ids, collectionId }),
+        });
+        await loadAssets(true);
+        setBatchCollectionsOpen(false);
+        setMessage(formatCollectionBatchResult(result));
+      } catch (error) {
+        setMessage(error instanceof Error ? error.message : "移出当前集合失败");
+      } finally {
+        setCollectionBusy(false);
+      }
+      return;
+    }
+    const tasks = ids.map((id) => apiJson(`/api/library/assets/${id}`, { method: "PATCH", body: JSON.stringify({ removeRole: role }) }));
     const results = await Promise.all(tasks.map((task) => task.then(() => true).catch(() => false)));
-    setMessage(`已移出 ${results.filter(Boolean).length}/${ids.length} 张图片`); setSelected(new Set()); await loadAssets(true);
+    setSelected(new Set()); await loadAssets(true); setMessage(`已移出当前图库 ${results.filter(Boolean).length}/${ids.length} 张图片`);
   }
 
   async function batchDelete() {
@@ -384,6 +468,8 @@ export default function LibraryPage() {
     setDetailId(undefined);
     setPreview(undefined);
     setTaggingStatus("");
+    setBatchTagsOpen(false);
+    setBatchCollectionsOpen(false);
   }
 
   function changeSort(value: string) {
@@ -421,6 +507,7 @@ export default function LibraryPage() {
   const isVehicle = role === "vehicle";
   const libraryName = isVehicle ? "车型图库" : "参考图库";
   const allSelected = data.assets.length > 0 && !data.nextCursor && selected.size === data.assets.length;
+  const selectedAssets = data.assets.filter((asset) => selected.has(asset.id));
 
   return (
     <main className={styles.page} onDragEnter={(event) => { if (event.dataTransfer.types.includes("Files")) setDragging(true); }} onDragOver={(event) => { if (event.dataTransfer.types.includes("Files")) event.preventDefault(); }} onDrop={handleDrop}>
@@ -461,13 +548,13 @@ export default function LibraryPage() {
             <label className={styles.timeFilterControl}><CalendarClock size={14} /><select value={timePreset} onChange={(event) => changeTimePreset(event.target.value)} aria-label="入库时间筛选"><option value="all">全部时间</option><option value="today">今天</option><option value="7d">近 7 天</option><option value="30d">近 30 天</option><option value="custom">自定义</option></select></label>
             <label className={styles.sortControl}><SortAsc size={14} /><select value={sort} onChange={(event) => changeSort(event.target.value)} aria-label="图片排序"><option value="newest">最新导入</option><option value="oldest">最早导入</option><option value="name-asc">名称 A-Z</option><option value="name-desc">名称 Z-A</option><option value="owner-asc">提交人 A-Z</option><option value="owner-desc">提交人 Z-A</option></select></label>
             {!isVehicle ? <select value={taggingStatus} onChange={(event) => setTaggingStatus(event.target.value)} aria-label="打标状态"><option value="">全部状态</option><option value="queued">等待打标</option><option value="running">打标中</option><option value="completed">已完成</option><option value="failed">失败</option></select> : null}
-            <label className={styles.selectAllControl} title="全选当前筛选结果（Ctrl/Cmd+A）"><input type="checkbox" aria-label="全选当前筛选结果" aria-keyshortcuts="Control+A Meta+A" checked={allSelected} disabled={loading || loadingMore || selectingAll || !data.assets.length} onChange={(event) => { if (event.target.checked) void selectAllAssets(); else { setSelected(new Set()); setBatchTagsOpen(false); } }} />{selectingAll ? "全选中..." : "全选"}</label>
+            <label className={styles.selectAllControl} title="全选当前筛选结果（Ctrl/Cmd+A）"><input type="checkbox" aria-label="全选当前筛选结果" aria-keyshortcuts="Control+A Meta+A" checked={allSelected} disabled={loading || loadingMore || selectingAll || !data.assets.length} onChange={(event) => { if (event.target.checked) void selectAllAssets(); else { setSelected(new Set()); setBatchTagsOpen(false); setBatchCollectionsOpen(false); } }} />{selectingAll ? "全选中..." : "全选"}</label>
             {timePreset === "custom" ? <div className={styles.customDateRange}><label><span>开始</span><input type="date" value={customDateFrom} max={customDateTo || undefined} onChange={(event) => setCustomDateFrom(event.target.value)} /></label><span className={styles.dateRangeSeparator}>至</span><label><span>结束</span><input type="date" value={customDateTo} min={customDateFrom || undefined} onChange={(event) => setCustomDateTo(event.target.value)} /></label><button type="button" disabled={!customRangeValid} onClick={applyCustomTimeRange}>应用</button></div> : null}
             {(search || visibility || taggingStatus || filterTags.length || timePreset !== "all") ? <button className={styles.clearButton} onClick={clearFilters}><X size={14} />清除</button> : null}
             {!isVehicle ? <button className={styles.clearButton} onClick={() => void batchRetag("failed")}><RefreshCw size={14} />重试失败</button> : null}
           </div>
 
-          {selected.size ? <><div className={styles.batchBar}><strong>已选择 {selected.size} 张</strong><button aria-expanded={batchTagsOpen} onClick={() => setBatchTagsOpen((value) => !value)}><Tags size={14} />管理标签</button><button onClick={() => void batchPatch({ visibility: "team" })}><Share2 size={14} />设为共享</button><button onClick={() => void batchPatch({ visibility: "private" })}><UserRound size={14} />设为个人</button>{!isVehicle ? <button onClick={() => void batchRetag("all")}><RefreshCw size={14} />重新打标</button> : null}<button onClick={() => void batchRemove()}><FolderInput size={14} />移出</button><button className={styles.batchDanger} onClick={() => void batchDelete()}><Trash2 size={14} />永久删除</button><button onClick={() => { setSelected(new Set()); setBatchTagsOpen(false); }}>取消选择</button></div>{batchTagsOpen ? <BatchTagManager count={selected.size} role={role} onApply={batchTags} onClose={() => setBatchTagsOpen(false)} /> : null}</> : null}
+          {selected.size ? <><div className={styles.batchBar}><strong>已选择 {selected.size} 张</strong><button disabled={collectionBusy} aria-expanded={batchCollectionsOpen} onClick={() => { setBatchCollectionsOpen((value) => !value); setBatchTagsOpen(false); }}><Folders size={14} />管理集合</button><button disabled={collectionBusy} aria-expanded={batchTagsOpen} onClick={() => { setBatchTagsOpen((value) => !value); setBatchCollectionsOpen(false); }}><Tags size={14} />管理标签</button><button disabled={collectionBusy} onClick={() => void batchPatch({ visibility: "team" })}><Share2 size={14} />设为共享</button><button disabled={collectionBusy} onClick={() => void batchPatch({ visibility: "private" })}><UserRound size={14} />设为个人</button>{!isVehicle ? <button disabled={collectionBusy} onClick={() => void batchRetag("all")}><RefreshCw size={14} />重新打标</button> : null}<button disabled={collectionBusy} onClick={() => void batchRemove()}><FolderInput size={14} />{collectionId ? "移出当前集合" : "移出当前图库"}</button><button disabled={collectionBusy} className={styles.batchDanger} onClick={() => void batchDelete()}><Trash2 size={14} />永久删除</button><button disabled={collectionBusy} onClick={() => { setSelected(new Set()); setBatchTagsOpen(false); setBatchCollectionsOpen(false); }}>取消选择</button></div>{batchCollectionsOpen ? <BatchCollectionManager assets={selectedAssets} collections={activeCollections} role={role} parentId={collectionId || undefined} busy={collectionBusy} onAdd={addSelectedToCollections} onCreate={createCollectionAndAdd} onClose={() => setBatchCollectionsOpen(false)} /> : null}{batchTagsOpen ? <BatchTagManager count={selected.size} role={role} onApply={batchTags} onClose={() => setBatchTagsOpen(false)} /> : null}</> : null}
 
           {message ? <div className={styles.notice} role="status">{message}</div> : null}
           {loading ? <div className={styles.state}><LoaderCircle className={styles.spin} size={28} />正在载入图库</div> : data.assets.length ? (
@@ -607,6 +694,71 @@ function UnifiedTagPicker({ tags, role, placeholder, disabled, onAdd, onRemove }
   return <div className={styles.tagPicker} data-shortcuts="off"><div className={styles.tagPickerControl} onClick={(event) => (event.currentTarget.querySelector("input") as HTMLInputElement | null)?.focus()}>{tags.map((tag) => <span className={styles.tagChip} key={tag.label} title={tag.title}>{tag.label}{onRemove && !disabled ? <button type="button" title={`删除 ${tag.label}`} aria-label={`删除标签 ${tag.label}`} onClick={() => void onRemove(tag.label)}><X size={11} /></button> : null}</span>)}<input value={draft} disabled={disabled || committing} placeholder={tags.length ? "" : placeholder} role="combobox" aria-label={placeholder} aria-autocomplete="list" aria-expanded={open} aria-controls={listboxId} aria-activedescendant={open && activeIndex >= 0 && options[activeIndex] ? `${listboxId}-${activeIndex}` : undefined} onFocus={() => setOpen(true)} onBlur={() => window.setTimeout(() => setOpen(false), 120)} onChange={(event) => { setDraft(event.target.value); setActiveIndex(-1); setOpen(true); setError(""); }} onKeyDown={handleKeyDown} /></div>{open && !disabled ? <div className={styles.tagSuggestions} id={listboxId} role="listbox">{options.length ? options.map((item, itemIndex) => <button type="button" id={`${listboxId}-${itemIndex}`} role="option" aria-selected={itemIndex === activeIndex} className={itemIndex === activeIndex ? styles.tagSuggestionActive : ""} key={item.label} onMouseDown={(event) => event.preventDefault()} onClick={() => void commit(item.label)}><span>{item.label}</span><small>{item.count}</small></button>) : draft.trim() ? <button type="button" role="option" aria-selected="true" onMouseDown={(event) => event.preventDefault()} onClick={() => void commit(draft)}>添加“{draft.trim()}”</button> : <p>暂无可用标签</p>}</div> : null}{error ? <span className={styles.tagPickerError}>{error}</span> : null}</div>;
 }
 
+function BatchCollectionManager({
+  assets,
+  collections,
+  role,
+  parentId,
+  busy,
+  onAdd,
+  onCreate,
+  onClose,
+}: {
+  assets: LibraryAsset[];
+  collections: LibraryCollection[];
+  role: LibraryAssetRole;
+  parentId?: string;
+  busy: boolean;
+  onAdd(collectionIds: string[]): Promise<boolean>;
+  onCreate(name: string): Promise<boolean>;
+  onClose(): void;
+}) {
+  const [query, setQuery] = useState("");
+  const [targetIds, setTargetIds] = useState<Set<string>>(new Set());
+  const [newName, setNewName] = useState("");
+  const rows = useMemo(() => collections
+    .map((collection) => ({
+      collection,
+      path: libraryCollectionPath(collection, collections),
+      depth: collectionDepth(collection, collections),
+      memberCount: assets.filter((asset) => asset.collectionIds.includes(collection.id)).length,
+    }))
+    .sort((left, right) => left.path.localeCompare(right.path, "zh-CN") || left.collection.id.localeCompare(right.collection.id)), [assets, collections]);
+  const normalizedQuery = normalizeCollectionQuery(query);
+  const visibleRows = rows.filter((row) => !normalizedQuery || normalizeCollectionQuery(`${row.collection.name} ${row.path}`).includes(normalizedQuery));
+  const eligibleIds = useMemo(() => new Set(rows.filter((row) => row.memberCount < assets.length).map((row) => row.collection.id)), [assets.length, rows]);
+
+  async function applyTargets() {
+    const ids = [...targetIds].filter((id) => eligibleIds.has(id));
+    if (!ids.length) return;
+    if (await onAdd(ids)) setTargetIds(new Set());
+  }
+
+  async function createAndAdd() {
+    const name = newName.trim();
+    if (!name) return;
+    if (await onCreate(name)) setNewName("");
+  }
+
+  return <section className={styles.batchCollectionPanel} aria-label="批量管理集合">
+    <div className={styles.collectionPanelHead}><div><strong>管理 {assets.length} 张图片的集合</strong><span>{role === "vehicle" ? "车型图库" : "参考图库"}</span></div><button className={styles.iconButton} title="关闭批量集合" disabled={busy} onClick={onClose}><X size={15} /></button></div>
+    <label className={styles.collectionSearch}><Search size={14} /><input value={query} disabled={busy} onChange={(event) => setQuery(event.target.value)} placeholder="搜索集合名称或路径" /></label>
+    <div className={styles.collectionChecklist} role="group" aria-label="目标集合">
+      {visibleRows.length ? visibleRows.map((row) => {
+        const full = row.memberCount === assets.length;
+        return <label key={row.collection.id} className={`${styles.collectionOption} ${full ? styles.collectionOptionFull : ""}`} style={{ paddingLeft: `${10 + row.depth * 14}px` }}>
+          <input type="checkbox" aria-label={`集合 ${row.path}`} checked={!full && targetIds.has(row.collection.id)} disabled={busy || full} onChange={(event) => setTargetIds((current) => { const next = new Set(current); if (event.target.checked) next.add(row.collection.id); else next.delete(row.collection.id); return next; })} />
+          <span className={styles.collectionOptionMain}><strong title={row.path}>{row.path}</strong><small title={row.collection.ownerDisplayName}>{row.collection.ownerDisplayName}</small></span>
+          <span className={styles.collectionMembership}>{row.memberCount}/{assets.length} 已在集合中</span>
+        </label>;
+      }) : <p className={styles.collectionEmpty}>{query.trim() ? "没有匹配的集合" : "当前图库还没有集合"}</p>}
+    </div>
+    <div className={styles.collectionPanelActions}><button className={styles.primaryButton} disabled={busy || ![...targetIds].some((id) => eligibleIds.has(id))} onClick={() => void applyTargets()}><FolderInput size={14} />{busy ? "处理中..." : "加入所选集合"}</button></div>
+    <div className={styles.newCollectionForm}><div><strong>新建并加入</strong><span>{parentId ? "将在当前集合下创建子集合" : "将在图库顶层创建集合"}</span></div><input value={newName} disabled={busy} maxLength={120} onChange={(event) => setNewName(event.target.value)} onKeyDown={(event) => { if (event.key === "Enter") { event.preventDefault(); void createAndAdd(); } }} placeholder="集合名称" aria-label="新集合名称" /><button disabled={busy || !newName.trim()} onClick={() => void createAndAdd()}><Plus size={14} />{busy ? "处理中..." : "新建并加入"}</button></div>
+    <p className={styles.collectionPanelHint}>只读团队图片会跳过；已有集合关系不会重复写入。</p>
+  </section>;
+}
+
 function BatchTagManager({ count, role, onApply, onClose }: { count: number; role: LibraryAssetRole; onApply(mode: "add" | "remove", label: string): Promise<void>; onClose(): void }) {
   const [mode, setMode] = useState<"add" | "remove">("add");
   return <section className={styles.batchTagPanel} aria-label="批量管理标签"><div><strong>管理 {count} 张图片的标签</strong><button className={styles.iconButton} title="关闭批量标签" onClick={onClose}><X size={15} /></button></div><div className={styles.batchTagModes} role="group" aria-label="标签操作"><button className={mode === "add" ? styles.segmentActive : ""} aria-pressed={mode === "add"} onClick={() => setMode("add")}><Plus size={13} />批量添加</button><button className={mode === "remove" ? styles.segmentActive : ""} aria-pressed={mode === "remove"} onClick={() => setMode("remove")}><Minus size={13} />批量删除</button></div><UnifiedTagPicker key={mode} tags={[]} role={role} placeholder={mode === "add" ? "输入或选择要添加的标签" : "输入或选择要删除的标签"} onAdd={(label) => onApply(mode, label)} /><p>只读团队资产会跳过，并计入失败数量。</p></section>;
@@ -724,6 +876,9 @@ function sameTag(left: string, right: string) { return left.trim().toLocaleLower
 function readLibraryRoleFromUrl(): LibraryAssetRole { return new URL(window.location.href).searchParams.get("role") === "vehicle" ? "vehicle" : "reference"; }
 function writeLibraryRoleToUrl(role: LibraryAssetRole, mode: "push" | "replace") { const url = new URL(window.location.href); url.searchParams.set("role", role); const href = `${url.pathname}${url.search}${url.hash}`; if (mode === "push") window.history.pushState(null, "", href); else window.history.replaceState(null, "", href); }
 function tagSourceTitle(source: "ai" | "manual" | "ai_manual") { return source === "ai" ? "AI 标签" : source === "manual" ? "人工标签" : "AI 与人工标签"; }
+function formatCollectionBatchResult(result: LibraryCollectionBatchResult) { const readOnly = result.failures.filter((failure) => /read-only/i.test(failure.error)).length; const failed = result.failures.length - readOnly; const unchanged = result.action === "remove_from_collection" ? "原本已移出" : "原本已归类"; return `集合操作完成：已更新 ${result.assets.length}，${unchanged} ${result.unchangedAssetIds.length}，只读跳过 ${readOnly}，失败 ${failed}`; }
+function normalizeCollectionQuery(value: string) { return value.normalize("NFKC").trim().toLocaleLowerCase(); }
+function libraryCollectionPath(collection: LibraryCollection, all: LibraryCollection[]) { if (collection.relativePath) return collection.relativePath; const names = [collection.name]; let parentId = collection.parentId; const seen = new Set<string>(); while (parentId && !seen.has(parentId)) { seen.add(parentId); const parent = all.find((item) => item.id === parentId); if (!parent) break; names.unshift(parent.name); parentId = parent.parentId; } return names.join("/"); }
 function collectionDepth(collection: LibraryCollection, all: LibraryCollection[]) { let depth = 0; let parentId = collection.parentId; const seen = new Set<string>(); while (parentId && !seen.has(parentId) && depth < 5) { seen.add(parentId); depth += 1; parentId = all.find((item) => item.id === parentId)?.parentId; } return depth; }
 function formatBytes(bytes: number) { if (bytes < 1024) return `${bytes} B`; if (bytes < 1024 ** 2) return `${(bytes / 1024).toFixed(1)} KB`; return `${(bytes / 1024 ** 2).toFixed(1)} MB`; }
 function isEditableTarget(target: EventTarget | null) { return target instanceof HTMLElement && Boolean(target.closest("input, textarea, select, [contenteditable='true'], [role='dialog'] [data-shortcuts='off']")); }
