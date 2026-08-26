@@ -39,3 +39,37 @@
 ### Next Steps
 
 - None - task complete
+
+
+## Session 60: Canvas content pool batch selection
+
+**Date**: 2026-08-26
+**Task**: Canvas content pool batch selection
+**Branch**: `local`
+
+### Summary
+
+Implemented owner-scoped content-pool card filtering and compact snapshots, added V2 manual/match batch expansion with 200-item limits, and verified offline plus mocked desktop/mobile browser flows.
+
+### Main Changes
+
+(Add details)
+
+### Git Commits
+
+| Hash | Message |
+|------|---------|
+| `2b3f94b22e118699f82da595d246b901977ea0dc` | (see git log) |
+| `dad0e3e` | (see git log) |
+
+### Testing
+
+- [OK] (Add test results)
+
+### Status
+
+[OK] **Completed**
+
+### Next Steps
+
+- None - task complete
