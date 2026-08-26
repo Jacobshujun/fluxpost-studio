@@ -24,6 +24,8 @@ and unrelated VPS services.
 
 - The release candidate may add this task's Trellis planning metadata and the
   minimum `package-lock.json` repair required for npm 11.17 Linux `npm ci`. It
+  may also make the Canvas video-loader verification fixture compatible with the
+  production verifier's FFmpeg 5.1 while preserving the rotation assertions. It
   must not change `package.json`, dependency versions, or application behavior.
 - Verify the final clean candidate with the documented deterministic baseline,
   then activate it locally on port `3001` and require candidate SHA identity.
@@ -56,6 +58,9 @@ and unrelated VPS services.
       no tracked secret/runtime files.
 - [ ] npm 11.17 accepts the repaired lockfile for a clean Linux x64 install, and
       the VPS verifier no longer fails dependency synchronization.
+- [ ] The Canvas video-loader check creates a 90-degree metadata fixture on both
+      FFmpeg 5.1 and current FFmpeg, and still asserts rotation and display-size
+      normalization rather than skipping the case.
 - [ ] The complete offline baseline passes on the committed candidate, and port
       `3001` reports the same SHA in candidate mode.
 - [ ] `origin/local` and `origin/main` resolve to the exact candidate SHA before

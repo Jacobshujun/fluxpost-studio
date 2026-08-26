@@ -8,9 +8,14 @@ this task's Trellis metadata and a deterministic `package-lock.json` repair afte
 the first isolated verifier exposed missing npm 11.17 Linux optional dependency
 entries for `@emnapi/core` and `@emnapi/runtime`. `package.json`, resolved direct
 dependency versions, and application behavior remain unchanged. The repaired
-metadata is committed before restarting all candidate verification gates so the
-local candidate, GitHub refs, VPS verifier, and production deploy operate on one
-new immutable full SHA.
+metadata is accompanied by a verification-only compatibility fix: current FFmpeg
+uses `-display_rotation`, while Debian 12 FFmpeg 5.1 falls back only when that
+option is explicitly unsupported to the older stream `rotate=90` metadata syntax.
+The existing probe assertions must still observe 90-degree rotation and swapped
+display dimensions, so the fallback cannot hide a broken fixture. These changes
+are committed before restarting all candidate verification gates so the local
+candidate, GitHub refs, VPS verifier, and production deploy operate on one new
+immutable full SHA.
 
 ## Promotion Contract
 

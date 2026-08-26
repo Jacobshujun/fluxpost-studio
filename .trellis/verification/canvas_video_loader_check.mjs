@@ -1,5 +1,5 @@
 import assert from "node:assert/strict";
-import { execFileSync } from "node:child_process";
+import { execFileSync, spawnSync } from "node:child_process";
 import { mkdtempSync, readFileSync, readdirSync, rmSync } from "node:fs";
 import { createRequire } from "node:module";
 import { tmpdir } from "node:os";
@@ -138,9 +138,28 @@ const dependencies = {
   now: () => fixedNow,
 };
 const bodyRequest = (body, headers) => new Request("http://localhost/api/canvas/video-uploads", { method: "POST", body, headers, duplex: "half" });
+
+function createRotatedFixture(sourcePath, outputPath) {
+  const modern = spawnSync("ffmpeg", [
+    "-hide_banner", "-loglevel", "error", "-y",
+    "-display_rotation:v:0", "90", "-i", sourcePath,
+    "-c", "copy", outputPath,
+  ], { encoding: "utf8" });
+  if (modern.status === 0) return;
+
+  const modernError = `${modern.stderr ?? ""}${modern.error?.message ?? ""}`;
+  if (!/Unrecognized option 'display_rotation/.test(modernError)) {
+    throw new Error(`Could not create rotated video fixture: ${modernError}`);
+  }
+  execFileSync("ffmpeg", [
+    "-hide_banner", "-loglevel", "error", "-y", "-i", sourcePath,
+    "-c", "copy", "-metadata:s:v:0", "rotate=90", outputPath,
+  ]);
+}
+
 try {
   execFileSync("ffmpeg", ["-hide_banner", "-loglevel", "error", "-y", "-f", "lavfi", "-i", "color=c=red:s=64x48:d=0.25", "-f", "lavfi", "-i", "sine=frequency=1000:duration=0.25", "-shortest", "-c:v", "libx264", "-pix_fmt", "yuv420p", "-c:a", "aac", path.join(temp, "sample.mp4")]);
-  execFileSync("ffmpeg", ["-hide_banner", "-loglevel", "error", "-y", "-display_rotation:v:0", "90", "-i", path.join(temp, "sample.mp4"), "-c", "copy", path.join(temp, "rotated.mp4")]);
+  createRotatedFixture(path.join(temp, "sample.mp4"), path.join(temp, "rotated.mp4"));
   execFileSync("ffmpeg", ["-hide_banner", "-loglevel", "error", "-y", "-f", "lavfi", "-i", "color=c=red:s=64x48:d=2", "-itsoffset", "0.5", "-f", "lavfi", "-i", "sine=frequency=1000:duration=1", "-map", "0:v:0", "-map", "1:a:0", "-c:v", "libx264", "-pix_fmt", "yuv420p", "-c:a", "aac", path.join(temp, "delayed-audio.mp4")]);
   execFileSync("ffmpeg", ["-hide_banner", "-loglevel", "error", "-y", "-f", "lavfi", "-i", "color=c=blue:s=64x48:d=0.25", "-an", "-c:v", "libx264", "-pix_fmt", "yuv420p", "-f", "mov", path.join(temp, "sample.mov")]);
   execFileSync("ffmpeg", ["-hide_banner", "-loglevel", "error", "-y", "-f", "lavfi", "-i", "color=c=green:s=64x48:d=0.25", "-an", "-c:v", "libvpx-vp9", path.join(temp, "sample.webm")]);
