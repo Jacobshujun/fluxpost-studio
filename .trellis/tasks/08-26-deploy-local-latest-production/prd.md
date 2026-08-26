@@ -22,8 +22,9 @@ and unrelated VPS services.
 
 ## Requirements
 
-- The release candidate may add only this task's Trellis planning metadata to
-  the approved product base. It must not add application changes after the base.
+- The release candidate may add this task's Trellis planning metadata and the
+  minimum `package-lock.json` repair required for npm 11.17 Linux `npm ci`. It
+  must not change `package.json`, dependency versions, or application behavior.
 - Verify the final clean candidate with the documented deterministic baseline,
   then activate it locally on port `3001` and require candidate SHA identity.
 - Fast-forward both `origin/local` and `origin/main` to the unchanged candidate
@@ -51,7 +52,10 @@ and unrelated VPS services.
 ## Acceptance Criteria
 
 - [ ] The final candidate contains the approved product base plus only this
-      task's pre-release Trellis metadata, with no tracked secret/runtime files.
+      task's pre-release Trellis metadata and the reviewed lockfile repair, with
+      no tracked secret/runtime files.
+- [ ] npm 11.17 accepts the repaired lockfile for a clean Linux x64 install, and
+      the VPS verifier no longer fails dependency synchronization.
 - [ ] The complete offline baseline passes on the committed candidate, and port
       `3001` reports the same SHA in candidate mode.
 - [ ] `origin/local` and `origin/main` resolve to the exact candidate SHA before

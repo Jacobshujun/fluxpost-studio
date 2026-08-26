@@ -2,11 +2,15 @@
 
 ## Candidate Boundary
 
-The functional candidate is the existing clean base
-`7df08cc987779478fc133b3c81a303bb8bae1f2d`. The only pre-release change is this
-task's Trellis metadata. That metadata is committed first so the deterministic
-baseline, local candidate, GitHub refs, VPS verifier, and production deploy all
-operate on one immutable full SHA.
+The functional candidate starts from the existing clean base
+`7df08cc987779478fc133b3c81a303bb8bae1f2d`. Pre-release changes are limited to
+this task's Trellis metadata and a deterministic `package-lock.json` repair after
+the first isolated verifier exposed missing npm 11.17 Linux optional dependency
+entries for `@emnapi/core` and `@emnapi/runtime`. `package.json`, resolved direct
+dependency versions, and application behavior remain unchanged. The repaired
+metadata is committed before restarting all candidate verification gates so the
+local candidate, GitHub refs, VPS verifier, and production deploy operate on one
+new immutable full SHA.
 
 ## Promotion Contract
 
