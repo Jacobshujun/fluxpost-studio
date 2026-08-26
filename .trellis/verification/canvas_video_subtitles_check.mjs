@@ -385,10 +385,10 @@ function run(command, args, cwd) {
 function findPython(cwd) {
   const candidates = process.platform === "win32" ? ["python", "python3"] : ["python3", "python"];
   for (const candidate of candidates) {
-    const result = spawnSync(candidate, ["--version"], { cwd, encoding: "utf8", windowsHide: true });
+    const result = spawnSync(candidate, ["-B", "-c", "import json"], { cwd, encoding: "utf8", windowsHide: true });
     if (!result.error && result.status === 0) return candidate;
   }
-  throw new Error(`Python interpreter is unavailable; tried ${candidates.join(" and ")}.`);
+  throw new Error(`Python interpreter with the json standard library is unavailable; tried ${candidates.join(" and ")}.`);
 }
 
 function probeMedia(filePath, cwd) {

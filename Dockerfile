@@ -10,7 +10,7 @@ WORKDIR /app
 ENV NEXT_TELEMETRY_DISABLED=1
 ENV FLUXPOST_STANDALONE_BUILD=1
 RUN apt-get update \
-  && apt-get install -y --no-install-recommends bash ffmpeg fontconfig fonts-noto-cjk git python3-minimal \
+  && apt-get install -y --no-install-recommends bash ffmpeg fontconfig fonts-noto-cjk git python3 \
   && rm -rf /var/lib/apt/lists/*
 COPY . .
 RUN node .trellis/verification/check.mjs

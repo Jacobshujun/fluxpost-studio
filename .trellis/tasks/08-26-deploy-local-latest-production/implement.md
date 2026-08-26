@@ -15,10 +15,12 @@
    both the local current FFmpeg and VPS FFmpeg 5.1, then restart every candidate
    verification and push gate on the new SHA.
 5. If the isolated verifier reaches the Canvas subtitle UTF-8 probe without a
-   Python executable, add `python3-minimal` only to the Docker verification stage,
-   make the probe select `python` or `python3`, and make process-start failures
-   explicit. Require the subtitle and VPS deployment contract checks to pass,
-   then restart every candidate verification and push gate on the new SHA.
+   usable Python standard library, add the full `python3` package only to the
+   Docker verification stage. Do not use Debian's `python3-minimal`, which lacks
+   `json`. Make the probe select `python` or `python3` only after importing
+   `json`, and make process-start failures explicit. Require the subtitle and VPS
+   deployment contract checks to pass, then restart every candidate verification
+   and push gate on the new SHA.
 6. Run the deterministic baseline with `TRELLIS_SMOKE_PORT=45678`. Require every
    focused check, TypeScript, lint, production build, HTTP smoke, and database
    check to pass without external provider calls.

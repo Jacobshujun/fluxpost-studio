@@ -15,9 +15,11 @@ The existing probe assertions must still observe 90-degree rotation and swapped
 display dimensions, so the fallback cannot hide a broken fixture. These changes
 are accompanied by one isolated-verifier dependency correction discovered at
 the next gate: the Canvas subtitle UTF-8 probe invokes Python, while the Debian
-verification image did not provide it. The verification stage installs
-`python3-minimal`; the runner remains unchanged. The probe accepts either the
-Windows `python` command or Debian's `python3` command and reports spawn failures
+verification image did not provide it. Debian's `python3-minimal` can launch an
+interpreter but omits the `json` standard library required by the probe, so the
+verification stage installs the full `python3` package; the runner remains
+unchanged. The probe accepts either the Windows `python` command or Debian's
+`python3` command only after proving `import json`, and reports spawn failures
 directly. All changes are committed before restarting every candidate
 verification gate so the local candidate, GitHub refs, VPS verifier, and
 production deploy operate on one new immutable full SHA.
