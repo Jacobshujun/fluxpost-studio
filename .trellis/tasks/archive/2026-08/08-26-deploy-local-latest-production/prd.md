@@ -56,39 +56,39 @@ and unrelated VPS services.
 
 ## Acceptance Criteria
 
-- [ ] The final candidate contains the approved product base plus only this
+- [x] The final candidate contains the approved product base plus only this
       task's pre-release Trellis metadata and the reviewed lockfile repair, with
       no tracked secret/runtime files.
-- [ ] npm 11.17 accepts the repaired lockfile for a clean Linux x64 install, and
+- [x] npm 11.17 accepts the repaired lockfile for a clean Linux x64 install, and
       the VPS verifier no longer fails dependency synchronization.
-- [ ] The Canvas video-loader check creates a 90-degree metadata fixture on both
+- [x] The Canvas video-loader check creates a 90-degree metadata fixture on both
       FFmpeg 5.1 and current FFmpeg, and still asserts rotation and display-size
       normalization rather than skipping the case.
-- [ ] The Canvas subtitle check uses the same strict FFmpeg 5.1/current-version
+- [x] The Canvas subtitle check uses the same strict FFmpeg 5.1/current-version
       rotation fixture compatibility and retains its rotation/display assertions.
-- [ ] The Docker verification target provides Python 3 for the Canvas subtitle
+- [x] The Docker verification target provides Python 3 for the Canvas subtitle
       UTF-8 probe, including the `json` standard library omitted by Debian's
       `python3-minimal`; the probe works with either `python` or `python3` and
       reports missing process or library support without an unrelated `.trim()`
       failure.
-- [ ] The complete offline baseline passes on the committed candidate, and port
+- [x] The complete offline baseline passes on the committed candidate, and port
       `3001` reports the same SHA in candidate mode.
-- [ ] `origin/local` and `origin/main` resolve to the exact candidate SHA before
+- [x] `origin/local` and `origin/main` resolve to the exact candidate SHA before
       VPS verification.
-- [ ] The installed isolated verifier produces a passing manifest bound to the
+- [x] The installed isolated verifier produces a passing manifest bound to the
       candidate SHA without reading production configuration or mounting runtime
       volumes.
-- [ ] Read-only preflight is healthy, no unsafe active work exists, and a usable
+- [x] Read-only preflight is healthy, no unsafe active work exists, and a usable
       rollback release plus stable volume/service inventory are captured.
-- [ ] The operator explicitly approves the evidenced full SHA before activation.
-- [ ] A root-only non-empty PostgreSQL backup exists before activation.
-- [ ] Production activates the exact candidate SHA through the installed wrapper.
-- [ ] Production identity, routes/auth boundaries, app/PostgreSQL/Nginx/public
+- [x] The operator explicitly approves the evidenced full SHA before activation.
+- [x] A root-only non-empty PostgreSQL backup exists before activation.
+- [x] Production activates the exact candidate SHA through the installed wrapper.
+- [x] Production identity, routes/auth boundaries, app/PostgreSQL/Nginx/public
       health, schema, workers, volumes, protected services, retained rollback,
       rescue images, and weekly BuildKit timer pass post-deploy checks.
-- [ ] `npm run local:parity` proves the clean candidate, GitHub `main`, and
+- [x] `npm run local:parity` proves the clean candidate, GitHub `main`, and
       production use the same SHA before completion-only metadata is committed.
-- [ ] No paid/provider action, Feishu/Lark write, runtime import, secret exposure,
+- [x] No paid/provider action, Feishu/Lark write, runtime import, secret exposure,
       DNS/firewall/Nginx change, global Docker prune, or volume deletion occurs.
 
 ## Out Of Scope
@@ -97,3 +97,12 @@ and unrelated VPS services.
 - Production configuration changes, local-to-production data/media migration,
   authenticated product workflows, or live provider-quality validation.
 - A second production activation solely to publish completion documentation.
+
+## Completion Evidence
+
+- Candidate: `f8e2caa8d97c3ea80e7a7571c600afe50e34b59c`.
+- Production release: `20260826-080626-f8e2caa8d97c`.
+- Rollback release retained: `20260817-015812-e086872de90a`.
+- Commit-bound verifier manifest passed before activation; the root-only custom-format PostgreSQL backup was non-empty and accepted by `pg_restore --list`.
+- Public and loopback identity, primary routes, unauthenticated API boundaries, app/PostgreSQL/Nginx health, schema, workers, named volumes, protected services, logs, image retention, two rescue tags, and the weekly BuildKit timer passed after activation.
+- `npm run local:parity` passed before this completion-only metadata record. No provider, TikHub, ComfyUI, or Feishu/Lark write was invoked.

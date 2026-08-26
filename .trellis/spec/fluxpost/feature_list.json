@@ -134,6 +134,7 @@
         "Production 38 remains healthy behind host Nginx without changing unrelated services"
       ],
       "evidence": [
+        "2026-08-26 exact SHA f8e2caa8d97c3ea80e7a7571c600afe50e34b59c passed the full local baseline and isolated VPS verifier, then deployed as release 20260826-080626-f8e2caa8d97c after zero-work preflight and a validated root-only PostgreSQL backup; identity, routes/auth, schema, workers, volumes, protected services, logs, rescue retention, BuildKit timer, and local/GitHub/production parity passed.",
         "2026-08-06 production retention kept current plus two rescues, reclaimed about 17 GB, preserved services/volumes, and enabled weekly prune."
       ],
       "notes": "Repository Caddy bootstrap remains unverified on the Nginx-managed production host."
