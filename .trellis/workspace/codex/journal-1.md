@@ -1898,3 +1898,37 @@ Blocked unfrozen Excel tests before Run creation, made autosave-aware run feedba
 ### Next Steps
 
 - None - task complete
+
+
+## Session 57: Restore Canvas partial image retry
+
+**Date**: 2026-08-26
+**Task**: Restore Canvas partial image retry
+**Branch**: `local`
+
+### Summary
+
+Restored V2 batch retry for partial model.gpt-image-each children with failed image metadata, kept V1/shared/generic partial and review/Feishu isolation unchanged, passed focused checks and the full offline baseline, and activated the clean product commit on port 3001.
+
+### Main Changes
+
+(Add details)
+
+### Git Commits
+
+| Hash | Message |
+|------|---------|
+| `a0df296679763f49bb269a1bbf02fa3b00d9d4ae` | (see git log) |
+| `f43f084` | (see git log) |
+
+### Testing
+
+- [OK] (Add test results)
+
+### Status
+
+[OK] **Completed**
+
+### Next Steps
+
+- None - task complete
