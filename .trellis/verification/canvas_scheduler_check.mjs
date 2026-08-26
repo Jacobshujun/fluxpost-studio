@@ -1224,7 +1224,7 @@ try {
         parameterValues: {},
         status: "partial",
         runId: "child-run-1",
-        resultArtifacts: [{ kind: "images", items: [{ url: "/new-result.jpg" }] }],
+        resultArtifacts: [{ kind: "images", items: [{ url: "/new-result.jpg" }], imageBatch: { status: "partial", total: 2, succeeded: 1, failed: 1, failedIndices: [2] } }],
         createdAt,
         updatedAt: createdAt,
       }],
@@ -1247,9 +1247,26 @@ try {
   const retriedV2Row = await scheduler.retryCanvasScheduleV2MainTask(storedSchedule.id, account, { mainTaskId: "main-1" });
   assert.deepEqual(
     retriedV2Row.mainTasks[0].childTasks.map((child) => [child.id, child.status, child.retryPending || false]),
-    [["child-1", "partial", false], ["child-failed", "pending", true], ["child-complete", "completed", false]],
-    "V2 row retry must retry failed children while leaving partial and completed children unchanged",
+    [["child-1", "pending", true], ["child-failed", "pending", true], ["child-complete", "completed", false]],
+    "V2 row retry must retry failed and retryable partial children while leaving completed children unchanged",
   );
+
+  storedSchedule = structuredClone(rowRetrySchedule);
+  storedSchedule.mainTasks[0].childTasks = [storedSchedule.mainTasks[0].childTasks[0]];
+  retriedNode = undefined;
+  const retriedV2Partial = await scheduler.retryCanvasScheduleV2ChildTask(storedSchedule.id, account, { mainTaskId: "main-1", childTaskId: "child-1" });
+  assert.equal(retriedNode, undefined, "a partial retry request must persist before scheduler reconciliation activates it");
+  assert.equal(retriedV2Partial.mainTasks[0].childTasks[0].retryPending, true);
+  assert.equal(retriedV2Partial.mainTasks[0].childTasks[0].status, "pending");
+  assert.equal(retriedV2Partial.mainTasks[0].resultArtifacts[0].postId, postId, "partial retry must preserve the existing review draft artifact");
+  storedSchedule = retriedV2Partial;
+  listedSchedules = [structuredClone(retriedV2Partial)];
+  canvasRunsById.set("child-run-1", { id: "child-run-1", status: "partial" });
+  nodeRunsByRunId.set("child-run-1", [structuredClone(partialImageEachNodeRun)]);
+  const activatedPartialRetry = await scheduler.getCanvasSchedule(storedSchedule.id, account);
+  assert.deepEqual(retriedNode, { runId: "child-run-1", nodeId: "partial-image-each" }, "the scheduler must activate only the failed children in a partial per-image node");
+  assert.equal(activatedPartialRetry.mainTasks[0].childTasks[0].status, "queued");
+  assert.equal(activatedPartialRetry.mainTasks[0].childTasks[0].retryPending, false);
 
   storedSchedule = structuredClone(rowRetrySchedule);
   storedSchedule.mainTasks[0].childTasks = [storedSchedule.mainTasks[0].childTasks[1]];
@@ -1295,8 +1312,18 @@ try {
   };
   await assert.rejects(
     scheduler.retryCanvasScheduleV2ChildTask(storedSchedule.id, account, { mainTaskId: "main-1", childTaskId: "child-1" }),
-    /Only failed child tasks can be retried/,
-    "all partial child tasks must remain non-retryable",
+    /No failed per-image Canvas child is available to retry/,
+    "generic partial child tasks must remain non-retryable",
+  );
+  canvasRunFixture = {
+    run: { id: "ordinary-failure-partial-run", steps: [{ nodeId: "ordinary-failure" }] },
+    nodeRuns: [{ nodeId: "ordinary-failure", nodeType: "model.gpt-text", attempt: 1, status: "failed" }],
+  };
+  storedSchedule.mainTasks[0].childTasks[0].runId = "ordinary-failure-partial-run";
+  await assert.rejects(
+    scheduler.retryCanvasScheduleV2ChildTask(storedSchedule.id, account, { mainTaskId: "main-1", childTaskId: "child-1" }),
+    /No failed per-image Canvas child is available to retry/,
+    "partial child tasks without failed per-image metadata must remain non-retryable even when another node failed",
   );
   canvasRunFixture = {
     run: { id: "shared-run-failed", steps: [{ nodeId: "shared-vision" }, { nodeId: "shared-select" }] },
@@ -1369,7 +1396,12 @@ try {
   assert.match(
     schedulerSource,
     /function findFailedCanvasNode[\s\S]*orderedAttempts[\s\S]*\["failed", "blocked", "needs_config"\]/,
-    "Image-child retry must prefer execution-order failures without treating partial nodes as retryable.",
+    "Image-child retry must preserve execution-order failure selection.",
+  );
+  assert.match(
+    schedulerSource,
+    /function findRetryableCanvasNode[\s\S]*findFailedCanvasNode[\s\S]*findRetryablePartialImageNode[\s\S]*nodeRun\.nodeType === "model\.gpt-image-each"[\s\S]*failedIndices/,
+    "V2 partial retry must fall back only to per-image nodes with failed child metadata.",
   );
   assert.match(
     schedulerSource,
@@ -1447,10 +1479,11 @@ try {
   for (const snippet of ["CanvasScheduleCenter", "CanvasScheduleV2Editor", "CanvasScheduleParameterEditor", "ScheduleV2RuntimeTree", "节点名称", "人物场景预设", "ScheduleAssetFilterEditor", "多个标签，AND", "条件随机", "条件匹配", "批次内随机去重", "随机抽取", "固定个数", "随机范围", "每个主任务随机抽取", "确认并启动", "接受新增候选图", "onBlur={commitLabel}", "onSchedulerRoleChange", "insertSchedulerSkeleton", "Switch 输入", "画布绑定", "onSaveBindings", "saveQueueRef.current = saveQueueRef.current.then", "current?.id === schedule.id ? current.revision : schedule.revision"]) {
     assert.ok(page.includes(snippet), `Canvas UI is missing ${snippet}`);
   }
-  assert.ok(!page.includes("重试失败图片"), "Canvas UI must not expose partial-specific retry copy");
-  assert.match(page, /main\.childTasks\.some\(\(child\) => child\.status === "failed"\)/, "V2 row retry must remain available for failed children");
+  assert.ok(page.includes("重试失败图片"), "Canvas UI must expose partial failed-image retry copy");
+  assert.match(page, /main\.childTasks\.some\(isCanvasScheduleV2ChildRetryable\)/, "V2 row retry must include retryable partial children");
   assert.match(page, /content\.imageTasks\.map[\s\S]*task\.status === "failed"/, "V1 image retry must remain available for failed tasks");
-  assert.ok(page.includes("重试本行失败卡片"), "V2 row retry must describe failed children only");
+  assert.ok(page.includes("重试本行失败项"), "V2 row retry must describe retryable failed children");
+  assert.match(page, /function isCanvasScheduleV2ChildRetryable[\s\S]*artifact\.imageBatch\?\.status === "partial"/, "V2 UI must restrict partial retry to failed image batches");
   for (const snippet of ["requestGenerationRef", "queryStringRef", "filterRef", "searchDraftState", "commitSearch", "ScheduleAssetThumbnail", "/thumbnail", "seenCursors", "selectIdRange", "全选当前筛选结果", "清空已选", "加载更多", "预览图片", "上一张图片", "下一张图片"]) {
     assert.ok(page.includes(snippet), `Canvas scheduler image source UI is missing ${snippet}`);
   }

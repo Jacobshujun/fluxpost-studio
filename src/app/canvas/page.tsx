@@ -167,6 +167,7 @@ import type {
   CanvasScheduleParameterType,
   CanvasScheduleParameterValue,
   CanvasScheduleSampleCount,
+  CanvasScheduleV2ChildTask,
   CanvasScheduleV2Definition,
   CanvasScheduleV2SharedOutput,
   CanvasSourceVideoSnapshot,
@@ -4215,11 +4216,19 @@ function ScheduleV2RuntimeTree({ schedule, busy, onAction }: { schedule: CanvasS
       {main.generatedPostId ? <Link href={`/review?postId=${encodeURIComponent(main.generatedPostId)}`}>打开评审草稿</Link> : null}
       {["completed", "partial"].includes(main.status) && main.mainRunId ? <CanvasScheduleMainImageDownload runId={main.mainRunId} /> : null}
       {main.pendingCandidateSync ? <button type="button" onClick={() => onAction("accept-candidates", { mainTaskId: main.id })} disabled={busy}>接受新增候选图</button> : null}
-      {main.childTasks.some((child) => child.status === "failed") ? <button type="button" onClick={() => onAction("retry-row", { mainTaskId: main.id })} disabled={busy}><RotateCcw />重试本行失败卡片</button> : null}
+      {main.childTasks.some(isCanvasScheduleV2ChildRetryable) ? <button type="button" onClick={() => onAction("retry-row", { mainTaskId: main.id })} disabled={busy}><RotateCcw />重试本行失败项</button> : null}
       {main.error ? <p>{main.error}</p> : null}
-      <ul>{main.childTasks.map((child, childIndex) => <li key={child.id}><StatusIcon status={child.status} /><span>{child.workbookCard ? `参数卡片 ${child.workbookCard.cardIndex} · ${child.workbookCard.text}` : `子任务 ${childIndex + 1} · ${formatCanvasScheduleParameterValues(child.parameterValues)}`}</span><em>{canvasScheduleStatusLabel(child.status)}</em>{child.error ? <small>{child.error}</small> : null}{child.status === "failed" ? <button type="button" onClick={() => onAction("retry", { mainTaskId: main.id, childTaskId: child.id })} disabled={busy}><RotateCcw />重试</button> : null}</li>)}</ul>
+      <ul>{main.childTasks.map((child, childIndex) => <li key={child.id}><StatusIcon status={child.status} /><span>{child.workbookCard ? `参数卡片 ${child.workbookCard.cardIndex} · ${child.workbookCard.text}` : `子任务 ${childIndex + 1} · ${formatCanvasScheduleParameterValues(child.parameterValues)}`}</span><em>{canvasScheduleStatusLabel(child.status)}</em>{child.error ? <small>{child.error}</small> : null}{isCanvasScheduleV2ChildRetryable(child) ? <button type="button" onClick={() => onAction("retry", { mainTaskId: main.id, childTaskId: child.id })} disabled={busy}><RotateCcw />{child.status === "partial" ? "重试失败图片" : "重试"}</button> : null}</li>)}</ul>
     </div></details>)}
   </div>;
+}
+
+function isCanvasScheduleV2ChildRetryable(child: CanvasScheduleV2ChildTask) {
+  if (child.status === "failed") return true;
+  if (child.status !== "partial") return false;
+  return child.resultArtifacts.some((artifact) => artifact.kind === "images"
+    && artifact.imageBatch?.status === "partial"
+    && (artifact.imageBatch.failed > 0 || artifact.imageBatch.failedIndices.length > 0));
 }
 
 function CanvasScheduleMainImageDownload({ runId }: { runId: string }) {

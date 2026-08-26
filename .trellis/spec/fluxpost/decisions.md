@@ -368,7 +368,7 @@ await retryCanvasScheduleV2SharedTask(scheduleId, account, { mainTaskId });
 ### 3. Contracts
 
 - Excel and generic V2 schedules use only `aggregationPolicy`: `at-least-one` accepts at least one successful artifact and `all` requires every child; neither path synthesizes review-layer partial metadata.
-- `partial`, failed indices, schedules, runs, node runs, and artifact diagnostics stay inside Canvas. Partial V1/V2 children, rows, shared stages, and node cards have no retry action; existing `failed`, `blocked`, and `needs_config` node retry behavior remains.
+- `partial`, failed indices, schedules, runs, node runs, and artifact diagnostics stay inside Canvas. A V2 child may retry a `partial` run only when its latest `model.gpt-image-each` attempt records failed image children; row retry includes those children and ordinary failed children. Partial V1 tasks, shared stages, generic nodes, and node cards remain non-retryable; existing `failed`, `blocked`, and `needs_config` behavior remains.
 - Review UI and Feishu `full`, `text`, and `media` modes do not read a legacy `canvasImageBatch` key. Existing body, vehicle, media, mode, approval, and queue checks remain authoritative.
 - Cleanup selects every generated-post JSON object containing the key. PostgreSQL uses `data_json - 'canvasImageBatch'`; SQLite uses `json_remove`. Both preserve row columns, especially `status`, `created_at`, and `updated_at`, and never touch Canvas history tables.
 
@@ -384,11 +384,11 @@ await retryCanvasScheduleV2SharedTask(scheduleId, account, { mainTaskId });
 
 - Good: one V2 child succeeds and one fails under `at-least-one`; the row yields successful images, Canvas remains partial for diagnosis, and the review draft can publish under normal mode validation.
 - Base: a historical partial/completed generated post is readable and publishable before cleanup; dry-run reports its id, and `--apply` removes only the legacy key.
-- Bad: copy failed indices into `GeneratedPost`, disable review buttons from Canvas state, retry a `partial` task, update `updated_at` during cleanup, or auto-run the cleanup at startup.
+- Bad: copy failed indices into `GeneratedPost`, disable review buttons from Canvas state, retry a generic `partial` task without failed per-image metadata, update `updated_at` during cleanup, or auto-run the cleanup at startup.
 
 ### 6. Tests Required
 
-- `canvas_scheduler_check.mjs` asserts generic/Excel aggregation parity, unrestricted admission despite historical `taskConcurrency`, no synthesized aggregate `imageBatch`, partial retry rejection, and ordinary failed retry.
+- `canvas_scheduler_check.mjs` asserts generic/Excel aggregation parity, unrestricted admission despite historical `taskConcurrency`, no synthesized aggregate `imageBatch`, precise V2 failed-image partial retry, generic/shared/V1 partial rejection, and ordinary failed retry.
 - `canvas_image_each_check.mjs`, `review_desk_workflow_check.mjs`, `feishu_publish_mode_check.mjs`, and `feishu_publish_queue_check.mjs` assert operational diagnostics remain while generated posts, review controls, Canvas publish, and all Feishu modes ignore the legacy key.
 - `canvas_review_policy_cleanup_check.mjs` asserts SQLite dry-run byte stability, apply removal, preservation of content/status/timestamps, idempotence, and static transactional PostgreSQL JSONB removal.
 

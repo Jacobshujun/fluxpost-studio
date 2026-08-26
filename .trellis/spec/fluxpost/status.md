@@ -8,13 +8,14 @@ Production, GitHub `main`, and the verified local product candidate now run exac
 
 ## Current Focus
 
+- The verified local Canvas fix restores V2 partial child and row retry only for failed `model.gpt-image-each` children; V1, shared, generic partial, review, and Feishu behavior remains unchanged.
 - Legacy implementation tasks are archived; active product gates live in `feature_list.json` rather than permanent task directories.
 - Production release `20260826-080626-f8e2caa8d97c` is healthy behind host Nginx, with retained rollback release `20260817-015812-e086872de90a`.
 - Port `3001`, GitHub `main`, and production passed exact-SHA parity at `f8e2caa8d97c3ea80e7a7571c600afe50e34b59c` before this completion-only metadata record.
 
 ## Next Entry
 
-Choose the next product gate from `feature_list.json` and create one bounded Trellis task. Any later product push or production activation requires separate approval and a new immutable candidate.
+Commit and activate the verified Canvas retry fix as the next clean port-3001 candidate. Any push or production activation requires separate approval and a new immutable candidate.
 
 ## Risks And Unknowns
 

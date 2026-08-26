@@ -253,7 +253,7 @@
         "Default checks cover graph, API, persistence, providers, media, subtitles, scheduler, desktop, and mobile contracts without live writes"
       ],
       "evidence": [
-        "2026-08-25 Excel readiness/history, generic aggregation, review isolation, retries, build, smoke, full baseline, and responsive Canvas checks passed."
+        "2026-08-26 V2 failed-image partial retry, generic/shared/V1 rejection, review isolation, build, smoke, and the full offline baseline passed."
       ],
       "notes": "Live provider/Feishu runs and multi-user PostgreSQL concurrency remain."
     },

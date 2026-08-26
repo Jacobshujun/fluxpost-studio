@@ -55,6 +55,7 @@ import type {
   CanvasArtifact,
   CanvasGraph,
   CanvasNode,
+  CanvasNodeRun,
   CanvasPromptStrategy,
   CanvasRun,
   CanvasSchedule,
@@ -592,7 +593,8 @@ export async function retryCanvasScheduleV2ChildTask(
   const main = current.mainTasks?.find((item) => item.id === input.mainTaskId);
   const child = main?.childTasks.find((item) => item.id === input.childTaskId);
   if (!main || !child?.runId) throw new Error("Child task not found");
-  if (child.status !== "failed") throw new Error("Only failed child tasks can be retried.");
+  if (!isRetryableScheduleTaskStatus(child.status)) throw new Error("Only failed or retryable partial child tasks can be retried.");
+  if (child.status === "partial") await requireRetryableCanvasScheduleRun(child.runId, account);
   const now = new Date().toISOString();
   const preserveGeneratedPost = current.definition.childResult.artifactKind === "images"
     && Boolean(main.generatedPostId || main.resultArtifacts.some((artifact) => artifact.kind === "socialPost"));
@@ -633,7 +635,12 @@ export async function retryCanvasScheduleV2MainTask(
   const main = current.mainTasks.find((item) => item.id === input.mainTaskId);
   if (!main) throw new Error("Main task not found");
   const retryableIds = new Set(main.childTasks.filter((child) => child.status === "failed" && child.runId).map((child) => child.id));
-  if (!retryableIds.size) throw new Error("This row has no failed card tasks to retry.");
+  for (const child of main.childTasks) {
+    if (child.status !== "partial" || !child.runId) continue;
+    const run = await getCanvasRun(child.runId, account);
+    if (run && findRetryablePartialImageNode(run.run, run.nodeRuns)) retryableIds.add(child.id);
+  }
+  if (!retryableIds.size) throw new Error("This row has no failed or retryable partial card tasks to retry.");
   const now = new Date().toISOString();
   const preserveGeneratedPost = current.definition.childResult.artifactKind === "images" && Boolean(main.generatedPostId);
   const next: CanvasSchedule = {
@@ -1876,9 +1883,9 @@ async function activateCanvasScheduleV2Retries(schedule: CanvasSchedule, now: st
       try {
         const run = await getCanvasRun(child.runId, ownerActor(schedule));
         if (!run) throw new Error("Canvas child run not found");
-        const failedNode = findFailedCanvasNode(run.run, run.nodeRuns);
-        if (!failedNode) throw new Error("No failed Canvas node is available to retry.");
-        await retryCanvasNode(run.run.id, failedNode.nodeId, ownerActor(schedule));
+        const retryableNode = findRetryableCanvasNode(run.run, run.nodeRuns);
+        if (!retryableNode) throw new Error("No retryable Canvas node is available.");
+        await retryCanvasNode(run.run.id, retryableNode.nodeId, ownerActor(schedule));
         child.status = "queued";
         child.retryPending = false;
         child.error = undefined;
@@ -1915,6 +1922,35 @@ function findFailedCanvasNode(run: Pick<CanvasRun, "steps">, nodeRuns: Awaited<R
     ...Array.from(latest.values()).filter((nodeRun) => !stepNodeIds.has(nodeRun.nodeId)),
   ];
   return orderedAttempts.find((nodeRun) => ["failed", "blocked", "needs_config"].includes(nodeRun.status));
+}
+
+function isRetryableScheduleTaskStatus(status: CanvasScheduleImageTask["status"]) {
+  return status === "failed" || status === "partial";
+}
+
+function findRetryableCanvasNode(run: Pick<CanvasRun, "steps">, nodeRuns: CanvasNodeRun[]) {
+  const failedNode = findFailedCanvasNode(run, nodeRuns);
+  if (failedNode) return failedNode;
+  return findRetryablePartialImageNode(run, nodeRuns);
+}
+
+function findRetryablePartialImageNode(run: Pick<CanvasRun, "steps">, nodeRuns: CanvasNodeRun[]) {
+  const latest = latestNodeAttempts(nodeRuns);
+  const stepNodeIds = new Set((run.steps || []).map((step) => step.nodeId));
+  const orderedAttempts = [
+    ...(run.steps || []).map((step) => latest.get(step.nodeId)).filter((nodeRun): nodeRun is CanvasNodeRun => Boolean(nodeRun)),
+    ...Array.from(latest.values()).filter((nodeRun) => !stepNodeIds.has(nodeRun.nodeId)),
+  ];
+  return orderedAttempts.find((nodeRun) => nodeRun.status === "partial"
+    && nodeRun.nodeType === "model.gpt-image-each"
+    && (Number(nodeRun.internalMetadata?.imageEach?.failed || 0) > 0
+      || Boolean(nodeRun.internalMetadata?.imageEach?.failedIndices.length)));
+}
+
+async function requireRetryableCanvasScheduleRun(runId: string, account: WorkspaceAccessActor) {
+  const run = await getCanvasRun(runId, account);
+  if (!run) throw new Error("Canvas child run not found");
+  if (!findRetryablePartialImageNode(run.run, run.nodeRuns)) throw new Error("No failed per-image Canvas child is available to retry.");
 }
 
 function extractImageUrls(nodeRuns: Awaited<ReturnType<typeof listCanvasNodeRunsFromDb>>, nodeId: string) {
