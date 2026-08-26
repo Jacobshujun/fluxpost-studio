@@ -7,8 +7,8 @@
 ## Current Status
 
 <!-- @@@auto:current-status -->
-- **Active File**: `journal-1.md`
-- **Total Sessions**: 58
+- **Active File**: `journal-2.md`
+- **Total Sessions**: 59
 - **Last Active**: 2026-08-26
 <!-- @@@/auto:current-status -->
 
@@ -19,7 +19,8 @@
 <!-- @@@auto:active-documents -->
 | File | Lines | Status |
 |------|-------|--------|
-| `journal-1.md` | ~1967 | Active |
+| `journal-2.md` | ~41 | Active |
+| `journal-1.md` | ~1967 | Archived |
 <!-- @@@/auto:active-documents -->
 
 ---
@@ -29,6 +30,7 @@
 <!-- @@@auto:session-history -->
 | # | Date | Title | Commits | Branch |
 |---|------|-------|---------|--------|
+| 59 | 2026-08-26 | 图库批量集合管理 | `5f1cb7c`, `883da0f` | `local` |
 | 58 | 2026-08-26 | Deploy Canvas partial image retry | `d260ac24f23a1131f65906a75b15bb6953ad173d` | `local` |
 | 57 | 2026-08-26 | Restore Canvas partial image retry | `a0df296679763f49bb269a1bbf02fa3b00d9d4ae`, `f43f084` | `local` |
 | 56 | 2026-08-26 | 清理并精简 Trellis 状态 | `276d820` | `local` |
