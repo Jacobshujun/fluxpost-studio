@@ -4,7 +4,7 @@ Last updated: 2026-08-26
 
 ## One-Line Status
 
-Library batch collection management is implemented and passes the full offline baseline; commit and clean port-3001 candidate activation remain.
+Library batch collection management is implemented, committed, and browser-verified on clean candidate SHA `5f1cb7c11a69cfce763175ac36e5a192ca251c83`; Trellis wrap-up remains.
 
 ## Current Focus
 
@@ -15,7 +15,7 @@ Library batch collection management is implemented and passes the full offline b
 
 ## Next Entry
 
-Commit the verified task, activate the clean committed candidate on port `3001`, and run the mocked desktop/mobile browser check against that candidate.
+Archive the completed task, record the session journal, and reactivate port `3001` from the final clean metadata HEAD. Production deployment requires separate approval.
 
 ## Risks And Unknowns
 
