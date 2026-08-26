@@ -1589,4 +1589,4 @@ Start-CandidateServer -Slot $targetSlot -Commit $ReleaseSha
 - `.trellis/` is the only active persistent AI collaboration system. `.trellis/spec/fluxpost/` is the FluxPost project-memory layer inside that system.
 - `feature_list.json` is a state machine, not a loose todo list.
 - A feature cannot be `done` without evidence.
-- Update `progress.md` and `handoff.md` after meaningful development, debugging, deployment, or analysis.
+- Update `status.md` when the current outcome changes. Update `progress.md` or `handoff.md` only for unfinished cross-session work, reusable troubleshooting/deployment evidence, durable verification facts, or an explicit user request, as defined in `rules.md`.

@@ -34,7 +34,7 @@ For a production candidate:
 
 1. Build from a clean worktree rooted at current GitHub `main`.
 2. Run focused checks, the baseline, TypeScript, lint, and production build.
-3. Push a dedicated branch and verify the remote full SHA.
+3. Push the unchanged verified commit, merge it to `origin/main`, and verify the remote full SHA before candidate verification; a temporary branch is optional, but production parity is always against `origin/main`.
 4. Run `/opt/fluxpost-studio/bin/verify-candidate.sh --ref FULL_40_CHARACTER_SHA` and require a commit-bound passing manifest before approval; this isolated gate must not read production configuration, mount runtime volumes, or activate services.
 5. Run read-only production preflight.
 6. Deploy only through `/opt/fluxpost-studio/bin/deploy.sh --ref FULL_40_CHARACTER_SHA` after separate explicit approval.
@@ -45,10 +45,10 @@ Do not deploy a dirty worktree, branch name, abbreviated SHA, local runtime rows
 
 ## Recent Verification
 
+- 2026-08-26: Trellis reconciliation reduced legacy active tasks from 29 to 0 after cleanup and default startup context from 45,129 bytes to 24,962 bytes; no active/archive duplicates or orphan task directories remain. JSON, context/marker budgets, all focused checks, TypeScript, lint (0 errors, 5 existing warnings), production build, isolated HTTP smoke, SQLite, and the full offline baseline passed without external production calls.
 - 2026-08-25: Excel/generic V2 parity, review/publish isolation, failed-only retries, cleanup contracts, TypeScript, lint, build, smoke, and baseline passed offline. SHA `d61d3966ae6afae5916ff82bccfcc97170d27c56` ran on port 3001; PostgreSQL cleanup went from 7 keys to 0; mocked Chromium at 1440x960 and 390x844 confirmed no partial warning, enabled single/batch Feishu actions, clean consoles, and no overflow without publishing.
 - 2026-08-25: Explicit Xray image transport, loopback/text/ComfyUI isolation, Canvas 30-second network recovery, ToAPIs GET-only resume, admin health UI/API, TypeScript, lint, production build, isolated HTTP smoke, and the full offline baseline passed; local Xray listened only on `127.0.0.1:10808`, and credential-free primary/backup HTTPS handshakes succeeded.
 - 2026-08-25: Clean competitor-workbook candidate activated on port 3001 with matching identity and HTTP smoke; mocked Chromium at 1440x960 and 390x844 verified the five-node/six-edge preset, workbook editor, hierarchical scheduler fields, concurrency 1-5, disabled preflight launch, and no horizontal overflow without provider calls.
-- 2026-08-24: Competitor-workbook 200-row/778-card parsing, invalid-input/path-redaction boundaries, hierarchy, shared references, progressive concurrency, retry/partial-draft sync, GPT V2 compatibility, TypeScript, lint, build, isolated smoke, and full baseline passed without live providers or Feishu.
 Older evidence is preserved in `.trellis/spec/fluxpost/archive/verification-history.md`.
 
 ## Missing Coverage

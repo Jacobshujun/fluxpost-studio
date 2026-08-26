@@ -1,19 +1,21 @@
 # Progress
 
-Last updated: 2026-07-01
+Last updated: 2026-08-26
 
 This file is an on-demand history library. Current state belongs in `.trellis/spec/fluxpost/status.md`; routine conversation logs should not be appended here.
 
 ## 最近一条
 <!-- TRELLIS-LATEST-START -->
-2026-08-20 global finished-body limit:
+2026-08-26 Trellis cleanup:
 
 Done:
-- Implemented Unicode body policy across generation, persistence, review, copy library, Canvas composition, and Feishu publishing compatibility.
-- Related deterministic checks and the complete offline baseline pass; harvested source and unchanged unmarked history remain intact.
+- Reduced legacy active tasks to the current cleanup task and preserved completed work under task archives.
+- Converted feature state back to a compact current state machine; detailed evidence remains in verification and archive files.
+- Removed contradictory current paths, retired-host gates, history-recording rules, and release wording.
+- Full isolated baseline passed; default startup context is 24,962 bytes and no active/archive duplicate or orphan task directory remains.
 
 Next:
-- Commit the scoped body-policy changes only; push and deployment remain separate approval gates.
+- Start future work as one bounded task from the current status and feature review gates.
 <!-- TRELLIS-LATEST-END -->
 
 ## 历史记录

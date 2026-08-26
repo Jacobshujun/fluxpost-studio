@@ -37,6 +37,12 @@ Last updated: 2026-08-25
 - Keep `status.md` as the current lightweight entry. Keep long historical records under `.trellis/spec/fluxpost/archive/`.
 - `feature_list.json` is a feature state machine, not a history log. Keep 1-3 evidence entries per feature and archive detailed evidence.
 
+## Task And Feature State
+
+- A Trellis task tracks a bounded implementation lifecycle; archive it when its scoped implementation and checks finish.
+- Manual, provider, or production acceptance belongs in `feature_list.json` as `ready_for_review`; it must not keep an otherwise completed implementation task permanently active.
+- Before archiving legacy tasks, require repository evidence such as completed acceptance items, implementation commits, stable verification, a completed archive copy, or an explicit replacement task. Preserve uncertainty as `待确认` rather than guessing.
+
 ## Trellis Self-Check Upgrade
 
 - `.trellis/verification/check.ps1` must enforce context budgets and latest-marker size gates before expensive checks.

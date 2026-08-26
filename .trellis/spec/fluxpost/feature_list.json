@@ -13,389 +13,287 @@
       "title": "Trellis Engineering project structure",
       "status": "done",
       "definition_of_done": [
-        "AGENTS.md exists and defines startup, work, completion, boundary, and quality protocols",
-        ".trellis/spec/fluxpost contains project brief, feature state, progress, handoff, decisions, verification, pitfalls, and architecture rules",
-        ".trellis/verification/check.ps1 runs real baseline verification without external production service calls",
-        "README explains Trellis recovery and baseline verification"
+        "AGENTS.md and .trellis/spec/fluxpost define the active workflow and project facts",
+        "The deterministic baseline checks Trellis structure without external production calls"
       ],
       "evidence": [
-        "2026-07-01 Trellis CLI 0.6.5 installed and initialized with Codex integration. Active project context moved to .trellis/spec/fluxpost, baseline scripts moved to .trellis/verification, and old docs/harness plus scripts/harness directories were renamed to disabled archives.",
-        "2026-06-17 Trellis context budget migration completed: AGENTS.md startup reads status.md, feature_list.json, and rules.md; handoff/progress are on-demand history with TRELLIS-LATEST markers.",
-        "Detailed historical evidence archived at .trellis/spec/fluxpost/archive/feature-list-history-2026-06-17.json"
+        "2026-08-26 Trellis task state, current facts, context budgets, and baseline contracts were reconciled; detailed history remains under .trellis/spec/fluxpost/archive/."
       ],
-      "notes": "Initialized as the canonical long-term AI collaboration context."
+      "notes": "Trellis is the only active persistent AI collaboration system."
     },
     {
       "id": "keyword-crawl-content-pool",
       "title": "Keyword crawl and content pool",
       "status": "ready_for_review",
       "definition_of_done": [
-        "Users can submit platform, keyword, count, and optional filters",
-        "TikHub results are normalized and written to data/content-pool.json",
-        "Crawled items expose metrics, media, timestamps, and a frozen administrator-configurable content-safety assessment"
+        "Users can crawl supported platforms or import supported links into the owner-scoped content pool",
+        "Retained items expose normalized metrics, media, timestamps, and frozen safety assessment"
       ],
       "evidence": [
-        "2026-08-04 safety policy SHA e6692c3d0cce807106e343c43a9804be2686ec3d passed isolated baseline and deployed as 20260804-102825-e6692c3d0cce; identity, auth, zero queues, volumes, backup, and rollback passed offline.",
-        "2026-06-16 Dongchedi source-link/ID import added through src/lib/dongchedi.ts and src/lib/source-link-import.ts, with advanced/simple link-mode UI/API wiring, generated-post/review labels, and .trellis/verification/dongchedi_import_check.mjs in the baseline; verification passed without live Dongchedi/TikHub/OpenAI/image-provider/Feishu production calls"
+        "Keyword/link import, content safety, persistence, platform mapping, and Dongchedi focused checks are in the offline baseline."
       ],
-      "notes": "Live provider/model behavior remains pending approval."
+      "notes": "Live provider/model behavior remains pending operator approval."
     },
     {
       "id": "media-cache-video-frames",
       "title": "Crawled media cache, video frames, and video transcription",
       "status": "ready_for_review",
       "definition_of_done": [
-        "Crawled images and videos can be cached under public/media/crawl",
-        "Downloaded videos can produce cover, interval, or scene-change frames",
-        "Failures are visible to the caller and do not delete unrelated media",
-        "Configured Ark video transcription can merge speech-to-text output into the source body before rewrite"
+        "Crawled media can be cached and downloaded videos can produce policy-selected frames",
+        "Optional transcription can merge speech text before rewrite with visible failures"
       ],
       "evidence": [
-        "2026-06-25 through 2026-07-01 video transcription, quality ranking, frame selection, forced refresh, and optional visual review passed their focused checks and full baseline without live provider calls.",
-        "Detailed evidence is indexed in .trellis/spec/fluxpost/verification.md and its archive."
+        "Media download, frame, quality, original-reference, and transcription checks pass offline."
       ],
-      "notes": "Requires system ffmpeg on PATH for video frames and MP3 audio extraction. Live transcription requires ARK_API_KEY or the existing VOLCENGINE_ASR_APP_KEY alias, plus optional Ark model/prompt/audio-size/timeout variables; default verification does not call the external Ark service."
+      "notes": "Live Ark transcription remains outside the default baseline."
     },
     {
       "id": "batch-content-production",
       "title": "Batch content production",
       "status": "ready_for_review",
       "definition_of_done": [
-        "Users can select source items and material paths",
-        "Each source item gets an independent production task",
-        "Generated drafts include title, body, image prompt, image task choices, and review status"
+        "Selected sources create independent production tasks and reviewable drafts",
+        "Drafts preserve title, body, image choices, and review status"
       ],
       "evidence": [
-        "Source files present: src/app/api/production/batches/route.ts, src/lib/batch-production.ts, src/lib/openai.ts",
-        "Detailed historical evidence archived at .trellis/spec/fluxpost/archive/feature-list-history-2026-06-17.json"
+        "Production routes, persistence, concurrency, generation, and review contracts are covered by the baseline."
       ],
-      "notes": "OpenAI-compatible external calls are not part of default baseline verification."
+      "notes": "Live text/image provider behavior remains pending operator review."
     },
     {
       "id": "review-feishu-publish",
       "title": "Review and Feishu publishing",
       "status": "ready_for_review",
       "definition_of_done": [
-        "Users can manually patch or prompt-edit a generated post",
-        "Approved posts can be staged as Feishu payloads",
-        "Configured Feishu CLI can publish using the project wrapper",
-        "Bulk publishes use one durable job with worker preparation and persisted ten-post chunks"
+        "Users can edit, approve, and queue generated posts for Feishu",
+        "Durable publish jobs preserve mode, chunks, records, attachments, retry, and ownership"
       ],
       "evidence": [
-        "Source files present: src/app/api/review/route.ts, src/app/api/publish/feishu/route.ts, src/lib/feishu-cli.ts",
-        "2026-08-18 full/text/media modes passed shared-contract, UI/API/queue/CLI/Canvas, legacy-default, dedupe, field-isolation, full offline baseline, and responsive screenshot checks without a live Feishu write",
-        "Detailed historical evidence archived at .trellis/spec/fluxpost/archive/feature-list-history-2026-06-17.json"
+        "2026-08-18 full/text/media UI, API, queue, CLI, Canvas, compatibility, and responsive checks passed without live writes."
       ],
-      "notes": "Keep ready_for_review until an operator-approved real publish validates the durable chunk path with final media. No real Base record creation was executed in this verification. Feishu IM notification requires FEISHU_NOTIFY_CHAT_ID or FEISHU_NOTIFY_USER_ID plus bot message permission."
+      "notes": "A real operator-approved Base publish with final media is still required."
     },
     {
       "id": "feishu-distribution-check",
       "title": "Feishu distribution audit write-back",
       "status": "ready_for_review",
       "definition_of_done": [
-        "Users can bulk input Feishu record numbers from a signed-in browser session",
-        "The app can judge whether each record is distributable to other Xiaohongshu accounts",
-        "The app scores each record with a cheat-on-content-style pre-publication score and prediction without letting score force the distribution decision",
-        "Approved and blocked decisions are written back to the Feishu single-select field 是否分发, and the final numeric score is written to 内容评分",
-        "Default verification covers the tool without triggering live Feishu writes"
+        "Signed-in users can queue record audits with independent distribution decisions and scores",
+        "Results write to the configured Feishu fields through isolated durable workers"
       ],
       "evidence": [
-        "Source files present: src/lib/distribution-check.ts, src/app/api/distribution-check/route.ts, and src/app/distribution-check/page.tsx",
-        "2026-06-17 distribution audit was upgraded to durable queue/progress mode: /distribution-check POST enqueues owner-scoped jobs, GET polls job/list progress, distribution_check_jobs stores progress/results, dedicated distribution concurrency pools isolate large audits from collection/generation work, and full Trellis baseline passed without live Feishu writes.",
-        "Detailed historical evidence archived at .trellis/spec/fluxpost/archive/feature-list-history-2026-06-17.json"
+        "Distribution API, queue, prompt, persistence, concurrency, and UI checks pass without live Feishu writes."
       ],
-      "notes": "Ready for a small intentional live validation with real 编号 values. No live Feishu write was triggered by automated verification."
+      "notes": "A small intentional live validation with real record numbers remains."
     },
     {
       "id": "execution-observability",
       "title": "Execution activity log",
       "status": "ready_for_review",
       "definition_of_done": [
-        "Backend operations record activity entries",
-        "Frontend can read recent activity",
-        "Users can clear the activity log from the API"
+        "Backend operations append owner-scoped activity entries without whole-table replacement",
+        "Users can read and clear permitted activity"
       ],
       "evidence": [
-        "Source files present: src/app/api/activity/route.ts, src/lib/activity-log.ts",
-        "Detailed historical evidence archived at .trellis/spec/fluxpost/archive/feature-list-history-2026-06-17.json"
+        "Execution-log append, compaction, ownership, and API contracts pass in the baseline."
       ],
-      "notes": "Stored in SQLite table execution_logs; legacy data/execution-log.json is retained as a migration artifact."
+      "notes": "Legacy JSON remains only as a migration artifact."
     },
     {
       "id": "sqlite-runtime-persistence",
       "title": "SQLite runtime persistence",
       "status": "ready_for_review",
       "definition_of_done": [
-        "Runtime stores use SQLite instead of JSON files as the primary write path",
-        "Existing JSON runtime data can migrate into SQLite without deleting legacy files",
-        "Baseline verification validates SQLite schema and store availability"
+        "SQLite is the fallback runtime store and legacy JSON can migrate without deletion",
+        "The baseline verifies schema and active stores"
       ],
       "evidence": [
-        "Source file present: src/lib/database.ts",
-        "2026-06-02 passed: npm run lint; npx --no-install tsc --noEmit; npm run build; powershell -ExecutionPolicy Bypass -File .trellis/verification/check.ps1",
-        "Detailed historical evidence archived at .trellis/spec/fluxpost/archive/feature-list-history-2026-06-17.json"
+        "Database, migration, content, post, queue, and workspace-store checks pass against isolated SQLite."
       ],
-      "notes": "Uses Node.js built-in node:sqlite, which requires Node 24+ and emits an expected experimental warning."
+      "notes": "PostgreSQL is the configured local runtime; SQLite remains the supported fallback."
     },
     {
       "id": "postgres-runtime-storage",
       "title": "PostgreSQL runtime storage and migration",
       "status": "done",
       "definition_of_done": [
-        "Runtime storage can use PostgreSQL when DATABASE_URL is configured",
-        "The app continues to use SQLite by default when DATABASE_URL is not configured",
-        "A PostgreSQL schema migration exists for the current runtime tables",
-        "A SQLite-to-PostgreSQL migration script can copy current runtime rows without moving media binaries",
-        "Baseline verification checks the PostgreSQL schema without requiring a live PostgreSQL server"
+        "DATABASE_URL selects PostgreSQL while its absence keeps SQLite fallback",
+        "Schema and SQLite-to-PostgreSQL migration cover active runtime domains without moving media"
       ],
       "evidence": [
-        "2026-06-04 passed: powershell -ExecutionPolicy Bypass -File .trellis/verification/check.ps1",
-        "Detailed historical evidence archived at .trellis/spec/fluxpost/archive/feature-list-history-2026-06-17.json"
+        "2026-06-04 local PostgreSQL provisioning and migration passed; the offline schema check remains in the baseline."
       ],
-      "notes": "Live local migration is complete. Current JSONB-table design preserves existing behavior; high-volume queue tables and SKIP LOCKED workers remain a follow-up."
+      "notes": "Future high-volume queue redesign is separate scope."
     },
     {
       "id": "one-command-vps-deployment",
       "title": "One-command Ubuntu VPS deployment",
       "status": "ready_for_review",
       "definition_of_done": [
-        "A fresh Ubuntu 24.04 VPS can bootstrap from GitHub with generated root-only base secrets",
-        "Pre-domain deployment starts only app and PostgreSQL on a loopback port for SSH-tunnel access",
-        "A validated DNS hostname can enable Caddy HTTPS through one command",
-        "Routine updates preserve every named volume and retain current plus two rescue images",
-        "Offline checks cover Compose/Bash, exact-ref rollback, full-id retention, dry-run/failure ordering, timers, and destructive guards"
+        "Bootstrap, exact-SHA verification/deploy, rollback, volumes, image retention, and weekly cache cleanup are deterministic",
+        "Production 38 remains healthy behind host Nginx without changing unrelated services"
       ],
       "evidence": [
-        "2026-08-06 v4 production cleanup kept current plus two rescues, removed unused history, reclaimed about 17 GB, preserved five healthy containers/seven volumes, and enabled weekly prune.",
-        "2026-08-03 exact SHA a65767384c1b1993c95c8c32d053edcd10c3fac6 passed local/isolated verification and deployed to production 38; identity, health, HTTPS, protected service, schema, six volumes, zero active queues, rollback, and root-only backup checks passed.",
-        "Detailed evidence is indexed in .trellis/spec/fluxpost/verification.md and its archive."
+        "2026-08-06 production retention kept current plus two rescues, reclaimed about 17 GB, preserved services/volumes, and enabled weekly prune."
       ],
-      "notes": "Ready for review because deterministic contracts, clean private install, and Nginx-managed HTTPS pass; the repository's Caddy-specific enable-domain path remains unverified on this Nginx-managed host."
+      "notes": "Repository Caddy bootstrap remains unverified on the Nginx-managed production host."
     },
     {
       "id": "modular-resource-workspaces",
       "title": "Content and TOS-backed image resource workspaces",
       "status": "ready_for_review",
       "definition_of_done": [
-        "The /content workspace exposes content-pool harvesting and management without the retired local-path material library",
-        "Content pool items can be created manually, edited, and deleted through local API routes",
-        "Reference and vehicle assets use the authenticated TOS-backed library with role, collection, tag, visibility, and preview behavior",
-        "Compact viral image imitation selects vehicle asset ids and freezes validated public URLs before queue execution",
-        "Generated drafts remain available through the independent /review workspace without a home production module"
+        "Content, review, and authenticated TOS-backed image libraries are separate operational workspaces",
+        "The retired local-path material domain is absent from active UI, APIs, schema, and migration"
       ],
       "evidence": [
-        "2026-07-29 retired the legacy local material UI/APIs/types/schema and local PostgreSQL/SQLite tables; compact vehicle selection, access/role validation, frozen TOS URLs, remote viral pairing, focused checks, TypeScript, changed-file lint, build/restart, and HTTP boundaries passed without live provider calls or source-file deletion code.",
-        "2026-07-22 /content content/material tabs, owner-scoped material APIs, CRUD/preview checks, full baseline, local restart, mocked desktop/mobile browser validation, and fixed-SHA 104 staging deployment passed",
-        "Detailed historical evidence archived at .trellis/spec/fluxpost/archive/feature-list-history-2026-06-17.json"
+        "2026-07-29 legacy material removal plus content/library ownership, sorting, selection, build, and browser checks passed."
       ],
-      "notes": "The 2026-07-22 local material workspace evidence is historical; that domain was intentionally retired on 2026-07-29. External provider calls and writes remain excluded from default verification."
+      "notes": "External provider calls remain excluded from default verification."
     },
     {
       "id": "ai-source-tagging",
       "title": "AI auto-tagging for crawled content and visual assets",
       "status": "ready_for_review",
       "definition_of_done": [
-        "Crawled source items are automatically tagged with up to four allowed content tags before being persisted",
-        "The first nine source images or video highlight frames can receive one allowed visual tag each",
-        "Content and visual tags can be manually edited from the content-pool management UI",
-        "Manual tag edits are persisted through the existing SQLite-backed content item update path"
+        "Sources receive allowed content tags and available visuals receive allowed visual tags",
+        "Manual edits persist without blocking text tags on visual-model failure"
       ],
       "evidence": [
-        "2026-06-03 video frame-first update: src/lib/source-tagging.ts now uses only videoFrames for video/mixed visual tagging when frames exist; src/app/page.tsx uses frames as the image preview list; npm run lint, tsc, build, local restart, and Trellis baseline passed",
-        "Detailed historical evidence archived at .trellis/spec/fluxpost/archive/feature-list-history-2026-06-17.json"
+        "Source tagging, image filtering, frame-first selection, persistence, and safety checks pass offline."
       ],
-      "notes": "External GPT vision/text behavior is not part of the default baseline. Visual tagging sends available local media as inline image data where possible; if the relay rejects image inputs, visual tagging records a failed status without blocking content text tags."
+      "notes": "Live vision/text model quality remains pending review."
     },
     {
       "id": "batch-resource-management",
       "title": "Batch management for content pool and generated posts",
       "status": "ready_for_review",
       "definition_of_done": [
-        "Users can multi-select content pool items and run bulk status or delete actions",
-        "Users can multi-select generated posts and run bulk status or delete actions",
-        "Batch APIs persist changes through the existing SQLite-backed domain stores",
-        "Batch actions record execution-log entries and refresh affected UI state"
+        "Users can select and batch-update or confirm-delete content and posts",
+        "Mutations preserve ownership, persistence, activity logging, and refreshed UI state"
       ],
       "evidence": [
-        "2026-06-02 Playwright check confirmed visible selection controls: content-pool selection changes from 选择 to 已选, generated-post selection changes from 选择 to 已选, and batch counters update",
-        "Detailed historical evidence archived at .trellis/spec/fluxpost/archive/feature-list-history-2026-06-17.json"
+        "Content desk, generated-post persistence, permissions, and responsive selection checks pass."
       ],
-      "notes": "Bulk delete is destructive and requires browser confirmation. Manual browser walkthrough is still recommended before heavy operational use."
+      "notes": "Manual review remains advisable before destructive high-volume use."
     },
     {
       "id": "shared-workspace-accounts",
       "title": "V1 whitelist account system with owner isolation",
       "status": "ready_for_review",
       "definition_of_done": [
-        "The workspace supports small-team whitelist login from environment configuration",
-        "Whitelist users receive stable account ids for local owner attribution",
-        "Whitelist mode supports administrator users from WORKSPACE_ADMIN_USERS",
-        "Browser sessions use HttpOnly cookies and daily sign-in uses per-user hashed passwords",
-        "Members can access only their own owner-scoped runtime records while admins can access all records",
-        "Write paths attribute new simple runs, content, material entries, generated posts, logs, and Feishu publish jobs to the current account",
-        "Default verification covers account schema and wiring without creating real credentials"
+        "Whitelist accounts use hashed passwords, HttpOnly sessions, and stable owner identities",
+        "Members see their records while admins retain workspace-wide access"
       ],
       "evidence": [
-        "Source files present: src/lib/workspace-accounts.ts, src/app/api/accounts/route.ts, src/app/api/accounts/session/route.ts",
-        "2026-06-08 passed: node .trellis/verification/workspace_accounts_check.mjs; node .trellis/verification/link_import_check.mjs; node .trellis/verification/generated_posts_upsert_check.mjs; npx --no-install tsc --noEmit; npm run lint; npm run build; full powershell -ExecutionPolicy Bypass -File .trellis/verification/check.ps1; npm run local:watch-simple -- -Once; npm run local:restart; read-only /api/accounts/session verification on http://127.0.0.1:3001",
-        "Detailed historical evidence archived at .trellis/spec/fluxpost/archive/feature-list-history-2026-06-17.json"
+        "Account schema, session, role, ownership, API authorization, build, and baseline checks pass without real credentials."
       ],
-      "notes": "Default whitelist accounts identify operators and partition app-layer runtime records by owner for normal members. Admins can see all records. Direct media URL authorization under /media and /generated remains a V1.1 hardening item. No real whitelist credentials or account-table credentials are created during automated verification."
+      "notes": "Direct authorization of guessed media URLs remains a later hardening item."
     },
     {
       "id": "high-throughput-concurrency",
       "title": "High-throughput provider concurrency",
       "status": "ready_for_review",
       "definition_of_done": [
-        "TikHub, media cache, GPT, image generation, Feishu, and production work use shared application-level concurrency pools",
-        "Default pool limits match current product targets: GPT 50, image 100, Feishu 50, with hard caps in code",
-        "Simple-mode platform crawling and post production run concurrently while progress writes remain serialized",
-        "Advanced batch production runs concurrently while task-status writes remain serialized",
-        "Generated post saves use single-row upsert so concurrent status updates do not duplicate primary keys",
-        "Baseline verification includes a static concurrency integration check without calling external services"
+        "Provider and worker domains use bounded shared pools with serialized status writes where required",
+        "Row-level writes and durable queues prevent lost concurrent updates"
       ],
       "evidence": [
-        "2026-06-08 collection/generation defaults raised while Feishu writes remain queued: crawl=12, media=30, production=30, SIMPLE_RUN_WORKER_CONCURRENCY=4, Feishu queue worker default=1 with per-owner serialization; concurrency and Feishu queue Trellis checks plus full baseline passed",
-        "Detailed historical evidence archived at .trellis/spec/fluxpost/archive/feature-list-history-2026-06-17.json"
+        "Concurrency, queue, generated-post upsert, execution-log, and scheduler checks pass offline."
       ],
-      "notes": "Provider work still uses application-process concurrency pools. Simple-mode queued runs now use a durable database queue, but subtask-level provider replay and Feishu per-post idempotency remain future work. Real large-count simple runs still need manual validation before marking done."
+      "notes": "Large live runs and subtask-level replay remain pending product validation."
     },
     {
       "id": "simple-auto-workflow",
       "title": "Compact automatic content workflow",
       "status": "ready_for_review",
       "definition_of_done": [
-        "Signed-in users enter the compact task workspace directly without simple or advanced mode switching",
-        "The compact workspace accepts keyword crawl, exact links, one Dongchedi category page, Feishu task numbers, one viral source link, or one original prompt with scoped controls",
-        "Compact tasks run crawl, AI tagging, content production, optional image processing, review staging, and optional Feishu publishing through /api/simple/runs",
-        "Prompt, image-policy, media, material, and Feishu settings remain editable from the compact workspace",
-        "Polling, multi-run progress, and operator force termination remain available",
-        "Dongchedi category tasks process at most 30 current-page articles serially, support pause/resume, redact encrypted Cookie state, and never auto-publish",
-        "Generated posts publish content tags to the Feishu Base 内容标签 multi-select field"
+        "Signed-in users run supported keyword, link, Dongchedi, Feishu, viral, or original inputs from the compact workspace",
+        "Durable runs preserve settings, progress, pause/resume/termination, review staging, and optional Feishu behavior"
       ],
       "evidence": [
-        "Source files present: src/lib/simple-runs.ts, src/lib/workspace-settings.ts, src/lib/viral-replication.ts, src/app/api/simple/runs/route.ts, src/app/api/workspace/settings/route.ts",
-        "2026-07-22 compact-only static checks, source-mode/config/material/queue checks, full baseline, local restart, mocked desktop/mobile multi-run validation, and fixed-SHA 104 staging deployment passed",
-        "2026-08-17 Dongchedi category guards, serial drafts, pause/resume, Cookie secrecy, partial completion, full offline baseline, and desktop/mobile smoke passed"
+        "Simple-mode input, queue, persistence, configuration, media, Dongchedi, review, and responsive checks pass offline."
       ],
-      "notes": "External calls are excluded from default verification. Dongchedi status fields are additive; live authorized providers and authenticated UI remain pending manual review."
+      "notes": "Live authorized providers and authenticated operator walkthrough remain."
     },
     {
       "id": "reference-image-library",
       "title": "Reference and vehicle image library",
       "status": "ready_for_review",
       "definition_of_done": [
-        "Signed-in users can import clipboard, file, drag-drop, and folder images into TOS-backed reference or vehicle views with shareable role URLs",
-        "Reference assets support structured AI tags, manual overrides, and durable retagging while vehicle assets use only user-maintained free-form tags and never enqueue AI by themselves",
-        "Fullscreen preview supports bounded navigation, zoom, pan, touch, focus management, keyboard controls, editing, and two-level deletion",
-        "Legacy vehicle images can be migrated idempotently without changing existing material or generation paths",
-        "Default verification covers both schemas and critical contracts without calling live TOS or GPT"
+        "Signed-in users import, tag, sort, select, preview, share, and delete permitted TOS-backed assets",
+        "Reference AI tags and manual vehicle tags preserve distinct contracts and ownership"
       ],
       "evidence": [
-        "Implementation covers library assets/tagging, authenticated tag suggestions and batch mutation APIs, unified tag UI, and theme-aware library styling",
-        "2026-07-23 tag/theme contracts, lint, TypeScript, build, restart, auth probe, and mocked desktop/mobile Playwright passed; screenshots cover three themes and themed preview without overflow",
-        "2026-07-29 team/private imports, six server sorts, versioned cursors, submitter display, desktop/mobile selection, and LAN upload passed offline checks; these contracts deployed in 20260803-075434-a65767384c1b with /library 200, API 401, schema, service, and volume checks"
+        "Library schema/API/auth/tag/theme/sort/cursor/selection/migration/browser checks and production route health passed."
       ],
-      "notes": "Keep ready_for_review until operator-approved production 38 samples prove real TOS PUT/HEAD/public read/delete for both roles and GPT tagging/retry for reference assets. Retired 104 is not a validation gate. Generation consumes no new assetIds in this phase."
+      "notes": "Real production-38 TOS and GPT tag/retry samples remain; retired 104 is not a gate."
     },
     {
       "id": "tos-runtime-media-storage",
       "title": "Volcengine TOS runtime media storage",
       "status": "ready_for_review",
       "definition_of_done": [
-        "New crawl images, source videos, selected frames, generated images, review uploads, and Feishu-imported media can persist to TOS behind a default-off switch",
-        "Uploads use object-level public-read and are accepted only after HEAD length and ETag verification",
-        "Failed uploads retain recoverable bytes under data/tos-pending and can be reconciled idempotently without writing unverified business URLs",
-        "Historical local media URLs remain valid and file-only consumers safely materialize and clean HTTP media",
-        "Advanced configuration masks TOS credentials and admin-only checks validate public GET, video Range, and cleanup",
-        "The 38.76.210.136 deployment passes a real application media workflow while unrelated VPS services remain healthy"
+        "New runtime media can persist verified public TOS URLs behind a default-off switch",
+        "Failures retain recoverable bytes; historical local URLs and file-only consumers remain compatible"
       ],
       "evidence": [
-        "2026-07-20 offline TOS runtime-media check, lint, type-check, build, full baseline, local restart, public config secrecy checks, route authorization checks, and responsive config-page screenshots passed",
-        "2026-07-20 isolated live TOS probe passed PUT, HEAD, anonymous GET, video Range 206, and DELETE without persisting or exposing operator credentials",
-        "2026-07-21 f38a0f8 deployed; partial Feishu image publishes completed with verified attachments 1/1 and 9/9, including safe record-not-found recovery"
+        "Offline producer/consumer checks and an isolated PUT/HEAD/public GET/Range/delete probe passed."
       ],
-      "notes": "Implementation and isolated provider validation are complete. Keep ready_for_review until a real FluxPost image/video workflow on production 38 proves URL persistence, local staging cleanup, historical media compatibility, and service health. Retired 82 and 104 are out of scope."
+      "notes": "A real production-38 application image/video workflow remains; retired 82/104 are out of scope."
     },
     {
       "id": "infinite-canvas-workflows",
       "title": "Infinite canvas workflow V1",
       "status": "ready_for_review",
       "definition_of_done": [
-        "Signed-in operators can manage owner-scoped workflows and copy, cut, paste, duplicate, or delete selected desktop nodes",
-        "The canvas supports typed acyclic nodes, authenticated media import, and local acoustic hard subtitles with snapshot styles plus an owner-scoped video/waveform revision editor and hash-matched isolated re-render",
-        "Runs persist immutable graph snapshots and execute ready DAG branches in parallel with node-level status, failure blocking, cancellation, retry, and upstream reuse",
-        "Billable model and external-write plans pass preflight then enqueue without browser prompts for unattended batches, while the server records plan acknowledgement and Feishu nodes expose only the existing publish queue",
-        "Seedance accepts local or legacy upstream Prompt sources, keeps stable official-style image mentions across fixed reference reorder/removal, freezes provider-facing inputs, and resumes accepted Ark tasks by querying the original task id",
-        "Seedance offers two audited Prompt candidates and explicit stable-reference apply without submitting a run",
-        "Default deterministic verification covers graph, persistence, API, desktop, and mobile contracts without paid provider or Feishu writes",
-        "A passive save-images node freezes 1-30 references for explicit signed-in desktop downloads without server paths or new persistence",
-        "Desktop fragments preserve internal edges, configuration, layout, execution mode, and scheduler roles across workflows, while versioned FluxPost JSON exports current edit state and imports as a new owner-scoped workflow",
-        "Batch schedulers freeze asset/copy samples, support pause/cancel/retry, and aggregate one review draft per main task; copy inputs keep independent title/body/tag snapshots",
-        "Scheduler V2 supports typed main/child parameters, fixed/each/random cartesian or zip expansion, stable field bindings, shared main outputs, partial/strict aggregation, and custom node names",
-        "Administrator-only xlsx sources freeze selected rows and ordered card children, reuse GPT-Image-2 V2 plus shared references, and retain one local review draft per row across retries",
-        "A local video-loader node keeps up to 200 ordered MP4/MOV/WebM snapshots, emits only the selected video in ordinary runs, and freezes one video per V2 scheduled task",
-        "A per-image GPT reconstruction node durably fans out 1-18 images, resumes accepted provider tasks, and retains ordered partial diagnostics inside Canvas without changing review or Feishu publish policy"
+        "Owner-scoped typed DAG workflows persist drafts, immutable runs, retries, cancellation, media, and review artifacts",
+        "V2 schedulers freeze inputs and support batch expansion, shared outputs, aggregation, Excel hierarchies, and portable workflows",
+        "Default checks cover graph, API, persistence, providers, media, subtitles, scheduler, desktop, and mobile contracts without live writes"
       ],
       "evidence": [
-        "2026-08-25 ordinary Excel readiness blocks before Run/provider creation; workflow-first dual projections preserve failed/waiting state plus older previews. Focused/full offline checks and mocked desktop/mobile Canvas passed with no external calls or overflow.",
-        "2026-08-25 Excel and generic V2 aggregation share at-least-one/all policy; generated drafts and Feishu modes ignore Canvas partial metadata, only failed tasks retry, and dry-run/apply cleanup covers SQLite plus transactional PostgreSQL. Focused checks, TypeScript, lint, build, isolated smoke, and full baseline passed.",
-        "2026-08-24 competitor-workbook 200/778 parsing, admin/redaction boundaries, ordered hierarchy, shared GPT references, concurrency, retry/partial draft synchronization, build, smoke, and full offline baseline passed without live providers or Feishu."
+        "2026-08-25 Excel readiness/history, generic aggregation, review isolation, retries, build, smoke, full baseline, and responsive Canvas checks passed."
       ],
-      "notes": "Keep ready_for_review until unrestricted Canvas image admission, Seedance/Feishu/provider runs, and PostgreSQL multi-user concurrency are live-verified; one recent subtitle input is acoustically verified."
+      "notes": "Live provider/Feishu runs and multi-user PostgreSQL concurrency remain."
     },
     {
       "id": "copy-library",
       "title": "Owner-scoped copy library and batch rewriting",
       "status": "ready_for_review",
       "definition_of_done": [
-        "Signed-in users can manually create, search, tag, share, edit, and confirm-delete title/body copy entries while owner/admin write permissions remain enforced",
-        "PostgreSQL and SQLite persist copy entries and Canvas nodes execute frozen title/body/tag snapshots without rereading changed or deleted sources",
-        "Batch scheduling supports manual or AND-tag condition-random copy pools, batch-local no-replacement frozen assignment, strict capacity errors, and an optional copy-input role compatible with old five-role workflows",
-        "The standard scheduler skeleton rewrites title and body through two separate GPT text nodes before existing review-draft composition",
-        "Default verification covers persistence, permissions, tags, snapshots, scheduling, build, and responsive UI without live provider calls"
+        "Users manage owner-scoped copy entries with search, tags, sharing, sorting, selection, and permissions",
+        "Canvas and schedulers freeze copy snapshots and support no-replacement conditional assignment"
       ],
       "evidence": [
-        "2026-07-28 copy_library_check.mjs and canvas_scheduler_check.mjs passed domain, schema, auth, snapshot, compatibility, injection, and two-call skeleton contracts",
-        "2026-08-19 local-image drag filtering, protected dragover, Flow-coordinate placement, compatible-node append routing, Canvas contracts, lint, and TypeScript passed without library or provider calls",
-        "2026-08-03 copy-library contracts deployed at a65767384c1b1993c95c8c32d053edcd10c3fac6 after the full baseline; route 200, API 401, schema, services, and volumes passed without live providers"
+        "Copy persistence, permissions, sorting, snapshots, scheduling, build, and responsive checks pass without providers."
       ],
-      "notes": "Keep ready_for_review until authenticated multi-user PostgreSQL use and an operator-approved real two-call text-model batch prove the live path. Default checks must not invoke paid models."
+      "notes": "Authenticated multi-user use and a real two-call text batch remain."
     },
     {
       "id": "local-production-parity",
       "title": "Local and remote production code parity",
       "status": "ready_for_review",
       "definition_of_done": [
-        "Port 3001 is the only local application environment and runs only the clean committed candidate; loopback and LAN entries share the same candidate implementation",
-        "Versioned runtimes expose a minimal full-SHA identity derived from the activated release",
-        "Candidate startup enforces clean HEAD identity, builds into an inactive primary-worktree slot before replacing the listener, and restores the prior slot on failed activation without creating mirror worktrees",
-        "Push and exact-SHA deployment promote only the candidate tested on port 3001",
-        "Final parity requires exact local runtime/HEAD, GitHub main, and production SHA equality without syncing runtime data"
+        "Port 3001 runs one clean committed candidate with full-SHA identity and rollback-safe build slots",
+        "Final parity requires local HEAD/runtime, origin/main, and production to share the exact SHA"
       ],
       "evidence": [
-        "2026-08-17 exact-SHA local/VPS candidate, deployment, identity, health, volumes, rollback, and final parity passed",
-        "2026-08-20 primary-worktree A/B build-slot isolation, complete offline baseline, slot-A/slot-B activation, and controlled failed-startup restoration passed at clean SHA 0909776383c05eab37a2f66a0b2443dde693e2da"
+        "2026-08-20 primary-worktree A/B activation, failure restoration, full baseline, and candidate identity passed."
       ],
-      "notes": "Keep ready_for_review for operator observation; code identity and environment cleanup are complete, while runtime data and configuration remain intentionally environment-specific."
+      "notes": "Runtime data and configuration remain intentionally environment-specific."
     },
     {
       "id": "original-xhs-batch-workspace",
       "title": "Batch original Xiaohongshu card workspace",
       "status": "ready_for_review",
       "definition_of_done": [
-        "Signed-in operators can paste or edit 1-100 topics with atomic row validation and batch-level generation settings",
-        "Durable PostgreSQL and SQLite queues execute two-stage copy generation, cover-first anchored card generation, vision QA, one failed-card retry, pause, resume, cancel, and explicit failed-item retry",
-        "GeneratedPost preserves batch source and versioned structured card metadata while imageUrls remains an ordered projection compatible with review and Feishu publishing",
-        "The review desk exposes frozen prompts, candidates, QA issues, missing-card recovery, and cover-anchored regeneration",
-        "Default deterministic verification covers catalog, validation, schema, APIs, orchestration contracts, build, and responsive UI without paid provider calls"
+        "Signed-in operators manage 1-100 topic batches with durable two-stage copy, anchored cards, QA, retry, pause/resume, and review metadata",
+        "PostgreSQL/SQLite queues and GeneratedPost projections remain review/Feishu compatible"
       ],
       "evidence": [
-        "2026-07-30 original card checks proved cover-first generation, one shared cover anchor, one failed-QA retry, pending ToAPIs task-id persistence, 30-second same-id resume without resubmission, pending-cover child blocking without failure, expired-lock recovery only with a persisted id, and asynchronous review regeneration; PostgreSQL/SQLite recovery SQL, workspace/concurrency/review checks, TypeScript, scoped lint, production build/restart/HTTP smoke, and mocked Playwright at 1440x960 and 390x844 passed without external provider calls.",
-        "2026-08-03 /original deployed at a65767384c1b1993c95c8c32d053edcd10c3fac6; the page returned 200, unsigned batch API returned 401, three additive original-batch tables were present, workers were enabled, and the original queue was empty after activation.",
-        "Source and MIT notice preserve baoyu-xhs-images v2.0.1 commit 6b7a2e417500561a5ecdd0b168332f4142584617 attribution."
+        "Original batch schema/API/orchestration/recovery/build/browser checks and production route/schema health passed."
       ],
-      "notes": "Keep ready_for_review until an operator approves a real two-topic, three-card-per-topic provider smoke and authenticated multi-user PostgreSQL lifecycle checks. Default checks must not invoke paid providers."
+      "notes": "A real small provider batch and authenticated multi-user lifecycle remain."
     }
   ]
 }

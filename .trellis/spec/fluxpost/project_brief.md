@@ -1,14 +1,14 @@
 # Project Brief
 
-Last updated: 2026-08-20
+Last updated: 2026-08-26
 
 ## Project Name, Goal, Path
 
 - Project name: FluxPost Studio.
 - Package name: `social-content-studio`.
-- Project path: `C:\Users\Administrator\.codex\social-content-studio`.
+- Project path: `D:\FluxPost\social-content-studio`.
 - GitHub upload remote: `https://github.com/Jacobshujun/fluxpost-studio.git`; it had no refs when checked on 2026-06-08 before the initial local snapshot upload.
-- Goal confirmed from README and code: local social media content production workspace covering TikHub harvesting, local image material scanning, GPT text draft generation, GPT image generation boundary, review edits, and Feishu CLI payload publishing.
+- Goal confirmed from README and code: local social media content production workspace covering content harvesting, TOS-backed image libraries, AI-assisted post creation, review, and Feishu CLI publishing.
 
 ## User Roles
 
@@ -25,7 +25,7 @@ Last updated: 2026-08-20
 2. Start the local web app.
 3. Search/crawl content by platform and keyword through `/content` and `/api/crawl/jobs`, batch-import supported source links into the content pool through `/content` and `/api/crawl/links`, or use `/api/simple/runs` for one-click production from keywords, exact source links, one current Dongchedi category page, Feishu task numbers, one viral source link, original prompts, or selected content-pool samples.
 4. Assess harvested items with the crawl-stage content safety gate, then persist retained items into the runtime database-backed content pool.
-5. Optionally scan local image material folders through `/api/materials/scan`.
+5. Select reusable reference or vehicle assets from the authenticated TOS-backed library when needed.
 6. Generate post drafts through `/api/generate` or through the simple-run one-click workflow, including text and optional image generation.
 7. Review or edit drafts through `/api/review`.
 8. Publish approved posts through `/api/publish/feishu` or through the simple-run publish stage, which writes a local payload and calls Feishu CLI when target Base config is available.
@@ -70,8 +70,6 @@ Last updated: 2026-08-20
   - `POST /api/lark/tasks`
   - `GET|POST /api/library/tags`
   - `GET|PATCH|DELETE /api/library/assets`
-  - `GET|POST|PATCH|DELETE /api/materials/library`
-  - `POST /api/materials/scan`
   - `GET|POST /api/production/batches`
   - `GET|POST|PATCH|DELETE /api/production/posts`
   - `POST /api/production/posts/regenerate`
