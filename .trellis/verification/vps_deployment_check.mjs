@@ -136,6 +136,7 @@ assertContains(files.verifier, /result=passed[\s\S]*commit=%s[\s\S]*image_id=%s/
 assertContains(files.verifier, /flock -n 9 \|\| fail "another FluxPost deployment or verification operation is active"/, "Candidate verification must share the deployment operation lock.");
 assertNotContains(files.verifier, /env\.production|ENV_FILE|docker compose|compose up|\/current|fluxpost-(?:postgres|config|data|public|node|caddy)/, "Candidate verification must not read deployment config, mount runtime state, or activate services.");
 assertContains(files.dockerfile, /FROM deps AS verification[\s\S]*RUN node \.trellis\/verification\/check\.mjs/, "Docker must expose the cross-platform offline verification target.");
+assertContains(files.dockerfile, /FROM deps AS verification[\s\S]*apt-get install -y --no-install-recommends[^\n]*python3-minimal/, "Docker verification must install Python 3 for the Canvas subtitle UTF-8 probe.");
 assertContains(files.dockerfile, /FROM node:24-bookworm-slim AS builder[\s\S]*ENV FLUXPOST_STANDALONE_BUILD=1/, "Docker app builds must keep standalone output enabled.");
 
 for (const [name, source] of Object.entries({ deploy: files.deploy, bootstrap: files.bootstrap, domain: files.domain, verifier: files.verifier })) {

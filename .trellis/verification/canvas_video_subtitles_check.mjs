@@ -204,7 +204,8 @@ assert.throws(() => localTimeline.normalizeCanvasLocalSubtitleTimeline({ engine:
 assert.equal(read("requirements/canvas-subtitles.txt").trim(), "faster-whisper==1.2.1");
 const pythonRecognizer = read("scripts/canvas/faster_whisper_subtitles.py");
 for (const snippet of ["WhisperModel", "word_timestamps=True", "vad_filter=True", "task=args.task", "beam_size=args.beam_size", "local_files_only=True", 'sys.stdout.reconfigure(encoding="utf-8")', "write_json_output("]) assert.ok(pythonRecognizer.includes(snippet), `Python recognizer is missing ${snippet}`);
-const unicodeProbe = run("python", [
+assert.throws(() => run("fluxpost-command-that-does-not-exist", [], root), /failed to start/i);
+const unicodeProbe = run(findPython(root), [
   "-B",
   "-c",
   'from scripts.canvas.faster_whisper_subtitles import write_json_output; write_json_output({"text": "\\u4e2d\\u6587\\u5b57\\u5e55\\u6d4b\\u8bd5"})',
@@ -374,8 +375,20 @@ console.log("Canvas video subtitles verification passed.");
 
 function run(command, args, cwd) {
   const result = spawnSync(command, args, { cwd, encoding: "utf8", windowsHide: true });
-  if (result.status !== 0) throw new Error(`${command} failed: ${(result.stderr || result.stdout).trim()}`);
-  return result.stdout;
+  if (result.error) throw new Error(`${command} failed to start: ${result.error.message}`, { cause: result.error });
+  const stdout = typeof result.stdout === "string" ? result.stdout : "";
+  const stderr = typeof result.stderr === "string" ? result.stderr : "";
+  if (result.status !== 0) throw new Error(`${command} failed: ${(stderr || stdout).trim() || `exit status ${result.status}`}`);
+  return stdout;
+}
+
+function findPython(cwd) {
+  const candidates = process.platform === "win32" ? ["python", "python3"] : ["python3", "python"];
+  for (const candidate of candidates) {
+    const result = spawnSync(candidate, ["--version"], { cwd, encoding: "utf8", windowsHide: true });
+    if (!result.error && result.status === 0) return candidate;
+  }
+  throw new Error(`Python interpreter is unavailable; tried ${candidates.join(" and ")}.`);
 }
 
 function probeMedia(filePath, cwd) {

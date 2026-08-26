@@ -26,7 +26,10 @@ and unrelated VPS services.
   minimum `package-lock.json` repair required for npm 11.17 Linux `npm ci`. It
   may also make the Canvas video-loader verification fixture compatible with the
   production verifier's FFmpeg 5.1 while preserving the rotation assertions. It
-  must not change `package.json`, dependency versions, or application behavior.
+  may install `python3-minimal` only in the isolated Docker verification stage
+  and make the Canvas subtitle UTF-8 probe select an available Python command
+  with explicit process-start diagnostics. It must not change `package.json`,
+  dependency versions, the Docker runner stage, or application behavior.
 - Verify the final clean candidate with the documented deterministic baseline,
   then activate it locally on port `3001` and require candidate SHA identity.
 - Fast-forward both `origin/local` and `origin/main` to the unchanged candidate
@@ -61,6 +64,9 @@ and unrelated VPS services.
 - [ ] The Canvas video-loader check creates a 90-degree metadata fixture on both
       FFmpeg 5.1 and current FFmpeg, and still asserts rotation and display-size
       normalization rather than skipping the case.
+- [ ] The Docker verification target provides Python 3 for the Canvas subtitle
+      UTF-8 probe, which works with either `python` or `python3` and reports a
+      missing executable without an unrelated `.trim()` failure.
 - [ ] The complete offline baseline passes on the committed candidate, and port
       `3001` reports the same SHA in candidate mode.
 - [ ] `origin/local` and `origin/main` resolve to the exact candidate SHA before

@@ -13,9 +13,14 @@ uses `-display_rotation`, while Debian 12 FFmpeg 5.1 falls back only when that
 option is explicitly unsupported to the older stream `rotate=90` metadata syntax.
 The existing probe assertions must still observe 90-degree rotation and swapped
 display dimensions, so the fallback cannot hide a broken fixture. These changes
-are committed before restarting all candidate verification gates so the local
-candidate, GitHub refs, VPS verifier, and production deploy operate on one new
-immutable full SHA.
+are accompanied by one isolated-verifier dependency correction discovered at
+the next gate: the Canvas subtitle UTF-8 probe invokes Python, while the Debian
+verification image did not provide it. The verification stage installs
+`python3-minimal`; the runner remains unchanged. The probe accepts either the
+Windows `python` command or Debian's `python3` command and reports spawn failures
+directly. All changes are committed before restarting every candidate
+verification gate so the local candidate, GitHub refs, VPS verifier, and
+production deploy operate on one new immutable full SHA.
 
 ## Promotion Contract
 
