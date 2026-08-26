@@ -1,4 +1,4 @@
-import type { GeneratedPost, Platform } from "../types";
+import type { ContentPoolSelectionFilter, ContentTag, GeneratedPost, Platform, SourceMediaType, SourceUsageStatus } from "../types";
 import type { CompetitorWorkbookCardSnapshot, CompetitorWorkbookRowSnapshot, CompetitorWorkbookSnapshot } from "../competitor-workbook";
 
 export type CanvasArtifactKind = "text" | "images" | "videos" | "socialPost" | "publishJobRef";
@@ -525,7 +525,30 @@ export type CanvasScheduleCopySnapshot = {
   updatedAt: string;
 };
 
-export type CanvasScheduleParameterType = "image" | "image-group" | "video" | "source-video" | "text" | "copy" | "number" | "boolean" | "enum";
+export type CanvasScheduleContentPoolFilter = Omit<ContentPoolSelectionFilter, "projectId"> & {
+  mode: "manual" | "match";
+  itemIds: string[];
+  projectId?: string;
+  platforms: Platform[];
+  statuses: SourceUsageStatus[];
+  mediaTypes: SourceMediaType[];
+  contentTags: ContentTag[];
+};
+
+export type CanvasScheduleContentPoolSnapshot = {
+  id: string;
+  projectId: string;
+  projectName: string;
+  platform: Platform;
+  title: string;
+  body: string;
+  sourceUrl: string;
+  imageUrls: string[];
+  videoUrls: string[];
+  snapshotAt: string;
+};
+
+export type CanvasScheduleParameterType = "image" | "image-group" | "video" | "source-video" | "content-pool" | "text" | "copy" | "number" | "boolean" | "enum";
 export type CanvasScheduleParameterScope = "main" | "child";
 export type CanvasScheduleExpansionMode = "cartesian" | "zip";
 export type CanvasScheduleAggregationPolicy = "at-least-one" | "all";
@@ -537,6 +560,7 @@ export type CanvasScheduleParameterValue =
   | CanvasScheduleAssetSnapshot
   | CanvasScheduleAssetSnapshot[]
   | CanvasScheduleCopySnapshot
+  | CanvasScheduleContentPoolSnapshot
   | CanvasVideoSnapshot
   | CanvasSourceVideoSnapshot;
 
@@ -544,6 +568,7 @@ export type CanvasScheduleParameterSource =
   | { mode: "fixed" | "manual-list"; values: CanvasScheduleParameterValue[] }
   | { mode: "library-filter"; role: "reference" | "vehicle"; filter: CanvasScheduleAssetFilter }
   | { mode: "copy-filter"; filter: CanvasScheduleCopyFilter }
+  | { mode: "content-pool-filter"; filter: CanvasScheduleContentPoolFilter }
   | { mode: "video-loader-queue"; nodeId: string }
   | { mode: "source-video-links"; links: string[]; projectName: string }
   | {
@@ -638,7 +663,7 @@ export type CanvasScheduleV2MainTask = {
   workbookRow?: CompetitorWorkbookRowSnapshot;
 };
 
-export type CanvasBatchBindingAdapter = "config-value" | "image-input" | "video-input" | "copy-input" | "source-video-input";
+export type CanvasBatchBindingAdapter = "config-value" | "image-input" | "video-input" | "copy-input" | "source-video-input" | "content-pool-input";
 
 export type CanvasBatchBindableField = {
   key: string;

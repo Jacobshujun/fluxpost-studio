@@ -9,6 +9,8 @@ import type {
   CanvasNode,
   CanvasScheduleAggregateArtifact,
   CanvasScheduleAssetSnapshot,
+  CanvasScheduleContentPoolSnapshot,
+  CanvasScheduleCopySnapshot,
   CanvasScheduleExpansionMode,
   CanvasScheduleParameter,
   CanvasScheduleParameterScope,
@@ -349,7 +351,8 @@ export function extractCanvasScheduleV2Artifacts(
 
 function validateCanvasScheduleParameterSource(parameter: CanvasScheduleParameter) {
   const source = parameter.source;
-  if (!source || !['fixed', 'manual-list', 'library-filter', 'copy-filter', 'video-loader-queue', 'source-video-links', 'competitor-workbook'].includes(source.mode)) throw new Error(`${parameter.name}: parameter source is invalid.`);
+  if (parameter.valueType === "content-pool" && parameter.scope !== "main") throw new Error(`${parameter.name}: content-pool parameters must use main-task scope.`);
+  if (!source || !['fixed', 'manual-list', 'library-filter', 'copy-filter', 'content-pool-filter', 'video-loader-queue', 'source-video-links', 'competitor-workbook'].includes(source.mode)) throw new Error(`${parameter.name}: parameter source is invalid.`);
   if (source.mode === "fixed" || source.mode === "manual-list") {
     if (!Array.isArray(source.values)) throw new Error(`${parameter.name}: parameter values must be a list.`);
     if (source.mode === "fixed" && source.values.length !== 1) throw new Error(`${parameter.name}: fixed source requires exactly one value.`);
@@ -359,6 +362,11 @@ function validateCanvasScheduleParameterSource(parameter: CanvasScheduleParamete
   if (parameter.expansion === "random" && source.mode === "fixed") throw new Error(`${parameter.name}: random expansion requires multiple candidate values.`);
   if (source.mode === "copy-filter" && parameter.valueType !== "copy") throw new Error(`${parameter.name}: copy filters require a copy parameter.`);
   if (source.mode === "library-filter" && !['image', 'image-group'].includes(parameter.valueType)) throw new Error(`${parameter.name}: library filters require an image parameter.`);
+  if (source.mode === "content-pool-filter") {
+    if (parameter.valueType !== "content-pool") throw new Error(`${parameter.name}: content-pool filters require a content-pool parameter.`);
+    if (source.filter.mode === "manual" && !source.filter.itemIds.length) throw new Error(`${parameter.name}: select at least one content-pool item.`);
+    if (source.filter.mode === "manual" && parameter.expansion === "fixed" && source.filter.itemIds.length !== 1) throw new Error(`${parameter.name}: fixed content-pool parameters require exactly one selected item.`);
+  }
   if (source.mode === "video-loader-queue") {
     if (parameter.valueType !== "video") throw new Error(`${parameter.name}: video loader queues require a video parameter.`);
     if (!source.nodeId?.trim() || source.nodeId !== parameter.binding.nodeId) throw new Error(`${parameter.name}: video loader queue must use its bound node.`);
@@ -371,6 +379,9 @@ function validateCanvasScheduleParameterSource(parameter: CanvasScheduleParamete
   }
   if (parameter.valueType === "source-video" && source.mode !== "source-video-links" && source.mode !== "fixed" && source.mode !== "manual-list") {
     throw new Error(`${parameter.name}: source-video parameters require frozen values or source video links.`);
+  }
+  if (parameter.valueType === "content-pool" && source.mode !== "content-pool-filter" && source.mode !== "fixed" && source.mode !== "manual-list") {
+    throw new Error(`${parameter.name}: content-pool parameters require a content-pool filter or frozen values.`);
   }
   if (source.mode === "competitor-workbook") {
     if (parameter.valueType !== "text") throw new Error(`${parameter.name}: competitor workbook fields require a text parameter.`);
@@ -444,6 +455,7 @@ function isCanvasScheduleParameterValue(type: CanvasScheduleParameter["valueType
   if (type === "copy") return isCopySnapshot(value);
   if (type === "video") return Boolean(normalizeCanvasVideoSnapshot(value));
   if (type === "source-video") return isCanvasSourceVideoSnapshot(value);
+  if (type === "content-pool") return isCanvasScheduleContentPoolSnapshot(value);
   if (type === "number") return typeof value === "number" && Number.isFinite(value);
   if (type === "boolean") return typeof value === "boolean";
   return typeof value === "string";
@@ -485,6 +497,23 @@ function applyCanvasParameterValue(node: CanvasNode, parameter: CanvasSchedulePa
     return {
       ...node,
       config: { ...node.config, ...canvasSourceVideoSnapshotConfig(value) },
+      executionMode: "enabled",
+    };
+  }
+  if (field.adapter === "content-pool-input") {
+    if (!isCanvasScheduleContentPoolSnapshot(value)) throw new Error(`${parameter.name}: expected a frozen content-pool snapshot.`);
+    return {
+      ...node,
+      config: {
+        ...node.config,
+        sourceItemId: value.id,
+        snapshotAt: value.snapshotAt,
+        snapshotTitle: value.title,
+        snapshotBody: value.body,
+        snapshotSourceUrl: value.sourceUrl,
+        snapshotImageUrls: [...value.imageUrls],
+        snapshotVideoUrls: [...value.videoUrls],
+      },
       executionMode: "enabled",
     };
   }
@@ -632,8 +661,23 @@ function isAssetSnapshot(value: CanvasScheduleParameterValue): value is CanvasSc
   return Boolean(value && typeof value === "object" && !Array.isArray(value) && "id" in value && "url" in value && !("projectName" in value));
 }
 
-function isCopySnapshot(value: CanvasScheduleParameterValue): value is Extract<CanvasScheduleParameterValue, { body: string }> {
-  return Boolean(value && typeof value === "object" && !Array.isArray(value) && "id" in value && "body" in value && "title" in value);
+function isCopySnapshot(value: CanvasScheduleParameterValue): value is CanvasScheduleCopySnapshot {
+  return Boolean(value && typeof value === "object" && !Array.isArray(value) && "id" in value && "body" in value && "title" in value && "tags" in value && "updatedAt" in value);
+}
+
+function isCanvasScheduleContentPoolSnapshot(value: CanvasScheduleParameterValue): value is CanvasScheduleContentPoolSnapshot {
+  if (Array.isArray(value) || !value || typeof value !== "object") return false;
+  const candidate = value as Partial<CanvasScheduleContentPoolSnapshot>;
+  return typeof candidate.id === "string"
+    && typeof candidate.projectId === "string"
+    && typeof candidate.projectName === "string"
+    && typeof candidate.platform === "string"
+    && typeof candidate.title === "string"
+    && typeof candidate.body === "string"
+    && typeof candidate.sourceUrl === "string"
+    && Array.isArray(candidate.imageUrls)
+    && Array.isArray(candidate.videoUrls)
+    && typeof candidate.snapshotAt === "string";
 }
 
 function uniqueStrings(values: string[]) {

@@ -571,6 +571,56 @@ export type ContentPoolSnapshot = {
   activeProject?: ContentProject;
 };
 
+export type SourceMediaType = NonNullable<NormalizedSourceItem["mediaType"]>;
+
+export type ContentPoolSelectionSort = "hot-desc" | "published-desc" | "crawled-desc";
+
+export type ContentPoolSelectionFilter = {
+  projectId?: string;
+  query: string;
+  platforms: Platform[];
+  statuses: SourceUsageStatus[];
+  mediaTypes: SourceMediaType[];
+  contentTags: ContentTag[];
+  localMediaComplete: boolean;
+  sort: ContentPoolSelectionSort;
+};
+
+export type ContentPoolSelectionProject = {
+  id: string;
+  name: string;
+  totalItems: number;
+};
+
+export type ContentPoolSelectionItem = {
+  id: string;
+  projectId: string;
+  projectName: string;
+  platform: Platform;
+  status: SourceUsageStatus;
+  mediaType: SourceMediaType;
+  contentTags: ContentTag[];
+  title: string;
+  body: string;
+  authorName: string;
+  sourceId: string;
+  sourceUrl: string;
+  imageUrls: string[];
+  videoUrls: string[];
+  thumbnailUrl?: string;
+  hotScore: number;
+  publishedAt?: string;
+  crawledAt?: string;
+  localMediaComplete: boolean;
+};
+
+export type ContentPoolSelectionPage = {
+  items: ContentPoolSelectionItem[];
+  projects: ContentPoolSelectionProject[];
+  total: number;
+  nextCursor?: string;
+};
+
 export type GeneratedPost = {
   id: string;
   ownerUserId?: string;

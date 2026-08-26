@@ -14,6 +14,14 @@ import {
   type WorkspaceAccessActor,
 } from "./workspace-ownership";
 import type { ContentPoolSnapshot, ContentProject, GeneratedPost, NormalizedSourceItem, Platform, SourceUsageStatus, ViralAnalysis } from "./types";
+import type { ContentPoolSelectionFilter } from "./types";
+import {
+  contentPoolSelectionProjects,
+  freezeContentPoolSelectionItemsByIds,
+  normalizeContentPoolSelectionFilter,
+  paginateContentPoolSelection,
+  selectContentPoolItems,
+} from "./content-pool-selection";
 
 type StoredContentPool = {
   projects: ContentProject[];
@@ -43,6 +51,40 @@ export async function getSourceItemsByIds(sourceItemIds: string[], account?: Wor
     });
   });
   return sourceItemIds.map((id) => itemsById.get(id)).filter((item): item is NormalizedSourceItem => Boolean(item));
+}
+
+export async function listContentPoolSelection(
+  input: Partial<ContentPoolSelectionFilter> = {},
+  account?: WorkspaceAccessActor,
+  cursor?: string,
+  limit?: number,
+) {
+  const pool = await readPool();
+  const projects = filterWorkspaceOwnedRecords(pool.projects.map(refreshProjectStats), account);
+  const filter = normalizeContentPoolSelectionFilter(input);
+  const items = selectContentPoolItems(projects, filter);
+  return paginateContentPoolSelection(items, contentPoolSelectionProjects(projects), filter.sort, cursor, limit);
+}
+
+export async function resolveContentPoolSelection(
+  input: Partial<ContentPoolSelectionFilter>,
+  account?: WorkspaceAccessActor,
+) {
+  const pool = await readPool();
+  const projects = filterWorkspaceOwnedRecords(pool.projects.map(refreshProjectStats), account);
+  return selectContentPoolItems(projects, input);
+}
+
+export async function freezeContentPoolItemsByIds(
+  sourceItemIds: string[],
+  account?: WorkspaceAccessActor,
+  snapshotAt = new Date().toISOString(),
+) {
+  const ids = makeUniqueIds(sourceItemIds);
+  const pool = await readPool();
+  const projects = filterWorkspaceOwnedRecords(pool.projects.map(refreshProjectStats), account);
+  const all = selectContentPoolItems(projects);
+  return freezeContentPoolSelectionItemsByIds(all, ids, snapshotAt);
 }
 
 export async function ingestCrawlItems(query: string, items: NormalizedSourceItem[], account?: WorkspaceAccessActor) {

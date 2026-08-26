@@ -137,7 +137,8 @@ import {
 import { getStoredTheme, subscribeTheme } from "@/lib/theme";
 import { selectIdRange } from "@/lib/list-selection";
 import { SubtitleEditorDialog } from "./SubtitleEditorDialog";
-import type { ContentPoolSnapshot, CopyLibraryEntryView, LibraryAsset, LibraryAssetPage, NormalizedSourceItem } from "@/lib/types";
+import { contentTagOptions } from "@/lib/types";
+import type { ContentPoolSelectionFilter, ContentPoolSelectionItem, ContentPoolSelectionPage, CopyLibraryEntryView, LibraryAsset, LibraryAssetPage } from "@/lib/types";
 import type { CompetitorWorkbookInspection, CompetitorWorkbookSnapshot } from "@/lib/competitor-workbook";
 import type {
   CanvasArtifact,
@@ -232,7 +233,7 @@ const canvasHistoryCommitDelayMs = 350;
 const canvasViewportDetailZoom = { reduced: 0.65, overview: 0.35 } as const;
 const canvasEdgeAnimationDuration = { idle: 3.6, active: 1.8 } as const;
 let canvasScheduleParameterSequence = 0;
-const canvasScheduleParameterTypes = ["image", "image-group", "video", "source-video", "text", "copy", "number", "boolean", "enum"] as const satisfies readonly CanvasScheduleParameterType[];
+const canvasScheduleParameterTypes = ["image", "image-group", "video", "source-video", "content-pool", "text", "copy", "number", "boolean", "enum"] as const satisfies readonly CanvasScheduleParameterType[];
 
 export default function CanvasPage() {
   const [workflows, setWorkflows] = useState<CanvasWorkflow[]>([]);
@@ -2489,7 +2490,7 @@ function NodeInspector({
       const options = field.key === "ratio" && node.config.resolution === "4k"
         ? field.options?.filter((option) => ["16:9", "9:16", "2:1", "1:2", "21:9", "9:21"].includes(option.value))
         : field.options;
-      if (field.kind === "content-pool-picker") return <ContentPoolSnapshotPicker key={field.key} node={node} onPatch={onPatch} />;
+      if (field.kind === "content-pool-picker") return <ContentPoolSnapshotPicker key={field.key} node={node} onPatch={onPatch} onPreviewImage={onPreviewImage} />;
       if (field.kind === "library-image-picker") return <LibraryImageSnapshotPicker key={field.key} node={node} onPatch={onPatch} onPreviewImage={onPreviewImage} />;
       if (field.kind === "copy-library-picker") return <CopyLibrarySnapshotPicker key={field.key} node={node} onPatch={onPatch} />;
       return <label key={field.key} className={field.kind === "boolean" ? "canvas-inspector-toggle" : undefined}><span>{field.label}</span>
@@ -3234,60 +3235,145 @@ function insertSeedancePlainText(editor: HTMLDivElement, text: string) {
   selection.addRange(range);
 }
 
-function ContentPoolSnapshotPicker({ node, onPatch }: { node: CanvasNode; onPatch: (patch: CanvasNode["config"]) => void }) {
-  const [items, setItems] = useState<NormalizedSourceItem[]>([]);
-  const [search, setSearch] = useState("");
+function ContentPoolSnapshotPicker({ node, onPatch, onPreviewImage }: {
+  node: CanvasNode;
+  onPatch: (patch: CanvasNode["config"]) => void;
+  onPreviewImage: (url: string, index: number) => void;
+}) {
+  const [filter, setFilter] = useState<ContentPoolSelectionFilter>(emptyContentPoolSelectionFilter);
+  const [refreshing, setRefreshing] = useState(false);
+  const [snapshotError, setSnapshotError] = useState("");
+  const selectedId = String(node.config.sourceItemId || "");
+  const refreshSnapshot = async () => {
+    if (!selectedId) return;
+    setRefreshing(true);
+    setSnapshotError("");
+    try {
+      const page = await api<ContentPoolSelectionPage>(`/api/content-pool/selection?itemId=${encodeURIComponent(selectedId)}`);
+      const item = page.items[0];
+      if (!item) throw new Error("原内容池素材已删除或无权访问，当前节点继续使用已冻结快照。");
+      onPatch(contentPoolSnapshotConfig(item));
+    } catch (refreshError) {
+      setSnapshotError(errorMessage(refreshError));
+    } finally {
+      setRefreshing(false);
+    }
+  };
+  return <div className="canvas-snapshot-picker canvas-content-pool-picker">
+    <ContentPoolSelectionBrowser
+      filter={filter}
+      selectedIds={selectedId ? [selectedId] : []}
+      mode="single"
+      onFilterChange={setFilter}
+      onToggle={(item) => onPatch(contentPoolSnapshotConfig(item))}
+      onPreviewImage={onPreviewImage}
+    />
+    {selectedId ? <div className="canvas-snapshot-meta">
+      <span>{String(node.config.snapshotTitle || "未命名素材")}</span>
+      <small>{normalizeConfigUrls(node.config.snapshotImageUrls).length} 图 · {normalizeConfigUrls(node.config.snapshotVideoUrls).length} 视频 · {formatSnapshotTime(node.config.snapshotAt)}</small>
+      <button type="button" onClick={() => void refreshSnapshot()} disabled={refreshing}><RotateCcw className={refreshing ? "animate-spin" : ""} />刷新当前快照</button>
+    </div> : null}
+    {snapshotError ? <p className="canvas-picker-error">{snapshotError}</p> : null}
+  </div>;
+}
+
+function ContentPoolSelectionBrowser({ filter, selectedIds, mode, onFilterChange, onToggle, onSelectionChange, onPreviewImage }: {
+  filter: ContentPoolSelectionFilter;
+  selectedIds: string[];
+  mode: "single" | "manual" | "match";
+  onFilterChange: (filter: ContentPoolSelectionFilter) => void;
+  onToggle: (item: ContentPoolSelectionItem) => void;
+  onSelectionChange?: (ids: string[]) => void;
+  onPreviewImage: (url: string, index: number) => void;
+}) {
+  const [page, setPage] = useState<ContentPoolSelectionPage>({ items: [], projects: [], total: 0 });
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState("");
-  const selectedId = String(node.config.sourceItemId || "");
-  const load = useCallback(async () => {
+  const loadSequence = useRef(0);
+  const selected = useMemo(() => new Set(selectedIds), [selectedIds]);
+  const load = useCallback(async (append = false, cursor?: string) => {
+    const sequence = ++loadSequence.current;
     setBusy(true);
     setError("");
     try {
-      const snapshot = await api<ContentPoolSnapshot>("/api/content-pool");
-      const nextItems = snapshot.projects.flatMap((project) => project.items);
-      setItems(nextItems);
-      return nextItems;
+      const next = await api<ContentPoolSelectionPage>(contentPoolSelectionUrl(filter, cursor));
+      if (sequence !== loadSequence.current) return;
+      setPage((current) => ({ ...next, items: append ? uniqueContentPoolItems([...current.items, ...next.items]) : next.items }));
     } catch (loadError) {
-      setError(errorMessage(loadError));
-      return undefined;
+      if (sequence === loadSequence.current) setError(errorMessage(loadError));
+    } finally {
+      if (sequence === loadSequence.current) setBusy(false);
+    }
+  }, [filter]);
+  useEffect(() => {
+    const timer = setTimeout(() => void load(), filter.query ? 240 : 0);
+    return () => clearTimeout(timer);
+  }, [filter, load]);
+  const setListFilter = <K extends "platforms" | "statuses" | "mediaTypes" | "contentTags">(key: K, value: ContentPoolSelectionFilter[K][number]) => {
+    const values = filter[key] as string[];
+    onFilterChange({ ...filter, [key]: values.includes(value) ? values.filter((item) => item !== value) : [...values, value] });
+  };
+  const activeAdvancedCount = filter.platforms.length + filter.statuses.length + filter.mediaTypes.length + filter.contentTags.length + Number(filter.localMediaComplete);
+  const selectAllMatching = async () => {
+    if (!onSelectionChange) return;
+    if (page.total > 200) {
+      setError("匹配结果超过 200 条，请缩小筛选范围后再全选。");
+      return;
+    }
+    setBusy(true);
+    setError("");
+    try {
+      let cursor: string | undefined;
+      const items: ContentPoolSelectionItem[] = [];
+      do {
+        const next = await api<ContentPoolSelectionPage>(contentPoolSelectionUrl(filter, cursor, 100));
+        items.push(...next.items);
+        cursor = next.nextCursor;
+      } while (cursor && items.length < 200);
+      onSelectionChange(uniqueContentPoolItems(items).map((item) => item.id));
+    } catch (selectionError) {
+      setError(errorMessage(selectionError));
     } finally {
       setBusy(false);
     }
-  }, []);
-  useEffect(() => {
-    const timer = setTimeout(() => void load(), 0);
-    return () => clearTimeout(timer);
-  }, [load]);
-  const filtered = useMemo(() => {
-    const query = search.trim().toLowerCase();
-    return items.filter((item) => !query || [item.title, item.contentText, item.platform, item.authorName].some((value) => value?.toLowerCase().includes(query))).slice(0, 100);
-  }, [items, search]);
-  const capture = (item: NormalizedSourceItem) => onPatch(contentPoolSnapshotConfig(item));
-  const refresh = async () => {
-    const latestItems = await load();
-    if (!latestItems) return;
-    const item = latestItems.find((candidate) => candidate.id === selectedId);
-    if (!item) {
-      setError("原内容池条目当前不可用，已保留节点快照。");
-      return;
-    }
-    capture(item);
-    setError("");
   };
-  return <div className="canvas-snapshot-picker">
-    <div className="canvas-picker-heading"><span>内容池条目</span><button type="button" onClick={() => void load()} disabled={busy} title="重新加载"><RotateCcw className={busy ? "animate-spin" : ""} /></button></div>
-    <label className="canvas-picker-search"><Search /><input value={search} onChange={(event) => setSearch(event.target.value)} placeholder="搜索标题、正文或平台" /></label>
-    <select value={selectedId} onChange={(event) => {
-      const item = items.find((candidate) => candidate.id === event.target.value);
-      if (item) capture(item);
-    }}>
-      <option value="">选择内容池素材</option>
-      {filtered.map((item) => <option key={item.id} value={item.id}>{item.title || item.contentText?.slice(0, 32) || item.id} · {item.platform}</option>)}
-    </select>
-    {selectedId ? <div className="canvas-snapshot-meta"><span>{String(node.config.snapshotTitle || "未命名素材")}</span><small>{normalizeConfigUrls(node.config.snapshotImageUrls).length} 图 · {normalizeConfigUrls(node.config.snapshotVideoUrls).length} 视频 · {formatSnapshotTime(node.config.snapshotAt)}</small><button type="button" onClick={() => void refresh()} disabled={busy}><RotateCcw />刷新快照</button></div> : null}
+  return <div className="canvas-content-pool-browser">
+    <div className="canvas-picker-heading"><span>内容池素材</span><button type="button" onClick={() => void load()} disabled={busy} title="刷新列表" aria-label="刷新内容池列表"><RefreshCw className={busy ? "animate-spin" : ""} /></button></div>
+    <div className="canvas-content-pool-primary-filters">
+      <label className="canvas-picker-search"><Search /><input value={filter.query} onChange={(event) => onFilterChange({ ...filter, query: event.target.value })} placeholder="搜索标题、正文、作者或来源 ID" /></label>
+      <label><span>项目</span><select value={filter.projectId || ""} onChange={(event) => onFilterChange({ ...filter, projectId: event.target.value || undefined })}><option value="">全部项目</option>{page.projects.map((project) => <option key={project.id} value={project.id}>{project.name} ({project.totalItems})</option>)}</select></label>
+      <label><span>排序</span><select value={filter.sort} onChange={(event) => onFilterChange({ ...filter, sort: event.target.value as ContentPoolSelectionFilter["sort"] })}><option value="hot-desc">热度最高</option><option value="published-desc">发布时间最新</option><option value="crawled-desc">抓取时间最新</option></select></label>
+    </div>
+    <details className="canvas-content-pool-advanced">
+      <summary><span>更多筛选</span>{activeAdvancedCount ? <em>{activeAdvancedCount}</em> : null}</summary>
+      <ContentPoolFilterChecks label="平台" options={["wechat_channels", "xiaohongshu", "douyin", "weibo", "xiaopeng_bbs", "dongchedi", "feishu", "original"]} selected={filter.platforms} onToggle={(value) => setListFilter("platforms", value as ContentPoolSelectionFilter["platforms"][number])} />
+      <ContentPoolFilterChecks label="状态" options={["new", "analyzed", "rewritten", "approved", "published"]} selected={filter.statuses} onToggle={(value) => setListFilter("statuses", value as ContentPoolSelectionFilter["statuses"][number])} />
+      <ContentPoolFilterChecks label="媒体" options={["image", "video", "mixed", "text", "unknown"]} selected={filter.mediaTypes} onToggle={(value) => setListFilter("mediaTypes", value as ContentPoolSelectionFilter["mediaTypes"][number])} />
+      <ContentPoolFilterChecks label="内容标签（同时满足）" options={[...contentTagOptions]} selected={filter.contentTags} onToggle={(value) => setListFilter("contentTags", value as ContentPoolSelectionFilter["contentTags"][number])} />
+      <label className="canvas-content-pool-local"><input type="checkbox" checked={filter.localMediaComplete} onChange={(event) => onFilterChange({ ...filter, localMediaComplete: event.target.checked })} /><span>仅本地媒体完整</span></label>
+    </details>
+    <div className="canvas-content-pool-toolbar">
+      <span>{page.total} 条匹配{mode === "manual" ? ` · 已选 ${selected.size}` : mode === "match" ? " · 预演时动态冻结" : ""}</span>
+      {mode === "manual" ? <div><button type="button" onClick={() => void selectAllMatching()} disabled={busy || !page.total}>选择全部匹配</button><button type="button" onClick={() => onSelectionChange?.([])} disabled={!selected.size}>清空</button></div> : null}
+    </div>
+    <div className={`canvas-content-pool-results${busy ? " is-loading" : ""}`} aria-busy={busy}>
+      {page.items.length ? <div className="canvas-content-pool-list">{page.items.map((item) => <article key={item.id} className={selected.has(item.id) ? "is-selected" : ""}>
+        <button type="button" className="canvas-content-pool-select" aria-pressed={selected.has(item.id)} disabled={mode === "match" || (mode === "manual" && !selected.has(item.id) && selected.size >= 200)} onClick={() => onToggle(item)}>
+          <span className="canvas-content-pool-thumbnail">{item.thumbnailUrl ? <Image src={item.thumbnailUrl} alt="" width={72} height={72} unoptimized referrerPolicy="no-referrer" /> : item.videoUrls.length ? <Video /> : <FileText />}</span>
+          <span className="canvas-content-pool-copy"><strong>{item.title || item.body.slice(0, 48) || "未命名素材"}</strong><small>{item.platform} · {item.projectName} · {item.status}</small><small>热度 {item.hotScore} · {formatContentPoolSelectionTime(item)}</small>{item.contentTags.length ? <span className="canvas-content-pool-tags">{item.contentTags.slice(0, 3).map((tag) => <em key={tag}>{tag}</em>)}</span> : null}</span>
+          {mode !== "match" ? <span className="canvas-content-pool-mark">{selected.has(item.id) ? <CheckCircle2 /> : mode === "single" ? <span /> : <Square />}</span> : null}
+        </button>
+        {item.thumbnailUrl ? <button type="button" className="canvas-content-pool-preview" onClick={() => onPreviewImage(item.thumbnailUrl!, 0)} title="预览图片" aria-label={`预览 ${item.title || item.id}`}><Eye /></button> : null}
+      </article>)}</div> : !busy ? <div className="canvas-schedule-asset-state"><Layers3 /><span>没有符合当前条件的素材</span></div> : null}
+      {busy && !page.items.length ? <div className="canvas-schedule-asset-state"><LoaderCircle className="animate-spin" /><span>正在加载内容池</span></div> : null}
+      {page.nextCursor ? <div className="canvas-schedule-asset-load-more"><button type="button" disabled={busy} onClick={() => void load(true, page.nextCursor)}>加载更多</button></div> : null}
+    </div>
     {error ? <p className="canvas-picker-error">{error}</p> : null}
   </div>;
+}
+
+function ContentPoolFilterChecks({ label, options, selected, onToggle }: { label: string; options: string[]; selected: readonly string[]; onToggle: (value: string) => void }) {
+  return <fieldset className="canvas-content-pool-checks"><legend>{label}</legend><div>{options.map((option) => <label key={option}><input type="checkbox" checked={selected.includes(option)} onChange={() => onToggle(option)} /><span>{contentPoolFilterLabel(option)}</span></label>)}</div></fieldset>;
 }
 
 function CopyLibrarySnapshotPicker({ node, onPatch }: { node: CanvasNode; onPatch: (patch: CanvasNode["config"]) => void }) {
@@ -4065,6 +4151,7 @@ function CanvasScheduleParameterEditor({ parameter, graph, onChange, onRemove, o
     if ((valueType === "image" || valueType === "image-group") && parameter.expansion === "fixed" && source.mode === "library-filter") source.filter.mode = "manual";
     onChange({
       ...parameter,
+      scope: valueType === "content-pool" ? "main" : parameter.scope,
       valueType,
       source,
       expansion: valueType === "video" ? "each" : parameter.expansion,
@@ -4073,6 +4160,16 @@ function CanvasScheduleParameterEditor({ parameter, graph, onChange, onRemove, o
   };
   const updateExpansion = (expansion: CanvasScheduleParameter["expansion"]) => {
     const source = parameter.source;
+    if (source.mode === "content-pool-filter") {
+      onChange({
+        ...parameter,
+        expansion,
+        sampleCount: expansion === "random" ? sampleCount : undefined,
+        randomCount: undefined,
+        source: { ...source, filter: { ...source.filter, itemIds: expansion === "fixed" ? source.filter.itemIds.slice(0, 1) : source.filter.itemIds } },
+      });
+      return;
+    }
     if (source.mode === "fixed" || source.mode === "manual-list") {
       const values = expansion === "fixed" ? source.values.slice(0, 1) : source.values;
       onChange({
@@ -4093,7 +4190,7 @@ function CanvasScheduleParameterEditor({ parameter, graph, onChange, onRemove, o
     <header><input maxLength={80} value={parameter.name} onChange={(event) => onChange({ ...parameter, name: event.target.value })} aria-label="参数名称" /><button type="button" onClick={onRemove} aria-label="删除参数" title="删除参数"><Trash2 /></button></header>
     <div className="canvas-schedule-parameter-grid">
       <label><span>类型</span><select value={parameter.valueType} onChange={(event) => updateType(event.target.value as CanvasScheduleParameterType)}>{canvasScheduleParameterTypes.map((type) => <option key={type} value={type}>{canvasScheduleParameterTypeLabel(type)}</option>)}</select></label>
-      <label><span>展开</span><select value={parameter.expansion} onChange={(event) => updateExpansion(event.target.value as CanvasScheduleParameter["expansion"])}><option value="fixed">固定共享</option><option value="each">全量逐项</option><option value="random">随机抽取</option></select></label>
+      <label><span>展开</span><select value={parameter.expansion} onChange={(event) => updateExpansion(event.target.value as CanvasScheduleParameter["expansion"])}><option value="fixed">{parameter.valueType === "content-pool" ? "固定单条" : "固定共享"}</option><option value="each">{parameter.valueType === "content-pool" ? "每条一项" : "全量逐项"}</option><option value="random">随机抽取</option></select></label>
       <label><span>绑定字段</span><select value={`${parameter.binding.nodeId}::${parameter.binding.fieldKey}`} onChange={(event) => {
         const option = bindingOptions.find((candidate) => `${candidate.node.id}::${candidate.field.key}` === event.target.value);
         if (option) onChange({
@@ -4154,6 +4251,12 @@ function CanvasScheduleParameterSourceEditor({ parameter, graph, onChange, onPre
       <label><span>内容池项目</span><input value={source.projectName} maxLength={80} onChange={(event) => onChange({ ...parameter, source: { ...source, projectName: event.target.value } })} /></label>
       <label><span>源链接（每行一个，最多 200 条）</span><textarea value={source.links.join("\n")} onChange={(event) => onChange({ ...parameter, expansion: "each", source: { ...source, links: event.target.value.split(/\r?\n/).map((link) => link.trim()).filter(Boolean).slice(0, 200) } })} /></label>
     </div>;
+  }
+  if (parameter.valueType === "content-pool") {
+    const source = parameter.source.mode === "content-pool-filter"
+      ? parameter.source
+      : defaultCanvasScheduleParameterSource("content-pool") as Extract<CanvasScheduleParameterSource, { mode: "content-pool-filter" }>;
+    return <ContentPoolScheduleSourceEditor parameter={parameter} source={source} onChange={onChange} onPreview={onPreview} />;
   }
   if (parameter.valueType === "image" || parameter.valueType === "image-group") {
     const source = parameter.source.mode === "library-filter" ? parameter.source : defaultCanvasScheduleParameterSource(parameter.valueType) as Extract<CanvasScheduleParameterSource, { mode: "library-filter" }>;
@@ -4255,13 +4358,45 @@ function CanvasScheduleMainImageDownload({ runId }: { runId: string }) {
       setBusy(false);
     }
   }
-
   return <div className="canvas-schedule-main-download">
     <button type="button" disabled={busy} onClick={() => void download()}>
       {busy ? <LoaderCircle className="animate-spin" /> : <Download />}
       {busy ? "下载中" : "下载图片"}
     </button>
     {feedback ? <small className={hasFailures ? "is-error" : ""} role="status">{feedback}</small> : null}
+  </div>;
+}
+
+function ContentPoolScheduleSourceEditor({ parameter, source, onChange, onPreview }: {
+  parameter: CanvasScheduleParameter;
+  source: Extract<CanvasScheduleParameterSource, { mode: "content-pool-filter" }>;
+  onChange: (parameter: CanvasScheduleParameter) => void;
+  onPreview: (preview: Extract<NonNullable<PreviewState>, { kind: "image" }>) => void;
+}) {
+  const filter = source.filter;
+  const setFilter = (next: ContentPoolSelectionFilter) => onChange({ ...parameter, source: { ...source, filter: { ...filter, ...next } } });
+  const setItemIds = (itemIds: string[]) => onChange({ ...parameter, source: { ...source, filter: { ...filter, itemIds: itemIds.slice(0, 200) } } });
+  const toggleItem = (item: ContentPoolSelectionItem) => {
+    if (parameter.expansion === "fixed") {
+      setItemIds([item.id]);
+      return;
+    }
+    setItemIds(filter.itemIds.includes(item.id) ? filter.itemIds.filter((id) => id !== item.id) : [...filter.itemIds, item.id]);
+  };
+  return <div className="canvas-schedule-parameter-source canvas-content-pool-schedule-source">
+    <div className="canvas-content-pool-source-mode" role="group" aria-label="内容池素材来源">
+      <button type="button" aria-pressed={filter.mode === "manual"} onClick={() => onChange({ ...parameter, source: { ...source, filter: { ...filter, mode: "manual" } } })}>手工选择</button>
+      <button type="button" aria-pressed={filter.mode === "match"} onClick={() => onChange({ ...parameter, source: { ...source, filter: { ...filter, mode: "match" } } })}>条件匹配</button>
+    </div>
+    <ContentPoolSelectionBrowser
+      filter={filter}
+      selectedIds={filter.itemIds}
+      mode={filter.mode}
+      onFilterChange={setFilter}
+      onToggle={toggleItem}
+      onSelectionChange={setItemIds}
+      onPreviewImage={(url, index) => onPreview({ kind: "image", url, index })}
+    />
   </div>;
 }
 
@@ -5120,16 +5255,50 @@ function configStringList(value: CanvasNode["config"][string]) {
   return Array.isArray(value) ? value.filter((item): item is string => typeof item === "string").map((item) => item.trim()) : [];
 }
 
-function contentPoolSnapshotConfig(item: NormalizedSourceItem): CanvasNode["config"] {
-  const downloadedImages = normalizeConfigUrls(item.downloadedImages);
+function emptyContentPoolSelectionFilter(): ContentPoolSelectionFilter {
+  return { query: "", platforms: [], statuses: [], mediaTypes: [], contentTags: [], localMediaComplete: false, sort: "hot-desc" };
+}
+
+function contentPoolSelectionUrl(filter: ContentPoolSelectionFilter, cursor?: string, limit = 40) {
+  const search = new URLSearchParams({ q: filter.query, sort: filter.sort, limit: String(limit) });
+  if (filter.projectId) search.set("projectId", filter.projectId);
+  if (filter.localMediaComplete) search.set("localMedia", "complete");
+  filter.platforms.forEach((value) => search.append("platform", value));
+  filter.statuses.forEach((value) => search.append("status", value));
+  filter.mediaTypes.forEach((value) => search.append("mediaType", value));
+  filter.contentTags.forEach((value) => search.append("contentTag", value));
+  if (cursor) search.set("cursor", cursor);
+  return `/api/content-pool/selection?${search}`;
+}
+
+function uniqueContentPoolItems(items: ContentPoolSelectionItem[]) {
+  const seen = new Set<string>();
+  return items.filter((item) => !seen.has(item.id) && Boolean(seen.add(item.id)));
+}
+
+function contentPoolFilterLabel(value: string) {
+  return ({
+    wechat_channels: "视频号", xiaohongshu: "小红书", douyin: "抖音", weibo: "微博", xiaopeng_bbs: "小鹏社区", dongchedi: "懂车帝", feishu: "飞书", original: "原创",
+    new: "新素材", analyzed: "已分析", rewritten: "已改写", approved: "已审核", published: "已发布",
+    image: "图片", video: "视频", mixed: "图文/视频", text: "纯文本", unknown: "未知",
+  } as Record<string, string>)[value] || value;
+}
+
+function formatContentPoolSelectionTime(item: ContentPoolSelectionItem) {
+  const value = item.publishedAt || item.crawledAt;
+  const timestamp = value ? Date.parse(value) : Number.NaN;
+  return Number.isFinite(timestamp) ? new Date(timestamp).toLocaleDateString("zh-CN") : "时间未知";
+}
+
+function contentPoolSnapshotConfig(item: ContentPoolSelectionItem): CanvasNode["config"] {
   return {
     sourceItemId: item.id,
     snapshotAt: new Date().toISOString(),
-    snapshotTitle: item.title || "",
-    snapshotBody: item.contentText || "",
-    snapshotSourceUrl: item.sourceUrl || "",
-    snapshotImageUrls: downloadedImages.length ? downloadedImages : normalizeConfigUrls(item.images),
-    snapshotVideoUrls: normalizeConfigUrls(item.downloadedVideoUrl ? [item.downloadedVideoUrl] : item.videoUrl ? [item.videoUrl] : []),
+    snapshotTitle: item.title,
+    snapshotBody: item.body,
+    snapshotSourceUrl: item.sourceUrl,
+    snapshotImageUrls: [...item.imageUrls],
+    snapshotVideoUrls: [...item.videoUrls],
   };
 }
 
@@ -5633,6 +5802,7 @@ function nextCanvasScheduleParameterId() {
 function defaultCanvasScheduleParameterSource(valueType: CanvasScheduleParameterType, nodeId = ""): CanvasScheduleParameterSource {
   if (valueType === "video") return { mode: "video-loader-queue", nodeId };
   if (valueType === "source-video") return { mode: "source-video-links", links: [], projectName: "视频内容重构" };
+  if (valueType === "content-pool") return { mode: "content-pool-filter", filter: { ...emptyContentPoolSelectionFilter(), mode: "manual", itemIds: [] } };
   if (valueType === "image" || valueType === "image-group") return { mode: "library-filter", role: "reference", filter: emptyScheduleFilter() };
   if (valueType === "copy") return { mode: "copy-filter", filter: emptyScheduleCopyFilter() };
   return { mode: "fixed", values: [defaultCanvasScheduleScalarValue(valueType)] };
@@ -5674,7 +5844,7 @@ function parseCanvasScheduleScalarValues(valueType: CanvasScheduleParameterType,
 }
 
 function canvasScheduleParameterTypeLabel(value: CanvasScheduleParameterType) {
-  return ({ image: "图片", "image-group": "图片组", video: "视频", "source-video": "源视频", text: "文本", copy: "文案记录", number: "数字", boolean: "布尔值", enum: "枚举" } as const)[value];
+  return ({ image: "图片", "image-group": "图片组", video: "视频", "source-video": "源视频", "content-pool": "内容池素材", text: "文本", copy: "文案记录", number: "数字", boolean: "布尔值", enum: "枚举" } as const)[value];
 }
 
 function formatCanvasScheduleParameterValues(values: Record<string, CanvasScheduleParameterValue>) {
@@ -5692,7 +5862,13 @@ function formatCanvasScheduleParameterValues(values: Record<string, CanvasSchedu
 
 function canvasScheduleParameterImages(values: Record<string, CanvasScheduleParameterValue>) {
   const seen = new Set<string>();
-  return Object.values(values).flatMap((value) => Array.isArray(value) ? value : [value])
+  const candidates: unknown[] = Object.values(values).flatMap((value): unknown[] => {
+    if (!Array.isArray(value) && value && typeof value === "object" && "imageUrls" in value && Array.isArray(value.imageUrls)) {
+      return value.imageUrls.map((url, index) => ({ id: `${value.id}-${index}`, url, name: value.title }));
+    }
+    return Array.isArray(value) ? value : [value];
+  });
+  return candidates
     .filter((value): value is CanvasScheduleAssetSnapshot => Boolean(
       value
       && typeof value === "object"

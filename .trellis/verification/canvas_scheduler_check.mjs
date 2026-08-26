@@ -113,6 +113,10 @@ try {
     "../content-pool": new Proxy({
       getSourceItemsByIds: async (ids) => ids.filter((id) => !visibleSourceVideoIds || visibleSourceVideoIds.has(id)).map((id) => ({ id })),
     }, { get: (target, key) => target[key] || emptyAsync }),
+    "../content-pool-selection": {
+      freezeContentPoolSelectionItem: (item, snapshotAt) => ({ ...item, snapshotAt }),
+      normalizeContentPoolSelectionFilter: (filter) => filter,
+    },
     "../workspace-ownership": {
       assertCanAccessWorkspaceRecord: () => undefined,
       canAccessWorkspaceOwner: () => true,
@@ -219,6 +223,70 @@ try {
     "image-target": "image",
     "content-target": "content",
   });
+
+  const contentPoolNode = node("content-pool", "input.content-pool");
+  assert.deepEqual(registry.getCanvasBatchBindableFields(contentPoolNode), [{
+    key: "sourceItemId",
+    label: "内容池素材",
+    parameterTypes: ["content-pool"],
+    adapter: "content-pool-input",
+  }]);
+  const contentPoolSnapshot = {
+    id: "source-1",
+    projectId: "project-1",
+    projectName: "项目一",
+    platform: "xiaohongshu",
+    title: "冻结标题",
+    body: "冻结正文",
+    sourceUrl: "https://example.test/source-1",
+    imageUrls: ["/media/source-1.jpg"],
+    videoUrls: ["/media/source-1.mp4"],
+    snapshotAt: "2026-08-26T00:00:00.000Z",
+  };
+  const injectedContentPoolGraph = schedulerV2.applyCanvasScheduleV2Parameters(
+    { nodes: [contentPoolNode], edges: [], viewport: { x: 0, y: 0, zoom: 1 } },
+    [{
+      id: "content-source",
+      name: "内容池素材",
+      scope: "main",
+      valueType: "content-pool",
+      source: { mode: "fixed", values: [contentPoolSnapshot] },
+      expansion: "fixed",
+      binding: { nodeId: contentPoolNode.id, fieldKey: "sourceItemId" },
+    }],
+    { "content-source": contentPoolSnapshot },
+  );
+  assert.deepEqual(injectedContentPoolGraph.nodes[0].config, {
+    ...contentPoolNode.config,
+    sourceItemId: "source-1",
+    snapshotAt: "2026-08-26T00:00:00.000Z",
+    snapshotTitle: "冻结标题",
+    snapshotBody: "冻结正文",
+    snapshotSourceUrl: "https://example.test/source-1",
+    snapshotImageUrls: ["/media/source-1.jpg"],
+    snapshotVideoUrls: ["/media/source-1.mp4"],
+  }, "content-pool injection must atomically write the complete frozen node snapshot");
+  const contentPoolParameter = {
+    id: "content-source",
+    name: "内容池素材",
+    scope: "main",
+    valueType: "content-pool",
+    source: { mode: "content-pool-filter", filter: { mode: "match", itemIds: [], query: "", platforms: [], statuses: [], mediaTypes: [], contentTags: [], localMediaComplete: false, sort: "hot-desc" } },
+    expansion: "each",
+    binding: { nodeId: contentPoolNode.id, fieldKey: "sourceItemId" },
+  };
+  scheduler.validateCanvasContentPoolScheduleCapacity(contentPoolParameter, 200);
+  assert.throws(
+    () => scheduler.validateCanvasContentPoolScheduleCapacity(contentPoolParameter, 201),
+    /exceed the limit of 200/,
+    "full content-pool expansion must stop above 200 values",
+  );
+  scheduler.validateCanvasContentPoolScheduleCapacity({ ...contentPoolParameter, expansion: "random", sampleCount: { mode: "exact", value: 200 } }, 500);
+  assert.throws(
+    () => scheduler.validateCanvasContentPoolScheduleCapacity({ ...contentPoolParameter, expansion: "random", sampleCount: { mode: "range", min: 1, max: 201 } }, 500),
+    /cannot exceed 200/,
+    "random content-pool previews may have a large candidate pool but freeze at most 200 values",
+  );
 
   const v2Definition = {
     parameters: [

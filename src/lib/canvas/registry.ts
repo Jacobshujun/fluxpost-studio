@@ -713,6 +713,9 @@ export function getCanvasBatchBindableFields(node: Pick<CanvasNode, "type" | "ve
   if (node.type === "input.video-loader") {
     return [{ key: "videos", label: "视频队列", parameterTypes: ["video"], adapter: "video-input" }];
   }
+  if (node.type === "input.content-pool") {
+    return [{ key: "sourceItemId", label: "内容池素材", parameterTypes: ["content-pool"], adapter: "content-pool-input" }];
+  }
   if (node.type === "input.competitor-workbook") {
     return [
       { key: "rowTitle", label: "竞品标题", parameterTypes: ["text"], adapter: "config-value" },

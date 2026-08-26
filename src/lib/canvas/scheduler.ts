@@ -15,7 +15,8 @@ import { getGeneratedPost, updateGeneratedPost } from "../generated-posts";
 import { freezeCompetitorWorkbook } from "../competitor-workbook";
 import { listCopyLibraryEntries } from "../copy-library";
 import { listLibraryAssets } from "../library-assets";
-import { getSourceItemsByIds } from "../content-pool";
+import { freezeContentPoolItemsByIds, getSourceItemsByIds, resolveContentPoolSelection } from "../content-pool";
+import { freezeContentPoolSelectionItem, normalizeContentPoolSelectionFilter } from "../content-pool-selection";
 import type { CopyLibraryEntry, LibraryAsset, LibraryAssetRole } from "../types";
 import {
   assertCanAccessWorkspaceRecord,
@@ -39,6 +40,7 @@ import {
 } from "./runs";
 import {
   applyCanvasScheduleV2Parameters,
+  canvasScheduleParameterSampleCount,
   createCanvasScheduleV2AggregateGraph,
   createCanvasScheduleV2ChildGraph,
   expandCompetitorWorkbookScheduleV2,
@@ -66,6 +68,7 @@ import type {
   CanvasScheduleContentTask,
   CanvasScheduleCopyFilter,
   CanvasScheduleCopySnapshot,
+  CanvasScheduleContentPoolFilter,
   CanvasScheduleImageTask,
   CanvasScheduleParameter,
   CanvasScheduleParameterValue,
@@ -82,6 +85,7 @@ const maxScheduleBatches = 20;
 const maxImageTasks = 2_000;
 const maxScenesPerBatch = 500;
 const maxVehiclesPerContent = 16;
+export const CONTENT_POOL_SCHEDULE_LIMIT = 200;
 const terminalRunStatuses = new Set(["completed", "partial", "failed", "cancelled"]);
 const mutableScheduleStatuses = new Set<CanvasScheduleStatus>(["draft", "ready"]);
 
@@ -1530,6 +1534,10 @@ async function resolveCanvasScheduleV2Parameter(
     const values = await resolveScheduleCopyPool(account, source.filter);
     return resolvedCanvasScheduleV2Parameter(parameter, "manual-list", values);
   }
+  if (source.mode === "content-pool-filter") {
+    const values = await resolveScheduleContentPool(account, parameter, source.filter);
+    return resolvedCanvasScheduleV2Parameter(parameter, "manual-list", values);
+  }
   if (source.mode === "library-filter") {
     const assets = await resolveScheduleAssetPool(account, source.role, source.filter);
     const values: CanvasScheduleParameterValue[] = parameter.valueType === "image-group" ? [assets] : assets;
@@ -1564,6 +1572,38 @@ function resolvedCanvasScheduleV2Parameter(
   sourceValues: CanvasScheduleParameterValue[],
 ): ResolvedCanvasScheduleParameter {
   return { ...structuredClone(parameter), source: { mode: sourceMode, values: structuredClone(sourceValues) } };
+}
+
+async function resolveScheduleContentPool(
+  account: WorkspaceAccessActor,
+  parameter: CanvasScheduleParameter,
+  filter: CanvasScheduleContentPoolFilter,
+): Promise<CanvasScheduleParameterValue[]> {
+  const snapshotAt = new Date().toISOString();
+  const resolved = filter.mode === "manual"
+    ? await freezeContentPoolItemsByIds(filter.itemIds, account, snapshotAt)
+    : {
+        values: (await resolveContentPoolSelection(normalizeContentPoolSelectionFilter(filter), account))
+          .map((item) => freezeContentPoolSelectionItem(item, snapshotAt)),
+        missingIds: [],
+      };
+  if (resolved.missingIds.length) {
+    throw new Error(`${parameter.name}: content-pool items were deleted or are not accessible: ${resolved.missingIds.join(", ")}`);
+  }
+  if (!resolved.values.length) throw new Error(`${parameter.name}: no content-pool items match the current source.`);
+  validateCanvasContentPoolScheduleCapacity(parameter, resolved.values.length);
+  return parameter.expansion === "fixed" ? resolved.values.slice(0, 1) : resolved.values;
+}
+
+export function validateCanvasContentPoolScheduleCapacity(parameter: CanvasScheduleParameter, candidateCount: number) {
+  if (parameter.expansion === "each" && candidateCount > CONTENT_POOL_SCHEDULE_LIMIT) {
+    throw new Error(`${parameter.name}: ${candidateCount} content-pool items exceed the limit of ${CONTENT_POOL_SCHEDULE_LIMIT}; narrow the filters or use random sampling.`);
+  }
+  const sampleCount = parameter.expansion === "random" ? canvasScheduleParameterSampleCount(parameter) : undefined;
+  const frozenMaximum = sampleCount?.mode === "range" ? sampleCount.max : sampleCount?.value;
+  if (frozenMaximum !== undefined && frozenMaximum > CONTENT_POOL_SCHEDULE_LIMIT) {
+    throw new Error(`${parameter.name}: random content-pool sampling cannot exceed ${CONTENT_POOL_SCHEDULE_LIMIT} items.`);
+  }
 }
 
 async function assertFrozenCanvasScheduleV2AssetsStillAvailable(schedule: CanvasSchedule, account: WorkspaceAccessActor) {
@@ -2102,6 +2142,7 @@ function normalizeCanvasScheduleV2ParameterSource(parameter: CanvasScheduleParam
   const source = parameter.source;
   if (source.mode === "fixed" || source.mode === "manual-list") return { mode: source.mode, values: structuredClone(source.values || []) };
   if (source.mode === "copy-filter") return { mode: "copy-filter", filter: normalizeCopyFilter(source.filter) };
+  if (source.mode === "content-pool-filter") return { mode: "content-pool-filter", filter: normalizeCanvasScheduleContentPoolFilter(source.filter) };
   if (source.mode === "library-filter") return { mode: "library-filter", role: source.role === "vehicle" ? "vehicle" : "reference", filter: normalizeAssetFilter(source.filter) };
   if (source.mode === "video-loader-queue") return { mode: "video-loader-queue", nodeId: String(source.nodeId || "").trim() };
   if (source.mode === "source-video-links") return {
@@ -2119,6 +2160,15 @@ function normalizeCanvasScheduleV2ParameterSource(parameter: CanvasScheduleParam
     field: source.field === "body" || source.field === "card" ? source.field : "title",
   };
   throw new Error(`${parameter.name}: parameter source is invalid.`);
+}
+
+function normalizeCanvasScheduleContentPoolFilter(filter: CanvasScheduleContentPoolFilter): CanvasScheduleContentPoolFilter {
+  const normalized = normalizeContentPoolSelectionFilter(filter);
+  return {
+    ...normalized,
+    mode: filter?.mode === "match" ? "match" : "manual",
+    itemIds: uniqueStrings(Array.isArray(filter?.itemIds) ? filter.itemIds : []),
+  };
 }
 
 function canvasScheduleV2PreviewFingerprint(definition: CanvasScheduleV2Definition, mainTasks: CanvasScheduleV2MainTask[]) {
