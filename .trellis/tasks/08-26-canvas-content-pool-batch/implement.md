@@ -28,3 +28,9 @@ npm run build
 $env:TRELLIS_SMOKE_PORT = "45678"
 powershell -ExecutionPolicy Bypass -File .trellis/verification/check.ps1
 ```
+
+## Verification Evidence
+
+- Focused content-pool selection and Canvas scheduler checks passed, including AND tags, stable cursor paging, deduplication, manual order/missing IDs, 200-item limits, and atomic snapshot injection.
+- TypeScript, lint (0 errors, 5 existing Canvas warnings), production build, isolated HTTP smoke, SQLite, and the full offline Trellis baseline passed without external production calls.
+- Mocked Chromium passed node selection, preview, search, filter disclosure, cursor loading, scheduler manual/select-all/condition modes, keyboard-native controls, and overflow checks at 1440x960 and 390x844 against clean candidate `2b3f94b22e118699f82da595d246b901977ea0dc`.

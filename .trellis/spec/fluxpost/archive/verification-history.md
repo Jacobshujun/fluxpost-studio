@@ -1,5 +1,7 @@
 # Verification
 
+- 2026-08-25: Explicit Xray image transport, loopback/text/ComfyUI isolation, Canvas 30-second network recovery, ToAPIs GET-only resume, admin health UI/API, TypeScript, lint, production build, isolated HTTP smoke, and the full offline baseline passed; local Xray listened only on `127.0.0.1:10808`, and credential-free primary/backup HTTPS handshakes succeeded.
+
 Last updated: 2026-07-16
 
 ## Baseline Command
