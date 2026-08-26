@@ -1932,3 +1932,36 @@ Restored V2 batch retry for partial model.gpt-image-each children with failed im
 ### Next Steps
 
 - None - task complete
+
+
+## Session 58: Deploy Canvas partial image retry
+
+**Date**: 2026-08-26
+**Task**: Deploy Canvas partial image retry
+**Branch**: `local`
+
+### Summary
+
+Activated clean SHA e58b37b0767da79ea365c214945755a0e8a0c16b on local LAN port 3001, fast-forwarded GitHub main, passed the isolated VPS verifier and zero-active-work preflight, deployed production release 20260826-094620-e58b37b0767d, and verified exact local/GitHub/production parity with healthy services and preserved volumes.
+
+### Main Changes
+
+(Add details)
+
+### Git Commits
+
+| Hash | Message |
+|------|---------|
+| `d260ac24f23a1131f65906a75b15bb6953ad173d` | (see git log) |
+
+### Testing
+
+- [OK] (Add test results)
+
+### Status
+
+[OK] **Completed**
+
+### Next Steps
+
+- None - task complete
