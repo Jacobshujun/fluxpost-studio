@@ -16,6 +16,7 @@ import {
   saveCanvasNodeRunToDb,
   saveCanvasRunToDb,
 } from "../database";
+import { recordExecutionLog } from "../activity-log";
 import {
   canAccessWorkspaceOwner,
   filterWorkspaceOwnedRecords,
@@ -74,7 +75,7 @@ export async function planCanvasRunWithMode(
   runMode = runMode === "isolated" ? "isolated" : "with-upstream";
   const plan = withCompetitorWorkbookReadiness(
     workflow.graph,
-    await resolveCanvasRunPlan(workflow.graph, workflow.id, targetNodeIds, runMode),
+    await resolveCanvasRunPlan(workflow.graph, workflow.id, targetNodeIds, runMode, account),
   );
   const details = [] as NonNullable<CanvasRunPlan["confirmationDetails"]>;
   let preflightBlocked = false;
@@ -116,6 +117,7 @@ async function resolveCanvasRunPlan(
   workflowId: string,
   targetNodeIds: string[] | undefined,
   runMode: CanvasRunMode,
+  account: WorkspaceAccessActor,
 ): Promise<CanvasRunPlan> {
   const base = buildCanvasRunPlan(graph, targetNodeIds);
   if (runMode === "with-upstream") return base;
@@ -125,6 +127,7 @@ async function resolveCanvasRunPlan(
   const targetId = targets[0];
   const candidatesByNode = new Map<string, Array<{ run: CanvasRun; nodeRun: CanvasNodeRun }>>();
   for (const candidate of await listCanvasSuccessfulNodeRunsForWorkflowFromDb(workflowId)) {
+    if (!canAccessWorkspaceOwner(account, candidate.run.ownerUserId)) continue;
     const candidates = candidatesByNode.get(candidate.nodeRun.nodeId) || [];
     candidates.push(candidate);
     candidatesByNode.set(candidate.nodeRun.nodeId, candidates);
@@ -295,8 +298,8 @@ export async function createCanvasRun(
     id: `canvas-run-${Date.now()}-${randomUUID().slice(0, 8)}`,
     workflowId: workflow.id,
     workflowRevision: workflow.revision,
-    ownerUserId: workflow.ownerUserId,
-    ownerDisplayName: workflow.ownerDisplayName,
+    ownerUserId: account.id,
+    ownerDisplayName: account.displayName || account.id,
     status: "queued",
     graphSnapshot: structuredClone(workflow.graph),
     runMode,
@@ -312,6 +315,20 @@ export async function createCanvasRun(
   };
   await saveCanvasRunToDb(run);
   await enqueueCanvasRunQueueItem(run);
+  await recordExecutionLog({
+    ownerUserId: account.id,
+    ownerDisplayName: account.displayName || account.id,
+    scope: "canvas/run",
+    action: "启动画布运行",
+    status: "success",
+    message: `已启动画布运行：${workflow.name}`,
+    details: {
+      runId: run.id,
+      workflowId: workflow.id,
+      workflowOwnerUserId: workflow.ownerUserId,
+      executionOwnerUserId: account.id,
+    },
+  });
   ensureCanvasRunWorker();
   return run;
 }
@@ -387,13 +404,15 @@ export async function listCanvasRunHistory(account: WorkspaceAccessActor, workfl
   const latestSuccessfulNodeRuns = new Map<string, CanvasLatestSuccessfulNodeRun>();
   if (workflowId) {
     for (const { run, nodeRun } of await listCanvasNodeRunsForWorkflowFromDb(workflowId)) {
+      if (!canAccessWorkspaceOwner(account, run.ownerUserId)) continue;
       if (latestNodeAttempts.has(nodeRun.nodeId)) continue;
       const projection = projectCanvasNodeRun(run, nodeRun);
       if (projection) latestNodeAttempts.set(nodeRun.nodeId, projection);
     }
   }
   const durableResults = workflowId
-    ? await listCanvasSuccessfulNodeRunsForWorkflowFromDb(workflowId)
+    ? (await listCanvasSuccessfulNodeRunsForWorkflowFromDb(workflowId))
+      .filter(({ run }) => canAccessWorkspaceOwner(account, run.ownerUserId))
     : (await Promise.all(runs.map(async (run) => (await listCanvasNodeRunsFromDb(run.id))
       .filter((nodeRun) => isOutputStatus(nodeRun.status))
       .map((nodeRun) => ({ run, nodeRun }))))).flat();

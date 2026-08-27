@@ -11,6 +11,7 @@ import {
   listCanvasSchedulesFromDb,
   updateCanvasScheduleInDb,
 } from "../database";
+import { recordExecutionLog } from "../activity-log";
 import { getGeneratedPost, updateGeneratedPost } from "../generated-posts";
 import { freezeCompetitorWorkbook } from "../competitor-workbook";
 import { listCopyLibraryEntries } from "../copy-library";
@@ -126,6 +127,7 @@ export async function createCanvasSchedule(account: WorkspaceAccessActor, input:
   const schedule: CanvasSchedule = {
     id: `canvas-schedule-${Date.now()}-${randomUUID().slice(0, 8)}`,
     ...scopeWorkspaceOwner(account),
+    ...scopeCanvasScheduleCreator(account),
     name: normalizeName(input.name, `${workflow.name} 批量任务`),
     revision: 1,
     workflowId: workflow.id,
@@ -294,13 +296,20 @@ export async function launchCanvasSchedule(
   if (current.status !== "ready" || !current.previewRevision) throw new Error("Run preflight before launching this schedule.");
   assertRevision(current, input.revision);
   if (input.previewRevision !== current.previewRevision) throw new Error("The sampling preview changed. Review it again before launch.");
-  if (isCanvasScheduleV2(current)) return launchCanvasScheduleV2(current, account, input.previewRevision);
+  if (isCanvasScheduleV2(current)) {
+    const launched = await launchCanvasScheduleV2(current, account, input.previewRevision);
+    await recordCanvasScheduleLaunch(launched, account);
+    return launched;
+  }
   const workflow = await requireScheduleWorkflow(current, account);
   const bindings = validateCanvasSchedulerBindings(workflow.graph, current.batches.some((batch) => batch.copyFilter !== undefined));
   if (stableSerialize(bindings) !== stableSerialize(current.bindings)) throw new Error("Canvas scheduler bindings changed after preflight.");
   await assertFrozenAssetsStillAvailable(current, account);
 
   const now = new Date().toISOString();
+  const executionOwner = scopeWorkspaceOwner(account);
+  const creator = scopeCanvasScheduleCreatorFromSchedule(current);
+  const executionWorkflow = { ...workflow, ...executionOwner };
   let sequence = 0;
   const batches = current.batches.map((batch) => ({
     ...batch,
@@ -320,6 +329,10 @@ export async function launchCanvasSchedule(
   }));
   const next: CanvasSchedule = {
     ...current,
+    ...executionOwner,
+    ...creator,
+    executionOwnerUserId: executionOwner.ownerUserId,
+    executionOwnerDisplayName: executionOwner.ownerDisplayName,
     revision: current.revision + 1,
     status: "queued",
     batches,
@@ -335,7 +348,7 @@ export async function launchCanvasSchedule(
     const createdAt = new Date(Date.parse(now) + sequence++).toISOString();
     runs.push(prepareCanvasRunFromGraph({
       id: entry.imageTask.runId || imageRunId(entry.imageTask.id),
-      workflow,
+      workflow: executionWorkflow,
       graph: createSchedulerImageGraph(workflow.graph, bindings, entry.batch.strategy, entry.content.scene, entry.imageTask.vehicle),
       targetNodeIds: [bindings["image-target"]],
       batchContext: {
@@ -356,6 +369,7 @@ export async function launchCanvasSchedule(
   }
   ensureCanvasRunWorker();
   kickCanvasSchedulerWorker();
+  await recordCanvasScheduleLaunch(next, account);
   return next;
 }
 
@@ -367,6 +381,7 @@ export async function duplicateCanvasSchedule(scheduleId: string, account: Works
   const schedule: CanvasSchedule = {
     id: `canvas-schedule-${Date.now()}-${randomUUID().slice(0, 8)}`,
     ...scopeWorkspaceOwner(account),
+    ...scopeCanvasScheduleCreator(account),
     name: scheduleDuplicateName(source.name, now),
     revision: 1,
     workflowId: workflow.id,
@@ -454,6 +469,7 @@ export async function convertCanvasScheduleToV2(scheduleId: string, account: Wor
   return createCanvasScheduleInDb({
     id: `canvas-schedule-${Date.now()}-${randomUUID().slice(0, 8)}`,
     ...scopeWorkspaceOwner(account),
+    ...scopeCanvasScheduleCreator(account),
     name: normalizeName(`${source.name} 灵活版`, "灵活批量任务"),
     revision: 1,
     workflowId: workflow.id,
@@ -872,7 +888,9 @@ async function launchCanvasScheduleV2(current: CanvasSchedule, account: Workspac
   const definition = current.definition;
   const workflowSnapshot = current.workflowSnapshot || latestWorkflow.graph;
   if (!definition || !current.mainTasks?.length) throw new Error("Run V2 preflight before launching this schedule.");
-  const workflow = { ...latestWorkflow, revision: current.workflowRevision };
+  const executionOwner = scopeWorkspaceOwner(account);
+  const creator = scopeCanvasScheduleCreatorFromSchedule(current);
+  const workflow = { ...latestWorkflow, revision: current.workflowRevision, ...executionOwner };
   validateCanvasScheduleV2Definition(workflowSnapshot, definition);
   if (canvasScheduleV2PreviewFingerprint(definition, current.mainTasks) !== previewRevision) {
     throw new Error("The V2 parameter preview changed. Review it again before launch.");
@@ -904,6 +922,10 @@ async function launchCanvasScheduleV2(current: CanvasSchedule, account: Workspac
   }));
   const next: CanvasSchedule = {
     ...current,
+    ...executionOwner,
+    ...creator,
+    executionOwnerUserId: executionOwner.ownerUserId,
+    executionOwnerDisplayName: executionOwner.ownerDisplayName,
     revision: current.revision + 1,
     status: "queued",
     workflowSnapshot: structuredClone(workflowSnapshot),
@@ -1185,8 +1207,7 @@ async function reconcileSchedule(current: CanvasSchedule) {
       workflow: {
         id: persisted.workflowId,
         revision: persisted.workflowRevision,
-        ownerUserId: persisted.ownerUserId,
-        ownerDisplayName: persisted.ownerDisplayName,
+        ...scopeCanvasScheduleExecutionOwner(persisted),
       },
       graph: createSchedulerFinalizationGraph(persisted.workflowSnapshot!, persisted.bindings!, content.candidateImageUrls, content.copy),
       targetNodeIds: [persisted.bindings!["content-target"]],
@@ -1406,8 +1427,7 @@ async function reconcileCanvasScheduleV2(current: CanvasSchedule) {
       workflow: {
         id: persisted.workflowId,
         revision: persisted.workflowRevision,
-        ownerUserId: persisted.ownerUserId,
-        ownerDisplayName: persisted.ownerDisplayName,
+        ...scopeCanvasScheduleExecutionOwner(persisted),
       },
       graph: createCanvasScheduleV2AggregateGraph(graphWithMainParameters, persisted.definition!, successfulArtifacts),
       targetNodeIds: [persisted.definition!.mainTargetNodeId!],
@@ -1866,8 +1886,7 @@ function prepareCanvasScheduleV2PendingChildRuns(schedule: CanvasSchedule, now: 
   const workflow = {
     id: schedule.workflowId,
     revision: schedule.workflowRevision,
-    ownerUserId: schedule.ownerUserId,
-    ownerDisplayName: schedule.ownerDisplayName,
+    ...scopeCanvasScheduleExecutionOwner(schedule),
   };
   const candidates = (schedule.mainTasks || []).flatMap((main) => {
     const sharedReady = !(schedule.definition?.sharedOutputs?.length) || main.sharedStatus === "completed";
@@ -2237,7 +2256,45 @@ function scheduleDuplicateName(sourceName: string, now: string) {
 }
 
 function ownerActor(schedule: CanvasSchedule): WorkspaceAccessActor {
-  return { id: schedule.ownerUserId, displayName: schedule.ownerDisplayName, role: "operator" };
+  const owner = scopeCanvasScheduleExecutionOwner(schedule);
+  return { id: owner.ownerUserId, displayName: owner.ownerDisplayName, role: "operator" };
+}
+
+function scopeCanvasScheduleExecutionOwner(schedule: CanvasSchedule) {
+  return {
+    ownerUserId: schedule.executionOwnerUserId || schedule.ownerUserId,
+    ownerDisplayName: schedule.executionOwnerDisplayName || schedule.ownerDisplayName,
+  };
+}
+
+function scopeCanvasScheduleCreator(account: WorkspaceAccessActor) {
+  return {
+    createdByUserId: account.id,
+    createdByDisplayName: account.displayName || account.id,
+  };
+}
+
+function scopeCanvasScheduleCreatorFromSchedule(schedule: CanvasSchedule) {
+  return {
+    createdByUserId: schedule.createdByUserId || schedule.ownerUserId,
+    createdByDisplayName: schedule.createdByDisplayName || schedule.ownerDisplayName,
+  };
+}
+
+async function recordCanvasScheduleLaunch(schedule: CanvasSchedule, account: WorkspaceAccessActor) {
+  await recordExecutionLog({
+    ...scopeWorkspaceOwner(account),
+    scope: "canvas/schedule",
+    action: "启动批量调度",
+    status: "success",
+    message: `已启动批量调度：${schedule.name}`,
+    details: {
+      scheduleId: schedule.id,
+      workflowId: schedule.workflowId,
+      createdByUserId: schedule.createdByUserId || schedule.ownerUserId,
+      executionOwnerUserId: account.id,
+    },
+  });
 }
 
 function randomInteger(min: number, max: number) {

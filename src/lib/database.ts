@@ -2532,16 +2532,16 @@ export async function updateCanvasScheduleInDb(schedule: CanvasSchedule, expecte
   await ensureDatabaseReady();
   if (getDatabaseBackend() === "postgres") {
     const result = await getPostgresPool().query(
-      `UPDATE canvas_schedules SET status = $1, revision = $2, updated_at = $3, data_json = $4::jsonb
-       WHERE id = $5 AND owner_user_id = $6 AND revision = $7`,
-      [schedule.status, schedule.revision, schedule.updatedAt, toJson(schedule), schedule.id, schedule.ownerUserId, expectedRevision],
+      `UPDATE canvas_schedules SET owner_user_id = $1, status = $2, revision = $3, updated_at = $4, data_json = $5::jsonb
+       WHERE id = $6 AND revision = $7`,
+      [schedule.ownerUserId, schedule.status, schedule.revision, schedule.updatedAt, toJson(schedule), schedule.id, expectedRevision],
     );
     return Number(result.rowCount || 0) === 1;
   }
   const result = getSqliteDatabase().prepare(`
-    UPDATE canvas_schedules SET status = ?, revision = ?, updated_at = ?, data_json = ?
-    WHERE id = ? AND owner_user_id = ? AND revision = ?
-  `).run(schedule.status, schedule.revision, schedule.updatedAt, toJson(schedule), schedule.id, schedule.ownerUserId, expectedRevision) as { changes?: number };
+    UPDATE canvas_schedules SET owner_user_id = ?, status = ?, revision = ?, updated_at = ?, data_json = ?
+    WHERE id = ? AND revision = ?
+  `).run(schedule.ownerUserId, schedule.status, schedule.revision, schedule.updatedAt, toJson(schedule), schedule.id, expectedRevision) as { changes?: number };
   return Number(result.changes || 0) === 1;
 }
 
@@ -2552,9 +2552,9 @@ export async function launchCanvasScheduleInDb(schedule: CanvasSchedule, expecte
     try {
       await client.query("BEGIN");
       const updated = await client.query(
-        `UPDATE canvas_schedules SET status = $1, revision = $2, updated_at = $3, data_json = $4::jsonb
-         WHERE id = $5 AND owner_user_id = $6 AND revision = $7`,
-        [schedule.status, schedule.revision, schedule.updatedAt, toJson(schedule), schedule.id, schedule.ownerUserId, expectedRevision],
+        `UPDATE canvas_schedules SET owner_user_id = $1, status = $2, revision = $3, updated_at = $4, data_json = $5::jsonb
+         WHERE id = $6 AND revision = $7`,
+        [schedule.ownerUserId, schedule.status, schedule.revision, schedule.updatedAt, toJson(schedule), schedule.id, expectedRevision],
       );
       if (Number(updated.rowCount || 0) !== 1) throw new Error("Canvas schedule revision conflict");
       for (const run of runs) {
@@ -2582,9 +2582,9 @@ export async function launchCanvasScheduleInDb(schedule: CanvasSchedule, expecte
   const db = getSqliteDatabase();
   runSqliteTransaction(db, () => {
     const updated = db.prepare(`
-      UPDATE canvas_schedules SET status = ?, revision = ?, updated_at = ?, data_json = ?
-      WHERE id = ? AND owner_user_id = ? AND revision = ?
-    `).run(schedule.status, schedule.revision, schedule.updatedAt, toJson(schedule), schedule.id, schedule.ownerUserId, expectedRevision) as { changes?: number };
+      UPDATE canvas_schedules SET owner_user_id = ?, status = ?, revision = ?, updated_at = ?, data_json = ?
+      WHERE id = ? AND revision = ?
+    `).run(schedule.ownerUserId, schedule.status, schedule.revision, schedule.updatedAt, toJson(schedule), schedule.id, expectedRevision) as { changes?: number };
     if (Number(updated.changes || 0) !== 1) throw new Error("Canvas schedule revision conflict");
     const insertRun = db.prepare(`
       INSERT INTO canvas_runs (id, workflow_id, owner_user_id, status, created_at, updated_at, data_json)
@@ -2610,9 +2610,9 @@ export async function fanOutCanvasScheduleV2ChildrenInDb(schedule: CanvasSchedul
     try {
       await client.query("BEGIN");
       const updated = await client.query(
-        `UPDATE canvas_schedules SET status = $1, revision = $2, updated_at = $3, data_json = $4::jsonb
-         WHERE id = $5 AND owner_user_id = $6 AND revision = $7`,
-        [schedule.status, schedule.revision, schedule.updatedAt, toJson(schedule), schedule.id, schedule.ownerUserId, expectedRevision],
+        `UPDATE canvas_schedules SET owner_user_id = $1, status = $2, revision = $3, updated_at = $4, data_json = $5::jsonb
+         WHERE id = $6 AND revision = $7`,
+        [schedule.ownerUserId, schedule.status, schedule.revision, schedule.updatedAt, toJson(schedule), schedule.id, expectedRevision],
       );
       if (Number(updated.rowCount || 0) !== 1) throw new Error("Canvas schedule revision conflict");
       for (const run of runs) {
@@ -2642,9 +2642,9 @@ export async function fanOutCanvasScheduleV2ChildrenInDb(schedule: CanvasSchedul
   const db = getSqliteDatabase();
   runSqliteTransaction(db, () => {
     const updated = db.prepare(`
-      UPDATE canvas_schedules SET status = ?, revision = ?, updated_at = ?, data_json = ?
-      WHERE id = ? AND owner_user_id = ? AND revision = ?
-    `).run(schedule.status, schedule.revision, schedule.updatedAt, toJson(schedule), schedule.id, schedule.ownerUserId, expectedRevision) as { changes?: number };
+      UPDATE canvas_schedules SET owner_user_id = ?, status = ?, revision = ?, updated_at = ?, data_json = ?
+      WHERE id = ? AND revision = ?
+    `).run(schedule.ownerUserId, schedule.status, schedule.revision, schedule.updatedAt, toJson(schedule), schedule.id, expectedRevision) as { changes?: number };
     if (Number(updated.changes || 0) !== 1) throw new Error("Canvas schedule revision conflict");
     const insertRun = db.prepare(`
       INSERT OR IGNORE INTO canvas_runs (id, workflow_id, owner_user_id, status, created_at, updated_at, data_json)

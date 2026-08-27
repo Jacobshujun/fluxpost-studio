@@ -724,6 +724,10 @@ export type CanvasSchedule = {
   id: string;
   ownerUserId: string;
   ownerDisplayName: string;
+  createdByUserId?: string;
+  createdByDisplayName?: string;
+  executionOwnerUserId?: string;
+  executionOwnerDisplayName?: string;
   name: string;
   revision: number;
   workflowId: string;
