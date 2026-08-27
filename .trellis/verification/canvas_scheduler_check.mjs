@@ -29,6 +29,7 @@ let fannedOutRuns;
 let sourceVideoResolveCalls = 0;
 let sourceVideoSnapshots = [];
 let visibleSourceVideoIds;
+let executionLogs = [];
 
 try {
   writeFileSync(path.join(temp, "toapis-image-api.js"), "exports.toApisImageRatios=['1:1'];exports.toApis4kImageRatios=['16:9'];", "utf8");
@@ -58,6 +59,9 @@ try {
   const schedulerModule = { exports: {} };
   const emptyAsync = async () => undefined;
   const stubs = {
+    "../activity-log": {
+      recordExecutionLog: async (entry) => { executionLogs.push(structuredClone(entry)); },
+    },
     "../copy-library": new Proxy({
       listCopyLibraryEntries: async () => {
         copyListCalls += 1;
@@ -130,6 +134,8 @@ try {
       prepareCanvasRunFromGraph: (input) => ({
         id: input.id,
         workflowRevision: input.workflow.revision,
+        ownerUserId: input.workflow.ownerUserId,
+        ownerDisplayName: input.workflow.ownerDisplayName,
         graph: structuredClone(input.graph),
         targetNodeIds: structuredClone(input.targetNodeIds),
         batchContext: structuredClone(input.batchContext),
@@ -726,6 +732,7 @@ try {
   );
 
   const account = { id: "owner", displayName: "Owner", role: "operator" };
+  const launcher = { id: "launcher", displayName: "Launcher", role: "admin" };
   const createdAt = "2026-07-29T00:00:00.000Z";
   const sourceVideoGraph = {
     nodes: [
@@ -910,7 +917,8 @@ try {
   };
   storedSchedule.previewRevision = v2PreviewFingerprint(storedSchedule.definition, storedSchedule.mainTasks);
   launchedRuns = undefined;
-  const sharedLaunch = await scheduler.launchCanvasSchedule(storedSchedule.id, account, {
+  executionLogs = [];
+  const sharedLaunch = await scheduler.launchCanvasSchedule(storedSchedule.id, launcher, {
     revision: storedSchedule.revision,
     previewRevision: storedSchedule.previewRevision,
   });
@@ -919,6 +927,12 @@ try {
   assert.equal(launchedRuns[0].id, `canvas-scheduler-v2-shared-${sharedLaunch.mainTasks[0].id}`);
   assert.deepEqual(launchedRuns[0].targetNodeIds, ["shared-vision", "shared-select"], "one shared run must target every selected output");
   assert.equal(launchedRuns[0].batchContext.phase, "shared");
+  assert.equal(sharedLaunch.ownerUserId, launcher.id, "launched schedule access must transfer to the launcher");
+  assert.equal(sharedLaunch.createdByUserId, account.id, "launch must preserve the schedule creator separately");
+  assert.equal(sharedLaunch.executionOwnerUserId, launcher.id, "launch must freeze the authenticated launcher as execution owner");
+  assert.equal(launchedRuns[0].ownerUserId, launcher.id, "shared runs must belong to the launcher instead of the workflow owner");
+  assert.equal(executionLogs.at(-1).ownerUserId, launcher.id, "launch audit logs must belong to the launcher");
+  assert.equal(executionLogs.at(-1).details.createdByUserId, account.id, "launch audit logs must retain the schedule creator");
   assert.equal(sharedLaunch.mainTasks[0].sharedStatus, "queued");
   assert.deepEqual(sharedLaunch.mainTasks[0].sharedArtifacts, []);
   assert.ok(sharedLaunch.mainTasks[0].childTasks.every((child) => child.status === "pending" && !child.runId), "child runs must stay unlaunched until shared artifacts freeze");
@@ -937,6 +951,7 @@ try {
   assert.deepEqual(reconciledShared.mainTasks[0].sharedArtifacts, frozenSharedArtifacts, "reconciliation must persist the complete frozen shared artifact records");
   for (const childRun of fannedOutRuns) {
     assert.equal(childRun.batchContext.phase, "child");
+    assert.equal(childRun.ownerUserId, launcher.id, "background child fan-out must retain the launcher");
     assert.deepEqual(
       { type: childRun.graph.nodes.find((item) => item.id === "shared-vision").type, config: childRun.graph.nodes.find((item) => item.id === "shared-vision").config },
       { type: "input.text", config: { text: "frozen visual analysis" } },
@@ -1507,6 +1522,8 @@ try {
   for (const snippet of ["launchCanvasScheduleInDb", 'await client.query("BEGIN")', 'await client.query("ROLLBACK")', "deferCanvasRunQueueItems"]) {
     assert.ok(database.includes(snippet), `database is missing ${snippet}`);
   }
+  assert.match(database, /UPDATE canvas_schedules SET owner_user_id = \$1, status = \$2, revision = \$3, updated_at = \$4, data_json = \$5::jsonb\s+WHERE id = \$6 AND revision = \$7/, "PostgreSQL schedule writes must transfer the indexed owner with the JSON record");
+  assert.match(database, /UPDATE canvas_schedules SET owner_user_id = \?, status = \?, revision = \?, updated_at = \?, data_json = \?\s+WHERE id = \? AND revision = \?/, "SQLite schedule writes must transfer the indexed owner with the JSON record");
   const sharedFanOutSource = database.slice(
     database.indexOf("export async function fanOutCanvasScheduleV2ChildrenInDb"),
     database.indexOf("export async function deferCanvasRunQueueItems"),
