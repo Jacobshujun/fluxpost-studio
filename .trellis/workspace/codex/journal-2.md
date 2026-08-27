@@ -107,3 +107,38 @@ Implemented separate manual content-pool tags with owner-scoped suggestions, nor
 ### Next Steps
 
 - None - task complete
+
+
+## Session 62: Canvas execution ownership
+
+**Date**: 2026-08-27
+**Task**: Canvas execution ownership
+**Branch**: `local`
+
+### Summary
+
+Assigned ordinary and scheduled Canvas runs, generated posts, and review attribution to the authenticated launcher while preserving creator audit identity; added owner-isolation and scheduler verification.
+
+### Main Changes
+
+(Add details)
+
+### Git Commits
+
+| Hash | Message |
+|------|---------|
+| `56ae737` | (see git log) |
+| `b8abdfe` | (see git log) |
+| `c1e6430` | (see git log) |
+
+### Testing
+
+- [OK] (Add test results)
+
+### Status
+
+[OK] **Completed**
+
+### Next Steps
+
+- None - task complete
