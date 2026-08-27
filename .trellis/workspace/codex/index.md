@@ -8,8 +8,8 @@
 
 <!-- @@@auto:current-status -->
 - **Active File**: `journal-2.md`
-- **Total Sessions**: 60
-- **Last Active**: 2026-08-26
+- **Total Sessions**: 61
+- **Last Active**: 2026-08-27
 <!-- @@@/auto:current-status -->
 
 ---
@@ -19,7 +19,7 @@
 <!-- @@@auto:active-documents -->
 | File | Lines | Status |
 |------|-------|--------|
-| `journal-2.md` | ~75 | Active |
+| `journal-2.md` | ~109 | Active |
 | `journal-1.md` | ~1967 | Archived |
 <!-- @@@/auto:active-documents -->
 
@@ -30,6 +30,7 @@
 <!-- @@@auto:session-history -->
 | # | Date | Title | Commits | Branch |
 |---|------|-------|---------|--------|
+| 61 | 2026-08-27 | Content pool tag management | `3b7f9f3`, `0cc8cd3` | `local` |
 | 60 | 2026-08-26 | Canvas content pool batch selection | `2b3f94b22e118699f82da595d246b901977ea0dc`, `dad0e3e` | `local` |
 | 59 | 2026-08-26 | 图库批量集合管理 | `5f1cb7c`, `883da0f` | `local` |
 | 58 | 2026-08-26 | Deploy Canvas partial image retry | `d260ac24f23a1131f65906a75b15bb6953ad173d` | `local` |

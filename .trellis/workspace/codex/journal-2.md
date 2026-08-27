@@ -73,3 +73,37 @@ Implemented owner-scoped content-pool card filtering and compact snapshots, adde
 ### Next Steps
 
 - None - task complete
+
+
+## Session 61: Content pool tag management
+
+**Date**: 2026-08-27
+**Task**: Content pool tag management
+**Branch**: `local`
+
+### Summary
+
+Implemented separate manual content-pool tags with owner-scoped suggestions, normalized AND filtering, single and partial-success batch editing, and shared normal/V2 Canvas selection; focused, baseline, and desktop/mobile browser checks passed.
+
+### Main Changes
+
+(Add details)
+
+### Git Commits
+
+| Hash | Message |
+|------|---------|
+| `3b7f9f3` | (see git log) |
+| `0cc8cd3` | (see git log) |
+
+### Testing
+
+- [OK] (Add test results)
+
+### Status
+
+[OK] **Completed**
+
+### Next Steps
+
+- None - task complete
