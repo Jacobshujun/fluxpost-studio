@@ -30,7 +30,8 @@
         "Retained items expose normalized metrics, media, timestamps, and frozen safety assessment"
       ],
       "evidence": [
-        "Keyword/link import, content safety, persistence, platform mapping, and Dongchedi focused checks are in the offline baseline."
+        "Keyword/link import, content safety, persistence, platform mapping, and Dongchedi focused checks are in the offline baseline.",
+        "2026-08-27 owner-scoped manual tag suggestions, normalized search, separate category/custom-tag AND filters, single editing, and legacy compatibility passed focused, baseline, and mocked desktop/mobile checks."
       ],
       "notes": "Live provider/model behavior remains pending operator approval."
     },
@@ -174,7 +175,8 @@
         "Mutations preserve ownership, persistence, activity logging, and refreshed UI state"
       ],
       "evidence": [
-        "Content desk, generated-post persistence, permissions, and responsive selection checks pass."
+        "Content desk, generated-post persistence, permissions, and responsive selection checks pass.",
+        "2026-08-27 partial-success custom-tag batch add/remove, per-item failures, owner isolation, duplicate-id handling, and single-write behavior passed deterministic and browser checks."
       ],
       "notes": "Manual review remains advisable before destructive high-volume use."
     },
@@ -255,7 +257,8 @@
       ],
       "evidence": [
         "2026-08-26 V2 failed-image partial retry, generic/shared/V1 rejection, review isolation, build, smoke, and the full offline baseline passed.",
-        "2026-08-26 content-pool filtering, cursor paging, immutable batch snapshots, 200-item limits, build, baseline, and mocked desktop/mobile browser checks passed."
+        "2026-08-26 content-pool filtering, cursor paging, immutable batch snapshots, 200-item limits, build, baseline, and mocked desktop/mobile browser checks passed.",
+        "2026-08-27 normal content-pool nodes and V2 schedule parameters shared custom-tag suggestions, AND filters, customTag URLs, result labels, and desktop/mobile overflow checks."
       ],
       "notes": "Live provider/Feishu runs and multi-user PostgreSQL concurrency remain."
     },

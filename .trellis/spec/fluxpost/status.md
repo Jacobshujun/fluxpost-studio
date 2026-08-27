@@ -1,26 +1,26 @@
 # FluxPost Current Status
 
-Last updated: 2026-08-26
+Last updated: 2026-08-27
 
 ## One-Line Status
 
-Canvas content-pool card selection and V2 batch expansion are implemented, offline-baseline verified, and browser-verified on clean candidate SHA `2b3f94b22e118699f82da595d246b901977ea0dc`.
+Content-pool manual tagging and shared Canvas tag filtering are implemented and offline/browser verified; the verified commit and clean port-3001 candidate are the remaining release steps.
 
 ## Current Focus
 
-- `input.content-pool` now uses an owner-scoped searchable card browser with project/sort controls, advanced filters, compact previews, cursor loading, list refresh, and independent snapshot refresh.
-- V2 schedules can bind a main-task `content-pool` parameter only to content-pool inputs, using manual or condition sources with fixed/each/random expansion and compact immutable snapshots.
-- Manual missing or unauthorized IDs fail explicitly; full expansion and random freezing enforce the 200-item boundary while the existing 2,000-child ceiling remains unchanged.
-- Preflight and launch never update content-pool status or publish; launch uses frozen snapshot fields even if mutable source rows later change or disappear.
+- Content items retain fixed AI categories separately from up to 20 normalized manual custom tags; historical rows without `customTags` remain compatible.
+- `/content` supports keyword/custom-tag search, separate category and custom-tag AND filters, single-item editing, owner-scoped suggestions, and partial-success batch add/remove with per-item failures.
+- Normal Canvas content-pool nodes and V2 content-pool schedule parameters reuse the same custom-tag suggestions, filters, result labels, and `customTag` query contract.
+- Focused checks, TypeScript, lint (0 errors and 5 existing Canvas warnings), production build, the full offline baseline, and mocked Chromium at 1440x960 and 390x844 passed without external calls.
 
 ## Next Entry
 
-Review the clean local candidate on port `3001`; production deployment remains a separate approval and exact-SHA operation.
+Commit and archive the verified task, then activate the clean current HEAD on loopback port `3001` for operator review.
 
 ## Risks And Unknowns
 
-- Real authenticated multi-user PostgreSQL use of content-pool schedule preflight remains an operator-review gate; default verification used owner-scoped domain fixtures and browser mocks without mutating runtime content.
-- No paid model, TikHub, Feishu, Lark, publishing, or production content-pool action was exercised.
+- Real authenticated multi-user PostgreSQL use of batch custom-tag updates remains an operator-review gate; deterministic checks cover owner scope, duplicate ids, partial success, and single-write behavior.
+- No paid model, TikHub, Feishu, Lark, publishing, or production action was exercised.
 - Production remains unchanged until a separate deployment is explicitly approved.
 - Nine high-severity transitive advisories remain; do not run `npm audit fix --force`.
 
