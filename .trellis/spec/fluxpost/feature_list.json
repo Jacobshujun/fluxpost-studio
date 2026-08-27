@@ -258,7 +258,7 @@
       "evidence": [
         "2026-08-26 content-pool filtering, cursor paging, immutable batch snapshots, 200-item limits, build, baseline, and mocked desktop/mobile browser checks passed.",
         "2026-08-27 normal content-pool nodes and V2 schedule parameters shared custom-tag suggestions, AND filters, customTag URLs, result labels, and desktop/mobile overflow checks.",
-        "2026-08-27 ordinary and batch Canvas launches now preserve creator audit fields while assigning schedule access, every derived run, generated posts, and review attribution to the authenticated launcher; focused owner-isolation, database, build, smoke, and full baseline checks passed."
+        "2026-08-27 local-directory snapshots, authenticated range previews, audios artifact propagation, deterministic image-slideshow encoding/text layers, workflow redaction, template wiring, focused contracts, FFmpeg probe, TypeScript, build, smoke, and full offline baseline passed."
       ],
       "notes": "Live provider/Feishu runs and an authenticated multi-user PostgreSQL launcher-attribution walkthrough remain."
     },
