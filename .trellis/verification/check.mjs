@@ -63,6 +63,7 @@ const nodeChecks = [
   ["Dongchedi page check", "dongchedi_page_check.mjs"],
   ["Link import check", "link_import_check.mjs"],
   ["Content desk check", "content_desk_check.mjs"],
+  ["Content-pool custom tags check", "content_pool_tags_check.mjs"],
   ["Simple link run check", "simple_link_run_check.mjs"],
   ["Simple viral run check", "simple_viral_run_check.mjs"],
   ["Simple original run check", "simple_original_run_check.mjs"],

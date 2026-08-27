@@ -28,6 +28,13 @@ const simpleRoute = read("src/app/api/simple/runs/route.ts");
 const simpleRuns = read("src/lib/simple-runs.ts");
 
 assertContains(contentPage, /fetch\(`?\/api\/content-pool/, "/content should read the owner-scoped content pool API.");
+assertContains(contentPage, /ContentPoolCustomTagPicker/, "/content should reuse the shared custom-tag picker.");
+assertContains(contentPage, /poolContentTagFilters[\s\S]*poolCustomTagFilters/, "/content should keep content-category and custom-tag filters distinct.");
+assertContains(contentPage, /matchesAllContentPoolCustomTags/, "/content custom-tag filtering should use the shared AND matcher.");
+assertContains(contentPage, /fetch\("\/api\/content-pool\/tags"/, "/content should update selected custom tags through the authenticated tag API.");
+assertContains(contentPage, /customTags:\s*sourceEdit\.customTags/, "single-item edits should persist custom tags without changing content categories.");
+assertContains(contentPage, /管理标签[\s\S]*批量添加[\s\S]*批量删除/, "/content should expose batch custom-tag add and remove controls.");
+assertContains(contentPage, /标签更新失败明细[\s\S]*failure\.itemId[\s\S]*failure\.error/, "/content should expose each failed batch tag result.");
 assertContains(contentPage, /fetch\("\/api\/crawl\/jobs"/, "/content should keep keyword crawl entry.");
 assertContains(contentPage, /fetch\("\/api\/crawl\/links"/, "/content should keep source-link import entry.");
 assertContains(contentPage, /fetch\("\/api\/simple\/runs"/, "/content should start simple-run secondary creation.");

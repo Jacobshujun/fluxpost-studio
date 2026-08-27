@@ -534,6 +534,7 @@ export type NormalizedSourceItem = {
   productionPlan?: ProductionPlan;
   safetyAssessment?: SourceSafetyAssessment;
   contentTagging?: SourceContentTagging;
+  customTags?: string[];
   visualTagging?: SourceVisualTagging;
   metrics: {
     views?: number;
@@ -582,6 +583,7 @@ export type ContentPoolSelectionFilter = {
   statuses: SourceUsageStatus[];
   mediaTypes: SourceMediaType[];
   contentTags: ContentTag[];
+  customTags: string[];
   localMediaComplete: boolean;
   sort: ContentPoolSelectionSort;
 };
@@ -600,6 +602,7 @@ export type ContentPoolSelectionItem = {
   status: SourceUsageStatus;
   mediaType: SourceMediaType;
   contentTags: ContentTag[];
+  customTags: string[];
   title: string;
   body: string;
   authorName: string;
@@ -612,6 +615,21 @@ export type ContentPoolSelectionItem = {
   publishedAt?: string;
   crawledAt?: string;
   localMediaComplete: boolean;
+};
+
+export type ContentPoolTagSuggestion = {
+  label: string;
+  count: number;
+};
+
+export type ContentPoolTagBatchFailure = {
+  itemId: string;
+  error: string;
+};
+
+export type ContentPoolTagBatchResult = {
+  items: NormalizedSourceItem[];
+  failures: ContentPoolTagBatchFailure[];
 };
 
 export type ContentPoolSelectionPage = {

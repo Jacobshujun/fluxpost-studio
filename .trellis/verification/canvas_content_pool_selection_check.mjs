@@ -9,12 +9,14 @@ const root = process.cwd();
 const read = (relative) => readFileSync(path.join(root, relative), "utf8");
 
 const selectionModule = "src/lib/content-pool-selection.ts";
+const tagsModule = "src/lib/content-pool-tags.ts";
 const selectionRoute = "src/app/api/content-pool/selection/route.ts";
 
 assert.equal(existsSync(path.join(root, selectionModule)), true, "content-pool selection domain module must exist");
 assert.equal(existsSync(path.join(root, selectionRoute)), true, "authenticated content-pool selection route must exist");
 
 const selectionSource = read(selectionModule);
+const tagsSource = read(tagsModule);
 const routeSource = read(selectionRoute);
 const canvasTypes = read("src/lib/canvas/types.ts");
 const registrySource = read("src/lib/canvas/registry.ts");
@@ -26,6 +28,7 @@ const contentPoolSource = read("src/lib/content-pool.ts");
 assert.match(selectionSource, /export function normalizeContentPoolSelectionFilter/);
 assert.match(selectionSource, /export function selectContentPoolItems/);
 assert.match(selectionSource, /contentTags[\s\S]+every\(/, "content tags must use AND matching");
+assert.match(selectionSource, /matchesAllContentPoolCustomTags/, "custom tags must use shared AND matching");
 assert.match(selectionSource, /sourceId/, "full-text matching must include source ids");
 assert.match(selectionSource, /local_complete/, "local-media filtering must use the persisted cache status");
 assert.match(selectionSource, /projectId[\s\S]+itemId/, "stable item ordering must include project and item tie breakers");
@@ -37,6 +40,7 @@ assert.doesNotMatch(selectionSource, /\braw\b/, "compact selection snapshots mus
 assert.match(routeSource, /requireWorkspaceAccount\(request\)/, "the selection route must be authenticated");
 assert.match(routeSource, /listContentPoolSelection/);
 assert.match(routeSource, /searchParams\.getAll\("contentTag"\)/);
+assert.match(routeSource, /searchParams\.getAll\("customTag"\)/);
 assert.match(contentPoolSource, /filterWorkspaceOwnedRecords\(pool\.projects[\s\S]+account\)/, "selection reads must remain owner-scoped");
 assert.doesNotMatch(schedulerSource, /batchUpdateSourceItemStatus|updateSourceItem/, "scheduler preflight and launch must not mutate content-pool status");
 
@@ -53,6 +57,8 @@ assert.match(schedulerV2Source, /snapshotVideoUrls/);
 
 assert.match(pageSource, /function ContentPoolSelectionBrowser/);
 assert.match(pageSource, /\/api\/content-pool\/selection/);
+assert.match(pageSource, /ContentPoolCustomTagPicker/, "Canvas should reuse the shared custom-tag picker");
+assert.match(pageSource, /search\.append\("customTag", value\)/, "Canvas should send custom-tag filters to the selection API");
 assert.match(pageSource, /function ContentPoolScheduleSourceEditor/);
 assert.doesNotMatch(
   pageSource.match(/function ContentPoolSnapshotPicker[\s\S]+?\n}\n/)?.[0] || "",
@@ -62,6 +68,10 @@ assert.doesNotMatch(
 
 const temp = mkdtempSync(path.join(tmpdir(), "fluxpost-content-pool-selection-"));
 try {
+  writeFileSync(path.join(temp, "content-pool-tags.js"), ts.transpileModule(tagsSource, {
+    compilerOptions: { module: ts.ModuleKind.CommonJS, target: ts.ScriptTarget.ES2022 },
+    fileName: "content-pool-tags.ts",
+  }).outputText, "utf8");
   writeFileSync(path.join(temp, "content-pool-selection.js"), ts.transpileModule(selectionSource, {
     compilerOptions: { module: ts.ModuleKind.CommonJS, target: ts.ScriptTarget.ES2022 },
     fileName: "content-pool-selection.ts",
@@ -81,6 +91,7 @@ try {
         hotScore: 20,
         publishedAt: "2026-08-20T00:00:00.000Z",
         contentTagging: tagging(["tag-a", "tag-b"]),
+        customTags: ["重点参考", "小鹏 MONA"],
         mediaCache: { status: "local_complete" },
         downloadedImages: ["/media/local.jpg"],
         downloadedVideoUrl: "/media/local.mp4",
@@ -91,6 +102,9 @@ try {
 
   const andTags = selection.selectContentPoolItems(projects, { contentTags: ["tag-a", "tag-b"] });
   assert.deepEqual(andTags.map((entry) => entry.id), ["item-1"], "content tags must all match");
+  assert.deepEqual(selection.selectContentPoolItems(projects, { customTags: ["重点参考", "小鹏 mona"] }).map((entry) => entry.id), ["item-1"], "custom tags must all match case-insensitively");
+  assert.deepEqual(selection.selectContentPoolItems(projects, { query: "小鹏 mona" }).map((entry) => entry.id), ["item-1"], "full-text search must include custom tags");
+  assert.deepEqual(selection.selectContentPoolItems(projects, { query: "小鹏　ＭＯＮＡ" }).map((entry) => entry.id), ["item-1"], "full-text search must normalize Unicode width and whitespace");
   assert.deepEqual(selection.selectContentPoolItems(projects, { query: "src-alpha" }).map((entry) => entry.id), ["item-1"], "full-text search must include source ids");
   assert.deepEqual(selection.selectContentPoolItems(projects, { localMediaComplete: true }).map((entry) => entry.id), ["item-1"], "local-complete filtering must be exact");
 

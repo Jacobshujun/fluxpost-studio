@@ -88,6 +88,8 @@ import {
   ZoomOut,
 } from "lucide-react";
 import { createContext, useCallback, useContext, useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
+import { ContentPoolCustomTagPicker } from "@/components/content-pool-custom-tag-picker";
+import { contentPoolCustomTagKey } from "@/lib/content-pool-tags";
 import {
   CANVAS_CLIPBOARD_MIME,
   createCanvasClipboardPayload,
@@ -3313,7 +3315,7 @@ function ContentPoolSelectionBrowser({ filter, selectedIds, mode, onFilterChange
     const values = filter[key] as string[];
     onFilterChange({ ...filter, [key]: values.includes(value) ? values.filter((item) => item !== value) : [...values, value] });
   };
-  const activeAdvancedCount = filter.platforms.length + filter.statuses.length + filter.mediaTypes.length + filter.contentTags.length + Number(filter.localMediaComplete);
+  const activeAdvancedCount = filter.platforms.length + filter.statuses.length + filter.mediaTypes.length + filter.contentTags.length + filter.customTags.length + Number(filter.localMediaComplete);
   const selectAllMatching = async () => {
     if (!onSelectionChange) return;
     if (page.total > 200) {
@@ -3349,7 +3351,8 @@ function ContentPoolSelectionBrowser({ filter, selectedIds, mode, onFilterChange
       <ContentPoolFilterChecks label="平台" options={["wechat_channels", "xiaohongshu", "douyin", "weibo", "xiaopeng_bbs", "dongchedi", "feishu", "original"]} selected={filter.platforms} onToggle={(value) => setListFilter("platforms", value as ContentPoolSelectionFilter["platforms"][number])} />
       <ContentPoolFilterChecks label="状态" options={["new", "analyzed", "rewritten", "approved", "published"]} selected={filter.statuses} onToggle={(value) => setListFilter("statuses", value as ContentPoolSelectionFilter["statuses"][number])} />
       <ContentPoolFilterChecks label="媒体" options={["image", "video", "mixed", "text", "unknown"]} selected={filter.mediaTypes} onToggle={(value) => setListFilter("mediaTypes", value as ContentPoolSelectionFilter["mediaTypes"][number])} />
-      <ContentPoolFilterChecks label="内容标签（同时满足）" options={[...contentTagOptions]} selected={filter.contentTags} onToggle={(value) => setListFilter("contentTags", value as ContentPoolSelectionFilter["contentTags"][number])} />
+      <ContentPoolFilterChecks label="内容分类（同时满足）" options={[...contentTagOptions]} selected={filter.contentTags} onToggle={(value) => setListFilter("contentTags", value as ContentPoolSelectionFilter["contentTags"][number])} />
+      <div className="canvas-content-pool-custom-tags"><span>自定义标签（同时满足）</span><ContentPoolCustomTagPicker tags={filter.customTags} placeholder="搜索并选择自定义标签" allowCreate={false} onAdd={(label) => onFilterChange({ ...filter, customTags: [...filter.customTags, label] })} onRemove={(label) => onFilterChange({ ...filter, customTags: filter.customTags.filter((item) => contentPoolCustomTagKey(item) !== contentPoolCustomTagKey(label)) })} /></div>
       <label className="canvas-content-pool-local"><input type="checkbox" checked={filter.localMediaComplete} onChange={(event) => onFilterChange({ ...filter, localMediaComplete: event.target.checked })} /><span>仅本地媒体完整</span></label>
     </details>
     <div className="canvas-content-pool-toolbar">
@@ -3360,7 +3363,7 @@ function ContentPoolSelectionBrowser({ filter, selectedIds, mode, onFilterChange
       {page.items.length ? <div className="canvas-content-pool-list">{page.items.map((item) => <article key={item.id} className={selected.has(item.id) ? "is-selected" : ""}>
         <button type="button" className="canvas-content-pool-select" aria-pressed={selected.has(item.id)} disabled={mode === "match" || (mode === "manual" && !selected.has(item.id) && selected.size >= 200)} onClick={() => onToggle(item)}>
           <span className="canvas-content-pool-thumbnail">{item.thumbnailUrl ? <Image src={item.thumbnailUrl} alt="" width={72} height={72} unoptimized referrerPolicy="no-referrer" /> : item.videoUrls.length ? <Video /> : <FileText />}</span>
-          <span className="canvas-content-pool-copy"><strong>{item.title || item.body.slice(0, 48) || "未命名素材"}</strong><small>{item.platform} · {item.projectName} · {item.status}</small><small>热度 {item.hotScore} · {formatContentPoolSelectionTime(item)}</small>{item.contentTags.length ? <span className="canvas-content-pool-tags">{item.contentTags.slice(0, 3).map((tag) => <em key={tag}>{tag}</em>)}</span> : null}</span>
+          <span className="canvas-content-pool-copy"><strong>{item.title || item.body.slice(0, 48) || "未命名素材"}</strong><small>{item.platform} · {item.projectName} · {item.status}</small><small>热度 {item.hotScore} · {formatContentPoolSelectionTime(item)}</small>{item.contentTags.length ? <span className="canvas-content-pool-tags">{item.contentTags.slice(0, 2).map((tag) => <em key={tag}>{tag}</em>)}</span> : null}{item.customTags.length ? <span className="canvas-content-pool-tags is-custom">{item.customTags.slice(0, 2).map((tag) => <em key={tag}>{tag}</em>)}</span> : null}</span>
           {mode !== "match" ? <span className="canvas-content-pool-mark">{selected.has(item.id) ? <CheckCircle2 /> : mode === "single" ? <span /> : <Square />}</span> : null}
         </button>
         {item.thumbnailUrl ? <button type="button" className="canvas-content-pool-preview" onClick={() => onPreviewImage(item.thumbnailUrl!, 0)} title="预览图片" aria-label={`预览 ${item.title || item.id}`}><Eye /></button> : null}
@@ -5256,7 +5259,7 @@ function configStringList(value: CanvasNode["config"][string]) {
 }
 
 function emptyContentPoolSelectionFilter(): ContentPoolSelectionFilter {
-  return { query: "", platforms: [], statuses: [], mediaTypes: [], contentTags: [], localMediaComplete: false, sort: "hot-desc" };
+  return { query: "", platforms: [], statuses: [], mediaTypes: [], contentTags: [], customTags: [], localMediaComplete: false, sort: "hot-desc" };
 }
 
 function contentPoolSelectionUrl(filter: ContentPoolSelectionFilter, cursor?: string, limit = 40) {
@@ -5267,6 +5270,7 @@ function contentPoolSelectionUrl(filter: ContentPoolSelectionFilter, cursor?: st
   filter.statuses.forEach((value) => search.append("status", value));
   filter.mediaTypes.forEach((value) => search.append("mediaType", value));
   filter.contentTags.forEach((value) => search.append("contentTag", value));
+  filter.customTags.forEach((value) => search.append("customTag", value));
   if (cursor) search.set("cursor", cursor);
   return `/api/content-pool/selection?${search}`;
 }

@@ -10,6 +10,7 @@ import type {
   SourceMediaType,
   SourceUsageStatus,
 } from "./types";
+import { matchesAllContentPoolCustomTags, normalizeContentPoolCustomTags } from "./content-pool-tags";
 
 export const CONTENT_POOL_SELECTION_PAGE_LIMIT = 40;
 export const CONTENT_POOL_SELECTION_MAX_LIMIT = 100;
@@ -28,6 +29,7 @@ export function normalizeContentPoolSelectionFilter(input: Partial<ContentPoolSe
     statuses: uniqueValues(input.statuses),
     mediaTypes: uniqueValues(input.mediaTypes),
     contentTags: uniqueValues(input.contentTags),
+    customTags: normalizeContentPoolCustomTags(input.customTags),
     localMediaComplete: input.localMediaComplete === true,
     sort: input.sort === "published-desc" || input.sort === "crawled-desc" ? input.sort : "hot-desc",
   };
@@ -35,7 +37,7 @@ export function normalizeContentPoolSelectionFilter(input: Partial<ContentPoolSe
 
 export function selectContentPoolItems(projects: ContentProject[], input: Partial<ContentPoolSelectionFilter> = {}) {
   const filter = normalizeContentPoolSelectionFilter(input);
-  const query = filter.query.toLocaleLowerCase();
+  const query = filter.query.normalize("NFKC").toLocaleLowerCase();
   const seen = new Set<string>();
   const items = projects.flatMap((project) => project.items.flatMap((item) => {
     if (seen.has(item.id)) return [];
@@ -47,11 +49,13 @@ export function selectContentPoolItems(projects: ContentProject[], input: Partia
     if (filter.mediaTypes.length && !filter.mediaTypes.includes(mediaType)) return [];
     const contentTags = item.contentTagging?.tags || [];
     if (filter.contentTags.length && !filter.contentTags.every((tag) => contentTags.includes(tag))) return [];
+    const customTags = normalizeContentPoolCustomTags(item.customTags);
+    if (!matchesAllContentPoolCustomTags(customTags, filter.customTags)) return [];
     if (filter.localMediaComplete && item.mediaCache?.status !== "local_complete") return [];
-    if (query && ![item.title, item.contentText, item.authorName, item.sourceId]
-      .some((value) => String(value || "").toLocaleLowerCase().includes(query))) return [];
+    if (query && ![item.title, item.contentText, item.authorName, item.sourceId, ...customTags]
+      .some((value) => String(value || "").normalize("NFKC").toLocaleLowerCase().includes(query))) return [];
     seen.add(item.id);
-    return [contentPoolSelectionItem(project, item, status, mediaType, contentTags)];
+    return [contentPoolSelectionItem(project, item, status, mediaType, contentTags, customTags)];
   }));
   return items.sort(contentPoolSelectionComparator(filter.sort));
 }
@@ -136,6 +140,7 @@ function contentPoolSelectionItem(
   status: SourceUsageStatus,
   mediaType: SourceMediaType,
   contentTags: ContentTag[],
+  customTags: string[],
 ): ContentPoolSelectionItem {
   const downloadedImages = uniqueStrings(item.downloadedImages);
   const imageUrls = downloadedImages.length ? downloadedImages : uniqueStrings(item.images);
@@ -148,6 +153,7 @@ function contentPoolSelectionItem(
     status,
     mediaType,
     contentTags: [...contentTags],
+    customTags: [...customTags],
     title: item.title || "",
     body: item.contentText || "",
     authorName: item.authorName || "",

@@ -16,6 +16,7 @@ export async function GET(request: Request) {
       statuses: searchParams.getAll("status") as SourceUsageStatus[],
       mediaTypes: searchParams.getAll("mediaType") as SourceMediaType[],
       contentTags: searchParams.getAll("contentTag") as ContentTag[],
+      customTags: searchParams.getAll("customTag"),
       localMediaComplete: searchParams.get("localMedia") === "complete",
       sort: (searchParams.get("sort") || "hot-desc") as ContentPoolSelectionFilter["sort"],
     };

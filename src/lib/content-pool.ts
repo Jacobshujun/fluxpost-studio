@@ -1,6 +1,7 @@
 import { filterAlignedDownloadedImages, isLikelyNonContentImageUrl, normalizeContentImageUrls } from "./media-url-filter";
 import { readContentProjectsFromDb, writeContentProjectsToDb } from "./database";
 import { buildMediaCacheStatus } from "./media-cache-status";
+import { applyContentPoolCustomTagChanges, ContentPoolTagValidationError, contentPoolCustomTagKey, normalizeContentPoolCustomTags } from "./content-pool-tags";
 import { updateSourceContentTags, updateSourceVisualTags } from "./source-tagging";
 import { enrichSourceTimestamps } from "./source-timestamps";
 import { extractDouyinCarouselImageUrls } from "./douyin-media";
@@ -13,7 +14,7 @@ import {
   scopeWorkspaceOwner,
   type WorkspaceAccessActor,
 } from "./workspace-ownership";
-import type { ContentPoolSnapshot, ContentProject, GeneratedPost, NormalizedSourceItem, Platform, SourceUsageStatus, ViralAnalysis } from "./types";
+import type { ContentPoolSnapshot, ContentPoolTagBatchResult, ContentPoolTagSuggestion, ContentProject, GeneratedPost, NormalizedSourceItem, Platform, SourceUsageStatus, ViralAnalysis } from "./types";
 import type { ContentPoolSelectionFilter } from "./types";
 import {
   contentPoolSelectionProjects,
@@ -51,6 +52,71 @@ export async function getSourceItemsByIds(sourceItemIds: string[], account?: Wor
     });
   });
   return sourceItemIds.map((id) => itemsById.get(id)).filter((item): item is NormalizedSourceItem => Boolean(item));
+}
+
+export async function listContentPoolTagSuggestions(
+  account?: WorkspaceAccessActor,
+  options: { query?: string; limit?: number } = {},
+): Promise<ContentPoolTagSuggestion[]> {
+  const pool = await readPool();
+  const query = String(options.query || "").normalize("NFKC").trim().toLocaleLowerCase();
+  const counts = new Map<string, ContentPoolTagSuggestion>();
+  for (const project of filterWorkspaceOwnedRecords(pool.projects.map(refreshProjectStats), account)) {
+    for (const item of project.items) {
+      for (const label of normalizeContentPoolCustomTags(item.customTags)) {
+        if (query && !label.toLocaleLowerCase().includes(query)) continue;
+        const key = contentPoolCustomTagKey(label);
+        const current = counts.get(key);
+        counts.set(key, current ? { ...current, count: current.count + 1 } : { label, count: 1 });
+      }
+    }
+  }
+  const limit = Math.max(1, Math.min(50, Math.trunc(options.limit || 20)));
+  return [...counts.values()]
+    .sort((left, right) => right.count - left.count || left.label.localeCompare(right.label, "zh-CN"))
+    .slice(0, limit);
+}
+
+export async function batchUpdateSourceItemCustomTags(
+  sourceItemIds: string[],
+  input: { add?: unknown; remove?: unknown },
+  account?: WorkspaceAccessActor,
+): Promise<ContentPoolTagBatchResult> {
+  const ids = makeUniqueIds(sourceItemIds);
+  if (!ids.length) throw new ContentPoolTagValidationError("Select at least one content item.");
+  const add = normalizeContentPoolCustomTags(input.add);
+  const remove = normalizeContentPoolCustomTags(input.remove);
+  if (!add.length && !remove.length) throw new ContentPoolTagValidationError("Add or remove at least one custom tag.");
+
+  const selectedIds = new Set(ids);
+  const handledIds = new Set<string>();
+  const result: ContentPoolTagBatchResult = { items: [], failures: [] };
+  const pool = await readPool();
+  const now = new Date().toISOString();
+  pool.projects = pool.projects.map((project) => {
+    let changed = false;
+    const items = project.items.map((item) => {
+      if (!selectedIds.has(item.id) || handledIds.has(item.id)) return item;
+      if (!canMutateWorkspaceContent(account, item)) return item;
+      handledIds.add(item.id);
+      try {
+        const customTags = applyContentPoolCustomTagChanges(item.customTags, { add, remove });
+        const nextItem = { ...item, customTags };
+        result.items.push(nextItem);
+        changed = true;
+        return nextItem;
+      } catch (error) {
+        result.failures.push({ itemId: item.id, error: error instanceof Error ? error.message : "Custom tag update failed." });
+        return item;
+      }
+    });
+    return changed ? refreshProjectStats({ ...project, items, updatedAt: now }) : project;
+  });
+  ids.filter((id) => !handledIds.has(id)).forEach((itemId) => {
+    result.failures.push({ itemId, error: "Content item not found or is not editable." });
+  });
+  if (result.items.length) await writePool(pool);
+  return result;
 }
 
 export async function listContentPoolSelection(
@@ -141,6 +207,7 @@ export async function ingestCrawlItems(query: string, items: NormalizedSourceIte
         usedCount: previous.usedCount || 0,
         analysis: previous.analysis || analyzeSourceItem(enrichedItem),
         contentTagging,
+        customTags: normalizeContentPoolCustomTags(previous.customTags),
         visualTagging,
       };
       existing.set(enrichedItem.id, {
@@ -151,6 +218,7 @@ export async function ingestCrawlItems(query: string, items: NormalizedSourceIte
       const videoFrames = normalizeVideoFrames(enrichedItem.videoFrames);
       const nextItem: NormalizedSourceItem = {
         ...enrichedItem,
+        customTags: normalizeContentPoolCustomTags(enrichedItem.customTags),
         videoFrames,
         mediaUrls: replaceVideoFrameUrlsInMediaUrls(enrichedItem.mediaUrls, videoFrames),
         poolStatus: "new",
@@ -191,6 +259,7 @@ export async function createSourceItem(query: string, item: Omit<NormalizedSourc
     ...owner,
     id: item.id || `${item.platform}-${sourceId}`,
     sourceId,
+    customTags: normalizeContentPoolCustomTags(item.customTags),
     images: normalizeContentImageUrls(item.images || []),
     videoFrames,
     mediaUrls: replaceVideoFrameUrlsInMediaUrls(
@@ -260,6 +329,7 @@ export async function updateSourceItem(sourceItemId: string, patch: Partial<Norm
           patch.contentTagging === undefined
             ? item.contentTagging
             : updateSourceContentTags(item.contentTagging, patch.contentTagging.tags),
+        customTags: patch.customTags === undefined ? item.customTags : normalizeContentPoolCustomTags(patch.customTags),
         visualTagging:
           patch.visualTagging === undefined
             ? item.visualTagging

@@ -15,8 +15,10 @@ import {
   Layers3,
   Loader2,
   Maximize2,
+  Minus,
   Moon,
   Play,
+  Plus,
   Radio,
   RefreshCw,
   Search,
@@ -31,6 +33,8 @@ import {
   Wand2,
   X,
 } from "lucide-react";
+import { ContentPoolCustomTagPicker } from "@/components/content-pool-custom-tag-picker";
+import { contentPoolCustomTagKey, matchesAllContentPoolCustomTags } from "@/lib/content-pool-tags";
 import { getStoredTheme, setStoredTheme, subscribeTheme, type ThemeMode } from "@/lib/theme";
 import { toRemoteImagePreviewSrc } from "@/lib/media-preview";
 import { selectBestVideoHighlightFrames } from "@/lib/video-frame-policy";
@@ -40,6 +44,7 @@ import {
   defaultSimpleRunMediaSettings,
   visualTagOptions,
   type ConfigStatus,
+  type ContentPoolTagBatchResult,
   type ContentProject,
   type ContentTag,
   type CrawlJob,
@@ -105,6 +110,7 @@ type SourceEditForm = {
   authorName: string;
   sourceUrl: string;
   contentTags: ContentTag[];
+  customTags: string[];
   visualTags: Array<{ id: string; tag: VisualTag }>;
   poolStatus: SourceUsageStatus;
   mediaType: NonNullable<NormalizedSourceItem["mediaType"]>;
@@ -294,6 +300,12 @@ export default function ContentDeskPage() {
   const [poolStatusFilter, setPoolStatusFilter] = useState<PoolStatusFilter>("all");
   const [poolPlatformFilter, setPoolPlatformFilter] = useState<PoolPlatformFilter>("all");
   const [poolSort, setPoolSort] = useState<PoolSortMode>("hot_desc");
+  const [poolSearch, setPoolSearch] = useState("");
+  const [poolContentTagFilters, setPoolContentTagFilters] = useState<ContentTag[]>([]);
+  const [poolCustomTagFilters, setPoolCustomTagFilters] = useState<string[]>([]);
+  const [batchTagsOpen, setBatchTagsOpen] = useState(false);
+  const [batchTagMode, setBatchTagMode] = useState<"add" | "remove">("add");
+  const [batchTagFailures, setBatchTagFailures] = useState<ContentPoolTagBatchResult["failures"]>([]);
   const [simpleRuns, setSimpleRuns] = useState<SimpleRun[]>([]);
   const [workspaceSettings, setWorkspaceSettings] = useState<WorkspacePromptSettings | null>(null);
   const [sourceEditState, setSourceEditState] = useState<{ sourceId: string; form: SourceEditForm }>({
@@ -314,13 +326,19 @@ export default function ContentDeskPage() {
   const [preview, setPreview] = useState<PreviewState>(null);
 
   const visibleSources = useMemo(() => {
+    const normalizedSearch = poolSearch.normalize("NFKC").trim().toLocaleLowerCase();
     const filtered = sources.filter((item) => {
       const statusMatched = poolStatusFilter === "all" || (item.poolStatus || "new") === poolStatusFilter;
       const platformMatched = poolPlatformFilter === "all" || item.platform === poolPlatformFilter;
-      return statusMatched && platformMatched;
+      const contentTags = getContentTags(item);
+      const contentTagsMatched = poolContentTagFilters.every((tag) => contentTags.includes(tag));
+      const customTagsMatched = matchesAllContentPoolCustomTags(item.customTags, poolCustomTagFilters);
+      const searchMatched = !normalizedSearch || [item.title, item.contentText, item.authorName, item.sourceId, ...(item.customTags || [])]
+        .some((value) => String(value || "").normalize("NFKC").toLocaleLowerCase().includes(normalizedSearch));
+      return statusMatched && platformMatched && contentTagsMatched && customTagsMatched && searchMatched;
     });
     return sortSources(filtered, poolSort);
-  }, [poolPlatformFilter, poolSort, poolStatusFilter, sources]);
+  }, [poolContentTagFilters, poolCustomTagFilters, poolPlatformFilter, poolSearch, poolSort, poolStatusFilter, sources]);
 
   const selectedContentItems = useMemo(
     () => visibleSources.filter((item) => selectedContentItemIds.includes(item.id)),
@@ -671,6 +689,7 @@ export default function ContentDeskPage() {
           updatedBy: "user",
           updatedAt: new Date().toISOString(),
         },
+        customTags: sourceEdit.customTags,
         visualTagging: {
           assets: buildVisualTagPatchAssets(selectedSource, sourceEdit.visualTags),
           model: selectedSource.visualTagging?.model,
@@ -807,6 +826,30 @@ export default function ContentDeskPage() {
     }
   }
 
+  async function updateSelectedContentItemCustomTags(mode: "add" | "remove", label: string) {
+    if (!selectedContentItemIds.length) throw new Error("请先勾选内容池样本。");
+    setBusy("batch");
+    setBatchTagFailures([]);
+    try {
+      const res = await fetch("/api/content-pool/tags", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ ids: selectedContentItemIds, [mode]: [label] }),
+      });
+      const data = (await res.json()) as ContentPoolTagBatchResult & { error?: string };
+      if (!res.ok) throw new Error(data.error || "批量标签更新失败");
+      setBatchTagFailures(data.failures);
+      await loadContentPool(query);
+      setMessage(`标签操作完成：已更新 ${data.items.length} 条，失败 ${data.failures.length} 条。`);
+    } catch (error) {
+      const message = error instanceof Error ? error.message : "批量标签更新失败";
+      setMessage(message);
+      throw error;
+    } finally {
+      setBusy(null);
+    }
+  }
+
   async function cacheSelectedContentItemMedia(sourceItemIds = selectedContentItemIds, options: { forceVideoRefresh?: boolean } = {}) {
     if (!sourceItemIds.length) {
       setMessage("请先勾选内容池样本。");
@@ -894,6 +937,16 @@ export default function ContentDeskPage() {
 
   function clearContentItemSelection() {
     setSelectedContentItemIds([]);
+    setBatchTagsOpen(false);
+    setBatchTagFailures([]);
+  }
+
+  function clearPoolFilters() {
+    setPoolSearch("");
+    setPoolStatusFilter("all");
+    setPoolPlatformFilter("all");
+    setPoolContentTagFilters([]);
+    setPoolCustomTagFilters([]);
   }
 
   function openSourcePreview(item: NormalizedSourceItem) {
@@ -1258,6 +1311,10 @@ export default function ContentDeskPage() {
 
           <section className="content-desk-pane content-desk-pool glass-strong ops-panel thin-scrollbar">
             <div className="content-desk-toolbar">
+              <label className="content-pool-search-field">
+                <Search className="h-4 w-4" />
+                <input value={poolSearch} onChange={(event) => setPoolSearch(event.target.value)} placeholder="搜索标题、正文、作者、来源 ID 或自定义标签" aria-label="搜索内容池" />
+              </label>
               <div className="content-desk-filter-grid">
                 <label className="review-filter-field">
                   <span><Filter className="h-3.5 w-3.5" />状态</span>
@@ -1284,6 +1341,22 @@ export default function ContentDeskPage() {
                   </select>
                 </label>
               </div>
+              <details className="content-pool-tag-filters" open={Boolean(poolContentTagFilters.length || poolCustomTagFilters.length) || undefined}>
+                <summary><span><Tag className="h-3.5 w-3.5" />标签筛选</span><em>{poolContentTagFilters.length + poolCustomTagFilters.length || ""}</em></summary>
+                <div className="content-pool-tag-filter-body">
+                  <div>
+                    <span className="content-pool-tag-filter-label">内容分类 · 同时满足</span>
+                    <div className="mt-2 flex flex-wrap gap-1.5">
+                      {contentTagOptions.map((tag) => <button key={tag} type="button" className={`filter-chip ${poolContentTagFilters.includes(tag) ? "filter-chip-active" : ""}`} onClick={() => setPoolContentTagFilters((current) => current.includes(tag) ? current.filter((item) => item !== tag) : [...current, tag])}>{tag}</button>)}
+                    </div>
+                  </div>
+                  <div>
+                    <span className="content-pool-tag-filter-label">自定义标签 · 同时满足</span>
+                    <ContentPoolCustomTagPicker tags={poolCustomTagFilters} placeholder="搜索并选择自定义标签" allowCreate={false} onAdd={(label) => setPoolCustomTagFilters((current) => [...current, label])} onRemove={(label) => setPoolCustomTagFilters((current) => current.filter((item) => contentPoolCustomTagKey(item) !== contentPoolCustomTagKey(label)))} />
+                  </div>
+                </div>
+              </details>
+              {(poolSearch || poolStatusFilter !== "all" || poolPlatformFilter !== "all" || poolContentTagFilters.length || poolCustomTagFilters.length) ? <button className="content-pool-clear-filters" type="button" onClick={clearPoolFilters}><X className="h-3.5 w-3.5" />清除筛选</button> : null}
               <BatchActionBar
                 selectedCount={selectedContentItemIds.length}
                 totalCount={visibleSources.length}
@@ -1293,12 +1366,24 @@ export default function ContentDeskPage() {
                 onClear={clearContentItemSelection}
                 actions={[
                   { label: "补全本地素材", onClick: () => cacheSelectedContentItemMedia() },
+                  { label: "管理标签", onClick: () => setBatchTagsOpen((current) => !current) },
                   { label: "二次创作", onClick: startPoolSecondaryCreation },
                   { label: "标记已分析", onClick: () => updateSelectedContentItemStatus("analyzed") },
                   { label: "标记已审查", onClick: () => updateSelectedContentItemStatus("approved") },
                   { label: "删除已选", danger: true, onClick: deleteSelectedContentItems },
                 ]}
               />
+              {batchTagsOpen && selectedContentItemIds.length ? <div className="content-pool-batch-tags" aria-label="批量管理自定义标签">
+                <div className="content-pool-batch-tag-head"><strong>管理 {selectedContentItemIds.length} 条内容的自定义标签</strong><button type="button" onClick={() => { setBatchTagsOpen(false); setBatchTagFailures([]); }} title="关闭批量标签" aria-label="关闭批量标签"><X /></button></div>
+                <div className="content-pool-batch-tag-modes" role="group" aria-label="标签操作">
+                  <button type="button" aria-pressed={batchTagMode === "add"} onClick={() => { setBatchTagMode("add"); setBatchTagFailures([]); }}><Plus />批量添加</button>
+                  <button type="button" aria-pressed={batchTagMode === "remove"} onClick={() => { setBatchTagMode("remove"); setBatchTagFailures([]); }}><Minus />批量删除</button>
+                </div>
+                <ContentPoolCustomTagPicker key={batchTagMode} tags={[]} placeholder={batchTagMode === "add" ? "输入或选择要添加的标签" : "输入或选择要删除的标签"} allowCreate={batchTagMode === "add"} onAdd={(label) => updateSelectedContentItemCustomTags(batchTagMode, label)} />
+                {batchTagFailures.length ? <ul className="content-pool-batch-tag-failures" aria-label="标签更新失败明细">
+                  {batchTagFailures.map((failure) => <li key={failure.itemId}><strong>{failure.itemId}</strong><span>{failure.error}</span></li>)}
+                </ul> : null}
+              </div> : null}
             </div>
 
             <div className="content-desk-list thin-scrollbar">
@@ -1321,6 +1406,7 @@ export default function ContentDeskPage() {
                           <p className="line-clamp-2 text-sm font-semibold text-white">{item.title || item.contentText || "未命名内容"}</p>
                           <p className="mt-2 line-clamp-2 text-xs leading-5 text-white/52">{item.contentText}</p>
                           <TagChipRow tags={getContentTags(item)} status={item.contentTagging?.status} compact />
+                          <CustomTagChipRow tags={item.customTags || []} compact />
                           <MediaCacheMiniBadge item={item} />
                           <div className="mt-2 grid gap-1 text-[10px] text-white/42">
                             <span className="inline-flex min-w-0 items-center gap-1">
@@ -1694,6 +1780,11 @@ function TagChipRow({ tags, status, compact = false }: { tags: ContentTag[]; sta
   );
 }
 
+function CustomTagChipRow({ tags, compact = false }: { tags: string[]; compact?: boolean }) {
+  if (!tags.length) return null;
+  return <div className={`${compact ? "mt-2" : "mt-3"} flex min-w-0 flex-wrap gap-1.5`}>{tags.slice(0, compact ? 4 : 20).map((tag) => <span key={tag} className="content-pool-custom-tag-badge">{tag}</span>)}</div>;
+}
+
 function TaggingOverview({ item }: { item: NormalizedSourceItem }) {
   const tags = getContentTags(item);
   const visualAssets = getVisualTagAssets(item);
@@ -1859,7 +1950,7 @@ function SourceManagementCard({
 
       <div className="mt-4">
         <div className="flex items-center justify-between gap-3">
-          <FieldLabel label="内容标签" />
+          <FieldLabel label="内容分类" />
           <span className="status-badge text-[10px] text-white/45">最多 4 个</span>
         </div>
         <div className="mt-2 flex flex-wrap gap-2">
@@ -1884,6 +1975,22 @@ function SourceManagementCard({
               </button>
             );
           })}
+        </div>
+      </div>
+
+      <div className="mt-4">
+        <div className="flex items-center justify-between gap-3">
+          <FieldLabel label="自定义标签" />
+          <span className="status-badge text-[10px] text-white/45">{form.customTags.length}/20</span>
+        </div>
+        <div className="mt-2">
+          <ContentPoolCustomTagPicker
+            tags={form.customTags}
+            placeholder="输入或选择运营标签"
+            disabled={busy}
+            onAdd={(label) => onFormChange({ customTags: [...form.customTags, label] })}
+            onRemove={(label) => onFormChange({ customTags: form.customTags.filter((item) => contentPoolCustomTagKey(item) !== contentPoolCustomTagKey(label)) })}
+          />
         </div>
       </div>
 
@@ -2220,6 +2327,7 @@ function makeEmptySourceEditForm(): SourceEditForm {
     authorName: "",
     sourceUrl: "",
     contentTags: [],
+    customTags: [],
     visualTags: [],
     poolStatus: "new",
     mediaType: "unknown",
@@ -2240,6 +2348,7 @@ function makeSourceEditForm(item: NormalizedSourceItem): SourceEditForm {
     authorName: item.authorName || "",
     sourceUrl: item.sourceUrl || "",
     contentTags: getContentTags(item),
+    customTags: item.customTags || [],
     visualTags: getVisualTagAssets(item).map((asset) => ({ id: asset.id, tag: asset.tag })),
     poolStatus: item.poolStatus || "new",
     mediaType: item.mediaType || "unknown",
@@ -2275,6 +2384,7 @@ function parseOptionalNumber(value: string) {
   const parsed = Number(trimmed.replace(/,/g, ""));
   return Number.isFinite(parsed) ? Math.max(0, Math.round(parsed)) : undefined;
 }
+
 
 function splitLines(value: string) {
   return value.split(/\r?\n/).map((item) => item.trim()).filter(Boolean);
