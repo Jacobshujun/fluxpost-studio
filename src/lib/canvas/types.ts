@@ -1,7 +1,7 @@
 import type { ContentPoolSelectionFilter, ContentTag, GeneratedPost, Platform, SourceMediaType, SourceUsageStatus } from "../types";
 import type { CompetitorWorkbookCardSnapshot, CompetitorWorkbookRowSnapshot, CompetitorWorkbookSnapshot } from "../competitor-workbook";
 
-export type CanvasArtifactKind = "text" | "images" | "videos" | "socialPost" | "publishJobRef";
+export type CanvasArtifactKind = "text" | "images" | "audios" | "videos" | "socialPost" | "publishJobRef";
 export type CanvasPortKind = CanvasArtifactKind | "any" | "visual";
 
 export function areCanvasPortKindsCompatible(outputKind: CanvasPortKind, inputKind: CanvasPortKind) {
@@ -31,6 +31,43 @@ export type CanvasMediaReference = {
   width?: number;
   height?: number;
   durationSeconds?: number;
+  sha256?: string;
+  localPath?: string;
+};
+
+export type CanvasDirectoryMediaKind = "image" | "audio" | "video";
+export type CanvasDirectoryMedia = CanvasMediaReference & {
+  id: string;
+  kind: CanvasDirectoryMediaKind;
+  absolutePath: string;
+  relativePath: string;
+  bytes: number;
+  modifiedAt: string;
+};
+export type CanvasDirectoryGroup = {
+  id: string;
+  snapshotId?: string;
+  name: string;
+  images: CanvasDirectoryMedia[];
+  audios: CanvasDirectoryMedia[];
+  videos: CanvasDirectoryMedia[];
+  valid: boolean;
+  errors: string[];
+};
+export type CanvasDirectorySnapshot = {
+  id: string;
+  ownerUserId: string;
+  rootPath: string;
+  scannedAt: string;
+  groups: CanvasDirectoryGroup[];
+  report: { files: number; groups: number; truncated: boolean; errors: string[] };
+};
+export type CanvasSlideshowTextStyle = {
+  x: number; y: number; width: number;
+  fontFamily: string; fontWeight: number; fontSize: number; autoScale: boolean;
+  lineHeight: number; align: "left" | "center" | "right"; color: string;
+  outlineColor: string; outlineWidth: number; shadow: boolean;
+  backgroundColor: string; backgroundOpacity: number; padding: number;
 };
 
 export type CanvasVideoSnapshot = {
@@ -142,6 +179,7 @@ export type CanvasSubtitleTranscriptCacheEntry = {
 export type CanvasArtifact =
   | { kind: "text"; value: string }
   | { kind: "images"; items: CanvasMediaReference[]; imageBatch?: CanvasImageBatchSummary }
+  | { kind: "audios"; items: CanvasMediaReference[]; jobId?: string; status?: string }
   | { kind: "videos"; items: CanvasMediaReference[]; providerTaskId?: string; providerStatus?: string }
   | { kind: "socialPost"; postId: string; post: GeneratedPost }
   | { kind: "publishJobRef"; jobId: string; status: string };
@@ -149,6 +187,7 @@ export type CanvasArtifact =
 export type CanvasNodeType =
   | "input.text"
   | "input.images"
+  | "input.local-directory"
   | "input.videos"
   | "input.video-loader"
   | "input.source-video"
@@ -165,6 +204,7 @@ export type CanvasNodeType =
   | "utility.save-images"
   | "utility.display-any"
   | "utility.video-reconstruct"
+  | "utility.image-slideshow"
   | "utility.video-subtitles"
   | "utility.prompt-template"
   | "utility.text-concatenate"
@@ -548,7 +588,7 @@ export type CanvasScheduleContentPoolSnapshot = {
   snapshotAt: string;
 };
 
-export type CanvasScheduleParameterType = "image" | "image-group" | "video" | "source-video" | "content-pool" | "text" | "copy" | "number" | "boolean" | "enum";
+export type CanvasScheduleParameterType = "image" | "image-group" | "directory-group" | "video" | "source-video" | "content-pool" | "text" | "copy" | "number" | "boolean" | "enum";
 export type CanvasScheduleParameterScope = "main" | "child";
 export type CanvasScheduleExpansionMode = "cartesian" | "zip";
 export type CanvasScheduleAggregationPolicy = "at-least-one" | "all";
@@ -562,7 +602,8 @@ export type CanvasScheduleParameterValue =
   | CanvasScheduleCopySnapshot
   | CanvasScheduleContentPoolSnapshot
   | CanvasVideoSnapshot
-  | CanvasSourceVideoSnapshot;
+  | CanvasSourceVideoSnapshot
+  | CanvasDirectoryGroup;
 
 export type CanvasScheduleParameterSource =
   | { mode: "fixed" | "manual-list"; values: CanvasScheduleParameterValue[] }
@@ -663,7 +704,7 @@ export type CanvasScheduleV2MainTask = {
   workbookRow?: CompetitorWorkbookRowSnapshot;
 };
 
-export type CanvasBatchBindingAdapter = "config-value" | "image-input" | "video-input" | "copy-input" | "source-video-input" | "content-pool-input";
+export type CanvasBatchBindingAdapter = "config-value" | "image-input" | "video-input" | "copy-input" | "source-video-input" | "content-pool-input" | "directory-group-input";
 
 export type CanvasBatchBindableField = {
   key: string;

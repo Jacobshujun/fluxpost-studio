@@ -16,13 +16,22 @@ export type CanvasWorkflowFileV1 = {
 };
 
 export function createCanvasWorkflowFile(name: string, graph: CanvasGraph): CanvasWorkflowFileV1 {
-  const decoded = decodeCanvasGraph(structuredClone(graph));
+  const decoded = redactPortableCanvasGraph(decodeCanvasGraph(structuredClone(graph)));
   assertValidCanvasWorkflowGraph(decoded);
   return {
     kind: workflowFileKind,
     version: workflowFileVersion,
     name: normalizeWorkflowFileName(name),
     graph: decoded,
+  };
+}
+
+function redactPortableCanvasGraph(graph: CanvasGraph): CanvasGraph {
+  return {
+    ...graph,
+    nodes: graph.nodes.map((node) => node.type === "input.local-directory"
+      ? { ...node, config: { ...node.config, path: "", snapshotId: "", groupId: "", selectedAudioId: "" } }
+      : node),
   };
 }
 

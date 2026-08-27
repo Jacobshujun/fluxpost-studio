@@ -5,6 +5,7 @@ export const canvasWorkflowTemplateKeys = [
   "video-reconstruct-seedance",
   "video-reconstruct-gpt-image",
   "competitor-workbook-posts",
+  "directory-group-slideshow",
 ] as const;
 
 export type CanvasWorkflowTemplateKey = (typeof canvasWorkflowTemplateKeys)[number];
@@ -14,6 +15,23 @@ export function isCanvasWorkflowTemplateKey(value: unknown): value is CanvasWork
 }
 
 export function createCanvasWorkflowTemplateGraph(templateKey: CanvasWorkflowTemplateKey): { name: string; graph: CanvasGraph } {
+  if (templateKey === "directory-group-slideshow") {
+    const directory = configuredNode("input.local-directory", "local-directory", { x: 70, y: 220 }, {}, "本地目录");
+    const title = configuredNode("input.text", "slideshow-title", { x: 70, y: 520 }, { text: "" }, "标题");
+    const body = configuredNode("input.text", "slideshow-body", { x: 70, y: 700 }, { text: "" }, "正文");
+    const slideshow = configuredNode("utility.image-slideshow", "image-slideshow", { x: 460, y: 300 }, {}, "图片合成视频");
+    const compose = configuredNode("compose.social-post", "review-draft", { x: 850, y: 280 }, {}, "内容组装");
+    return { name: "目录分组成片", graph: graph([directory, title, body, slideshow, compose], [
+      edge("local-directory", "images", "image-slideshow", "images"),
+      edge("local-directory", "audios", "image-slideshow", "audio"),
+      edge("slideshow-title", "text", "image-slideshow", "title"),
+      edge("slideshow-body", "text", "image-slideshow", "body"),
+      edge("slideshow-title", "text", "review-draft", "title"),
+      edge("slideshow-body", "text", "review-draft", "body"),
+      edge("local-directory", "images", "review-draft", "images"),
+      edge("image-slideshow", "videos", "review-draft", "videos"),
+    ]) };
+  }
   if (templateKey === "competitor-workbook-posts") {
     const workbook = configuredNode("input.competitor-workbook", "competitor-workbook", { x: 70, y: 180 }, {}, "竞品 Excel 行");
     const references = configuredNode("input.library-images", "vehicle-references", { x: 70, y: 560 }, {}, "车型参考图");

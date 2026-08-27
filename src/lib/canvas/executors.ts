@@ -11,7 +11,8 @@ import type { GeneratedPost, SourceImageTask } from "../types";
 import type { WorkspaceAccessActor } from "../workspace-ownership";
 import { ArkSeedanceNeedsConfigError, queryArkSeedanceVideo, submitArkSeedanceVideo } from "./seedance";
 import { resolveSeedanceInput } from "./seedance-references";
-import { CanvasMediaNeedsConfigError, extractCanvasVideoFrames, reconstructCanvasVideo, transformCanvasImages } from "./media-tools";
+import { CanvasMediaNeedsConfigError, extractCanvasVideoFrames, reconstructCanvasVideo, transformCanvasImages, renderCanvasImageSlideshow } from "./media-tools";
+import { revalidateCanvasDirectoryGroup } from "./directory-snapshots";
 import { canvasVisionPresets, concatenateCanvasText, parseCanvasImageSelection, renderCanvasPromptTemplate, splitCanvasText } from "./node-utils";
 import { normalizeUrlList } from "./registry";
 import { CANVAS_SAVE_IMAGE_MAX_ITEMS } from "./save-images";
@@ -27,6 +28,7 @@ import type {
   CanvasNode,
   CanvasNodeRun,
   CanvasNodeRunInternalMetadata,
+  CanvasSlideshowTextStyle,
 } from "./types";
 import { addCanvasVideoSubtitles } from "./video-subtitles";
 import { selectedCanvasVideo } from "./video-loader";
@@ -73,6 +75,7 @@ type CanvasNodeExecutor = (context: CanvasNodeExecutionContext) => Promise<Canva
 const executors: Record<CanvasNode["type"], CanvasNodeExecutor> = {
   "input.text": executeLiteralNode,
   "input.images": executeLiteralNode,
+  "input.local-directory": executeLocalDirectory,
   "input.videos": executeLiteralNode,
   "input.video-loader": executeLiteralNode,
   "input.source-video": executeLiteralNode,
@@ -89,6 +92,7 @@ const executors: Record<CanvasNode["type"], CanvasNodeExecutor> = {
   "utility.save-images": executeSaveImages,
   "utility.display-any": executeDisplayAny,
   "utility.video-reconstruct": executeVideoReconstruct,
+  "utility.image-slideshow": executeImageSlideshow,
   "utility.video-subtitles": executeVideoSubtitles,
   "utility.prompt-template": executePromptTemplate,
   "utility.text-concatenate": executeTextConcatenate,
@@ -114,6 +118,7 @@ async function executeLiteralNode({ node }: CanvasNodeExecutionContext) {
 export function resolveCanvasLiteralOutputs(node: CanvasNode): Record<string, CanvasArtifact> | undefined {
   if (node.type === "input.text") return { text: { kind: "text", value: String(node.config.text || "").trim() } };
   if (node.type === "input.images") return { images: imageArtifact(normalizeUrlList(node.config.urls), decodeCanvasImageBatch(node.config.imageBatch)) };
+  if (node.type === "input.local-directory") throw new Error("Local directory input must be scanned before execution.");
   if (node.type === "input.videos") return { videos: videoArtifact(normalizeUrlList(node.config.urls)) };
   if (node.type === "input.video-loader") {
     const video = selectedCanvasVideo(node.config);
@@ -180,6 +185,36 @@ export function resolveCanvasLiteralOutputs(node: CanvasNode): Record<string, Ca
     };
   }
   return undefined;
+}
+
+async function executeLocalDirectory({ node, account }: CanvasNodeExecutionContext): Promise<CanvasNodeExecutionResult> {
+  const snapshotId = String(node.config.snapshotId || "");
+  const groupId = String(node.config.groupId || "");
+  if (!snapshotId || !groupId) throw new Error("Local directory node snapshot is incomplete.");
+  const group = await revalidateCanvasDirectoryGroup(snapshotId, groupId, account.id);
+  const selectedAudioId = String(node.config.selectedAudioId || group.audios[0]?.id || "");
+  const audio = group.audios.find((item) => item.id === selectedAudioId) || group.audios[0];
+  if (!audio) throw new Error("Selected directory group has no audio.");
+  return {
+    outputs: {
+      images: { kind: "images", items: group.images.map((item) => ({ ...item, url: `/api/canvas/local-directory/media?snapshot=${encodeURIComponent(snapshotId)}&media=${encodeURIComponent(item.id)}`, localPath: item.absolutePath })) },
+      audios: { kind: "audios", items: [{ ...audio, url: `/api/canvas/local-directory/media?snapshot=${encodeURIComponent(snapshotId)}&media=${encodeURIComponent(audio.id)}`, localPath: audio.absolutePath }] },
+      videos: { kind: "videos", items: group.videos.map((item) => ({ ...item, url: `/api/canvas/local-directory/media?snapshot=${encodeURIComponent(snapshotId)}&media=${encodeURIComponent(item.id)}`, localPath: item.absolutePath })) },
+    },
+  };
+}
+
+async function executeImageSlideshow({ node, inputs }: CanvasNodeExecutionContext): Promise<CanvasNodeExecutionResult> {
+  const images = imageItems(inputs.images);
+  const audios = (inputs.audio || []).flatMap((artifact) => artifact.kind === "audios" ? artifact.items : []);
+  if (!images.length || images.length > 250) throw new Error("Image slideshow requires 1-250 images.");
+  if (audios.length !== 1) throw new Error("Image slideshow requires exactly one audio track.");
+  const title = textValues(inputs.title)[0] || String(node.config.titleText || "");
+  const body = textValues(inputs.body)[0] || String(node.config.bodyText || "");
+  const sharedStyle = { fontFamily: String(node.config.fontFamily || "Microsoft YaHei"), fontWeight: Number(node.config.fontWeight || 700), autoScale: node.config.autoScale !== false, lineHeight: Number(node.config.lineHeight || 1.2), align: String(node.config.textAlign || "center") as CanvasSlideshowTextStyle["align"], color: String(node.config.textColor || "#ffffff"), outlineColor: String(node.config.outlineColor || "#000000"), outlineWidth: Number(node.config.outlineWidth || 4), shadow: node.config.shadow !== false, backgroundColor: String(node.config.backgroundColor || "#000000"), backgroundOpacity: Number(node.config.backgroundOpacity || 0), padding: Number(node.config.textPadding || 16) };
+  const result = await renderCanvasImageSlideshow({ images, audio: audios[0], title, body, durationSeconds: Number(node.config.duration || 10), ratio: String(node.config.ratio || "9:16") as "9:16" | "3:4" | "1:1" | "16:9", transition: String(node.config.transition || "beat") as "beat" | "smooth" | "none", motion: node.config.motion !== false, seed: node.id, titleStyle: { ...sharedStyle, x: Number(node.config.titleX || 0.5), y: Number(node.config.titleY || 0.1), width: Number(node.config.titleWidth || 0.9), fontSize: Number(node.config.titleFontSize || 64) }, bodyStyle: { ...sharedStyle, x: Number(node.config.bodyX || 0.5), y: Number(node.config.bodyY || 0.72), width: Number(node.config.bodyWidth || 0.9), fontSize: Number(node.config.bodyFontSize || 42) } });
+  const { beatFallback, ...video } = result;
+  return { outputs: { videos: { kind: "videos", items: [video] } }, ...(beatFallback ? { providerStatus: "Beat analysis failed; used uniform transition points." } : {}) };
 }
 
 async function executeImagePreview({ inputs }: CanvasNodeExecutionContext) {

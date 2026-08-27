@@ -1,7 +1,7 @@
 import { existsSync, mkdirSync, readFileSync } from "node:fs";
 import path from "node:path";
 import { Pool, type PoolClient } from "pg";
-import type { CanvasNodeRun, CanvasRun, CanvasRunQueueItem, CanvasSchedule, CanvasSubtitlePreset, CanvasSubtitleRevision, CanvasSubtitleTranscriptCacheEntry, CanvasSubtitleWaveform, CanvasWorkflow } from "./canvas/types";
+import type { CanvasDirectorySnapshot, CanvasNodeRun, CanvasRun, CanvasRunQueueItem, CanvasSchedule, CanvasSubtitlePreset, CanvasSubtitleRevision, CanvasSubtitleTranscriptCacheEntry, CanvasSubtitleWaveform, CanvasWorkflow } from "./canvas/types";
 import { getLibraryAssetAddedAt } from "./library-sort";
 import type {
   ContentProject,
@@ -2491,6 +2491,30 @@ export async function deleteCanvasWorkflowFromDb(workflowId: string, ownerUserId
   }
 }
 
+export async function createCanvasDirectorySnapshotInDb(snapshot: CanvasDirectorySnapshot) {
+  await ensureDatabaseReady();
+  if (getDatabaseBackend() === "postgres") {
+    await getPostgresPool().query(
+      `INSERT INTO canvas_directory_snapshots (id, owner_user_id, root_path, scanned_at, data_json) VALUES ($1, $2, $3, $4, $5::jsonb)`,
+      [snapshot.id, snapshot.ownerUserId, snapshot.rootPath, snapshot.scannedAt, toJson(snapshot)],
+    );
+  } else {
+    getSqliteDatabase().prepare(`INSERT INTO canvas_directory_snapshots (id, owner_user_id, root_path, scanned_at, data_json) VALUES (?, ?, ?, ?, ?)`)
+      .run(snapshot.id, snapshot.ownerUserId, snapshot.rootPath, snapshot.scannedAt, toJson(snapshot));
+  }
+  return snapshot;
+}
+
+export async function getCanvasDirectorySnapshotFromDb(snapshotId: string, ownerUserId: string) {
+  await ensureDatabaseReady();
+  if (getDatabaseBackend() === "postgres") {
+    const result = await getPostgresPool().query<JsonRow>("SELECT data_json FROM canvas_directory_snapshots WHERE id = $1 AND owner_user_id = $2", [snapshotId, ownerUserId]);
+    return result.rows[0] ? fromJson<CanvasDirectorySnapshot>(result.rows[0].data_json) : undefined;
+  }
+  const row = getSqliteDatabase().prepare("SELECT data_json FROM canvas_directory_snapshots WHERE id = ? AND owner_user_id = ?").get(snapshotId, ownerUserId) as JsonRow | undefined;
+  return row ? fromJson<CanvasDirectorySnapshot>(row.data_json) : undefined;
+}
+
 export async function listCanvasSchedulesFromDb(limit = 100) {
   await ensureDatabaseReady();
   if (getDatabaseBackend() === "postgres") {
@@ -3425,6 +3449,15 @@ function createSqliteSchema(db: SqliteDatabase) {
     CREATE INDEX IF NOT EXISTS idx_lark_task_launches_run_id ON lark_task_launches(run_id);
     CREATE INDEX IF NOT EXISTS idx_lark_task_launches_created_at ON lark_task_launches(created_at DESC);
 
+    CREATE TABLE IF NOT EXISTS canvas_directory_snapshots (
+      id TEXT PRIMARY KEY,
+      owner_user_id TEXT NOT NULL,
+      root_path TEXT NOT NULL,
+      scanned_at TEXT NOT NULL,
+      data_json TEXT NOT NULL
+    );
+    CREATE INDEX IF NOT EXISTS idx_canvas_directory_snapshots_owner_scanned ON canvas_directory_snapshots(owner_user_id, scanned_at DESC);
+
     CREATE TABLE IF NOT EXISTS canvas_workflows (
       id TEXT PRIMARY KEY,
       owner_user_id TEXT NOT NULL,
@@ -3894,6 +3927,15 @@ const postgresSchemaSql = `
   CREATE INDEX IF NOT EXISTS idx_lark_task_launches_message_id ON lark_task_launches(message_id);
   CREATE INDEX IF NOT EXISTS idx_lark_task_launches_run_id ON lark_task_launches(run_id);
   CREATE INDEX IF NOT EXISTS idx_lark_task_launches_created_at ON lark_task_launches(created_at DESC);
+
+  CREATE TABLE IF NOT EXISTS canvas_directory_snapshots (
+    id TEXT PRIMARY KEY,
+    owner_user_id TEXT NOT NULL,
+    root_path TEXT NOT NULL,
+    scanned_at TIMESTAMPTZ NOT NULL,
+    data_json JSONB NOT NULL
+  );
+  CREATE INDEX IF NOT EXISTS idx_canvas_directory_snapshots_owner_scanned ON canvas_directory_snapshots(owner_user_id, scanned_at DESC);
 
   CREATE TABLE IF NOT EXISTS canvas_workflows (
     id TEXT PRIMARY KEY,

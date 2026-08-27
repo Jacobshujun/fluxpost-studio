@@ -57,7 +57,7 @@ const loadTsModule = (relativePath, requireMap = {}, sandboxExtras = {}) => {
 const packageJson = JSON.parse(read("package.json"));
 assert.equal(packageJson.dependencies["@xyflow/react"], "^12.11.2");
 const canvasTypes = read("src/lib/canvas/types.ts");
-assert.ok(canvasTypes.includes('export type CanvasArtifactKind = "text" | "images" | "videos" | "socialPost" | "publishJobRef";'), "display-any must not add a wildcard artifact kind");
+assert.ok(canvasTypes.includes('export type CanvasArtifactKind = "text" | "images" | "audios" | "videos" | "socialPost" | "publishJobRef";'), "display-any must use explicit artifact kinds and never add a wildcard artifact kind");
 assert.ok(canvasTypes.includes('export type CanvasPortKind = CanvasArtifactKind | "any" | "visual";'), "wildcard and visual compatibility must stay isolated to port definitions");
 requireText(canvasTypes, [
   'phase: "shared" | "child" | "aggregate";',
@@ -239,7 +239,7 @@ try {
     defaultConfig: {},
     passiveSink: true,
   }, "display-any must be a passive, outputless wildcard sink");
-  for (const kind of ["text", "images", "videos", "socialPost", "publishJobRef"]) {
+  for (const kind of ["text", "images", "audios", "videos", "socialPost", "publishJobRef"]) {
     assert.equal(areCanvasPortKindsCompatible(kind, "any"), true, `${kind} output must connect to an any input`);
     assert.equal(areCanvasPortKindsCompatible(kind, kind), true, `${kind} must retain exact compatibility`);
   }

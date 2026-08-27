@@ -50,6 +50,28 @@ const canvasNodeDefinitionVersions: CanvasNodeDefinition[] = [
     defaultConfig: { urls: [] },
   },
   {
+    type: "input.local-directory",
+    version: 1,
+    label: "本地目录",
+    description: "扫描服务器绝对路径并按一级子目录输出图片、音乐和视频组。",
+    category: "input",
+    icon: "FolderOpen",
+    color: "#0f766e",
+    inputs: [],
+    outputs: [
+      { id: "images", label: "图片组", kind: "images" },
+      { id: "audios", label: "音乐", kind: "audios" },
+      { id: "videos", label: "视频", kind: "videos" },
+    ],
+    fields: [
+      { key: "path", label: "服务器绝对路径", kind: "text", placeholder: "例如 Y:\\视频内容 或 \\\\server\\share\\media" },
+      { key: "snapshotId", label: "快照 ID", kind: "text" },
+      { key: "groupId", label: "组 ID", kind: "text" },
+      { key: "selectedAudioId", label: "音乐 ID", kind: "text" },
+    ],
+    defaultConfig: { path: "", snapshotId: "", groupId: "", selectedAudioId: "" },
+  },
+  {
     type: "input.video-loader",
     version: 1,
     label: "视频加载",
@@ -342,6 +364,52 @@ const canvasNodeDefinitionVersions: CanvasNodeDefinition[] = [
     fields: [],
     defaultConfig: {},
     bypass: { inputPort: "source", outputPort: "videos" },
+  },
+  {
+    type: "utility.image-slideshow",
+    version: 1,
+    label: "图片合成视频",
+    description: "将图片组与一首音乐合成为社交视频。",
+    category: "utility",
+    icon: "Film",
+    color: "#db2777",
+    inputs: [
+      { id: "images", label: "图片组", kind: "images", required: true, multiple: true },
+      { id: "audio", label: "音乐", kind: "audios", required: true },
+      { id: "title", label: "标题", kind: "text" },
+      { id: "body", label: "正文", kind: "text" },
+    ],
+    outputs: [{ id: "videos", label: "成片", kind: "videos" }],
+    fields: [
+      { key: "duration", label: "时长（秒）", kind: "number", min: 1, max: 600 },
+      { key: "ratio", label: "比例", kind: "select", options: ["9:16", "3:4", "1:1", "16:9"].map((value) => ({ value, label: value })) },
+      { key: "transition", label: "转场", kind: "select", options: [{ value: "beat", label: "音乐节拍" }, { value: "smooth", label: "均匀平滑" }, { value: "none", label: "无转场" }] },
+      { key: "motion", label: "轻微推拉", kind: "boolean" },
+      { key: "titleText", label: "标题（静态）", kind: "textarea" },
+      { key: "bodyText", label: "正文（静态）", kind: "textarea" },
+      { key: "fontFamily", label: "字体", kind: "text" },
+      { key: "titleFontSize", label: "标题字号", kind: "number", min: 24, max: 160 },
+      { key: "bodyFontSize", label: "正文字号", kind: "number", min: 20, max: 120 },
+      { key: "fontWeight", label: "字重", kind: "select", options: [{ value: "400", label: "常规" }, { value: "500", label: "中等" }, { value: "700", label: "粗体" }] },
+      { key: "autoScale", label: "自动缩放", kind: "boolean" },
+      { key: "lineHeight", label: "行距", kind: "number", min: 1, max: 2 },
+      { key: "textAlign", label: "对齐", kind: "select", options: [{ value: "left", label: "左" }, { value: "center", label: "中" }, { value: "right", label: "右" }] },
+      { key: "textColor", label: "文字颜色", kind: "text" },
+      { key: "outlineColor", label: "描边颜色", kind: "text" },
+      { key: "outlineWidth", label: "描边", kind: "number", min: 0, max: 12 },
+      { key: "shadow", label: "阴影", kind: "boolean" },
+      { key: "backgroundColor", label: "背景颜色", kind: "text" },
+      { key: "backgroundOpacity", label: "背景透明度", kind: "number", min: 0, max: 1 },
+      { key: "textPadding", label: "内边距", kind: "number", min: 0, max: 80 },
+      { key: "titleX", label: "标题 X", kind: "number", min: 0.05, max: 0.95 },
+      { key: "titleY", label: "标题 Y", kind: "number", min: 0.05, max: 0.95 },
+      { key: "titleWidth", label: "标题宽度", kind: "number", min: 0.1, max: 0.9 },
+      { key: "bodyX", label: "正文 X", kind: "number", min: 0.05, max: 0.95 },
+      { key: "bodyY", label: "正文 Y", kind: "number", min: 0.05, max: 0.95 },
+      { key: "bodyWidth", label: "正文宽度", kind: "number", min: 0.1, max: 0.9 },
+    ],
+    defaultConfig: { duration: 10, ratio: "9:16", transition: "beat", motion: true, titleText: "", bodyText: "", fontFamily: "Microsoft YaHei", titleFontSize: 64, bodyFontSize: 42, fontWeight: "700", autoScale: true, lineHeight: 1.2, textAlign: "center", textColor: "#ffffff", outlineColor: "#000000", outlineWidth: 4, shadow: true, backgroundColor: "#000000", backgroundOpacity: 0, textPadding: 16, titleX: 0.5, titleY: 0.1, titleWidth: 0.9, bodyX: 0.5, bodyY: 0.72, bodyWidth: 0.9 },
+    capability: "video_model",
   },
   {
     type: "utility.prompt-template",
@@ -713,6 +781,9 @@ export function getCanvasBatchBindableFields(node: Pick<CanvasNode, "type" | "ve
   if (node.type === "input.video-loader") {
     return [{ key: "videos", label: "视频队列", parameterTypes: ["video"], adapter: "video-input" }];
   }
+  if (node.type === "input.local-directory") {
+    return [{ key: "groupId", label: "目录媒体组", parameterTypes: ["directory-group"], adapter: "directory-group-input" }];
+  }
   if (node.type === "input.content-pool") {
     return [{ key: "sourceItemId", label: "内容池素材", parameterTypes: ["content-pool"], adapter: "content-pool-input" }];
   }
@@ -793,6 +864,15 @@ export function validateCanvasNodeConfig(type: CanvasNodeType, config: CanvasNod
     }
   }
   if (type === "input.text" && !String(config.text || "").trim()) errors.push("文字节点内容不能为空。");
+  if (type === "input.local-directory") {
+    if (!String(config.path || "").trim()) errors.push("本地目录路径不能为空。");
+    if (!String(config.snapshotId || "").trim()) errors.push("本地目录需要先扫描并创建快照。");
+    if (!String(config.groupId || "").trim()) errors.push("本地目录需要选择媒体组。");
+  }
+  if (type === "utility.image-slideshow") {
+    const duration = Number(config.duration || 0);
+    if (!Number.isFinite(duration) || duration < 1 || duration > 600) errors.push("图片合成视频时长必须在 1-600 秒之间。");
+  }
   if ((type === "input.images" || type === "input.videos") && !normalizeUrlList(config.urls).length) {
     errors.push(`${definition.label}至少需要一个 URL。`);
   }

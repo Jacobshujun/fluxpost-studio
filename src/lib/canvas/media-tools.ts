@@ -1,12 +1,12 @@
 import { createHash, randomUUID } from "node:crypto";
 import { execFile } from "node:child_process";
-import { copyFile, mkdir, rename, rm, stat } from "node:fs/promises";
+import { copyFile, mkdir, readFile, rename, rm, stat } from "node:fs/promises";
 import path from "node:path";
 import { runWithConcurrencyPool } from "../concurrency";
 import { materializeRuntimeMedia } from "../runtime-media-materializer";
 import { findExistingRuntimeMedia, persistRuntimeMedia } from "../runtime-media-storage";
 import { parseCanvasVideoTimestamps, resolveCanvasImageDimensions } from "./node-utils";
-import type { CanvasMediaReference, CanvasNodeConfig } from "./types";
+import type { CanvasMediaReference, CanvasNodeConfig, CanvasSlideshowTextStyle } from "./types";
 
 const maxImageBytes = 30 * 1024 * 1024;
 const maxVideoBytes = 512 * 1024 * 1024;
@@ -18,6 +18,153 @@ const videoEncodeTimeoutMs = 30 * 60_000;
 const maxSourceDurationSeconds = 600;
 const maxOutputEdge = 4096;
 const outputRoot = path.join(/*turbopackIgnore: true*/ process.cwd(), "public", "generated", "canvas-tools");
+
+export async function renderCanvasImageSlideshow(input: {
+  images: CanvasMediaReference[];
+  audio: CanvasMediaReference;
+  title?: string;
+  body?: string;
+  titleStyle?: CanvasSlideshowTextStyle;
+  bodyStyle?: CanvasSlideshowTextStyle;
+  durationSeconds: number;
+  ratio: "9:16" | "3:4" | "1:1" | "16:9";
+  transition: "beat" | "smooth" | "none";
+  motion: boolean;
+  seed: string;
+}) {
+  if (!input.images.length) throw new Error("Image slideshow requires at least one image.");
+  const dimensions = ({ "9:16": [1080, 1920], "3:4": [1080, 1440], "1:1": [1080, 1080], "16:9": [1920, 1080] } as const)[input.ratio];
+  const images = await Promise.all(input.images.map((item) => materializeCanvasMediaReference(item, "image", maxImageBytes)));
+  const audio = await materializeCanvasMediaReference(input.audio, "video", maxVideoBytes);
+  const audioDuration = await probeCanvasAudioDuration(audio.filePath);
+  const duration = Math.floor(Math.min(Math.max(1, Math.min(600, Number(input.durationSeconds) || 10)), audioDuration) * 25) / 25;
+  if (duration < 1) throw new Error("Audio is too short to create a slideshow.");
+  const segment = duration / input.images.length;
+  const beatCuts = input.transition === "beat" ? await analyzeBeatCuts(audio.filePath, duration, input.images.length) : undefined;
+  const transitionCuts = beatCuts || Array.from({ length: Math.max(0, input.images.length - 1) }, (_, index) => segment * (index + 1));
+  const fingerprint = createHash("sha256").update(JSON.stringify({ ...input, imageUrls: input.images.map((item) => item.url), audioUrl: input.audio.url, duration, dimensions })).digest("hex").slice(0, 32);
+  const publicPath = `/generated/canvas-tools/${fingerprint}.mp4`;
+  const existing = await existingOutput(publicPath);
+  if (existing) {
+    await Promise.all(images.map((item) => item.cleanup())); await audio.cleanup();
+    return { url: existing, mimeType: "video/mp4" as const, width: dimensions[0], height: dimensions[1], durationSeconds: duration };
+  }
+  const outputPath = path.join(outputRoot, `${fingerprint}.mp4`);
+  await mkdir(outputRoot, { recursive: true });
+  const args: string[] = ["-hide_banner", "-loglevel", "error", "-y"];
+  const transitionDuration = input.transition === "none" || input.images.length === 1 ? 0 : Math.min(0.4, segment * 0.4);
+  for (const item of images) args.push("-loop", "1", "-framerate", "25", "-t", formatSeconds(segment + transitionDuration), "-i", item.filePath);
+  args.push("-i", audio.filePath);
+  const overlayPath = input.title || input.body ? path.join(outputRoot, `.${fingerprint}-text.png`) : undefined;
+  if (overlayPath) {
+    await renderSlideshowTextLayer(overlayPath, dimensions[0], dimensions[1], input.title || "", input.body || "", input.titleStyle, input.bodyStyle);
+    args.push("-loop", "1", "-i", overlayPath);
+  }
+  const filters = images.map((_item, index) => {
+    const frames = Math.max(1, Math.round((segment + transitionDuration) * 25));
+    const motion = input.motion ? `,zoompan=z='min(zoom+0.00035,1.05)':x='iw/2-(iw/zoom/2)':y='ih/2-(ih/zoom/2)':d=${frames}:s=${dimensions[0]}x${dimensions[1]}:fps=25` : "";
+    return `[${index}:v]split=2[bg${index}][fg${index}];[bg${index}]scale=${dimensions[0]}:${dimensions[1]}:force_original_aspect_ratio=increase,crop=${dimensions[0]}:${dimensions[1]},gblur=sigma=30[blur${index}];[fg${index}]scale=${dimensions[0]}:${dimensions[1]}:force_original_aspect_ratio=decrease[fit${index}];[blur${index}][fit${index}]overlay=(W-w)/2:(H-h)/2,setsar=1,fps=25${motion},trim=duration=${formatSeconds(segment + transitionDuration)},setpts=PTS-STARTPTS[v${index}]`;
+  });
+  if (images.length === 1) filters.push("[v0]null[base]");
+  else if (input.transition === "none") filters.push(`${images.map((_item, index) => `[v${index}]`).join("")}concat=n=${images.length}:v=1:a=0[base]`);
+  else {
+    let previous = "v0";
+    for (let index = 1; index < images.length; index += 1) {
+      const output = index === images.length - 1 ? "base" : `x${index}`;
+      filters.push(`[${previous}][v${index}]xfade=transition=${deterministicTransition(input.seed, index)}:duration=${formatSeconds(transitionDuration)}:offset=${formatSeconds(transitionCuts[index - 1])}[${output}]`);
+      previous = output;
+    }
+  }
+  filters.push(overlayPath ? `[base][${images.length + 1}:v]overlay=0:0,trim=duration=${formatSeconds(duration)},format=yuv420p[vout]` : `[base]trim=duration=${formatSeconds(duration)},format=yuv420p[vout]`);
+  const fadeStart = Math.max(0, duration - 0.18);
+  args.push("-filter_complex", filters.join(";"), "-map", "[vout]", "-map", `${images.length}:a:0`, "-t", formatSeconds(duration), "-r", "25", "-c:v", "libx264", "-preset", "medium", "-crf", "19", "-profile:v", "main", "-level", "4.0", "-pix_fmt", "yuv420p", "-tag:v", "avc1", "-colorspace", "bt709", "-color_primaries", "bt709", "-color_trc", "bt709", "-color_range", "tv", "-af", `afade=t=out:st=${formatSeconds(fadeStart)}:d=0.18`, "-c:a", "aac", "-profile:a", "aac_low", "-b:a", "160k", "-ar", "48000", "-ac", "2", "-shortest", "-movflags", "+faststart", outputPath);
+  try {
+    await runWithConcurrencyPool("localVideo", () => runMediaCommand("ffmpeg", args, videoEncodeTimeoutMs));
+    const url = await persistRuntimeMedia({ filePath: outputPath, publicPath, contentType: "video/mp4", overwrite: false });
+    return { url, mimeType: "video/mp4" as const, width: dimensions[0], height: dimensions[1], durationSeconds: duration, beatFallback: input.transition === "beat" && !beatCuts };
+  } finally {
+    if (overlayPath) await rm(overlayPath, { force: true });
+    await Promise.all(images.map((item) => item.cleanup())); await audio.cleanup();
+  }
+}
+
+async function materializeCanvasMediaReference(item: CanvasMediaReference, kind: "image" | "video", maxBytes: number) {
+  if (item.localPath && item.sha256) {
+    const file = await stat(item.localPath);
+    if (!file.isFile() || file.size > maxBytes) throw new Error("Directory snapshot media is unavailable or exceeds its size limit.");
+    return { filePath: item.localPath, resolvedUrl: item.url, temporary: false, cleanup: async () => undefined };
+  }
+  return materializeRuntimeMedia(item.url, { maxBytes, kind });
+}
+
+async function renderSlideshowTextLayer(filePath: string, width: number, height: number, title: string, body: string, titleStyle?: CanvasSlideshowTextStyle, bodyStyle?: CanvasSlideshowTextStyle) {
+  const { default: sharp } = await import("sharp");
+  const fallback: CanvasSlideshowTextStyle = { x: 0.5, y: 0.1, width: 0.9, fontFamily: "Microsoft YaHei", fontWeight: 700, fontSize: 64, autoScale: true, lineHeight: 1.2, align: "center", color: "#ffffff", outlineColor: "#000000", outlineWidth: 4, shadow: true, backgroundColor: "#000000", backgroundOpacity: 0, padding: 16 };
+  const titleResolved = titleStyle || fallback;
+  const bodyResolved = bodyStyle || { ...fallback, y: 0.72, fontSize: 42 };
+  const titleLines = wrapSlideshowText(title, Math.max(8, Math.floor(width * titleResolved.width / titleResolved.fontSize)));
+  const bodyLines = wrapSlideshowText(body, Math.max(12, Math.floor(width * bodyResolved.width / bodyResolved.fontSize)));
+  if (titleLines.length > 3 || bodyLines.length > 8) throw new Error("Slideshow text does not fit at the minimum readable size.");
+  const block = (value: string, lines: string[], style: CanvasSlideshowTextStyle, name: string) => {
+    if (!value) return "";
+    const boxWidth = width * style.width; const x = width * style.x; const y = height * style.y;
+    const anchor = style.align === "left" ? "start" : style.align === "right" ? "end" : "middle";
+    const textX = style.align === "left" ? x - boxWidth / 2 + style.padding : style.align === "right" ? x + boxWidth / 2 - style.padding : x;
+    const lineHeight = style.fontSize * style.lineHeight;
+    const boxHeight = lines.length * lineHeight + style.padding * 2;
+    const background = style.backgroundOpacity > 0 ? `<rect x="${x - boxWidth / 2}" y="${y - style.padding}" width="${boxWidth}" height="${boxHeight}" rx="6" fill="${escapeXml(style.backgroundColor)}" fill-opacity="${style.backgroundOpacity}"/>` : "";
+    const shadow = style.shadow ? "filter='url(#shadow)'" : "";
+    const spans = lines.map((line, index) => `<tspan x="${textX}" dy="${index ? lineHeight : 0}">${escapeXml(line)}</tspan>`).join("");
+    return `${background}<text class="${name}" x="${textX}" y="${y}" text-anchor="${anchor}" fill="${escapeXml(style.color)}" stroke="${escapeXml(style.outlineColor)}" stroke-width="${style.outlineWidth}" font-family="${escapeXml(style.fontFamily)},sans-serif" font-size="${style.fontSize}" font-weight="${style.fontWeight}" ${shadow}>${spans}</text>`;
+  };
+  const svg = `<svg width="${width}" height="${height}" xmlns="http://www.w3.org/2000/svg"><defs><filter id="shadow"><feDropShadow dx="3" dy="4" stdDeviation="4" flood-opacity="0.6"/></filter></defs><style>text{paint-order:stroke fill;stroke-linejoin:round}</style>${block(title, titleLines, titleResolved, "title")}${block(body, bodyLines, bodyResolved, "body")}</svg>`;
+  await sharp(Buffer.from(svg)).png().toFile(filePath);
+}
+
+function wrapSlideshowText(value: string, maxChars: number) {
+  return value.trim().split(/\r?\n/).flatMap((paragraph) => paragraph ? Array.from({ length: Math.ceil(Array.from(paragraph).length / maxChars) }, (_, index) => Array.from(paragraph).slice(index * maxChars, (index + 1) * maxChars).join("")) : [""]);
+}
+function escapeXml(value: string) { return value.replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;").replace(/"/g, "&quot;"); }
+function deterministicTransition(seed: string, index: number) { const values = ["fade", "smoothleft", "smoothright", "smoothup", "smoothdown", "dissolve"] as const; return values[createHash("sha256").update(`${seed}:${index}`).digest()[0] % values.length]; }
+
+async function analyzeBeatCuts(audioPath: string, duration: number, imageCount: number) {
+  if (imageCount <= 1) return [];
+  const pcmPath = path.join(outputRoot, `.beat-${randomUUID()}.pcm`);
+  try {
+    await runMediaCommand("ffmpeg", ["-hide_banner", "-loglevel", "error", "-y", "-i", audioPath, "-t", formatSeconds(duration), "-ac", "1", "-ar", "16000", "-f", "s16le", pcmPath]);
+    const pcm = await readFile(pcmPath);
+    const samplesPerFrame = 320;
+    const frameCount = Math.floor(pcm.length / 2 / samplesPerFrame);
+    if (frameCount < 20) return undefined;
+    const rms = Array.from({ length: frameCount }, (_, frame) => {
+      let sum = 0;
+      for (let offset = 0; offset < samplesPerFrame; offset += 1) { const value = pcm.readInt16LE((frame * samplesPerFrame + offset) * 2) / 32768; sum += value * value; }
+      return Math.sqrt(sum / samplesPerFrame);
+    });
+    const novelty = rms.map((value, index) => Math.max(0, value - (index ? rms[index - 1] : value)));
+    const sorted = novelty.filter((value) => value > 0).sort((a, b) => a - b);
+    const threshold = sorted[Math.floor(sorted.length * 0.85)] || 0;
+    if (!threshold) return undefined;
+    const peaks = novelty.flatMap((value, index) => value >= threshold && value >= (novelty[index - 1] || 0) && value >= (novelty[index + 1] || 0) ? [index * 0.02] : []);
+    const cuts: number[] = [];
+    for (let index = 1; index < imageCount; index += 1) {
+      const ideal = duration * index / imageCount;
+      const nearby = peaks.filter((peak) => Math.abs(peak - ideal) <= Math.min(0.75, duration / imageCount * 0.45) && (!cuts.length || peak - cuts[cuts.length - 1] >= 0.2));
+      if (!nearby.length) return undefined;
+      cuts.push(nearby.sort((left, right) => Math.abs(left - ideal) - Math.abs(right - ideal))[0]);
+    }
+    return cuts;
+  } finally { await rm(pcmPath, { force: true }); }
+}
+
+export async function probeCanvasAudioDuration(filePath: string) {
+  const output = await runMediaCommand("ffprobe", ["-v", "error", "-show_entries", "format=duration:stream=codec_type,duration", "-of", "json", filePath]);
+  const data = JSON.parse(output) as { format?: { duration?: string }; streams?: Array<{ codec_type?: string; duration?: string }> };
+  if (!data.streams?.some((stream) => stream.codec_type === "audio")) throw new Error("Media does not contain an audio stream.");
+  const duration = Number(data.format?.duration || data.streams.find((stream) => stream.codec_type === "audio")?.duration);
+  if (!Number.isFinite(duration) || duration <= 0) throw new Error("Audio duration is invalid.");
+  return duration;
+}
 
 export class CanvasMediaNeedsConfigError extends Error {
   constructor(message: string) {

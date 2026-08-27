@@ -362,6 +362,7 @@ function validateCanvasScheduleParameterSource(parameter: CanvasScheduleParamete
   if (parameter.expansion === "random" && source.mode === "fixed") throw new Error(`${parameter.name}: random expansion requires multiple candidate values.`);
   if (source.mode === "copy-filter" && parameter.valueType !== "copy") throw new Error(`${parameter.name}: copy filters require a copy parameter.`);
   if (source.mode === "library-filter" && !['image', 'image-group'].includes(parameter.valueType)) throw new Error(`${parameter.name}: library filters require an image parameter.`);
+  if (parameter.valueType === "directory-group" && source.mode !== "fixed" && source.mode !== "manual-list") throw new Error(`${parameter.name}: directory groups require frozen values.`);
   if (source.mode === "content-pool-filter") {
     if (parameter.valueType !== "content-pool") throw new Error(`${parameter.name}: content-pool filters require a content-pool parameter.`);
     if (source.filter.mode === "manual" && !source.filter.itemIds.length) throw new Error(`${parameter.name}: select at least one content-pool item.`);
@@ -455,6 +456,7 @@ function isCanvasScheduleParameterValue(type: CanvasScheduleParameter["valueType
   if (type === "copy") return isCopySnapshot(value);
   if (type === "video") return Boolean(normalizeCanvasVideoSnapshot(value));
   if (type === "source-video") return isCanvasSourceVideoSnapshot(value);
+  if (type === "directory-group") return isDirectoryGroup(value);
   if (type === "content-pool") return isCanvasScheduleContentPoolSnapshot(value);
   if (type === "number") return typeof value === "number" && Number.isFinite(value);
   if (type === "boolean") return typeof value === "boolean";
@@ -464,6 +466,10 @@ function isCanvasScheduleParameterValue(type: CanvasScheduleParameter["valueType
 function applyCanvasParameterValue(node: CanvasNode, parameter: CanvasScheduleParameter, value: CanvasScheduleParameterValue): CanvasNode {
   const field = getCanvasBatchBindableFields(node).find((item) => item.key === parameter.binding.fieldKey);
   if (!field || !field.parameterTypes.includes(parameter.valueType)) throw new Error(`${parameter.name}: Canvas binding is no longer compatible.`);
+  if (field.adapter === "directory-group-input") {
+    if (!isDirectoryGroup(value)) throw new Error(`${parameter.name}: expected a directory group snapshot.`);
+    return { ...node, config: { ...node.config, groupId: value.id, snapshotId: String((value as { snapshotId?: string }).snapshotId || node.config.snapshotId || "") } };
+  }
   if (field.adapter === "image-input") {
     const assets = Array.isArray(value) ? value : [value];
     if (!assets.every(isAssetSnapshot)) throw new Error(`${parameter.name}: expected image snapshot values.`);
@@ -663,6 +669,10 @@ function isAssetSnapshot(value: CanvasScheduleParameterValue): value is CanvasSc
 
 function isCopySnapshot(value: CanvasScheduleParameterValue): value is CanvasScheduleCopySnapshot {
   return Boolean(value && typeof value === "object" && !Array.isArray(value) && "id" in value && "body" in value && "title" in value && "tags" in value && "updatedAt" in value);
+}
+
+function isDirectoryGroup(value: CanvasScheduleParameterValue): value is Extract<CanvasScheduleParameterValue, { id: string; images: unknown; audios: unknown }> {
+  return Boolean(value && typeof value === "object" && !Array.isArray(value) && "id" in value && "images" in value && "audios" in value);
 }
 
 function isCanvasScheduleContentPoolSnapshot(value: CanvasScheduleParameterValue): value is CanvasScheduleContentPoolSnapshot {

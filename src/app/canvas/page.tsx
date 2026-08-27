@@ -235,7 +235,7 @@ const canvasHistoryCommitDelayMs = 350;
 const canvasViewportDetailZoom = { reduced: 0.65, overview: 0.35 } as const;
 const canvasEdgeAnimationDuration = { idle: 3.6, active: 1.8 } as const;
 let canvasScheduleParameterSequence = 0;
-const canvasScheduleParameterTypes = ["image", "image-group", "video", "source-video", "content-pool", "text", "copy", "number", "boolean", "enum"] as const satisfies readonly CanvasScheduleParameterType[];
+const canvasScheduleParameterTypes = ["image", "image-group", "directory-group", "video", "source-video", "content-pool", "text", "copy", "number", "boolean", "enum"] as const satisfies readonly CanvasScheduleParameterType[];
 
 export default function CanvasPage() {
   const [workflows, setWorkflows] = useState<CanvasWorkflow[]>([]);
@@ -2474,7 +2474,8 @@ function NodeInspector({
       onPreview={onPreviewVideo}
       onChange={(videos, selectedVideoId) => onPatch(canvasVideoLoaderConfig(videos, selectedVideoId))}
     /> : null}
-    {node.type === "input.competitor-workbook" ? <CompetitorWorkbookNodeEditor node={node} onPatch={onPatch} /> : node.type === "utility.video-subtitles" ? <>
+    {node.type === "utility.image-slideshow" ? <CanvasSlideshowLayoutEditor node={node} onPatch={onPatch} /> : null}
+    {node.type === "input.local-directory" ? <CanvasLocalDirectoryEditor node={node} onPatch={onPatch} /> : node.type === "input.competitor-workbook" ? <CompetitorWorkbookNodeEditor node={node} onPatch={onPatch} /> : node.type === "utility.video-subtitles" ? <>
       <div className="canvas-subtitle-inspector-entry">
         <button type="button" disabled={!subtitleNodeRun || !["completed", "reused"].includes(subtitleNodeRun.status)} onClick={() => subtitleNodeRun && onSubtitleEdit(subtitleNodeRun)}><Captions />校对字幕</button>
         <small>{subtitleNodeRun?.internalMetadata?.subtitle ? "修改文字和时间轴" : subtitleNodeRun ? "该结果需重新运行一次后才能校对" : "首次生成字幕后可校对"}</small>
@@ -2512,6 +2513,43 @@ function NodeInspector({
     <div className="canvas-port-list"><span>输入</span>{definition.inputs.length ? definition.inputs.map((port) => <small key={port.id}>{port.label} · {portKindLabel(port.kind)}{port.required ? " · 必填" : ""}</small>) : <small>无</small>}</div>
     <div className="canvas-port-list"><span>输出</span>{definition.outputs.length ? definition.outputs.map((port) => <small key={port.id}>{port.label} · {portKindLabel(port.kind)}</small>) : <small>无</small>}</div>
   </div>;
+}
+
+function CanvasSlideshowLayoutEditor({ node, onPatch }: { node: CanvasNode; onPatch: (patch: CanvasNode["config"]) => void }) {
+  const ratio = String(node.config.ratio || "9:16").split(":").map(Number);
+  const move = (event: React.PointerEvent<HTMLButtonElement>, prefix: "title" | "body") => {
+    event.stopPropagation(); event.currentTarget.setPointerCapture(event.pointerId);
+    const stage = event.currentTarget.parentElement;
+    if (!stage) return;
+    const update = (clientX: number, clientY: number) => { const bounds = stage.getBoundingClientRect(); onPatch({ [`${prefix}X`]: Math.max(0.05, Math.min(0.95, (clientX - bounds.left) / bounds.width)), [`${prefix}Y`]: Math.max(0.05, Math.min(0.95, (clientY - bounds.top) / bounds.height)) }); };
+    const onMove = (pointer: PointerEvent) => update(pointer.clientX, pointer.clientY);
+    const onUp = () => { window.removeEventListener("pointermove", onMove); window.removeEventListener("pointerup", onUp); };
+    window.addEventListener("pointermove", onMove); window.addEventListener("pointerup", onUp, { once: true }); update(event.clientX, event.clientY);
+  };
+  const box = (prefix: "title" | "body", label: string) => <button type="button" className="nodrag nopan nowheel" onPointerDown={(event) => move(event, prefix)} style={{ position: "absolute", left: `${Number(node.config[`${prefix}X`] || 0.5) * 100}%`, top: `${Number(node.config[`${prefix}Y`] || (prefix === "title" ? 0.1 : 0.72)) * 100}%`, width: `${Number(node.config[`${prefix}Width`] || 0.9) * 100}%`, transform: "translate(-50%, -50%)", minHeight: 28, border: "1px solid currentColor", background: "rgba(0,0,0,.45)", color: "white", cursor: "move" }}>{label}</button>;
+  return <div aria-label="文字布局" style={{ position: "relative", width: "100%", aspectRatio: `${ratio[0] || 9} / ${ratio[1] || 16}`, maxHeight: 360, background: "#20242a", overflow: "hidden" }}>{box("title", String(node.config.titleText || "标题"))}{box("body", String(node.config.bodyText || "正文"))}</div>;
+}
+
+function CanvasLocalDirectoryEditor({ node, onPatch }: { node: CanvasNode; onPatch: (patch: CanvasNode["config"]) => void }) {
+  const [busy, setBusy] = useState(false);
+  const [message, setMessage] = useState("");
+  const [snapshot, setSnapshot] = useState<{ id: string; groups: Array<{ id: string; name: string; images: unknown[]; audios: Array<{ id: string; name?: string }> }>; report: { files: number; groups: number; truncated: boolean } } | null>(null);
+  useEffect(() => {
+    const snapshotId = String(node.config.snapshotId || "");
+    if (!snapshotId) return;
+    void api<{ snapshot: NonNullable<typeof snapshot> }>(`/api/canvas/local-directory/snapshot?id=${encodeURIComponent(snapshotId)}`)
+      .then((response) => setSnapshot(response.snapshot)).catch(() => undefined);
+  }, [node.config.snapshotId]);
+  const scan = async () => {
+    setBusy(true); setMessage("");
+    try {
+      const response = await api<{ snapshot: typeof snapshot }>("/api/canvas/local-directory/scan", { method: "POST", body: JSON.stringify({ path: String(node.config.path || "") }) });
+      setSnapshot(response.snapshot); const group = response.snapshot?.groups[0];
+      if (response.snapshot && group) onPatch({ snapshotId: response.snapshot.id, groupId: group.id, selectedAudioId: group.audios[0]?.id || "" });
+    } catch (error) { setMessage(error instanceof Error ? error.message : "扫描失败"); } finally { setBusy(false); }
+  };
+  const selectedGroup = snapshot?.groups.find((group) => group.id === node.config.groupId);
+  return <div className="canvas-local-directory-editor"><label><span>服务器绝对路径</span><input value={String(node.config.path || "")} onChange={(event) => onPatch({ path: event.target.value, snapshotId: "", groupId: "", selectedAudioId: "" })} placeholder="Y:\\视频内容 或 \\\\server\\share" /></label><button type="button" onClick={() => void scan()} disabled={busy}>{busy ? "扫描中..." : "扫描目录"}</button>{snapshot ? <><select value={String(node.config.groupId || "")} onChange={(event) => { const group = snapshot.groups.find((item) => item.id === event.target.value); onPatch({ groupId: event.target.value, selectedAudioId: group?.audios[0]?.id || "" }); }}><option value="">选择媒体组</option>{snapshot.groups.map((group) => <option key={group.id} value={group.id}>{group.name} · {group.images.length} 图</option>)}</select>{selectedGroup?.audios.length ? <><select value={String(node.config.selectedAudioId || "")} onChange={(event) => onPatch({ selectedAudioId: event.target.value })}>{selectedGroup.audios.map((audio) => <option key={audio.id} value={audio.id}>{audio.name || audio.id}</option>)}</select><audio controls src={`/api/canvas/local-directory/media?snapshot=${encodeURIComponent(snapshot.id)}&media=${encodeURIComponent(String(node.config.selectedAudioId || selectedGroup.audios[0].id))}`} /></> : null}<small>{snapshot.report.groups} 组 · {snapshot.report.files} 个媒体{snapshot.report.truncated ? " · 已达扫描上限" : ""}</small></> : null}{message ? <small>{message}</small> : null}</div>;
 }
 
 function CompetitorWorkbookNodeEditor({ node, onPatch }: { node: CanvasNode; onPatch: (patch: CanvasNode["config"]) => void }) {
@@ -5848,7 +5886,7 @@ function parseCanvasScheduleScalarValues(valueType: CanvasScheduleParameterType,
 }
 
 function canvasScheduleParameterTypeLabel(value: CanvasScheduleParameterType) {
-  return ({ image: "图片", "image-group": "图片组", video: "视频", "source-video": "源视频", "content-pool": "内容池素材", text: "文本", copy: "文案记录", number: "数字", boolean: "布尔值", enum: "枚举" } as const)[value];
+  return ({ image: "图片", "image-group": "图片组", "directory-group": "目录组", video: "视频", "source-video": "源视频", "content-pool": "内容池素材", text: "文本", copy: "文案记录", number: "数字", boolean: "布尔值", enum: "枚举" } as const)[value];
 }
 
 function formatCanvasScheduleParameterValues(values: Record<string, CanvasScheduleParameterValue>) {
@@ -6052,7 +6090,7 @@ async function api<T = { ok: boolean }>(url: string, init?: RequestInit): Promis
 
 function errorMessage(error: unknown) { return error instanceof Error ? error.message : "操作失败"; }
 function categoryLabel(category: string) { return ({ input: "输入", model: "模型", utility: "工具", compose: "组装", publish: "发布" } as Record<string, string>)[category] || category; }
-function portKindLabel(kind: CanvasPortKind) { return ({ any: "任意", visual: "图片或视频", text: "文字", images: "图片", videos: "视频", socialPost: "内容", publishJobRef: "发布任务" } as Record<CanvasPortKind, string>)[kind]; }
+function portKindLabel(kind: CanvasPortKind) { return ({ any: "任意", visual: "图片或视频", text: "文字", images: "图片", audios: "音乐", videos: "视频", socialPost: "内容", publishJobRef: "发布任务" } as Record<CanvasPortKind, string>)[kind]; }
 function iconForNode(type: CanvasNodeType) {
   const props = { className: "h-4 w-4" };
   if (type === "input.text") return <Type {...props} />;

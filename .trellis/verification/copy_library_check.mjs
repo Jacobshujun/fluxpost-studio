@@ -263,6 +263,7 @@ function loadTypeScriptModule(source, fileName, stubs) {
   Function("require", "module", "exports", "structuredClone", `${transpile(source, fileName)}`)(
     (name) => {
       if (name === "node:crypto") return require("node:crypto");
+      if (name === "./directory-snapshots") return {};
       if (Object.hasOwn(stubs, name)) return stubs[name];
       throw new Error(`Unexpected ${fileName} import: ${name}`);
     },
