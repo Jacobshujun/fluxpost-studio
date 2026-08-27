@@ -235,6 +235,54 @@ await retryCanvasNode(sharedRunId, failedNodeId, account);
 await retryCanvasScheduleV2SharedTask(scheduleId, account, { mainTaskId });
 ```
 
+## Scenario: Canvas execution ownership on shared workflows
+
+### 1. Scope / Trigger
+
+- Trigger: creating, launching, retrying, reconciling, or reading ordinary Canvas runs and V1/V2 batch schedules when admins or team members can access a workflow created by another user.
+
+### 2. Signatures
+
+- Draft `CanvasSchedule.ownerUserId` / `ownerDisplayName` identify the draft owner. `createdByUserId` / `createdByDisplayName` preserve the original creator. At launch, `owner*` and `executionOwnerUserId` / `executionOwnerDisplayName` become the authenticated launcher.
+- Ordinary `createCanvasRun(workflowId, account, input)` stamps `CanvasRun.owner*` from `account`, never from `CanvasWorkflow.owner*`.
+- `canvas_schedules.owner_user_id` must change atomically with the JSON owner during launch.
+
+### 3. Contracts
+
+- Whoever launches execution owns every resulting Canvas run, node execution, generated post, and review artifact, including shared, child, aggregate, finalize, retry, and restart-reconciliation paths.
+- Workflow and schedule creators remain audit facts, not execution identities. Launch logs record creator/workflow owner and execution owner separately.
+- Historical schedules without execution-owner fields fall back to their stored owner; no automatic runtime-data migration is allowed.
+- Ordinary members may read or reuse only Canvas runs permitted by `canAccessWorkspaceOwner`; admins retain workspace-wide access.
+
+### 4. Validation & Error Matrix
+
+- Inaccessible workflow or schedule -> existing not-found response before launch.
+- Revision or preview mismatch -> existing conflict/error; no owner transfer, run insertion, or launch log.
+- Successful launch -> owner transfer plus run/queue insertion in one database transaction; the launch log follows successful persistence.
+- Historical schedule without `executionOwnerUserId` -> use stored owner for reconciliation and retries.
+
+### 5. Good/Base/Bad Cases
+
+- Good: user B launches user A's admin-visible draft; schedule, shared/child/aggregate runs, generated post, and review author are B, while `createdByUserId` remains A.
+- Base: user A launches their own task; creator and execution identities are equal and behavior is unchanged.
+- Bad: shared runs inherit the workflow owner, child runs inherit the schedule creator, review posts inherit a third user, or the JSON owner changes while `owner_user_id` remains stale.
+
+### 6. Tests Required
+
+- `canvas_scheduler_check.mjs` must simulate distinct creator and launcher accounts and assert owner transfer, creator retention, launch audit identity, shared/child propagation, historical fallback, and PostgreSQL/SQLite indexed-owner updates.
+- `canvas_workflows_check.mjs` must assert ordinary runs use the authenticated launcher and owner-filter isolated reuse/history projections.
+- Account isolation, TypeScript, lint, build, isolated HTTP smoke, and the full offline baseline remain required.
+
+### 7. Wrong vs Correct
+
+```typescript
+// Wrong: execution silently belongs to the workflow creator.
+ownerUserId: workflow.ownerUserId
+
+// Correct: manual execution belongs to the authenticated launcher.
+ownerUserId: account.id
+```
+
 ## Stable Decisions
 
 - Compact/simple runs expose operator-controlled switches for `useComfyUiKlein`, `directOriginalReference`, `enableVideoTranscription`, and `writeFeishu`. All four default off in the UI and at the simple-run API/domain boundary; only an explicit `true` enables local Klein routing, direct original-image use, Ark video/audio transcription, or auto-approve-and-enqueue Feishu publishing. `writeFeishu=false` or omission skips Feishu enqueue, marks the publish stage skipped, and leaves generated drafts in the content review desk for explicit human approval.
