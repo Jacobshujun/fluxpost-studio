@@ -60,12 +60,10 @@ export async function POST(request: Request) {
     const materialAssets = await resolveLibraryAssetSelections(
       account,
       Array.isArray(body.materialAssetIds) ? body.materialAssetIds : [],
-      "vehicle",
     );
     const viralMaterialAssets = await resolveLibraryAssetSelections(
       account,
       Array.isArray(body.viralMaterialAssetIds) ? body.viralMaterialAssetIds : [],
-      "vehicle",
     );
     let feishuPublishMode;
     try {

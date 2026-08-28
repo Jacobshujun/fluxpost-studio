@@ -1,8 +1,8 @@
 import { existsSync, mkdirSync, readFileSync } from "node:fs";
+import { createHash } from "node:crypto";
 import path from "node:path";
 import { Pool, type PoolClient } from "pg";
 import type { CanvasDirectorySnapshot, CanvasNodeRun, CanvasRun, CanvasRunQueueItem, CanvasSchedule, CanvasSubtitlePreset, CanvasSubtitleRevision, CanvasSubtitleTranscriptCacheEntry, CanvasSubtitleWaveform, CanvasWorkflow } from "./canvas/types";
-import { getLibraryAssetAddedAt } from "./library-sort";
 import type {
   ContentProject,
   CopyLibraryEntry,
@@ -15,6 +15,7 @@ import type {
   LarkTaskLaunch,
   LibraryAsset,
   LibraryCollection,
+  LibrarySmartFolder,
   LibraryTaggingJob,
   OriginalBatch,
   OriginalBatchItem,
@@ -25,6 +26,8 @@ import type {
   WorkspaceSession,
 } from "./types";
 import { normalizeFeishuPublishMode } from "./feishu-publish-mode";
+import { getLibraryUnifiedTagsForAsset } from "./library-tags";
+import type { LibraryAssetFilters, LibraryListSort } from "./types";
 
 type SqliteStatement = {
   all: (...params: unknown[]) => unknown[];
@@ -46,6 +49,16 @@ type JsonRow = {
 
 type CountRow = {
   count: number;
+};
+
+export type LibraryDatabaseCursor = { value: string; id: string };
+
+export type LibraryDatabaseQuery = {
+  actorId: string;
+  isAdmin: boolean;
+  filters: LibraryAssetFilters;
+  smartFolder?: LibrarySmartFolder;
+  cursor?: LibraryDatabaseCursor;
 };
 
 type SimpleRunQueueRow = {
@@ -259,22 +272,252 @@ export function getDatabaseRuntimeStatus() {
 export async function listLibraryAssetsFromDb(): Promise<LibraryAsset[]> {
   await ensureDatabaseReady();
   if (getDatabaseBackend() === "postgres") {
-    const result = await getPostgresPool().query<JsonRow>("SELECT data_json FROM library_assets WHERE deleted_at IS NULL ORDER BY created_at DESC, id DESC");
-    return result.rows.map((row) => fromLibraryAssetJson(row.data_json));
+    const result = await getPostgresPool().query<JsonRow & { id: string; collection_ids: string[] }>(
+      `SELECT a.id, a.data_json, COALESCE(array_agg(ca.collection_id) FILTER (WHERE ca.collection_id IS NOT NULL), ARRAY[]::text[]) collection_ids
+       FROM library_assets a LEFT JOIN library_collection_assets ca ON ca.asset_id=a.id
+       WHERE a.deleted_at IS NULL GROUP BY a.id ORDER BY a.created_at DESC, a.id DESC`,
+    );
+    return result.rows.map((row) => fromLibraryAssetJson(row.data_json, row.collection_ids));
   }
-  const rows = getSqliteDatabase().prepare("SELECT data_json FROM library_assets WHERE deleted_at IS NULL ORDER BY created_at DESC, id DESC").all() as JsonRow[];
-  return rows.map((row) => fromLibraryAssetJson(row.data_json));
+  const rows = getSqliteDatabase().prepare(
+    `SELECT a.data_json, COALESCE(group_concat(ca.collection_id, char(31)), '') collection_ids
+     FROM library_assets a LEFT JOIN library_collection_assets ca ON ca.asset_id=a.id
+     WHERE a.deleted_at IS NULL GROUP BY a.id ORDER BY a.created_at DESC, a.id DESC`,
+  ).all() as Array<JsonRow & { collection_ids: string }>;
+  return rows.map((row) => fromLibraryAssetJson(row.data_json, splitSqliteIds(row.collection_ids)));
+}
+
+export async function queryLibraryAssetsFromDb(input: LibraryDatabaseQuery) {
+  await ensureDatabaseReady();
+  const postgres = getDatabaseBackend() === "postgres";
+  const compiled = compileLibraryAssetQuery(input, postgres);
+  const countSql = `${compiled.cte} SELECT COUNT(*) count FROM library_assets a WHERE ${compiled.where.join(" AND ")}`;
+  const countValues = [...compiled.params.values];
+  const cursorWhere = [...compiled.where];
+  addLibraryCursorPredicate(cursorWhere, compiled.params, input.filters.sort || "newest", input.cursor);
+  const limit = Math.max(1, Math.min(100, Math.floor(input.filters.limit || 60)));
+  const limitPlaceholder = compiled.params.add(limit + 1);
+  const collectionProjection = postgres
+    ? "ARRAY(SELECT ca.collection_id FROM library_collection_assets ca WHERE ca.asset_id=a.id ORDER BY ca.collection_id) collection_ids"
+    : "COALESCE((SELECT group_concat(ca.collection_id, char(31)) FROM library_collection_assets ca WHERE ca.asset_id=a.id ORDER BY ca.collection_id), '') collection_ids";
+  const favoriteProjection = `EXISTS (SELECT 1 FROM library_asset_favorites fav WHERE fav.asset_id=a.id AND fav.owner_user_id=${compiled.params.add(input.actorId)}) favorite`;
+  const listSql = `${compiled.cte} SELECT a.data_json, ${collectionProjection}, ${favoriteProjection}
+    FROM library_assets a WHERE ${cursorWhere.join(" AND ")}
+    ORDER BY ${libraryOrderSql(input.filters.sort || "newest", postgres)} LIMIT ${limitPlaceholder}`;
+
+  let total: number;
+  let rows: Array<JsonRow & { collection_ids: string[] | string; favorite: boolean | number }>;
+  if (postgres) {
+    const [countResult, listResult] = await Promise.all([
+      getPostgresPool().query<{ count: string }>(countSql, countValues),
+      getPostgresPool().query<JsonRow & { collection_ids: string[]; favorite: boolean }>(listSql, compiled.params.values),
+    ]);
+    total = Number(countResult.rows[0]?.count || 0);
+    rows = listResult.rows;
+  } else {
+    const count = getSqliteDatabase().prepare(countSql).get(...countValues) as { count: number };
+    total = Number(count?.count || 0);
+    rows = getSqliteDatabase().prepare(listSql).all(...compiled.params.values) as typeof rows;
+  }
+  const pageRows = rows.slice(0, limit);
+  return {
+    assets: pageRows.map((row) => ({
+      ...fromLibraryAssetJson(row.data_json, Array.isArray(row.collection_ids) ? row.collection_ids : splitSqliteIds(row.collection_ids)),
+      favorite: Boolean(row.favorite),
+    })),
+    total,
+    hasMore: rows.length > limit,
+  };
+}
+
+export async function queryLibraryAssetIdsFromDb(input: LibraryDatabaseQuery, excludedAssetIds: string[] = []) {
+  await ensureDatabaseReady();
+  const postgres = getDatabaseBackend() === "postgres";
+  const compiled = compileLibraryAssetQuery(input, postgres);
+  if (excludedAssetIds.length) {
+    const placeholders = excludedAssetIds.map((id) => compiled.params.add(id));
+    compiled.where.push(`a.id NOT IN (${placeholders.join(",")})`);
+  }
+  const sql = `${compiled.cte} SELECT a.id FROM library_assets a WHERE ${compiled.where.join(" AND ")} ORDER BY ${libraryOrderSql(input.filters.sort || "newest", postgres)}`;
+  if (postgres) return (await getPostgresPool().query<{ id: string }>(sql, compiled.params.values)).rows.map((row) => row.id);
+  return (getSqliteDatabase().prepare(sql).all(...compiled.params.values) as Array<{ id: string }>).map((row) => row.id);
+}
+
+export async function queryLibraryTagSuggestionsFromDb(input: { actorId: string; isAdmin: boolean; query?: string; limit?: number }) {
+  await ensureDatabaseReady();
+  const postgres = getDatabaseBackend() === "postgres";
+  const params = new LibrarySqlParams(postgres);
+  const where = ["a.deleted_at IS NULL", "label.dimension='unified'"];
+  if (!input.isAdmin) where.push(`(a.owner_user_id=${params.add(input.actorId)} OR a.visibility='team')`);
+  if (input.query?.trim()) where.push(`LOWER(label.value) LIKE ${params.add(`%${input.query.trim().toLocaleLowerCase()}%`)}`);
+  const limit = params.add(Math.max(1, Math.min(50, Math.floor(input.limit || 20))));
+  const sql = `SELECT MIN(label.value) label, COUNT(DISTINCT label.asset_id) count
+    FROM library_asset_labels label JOIN library_assets a ON a.id=label.asset_id
+    WHERE ${where.join(" AND ")} GROUP BY LOWER(label.value)
+    ORDER BY count DESC, MIN(label.value) ASC LIMIT ${limit}`;
+  const rows = postgres
+    ? (await getPostgresPool().query<{ label: string; count: string }>(sql, params.values)).rows
+    : getSqliteDatabase().prepare(sql).all(...params.values) as Array<{ label: string; count: number }>;
+  return rows.map((row) => ({ label: row.label, count: Number(row.count) }));
+}
+
+class LibrarySqlParams {
+  readonly values: unknown[] = [];
+  constructor(readonly postgres: boolean) {}
+  add(value: unknown) {
+    this.values.push(value);
+    return this.postgres ? `$${this.values.length}` : `?${this.values.length}`;
+  }
+}
+
+function compileLibraryAssetQuery(input: LibraryDatabaseQuery, postgres: boolean) {
+  const params = new LibrarySqlParams(postgres);
+  const where = ["a.deleted_at IS NULL"];
+  if (!input.isAdmin) where.push(`(a.owner_user_id=${params.add(input.actorId)} OR a.visibility='team')`);
+  const filters = input.filters;
+  if (filters.search?.trim()) {
+    const pattern = `%${filters.search.trim().toLocaleLowerCase()}%`;
+    const p1 = params.add(pattern); const p2 = params.add(pattern); const p3 = params.add(pattern); const p4 = params.add(pattern);
+    const fullText = postgres ? `a.search_vector @@ plainto_tsquery('simple', ${params.add(filters.search.trim())}) OR ` : "";
+    where.push(`(${fullText}LOWER(a.name) LIKE ${p1} OR LOWER(a.original_name) LIKE ${p2} OR LOWER(a.note) LIKE ${p3}
+      OR EXISTS (SELECT 1 FROM library_asset_labels search_label WHERE search_label.asset_id=a.id AND LOWER(search_label.value) LIKE ${p4}))`);
+  }
+  if (filters.collectionId) where.push(collectionPredicate(params, filters.collectionId, filters.includeDescendants !== false));
+  if (filters.uncategorized) where.push("NOT EXISTS (SELECT 1 FROM library_collection_assets uncategorized_ca WHERE uncategorized_ca.asset_id=a.id)");
+  if (filters.favorite) where.push(`EXISTS (SELECT 1 FROM library_asset_favorites favorite_filter WHERE favorite_filter.asset_id=a.id AND favorite_filter.owner_user_id=${params.add(input.actorId)})`);
+  if (filters.visibility) where.push(`a.visibility=${params.add(filters.visibility)}`);
+  if (filters.taggingStatus) where.push(`a.tagging_status=${params.add(filters.taggingStatus)}`);
+  if (filters.addedFrom) where.push(`a.created_at>=${params.add(filters.addedFrom)}`);
+  if (filters.addedBefore) where.push(`a.created_at<${params.add(filters.addedBefore)}`);
+  addNumberRange(where, params, "a.width", filters.minWidth, filters.maxWidth);
+  addNumberRange(where, params, "a.height", filters.minHeight, filters.maxHeight);
+  addNumberRange(where, params, "a.byte_size", filters.minByteSize, filters.maxByteSize);
+  addInPredicate(where, params, "a.owner_user_id", filters.ownerIds);
+  addLabelDimension(where, params, "imageType", filters.imageTypes);
+  addLabelDimension(where, params, "scenes", filters.scenes);
+  addLabelDimension(where, params, "vehicleModels", filters.vehicleModels);
+  addLabelDimension(where, params, "vehicleColors", filters.vehicleColors);
+  addLabelDimension(where, params, "angles", filters.angles);
+  addLabelDimension(where, params, "people", filters.people);
+  addLabelDimension(where, params, "customTags", filters.customTags);
+  for (const tag of filters.tags || []) {
+    where.push(`EXISTS (SELECT 1 FROM library_asset_labels tag_filter WHERE tag_filter.asset_id=a.id AND tag_filter.dimension='unified' AND LOWER(tag_filter.value)=${params.add(tag.trim().toLocaleLowerCase())})`);
+  }
+  if (input.smartFolder?.conditions.length) {
+    const predicates = input.smartFolder.conditions.map((condition) => smartFolderPredicate(condition, params, input.actorId));
+    where.push(`(${predicates.join(input.smartFolder.match === "any" ? " OR " : " AND ")})`);
+  }
+  return { cte: "", params, where };
+}
+
+function collectionPredicate(params: LibrarySqlParams, collectionId: string, includeDescendants: boolean) {
+  if (!includeDescendants) return `EXISTS (SELECT 1 FROM library_collection_assets ca WHERE ca.asset_id=a.id AND ca.collection_id=${params.add(collectionId)})`;
+  const root = params.add(collectionId);
+  return `EXISTS (WITH RECURSIVE collection_tree(id) AS (
+    SELECT id FROM library_collections WHERE id=${root}
+    UNION ALL SELECT child.id FROM library_collections child JOIN collection_tree parent ON child.parent_id=parent.id
+  ) SELECT 1 FROM library_collection_assets ca JOIN collection_tree tree ON tree.id=ca.collection_id WHERE ca.asset_id=a.id)`;
+}
+
+function addLabelDimension(where: string[], params: LibrarySqlParams, dimension: string, values?: string[]) {
+  if (!values?.length) return;
+  const placeholders = values.map((value) => params.add(value.trim().toLocaleLowerCase()));
+  where.push(`EXISTS (SELECT 1 FROM library_asset_labels dimension_filter WHERE dimension_filter.asset_id=a.id
+    AND dimension_filter.dimension=${params.add(dimension)} AND LOWER(dimension_filter.value) IN (${placeholders.join(",")}))`);
+}
+
+function addInPredicate(where: string[], params: LibrarySqlParams, column: string, values?: string[]) {
+  if (!values?.length) return;
+  where.push(`${column} IN (${values.map((value) => params.add(value)).join(",")})`);
+}
+
+function addNumberRange(where: string[], params: LibrarySqlParams, column: string, min?: number, max?: number) {
+  if (Number.isFinite(min)) where.push(`${column}>=${params.add(min)}`);
+  if (Number.isFinite(max)) where.push(`${column}<=${params.add(max)}`);
+}
+
+function smartFolderPredicate(condition: LibrarySmartFolder["conditions"][number], params: LibrarySqlParams, actorId: string) {
+  const values = Array.isArray(condition.value) ? condition.value : [condition.value];
+  const first = values[0];
+  if (condition.field === "collection" && typeof first === "string") {
+    const exists = collectionPredicate(params, first, condition.includeDescendants !== false);
+    return condition.operator === "not_contains" ? `NOT (${exists})` : exists;
+  }
+  if (condition.field === "tag") {
+    const exists = `EXISTS (SELECT 1 FROM library_asset_labels smart_tag WHERE smart_tag.asset_id=a.id AND smart_tag.dimension='unified' AND LOWER(smart_tag.value) IN (${values.map((value) => params.add(String(value).toLocaleLowerCase())).join(",")}))`;
+    return condition.operator === "not_contains" ? `NOT ${exists}` : exists;
+  }
+  if (condition.field === "text") {
+    const pattern = `%${String(first || "").toLocaleLowerCase()}%`;
+    const matches = `(LOWER(a.name) LIKE ${params.add(pattern)} OR LOWER(a.original_name) LIKE ${params.add(pattern)} OR LOWER(a.note) LIKE ${params.add(pattern)})`;
+    return condition.operator === "not_contains" ? `NOT ${matches}` : matches;
+  }
+  if (condition.field === "favorite") {
+    const exists = `EXISTS (SELECT 1 FROM library_asset_favorites smart_favorite WHERE smart_favorite.asset_id=a.id AND smart_favorite.owner_user_id=${params.add(actorId)})`;
+    return Boolean(first) ? exists : `NOT ${exists}`;
+  }
+  if (condition.field === "imageType") {
+    const placeholders = values.map((value) => params.add(String(value).toLocaleLowerCase()));
+    const exists = `EXISTS (SELECT 1 FROM library_asset_labels smart_type WHERE smart_type.asset_id=a.id AND smart_type.dimension='imageType' AND LOWER(smart_type.value) IN (${placeholders.join(",")}))`;
+    return condition.operator === "not_contains" ? `NOT ${exists}` : exists;
+  }
+  const columns: Partial<Record<LibrarySmartFolder["conditions"][number]["field"], string>> = {
+    owner: "a.owner_user_id",
+    visibility: "a.visibility",
+    width: "a.width",
+    height: "a.height",
+    byteSize: "a.byte_size",
+    createdAt: "a.created_at",
+    taggingStatus: "a.tagging_status",
+  };
+  const column = columns[condition.field];
+  if (!column) return "1=0";
+  if (condition.operator === "one_of") return `${column} IN (${values.map((value) => params.add(value)).join(",")})`;
+  const operator = condition.operator === "gte" || condition.operator === "after" ? ">=" : condition.operator === "lte" || condition.operator === "before" ? "<=" : "=";
+  return `${column}${operator}${params.add(first)}`;
+}
+
+function libraryOwnerSortColumn(postgres: boolean) {
+  return postgres
+    ? "LOWER(COALESCE(a.data_json->>'ownerDisplayName', a.owner_user_id))"
+    : "LOWER(COALESCE(json_extract(a.data_json, '$.ownerDisplayName'), a.owner_user_id))";
+}
+
+function libraryOrderSql(sort: LibraryListSort, postgres: boolean) {
+  if (sort === "oldest") return "a.created_at ASC, a.id ASC";
+  if (sort === "name-asc") return "LOWER(a.name) ASC, a.id ASC";
+  if (sort === "name-desc") return "LOWER(a.name) DESC, a.id DESC";
+  if (sort === "owner-asc") return `${libraryOwnerSortColumn(postgres)} ASC, a.id ASC`;
+  if (sort === "owner-desc") return `${libraryOwnerSortColumn(postgres)} DESC, a.id DESC`;
+  return "a.created_at DESC, a.id DESC";
+}
+
+function addLibraryCursorPredicate(where: string[], params: LibrarySqlParams, sort: LibraryListSort, cursor?: LibraryDatabaseCursor) {
+  if (!cursor) return;
+  const column = sort.startsWith("name") ? "LOWER(a.name)" : sort.startsWith("owner") ? libraryOwnerSortColumn(params.postgres) : "a.created_at";
+  const descending = sort === "newest" || sort === "name-desc" || sort === "owner-desc";
+  const value = params.add(sort === "newest" || sort === "oldest" ? cursor.value : cursor.value.toLocaleLowerCase());
+  const id = params.add(cursor.id);
+  where.push(`(${column} ${descending ? "<" : ">"} ${value} OR (${column}=${value} AND a.id ${descending ? "<" : ">"} ${id}))`);
 }
 
 export async function getLibraryAssetFromDb(assetId: string, includeDeleted = false) {
   await ensureDatabaseReady();
   const deletedClause = includeDeleted ? "" : " AND deleted_at IS NULL";
   if (getDatabaseBackend() === "postgres") {
-    const result = await getPostgresPool().query<JsonRow>(`SELECT data_json FROM library_assets WHERE id = $1${deletedClause}`, [assetId]);
-    return result.rows[0] ? fromLibraryAssetJson(result.rows[0].data_json) : undefined;
+    const result = await getPostgresPool().query<JsonRow & { collection_ids: string[] }>(
+      `SELECT a.data_json, COALESCE(array_agg(ca.collection_id) FILTER (WHERE ca.collection_id IS NOT NULL), ARRAY[]::text[]) collection_ids
+       FROM library_assets a LEFT JOIN library_collection_assets ca ON ca.asset_id=a.id
+       WHERE a.id = $1${deletedClause} GROUP BY a.id`, [assetId],
+    );
+    return result.rows[0] ? fromLibraryAssetJson(result.rows[0].data_json, result.rows[0].collection_ids) : undefined;
   }
-  const row = getSqliteDatabase().prepare(`SELECT data_json FROM library_assets WHERE id = ?${deletedClause}`).get(assetId) as JsonRow | undefined;
-  return row ? fromLibraryAssetJson(row.data_json) : undefined;
+  const row = getSqliteDatabase().prepare(
+    `SELECT a.data_json, COALESCE(group_concat(ca.collection_id, char(31)), '') collection_ids
+     FROM library_assets a LEFT JOIN library_collection_assets ca ON ca.asset_id=a.id
+     WHERE a.id = ?${deletedClause} GROUP BY a.id`,
+  ).get(assetId) as (JsonRow & { collection_ids: string }) | undefined;
+  return row ? fromLibraryAssetJson(row.data_json, splitSqliteIds(row.collection_ids)) : undefined;
 }
 
 export async function findLibraryAssetByOwnerHashFromDb(ownerUserId: string, sha256: string) {
@@ -284,19 +527,29 @@ export async function findLibraryAssetByOwnerHashFromDb(ownerUserId: string, sha
       "SELECT data_json FROM library_assets WHERE owner_user_id = $1 AND sha256 = $2 AND deleted_at IS NULL LIMIT 1",
       [ownerUserId, sha256],
     );
-    return result.rows[0] ? fromLibraryAssetJson(result.rows[0].data_json) : undefined;
+    const asset = result.rows[0] ? fromLibraryAssetJson(result.rows[0].data_json) : undefined;
+    return asset ? getLibraryAssetFromDb(asset.id) : undefined;
   }
   const row = getSqliteDatabase().prepare(
     "SELECT data_json FROM library_assets WHERE owner_user_id = ? AND sha256 = ? AND deleted_at IS NULL LIMIT 1",
   ).get(ownerUserId, sha256) as JsonRow | undefined;
-  return row ? fromLibraryAssetJson(row.data_json) : undefined;
+  const asset = row ? fromLibraryAssetJson(row.data_json) : undefined;
+  return asset ? getLibraryAssetFromDb(asset.id) : undefined;
 }
 
-function fromLibraryAssetJson(value: unknown): LibraryAsset {
-  const asset = fromJson<LibraryAsset>(value);
-  const roleAddedAt: LibraryAsset["roleAddedAt"] = {};
-  for (const role of asset.roles) roleAddedAt[role] = getLibraryAssetAddedAt(asset, role);
-  return { ...asset, roleAddedAt };
+function fromLibraryAssetJson(value: unknown, collectionIds: string[] = []): LibraryAsset {
+  const stored = fromJson<LibraryAsset & { roles?: unknown; roleAddedAt?: unknown }>(value);
+  const { roles: _roles, roleAddedAt: _roleAddedAt, ...asset } = stored;
+  return {
+    ...asset,
+    note: typeof asset.note === "string" ? asset.note : "",
+    collectionIds,
+    taggingStatus: asset.taggingStatus || "idle",
+  };
+}
+
+function splitSqliteIds(value: string) {
+  return value ? value.split(String.fromCharCode(31)).filter(Boolean) : [];
 }
 
 export async function saveLibraryAssetToDb(asset: LibraryAsset) {
@@ -409,29 +662,39 @@ export async function listLibraryCollectionsFromDb(): Promise<LibraryCollection[
   await ensureDatabaseReady();
   if (getDatabaseBackend() === "postgres") {
     const result = await getPostgresPool().query<JsonRow>("SELECT data_json FROM library_collections ORDER BY created_at ASC, id ASC");
-    return result.rows.map((row) => fromJson<LibraryCollection>(row.data_json));
+    return result.rows.map((row) => fromLibraryCollectionJson(row.data_json));
   }
   const rows = getSqliteDatabase().prepare("SELECT data_json FROM library_collections ORDER BY created_at ASC, id ASC").all() as JsonRow[];
-  return rows.map((row) => fromJson<LibraryCollection>(row.data_json));
+  return rows.map((row) => fromLibraryCollectionJson(row.data_json));
+}
+
+function fromLibraryCollectionJson(value: unknown): LibraryCollection {
+  const stored = fromJson<LibraryCollection & { role?: unknown }>(value);
+  const { role: _role, ...collection } = stored;
+  return {
+    ...collection,
+    visibility: collection.visibility === "team" ? "team" : "private",
+    kind: "folder",
+  };
 }
 
 export async function saveLibraryCollectionToDb(collection: LibraryCollection) {
   await ensureDatabaseReady();
-  const values = [collection.id, collection.ownerUserId, collection.role, collection.parentId || null, collection.name, collection.relativePath || null, collection.createdAt, collection.updatedAt, toJson(collection)];
+  const values = [collection.id, collection.ownerUserId, collection.visibility, collection.kind, collection.parentId || null, collection.name, collection.relativePath || null, collection.createdAt, collection.updatedAt, toJson(collection)];
   if (getDatabaseBackend() === "postgres") {
     await getPostgresPool().query(
-      `INSERT INTO library_collections (id, owner_user_id, role, parent_id, name, relative_path, created_at, updated_at, data_json)
-       VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9::jsonb)
-       ON CONFLICT(id) DO UPDATE SET owner_user_id=excluded.owner_user_id, role=excluded.role, parent_id=excluded.parent_id,
+      `INSERT INTO library_collections (id, owner_user_id, visibility, kind, parent_id, name, relative_path, created_at, updated_at, data_json)
+       VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10::jsonb)
+       ON CONFLICT(id) DO UPDATE SET owner_user_id=excluded.owner_user_id, visibility=excluded.visibility, kind=excluded.kind, parent_id=excluded.parent_id,
        name=excluded.name, relative_path=excluded.relative_path, updated_at=excluded.updated_at, data_json=excluded.data_json`,
       values,
     );
     return collection;
   }
   getSqliteDatabase().prepare(
-    `INSERT INTO library_collections (id, owner_user_id, role, parent_id, name, relative_path, created_at, updated_at, data_json)
-     VALUES (?,?,?,?,?,?,?,?,?)
-     ON CONFLICT(id) DO UPDATE SET owner_user_id=excluded.owner_user_id, role=excluded.role, parent_id=excluded.parent_id,
+    `INSERT INTO library_collections (id, owner_user_id, visibility, kind, parent_id, name, relative_path, created_at, updated_at, data_json)
+     VALUES (?,?,?,?,?,?,?,?,?,?)
+     ON CONFLICT(id) DO UPDATE SET owner_user_id=excluded.owner_user_id, visibility=excluded.visibility, kind=excluded.kind, parent_id=excluded.parent_id,
      name=excluded.name, relative_path=excluded.relative_path, updated_at=excluded.updated_at, data_json=excluded.data_json`,
   ).run(...values);
   return collection;
@@ -440,10 +703,118 @@ export async function saveLibraryCollectionToDb(collection: LibraryCollection) {
 export async function deleteLibraryCollectionFromDb(collectionId: string) {
   await ensureDatabaseReady();
   if (getDatabaseBackend() === "postgres") {
-    await getPostgresPool().query("DELETE FROM library_collections WHERE id = $1", [collectionId]);
+    const client = await getPostgresPool().connect();
+    try {
+      await client.query("BEGIN");
+      const row = await client.query<{ parent_id?: string | null }>("SELECT parent_id FROM library_collections WHERE id=$1 FOR UPDATE", [collectionId]);
+      if (!row.rows[0]) throw new Error("Library collection not found.");
+      await client.query("UPDATE library_collections SET parent_id=$1 WHERE parent_id=$2", [row.rows[0].parent_id || null, collectionId]);
+      await client.query("DELETE FROM library_collections WHERE id=$1", [collectionId]);
+      await client.query("COMMIT");
+    } catch (error) {
+      await client.query("ROLLBACK");
+      throw error;
+    } finally {
+      client.release();
+    }
     return;
   }
-  getSqliteDatabase().prepare("DELETE FROM library_collections WHERE id = ?").run(collectionId);
+  const db = getSqliteDatabase();
+  runSqliteTransaction(db, () => {
+    const row = db.prepare("SELECT parent_id FROM library_collections WHERE id=?").get(collectionId) as { parent_id?: string | null } | undefined;
+    if (!row) throw new Error("Library collection not found.");
+    db.prepare("UPDATE library_collections SET parent_id=? WHERE parent_id=?").run(row.parent_id || null, collectionId);
+    db.prepare("DELETE FROM library_collections WHERE id=?").run(collectionId);
+  });
+}
+
+export async function replaceLibraryAssetCollectionsFromDb(assetId: string, collectionIds: string[], createdAt = new Date().toISOString()) {
+  await ensureDatabaseReady();
+  const ids = Array.from(new Set(collectionIds));
+  if (getDatabaseBackend() === "postgres") {
+    const client = await getPostgresPool().connect();
+    try {
+      await client.query("BEGIN");
+      await client.query("DELETE FROM library_collection_assets WHERE asset_id=$1", [assetId]);
+      for (const collectionId of ids) await client.query(
+        "INSERT INTO library_collection_assets (collection_id, asset_id, created_at) VALUES ($1,$2,$3) ON CONFLICT DO NOTHING",
+        [collectionId, assetId, createdAt],
+      );
+      await client.query("COMMIT");
+    } catch (error) {
+      await client.query("ROLLBACK");
+      throw error;
+    } finally {
+      client.release();
+    }
+  } else {
+    const db = getSqliteDatabase();
+    runSqliteTransaction(db, () => {
+      db.prepare("DELETE FROM library_collection_assets WHERE asset_id=?").run(assetId);
+      const insert = db.prepare("INSERT INTO library_collection_assets (collection_id, asset_id, created_at) VALUES (?,?,?) ON CONFLICT DO NOTHING");
+      ids.forEach((collectionId) => insert.run(collectionId, assetId, createdAt));
+    });
+  }
+}
+
+export async function listLibrarySmartFoldersFromDb(): Promise<LibrarySmartFolder[]> {
+  await ensureDatabaseReady();
+  if (getDatabaseBackend() === "postgres") {
+    const result = await getPostgresPool().query<JsonRow>("SELECT data_json FROM library_smart_folders ORDER BY name ASC, id ASC");
+    return result.rows.map((row) => fromJson<LibrarySmartFolder>(row.data_json));
+  }
+  const rows = getSqliteDatabase().prepare("SELECT data_json FROM library_smart_folders ORDER BY name ASC, id ASC").all() as JsonRow[];
+  return rows.map((row) => fromJson<LibrarySmartFolder>(row.data_json));
+}
+
+export async function saveLibrarySmartFolderToDb(folder: LibrarySmartFolder) {
+  await ensureDatabaseReady();
+  const values = [folder.id, folder.ownerUserId, folder.visibility, folder.name, folder.createdAt, folder.updatedAt, toJson(folder)];
+  if (getDatabaseBackend() === "postgres") {
+    await getPostgresPool().query(
+      `INSERT INTO library_smart_folders (id, owner_user_id, visibility, name, created_at, updated_at, data_json)
+       VALUES ($1,$2,$3,$4,$5,$6,$7::jsonb) ON CONFLICT(id) DO UPDATE SET visibility=excluded.visibility,
+       name=excluded.name, updated_at=excluded.updated_at, data_json=excluded.data_json`, values,
+    );
+  } else {
+    getSqliteDatabase().prepare(
+      `INSERT INTO library_smart_folders (id, owner_user_id, visibility, name, created_at, updated_at, data_json)
+       VALUES (?,?,?,?,?,?,?) ON CONFLICT(id) DO UPDATE SET visibility=excluded.visibility,
+       name=excluded.name, updated_at=excluded.updated_at, data_json=excluded.data_json`,
+    ).run(...values);
+  }
+  return folder;
+}
+
+export async function deleteLibrarySmartFolderFromDb(folderId: string) {
+  await ensureDatabaseReady();
+  if (getDatabaseBackend() === "postgres") await getPostgresPool().query("DELETE FROM library_smart_folders WHERE id=$1", [folderId]);
+  else getSqliteDatabase().prepare("DELETE FROM library_smart_folders WHERE id=?").run(folderId);
+}
+
+export async function setLibraryAssetFavoriteInDb(ownerUserId: string, assetId: string, favorite: boolean) {
+  await ensureDatabaseReady();
+  if (getDatabaseBackend() === "postgres") {
+    if (favorite) await getPostgresPool().query(
+      "INSERT INTO library_asset_favorites (owner_user_id, asset_id, created_at) VALUES ($1,$2,$3) ON CONFLICT DO NOTHING",
+      [ownerUserId, assetId, new Date().toISOString()],
+    );
+    else await getPostgresPool().query("DELETE FROM library_asset_favorites WHERE owner_user_id=$1 AND asset_id=$2", [ownerUserId, assetId]);
+  } else if (favorite) {
+    getSqliteDatabase().prepare("INSERT INTO library_asset_favorites (owner_user_id, asset_id, created_at) VALUES (?,?,?) ON CONFLICT DO NOTHING")
+      .run(ownerUserId, assetId, new Date().toISOString());
+  } else {
+    getSqliteDatabase().prepare("DELETE FROM library_asset_favorites WHERE owner_user_id=? AND asset_id=?").run(ownerUserId, assetId);
+  }
+}
+
+export async function isLibraryAssetFavoriteInDb(ownerUserId: string, assetId: string) {
+  await ensureDatabaseReady();
+  if (getDatabaseBackend() === "postgres") {
+    const result = await getPostgresPool().query("SELECT 1 FROM library_asset_favorites WHERE owner_user_id=$1 AND asset_id=$2", [ownerUserId, assetId]);
+    return Boolean(result.rows[0]);
+  }
+  return Boolean(getSqliteDatabase().prepare("SELECT 1 FROM library_asset_favorites WHERE owner_user_id=? AND asset_id=?").get(ownerUserId, assetId));
 }
 
 export async function saveLibraryTaggingJobToDb(job: LibraryTaggingJob) {
@@ -3033,7 +3404,9 @@ function getSqliteDatabase() {
   const { DatabaseSync } = getNodeSqlite();
   sqliteDatabase = new DatabaseSync(sqliteStorePath);
   configureSqliteDatabase(sqliteDatabase);
+  prepareUnifiedLibrarySqliteColumns(sqliteDatabase);
   createSqliteSchema(sqliteDatabase);
+  migrateUnifiedLibrarySqlite(sqliteDatabase);
   retireLegacyMaterialLibrarySqlite(sqliteDatabase);
   migrateLegacyJsonToSqlite(sqliteDatabase);
   return sqliteDatabase;
@@ -3062,7 +3435,9 @@ function getPostgresPool() {
 }
 
 async function initializePostgres() {
+  await prepareUnifiedLibraryPostgresColumns();
   await getPostgresPool().query(postgresSchemaSql);
+  await migrateUnifiedLibraryPostgres();
   await retireLegacyMaterialLibraryPostgres();
   await migrateLegacyJsonToPostgres();
 }
@@ -3579,7 +3954,14 @@ function createSqliteSchema(db: SqliteDatabase) {
     CREATE TABLE IF NOT EXISTS library_assets (
       id TEXT PRIMARY KEY,
       owner_user_id TEXT NOT NULL,
+      name TEXT NOT NULL,
+      original_name TEXT NOT NULL,
+      note TEXT NOT NULL DEFAULT '',
       visibility TEXT NOT NULL,
+      mime_type TEXT NOT NULL,
+      width INTEGER,
+      height INTEGER,
+      byte_size INTEGER NOT NULL,
       sha256 TEXT NOT NULL,
       object_key TEXT NOT NULL UNIQUE,
       public_url TEXT NOT NULL,
@@ -3595,18 +3977,14 @@ function createSqliteSchema(db: SqliteDatabase) {
     CREATE INDEX IF NOT EXISTS idx_library_assets_visibility_created ON library_assets(visibility, created_at DESC, id DESC);
     CREATE INDEX IF NOT EXISTS idx_library_assets_tagging_status ON library_assets(tagging_status, updated_at DESC);
 
-    CREATE TABLE IF NOT EXISTS library_asset_roles (
-      asset_id TEXT NOT NULL,
-      role TEXT NOT NULL,
-      PRIMARY KEY(asset_id, role),
-      FOREIGN KEY(asset_id) REFERENCES library_assets(id) ON DELETE CASCADE
-    );
-    CREATE INDEX IF NOT EXISTS idx_library_asset_roles_role ON library_asset_roles(role, asset_id);
+    CREATE INDEX IF NOT EXISTS idx_library_assets_name ON library_assets(name, id);
+    CREATE INDEX IF NOT EXISTS idx_library_assets_dimensions ON library_assets(width, height, byte_size, id);
 
     CREATE TABLE IF NOT EXISTS library_collections (
       id TEXT PRIMARY KEY,
       owner_user_id TEXT NOT NULL,
-      role TEXT NOT NULL,
+      visibility TEXT NOT NULL,
+      kind TEXT NOT NULL,
       parent_id TEXT,
       name TEXT NOT NULL,
       relative_path TEXT,
@@ -3614,7 +3992,8 @@ function createSqliteSchema(db: SqliteDatabase) {
       updated_at TEXT NOT NULL,
       data_json TEXT NOT NULL
     );
-    CREATE INDEX IF NOT EXISTS idx_library_collections_owner_role ON library_collections(owner_user_id, role, parent_id, name);
+    CREATE INDEX IF NOT EXISTS idx_library_collections_owner_parent ON library_collections(owner_user_id, parent_id, name);
+    CREATE INDEX IF NOT EXISTS idx_library_collections_visibility ON library_collections(visibility, owner_user_id, parent_id);
 
     CREATE TABLE IF NOT EXISTS library_collection_assets (
       collection_id TEXT NOT NULL,
@@ -3637,6 +4016,28 @@ function createSqliteSchema(db: SqliteDatabase) {
       FOREIGN KEY(asset_id) REFERENCES library_assets(id) ON DELETE CASCADE
     );
     CREATE INDEX IF NOT EXISTS idx_library_asset_labels_filter ON library_asset_labels(dimension, value, asset_id);
+    CREATE INDEX IF NOT EXISTS idx_library_asset_labels_filter_lower ON library_asset_labels(dimension, lower(value), asset_id);
+
+    CREATE TABLE IF NOT EXISTS library_smart_folders (
+      id TEXT PRIMARY KEY,
+      owner_user_id TEXT NOT NULL,
+      visibility TEXT NOT NULL,
+      name TEXT NOT NULL,
+      created_at TEXT NOT NULL,
+      updated_at TEXT NOT NULL,
+      data_json TEXT NOT NULL
+    );
+    CREATE INDEX IF NOT EXISTS idx_library_smart_folders_owner_name ON library_smart_folders(owner_user_id, name, id);
+    CREATE INDEX IF NOT EXISTS idx_library_smart_folders_visibility ON library_smart_folders(visibility, owner_user_id, name);
+
+    CREATE TABLE IF NOT EXISTS library_asset_favorites (
+      owner_user_id TEXT NOT NULL,
+      asset_id TEXT NOT NULL,
+      created_at TEXT NOT NULL,
+      PRIMARY KEY(owner_user_id, asset_id),
+      FOREIGN KEY(asset_id) REFERENCES library_assets(id) ON DELETE CASCADE
+    );
+    CREATE INDEX IF NOT EXISTS idx_library_asset_favorites_asset ON library_asset_favorites(asset_id, owner_user_id);
 
     CREATE TABLE IF NOT EXISTS library_tagging_jobs (
       id TEXT PRIMARY KEY,
@@ -4058,7 +4459,17 @@ const postgresSchemaSql = `
   CREATE TABLE IF NOT EXISTS library_assets (
     id TEXT PRIMARY KEY,
     owner_user_id TEXT NOT NULL,
+    name TEXT NOT NULL,
+    original_name TEXT NOT NULL,
+    note TEXT NOT NULL DEFAULT '',
     visibility TEXT NOT NULL,
+    mime_type TEXT NOT NULL,
+    width INTEGER,
+    height INTEGER,
+    byte_size BIGINT NOT NULL,
+    search_vector tsvector GENERATED ALWAYS AS (
+      to_tsvector('simple', COALESCE(name, '') || ' ' || COALESCE(original_name, '') || ' ' || COALESCE(note, ''))
+    ) STORED,
     sha256 TEXT NOT NULL,
     object_key TEXT NOT NULL UNIQUE,
     public_url TEXT NOT NULL,
@@ -4074,17 +4485,15 @@ const postgresSchemaSql = `
   CREATE INDEX IF NOT EXISTS idx_library_assets_visibility_created ON library_assets(visibility, created_at DESC, id DESC);
   CREATE INDEX IF NOT EXISTS idx_library_assets_tagging_status ON library_assets(tagging_status, updated_at DESC);
 
-  CREATE TABLE IF NOT EXISTS library_asset_roles (
-    asset_id TEXT NOT NULL REFERENCES library_assets(id) ON DELETE CASCADE,
-    role TEXT NOT NULL,
-    PRIMARY KEY(asset_id, role)
-  );
-  CREATE INDEX IF NOT EXISTS idx_library_asset_roles_role ON library_asset_roles(role, asset_id);
+  CREATE INDEX IF NOT EXISTS idx_library_assets_name ON library_assets(name, id);
+  CREATE INDEX IF NOT EXISTS idx_library_assets_dimensions ON library_assets(width, height, byte_size, id);
+  CREATE INDEX IF NOT EXISTS idx_library_assets_search ON library_assets USING GIN(search_vector);
 
   CREATE TABLE IF NOT EXISTS library_collections (
     id TEXT PRIMARY KEY,
     owner_user_id TEXT NOT NULL,
-    role TEXT NOT NULL,
+    visibility TEXT NOT NULL,
+    kind TEXT NOT NULL,
     parent_id TEXT,
     name TEXT NOT NULL,
     relative_path TEXT,
@@ -4092,7 +4501,8 @@ const postgresSchemaSql = `
     updated_at TIMESTAMPTZ NOT NULL,
     data_json JSONB NOT NULL
   );
-  CREATE INDEX IF NOT EXISTS idx_library_collections_owner_role ON library_collections(owner_user_id, role, parent_id, name);
+  CREATE INDEX IF NOT EXISTS idx_library_collections_owner_parent ON library_collections(owner_user_id, parent_id, name);
+  CREATE INDEX IF NOT EXISTS idx_library_collections_visibility ON library_collections(visibility, owner_user_id, parent_id);
 
   CREATE TABLE IF NOT EXISTS library_collection_assets (
     collection_id TEXT NOT NULL REFERENCES library_collections(id) ON DELETE CASCADE,
@@ -4112,6 +4522,27 @@ const postgresSchemaSql = `
     PRIMARY KEY(asset_id, dimension, value)
   );
   CREATE INDEX IF NOT EXISTS idx_library_asset_labels_filter ON library_asset_labels(dimension, value, asset_id);
+  CREATE INDEX IF NOT EXISTS idx_library_asset_labels_filter_lower ON library_asset_labels(dimension, LOWER(value), asset_id);
+
+  CREATE TABLE IF NOT EXISTS library_smart_folders (
+    id TEXT PRIMARY KEY,
+    owner_user_id TEXT NOT NULL,
+    visibility TEXT NOT NULL,
+    name TEXT NOT NULL,
+    created_at TIMESTAMPTZ NOT NULL,
+    updated_at TIMESTAMPTZ NOT NULL,
+    data_json JSONB NOT NULL
+  );
+  CREATE INDEX IF NOT EXISTS idx_library_smart_folders_owner_name ON library_smart_folders(owner_user_id, name, id);
+  CREATE INDEX IF NOT EXISTS idx_library_smart_folders_visibility ON library_smart_folders(visibility, owner_user_id, name);
+
+  CREATE TABLE IF NOT EXISTS library_asset_favorites (
+    owner_user_id TEXT NOT NULL,
+    asset_id TEXT NOT NULL REFERENCES library_assets(id) ON DELETE CASCADE,
+    created_at TIMESTAMPTZ NOT NULL,
+    PRIMARY KEY(owner_user_id, asset_id)
+  );
+  CREATE INDEX IF NOT EXISTS idx_library_asset_favorites_asset ON library_asset_favorites(asset_id, owner_user_id);
 
   CREATE TABLE IF NOT EXISTS library_tagging_jobs (
     id TEXT PRIMARY KEY,
@@ -4406,6 +4837,325 @@ function fromFeishuPublishQueueRow(row: FeishuPublishQueueRow): FeishuPublishJob
   };
 }
 
+export function legacyLibraryRootId(ownerUserId: string, role: "reference" | "vehicle") {
+  return `library-collection-legacy-${role}-${createHash("sha256").update(ownerUserId).digest("hex").slice(0, 20)}`;
+}
+
+function prepareUnifiedLibrarySqliteColumns(db: SqliteDatabase) {
+  if (!sqliteTableExists(db, "library_assets")) return;
+  const additions = [
+    ["name", "TEXT"], ["original_name", "TEXT"], ["note", "TEXT NOT NULL DEFAULT ''"],
+    ["mime_type", "TEXT"], ["width", "INTEGER"], ["height", "INTEGER"], ["byte_size", "INTEGER"],
+  ] as const;
+  for (const [name, type] of additions) if (!sqliteColumnExists(db, "library_assets", name)) db.exec(`ALTER TABLE library_assets ADD COLUMN ${name} ${type}`);
+  if (sqliteTableExists(db, "library_collections")) {
+    if (!sqliteColumnExists(db, "library_collections", "visibility")) db.exec("ALTER TABLE library_collections ADD COLUMN visibility TEXT NOT NULL DEFAULT 'private'");
+    if (!sqliteColumnExists(db, "library_collections", "kind")) db.exec("ALTER TABLE library_collections ADD COLUMN kind TEXT NOT NULL DEFAULT 'folder'");
+  }
+}
+
+async function prepareUnifiedLibraryPostgresColumns() {
+  const pool = getPostgresPool();
+  const exists = await pool.query<{ exists: boolean }>("SELECT to_regclass('public.library_assets') IS NOT NULL AS exists");
+  if (!exists.rows[0]?.exists) return;
+  await pool.query(`
+    ALTER TABLE library_assets ADD COLUMN IF NOT EXISTS name TEXT;
+    ALTER TABLE library_assets ADD COLUMN IF NOT EXISTS original_name TEXT;
+    ALTER TABLE library_assets ADD COLUMN IF NOT EXISTS note TEXT NOT NULL DEFAULT '';
+    ALTER TABLE library_assets ADD COLUMN IF NOT EXISTS mime_type TEXT;
+    ALTER TABLE library_assets ADD COLUMN IF NOT EXISTS width INTEGER;
+    ALTER TABLE library_assets ADD COLUMN IF NOT EXISTS height INTEGER;
+    ALTER TABLE library_assets ADD COLUMN IF NOT EXISTS byte_size BIGINT;
+    ALTER TABLE library_assets ADD COLUMN IF NOT EXISTS search_vector tsvector GENERATED ALWAYS AS (
+      to_tsvector('simple', COALESCE(name, '') || ' ' || COALESCE(original_name, '') || ' ' || COALESCE(note, ''))
+    ) STORED;
+    ALTER TABLE library_collections ADD COLUMN IF NOT EXISTS visibility TEXT NOT NULL DEFAULT 'private';
+    ALTER TABLE library_collections ADD COLUMN IF NOT EXISTS kind TEXT NOT NULL DEFAULT 'folder';
+  `);
+}
+
+function migrateUnifiedLibrarySqlite(db: SqliteDatabase) {
+  if (getSqliteMeta(db, "unified_library_v1")) return;
+  runSqliteTransaction(db, () => {
+    if (sqliteTableExists(db, "library_asset_roles") && sqliteColumnExists(db, "library_collections", "role")) {
+      const owners = db.prepare(
+        `SELECT DISTINCT a.owner_user_id owner_user_id, r.role role, a.data_json data_json FROM library_asset_roles r JOIN library_assets a ON a.id=r.asset_id
+         UNION SELECT DISTINCT owner_user_id, role, data_json FROM library_collections`,
+      ).all() as Array<{ owner_user_id: string; role: "reference" | "vehicle"; data_json: unknown }>;
+      const insertRoot = db.prepare(
+        `INSERT INTO library_collections (id, owner_user_id, role, visibility, kind, parent_id, name, relative_path, created_at, updated_at, data_json)
+         VALUES (?,?,?,?,?,?,?,?,?,?,?) ON CONFLICT(id) DO NOTHING`,
+      );
+      const ownersById = new Map<string, string>();
+      for (const row of owners) {
+        const stored = safeJsonRecord(row.data_json);
+        if (!ownersById.has(row.owner_user_id)) ownersById.set(row.owner_user_id, String(stored.ownerDisplayName || row.owner_user_id));
+      }
+      for (const [ownerUserId, ownerDisplayName] of ownersById) for (const role of ["reference", "vehicle"] as const) {
+        const id = legacyLibraryRootId(ownerUserId, role);
+        const now = new Date().toISOString();
+        const collection: LibraryCollection = {
+          id, ownerUserId, ownerDisplayName,
+          visibility: "private", kind: "folder", name: role === "reference" ? "参考图库" : "车型库",
+          relativePath: role === "reference" ? "参考图库" : "车型库", createdAt: now, updatedAt: now,
+        };
+        insertRoot.run(id, ownerUserId, role, "private", "folder", null, collection.name, collection.relativePath, now, now, toJson(collection));
+        setSqliteMeta(db, `unified_library_root:${ownerUserId}:${role}`, id);
+        db.prepare(`INSERT INTO library_collection_assets (collection_id, asset_id, created_at)
+          SELECT ?, r.asset_id, ? FROM library_asset_roles r
+          JOIN library_assets a ON a.id=r.asset_id
+          WHERE r.role=? AND a.owner_user_id=? ON CONFLICT DO NOTHING`).run(id, now, role, ownerUserId);
+        db.prepare("UPDATE library_collections SET parent_id=? WHERE owner_user_id=? AND role=? AND parent_id IS NULL AND id<>?")
+          .run(id, ownerUserId, role, id);
+      }
+      db.exec("DROP INDEX IF EXISTS idx_library_asset_roles_role; DROP TABLE library_asset_roles; DROP INDEX IF EXISTS idx_library_collections_owner_role;");
+      db.exec("ALTER TABLE library_collections DROP COLUMN role");
+    }
+    normalizeUnifiedLibrarySqliteRows(db);
+    migrateLegacyLibraryJsonSqlite(db);
+    setSqliteMeta(db, "unified_library_v1", new Date().toISOString());
+  });
+}
+
+async function migrateUnifiedLibraryPostgres() {
+  const pool = getPostgresPool();
+  const marker = await pool.query<{ value?: string }>("SELECT value FROM app_meta WHERE key=$1", ["unified_library_v1"]);
+  if (marker.rows[0]?.value) return;
+  const client = await pool.connect();
+  try {
+    await client.query("BEGIN");
+    const legacy = await client.query<{ exists: boolean }>("SELECT to_regclass('public.library_asset_roles') IS NOT NULL AS exists");
+    const roleColumn = await client.query<{ exists: boolean }>("SELECT EXISTS(SELECT 1 FROM information_schema.columns WHERE table_name='library_collections' AND column_name='role') AS exists");
+    if (legacy.rows[0]?.exists && roleColumn.rows[0]?.exists) {
+      const owners = await client.query<{ owner_user_id: string; role: "reference" | "vehicle"; data_json: unknown }>(
+        `SELECT DISTINCT a.owner_user_id, r.role, a.data_json FROM library_asset_roles r JOIN library_assets a ON a.id=r.asset_id
+         UNION SELECT DISTINCT owner_user_id, role, data_json FROM library_collections`,
+      );
+      const ownersById = new Map<string, string>();
+      for (const row of owners.rows) {
+        const stored = safeJsonRecord(row.data_json);
+        if (!ownersById.has(row.owner_user_id)) ownersById.set(row.owner_user_id, String(stored.ownerDisplayName || row.owner_user_id));
+      }
+      for (const [ownerUserId, ownerDisplayName] of ownersById) for (const role of ["reference", "vehicle"] as const) {
+        const id = legacyLibraryRootId(ownerUserId, role);
+        const now = new Date().toISOString();
+        const collection: LibraryCollection = {
+          id, ownerUserId, ownerDisplayName,
+          visibility: "private", kind: "folder", name: role === "reference" ? "参考图库" : "车型库",
+          relativePath: role === "reference" ? "参考图库" : "车型库", createdAt: now, updatedAt: now,
+        };
+        await client.query(
+          `INSERT INTO library_collections (id, owner_user_id, role, visibility, kind, parent_id, name, relative_path, created_at, updated_at, data_json)
+           VALUES ($1,$2,$3,$4,$5,NULL,$6,$7,$8,$8,$9::jsonb) ON CONFLICT(id) DO NOTHING`,
+          [id, ownerUserId, role, "private", "folder", collection.name, collection.relativePath, now, toJson(collection)],
+        );
+        await client.query(
+          `INSERT INTO app_meta (key,value,updated_at) VALUES ($1,$2,$3)
+           ON CONFLICT(key) DO UPDATE SET value=excluded.value, updated_at=excluded.updated_at`,
+          [`unified_library_root:${ownerUserId}:${role}`, id, now],
+        );
+        await client.query(`INSERT INTO library_collection_assets (collection_id, asset_id, created_at)
+          SELECT $1, r.asset_id, $2 FROM library_asset_roles r
+          JOIN library_assets a ON a.id=r.asset_id
+          WHERE r.role=$3 AND a.owner_user_id=$4 ON CONFLICT DO NOTHING`, [id, now, role, ownerUserId]);
+        await client.query("UPDATE library_collections SET parent_id=$1 WHERE owner_user_id=$2 AND role=$3 AND parent_id IS NULL AND id<>$1", [id, ownerUserId, role]);
+      }
+      await client.query("DROP INDEX IF EXISTS idx_library_asset_roles_role; DROP TABLE library_asset_roles; DROP INDEX IF EXISTS idx_library_collections_owner_role; ALTER TABLE library_collections DROP COLUMN role");
+    }
+    await normalizeUnifiedLibraryPostgresRows(client);
+    await migrateLegacyLibraryJsonPostgres(client);
+    const completedAt = new Date().toISOString();
+    await client.query(
+      `INSERT INTO app_meta (key,value,updated_at) VALUES ($1,$2,$3)
+       ON CONFLICT(key) DO UPDATE SET value=excluded.value, updated_at=excluded.updated_at`,
+      ["unified_library_v1", completedAt, completedAt],
+    );
+    await client.query("COMMIT");
+  } catch (error) {
+    await client.query("ROLLBACK");
+    throw error;
+  } finally {
+    client.release();
+  }
+}
+
+function sqliteTableExists(db: SqliteDatabase, table: string) {
+  return Boolean(db.prepare("SELECT 1 FROM sqlite_master WHERE type='table' AND name=?").get(table));
+}
+
+function sqliteColumnExists(db: SqliteDatabase, table: string, column: string) {
+  return (db.prepare(`PRAGMA table_info(${table})`).all() as Array<{ name: string }>).some((row) => row.name === column);
+}
+
+function safeJsonRecord(value: unknown): Record<string, unknown> {
+  try {
+    const parsed = typeof value === "string" ? JSON.parse(value) : value;
+    return parsed && typeof parsed === "object" && !Array.isArray(parsed) ? parsed as Record<string, unknown> : {};
+  } catch {
+    return {};
+  }
+}
+
+function normalizeUnifiedLibrarySqliteRows(db: SqliteDatabase) {
+  const assets = db.prepare("SELECT id, data_json FROM library_assets").all() as Array<{ id: string; data_json: unknown }>;
+  const updateAsset = db.prepare(
+    `UPDATE library_assets SET name=?, original_name=?, note=?, mime_type=?, width=?, height=?, byte_size=?, tagging_status=?, data_json=? WHERE id=?`,
+  );
+  const deleteLabels = db.prepare("DELETE FROM library_asset_labels WHERE asset_id=?");
+  const insertLabel = db.prepare(
+    "INSERT INTO library_asset_labels (asset_id, dimension, value, source, confidence, updated_at) VALUES (?,?,?,?,?,?) ON CONFLICT(asset_id, dimension, value) DO UPDATE SET source=excluded.source, confidence=excluded.confidence, updated_at=excluded.updated_at",
+  );
+  for (const row of assets) {
+    const stored = safeJsonRecord(row.data_json);
+    const { roles: _roles, roleAddedAt: _roleAddedAt, collectionIds: _collectionIds, ...data } = stored;
+    const taggingStatus = typeof data.taggingStatus === "string" ? data.taggingStatus : "idle";
+    data.note = typeof data.note === "string" ? data.note : "";
+    data.taggingStatus = taggingStatus;
+    updateAsset.run(
+      String(data.name || ""), String(data.originalName || data.name || ""), data.note,
+      String(data.mimeType || ""), numberOrNull(data.width), numberOrNull(data.height), Number(data.byteSize || 0),
+      taggingStatus, toJson(data), row.id,
+    );
+    deleteLabels.run(row.id);
+    for (const label of flattenLibraryAssetLabels(data as LibraryAsset)) {
+      insertLabel.run(row.id, label.dimension, label.value, label.source, label.confidence ?? null, String(data.updatedAt || new Date().toISOString()));
+    }
+  }
+  normalizeUnifiedCollectionRows(
+    db.prepare("SELECT id, owner_user_id, visibility, kind, parent_id, name, relative_path, created_at, updated_at, data_json FROM library_collections").all() as UnifiedCollectionRow[],
+    (collection, row) => db.prepare(
+      "UPDATE library_collections SET visibility=?, kind=?, parent_id=?, relative_path=?, data_json=? WHERE id=?",
+    ).run(collection.visibility, collection.kind, collection.parentId || null, collection.relativePath || null, toJson(collection), row.id),
+  );
+}
+
+async function normalizeUnifiedLibraryPostgresRows(client: PoolClient) {
+  const assets = await client.query<{ id: string; data_json: unknown }>("SELECT id, data_json FROM library_assets");
+  for (const row of assets.rows) {
+    const stored = safeJsonRecord(row.data_json);
+    const { roles: _roles, roleAddedAt: _roleAddedAt, collectionIds: _collectionIds, ...data } = stored;
+    const taggingStatus = typeof data.taggingStatus === "string" ? data.taggingStatus : "idle";
+    data.note = typeof data.note === "string" ? data.note : "";
+    data.taggingStatus = taggingStatus;
+    await client.query(
+      `UPDATE library_assets SET name=$1, original_name=$2, note=$3, mime_type=$4, width=$5, height=$6,
+       byte_size=$7, tagging_status=$8, data_json=$9::jsonb WHERE id=$10`,
+      [String(data.name || ""), String(data.originalName || data.name || ""), data.note, String(data.mimeType || ""),
+        numberOrNull(data.width), numberOrNull(data.height), Number(data.byteSize || 0), taggingStatus, toJson(data), row.id],
+    );
+    await client.query("DELETE FROM library_asset_labels WHERE asset_id=$1", [row.id]);
+    for (const label of flattenLibraryAssetLabels(data as LibraryAsset)) {
+      await client.query(
+        `INSERT INTO library_asset_labels (asset_id, dimension, value, source, confidence, updated_at)
+         VALUES ($1,$2,$3,$4,$5,$6) ON CONFLICT(asset_id, dimension, value)
+         DO UPDATE SET source=excluded.source, confidence=excluded.confidence, updated_at=excluded.updated_at`,
+        [row.id, label.dimension, label.value, label.source, label.confidence ?? null, String(data.updatedAt || new Date().toISOString())],
+      );
+    }
+  }
+  const collections = await client.query<UnifiedCollectionRow>(
+    "SELECT id, owner_user_id, visibility, kind, parent_id, name, relative_path, created_at, updated_at, data_json FROM library_collections",
+  );
+  const updates: Array<{ collection: LibraryCollection; row: UnifiedCollectionRow }> = [];
+  normalizeUnifiedCollectionRows(collections.rows, (collection, row) => updates.push({ collection, row }));
+  for (const { collection, row } of updates) await client.query(
+    "UPDATE library_collections SET visibility=$1, kind=$2, parent_id=$3, relative_path=$4, data_json=$5::jsonb WHERE id=$6",
+    [collection.visibility, collection.kind, collection.parentId || null, collection.relativePath || null, toJson(collection), row.id],
+  );
+}
+
+type UnifiedCollectionRow = {
+  id: string;
+  owner_user_id: string;
+  visibility: string;
+  kind: string;
+  parent_id?: string | null;
+  name: string;
+  relative_path?: string | null;
+  created_at: string | Date;
+  updated_at: string | Date;
+  data_json: unknown;
+};
+
+function normalizeUnifiedCollectionRows(rows: UnifiedCollectionRow[], save: (collection: LibraryCollection, row: UnifiedCollectionRow) => void) {
+  const byId = new Map(rows.map((row) => [row.id, row]));
+  const pathFor = (row: UnifiedCollectionRow, seen = new Set<string>()): string => {
+    if (!row.parent_id || seen.has(row.id)) return row.name;
+    seen.add(row.id);
+    const parent = byId.get(row.parent_id);
+    return parent ? `${pathFor(parent, seen)}/${row.name}` : row.name;
+  };
+  for (const row of rows) {
+    const stored = safeJsonRecord(row.data_json);
+    const collection: LibraryCollection = {
+      id: row.id,
+      ownerUserId: row.owner_user_id,
+      ownerDisplayName: String(stored.ownerDisplayName || row.owner_user_id),
+      visibility: row.visibility === "team" ? "team" : "private",
+      kind: "folder",
+      name: row.name,
+      parentId: row.parent_id || undefined,
+      relativePath: pathFor(row),
+      createdAt: normalizeDateValue(row.created_at),
+      updatedAt: normalizeDateValue(row.updated_at),
+    };
+    save(collection, row);
+  }
+}
+
+function migrateLegacyLibraryJsonSqlite(db: SqliteDatabase) {
+  for (const table of ["canvas_workflows", "canvas_schedules"] as const) {
+    if (!sqliteTableExists(db, table)) continue;
+    const rows = db.prepare(`SELECT id, owner_user_id, data_json FROM ${table}`).all() as Array<{ id: string; owner_user_id: string; data_json: unknown }>;
+    const update = db.prepare(`UPDATE ${table} SET data_json=? WHERE id=?`);
+    for (const row of rows) {
+      const migrated = migrateLegacyLibraryValue(safeJsonRecord(row.data_json), row.owner_user_id);
+      if (migrated.changed) update.run(toJson(migrated.value), row.id);
+    }
+  }
+}
+
+async function migrateLegacyLibraryJsonPostgres(client: PoolClient) {
+  for (const table of ["canvas_workflows", "canvas_schedules"] as const) {
+    const rows = await client.query<{ id: string; owner_user_id: string; data_json: unknown }>(`SELECT id, owner_user_id, data_json FROM ${table}`);
+    for (const row of rows.rows) {
+      const migrated = migrateLegacyLibraryValue(safeJsonRecord(row.data_json), row.owner_user_id);
+      if (migrated.changed) await client.query(`UPDATE ${table} SET data_json=$1::jsonb WHERE id=$2`, [toJson(migrated.value), row.id]);
+    }
+  }
+}
+
+function migrateLegacyLibraryValue(value: unknown, ownerUserId: string): { value: unknown; changed: boolean } {
+  let changed = false;
+  const visit = (current: unknown): unknown => {
+    if (Array.isArray(current)) return current.map(visit);
+    if (!current || typeof current !== "object") return current;
+    const record = current as Record<string, unknown>;
+    const next: Record<string, unknown> = {};
+    for (const [key, item] of Object.entries(record)) {
+      if (record.mode === "library-filter" && key === "role" && (item === "reference" || item === "vehicle")) {
+        changed = true;
+        continue;
+      }
+      next[key] = visit(item);
+    }
+    if (record.mode === "library-filter" && (record.role === "reference" || record.role === "vehicle")) {
+      const filter = safeJsonRecord(next.filter);
+      if (!filter.collectionId) filter.collectionId = legacyLibraryRootId(ownerUserId, record.role);
+      filter.includeDescendants = true;
+      next.filter = filter;
+      changed = true;
+    }
+    return next;
+  };
+  return { value: visit(value), changed };
+}
+
+function numberOrNull(value: unknown) {
+  const number = Number(value);
+  return Number.isFinite(number) ? number : null;
+}
+
 export async function listCanvasSubtitlePresetsFromDb() {
   await ensureDatabaseReady();
   if (getDatabaseBackend() === "postgres") {
@@ -4689,27 +5439,18 @@ function fromWorkspaceSessionRow(row: WorkspaceSessionRow): WorkspaceSession {
 async function saveLibraryAssetPostgres(client: PoolClient, asset: LibraryAsset) {
   await client.query(
     `INSERT INTO library_assets (
-       id, owner_user_id, visibility, sha256, object_key, public_url, tagging_status, cleanup_status,
-       created_at, updated_at, deleted_at, data_json
-     ) VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12::jsonb)
-     ON CONFLICT(id) DO UPDATE SET owner_user_id=excluded.owner_user_id, visibility=excluded.visibility,
+       id, owner_user_id, name, original_name, note, visibility, mime_type, width, height, byte_size,
+       sha256, object_key, public_url, tagging_status, cleanup_status, created_at, updated_at, deleted_at, data_json
+     ) VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15,$16,$17,$18,$19::jsonb)
+     ON CONFLICT(id) DO UPDATE SET owner_user_id=excluded.owner_user_id, name=excluded.name,
+       original_name=excluded.original_name, note=excluded.note, visibility=excluded.visibility,
+       mime_type=excluded.mime_type, width=excluded.width, height=excluded.height, byte_size=excluded.byte_size,
        sha256=excluded.sha256, object_key=excluded.object_key, public_url=excluded.public_url,
        tagging_status=excluded.tagging_status, cleanup_status=excluded.cleanup_status,
        updated_at=excluded.updated_at,
        deleted_at=excluded.deleted_at, data_json=excluded.data_json`,
     libraryAssetValues(asset),
   );
-  await client.query("DELETE FROM library_asset_roles WHERE asset_id=$1", [asset.id]);
-  for (const role of Array.from(new Set(asset.roles))) {
-    await client.query("INSERT INTO library_asset_roles (asset_id, role) VALUES ($1,$2)", [asset.id, role]);
-  }
-  await client.query("DELETE FROM library_collection_assets WHERE asset_id=$1", [asset.id]);
-  for (const collectionId of Array.from(new Set(asset.collectionIds))) {
-    await client.query(
-      "INSERT INTO library_collection_assets (collection_id, asset_id, created_at) VALUES ($1,$2,$3) ON CONFLICT DO NOTHING",
-      [collectionId, asset.id, asset.updatedAt],
-    );
-  }
   await client.query("DELETE FROM library_asset_labels WHERE asset_id=$1", [asset.id]);
   for (const label of flattenLibraryAssetLabels(asset)) {
     await client.query(
@@ -4722,23 +5463,17 @@ async function saveLibraryAssetPostgres(client: PoolClient, asset: LibraryAsset)
 function saveLibraryAssetSqlite(db: SqliteDatabase, asset: LibraryAsset) {
   db.prepare(
     `INSERT INTO library_assets (
-       id, owner_user_id, visibility, sha256, object_key, public_url, tagging_status, cleanup_status,
-       created_at, updated_at, deleted_at, data_json
-     ) VALUES (?,?,?,?,?,?,?,?,?,?,?,?)
-     ON CONFLICT(id) DO UPDATE SET owner_user_id=excluded.owner_user_id, visibility=excluded.visibility,
+       id, owner_user_id, name, original_name, note, visibility, mime_type, width, height, byte_size,
+       sha256, object_key, public_url, tagging_status, cleanup_status, created_at, updated_at, deleted_at, data_json
+     ) VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)
+     ON CONFLICT(id) DO UPDATE SET owner_user_id=excluded.owner_user_id, name=excluded.name,
+       original_name=excluded.original_name, note=excluded.note, visibility=excluded.visibility,
+       mime_type=excluded.mime_type, width=excluded.width, height=excluded.height, byte_size=excluded.byte_size,
        sha256=excluded.sha256, object_key=excluded.object_key, public_url=excluded.public_url,
        tagging_status=excluded.tagging_status, cleanup_status=excluded.cleanup_status,
        updated_at=excluded.updated_at,
        deleted_at=excluded.deleted_at, data_json=excluded.data_json`,
   ).run(...libraryAssetValues(asset));
-  db.prepare("DELETE FROM library_asset_roles WHERE asset_id=?").run(asset.id);
-  const insertRole = db.prepare("INSERT INTO library_asset_roles (asset_id, role) VALUES (?,?)");
-  Array.from(new Set(asset.roles)).forEach((role) => insertRole.run(asset.id, role));
-  db.prepare("DELETE FROM library_collection_assets WHERE asset_id=?").run(asset.id);
-  const insertCollection = db.prepare(
-    "INSERT INTO library_collection_assets (collection_id, asset_id, created_at) VALUES (?,?,?) ON CONFLICT DO NOTHING",
-  );
-  Array.from(new Set(asset.collectionIds)).forEach((collectionId) => insertCollection.run(collectionId, asset.id, asset.updatedAt));
   db.prepare("DELETE FROM library_asset_labels WHERE asset_id=?").run(asset.id);
   const insertLabel = db.prepare(
     "INSERT INTO library_asset_labels (asset_id, dimension, value, source, confidence, updated_at) VALUES (?,?,?,?,?,?)",
@@ -4752,7 +5487,14 @@ function libraryAssetValues(asset: LibraryAsset) {
   return [
     asset.id,
     asset.ownerUserId,
+    asset.name,
+    asset.originalName,
+    asset.note || "",
     asset.visibility,
+    asset.mimeType,
+    asset.width || null,
+    asset.height || null,
+    asset.byteSize,
     asset.sha256,
     asset.objectKey,
     asset.publicUrl,
@@ -4781,6 +5523,9 @@ function flattenLibraryAssetLabels(asset: LibraryAsset) {
   add("angles", profile.angles);
   add("people", [profile.people]);
   add("customTags", profile.customTags);
+  for (const tag of getLibraryUnifiedTagsForAsset(asset)) {
+    labels.push({ dimension: "unified", value: tag.label, source: tag.source === "ai" ? "ai" : "user" });
+  }
   return labels;
 }
 

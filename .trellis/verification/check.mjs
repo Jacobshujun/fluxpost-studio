@@ -16,6 +16,7 @@ const nodeChecks = [
   ["Library batch collections check", "library_collection_batch_check.mjs"],
   ["Library thumbnail cache check", "library_thumbnails_check.mjs"],
   ["Vehicle library check", "vehicle_library_check.mjs"],
+  ["Unified library runtime check", "unified_library_runtime_check.mjs"],
   ["Compact-only workspace check", "compact_only_workspace_check.mjs"],
   ["Advanced config admin boundary check", "advanced_config_check.mjs"],
   ["TOS runtime media storage check", "tos_runtime_media_check.mjs"],

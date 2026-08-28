@@ -22,12 +22,11 @@ export async function listLibraryTaggingJobs(account: WorkspaceAccessActor, limi
 }
 
 export async function enqueueLibraryTagging(account: WorkspaceAccessActor, assetIds: string[], mode: "failed" | "all" = "failed") {
-  const uniqueIds = Array.from(new Set(assetIds)).slice(0, 200);
+  const uniqueIds = Array.from(new Set(assetIds));
   const jobs: LibraryTaggingJob[] = [];
   for (const assetId of uniqueIds) {
     const asset = await getLibraryAssetFromDb(assetId);
     if (!asset || (!isWorkspaceAdmin(account) && asset.ownerUserId !== account.id)) continue;
-    if (!asset.roles.includes("reference")) continue;
     if (mode === "failed" && asset.taggingStatus !== "failed") continue;
     const now = new Date().toISOString();
     const job = makeLibraryTaggingJob(asset, now);
@@ -65,20 +64,12 @@ async function processJob(job: LibraryTaggingJob) {
     await finishJob(job, "failed", "Library asset no longer exists.");
     return;
   }
-  if (!asset.roles.includes("reference")) {
-    await finishIneligibleJob(job, asset);
-    return;
-  }
   const now = new Date().toISOString();
   await saveLibraryAssetToDb({ ...asset, taggingStatus: "running", taggingError: undefined, updatedAt: now });
   try {
     const eligible = await getLibraryAssetFromDb(asset.id);
     if (!eligible) {
       await finishJob(job, "failed", "Library asset no longer exists.");
-      return;
-    }
-    if (!eligible.roles.includes("reference")) {
-      await finishIneligibleJob(job, eligible);
       return;
     }
     const response = await callTaggingModel(
@@ -91,10 +82,6 @@ async function processJob(job: LibraryTaggingJob) {
     const current = await getLibraryAssetFromDb(asset.id);
     if (!current) {
       await finishJob(job, "failed", "Library asset no longer exists.");
-      return;
-    }
-    if (!current.roles.includes("reference")) {
-      await finishIneligibleJob(job, current);
       return;
     }
     await saveLibraryAssetToDb({
@@ -111,10 +98,6 @@ async function processJob(job: LibraryTaggingJob) {
     const current = await getLibraryAssetFromDb(asset.id);
     if (!current) {
       await finishJob(job, "failed", "Library asset no longer exists.");
-      return;
-    }
-    if (!current.roles.includes("reference")) {
-      await finishIneligibleJob(job, current);
       return;
     }
     const retry = isTransientTaggingError(error) && job.attempts < job.maxAttempts;
@@ -141,18 +124,6 @@ async function processJob(job: LibraryTaggingJob) {
       await finishJob(job, "failed", message);
     }
   }
-}
-
-async function finishIneligibleJob(job: LibraryTaggingJob, asset: Awaited<ReturnType<typeof getLibraryAssetFromDb>>) {
-  if (asset && !asset.roles.includes("reference")) {
-    await saveLibraryAssetToDb({
-      ...asset,
-      taggingStatus: "completed",
-      taggingError: undefined,
-      updatedAt: new Date().toISOString(),
-    });
-  }
-  await finishJob(job, "completed");
 }
 
 async function finishJob(job: LibraryTaggingJob, status: "completed" | "failed", error?: string) {

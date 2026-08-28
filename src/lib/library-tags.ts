@@ -1,6 +1,5 @@
 import type {
   LibraryAsset,
-  LibraryAssetRole,
   LibraryImageType,
   LibraryManualTagOverrides,
   LibraryPeoplePresence,
@@ -161,38 +160,16 @@ export function getLibraryUnifiedTagLabels(tags: LibraryTagProfile) {
   return getLibraryUnifiedTags(tags).map((tag) => tag.label);
 }
 
-export function getLibraryTagProfileForRole(
-  asset: Pick<LibraryAsset, "effectiveTags" | "manualOverrides">,
-  role: LibraryAssetRole,
-): LibraryTagProfile {
-  if (role === "reference") return asset.effectiveTags;
-  const overrides = normalizeLibraryManualOverrides(asset.manualOverrides);
-  return {
-    ...(overrides.imageType ? { imageType: overrides.imageType } : {}),
-    scenes: overrides.scenes || [],
-    vehicleModels: overrides.vehicleModels || [],
-    vehicleColors: overrides.vehicleColors || [],
-    angles: overrides.angles || [],
-    people: overrides.people || "unknown",
-    customTags: overrides.customTags || [],
-  };
+export function getLibraryUnifiedTagsForAsset(
+  asset: Pick<LibraryAsset, "aiTags" | "effectiveTags" | "manualOverrides">,
+) {
+  return getLibraryUnifiedTags(asset.effectiveTags, asset.manualOverrides, asset.aiTags);
 }
 
-export function getLibraryUnifiedTagsForRole(
+export function getLibraryUnifiedTagLabelsForAsset(
   asset: Pick<LibraryAsset, "aiTags" | "effectiveTags" | "manualOverrides">,
-  role: LibraryAssetRole,
 ) {
-  const profile = getLibraryTagProfileForRole(asset, role);
-  return role === "reference"
-    ? getLibraryUnifiedTags(profile, asset.manualOverrides, asset.aiTags)
-    : getLibraryUnifiedTags(profile, normalizeLibraryManualOverrides(asset.manualOverrides), emptyLibraryTagProfile());
-}
-
-export function getLibraryUnifiedTagLabelsForRole(
-  asset: Pick<LibraryAsset, "aiTags" | "effectiveTags" | "manualOverrides">,
-  role: LibraryAssetRole,
-) {
-  return getLibraryUnifiedTagsForRole(asset, role).map((tag) => tag.label);
+  return getLibraryUnifiedTagsForAsset(asset).map((tag) => tag.label);
 }
 
 export function applyLibraryTagChanges(

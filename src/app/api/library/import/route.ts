@@ -1,7 +1,6 @@
 import { NextResponse } from "next/server";
 import { importLibraryAsset } from "@/lib/library-assets";
-import { kickLibraryTaggingWorker } from "@/lib/library-tagging";
-import type { LibraryAssetRole, LibraryVisibility } from "@/lib/types";
+import type { LibraryVisibility } from "@/lib/types";
 import { isWorkspaceSignInError, requireWorkspaceAccount } from "@/lib/workspace-accounts";
 
 export const runtime = "nodejs";
@@ -10,17 +9,16 @@ export async function POST(request: Request) {
   try {
     const account = await requireWorkspaceAccount(request);
     const form = await request.formData();
+    if (form.has("role")) throw new Error("Library roles are no longer supported. Use collectionIds.");
     const file = form.get("file");
     if (!(file instanceof File)) return NextResponse.json({ error: "Image file is required." }, { status: 400 });
     const result = await importLibraryAsset(account, {
       bytes: Buffer.from(await file.arrayBuffer()),
       originalName: file.name,
       relativePath: stringValue(form.get("relativePath")),
-      role: (stringValue(form.get("role")) || "reference") as LibraryAssetRole,
       visibility: (stringValue(form.get("visibility")) || "team") as LibraryVisibility,
-      collectionId: stringValue(form.get("collectionId")),
+      collectionIds: parseCollectionIds(form),
     });
-    if ("job" in result && result.job) kickLibraryTaggingWorker();
     return NextResponse.json(result);
   } catch (error) {
     return NextResponse.json(
@@ -28,6 +26,21 @@ export async function POST(request: Request) {
       { status: isWorkspaceSignInError(error) ? 401 : 400 },
     );
   }
+}
+
+function parseCollectionIds(form: FormData) {
+  const repeated = form.getAll("collectionId").flatMap((value) => typeof value === "string" ? value.split(",") : []);
+  const encoded = stringValue(form.get("collectionIds"));
+  if (encoded) {
+    try {
+      const parsed = JSON.parse(encoded) as unknown;
+      if (!Array.isArray(parsed) || !parsed.every((value) => typeof value === "string")) throw new Error();
+      repeated.push(...parsed);
+    } catch {
+      throw new Error("collectionIds must be a JSON string array.");
+    }
+  }
+  return Array.from(new Set(repeated.map((value) => value.trim()).filter(Boolean)));
 }
 
 function stringValue(value: FormDataEntryValue | null) {

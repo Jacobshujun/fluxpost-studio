@@ -254,7 +254,17 @@ CREATE INDEX IF NOT EXISTS idx_lark_task_launches_created_at ON lark_task_launch
 CREATE TABLE IF NOT EXISTS library_assets (
   id TEXT PRIMARY KEY,
   owner_user_id TEXT NOT NULL,
+  name TEXT NOT NULL,
+  original_name TEXT NOT NULL,
+  note TEXT NOT NULL DEFAULT '',
   visibility TEXT NOT NULL,
+  mime_type TEXT NOT NULL,
+  width INTEGER,
+  height INTEGER,
+  byte_size BIGINT NOT NULL,
+  search_vector tsvector GENERATED ALWAYS AS (
+    to_tsvector('simple', COALESCE(name, '') || ' ' || COALESCE(original_name, '') || ' ' || COALESCE(note, ''))
+  ) STORED,
   sha256 TEXT NOT NULL,
   object_key TEXT NOT NULL UNIQUE,
   public_url TEXT NOT NULL,
@@ -270,17 +280,15 @@ CREATE INDEX IF NOT EXISTS idx_library_assets_owner_created ON library_assets(ow
 CREATE INDEX IF NOT EXISTS idx_library_assets_visibility_created ON library_assets(visibility, created_at DESC, id DESC);
 CREATE INDEX IF NOT EXISTS idx_library_assets_tagging_status ON library_assets(tagging_status, updated_at DESC);
 
-CREATE TABLE IF NOT EXISTS library_asset_roles (
-  asset_id TEXT NOT NULL REFERENCES library_assets(id) ON DELETE CASCADE,
-  role TEXT NOT NULL,
-  PRIMARY KEY(asset_id, role)
-);
-CREATE INDEX IF NOT EXISTS idx_library_asset_roles_role ON library_asset_roles(role, asset_id);
+CREATE INDEX IF NOT EXISTS idx_library_assets_name ON library_assets(name, id);
+CREATE INDEX IF NOT EXISTS idx_library_assets_dimensions ON library_assets(width, height, byte_size, id);
+CREATE INDEX IF NOT EXISTS idx_library_assets_search ON library_assets USING GIN(search_vector);
 
 CREATE TABLE IF NOT EXISTS library_collections (
   id TEXT PRIMARY KEY,
   owner_user_id TEXT NOT NULL,
-  role TEXT NOT NULL,
+  visibility TEXT NOT NULL,
+  kind TEXT NOT NULL,
   parent_id TEXT,
   name TEXT NOT NULL,
   relative_path TEXT,
@@ -288,7 +296,8 @@ CREATE TABLE IF NOT EXISTS library_collections (
   updated_at TIMESTAMPTZ NOT NULL,
   data_json JSONB NOT NULL
 );
-CREATE INDEX IF NOT EXISTS idx_library_collections_owner_role ON library_collections(owner_user_id, role, parent_id, name);
+CREATE INDEX IF NOT EXISTS idx_library_collections_owner_parent ON library_collections(owner_user_id, parent_id, name);
+CREATE INDEX IF NOT EXISTS idx_library_collections_visibility ON library_collections(visibility, owner_user_id, parent_id);
 
 CREATE TABLE IF NOT EXISTS library_collection_assets (
   collection_id TEXT NOT NULL REFERENCES library_collections(id) ON DELETE CASCADE,
@@ -308,6 +317,27 @@ CREATE TABLE IF NOT EXISTS library_asset_labels (
   PRIMARY KEY(asset_id, dimension, value)
 );
 CREATE INDEX IF NOT EXISTS idx_library_asset_labels_filter ON library_asset_labels(dimension, value, asset_id);
+CREATE INDEX IF NOT EXISTS idx_library_asset_labels_filter_lower ON library_asset_labels(dimension, LOWER(value), asset_id);
+
+CREATE TABLE IF NOT EXISTS library_smart_folders (
+  id TEXT PRIMARY KEY,
+  owner_user_id TEXT NOT NULL,
+  visibility TEXT NOT NULL,
+  name TEXT NOT NULL,
+  created_at TIMESTAMPTZ NOT NULL,
+  updated_at TIMESTAMPTZ NOT NULL,
+  data_json JSONB NOT NULL
+);
+CREATE INDEX IF NOT EXISTS idx_library_smart_folders_owner_name ON library_smart_folders(owner_user_id, name, id);
+CREATE INDEX IF NOT EXISTS idx_library_smart_folders_visibility ON library_smart_folders(visibility, owner_user_id, name);
+
+CREATE TABLE IF NOT EXISTS library_asset_favorites (
+  owner_user_id TEXT NOT NULL,
+  asset_id TEXT NOT NULL REFERENCES library_assets(id) ON DELETE CASCADE,
+  created_at TIMESTAMPTZ NOT NULL,
+  PRIMARY KEY(owner_user_id, asset_id)
+);
+CREATE INDEX IF NOT EXISTS idx_library_asset_favorites_asset ON library_asset_favorites(asset_id, owner_user_id);
 
 CREATE TABLE IF NOT EXISTS library_tagging_jobs (
   id TEXT PRIMARY KEY,

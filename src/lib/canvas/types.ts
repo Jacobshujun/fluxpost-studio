@@ -543,6 +543,8 @@ export type CanvasScheduleAssetFilter = {
   assetIds: string[];
   search: string;
   collectionId?: string;
+  includeDescendants?: boolean;
+  smartFolderId?: string;
   tags: string[];
 };
 
@@ -607,7 +609,7 @@ export type CanvasScheduleParameterValue =
 
 export type CanvasScheduleParameterSource =
   | { mode: "fixed" | "manual-list"; values: CanvasScheduleParameterValue[] }
-  | { mode: "library-filter"; role: "reference" | "vehicle"; filter: CanvasScheduleAssetFilter }
+  | { mode: "library-filter"; filter: CanvasScheduleAssetFilter }
   | { mode: "copy-filter"; filter: CanvasScheduleCopyFilter }
   | { mode: "content-pool-filter"; filter: CanvasScheduleContentPoolFilter }
   | { mode: "video-loader-queue"; nodeId: string }

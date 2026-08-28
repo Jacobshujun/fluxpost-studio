@@ -140,7 +140,7 @@ import { getStoredTheme, subscribeTheme } from "@/lib/theme";
 import { selectIdRange } from "@/lib/list-selection";
 import { SubtitleEditorDialog } from "./SubtitleEditorDialog";
 import { contentTagOptions } from "@/lib/types";
-import type { ContentPoolSelectionFilter, ContentPoolSelectionItem, ContentPoolSelectionPage, CopyLibraryEntryView, LibraryAsset, LibraryAssetPage } from "@/lib/types";
+import type { ContentPoolSelectionFilter, ContentPoolSelectionItem, ContentPoolSelectionPage, CopyLibraryEntryView, LibraryAsset, LibraryAssetPage, LibraryNavigation } from "@/lib/types";
 import type { CompetitorWorkbookInspection, CompetitorWorkbookSnapshot } from "@/lib/competitor-workbook";
 import type {
   CanvasArtifact,
@@ -3481,7 +3481,8 @@ function LibraryImageSnapshotPicker({ node, onPatch, onPreviewImage }: {
   onPatch: (patch: CanvasNode["config"]) => void;
   onPreviewImage: (url: string, index: number) => void;
 }) {
-  const [data, setData] = useState<LibraryAssetPage>({ assets: [], collections: [], total: 0 });
+  const [data, setData] = useState<LibraryAssetPage>({ assets: [], total: 0 });
+  const [navigation, setNavigation] = useState<LibraryNavigation>({ collections: [], smartFolders: [], counts: { all: 0, uncategorized: 0, favorites: 0 } });
   const [search, setSearch] = useState("");
   const [tag, setTag] = useState("");
   const [collectionId, setCollectionId] = useState("");
@@ -3509,6 +3510,7 @@ function LibraryImageSnapshotPicker({ node, onPatch, onPreviewImage }: {
     const timer = setTimeout(() => void load(), 250);
     return () => clearTimeout(timer);
   }, [load]);
+  useEffect(() => { void api<LibraryNavigation>("/api/library/navigation").then(setNavigation).catch(() => undefined); }, []);
   const patchSelection = (nextIds: string[], nextNames: string[], nextUrls: string[]) => onPatch({ assetIds: nextIds, assetNames: nextNames, urls: nextUrls, snapshotAt: new Date().toISOString() });
   const toggle = (asset: LibraryAsset) => {
     const index = ids.indexOf(asset.id);
@@ -3539,7 +3541,7 @@ function LibraryImageSnapshotPicker({ node, onPatch, onPreviewImage }: {
   return <div className="canvas-snapshot-picker">
     <div className="canvas-picker-heading"><span>素材库图片</span><small>{ids.length}/30</small><button type="button" onClick={() => void refresh()} disabled={busy || !ids.length} title="刷新所选素材"><RotateCcw className={busy ? "animate-spin" : ""} /></button></div>
     <label className="canvas-picker-search"><Search /><input value={search} onChange={(event) => setSearch(event.target.value)} placeholder="搜索图片" /></label>
-    <div className="canvas-picker-filters"><input value={tag} onChange={(event) => setTag(event.target.value)} placeholder="标签" /><select value={collectionId} onChange={(event) => setCollectionId(event.target.value)}><option value="">全部集合</option>{data.collections.map((collection) => <option key={collection.id} value={collection.id}>{collection.name}</option>)}</select></div>
+    <div className="canvas-picker-filters"><input value={tag} onChange={(event) => setTag(event.target.value)} placeholder="标签" /><select value={collectionId} onChange={(event) => setCollectionId(event.target.value)}><option value="">全部图集</option>{navigation.collections.map((collection) => <option key={collection.id} value={collection.id}>{collection.relativePath || collection.name}</option>)}</select></div>
     {ids.length ? <div className="canvas-picker-selected">{urls.map((url, index) => <div key={`${ids[index]}-${index}`}>
       <button type="button" className="canvas-picker-thumb" onClick={() => onPreviewImage(url, index)} style={{ backgroundImage: `url(${JSON.stringify(url)})` }} aria-label={`预览素材 ${index + 1}`} />
       <span>{index + 1}. {names[index] || ids[index]}</span>
@@ -3974,8 +3976,8 @@ function CanvasScheduleCenter({ workflow, graph, onSaveBindings, onPreview, onCl
                       <option value="input-1">输入 1</option><option value="input-2">输入 2</option><option value="input-3">输入 3</option>
                     </select></label>
                   </div>
-                  <ScheduleAssetFilterEditor key={`${selected.id}:${batch.id}:scene`} title="场景 / 内容素材" role="reference" filter={batch.sceneFilter} count={batch.sceneCount} onCountChange={(sceneCount) => patchBatch(batch.id, { sceneCount })} onChange={(sceneFilter) => patchBatch(batch.id, { sceneFilter })} onPreview={onPreview} />
-                  <ScheduleAssetFilterEditor key={`${selected.id}:${batch.id}:vehicle`} title="车型素材" role="vehicle" filter={batch.vehicleFilter} onChange={(vehicleFilter) => patchBatch(batch.id, { vehicleFilter })} onPreview={onPreview} />
+                  <ScheduleAssetFilterEditor key={`${selected.id}:${batch.id}:scene`} title="场景 / 内容素材" filter={batch.sceneFilter} count={batch.sceneCount} onCountChange={(sceneCount) => patchBatch(batch.id, { sceneCount })} onChange={(sceneFilter) => patchBatch(batch.id, { sceneFilter })} onPreview={onPreview} />
+                  <ScheduleAssetFilterEditor key={`${selected.id}:${batch.id}:vehicle`} title="车型素材" filter={batch.vehicleFilter} onChange={(vehicleFilter) => patchBatch(batch.id, { vehicleFilter })} onPreview={onPreview} />
                   {batch.copyFilter ? <ScheduleCopyFilterEditor filter={batch.copyFilter} onChange={(copyFilter) => patchBatch(batch.id, { copyFilter })} onDisable={() => patchBatch(batch.id, { copyFilter: undefined })} /> : <button className="canvas-schedule-add" type="button" onClick={() => patchBatch(batch.id, { copyFilter: emptyScheduleCopyFilter() })}><BookOpenText />启用文案池</button>}
                   <div className="canvas-schedule-range"><span>每篇车型图片数</span><label><small>最少</small><input type="number" min={1} max={16} value={batch.vehicleCountMin} onChange={(event) => patchBatch(batch.id, { vehicleCountMin: Number(event.target.value) })} /></label><span>至</span><label><small>最多</small><input type="number" min={1} max={16} value={batch.vehicleCountMax} onChange={(event) => patchBatch(batch.id, { vehicleCountMax: Number(event.target.value) })} /></label></div>
                   {batch.contentTasks.length ? <SchedulePreview batch={batch} busy={busy} onResample={(contentTaskId) => void scheduleAction("resample", { batchId: batch.id, contentTaskId }, false)} /> : null}
@@ -4050,7 +4052,7 @@ function CanvasScheduleV2Editor({ schedule, graph, busy, onDefinitionChange, onA
       name: names[index],
       scope: index === 2 ? "child" : "main",
       valueType: "image",
-      source: { mode: "library-filter", role: index === 2 ? "vehicle" : "reference", filter: { ...emptyScheduleFilter(), mode: "manual" } },
+      source: { mode: "library-filter", filter: { ...emptyScheduleFilter(), mode: "manual" } },
       expansion: index === 2 ? "each" : "fixed",
       binding: { nodeId: node.id, fieldKey: getCanvasBatchBindableFields(node).find((field) => field.parameterTypes.includes("image"))!.key },
     }));
@@ -4104,7 +4106,7 @@ function CanvasScheduleV2Editor({ schedule, graph, busy, onDefinitionChange, onA
     ];
     if (workbookReferenceNode) parameters.push({
       id: nextCanvasScheduleParameterId(), name: "全批次车型参考图", scope: "child", valueType: "image-group",
-      source: { mode: "library-filter", role: "vehicle", filter: { ...emptyScheduleFilter(), mode: "manual", assetIds: normalizeConfigUrls(workbookReferenceNode.config.assetIds) } },
+      source: { mode: "library-filter", filter: { ...emptyScheduleFilter(), mode: "manual", assetIds: normalizeConfigUrls(workbookReferenceNode.config.assetIds) } },
       expansion: "fixed", binding: { nodeId: workbookReferenceNode.id, fieldKey: "assetIds" },
     });
     patchDefinition({
@@ -4301,7 +4303,7 @@ function CanvasScheduleParameterSourceEditor({ parameter, graph, onChange, onPre
   }
   if (parameter.valueType === "image" || parameter.valueType === "image-group") {
     const source = parameter.source.mode === "library-filter" ? parameter.source : defaultCanvasScheduleParameterSource(parameter.valueType) as Extract<CanvasScheduleParameterSource, { mode: "library-filter" }>;
-    return <div className="canvas-schedule-parameter-source"><label><span>图库</span><select value={source.role} onChange={(event) => onChange({ ...parameter, source: { ...source, role: event.target.value as "reference" | "vehicle" } })}><option value="reference">参考图库</option><option value="vehicle">车型图库</option></select></label><ScheduleAssetFilterEditor title={parameter.valueType === "image-group" ? "图片组来源" : "图片来源"} role={source.role} filter={source.filter} singleSelection={parameter.valueType === "image" && parameter.expansion === "fixed"} filterMatchLabel onChange={(filter) => onChange({ ...parameter, source: { ...source, filter } })} onPreview={onPreview} /></div>;
+    return <ScheduleAssetFilterEditor title={parameter.valueType === "image-group" ? "图片组来源" : "图片来源"} filter={source.filter} singleSelection={parameter.valueType === "image" && parameter.expansion === "fixed"} filterMatchLabel onChange={(filter) => onChange({ ...parameter, source: { ...source, filter } })} onPreview={onPreview} />;
   }
   if (parameter.valueType === "copy") {
     const source = parameter.source.mode === "copy-filter" ? parameter.source : defaultCanvasScheduleParameterSource("copy") as Extract<CanvasScheduleParameterSource, { mode: "copy-filter" }>;
@@ -4465,9 +4467,8 @@ function CanvasScheduleArtifactSummary({ artifacts }: { artifacts: CanvasArtifac
   return <div className="canvas-schedule-runtime-media">{images.map((item, index) => <Image key={`${item.url}-${index}`} src={item.url} alt="" width={70} height={52} unoptimized referrerPolicy="no-referrer" />)}{videos.map((item, index) => <span key={`${item.url}-${index}`}><Video />视频 {index + 1}</span>)}{texts.map((value, index) => <span key={index}>{value.slice(0, 80)}</span>)}{posts.map((artifact) => <Link key={artifact.postId} href={`/review?postId=${encodeURIComponent(artifact.postId)}`}>打开评审草稿</Link>)}</div>;
 }
 
-function ScheduleAssetFilterEditor({ title, role, filter, count, onCountChange, onChange, onPreview, singleSelection = false, filterMatchLabel = false }: {
+function ScheduleAssetFilterEditor({ title, filter, count, onCountChange, onChange, onPreview, singleSelection = false, filterMatchLabel = false }: {
   title: string;
-  role: "reference" | "vehicle";
   filter: CanvasScheduleAssetFilter;
   count?: number;
   onCountChange?: (value: number) => void;
@@ -4476,7 +4477,8 @@ function ScheduleAssetFilterEditor({ title, role, filter, count, onCountChange, 
   singleSelection?: boolean;
   filterMatchLabel?: boolean;
 }) {
-  const [data, setData] = useState<LibraryAssetPage>({ assets: [], collections: [], total: 0 });
+  const [data, setData] = useState<LibraryAssetPage>({ assets: [], total: 0 });
+  const [navigation, setNavigation] = useState<LibraryNavigation>({ collections: [], smartFolders: [], counts: { all: 0, uncategorized: 0, favorites: 0 } });
   const [searchDraftState, setSearchDraftState] = useState({ source: filter.search, value: filter.search });
   const [busy, setBusy] = useState(false);
   const [loadingMore, setLoadingMore] = useState(false);
@@ -4491,12 +4493,14 @@ function ScheduleAssetFilterEditor({ title, role, filter, count, onCountChange, 
   const searchCommitTimerRef = useRef<ReturnType<typeof setTimeout> | undefined>(undefined);
   const tagsText = filter.tags.join(", ");
   const queryString = useMemo(() => {
-    const params = new URLSearchParams({ role, limit: "24" });
+    const params = new URLSearchParams({ limit: "24" });
     if (filter.search.trim()) params.set("search", filter.search.trim());
     if (filter.collectionId) params.set("collectionId", filter.collectionId);
+    if (filter.includeDescendants === false) params.set("includeDescendants", "false");
+    if (filter.smartFolderId) params.set("smartFolderId", filter.smartFolderId);
     splitScheduleTags(tagsText).forEach((tag) => params.append("tag", tag));
     return params.toString();
-  }, [filter.collectionId, filter.search, role, tagsText]);
+  }, [filter.collectionId, filter.includeDescendants, filter.search, filter.smartFolderId, tagsText]);
   const queryStringRef = useRef(queryString);
   const filterRef = useRef(filter);
   const searchDraft = searchDraftState.source === filter.search ? searchDraftState.value : filter.search;
@@ -4509,6 +4513,7 @@ function ScheduleAssetFilterEditor({ title, role, filter, count, onCountChange, 
   useEffect(() => () => {
     if (searchCommitTimerRef.current) clearTimeout(searchCommitTimerRef.current);
   }, []);
+  useEffect(() => { void api<LibraryNavigation>("/api/library/navigation").then(setNavigation).catch(() => undefined); }, []);
 
   const commitSearch = useCallback((value: string) => {
     if (searchCommitTimerRef.current) clearTimeout(searchCommitTimerRef.current);
@@ -4569,7 +4574,7 @@ function ScheduleAssetFilterEditor({ title, role, filter, count, onCountChange, 
       setData((current) => {
         if (current.nextCursor !== cursor) return current;
         const knownIds = new Set(current.assets.map((asset) => asset.id));
-        return { ...result, collections: current.collections.length ? current.collections : result.collections, assets: [...current.assets, ...result.assets.filter((asset) => !knownIds.has(asset.id))] };
+        return { ...result, assets: [...current.assets, ...result.assets.filter((asset) => !knownIds.has(asset.id))] };
       });
     } catch (loadError) {
       if (generation === requestGenerationRef.current && queryString === queryStringRef.current) setError(errorMessage(loadError));
@@ -4663,7 +4668,7 @@ function ScheduleAssetFilterEditor({ title, role, filter, count, onCountChange, 
     <div className="canvas-schedule-assets-head"><strong>{title}</strong><div className="canvas-task-filters"><button type="button" aria-pressed={filter.mode === "manual"} onClick={() => onChange({ ...filter, mode: "manual" })}>手动选择</button><button type="button" aria-pressed={filter.mode === "random"} onClick={() => onChange({ ...filter, mode: "random" })}>{filterMatchLabel ? "条件匹配" : "条件随机"}</button></div></div>
     <div className="canvas-schedule-filter-row">
       <label><Search /><input value={searchDraft} onChange={(event) => updateSearchDraft(event.target.value)} onKeyDown={(event) => { if (event.key === "Enter") { event.preventDefault(); commitSearch(searchDraft); } }} placeholder="关键字" /></label>
-      <select value={filter.collectionId || ""} onChange={(event) => onChange({ ...filter, collectionId: event.target.value || undefined })}><option value="">全部集合</option>{data.collections.map((collection) => <option value={collection.id} key={collection.id}>{collection.name}</option>)}</select>
+      <select value={filter.smartFolderId ? `smart:${filter.smartFolderId}` : filter.collectionId ? `collection:${filter.collectionId}` : ""} onChange={(event) => { const [kind, id] = event.target.value.split(":"); onChange({ ...filter, collectionId: kind === "collection" ? id : undefined, smartFolderId: kind === "smart" ? id : undefined }); }}><option value="">全部图片</option><optgroup label="图集">{navigation.collections.map((collection) => <option value={`collection:${collection.id}`} key={collection.id}>{collection.relativePath || collection.name}</option>)}</optgroup><optgroup label="智能文件夹">{navigation.smartFolders.map((folder) => <option value={`smart:${folder.id}`} key={folder.id}>{folder.name}</option>)}</optgroup></select>
       <input value={tagsText} onChange={(event) => onChange({ ...filter, tags: splitScheduleTags(event.target.value) })} placeholder="多个标签，AND" />
       {count !== undefined && filter.mode === "random" ? <label className="canvas-schedule-count"><span>抽取</span><input type="number" min={1} max={500} value={count} onChange={(event) => onCountChange?.(Number(event.target.value))} /></label> : null}
     </div>
@@ -5845,7 +5850,7 @@ function defaultCanvasScheduleParameterSource(valueType: CanvasScheduleParameter
   if (valueType === "video") return { mode: "video-loader-queue", nodeId };
   if (valueType === "source-video") return { mode: "source-video-links", links: [], projectName: "视频内容重构" };
   if (valueType === "content-pool") return { mode: "content-pool-filter", filter: { ...emptyContentPoolSelectionFilter(), mode: "manual", itemIds: [] } };
-  if (valueType === "image" || valueType === "image-group") return { mode: "library-filter", role: "reference", filter: emptyScheduleFilter() };
+  if (valueType === "image" || valueType === "image-group") return { mode: "library-filter", filter: emptyScheduleFilter() };
   if (valueType === "copy") return { mode: "copy-filter", filter: emptyScheduleCopyFilter() };
   return { mode: "fixed", values: [defaultCanvasScheduleScalarValue(valueType)] };
 }

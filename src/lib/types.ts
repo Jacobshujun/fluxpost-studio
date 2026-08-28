@@ -1148,8 +1148,6 @@ export type ImageGenerationQueueJob = {
   error?: string;
 };
 
-export type LibraryAssetRole = "reference" | "vehicle";
-
 export type LibraryVisibility = "private" | "team";
 
 export type LibraryListSort =
@@ -1179,7 +1177,7 @@ export type CopyLibraryEntryView = CopyLibraryEntry & {
 
 export type LibraryPeoplePresence = "yes" | "no" | "unknown";
 
-export type LibraryTaggingStatus = "queued" | "running" | "completed" | "failed";
+export type LibraryTaggingStatus = "idle" | "queued" | "running" | "completed" | "failed";
 
 export type LibraryObjectCleanupStatus = "ready" | "pending" | "failed";
 
@@ -1233,9 +1231,8 @@ export type LibraryAsset = {
   width?: number;
   height?: number;
   sha256: string;
-  roles: LibraryAssetRole[];
-  roleAddedAt: Partial<Record<LibraryAssetRole, string>>;
   collectionIds: string[];
+  note?: string;
   visibility: LibraryVisibility;
   aiTags: LibraryTagProfile;
   manualOverrides: LibraryManualTagOverrides;
@@ -1248,18 +1245,100 @@ export type LibraryAsset = {
   createdAt: string;
   updatedAt: string;
   deletedAt?: string;
+  favorite?: boolean;
+  thumbnailUrl?: string;
 };
 
 export type LibraryCollection = {
   id: string;
   ownerUserId: string;
   ownerDisplayName: string;
-  role: LibraryAssetRole;
+  visibility: LibraryVisibility;
+  kind: "folder";
   name: string;
   parentId?: string;
   relativePath?: string;
   createdAt: string;
   updatedAt: string;
+  canEdit?: boolean;
+  assetCount?: number;
+};
+
+export type LibrarySmartFolderField =
+  | "tag"
+  | "collection"
+  | "text"
+  | "owner"
+  | "visibility"
+  | "imageType"
+  | "width"
+  | "height"
+  | "byteSize"
+  | "createdAt"
+  | "taggingStatus"
+  | "favorite";
+
+export type LibrarySmartFolderOperator =
+  | "contains"
+  | "not_contains"
+  | "equals"
+  | "one_of"
+  | "gte"
+  | "lte"
+  | "before"
+  | "after"
+  | "is";
+
+export type LibrarySmartFolderCondition = {
+  id: string;
+  field: LibrarySmartFolderField;
+  operator: LibrarySmartFolderOperator;
+  value: string | string[] | number | boolean;
+  includeDescendants?: boolean;
+};
+
+export type LibrarySmartFolder = {
+  id: string;
+  ownerUserId: string;
+  ownerDisplayName: string;
+  name: string;
+  visibility: LibraryVisibility;
+  match: "all" | "any";
+  conditions: LibrarySmartFolderCondition[];
+  createdAt: string;
+  updatedAt: string;
+  canEdit?: boolean;
+};
+
+export type LibraryAssetFilters = {
+  cursor?: string;
+  limit?: number;
+  search?: string;
+  collectionId?: string;
+  includeDescendants?: boolean;
+  smartFolderId?: string;
+  uncategorized?: boolean;
+  favorite?: boolean;
+  visibility?: LibraryVisibility;
+  taggingStatus?: LibraryTaggingStatus;
+  imageTypes?: string[];
+  scenes?: string[];
+  vehicleModels?: string[];
+  vehicleColors?: string[];
+  angles?: string[];
+  people?: string[];
+  customTags?: string[];
+  tags?: string[];
+  ownerIds?: string[];
+  minWidth?: number;
+  maxWidth?: number;
+  minHeight?: number;
+  maxHeight?: number;
+  minByteSize?: number;
+  maxByteSize?: number;
+  sort?: LibraryListSort;
+  addedFrom?: string;
+  addedBefore?: string;
 };
 
 export type LibraryTaggingJob = {
@@ -1281,9 +1360,14 @@ export type LibraryTaggingJob = {
 
 export type LibraryAssetPage = {
   assets: LibraryAsset[];
-  collections: LibraryCollection[];
   nextCursor?: string;
   total: number;
+};
+
+export type LibraryNavigation = {
+  collections: LibraryCollection[];
+  smartFolders: LibrarySmartFolder[];
+  counts: { all: number; uncategorized: number; favorites: number };
 };
 
 export type LibraryTagSuggestion = {
@@ -1309,23 +1393,24 @@ export type LibraryCollectionBatchAction =
 export type LibraryCollectionBatchRequest =
   | {
       action: "add_to_collections";
-      role: LibraryAssetRole;
-      assetIds: string[];
+      selection: LibrarySelection;
       collectionIds: string[];
     }
   | {
       action: "create_collection_and_add";
-      role: LibraryAssetRole;
-      assetIds: string[];
+      selection: LibrarySelection;
       name: string;
       parentId?: string;
     }
   | {
       action: "remove_from_collection";
-      role: LibraryAssetRole;
-      assetIds: string[];
+      selection: LibrarySelection;
       collectionId: string;
     };
+
+export type LibrarySelection =
+  | { mode: "ids"; assetIds: string[] }
+  | { mode: "query"; filters: LibraryAssetFilters; excludedAssetIds?: string[] };
 
 export type LibraryCollectionBatchFailure = {
   assetId: string;
@@ -1337,6 +1422,13 @@ export type LibraryCollectionBatchResult = {
   collection?: LibraryCollection;
   assets: LibraryAsset[];
   unchangedAssetIds: string[];
+  failures: LibraryCollectionBatchFailure[];
+};
+
+export type LibraryBatchResult = {
+  matched: number;
+  succeeded: number;
+  failed: number;
   failures: LibraryCollectionBatchFailure[];
 };
 

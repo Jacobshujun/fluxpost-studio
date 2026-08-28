@@ -112,7 +112,7 @@ try {
       },
     }, { get: (target, key) => target[key] || emptyAsync }),
     "../library-assets": new Proxy({
-      listLibraryAssets: async (_account, options) => ({ assets: structuredClone(libraryAssetsByRole[options.role] || []), nextCursor: undefined }),
+      listLibraryAssets: async () => ({ assets: structuredClone([...libraryAssetsByRole.reference, ...libraryAssetsByRole.vehicle]), nextCursor: undefined }),
     }, { get: (target, key) => target[key] || emptyAsync }),
     "../content-pool": new Proxy({
       getSourceItemsByIds: async (ids) => ids.filter((id) => !visibleSourceVideoIds || visibleSourceVideoIds.has(id)).map((id) => ({ id })),
@@ -1573,7 +1573,7 @@ try {
     assert.ok(page.includes(snippet), `Canvas scheduler image source UI is missing ${snippet}`);
   }
   assert.ok(!page.includes("IntersectionObserver"), "scheduler image pagination must require an explicit load-more command");
-  assert.match(page, /new URLSearchParams\(\{ role, limit: "24" \}\)/, "scheduler image pages must be capped at 24 assets");
+  assert.match(page, /new URLSearchParams\(\{ limit: "24" \}\)/, "scheduler image pages must be capped at 24 assets");
   assert.match(page, /setTimeout\(\(\) => commitSearch\(value\), 350\)/, "scheduler keyword input must debounce definition updates for 350 ms");
   assert.match(page, /event\.key === "Enter"[\s\S]*commitSearch\(searchDraft\)/, "Enter must commit the scheduler keyword immediately");
   assert.match(page, /<CanvasScheduleV2Editor[\s\S]*key=\{selected\.id\}/, "switching schedules must remount V2 filter drafts and cancel pending search commits");

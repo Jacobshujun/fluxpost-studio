@@ -1,4 +1,4 @@
-import type { LibraryAsset, LibraryAssetRole, LibraryListSort } from "./types";
+import type { LibraryAsset, LibraryListSort } from "./types";
 
 export const defaultLibraryListSort: LibraryListSort = "newest";
 
@@ -28,8 +28,7 @@ export function libraryListSortDirection(sort: LibraryListSort) {
 }
 
 export function getLibraryAssetAddedAt(
-  asset: Pick<LibraryAsset, "createdAt" | "roleAddedAt">,
-  role?: LibraryAssetRole,
+  asset: Pick<LibraryAsset, "createdAt">,
 ) {
-  return role ? asset.roleAddedAt?.[role] || asset.createdAt : asset.createdAt;
+  return asset.createdAt;
 }

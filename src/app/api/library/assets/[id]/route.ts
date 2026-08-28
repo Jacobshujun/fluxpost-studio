@@ -19,7 +19,8 @@ export async function GET(request: Request, context: RouteContext) {
 export async function PATCH(request: Request, context: RouteContext) {
   try {
     const account = await requireWorkspaceAccount(request);
-    const body = (await request.json()) as PatchLibraryAssetInput;
+    const body = (await request.json()) as PatchLibraryAssetInput & { roles?: unknown; role?: unknown; roleAddedAt?: unknown };
+    if (body.role !== undefined || body.roles !== undefined || body.roleAddedAt !== undefined) throw new Error("Library roles are no longer supported.");
     const result = await patchLibraryAssetWithResult(account, (await context.params).id, body);
     if (result.taggingQueued) kickLibraryTaggingWorker();
     return NextResponse.json({ asset: result.asset });

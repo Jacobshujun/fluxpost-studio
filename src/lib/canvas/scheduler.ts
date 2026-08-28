@@ -18,7 +18,7 @@ import { listCopyLibraryEntries } from "../copy-library";
 import { listLibraryAssets } from "../library-assets";
 import { freezeContentPoolItemsByIds, getSourceItemsByIds, resolveContentPoolSelection } from "../content-pool";
 import { freezeContentPoolSelectionItem, normalizeContentPoolSelectionFilter } from "../content-pool-selection";
-import type { CopyLibraryEntry, LibraryAsset, LibraryAssetRole } from "../types";
+import type { CopyLibraryEntry, LibraryAsset } from "../types";
 import {
   assertCanAccessWorkspaceRecord,
   canAccessWorkspaceOwner,
@@ -213,8 +213,8 @@ export async function preflightCanvasSchedule(scheduleId: string, account: Works
   const batches: CanvasScheduleBatch[] = [];
   let totalImageTasks = 0;
   for (const batch of current.batches) {
-    const scenePool = await resolveScheduleAssetPool(account, "reference", batch.sceneFilter);
-    const vehiclePool = await resolveScheduleAssetPool(account, "vehicle", batch.vehicleFilter);
+    const scenePool = await resolveScheduleAssetPool(account, batch.sceneFilter);
+    const vehiclePool = await resolveScheduleAssetPool(account, batch.vehicleFilter);
     const copyPool = batch.copyFilter ? await resolveScheduleCopyPool(account, batch.copyFilter) : undefined;
     const scenes = batch.sceneFilter.mode === "manual"
       ? scenePool
@@ -256,7 +256,7 @@ export async function resampleCanvasSchedule(
   assertRevision(current, input.revision);
   const batch = current.batches.find((item) => item.id === input.batchId);
   if (!batch) throw new Error("Batch not found");
-  const vehiclePool = await resolveScheduleAssetPool(account, "vehicle", batch.vehicleFilter);
+  const vehiclePool = await resolveScheduleAssetPool(account, batch.vehicleFilter);
   if (batch.vehicleCountMax > vehiclePool.length) throw new Error(`${batch.name}: 车型素材池数量不足。`);
   const copies = !input.contentTaskId && batch.copyFilter
     ? assignCanvasScheduleCopies(await resolveScheduleCopyPool(account, batch.copyFilter), batch.contentTasks.length, batch.name)
@@ -423,7 +423,7 @@ export async function convertCanvasScheduleToV2(scheduleId: string, account: Wor
       name: "主任务图片",
       scope: "main",
       valueType: "image",
-      source: { mode: "library-filter", role: "reference", filter: structuredClone(batch.sceneFilter) },
+      source: { mode: "library-filter", filter: structuredClone(batch.sceneFilter) },
       expansion: "each",
       binding: { nodeId: bindings["scene-input"], fieldKey: canvasScheduleImageBindingKey(workflow.graph, bindings["scene-input"]) },
     },
@@ -432,7 +432,7 @@ export async function convertCanvasScheduleToV2(scheduleId: string, account: Wor
       name: "子任务图片",
       scope: "child",
       valueType: "image",
-      source: { mode: "library-filter", role: "vehicle", filter: structuredClone(batch.vehicleFilter) },
+      source: { mode: "library-filter", filter: structuredClone(batch.vehicleFilter) },
       expansion: "each",
       binding: { nodeId: bindings["vehicle-input"], fieldKey: canvasScheduleImageBindingKey(workflow.graph, bindings["vehicle-input"]) },
     },
@@ -1507,17 +1507,18 @@ function assertRevision(schedule: CanvasSchedule, revision: number) {
   if (!Number.isInteger(revision) || revision !== schedule.revision) throw new CanvasScheduleRevisionConflictError();
 }
 
-async function resolveScheduleAssetPool(account: WorkspaceAccessActor, role: LibraryAssetRole, filter: CanvasScheduleAssetFilter) {
+async function resolveScheduleAssetPool(account: WorkspaceAccessActor, filter: CanvasScheduleAssetFilter) {
   const all: LibraryAsset[] = [];
   let cursor: string | undefined;
   do {
     const page = await listLibraryAssets(account, {
-      role,
       limit: 100,
       cursor,
       ...(filter.mode === "random" ? {
         search: filter.search,
         collectionId: filter.collectionId,
+        includeDescendants: filter.includeDescendants,
+        smartFolderId: filter.smartFolderId,
         tags: filter.tags,
       } : {}),
     });
@@ -1527,7 +1528,7 @@ async function resolveScheduleAssetPool(account: WorkspaceAccessActor, role: Lib
   if (filter.mode === "random") return all.map(assetSnapshot);
   const byId = new Map(all.map((asset) => [asset.id, asset]));
   const missing = filter.assetIds.filter((id) => !byId.has(id));
-  if (missing.length) throw new Error(`${role === "reference" ? "场景" : "车型"}素材已删除或无权访问：${missing[0]}`);
+  if (missing.length) throw new Error(`素材已删除或无权访问：${missing[0]}`);
   return filter.assetIds.map((id) => assetSnapshot(byId.get(id)!));
 }
 
@@ -1559,7 +1560,7 @@ async function resolveCanvasScheduleV2Parameter(
     return resolvedCanvasScheduleV2Parameter(parameter, "manual-list", values);
   }
   if (source.mode === "library-filter") {
-    const assets = await resolveScheduleAssetPool(account, source.role, source.filter);
+    const assets = await resolveScheduleAssetPool(account, source.filter);
     const values: CanvasScheduleParameterValue[] = parameter.valueType === "image-group" ? [assets] : assets;
     return resolvedCanvasScheduleV2Parameter(parameter, "manual-list", values);
   }
@@ -1629,19 +1630,16 @@ export function validateCanvasContentPoolScheduleCapacity(parameter: CanvasSched
 async function assertFrozenCanvasScheduleV2AssetsStillAvailable(schedule: CanvasSchedule, account: WorkspaceAccessActor) {
   const definition = schedule.definition;
   if (!definition || !schedule.mainTasks) return;
-  const required = new Map<LibraryAssetRole, Set<string>>([["reference", new Set()], ["vehicle", new Set()]]);
+  const required = new Set<string>();
   const requiredSourceVideos = new Set<string>();
   const parameters = new Map(definition.parameters.map((parameter) => [parameter.id, parameter]));
   for (const main of schedule.mainTasks) {
     collectFrozenCanvasScheduleV2Assets(main.parameterValues);
     for (const child of main.childTasks) collectFrozenCanvasScheduleV2Assets(child.parameterValues);
   }
-  for (const role of ["reference", "vehicle"] as const) {
-    if (!required.get(role)?.size) continue;
-    const visible = new Set((await resolveScheduleAssetPool(account, role, { mode: "random", assetIds: [], search: "", tags: [] })).map((asset) => asset.id));
-    const missing = Array.from(required.get(role)!).find((id) => !visible.has(id));
-    if (missing) throw new Error(`Frozen batch asset was deleted or is no longer accessible: ${missing}`);
-  }
+  const visible = new Set((await resolveScheduleAssetPool(account, { mode: "random", assetIds: [], search: "", tags: [] })).map((asset) => asset.id));
+  const missingAsset = Array.from(required).find((id) => !visible.has(id));
+  if (missingAsset) throw new Error(`Frozen batch asset was deleted or is no longer accessible: ${missingAsset}`);
   if (requiredSourceVideos.size) {
     const ids = Array.from(requiredSourceVideos);
     const visible = new Set((await getSourceItemsByIds(ids, account)).map((item) => item.id));
@@ -1659,23 +1657,21 @@ async function assertFrozenCanvasScheduleV2AssetsStillAvailable(schedule: Canvas
       if (parameter?.source.mode !== "library-filter") continue;
       const snapshots = Array.isArray(value) ? value : [value];
       for (const snapshot of snapshots) {
-        if (snapshot && typeof snapshot === "object" && "id" in snapshot && "url" in snapshot) required.get(parameter.source.role)!.add(String(snapshot.id));
+        if (snapshot && typeof snapshot === "object" && "id" in snapshot && "url" in snapshot) required.add(String(snapshot.id));
       }
     }
   }
 }
 
 async function assertFrozenAssetsStillAvailable(schedule: CanvasSchedule, account: WorkspaceAccessActor) {
-  const required = new Map<LibraryAssetRole, Set<string>>([
-    ["reference", new Set(schedule.batches.flatMap((batch) => batch.contentTasks.map((task) => task.scene.id)))],
-    ["vehicle", new Set(schedule.batches.flatMap((batch) => batch.contentTasks.flatMap((task) => task.vehicles.map((asset) => asset.id))))],
-  ]);
-  for (const role of ["reference", "vehicle"] as const) {
-    const filter: CanvasScheduleAssetFilter = { mode: "random", assetIds: [], search: "", tags: [] };
-    const visible = new Set((await resolveScheduleAssetPool(account, role, filter)).map((asset) => asset.id));
-    const missing = Array.from(required.get(role) || []).find((id) => !visible.has(id));
-    if (missing) throw new Error(`预演素材已删除或无权访问：${missing}`);
-  }
+  const required = new Set(schedule.batches.flatMap((batch) => [
+    ...batch.contentTasks.map((task) => task.scene.id),
+    ...batch.contentTasks.flatMap((task) => task.vehicles.map((asset) => asset.id)),
+  ]));
+  const filter: CanvasScheduleAssetFilter = { mode: "random", assetIds: [], search: "", tags: [] };
+  const visible = new Set((await resolveScheduleAssetPool(account, filter)).map((asset) => asset.id));
+  const missing = Array.from(required).find((id) => !visible.has(id));
+  if (missing) throw new Error(`预演素材已删除或无权访问：${missing}`);
 }
 
 function makeContentTask(
@@ -2162,7 +2158,7 @@ function normalizeCanvasScheduleV2ParameterSource(parameter: CanvasScheduleParam
   if (source.mode === "fixed" || source.mode === "manual-list") return { mode: source.mode, values: structuredClone(source.values || []) };
   if (source.mode === "copy-filter") return { mode: "copy-filter", filter: normalizeCopyFilter(source.filter) };
   if (source.mode === "content-pool-filter") return { mode: "content-pool-filter", filter: normalizeCanvasScheduleContentPoolFilter(source.filter) };
-  if (source.mode === "library-filter") return { mode: "library-filter", role: source.role === "vehicle" ? "vehicle" : "reference", filter: normalizeAssetFilter(source.filter) };
+  if (source.mode === "library-filter") return { mode: "library-filter", filter: normalizeAssetFilter(source.filter) };
   if (source.mode === "video-loader-queue") return { mode: "video-loader-queue", nodeId: String(source.nodeId || "").trim() };
   if (source.mode === "source-video-links") return {
     mode: "source-video-links",

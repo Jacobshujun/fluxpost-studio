@@ -55,6 +55,7 @@ import {
   type LibraryAsset,
   type LibraryAssetPage,
   type LibraryCollection,
+  type LibraryNavigation,
   type SimpleRun,
   type SimpleRunMediaSettings,
   type SourceLinkPlatform,
@@ -193,7 +194,8 @@ export default function Home() {
   const [simpleOriginalUseWebSearch, setSimpleOriginalUseWebSearch] = useState(false);
   const [simpleRuns, setSimpleRuns] = useState<SimpleRun[]>([]);
   const [activeSimpleRunId, setActiveSimpleRunId] = useState("");
-  const [vehicleLibrary, setVehicleLibrary] = useState<LibraryAssetPage>({ assets: [], collections: [], total: 0 });
+  const [vehicleLibrary, setVehicleLibrary] = useState<LibraryAssetPage>({ assets: [], total: 0 });
+  const [libraryNavigation, setLibraryNavigation] = useState<LibraryNavigation>({ collections: [], smartFolders: [], counts: { all: 0, uncategorized: 0, favorites: 0 } });
   const [message, setMessage] = useState("");
   const [busy, setBusy] = useState<"settings" | "simpleRun" | null>(null);
   const [terminatingSimpleRunId, setTerminatingSimpleRunId] = useState("");
@@ -207,10 +209,10 @@ export default function Home() {
   const simpleLinkCount = useMemo(() => splitLines(simpleLinkText).length, [simpleLinkText]);
   const simpleFeishuTaskCount = useMemo(() => splitFeishuTaskNumbers(simpleFeishuTaskText).length, [simpleFeishuTaskText]);
   const vehicleMaterialAssetIds = useMemo(() => vehicleLibrary.assets.map((asset) => asset.id), [vehicleLibrary.assets]);
-  const viralMaterialCandidates = useMemo(() => buildViralMaterialCandidates(vehicleLibrary.assets, vehicleLibrary.collections), [vehicleLibrary.assets, vehicleLibrary.collections]);
+  const viralMaterialCandidates = useMemo(() => buildViralMaterialCandidates(vehicleLibrary.assets, libraryNavigation.collections), [libraryNavigation.collections, vehicleLibrary.assets]);
   const viralMaterialFolders = useMemo(
-    () => buildViralMaterialFolders(vehicleLibrary.collections, vehicleLibrary.assets, simpleViralMaterialAssetIds),
-    [simpleViralMaterialAssetIds, vehicleLibrary.assets, vehicleLibrary.collections],
+    () => buildViralMaterialFolders(libraryNavigation.collections, vehicleLibrary.assets, simpleViralMaterialAssetIds),
+    [libraryNavigation.collections, simpleViralMaterialAssetIds, vehicleLibrary.assets],
   );
   const activeSimpleViralMaterialFolderId = useMemo(() => {
     if (viralMaterialFolders.some((folder) => folder.id === simpleViralMaterialFolderId)) return simpleViralMaterialFolderId;
@@ -323,7 +325,8 @@ export default function Home() {
       setAccountPanelOpen(false);
       setSimpleRuns([]);
       setActiveSimpleRunId("");
-      setVehicleLibrary({ assets: [], collections: [], total: 0 });
+      setVehicleLibrary({ assets: [], total: 0 });
+      setLibraryNavigation({ collections: [], smartFolders: [], counts: { all: 0, uncategorized: 0, favorites: 0 } });
       setAccountBusy(false);
     }
   }
@@ -361,12 +364,18 @@ export default function Home() {
 
   async function loadVehicleLibrary() {
     try {
+      const navigationResponse = await fetch("/api/library/navigation");
+      const navigation = (await navigationResponse.json()) as LibraryNavigation & { error?: string };
+      if (!navigationResponse.ok) throw new Error(navigation.error || "图库导航读取失败");
+      setLibraryNavigation(navigation);
+      const vehicleRoot = navigation.collections.find((collection) => !collection.parentId && collection.name === "车型库");
       const assets: LibraryAsset[] = [];
       const seenCursors = new Set<string>();
       let cursor = "";
       let page: LibraryAssetPage | undefined;
       do {
-        const params = new URLSearchParams({ role: "vehicle", limit: "100", sort: "name-asc" });
+        const params = new URLSearchParams({ limit: "100", sort: "name-asc" });
+        if (vehicleRoot) params.set("collectionId", vehicleRoot.id);
         if (cursor) params.set("cursor", cursor);
         const res = await fetch(`/api/library/assets?${params}`);
         const data = (await res.json()) as LibraryAssetPage & { error?: string };
@@ -377,7 +386,7 @@ export default function Home() {
         if (cursor && seenCursors.has(cursor)) throw new Error("车型图库分页游标重复");
         if (cursor) seenCursors.add(cursor);
       } while (cursor);
-      setVehicleLibrary({ assets, collections: page?.collections || [], total: page?.total || assets.length });
+      setVehicleLibrary({ assets, total: page?.total || assets.length });
     } catch (error) {
       setMessage(error instanceof Error ? error.message : "车型图库读取失败");
     }
@@ -664,8 +673,7 @@ export default function Home() {
               </div>
               <AccountMenu account={currentAccount} accounts={workspaceAccounts} open={accountPanelOpen} busy={accountBusy} message={accountMessage} onToggleOpen={() => setAccountPanelOpen((value) => !value)} onRefresh={loadWorkspaceAccounts} onAccountsChanged={loadWorkspaceAccounts} onLogout={logoutWorkspaceAccount} />
               <HeaderLink href="/content" icon={<Database className="h-4 w-4" />} label="采集与内容池" />
-              <HeaderLink href="/library?role=reference" icon={<ImageIcon className="h-4 w-4" />} label="参考图库" />
-              <HeaderLink href="/library?role=vehicle" icon={<Images className="h-4 w-4" />} label="车型图库" />
+              <HeaderLink href="/library" icon={<Images className="h-4 w-4" />} label="图库" />
               <HeaderLink href="/copy-library" icon={<FileText className="h-4 w-4" />} label="文案库" />
               <HeaderLink href="/original" icon={<Sparkles className="h-4 w-4" />} label="批量原创" />
               <HeaderLink href="/review" icon={<ExternalLink className="h-4 w-4" />} label="内容审查台" />
@@ -962,7 +970,7 @@ function buildViralMaterialCandidates(assets: LibraryAsset[], collections: Libra
 
 function buildViralMaterialFolders(collections: LibraryCollection[], assets: LibraryAsset[], selectedAssetIds: string[]) {
   const all = { id: "all", name: "全部车型", imageCount: assets.length, selectedCount: assets.filter((asset) => selectedAssetIds.includes(asset.id)).length, assetIds: assets.map((asset) => asset.id) };
-  const folders = collections.filter((collection) => collection.role === "vehicle").map<ViralMaterialFolderCandidate>((collection) => { const assetIds = assets.filter((asset) => asset.collectionIds.includes(collection.id)).map((asset) => asset.id); return { id: collection.id, name: collection.name, imageCount: assetIds.length, selectedCount: assetIds.filter((id) => selectedAssetIds.includes(id)).length, assetIds }; }).filter((folder) => folder.imageCount > 0);
+  const folders = collections.map<ViralMaterialFolderCandidate>((collection) => { const assetIds = assets.filter((asset) => asset.collectionIds.includes(collection.id)).map((asset) => asset.id); return { id: collection.id, name: collection.relativePath || collection.name, imageCount: assetIds.length, selectedCount: assetIds.filter((id) => selectedAssetIds.includes(id)).length, assetIds }; }).filter((folder) => folder.imageCount > 0);
   return assets.length ? [all, ...folders] : [];
 }
 
