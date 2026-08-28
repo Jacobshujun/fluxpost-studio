@@ -221,17 +221,17 @@
     },
     {
       "id": "reference-image-library",
-      "title": "Reference and vehicle image library",
+      "title": "Unified image asset library",
       "status": "ready_for_review",
       "definition_of_done": [
-        "Signed-in users import, tag, sort, select, preview, share, and delete permitted TOS-backed assets",
-        "Reference AI tags and manual vehicle tags preserve distinct contracts and ownership"
+        "Signed-in users organize permitted TOS-backed assets with nested collections, flat tags, favorites, notes, smart folders, thumbnails, paging, and query-based batch actions",
+        "Legacy reference and vehicle roles migrate to ordinary private roots while Canvas and simple mode preserve frozen asset snapshots"
       ],
       "evidence": [
-        "Library schema/API/auth/tag/theme/sort/cursor/selection/migration/browser checks and production route health passed.",
-        "2026-08-26 batch multi-collection add/create/remove, permissions, idempotency, 65-item selection retention, and mocked desktop/mobile checks passed offline."
+        "2026-08-28 unified PostgreSQL/SQLite schema and role migration, SQL filtering/cursors, smart-folder/favorite permissions, query selection, Canvas/simple snapshots, full offline baseline, and mocked 1440x960/390x844 browser workflows passed without external calls.",
+        "2026-08-28 isolated PostgreSQL benchmark passed with 50,000 assets and 1,000,000 label relations; common query P95 ranged from 5.4ms to 252.6ms and navigation metadata was 11.6ms."
       ],
-      "notes": "Real production-38 TOS and GPT tag/retry samples remain; retired 104 is not a gate."
+      "notes": "The real 621-asset runtime migration, authenticated multi-user review, and live TOS/GPT samples remain operator gates; retired 104 is not a gate."
     },
     {
       "id": "tos-runtime-media-storage",

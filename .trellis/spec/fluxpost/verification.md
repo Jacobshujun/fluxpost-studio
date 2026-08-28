@@ -1,6 +1,6 @@
 # Verification
 
-Last updated: 2026-08-25
+Last updated: 2026-08-28
 
 ## Baseline Command
 
@@ -13,12 +13,19 @@ powershell -ExecutionPolicy Bypass -File .trellis/verification/check.ps1
 
 `.trellis/verification/check.ps1` wraps `.trellis/verification/check.mjs`. Its isolated smoke server disables workers on a private test port; the port-3001 versioned candidate retains normal worker behavior.
 
+The large PostgreSQL acceptance benchmark is intentionally separate from the default baseline because it creates one million temporary relation rows. It only accepts loopback PostgreSQL by default, creates a unique schema, and drops that schema in `finally`:
+
+```powershell
+node --env-file=.env.local .trellis/verification/unified_library_postgres_benchmark.mjs
+```
+
 ## Current Automated Checks
 
 The baseline verifies:
 
 - Trellis file existence, context budgets, latest markers, JSON validity, and feature evidence limits.
 - PostgreSQL schema, accounts/ownership, libraries, configuration, TOS, v4 deployment/image-retention/timer scripts, execution logs, platform mappings, media, video, concurrency, queues, Feishu boundaries, source imports, review flows, and row-level persistence.
+- Unified-library role migration, owner isolation, nested collections, flat tags, smart-folder conditions and permissions, favorites, SQL filtering, keyset cursors, server query selections, thumbnails, and Canvas/simple snapshot consumers.
 - Infinite Canvas graph/API/DAG, incomplete-draft persistence, execution readiness, common nodes, competitor-workbook parsing/redaction/hierarchical scheduling, subtitle recognition/render/revision/waveform/cache contracts, media, provider resume, scheduler, copy-library, and original-batch behavior without paid calls.
 - Canvas local video-loader snapshot, streaming upload/FFprobe, selected-literal output, frozen V2 queue, and single-video task contracts without external storage calls.
 - Finished-body Unicode counting, 800-target prompts, one-repair fallback, history promotion, persistence consistency, editor clamping, Canvas composition, and Feishu exemptions without paid calls.
@@ -45,17 +52,17 @@ Do not deploy a dirty worktree, branch name, abbreviated SHA, local runtime rows
 
 ## Recent Verification
 
+- 2026-08-28: Unified assets, nested collections, flat tags, favorites, notes, smart folders, SQL filtering/keyset paging, server query selections, thumbnail UI, role migration, and Canvas/simple frozen consumers passed focused checks, TypeScript, lint (0 errors, 20 warnings), build, isolated HTTP/SQLite smoke, and the complete offline baseline. Mocked Chromium passed at 1440x960 and 390x844 without overflow or live services. An isolated 50,000-asset/1,000,000-label PostgreSQL benchmark measured P95 `9.3ms` default list, `30.2ms` tag filter, `252.6ms` collection subtree, `5.4ms` smart folder, `8.7ms` cursor page, and `11.6ms` navigation metadata.
 - 2026-08-27: Canvas ordinary and batch launches now assign execution, schedule access, derived runs, generated posts, and review attribution to the authenticated launcher while preserving creator audit fields; shared/child/aggregate/finalize/retry/restart paths, owner-filtered history/reuse, indexed PostgreSQL/SQLite owner writes, focused checks, TypeScript, lint (0 errors and 5 existing warnings), build, isolated HTTP smoke, and the full offline baseline passed without external calls.
 - 2026-08-27: Content-pool manual custom tags now remain separate from fixed AI categories and support owner-scoped suggestions, normalized search, AND filters, single editing, partial-success batch add/remove with per-item errors, and shared normal/V2 Canvas filtering. Focused checks, TypeScript, lint (0 errors, 5 existing Canvas warnings), production build, isolated HTTP smoke, SQLite, the full offline baseline, and mocked Chromium at 1440x960 and 390x844 passed without external calls.
 - 2026-08-26: Canvas content-pool selection now supports owner-scoped search/project/platform/status/media/tag/local-complete filters, stable cursor paging, compact snapshots, and V2 manual/match fixed/each/random main-task expansion with explicit missing-ID and 200-item limits. Focused checks, TypeScript, lint (0 errors, 5 existing Canvas warnings), production build, isolated smoke, SQLite, and the full offline baseline passed without external calls; mocked Chromium at 1440x960 and 390x844 passed selection, preview, pagination, bulk modes, focus-native controls, and overflow checks on clean candidate `2b3f94b22e118699f82da595d246b901977ea0dc`.
 - 2026-08-26: Library batch multi-collection add/create/remove, target-first validation, partial permissions, stable relationship updates, and 65-item cursor selection retention passed focused domain checks, TypeScript, lint (0 errors, 5 existing Canvas warnings), production build, isolated HTTP smoke, SQLite, and the full offline baseline without external calls. Clean SHA `5f1cb7c11a69cfce763175ac36e5a192ca251c83` activated on loopback port `3001`; mocked system Chrome at 1440x960 and 390x844 passed against that candidate without live services.
-- 2026-08-26: V2 Canvas partial child/row retry now targets only `model.gpt-image-each` attempts with failed child metadata, preserves the existing review draft, and leaves V1/shared/generic partial tasks non-retryable. Focused checks and the full offline baseline passed without external calls; clean SHA `e58b37b0767da79ea365c214945755a0e8a0c16b` passed the isolated VPS verifier, deployed as `20260826-094620-e58b37b0767d`, and reached exact parity across local LAN port `3001`, GitHub `main`, and production. Post-deploy identity, app/PostgreSQL/Nginx/public health, loopback binding, 16 zero-active-work checks, persistent volumes, protected services, retained rollback/rescue images, and the weekly BuildKit timer passed without provider or Feishu/Lark writes.
 Older evidence is preserved in `.trellis/spec/fluxpost/archive/verification-history.md`.
 
 ## Missing Coverage
 
 - No live paid Ark plain-text transcription, Seedance, GPT image/text, TikHub, ComfyUI, Feishu, or Lark action is part of the default baseline. Canvas subtitle timing is local Faster Whisper and was verified separately against one recent local input.
-- No local Canvas history, media, account, or configuration migration was performed.
+- No real local library, Canvas history, media, account, or configuration migration was performed; unified-library migration checks use isolated fixtures.
 - No authenticated production Canvas create/save/run walkthrough or multi-user PostgreSQL concurrency test was run during this release.
 - No default check changes DNS, firewall, Nginx routing, Docker volumes, or external production services.
 - No production image cleanup or systemd timer change is performed by the default baseline; the 2026-08-06 live maintenance evidence was an explicitly authorized operator action.

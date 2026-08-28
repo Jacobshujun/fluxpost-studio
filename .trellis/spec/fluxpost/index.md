@@ -20,6 +20,7 @@ This layer is the project-specific operating memory migrated from the previous H
 | [verification.md](./verification.md) | Baseline and manual verification commands. |
 | [pitfalls.md](./pitfalls.md) | Known traps and integration risks. |
 | [architecture_rules.md](./architecture_rules.md) | Module, data, deployment, and Trellis boundaries. |
+| [unified_library.md](./unified_library.md) | Unified image asset, collection, smart-folder, query, migration, and performance contracts. |
 | [image_transport.md](./image_transport.md) | Image-only Xray routing, health, Canvas recovery, and ToAPIs resume contracts. |
 | [decisions.md](./decisions.md) | Stable product, architecture, and deployment decisions. |
 | [handoff.md](./handoff.md) | On-demand handoff history; read only latest marker by default. |

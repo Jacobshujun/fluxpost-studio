@@ -1,6 +1,6 @@
 # Project Brief
 
-Last updated: 2026-08-26
+Last updated: 2026-08-28
 
 ## Project Name, Goal, Path
 
@@ -25,7 +25,7 @@ Last updated: 2026-08-26
 2. Start the local web app.
 3. Search/crawl content by platform and keyword through `/content` and `/api/crawl/jobs`, batch-import supported source links into the content pool through `/content` and `/api/crawl/links`, or use `/api/simple/runs` for one-click production from keywords, exact source links, one current Dongchedi category page, Feishu task numbers, one viral source link, original prompts, or selected content-pool samples.
 4. Assess harvested items with the crawl-stage content safety gate, then persist retained items into the runtime database-backed content pool.
-5. Select reusable reference or vehicle assets from the authenticated TOS-backed library when needed.
+5. Select reusable assets from the authenticated TOS-backed unified library by collection, smart folder, tags, or explicit IDs when needed.
 6. Generate post drafts through `/api/generate` or through the simple-run one-click workflow, including text and optional image generation.
 7. Review or edit drafts through `/api/review`.
 8. Publish approved posts through `/api/publish/feishu` or through the simple-run publish stage, which writes a local payload and calls Feishu CLI when target Base config is available.
@@ -70,6 +70,10 @@ Last updated: 2026-08-26
   - `POST /api/lark/tasks`
   - `GET|POST /api/library/tags`
   - `GET|PATCH|DELETE /api/library/assets`
+  - `GET|POST|PATCH|DELETE /api/library/collections`
+  - `GET|POST|PATCH|DELETE /api/library/smart-folders`
+  - `GET|POST|DELETE /api/library/favorites`
+  - `GET /api/library/navigation`
   - `GET|POST /api/production/batches`
   - `GET|POST|PATCH|DELETE /api/production/posts`
   - `POST /api/production/posts/regenerate`
@@ -89,7 +93,7 @@ Last updated: 2026-08-26
 - Legacy JSON files under `data/` can be used as one-time migration sources for active domains: `content-pool.json`, `batch-production.json`, `generated-posts.json`, and `execution-log.json`. `material-library.json` is retired local state and is not imported.
 - Runtime database stores workspace accounts/sessions, content projects, generated posts, batch jobs, execution logs, crawl jobs, runtime posts, simple runs, and workspace settings metadata, including saved production prompts and the `/distribution-check` audit prompt.
 - Runtime database also stores owner-scoped `original_batches`, `original_batch_items`, and `original_batch_queue` records for the `/original` 1-100 topic Xiaohongshu card workspace. Its worker concurrency is controlled by `WORKER_ORIGINAL_BATCH_CONCURRENCY`, default `2` and hard-capped at `8`.
-- Runtime database also stores durable queues, library metadata, owner-scoped Canvas subtitle presets/timeline cache, roles, labels, overrides, and tagging jobs; media binaries remain outside PostgreSQL.
+- Runtime database also stores durable queues, unified library metadata, nested collections, smart folders, favorites, labels, overrides, owner-scoped Canvas subtitle presets/timeline cache, and tagging jobs; media binaries remain outside PostgreSQL.
 - Workspace sessions use an HttpOnly `fluxpost_session` browser cookie. In default whitelist mode, the first-admin setup key is environment-driven and not stored in the runtime database; daily account passwords are stored only as Node `scrypt` hashes.
 - SQLite-to-PostgreSQL migration script: `scripts/db/migrate-sqlite-to-postgres.mjs`. It copies metadata and JSON payload rows; it does not move media binaries.
 - Feishu outbox payload directory from code/README: `data/feishu-outbox/`.
@@ -97,7 +101,7 @@ Last updated: 2026-08-26
 - Generated AI images: `public/generated/`.
 - Crawled media cache and video frames: `public/media/crawl/`.
 - Source-based generated posts can store final source video materials in optional `GeneratedPost.videoUrls` only when the operator enables the default-off `引用源视频素材` / `includeSourceVideo` switch; resolution prefers cached local `downloadedVideoUrl` over remote `videoUrl`.
-- Reusable reference/vehicle images live in the TOS-backed `library_assets` domain; the compact home consumes accessible vehicle assets by id and freezes their public URLs into simple runs.
+- Reusable images live in one TOS-backed `library_assets` pool. Legacy reference/vehicle roles migrate to ordinary private root collections; Canvas and simple mode resolve accessible collections/smart folders and freeze selected public URLs into runs.
 - Video frame extraction uses the system `ffmpeg` executable through `src/lib/media-cache.ts`.
 - Ark audio extracts MP3 with FFmpeg, uploads it to Files as `user_data`, then calls Responses with `input_audio.file_id` for optional crawl/simple-run plain text. Canvas subtitles instead require one video, use local Faster Whisper acoustic word timing, keep an owner/settings/protocol-scoped timeline cache, and emit ASS hard-subtitle MP4 plus text.
 - Sensitive config is environment-based and must stay out of Trellis docs: `.env.local`, `.env*`, API keys, Feishu tokens, and local user material paths when private.
