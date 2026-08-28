@@ -4,7 +4,7 @@ Last updated: 2026-08-28
 
 ## One-Line Status
 
-The unified image asset pool, collections, smart folders, SQL paging, query selection, thumbnails, and migrated Canvas/simple consumers are implemented and verified; commit/archive and a clean port-3001 candidate remain.
+The unified image asset pool and consumers are implemented and verified; the library now inherits and persists the application theme, and the clean fix is active on port `3001`.
 
 ## Current Focus
 
@@ -12,11 +12,12 @@ The unified image asset pool, collections, smart folders, SQL paging, query sele
 - Ordinary nested collections, personal favorites, asset notes, flat tags, one-level `all/any` smart folders, permission-aware SQL filters, signed keyset cursors, and server-side query selections share PostgreSQL/SQLite semantics.
 - The library grid loads compact 60-item pages and thumbnail endpoints; mocked Chromium passed 1440x960 and 390x844 workflows without horizontal overflow or live services.
 - Canvas and simple mode use collection/smart-folder filters and freeze accessible asset snapshots before execution; new imports remain idle until manual AI tagging.
+- The library page subscribes to the shared `fluxpost-theme` state and derives its surfaces, text, borders, controls, and accents from the active application theme instead of hardcoded light colors.
 - Focused migration/query checks, TypeScript, lint (0 errors, 20 warnings), build, isolated HTTP/SQLite smoke, and the full baseline pass. An isolated 50,000-asset/1,000,000-label PostgreSQL benchmark met all P95 targets.
 
 ## Next Entry
 
-Commit and archive the verified unified-library implementation, then activate clean current HEAD on loopback port `3001` for authenticated operator review and one-time runtime migration.
+Continue authenticated operator review of the unified library and run the one-time runtime migration when approved.
 
 ## Risks And Unknowns
 

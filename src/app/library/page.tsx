@@ -6,8 +6,9 @@ import {
   Images, LoaderCircle, MoreHorizontal, Pencil, Plus, RefreshCw, Search, Share2, Sparkles, Tag,
   Trash2, Upload, UserRound, UsersRound, WandSparkles, X,
 } from "lucide-react";
-import { useCallback, useEffect, useMemo, useRef, useState, type DragEvent, type ReactNode } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState, useSyncExternalStore, type DragEvent, type ReactNode } from "react";
 import { getLibraryUnifiedTagsForAsset } from "@/lib/library-tags";
+import { getStoredTheme, subscribeTheme, type ThemeMode } from "@/lib/theme";
 import type {
   LibraryAsset, LibraryAssetFilters, LibraryAssetPage, LibraryCollection, LibraryListSort, LibraryNavigation,
   LibrarySelection, LibrarySmartFolder, LibrarySmartFolderCondition, LibraryTagSuggestion, LibraryVisibility,
@@ -21,6 +22,7 @@ const emptyNavigation: LibraryNavigation = { collections: [], smartFolders: [], 
 const emptyPage: LibraryAssetPage = { assets: [], total: 0 };
 
 export default function LibraryPage() {
+  const theme = useSyncExternalStore(subscribeTheme, getStoredTheme, () => "professional" as ThemeMode);
   const [navigation, setNavigation] = useState(emptyNavigation);
   const [data, setData] = useState(emptyPage);
   const [view, setView] = useState<View>({ kind: "all" });
@@ -47,6 +49,10 @@ export default function LibraryPage() {
   const [smartDraft, setSmartDraft] = useState<SmartDraft>();
   const fileInputRef = useRef<HTMLInputElement>(null);
   const requestRef = useRef(0);
+
+  useEffect(() => {
+    document.documentElement.dataset.theme = theme;
+  }, [theme]);
 
   const filters = useMemo<LibraryAssetFilters>(() => ({
     search: search || undefined, tags, visibility: visibility || undefined,
