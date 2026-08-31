@@ -85,6 +85,7 @@ const nodeChecks = [
   ["Image transport and Xray recovery check", "image_transport_check.mjs"],
   ["GPT image size request check", "gpt_image_size_request_check.mjs"],
   ["ComfyUI Klein integration check", "comfyui_klein_check.mjs"],
+  ["Canvas interaction check", "canvas_interaction_check.mjs"],
   ["Infinite canvas workflows check", "canvas_workflows_check.mjs"],
   ["Canvas directory slideshow check", "canvas_directory_slideshow_check.mjs"],
   ["Canvas per-image GPT reconstruction check", "canvas_image_each_check.mjs"],

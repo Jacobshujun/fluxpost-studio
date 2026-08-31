@@ -256,7 +256,7 @@ export default function CanvasPage() {
   const [displayingExplicitRun, setDisplayingExplicitRun] = useState(false);
   const [manualSaveAcknowledged, setManualSaveAcknowledged] = useState(false);
   const [dirty, setDirty] = useState(false);
-  const [paletteVisible, setPaletteVisible] = useState(true);
+  const [paletteVisible, setPaletteVisible] = useState(false);
   const [mobilePalette, setMobilePalette] = useState(false);
   const [taskCenterOpen, setTaskCenterOpen] = useState(false);
   const [scheduleCenterOpen, setScheduleCenterOpen] = useState(false);
@@ -1610,8 +1610,10 @@ export default function CanvasPage() {
             defaultViewport={viewport}
             minZoom={0.2}
             onlyRenderVisibleElements
-            panOnDrag={isMobile}
+            panOnDrag={true}
             selectionOnDrag={!isMobile}
+            selectionKeyCode="Alt"
+            multiSelectionKeyCode={null}
             nodesDraggable={!isMobile}
             nodesConnectable={!isMobile}
             elementsSelectable

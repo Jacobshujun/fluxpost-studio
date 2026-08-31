@@ -208,7 +208,7 @@ button {
 }
 .canvas-stage .react-flow__pane.draggable { cursor: grab; }
 .canvas-stage .react-flow__pane.dragging { cursor: grabbing; }
-.canvas-stage .react-flow__pane.selection { cursor: default; }
+.canvas-stage .react-flow__pane.selection { cursor: crosshair; }
 .canvas-stage .react-flow__viewport { will-change: transform; }
 .canvas-stage .react-flow__controls { box-shadow: var(--shadow-soft); border: 1px solid var(--line-strong); }
 .canvas-stage .react-flow__minimap { border: 1px solid var(--line-strong); box-shadow: var(--shadow-soft); }

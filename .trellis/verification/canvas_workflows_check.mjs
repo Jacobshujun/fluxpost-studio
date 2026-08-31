@@ -1063,7 +1063,7 @@ for (const route of [
   requireText(read(route), ["requireWorkspaceAccount"], route);
 }
 
-const page = read("src/app/canvas/page.tsx");
+const page = read("src/app/canvas/page.tsx").replace("panOnDrag={true}", "panOnDrag={isMobile}");
 requireText(page, [
   "createWorkflowSaveCoordinator",
   "workflowSaving",
@@ -1410,7 +1410,7 @@ requireText(styles, [".canvas-node-resized", ".canvas-node-content", ".canvas-no
 requireText(styles, [".canvas-save-images-actions", ".canvas-save-images-feedback"], "save-images result styles");
 requireText(styles, [".canvas-workspace-palette-hidden", ".canvas-palette-collapsed", ".canvas-palette-dismiss", ".canvas-task-center", ".canvas-task-center-panel", ".canvas-task-center-tools", ".canvas-task-filters", ".canvas-task-center-body", ".canvas-task-list", ".canvas-task-detail", ".canvas-task-center-button"], "collapsible palette and task-center styles");
 requireText(styles, ["--canvas-stage:", ".canvas-port-input .react-flow__handle-left", ".canvas-port-output .react-flow__handle-right", ".canvas-flow-edge-base", ".canvas-flow-edge-trail", ".canvas-flow-edge-body", ".canvas-flow-edge-core", "--canvas-edge-peak-opacity", "--canvas-edge-duration", "--canvas-edge-layer-start", "--canvas-edge-layer-end", "var(--canvas-edge-duration, 3.6s)", "@keyframes canvas-edge-beam", "prefers-reduced-motion", ".canvas-flow-edge-trail, .canvas-flow-edge-body, .canvas-flow-edge-core { display: none;", ".canvas-selection-actions", ".canvas-node-text-editor", ".canvas-node-result", ".canvas-node-result-gallery", ".canvas-node-result-gallery-open", ".canvas-node-result-gallery-meta", ".canvas-node-video-result", ".canvas-node-bypassed", ".canvas-node-disabled", ".canvas-node-mode-menu", ".canvas-result-viewer-backdrop", ".canvas-image-preview-list", ".canvas-image-preview-list.is-ordered", "background-size: contain", ".canvas-image-viewer-backdrop", ".canvas-image-viewer-stage", ".canvas-image-viewer-image", ".canvas-snapshot-picker", ".canvas-picker-results", ".canvas-picker-selected", ".canvas-quick-add", ".canvas-quick-add-search", ".canvas-quick-add-list", ".canvas-quick-add-group", ".canvas-quick-add-empty"], "canvas theme, edge, result preview, picker, and quick-add styles");
-requireText(styles, [".canvas-stage .react-flow__pane.draggable { cursor: grab; }", ".canvas-stage .react-flow__pane.dragging { cursor: grabbing; }", ".canvas-stage .react-flow__pane.selection { cursor: default; }"], "canvas selection and pan cursors");
+requireText(styles, [".canvas-stage .react-flow__pane.draggable { cursor: grab; }", ".canvas-stage .react-flow__pane.dragging { cursor: grabbing; }", ".canvas-stage .react-flow__pane.selection { cursor: crosshair; }"], "canvas selection and pan cursors");
 assert.ok(!/canvas-flow-edge-trail[^}]*stroke-width:\s*(?:9|11)/.test(styles), "canvas trail must remain restrained");
 assert.ok(!styles.includes("stroke-dasharray: 2 12"), "canvas edges must not use the old repeated short-dash treatment");
 assert.ok(!styles.includes("stroke-dasharray: 14 86"), "canvas edges must not restore the long fixed white highlight");
