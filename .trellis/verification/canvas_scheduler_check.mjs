@@ -1458,6 +1458,16 @@ try {
     /Only failed shared tasks can be retried/,
     "partial shared stages must not expose a partial-specific retry",
   );
+  canvasRunFixture = {
+    run: { id: "shared-run-partial-error", steps: [{ nodeId: "shared-vision" }] },
+    nodeRuns: [{ nodeId: "shared-vision", attempt: 1, status: "failed" }],
+  };
+  storedSchedule.mainTasks[0].sharedRunId = "shared-run-partial-error";
+  storedSchedule.mainTasks[0].sharedError = "temporary upstream failure";
+  retriedNode = undefined;
+  const retriedPartialShared = await scheduler.retryCanvasScheduleV2SharedTask(storedSchedule.id, account, { mainTaskId: "main-1" });
+  assert.deepEqual(retriedNode, { runId: "shared-run-partial-error", nodeId: "shared-vision" }, "partial shared stages with an error must be retryable");
+  assert.equal(retriedPartialShared.mainTasks[0].sharedStatus, "queued");
   storedSchedule = {
     ...acceptedV2,
     mainTasks: [{ ...acceptedV2.mainTasks[0], sharedRunId: "shared-run-failed", sharedStatus: "failed", sharedArtifacts: [{ nodeId: "shared-select", outputPort: "images", artifactKind: "images", artifact: { kind: "images", items: [{ url: "/already-frozen.jpg" }] } }] }],

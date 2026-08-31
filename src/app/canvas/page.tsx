@@ -4451,7 +4451,7 @@ function CanvasScheduleSharedStage({ main, preview = false, busy = false, onRetr
 }) {
   const status = main.sharedStatus || "pending";
   const artifacts = main.sharedArtifacts?.map((entry) => entry.artifact) || [];
-  const canRetry = !preview && status === "failed" && onRetry;
+  const canRetry = !preview && (status === "failed" || (status === "partial" && Boolean(main.sharedError))) && onRetry;
   return <section className={`canvas-schedule-shared-stage is-${status}`} aria-label="主任务共享阶段">
     <header><Share2 /><span><strong>共享阶段</strong><small>{preview ? "每个主任务执行一次" : main.sharedRunId || "等待创建运行"}</small></span><em>{canvasScheduleStatusLabel(status)}</em>{canRetry ? <button type="button" onClick={onRetry} disabled={busy}><RotateCcw />重试共享阶段</button> : null}</header>
     {artifacts.length ? <CanvasScheduleArtifactSummary artifacts={artifacts} /> : null}

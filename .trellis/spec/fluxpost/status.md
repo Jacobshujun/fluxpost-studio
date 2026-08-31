@@ -1,6 +1,6 @@
 # FluxPost Current Status
 
-Last updated: 2026-08-28
+Last updated: 2026-08-31
 
 ## One-Line Status
 
@@ -25,6 +25,7 @@ Continue authenticated operator review of the unified library and run the one-ti
 - The PostgreSQL collection-subtree benchmark measured P95 `252.6ms` against the `300ms` target and is the closest performance margin as data grows.
 - No paid model, TOS write, TikHub, Feishu, Lark, publishing, or production action was exercised.
 - Production remains unchanged until a separate deployment is explicitly approved.
+- 2026-08-31 Canvas batch incident: repeated Vision failures were upstream `502` Cloudflare HTML responses from the configured OpenAI-compatible text gateway during a concurrent shared-stage burst; later requests succeeded, and the local baseline remains green. The Canvas run queue currently gives these runs one attempt, so recovery requires retrying the failed shared stage.
 - Nine high-severity transitive advisories remain; do not run `npm audit fix --force`.
 
 ## History

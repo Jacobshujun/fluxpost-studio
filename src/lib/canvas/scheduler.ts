@@ -700,7 +700,9 @@ export async function retryCanvasScheduleV2SharedTask(
   if (!isCanvasScheduleV2(current)) throw new Error("V2 shared task not found");
   const main = current.mainTasks.find((item) => item.id === input.mainTaskId);
   if (!main?.sharedRunId) throw new Error("Shared task not found");
-  if (main.sharedStatus !== "failed") throw new Error("Only failed shared tasks can be retried.");
+  if (main.sharedStatus !== "failed" && !(main.sharedStatus === "partial" && main.sharedError)) {
+    throw new Error("Only failed shared tasks can be retried.");
+  }
   if ((main.sharedArtifacts || []).length || main.childTasks.some((child) => child.runId)) {
     throw new Error("A completed shared result cannot be rerun.");
   }
