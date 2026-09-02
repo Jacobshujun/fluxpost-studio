@@ -8,6 +8,8 @@ import type { LibraryAsset } from "./types";
 
 export const libraryThumbnailWidth = 240;
 export const libraryThumbnailHeight = 144;
+export const librarySquareThumbnailSize = 240;
+export const librarySquareThumbnailVersion = 2;
 export const libraryThumbnailMimeType = "image/webp";
 export const libraryThumbnailCacheControl = "private, max-age=31536000, immutable";
 
@@ -21,6 +23,8 @@ export type LibraryThumbnailResult = {
   etag: string;
 };
 
+export type LibraryThumbnailVariant = "landscape" | "square";
+
 export type LibraryThumbnailDependencies = {
   fetchSource?: typeof fetch;
   isManagedSource?: (url: string) => boolean;
@@ -30,15 +34,16 @@ export type LibraryThumbnailDependencies = {
 export async function getLibraryThumbnail(
   asset: Pick<LibraryAsset, "publicUrl" | "sha256">,
   dependencies: LibraryThumbnailDependencies = {},
+  variant: LibraryThumbnailVariant = "landscape",
 ): Promise<LibraryThumbnailResult> {
   assertAssetThumbnailSource(asset, dependencies.isManagedSource || isManagedRuntimeMediaUrl);
   const key = asset.sha256.toLowerCase();
   const cacheDirectory = dependencies.cacheDirectory || cacheRoot;
-  const operationKey = `${cacheDirectory}\0${key}`;
+  const operationKey = `${cacheDirectory}\0${variant}\0${key}`;
   const existing = pending.get(operationKey);
   if (existing) return existing;
 
-  const operation = runWithConcurrencyPool("libraryThumbnail", () => generateOrReadThumbnail(asset, cacheDirectory, dependencies.fetchSource || fetch));
+  const operation = runWithConcurrencyPool("libraryThumbnail", () => generateOrReadThumbnail(asset, cacheDirectory, dependencies.fetchSource || fetch, variant));
   pending.set(operationKey, operation);
   try {
     return await operation;
@@ -47,9 +52,9 @@ export async function getLibraryThumbnail(
   }
 }
 
-export function libraryThumbnailPath(sha256: string, cacheDirectory = cacheRoot) {
+export function libraryThumbnailPath(sha256: string, cacheDirectory = cacheRoot, variant: LibraryThumbnailVariant = "landscape") {
   const key = normalizeSha256(sha256);
-  return path.join(cacheDirectory, `${key}.webp`);
+  return path.join(cacheDirectory, `${key}${variant === "square" ? `-square-v${librarySquareThumbnailVersion}` : ""}.webp`);
 }
 
 function assertAssetThumbnailSource(asset: Pick<LibraryAsset, "publicUrl" | "sha256">, isManagedSource: (url: string) => boolean) {
@@ -61,33 +66,37 @@ async function generateOrReadThumbnail(
   asset: Pick<LibraryAsset, "publicUrl" | "sha256">,
   cacheDirectory: string,
   fetchSource: typeof fetch,
+  variant: LibraryThumbnailVariant,
 ): Promise<LibraryThumbnailResult> {
-  const filePath = libraryThumbnailPath(asset.sha256, cacheDirectory);
-  const cached = await readValidThumbnail(filePath);
-  if (cached) return { bytes: cached, cacheStatus: "hit", etag: thumbnailEtag(asset.sha256) };
+  const dimensions = variant === "square"
+    ? { width: librarySquareThumbnailSize, height: librarySquareThumbnailSize, fit: "contain" as const }
+    : { width: libraryThumbnailWidth, height: libraryThumbnailHeight, fit: "cover" as const };
+  const filePath = libraryThumbnailPath(asset.sha256, cacheDirectory, variant);
+  const cached = await readValidThumbnail(filePath, dimensions.width, dimensions.height);
+  if (cached) return { bytes: cached, cacheStatus: "hit", etag: thumbnailEtag(asset.sha256, variant) };
 
   const source = await downloadThumbnailSource(asset.publicUrl, fetchSource);
   let bytes: Buffer;
   try {
     bytes = await sharp(source, { failOn: "error", limitInputPixels: 80_000_000 })
       .rotate()
-      .resize(libraryThumbnailWidth, libraryThumbnailHeight, { fit: "cover", position: "attention" })
+      .resize(dimensions.width, dimensions.height, { fit: dimensions.fit, position: dimensions.fit === "cover" ? "attention" : undefined })
       .webp({ quality: 72, effort: 4 })
       .toBuffer();
   } catch (error) {
     throw new Error(`Library thumbnail generation failed: ${errorMessage(error)}`);
   }
-  await writeThumbnailAtomically(filePath, bytes);
-  return { bytes, cacheStatus: "generated", etag: thumbnailEtag(asset.sha256) };
+  await writeThumbnailAtomically(filePath, bytes, dimensions.width, dimensions.height);
+  return { bytes, cacheStatus: "generated", etag: thumbnailEtag(asset.sha256, variant) };
 }
 
-async function readValidThumbnail(filePath: string) {
+async function readValidThumbnail(filePath: string, width: number, height: number) {
   const fileStat = await stat(filePath).catch(() => undefined);
   if (!fileStat?.isFile() || fileStat.size <= 0) return undefined;
   const bytes = await readFile(filePath);
   try {
     const metadata = await sharp(bytes).metadata();
-    if (metadata.format === "webp" && metadata.width === libraryThumbnailWidth && metadata.height === libraryThumbnailHeight) return bytes;
+    if (metadata.format === "webp" && metadata.width === width && metadata.height === height) return bytes;
   } catch {
     // Invalid derived cache files are replaced from the immutable source.
   }
@@ -130,14 +139,14 @@ async function downloadThumbnailSource(url: string, fetchSource: typeof fetch) {
   return Buffer.concat(chunks.map((chunk) => Buffer.from(chunk)), size);
 }
 
-async function writeThumbnailAtomically(filePath: string, bytes: Buffer) {
+async function writeThumbnailAtomically(filePath: string, bytes: Buffer, width: number, height: number) {
   await mkdir(path.dirname(filePath), { recursive: true });
   const temporaryPath = `${filePath}.${process.pid}.${randomUUID()}.tmp`;
   try {
     await writeFile(temporaryPath, bytes, { flag: "wx" });
     await rename(temporaryPath, filePath).catch(async (error: NodeJS.ErrnoException) => {
       if (error.code !== "EEXIST" && error.code !== "EPERM") throw error;
-      const existing = await readValidThumbnail(filePath);
+      const existing = await readValidThumbnail(filePath, width, height);
       if (!existing) throw error;
     });
   } finally {
@@ -151,8 +160,8 @@ function normalizeSha256(value: string) {
   return normalized;
 }
 
-function thumbnailEtag(sha256: string) {
-  return `"library-thumbnail-v1-${normalizeSha256(sha256)}"`;
+function thumbnailEtag(sha256: string, variant: LibraryThumbnailVariant) {
+  return `"library-thumbnail-${variant === "square" ? `v${librarySquareThumbnailVersion}-square-contain` : "v1"}-${normalizeSha256(sha256)}"`;
 }
 
 function errorMessage(error: unknown) {

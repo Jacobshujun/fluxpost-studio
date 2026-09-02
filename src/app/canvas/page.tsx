@@ -4702,10 +4702,10 @@ function ScheduleAssetThumbnail({ asset }: { asset: LibraryAsset }) {
     {state === "loading" ? <LoaderCircle className="animate-spin" /> : null}
     {state === "error" ? <ImageOff /> : null}
     <Image
-      src={`/api/library/assets/${encodeURIComponent(asset.id)}/thumbnail`}
+      src={`/api/library/assets/${encodeURIComponent(asset.id)}/thumbnail?variant=square&version=2`}
       alt=""
       width={240}
-      height={144}
+      height={240}
       unoptimized
       loading="lazy"
       onLoad={() => setState("ready")}

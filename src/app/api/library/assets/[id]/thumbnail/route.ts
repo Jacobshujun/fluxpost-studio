@@ -4,6 +4,7 @@ import {
   getLibraryThumbnail,
   libraryThumbnailCacheControl,
   libraryThumbnailMimeType,
+  type LibraryThumbnailVariant,
 } from "@/lib/library-thumbnails";
 import { isWorkspaceSignInError, requireWorkspaceAccount } from "@/lib/workspace-accounts";
 
@@ -12,6 +13,11 @@ export const runtime = "nodejs";
 type RouteContext = { params: Promise<{ id: string }> };
 
 export async function GET(request: Request, context: RouteContext) {
+  const variantParam = new URL(request.url).searchParams.get("variant") || "landscape";
+  if (variantParam !== "landscape" && variantParam !== "square") {
+    return NextResponse.json({ error: "Invalid thumbnail variant." }, { status: 400 });
+  }
+  const variant = variantParam as LibraryThumbnailVariant;
   let asset;
   try {
     const account = await requireWorkspaceAccount(request);
@@ -24,7 +30,7 @@ export async function GET(request: Request, context: RouteContext) {
   }
 
   try {
-    const thumbnail = await getLibraryThumbnail(asset);
+    const thumbnail = await getLibraryThumbnail(asset, {}, variant);
     return new NextResponse(new Uint8Array(thumbnail.bytes), {
       headers: {
         "Cache-Control": libraryThumbnailCacheControl,

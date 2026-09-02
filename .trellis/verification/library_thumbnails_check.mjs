@@ -23,7 +23,7 @@ if (runtime.error) throw runtime.error;
 assert(runtime.status === 0, `Library thumbnail runtime check failed with exit code ${runtime.status}.`);
 
 const route = read("src/app/api/library/assets/[id]/thumbnail/route.ts");
-for (const contract of ["requireWorkspaceAccount(request)", "getLibraryAsset(account", "getLibraryThumbnail(asset)", "libraryThumbnailCacheControl", "status: isWorkspaceSignInError(error) ? 401 : 404", "{ status: 502 }"]) {
+for (const contract of ["requireWorkspaceAccount(request)", "getLibraryAsset(account", "getLibraryThumbnail(asset, {}, variant)", "variantParam", "libraryThumbnailCacheControl", "status: isWorkspaceSignInError(error) ? 401 : 404", "{ status: 502 }"]) {
   assert(route.includes(contract), `Thumbnail route contract missing: ${contract}`);
 }
 const prewarm = read("scripts/library/prewarm-thumbnails.ts");

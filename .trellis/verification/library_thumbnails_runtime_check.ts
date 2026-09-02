@@ -3,7 +3,7 @@ import os from "node:os";
 import path from "node:path";
 import sharp from "sharp";
 import { prewarmLibraryThumbnails } from "../../src/lib/library-thumbnail-prewarm";
-import { getLibraryThumbnail } from "../../src/lib/library-thumbnails";
+import { getLibraryThumbnail, libraryThumbnailPath } from "../../src/lib/library-thumbnails";
 
 const assert = (condition: unknown, message: string) => { if (!condition) throw new Error(message); };
 void main();
@@ -34,6 +34,13 @@ try {
   assert(hit.cacheStatus === "hit", "A valid thumbnail cache file must be reused.");
   assert(fetchCalls === 1, "A cache hit must not fetch the original again.");
   assert((await readdir(cacheDirectory)).every((name) => !name.endsWith(".tmp")), "Atomic generation left a temporary file behind.");
+
+  const square = await getLibraryThumbnail(asset, dependencies, "square");
+  const squareMetadata = await sharp(square.bytes).metadata();
+  assert(squareMetadata.width === 240 && squareMetadata.height === 240, `Expected square 240x240, got ${squareMetadata.width}x${squareMetadata.height}.`);
+  assert(square.etag.includes("square-contain"), `Square thumbnails must use the contain-fit cache version, got ${square.etag}.`);
+  assert((await readdir(cacheDirectory)).includes(path.basename(libraryThumbnailPath(asset.sha256, cacheDirectory, "square"))), "Square thumbnails must use a versioned cache file.");
+  assert(square.etag !== concurrent[0].etag, "Square thumbnails must use a distinct variant ETag.");
 
   let active = 0;
   let maximumActive = 0;
