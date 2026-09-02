@@ -676,6 +676,8 @@ export type CanvasScheduleV2ChildTask = {
   id: string;
   parameterValues: Record<string, CanvasScheduleParameterValue>;
   status: CanvasScheduleTaskStatus;
+  /** Set during schedule reconciliation when the persisted Canvas run has a safe retry target. */
+  retryable?: boolean;
   runId?: string;
   resultArtifacts: CanvasScheduleAggregateArtifact[];
   error?: string;

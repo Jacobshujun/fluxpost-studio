@@ -1578,7 +1578,7 @@ try {
   assert.match(page, /main\.childTasks\.some\(isCanvasScheduleV2ChildRetryable\)/, "V2 row retry must include retryable partial children");
   assert.match(page, /content\.imageTasks\.map[\s\S]*task\.status === "failed"/, "V1 image retry must remain available for failed tasks");
   assert.ok(page.includes("重试本行失败项"), "V2 row retry must describe retryable failed children");
-  assert.match(page, /function isCanvasScheduleV2ChildRetryable[\s\S]*artifact\.imageBatch\?\.status === "partial"/, "V2 UI must restrict partial retry to failed image batches");
+  assert.match(page, /function isCanvasScheduleV2ChildRetryable[\s\S]*child\.status === "failed"[\s\S]*child\.retryable === true/, "V2 UI must preserve failed retries and use the server-computed partial retryability marker");
   for (const snippet of ["requestGenerationRef", "queryStringRef", "filterRef", "searchDraftState", "commitSearch", "ScheduleAssetThumbnail", "thumbnail?variant=square&version=2", "seenCursors", "selectIdRange", "全选当前筛选结果", "清空已选", "加载更多", "预览图片", "上一张图片", "下一张图片"]) {
     assert.ok(page.includes(snippet), `Canvas scheduler image source UI is missing ${snippet}`);
   }

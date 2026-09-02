@@ -4372,11 +4372,7 @@ function ScheduleV2RuntimeTree({ schedule, busy, onAction }: { schedule: CanvasS
 }
 
 function isCanvasScheduleV2ChildRetryable(child: CanvasScheduleV2ChildTask) {
-  if (child.status === "failed") return true;
-  if (child.status !== "partial") return false;
-  return child.resultArtifacts.some((artifact) => artifact.kind === "images"
-    && artifact.imageBatch?.status === "partial"
-    && (artifact.imageBatch.failed > 0 || artifact.imageBatch.failedIndices.length > 0));
+  return child.status === "failed" || child.retryable === true;
 }
 
 function CanvasScheduleMainImageDownload({ runId }: { runId: string }) {

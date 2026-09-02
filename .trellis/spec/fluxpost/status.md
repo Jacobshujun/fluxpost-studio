@@ -15,11 +15,13 @@ The unified image asset pool and consumers are implemented and verified; the lib
 - Canvas and simple mode use collection/smart-folder filters and freeze accessible asset snapshots before execution; new imports remain idle until manual AI tagging.
 - The library page subscribes to the shared `fluxpost-theme` state and derives its surfaces, text, borders, controls, and accents from the active application theme instead of hardcoded light colors.
 - The Canvas batch scheduler keeps its existing split layout and responsive behavior while using a full-width desktop panel for higher-frequency editing.
+- Canvas V2 batch retries now preserve failed-task buttons for historical terminal schedules and expose a server-computed retryability marker for partial child runs whose underlying per-image node has failed items, including child results projected as review posts.
 - Batch scheduler image sources use bounded auto-fill cards and absolutely positioned 1:1 thumbnail boxes with centered contain-fit rendering so full-width layouts do not crop images into strips.
 - Batch scheduler thumbnails request the versioned server-side square contain variant; the original landscape thumbnail cache remains unchanged.
 - Canvas batch scheduler copy-pool entries restore their two-column selectable card layout, truncation, and selected-state styling after a CSS regression removed the dedicated rules.
 - Canvas interaction source and mocked Chromium checks pass for blank-area pan, Alt-only marquee multi-select, collapsed-by-default node library, mobile drawer access, and 390px overflow.
 - Focused migration/query checks, TypeScript, lint (0 errors, 20 warnings), build, isolated HTTP/SQLite smoke, and the full baseline pass. An isolated 50,000-asset/1,000,000-label PostgreSQL benchmark met all P95 targets.
+- 2026-09-02 Canvas batch retry regression fix: V2 child reconciliation now persists safe retryability from Canvas node attempts; failed children remain directly retryable for historical schedules. Canvas scheduler check, TypeScript, lint (0 errors, 20 warnings), build, isolated HTTP/SQLite smoke, and the full offline baseline passed.
 
 ## Next Entry
 

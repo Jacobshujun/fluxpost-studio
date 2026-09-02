@@ -631,6 +631,7 @@ export async function retryCanvasScheduleV2ChildTask(
       childTasks: item.childTasks.map((candidate) => candidate.id !== child.id ? candidate : {
         ...candidate,
         status: "pending",
+        retryable: false,
         retryPending: true,
         resultArtifacts: [],
         error: undefined,
@@ -676,6 +677,7 @@ export async function retryCanvasScheduleV2MainTask(
       childTasks: item.childTasks.map((child) => !retryableIds.has(child.id) ? child : {
         ...child,
         status: "pending",
+        retryable: false,
         retryPending: true,
         resultArtifacts: [],
         error: undefined,
@@ -1310,10 +1312,16 @@ async function reconcileCanvasScheduleV2(current: CanvasSchedule) {
         ? extractCanvasScheduleV2Artifacts(latest?.outputs, definition.childResult.outputPort, definition.childResult.artifactKind)
         : [];
       const error = terminalRunStatuses.has(run.status) ? run.error : undefined;
-      if (child.status !== status || stableSerialize(child.resultArtifacts) !== stableSerialize(resultArtifacts) || child.error !== error) {
+      const retryable = status === "failed"
+        ? Boolean(findRetryableCanvasNode(run, nodeRuns))
+        : status === "partial"
+          ? Boolean(findRetryablePartialImageNode(run, nodeRuns))
+          : false;
+      if (child.status !== status || stableSerialize(child.resultArtifacts) !== stableSerialize(resultArtifacts) || child.error !== error || child.retryable !== retryable) {
         child.status = status;
         child.resultArtifacts = resultArtifacts;
         child.error = error;
+        child.retryable = retryable;
         child.updatedAt = now;
         changed = true;
       }
@@ -1944,6 +1952,7 @@ async function activateCanvasScheduleV2Retries(schedule: CanvasSchedule, now: st
         if (!retryableNode) throw new Error("No retryable Canvas node is available.");
         await retryCanvasNode(run.run.id, retryableNode.nodeId, ownerActor(schedule));
         child.status = "queued";
+        child.retryable = false;
         child.retryPending = false;
         child.error = undefined;
         child.updatedAt = now;
@@ -1952,6 +1961,7 @@ async function activateCanvasScheduleV2Retries(schedule: CanvasSchedule, now: st
         changed = true;
       } catch (error) {
         child.status = "failed";
+        child.retryable = false;
         child.retryPending = false;
         child.error = error instanceof Error ? error.message : "Card retry failed.";
         child.updatedAt = now;
