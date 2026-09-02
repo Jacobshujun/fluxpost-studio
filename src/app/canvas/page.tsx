@@ -3694,8 +3694,17 @@ function CanvasScheduleCenter({ workflow, graph, onSaveBindings, onPreview, onCl
       setSchedules(workflowSchedules);
       const currentId = preferredId || selectedRef.current?.id;
       const next = workflowSchedules.find((item) => item.id === currentId) || workflowSchedules[0];
-      selectedRef.current = next;
-      setSelected(next);
+      if (next) {
+        const detail = await api<{ schedule: CanvasSchedule }>(`/api/canvas/schedules/${encodeURIComponent(next.id)}`);
+        const resolved = detail.schedule;
+        setSchedules((current) => [resolved, ...current.filter((item) => item.id !== resolved.id)]
+          .sort((left, right) => right.updatedAt.localeCompare(left.updatedAt)));
+        selectedRef.current = resolved;
+        setSelected(resolved);
+      } else {
+        selectedRef.current = undefined;
+        setSelected(undefined);
+      }
       editSequenceRef.current = 0;
       setEditSequence(0);
     } catch (loadError) {

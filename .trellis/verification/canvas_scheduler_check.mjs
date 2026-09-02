@@ -1352,6 +1352,19 @@ try {
   assert.equal(activatedPartialRetry.mainTasks[0].childTasks[0].retryPending, false);
 
   storedSchedule = structuredClone(rowRetrySchedule);
+  storedSchedule.mainTasks[0].childTasks = [storedSchedule.mainTasks[0].childTasks[0]];
+  storedSchedule.mainTasks[0].childTasks[0].status = "partial";
+  storedSchedule.mainTasks[0].childTasks[0].retryable = undefined;
+  storedSchedule.status = "partial";
+  canvasRunFixture = {
+    run: { id: "child-run-1", steps: [{ nodeId: "partial-image-each" }] },
+    nodeRuns: [structuredClone(partialImageEachNodeRun)],
+  };
+  listedSchedules = [structuredClone(storedSchedule)];
+  const terminalPartialSchedule = await scheduler.getCanvasSchedule(storedSchedule.id, account);
+  assert.equal(terminalPartialSchedule.mainTasks[0].childTasks[0].retryable, true, "targeted terminal schedule reads must compute partial-child retryability");
+
+  storedSchedule = structuredClone(rowRetrySchedule);
   storedSchedule.mainTasks[0].childTasks = [storedSchedule.mainTasks[0].childTasks[1]];
   storedSchedule.mainTasks[0].childTasks[0].id = "child-1";
   storedSchedule.mainTasks[0].childTasks[0].runId = "child-run-1";
@@ -1495,6 +1508,11 @@ try {
     schedulerSource,
     /function findRetryableCanvasNode[\s\S]*findFailedCanvasNode[\s\S]*findRetryablePartialImageNode[\s\S]*nodeRun\.nodeType === "model\.gpt-image-each"[\s\S]*failedIndices/,
     "V2 partial retry must fall back only to per-image nodes with failed child metadata.",
+  );
+  assert.match(
+    schedulerSource,
+    /runtimeStatuses = new Set\(\["queued", "running", "paused", "completed", "partial", "failed", "cancelled"\]\)[\s\S]*\(!wanted \|\| wanted\.has\(schedule\.id\)\) && runtimeStatuses\.has\(schedule\.status\)/,
+    "targeted terminal schedule reads must reconcile retryability without mutating drafts",
   );
   assert.match(
     schedulerSource,

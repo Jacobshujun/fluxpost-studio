@@ -1102,8 +1102,9 @@ async function drainCanvasSchedules() {
 
 async function reconcileCanvasSchedules(onlyIds?: string[]) {
   const wanted = onlyIds ? new Set(onlyIds) : undefined;
+  const runtimeStatuses = new Set(["queued", "running", "paused", "completed", "partial", "failed", "cancelled"]);
   const schedules = (await listCanvasSchedulesFromDb()).map(normalizeStoredSchedule).filter((schedule) =>
-    (!wanted || wanted.has(schedule.id)) && ["queued", "running", "paused"].includes(schedule.status),
+    (!wanted || wanted.has(schedule.id)) && runtimeStatuses.has(schedule.status) && (Boolean(wanted) || ["queued", "running", "paused"].includes(schedule.status)),
   );
   for (const schedule of schedules) await reconcileSchedule(schedule);
   return schedules.length;
