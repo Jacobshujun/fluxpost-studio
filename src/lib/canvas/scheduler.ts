@@ -74,6 +74,7 @@ import type {
   CanvasScheduleParameter,
   CanvasScheduleParameterValue,
   CanvasScheduleStatus,
+  CanvasScheduleTaskStatus,
   CanvasScheduleV2Definition,
   CanvasScheduleV2MainTask,
   CanvasScheduleV2SharedArtifact,
@@ -1124,14 +1125,21 @@ async function reconcileSchedule(current: CanvasSchedule) {
         if (!imageTask.runId) continue;
         const run = await getCanvasRunFromDb(imageTask.runId);
         if (!run) continue;
-        const status = scheduleTaskStatusFromRun(run.status);
         const error = terminalRunStatuses.has(run.status) ? run.error : undefined;
         const nodeRuns = terminalRunStatuses.has(run.status) ? await listCanvasNodeRunsFromDb(run.id) : [];
         const imageUrls = extractImageUrls(nodeRuns, bindings["image-target"]);
-        if (imageTask.status !== status || stableSerialize(imageTask.imageUrls) !== stableSerialize(imageUrls) || imageTask.error !== error) {
+        const projection = projectCanvasScheduleTaskStatus(
+          run.status,
+          imageUrls.length > 0,
+          run.error,
+          "Image target did not produce an image.",
+        );
+        const status = projection.status;
+        const taskError = projection.error ?? error;
+        if (imageTask.status !== status || stableSerialize(imageTask.imageUrls) !== stableSerialize(imageUrls) || imageTask.error !== taskError) {
           imageTask.status = status;
           imageTask.imageUrls = imageUrls;
-          imageTask.error = error;
+          imageTask.error = taskError;
           imageTask.updatedAt = now;
           changed = true;
         }
@@ -1260,9 +1268,8 @@ async function reconcileCanvasScheduleV2(current: CanvasSchedule) {
         }
         continue;
       }
-      const sharedStatus = scheduleTaskStatusFromRun(sharedRun.status);
       let sharedArtifacts = main.sharedArtifacts || [];
-      let sharedError = terminalRunStatuses.has(sharedRun.status) ? sharedRun.error : undefined;
+      let extractionError: string | undefined;
       if (sharedRun.status === "completed") {
         try {
           const latest = latestNodeAttempts(await listCanvasNodeRunsFromDb(sharedRun.id));
@@ -1270,16 +1277,21 @@ async function reconcileCanvasScheduleV2(current: CanvasSchedule) {
             Object.fromEntries(sharedOutputs.map((output) => [output.nodeId, latest.get(output.nodeId)?.outputs])),
             sharedOutputs,
           );
-          sharedError = undefined;
         } catch (error) {
           sharedArtifacts = [];
-          sharedError = error instanceof Error ? error.message : "Shared output extraction failed.";
+          extractionError = error instanceof Error ? error.message : "Shared output extraction failed.";
         }
+      } else if (terminalRunStatuses.has(sharedRun.status)) {
+        sharedArtifacts = [];
       }
-      const effectiveSharedStatus = sharedRun.status === "completed"
-        ? (sharedError ? "failed" : "completed")
-        : sharedStatus;
-      if (effectiveSharedStatus === "failed" && !sharedError) sharedError = "Shared Canvas run failed.";
+      const sharedProjection = projectCanvasScheduleSharedStatus(
+        sharedRun.status,
+        sharedArtifacts.length === sharedOutputs.length,
+        sharedRun.error,
+        extractionError,
+      );
+      const effectiveSharedStatus = sharedProjection.status;
+      const sharedError = sharedProjection.error;
       if (main.sharedStatus !== effectiveSharedStatus
         || stableSerialize(main.sharedArtifacts || []) !== stableSerialize(sharedArtifacts)
         || main.sharedError !== sharedError) {
@@ -1306,13 +1318,19 @@ async function reconcileCanvasScheduleV2(current: CanvasSchedule) {
       if (!child.runId) continue;
       const run = await getCanvasRunFromDb(child.runId);
       if (!run) continue;
-      const status = scheduleTaskStatusFromRun(run.status);
       const nodeRuns = terminalRunStatuses.has(run.status) ? await listCanvasNodeRunsFromDb(run.id) : [];
       const latest = latestNodeAttempts(nodeRuns).get(definition.childResult.nodeId);
       const resultArtifacts = terminalRunStatuses.has(run.status)
         ? extractCanvasScheduleV2Artifacts(latest?.outputs, definition.childResult.outputPort, definition.childResult.artifactKind)
         : [];
-      const error = terminalRunStatuses.has(run.status) ? run.error : undefined;
+      const projection = projectCanvasScheduleTaskStatus(
+        run.status,
+        resultArtifacts.length > 0,
+        run.error,
+        `Child result ${definition.childResult.nodeId}:${definition.childResult.outputPort} did not produce ${definition.childResult.artifactKind}.`,
+      );
+      const status = projection.status;
+      const error = projection.error;
       const retryable = status === "failed"
         ? Boolean(findRetryableCanvasNode(run, nodeRuns))
         : status === "partial"
@@ -1385,13 +1403,20 @@ async function reconcileCanvasScheduleV2(current: CanvasSchedule) {
         if (synced) changed = true;
       }
     }
-    const mainStatus = mainRun.status === "completed"
-      ? (successfulChildren.length === main.childTasks.length ? "completed" : "partial")
-      : "failed";
-    if (main.status !== mainStatus || stableSerialize(main.resultArtifacts) !== stableSerialize(outputs) || main.error !== mainRun.error) {
+    const mainStatus = !postArtifact
+      ? "failed"
+      : mainRun.status === "completed"
+        ? (successfulChildren.length === main.childTasks.length ? "completed" : "partial")
+        : mainRun.status === "partial"
+          ? "partial"
+          : "failed";
+    const mainError = mainStatus === "failed" && !mainRun.error
+      ? "Main target node did not produce a result."
+      : mainRun.error;
+    if (main.status !== mainStatus || stableSerialize(main.resultArtifacts) !== stableSerialize(outputs) || main.error !== mainError) {
       main.status = mainStatus;
       main.resultArtifacts = outputs;
-      main.error = mainRun.error;
+      main.error = mainError;
       main.updatedAt = now;
       changed = true;
     }
@@ -2035,6 +2060,53 @@ function canvasScheduleV2CandidateImageUrls(main: CanvasScheduleV2MainTask) {
   return uniqueStrings(main.childTasks.flatMap((child) => child.resultArtifacts.flatMap((artifact) =>
     artifact.kind === "images" ? artifact.items.map((item) => item.url) : [],
   )));
+}
+
+export function projectCanvasScheduleTaskStatus(
+  status: CanvasRun["status"],
+  hasTargetOutput: boolean,
+  runError: string | undefined,
+  missingOutputError: string,
+): { status: CanvasScheduleTaskStatus; error?: string } {
+  const projected = scheduleTaskStatusFromRun(status);
+  if (status === "completed" || status === "partial") {
+    if (!hasTargetOutput) return { status: "failed", error: runError || missingOutputError };
+    return { status: projected, error: runError };
+  }
+  return {
+    status: projected,
+    error: terminalRunStatuses.has(status) ? runError : undefined,
+  };
+}
+
+export function projectCanvasScheduleSharedStatus(
+  status: CanvasRun["status"],
+  hasAllOutputs: boolean,
+  runError: string | undefined,
+  extractionError?: string,
+): { status: CanvasScheduleTaskStatus; error?: string } {
+  const projected = scheduleTaskStatusFromRun(status);
+  if (status === "partial") {
+    return {
+      status: "failed",
+      error: runError || "Shared Canvas run was partial; all shared outputs must complete.",
+    };
+  }
+  if (status === "completed") {
+    if (!hasAllOutputs) {
+      return {
+        status: "failed",
+        error: runError || extractionError || "Shared output did not produce all declared artifacts.",
+      };
+    }
+    return { status: "completed", error: runError };
+  }
+  return {
+    status: projected,
+    error: terminalRunStatuses.has(status)
+      ? runError || (status === "failed" ? "Shared Canvas run failed." : undefined)
+      : undefined,
+  };
 }
 
 function scheduleTaskStatusFromRun(status: CanvasRun["status"]): CanvasScheduleImageTask["status"] {

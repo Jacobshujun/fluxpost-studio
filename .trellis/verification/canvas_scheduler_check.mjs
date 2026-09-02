@@ -171,6 +171,32 @@ try {
   const scheduler = schedulerModule.exports;
 
   assert.deepEqual(
+    scheduler.projectCanvasScheduleTaskStatus("partial", false, "provider failed", "missing target"),
+    { status: "failed", error: "provider failed" },
+    "a partial CanvasRun without its target output must project to a failed schedule task",
+  );
+  assert.deepEqual(
+    scheduler.projectCanvasScheduleTaskStatus("completed", false, undefined, "missing target"),
+    { status: "failed", error: "missing target" },
+    "a completed CanvasRun without its target output must project to a failed schedule task",
+  );
+  assert.deepEqual(
+    scheduler.projectCanvasScheduleTaskStatus("partial", true, "one child failed", "missing target"),
+    { status: "partial", error: "one child failed" },
+    "a partial CanvasRun with a target output must remain partially complete",
+  );
+  assert.deepEqual(
+    scheduler.projectCanvasScheduleSharedStatus("partial", false, "shared provider failed"),
+    { status: "failed", error: "shared provider failed" },
+    "shared partial runs must fail because all declared shared outputs are required",
+  );
+  assert.deepEqual(
+    scheduler.projectCanvasScheduleSharedStatus("completed", false, undefined, "missing shared output"),
+    { status: "failed", error: "missing shared output" },
+    "completed shared runs without every declared output must fail",
+  );
+
+  assert.deepEqual(
     [...selection.selectIdRange(["asset-1", "asset-2", "asset-3", "asset-4"], new Set(["asset-1"]), "asset-2", "asset-4", false)],
     ["asset-2", "asset-3", "asset-4"],
     "scheduler image Shift selection must replace the selection with the ordered loaded range",
@@ -1195,6 +1221,21 @@ try {
     assert.deepEqual(atLeastOne.mainTasks[0].resultArtifacts, [resultArtifact], `${sourceKind} at-least-one must retain successful child artifacts`);
     assert.equal(atLeastOne.mainTasks[0].resultArtifacts.some((artifact) => "imageBatch" in artifact), false, `${sourceKind} aggregation must not synthesize review policy metadata`);
 
+    storedSchedule = structuredClone(policySchedule);
+    listedSchedules = [structuredClone(storedSchedule)];
+    canvasRunsById.set(`run-${sourceKind}-success`, { id: `run-${sourceKind}-success`, status: "partial", error: "target generation failed" });
+    nodeRunsByRunId.set(`run-${sourceKind}-success`, [{ nodeId: "image", attempt: 1, outputs: {} }]);
+    const missingTarget = await scheduler.getCanvasSchedule(storedSchedule.id, account);
+    assert.equal(missingTarget.mainTasks[0].childTasks[0].status, "failed", `${sourceKind} partial run without target output must be failed`);
+    assert.equal(missingTarget.mainTasks[0].status, "failed", `${sourceKind} at-least-one must fail when no child has a target output`);
+
+    storedSchedule = structuredClone(policySchedule);
+    listedSchedules = [structuredClone(storedSchedule)];
+    canvasRunsById.set(`run-${sourceKind}-success`, { id: `run-${sourceKind}-success`, status: "partial", error: "one upstream branch failed" });
+    nodeRunsByRunId.set(`run-${sourceKind}-success`, [{ nodeId: "image", attempt: 1, outputs: { images: structuredClone(resultArtifact) } }]);
+    const validPartial = await scheduler.getCanvasSchedule(storedSchedule.id, account);
+    assert.equal(validPartial.mainTasks[0].childTasks[0].status, "partial", `${sourceKind} partial run with target output must remain partial`);
+
     storedSchedule = { ...structuredClone(policySchedule), definition: { ...structuredClone(policySchedule.definition), aggregationPolicy: "all" } };
     listedSchedules = [structuredClone(storedSchedule)];
     const allRequired = await scheduler.getCanvasSchedule(storedSchedule.id, account);
@@ -1252,6 +1293,20 @@ try {
     createdAt,
     updatedAt: createdAt,
   };
+  const v1ScheduleFixture = structuredClone(storedSchedule);
+  const v1ProjectionSchedule = structuredClone(v1ScheduleFixture);
+  v1ProjectionSchedule.id = "schedule-v1-projection";
+  v1ProjectionSchedule.bindings = { "scene-input": "scene", "vehicle-input": "vehicle", "prompt-switch": "switch", "image-target": "image", "content-target": "content" };
+  v1ProjectionSchedule.workflowSnapshot = structuredClone(graph);
+  v1ProjectionSchedule.batches[0].contentTasks[0].imageTasks[0].runId = "v1-projection-run";
+  storedSchedule = v1ProjectionSchedule;
+  listedSchedules = [structuredClone(v1ProjectionSchedule)];
+  canvasRunsById.set("v1-projection-run", { id: "v1-projection-run", status: "partial", error: "target image generation failed" });
+  nodeRunsByRunId.set("v1-projection-run", [{ nodeId: "image", attempt: 1, outputs: {} }]);
+  const projectedV1 = await scheduler.getCanvasSchedule(v1ProjectionSchedule.id, account);
+  assert.equal(projectedV1.batches[0].contentTasks[0].imageTasks[0].status, "failed", "V1 partial run without target image must be failed");
+  assert.equal(projectedV1.batches[0].contentTasks[0].imageTasks[0].error, "target image generation failed", "V1 projection must preserve the durable run error");
+  storedSchedule = v1ScheduleFixture;
   retriedNode = undefined;
   await assert.rejects(
     scheduler.retryCanvasScheduleImageTask(storedSchedule.id, account, {
@@ -1321,7 +1376,22 @@ try {
     createdAt,
     updatedAt: createdAt,
   };
-  const rowRetrySchedule = structuredClone(storedSchedule);
+  const v2RetryFixture = structuredClone(storedSchedule);
+  const missingMainTargetSchedule = structuredClone(storedSchedule);
+  missingMainTargetSchedule.id = "schedule-v2-missing-main-target";
+  missingMainTargetSchedule.mainTasks[0].childTasks[0].status = "completed";
+  missingMainTargetSchedule.mainTasks[0].resultArtifacts = [{ kind: "images", items: [{ url: "/child-result.jpg" }] }];
+  missingMainTargetSchedule.mainTasks[0].mainRunId = "aggregate-missing-target";
+  storedSchedule = missingMainTargetSchedule;
+  listedSchedules = [structuredClone(missingMainTargetSchedule)];
+  canvasRunsById.set("child-run-1", { id: "child-run-1", status: "completed" });
+  nodeRunsByRunId.set("child-run-1", [{ nodeId: v2Definition.childResult.nodeId, attempt: 1, outputs: { [v2Definition.childResult.outputPort]: { kind: "images", items: [{ url: "/child-result.jpg" }] } } }]);
+  canvasRunsById.set("aggregate-missing-target", { id: "aggregate-missing-target", status: "completed" });
+  nodeRunsByRunId.set("aggregate-missing-target", [{ nodeId: v2Definition.mainTargetNodeId, attempt: 1, outputs: {} }]);
+  const projectedMissingMain = await scheduler.getCanvasSchedule(missingMainTargetSchedule.id, account);
+  assert.equal(projectedMissingMain.mainTasks[0].status, "failed", "a completed V2 main run without its target post must be failed");
+
+  const rowRetrySchedule = structuredClone(v2RetryFixture);
   rowRetrySchedule.mainTasks[0].childTasks.push(
     { ...structuredClone(rowRetrySchedule.mainTasks[0].childTasks[0]), id: "child-failed", runId: "child-run-failed", status: "failed" },
     { ...structuredClone(rowRetrySchedule.mainTasks[0].childTasks[0]), id: "child-complete", runId: "child-run-complete", status: "completed" },
