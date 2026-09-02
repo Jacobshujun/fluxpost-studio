@@ -22,6 +22,7 @@ try {
   const detailRoute = read("src/app/api/copy-library/[id]/route.ts");
   const page = read("src/app/copy-library/page.tsx");
   const css = read("src/app/copy-library/copy-library.module.css");
+  const canvasCss = read("src/app/globals.css");
   const home = read("src/app/page.tsx");
 
   assert.match(css, /\.filters select option[^}]*background:var\(--panel-solid\)[^}]*color:var\(--foreground\)/, "Copy-library native options must keep a solid, theme-aware background and readable text.");
@@ -183,6 +184,7 @@ try {
   assert.match(css, /\.page\{[^}]*height:100dvh[^}]*overflow:hidden/);
   assert.match(css, /\.libraryPane\{[^}]*min-height:0/);
   assert.match(css, /\.list\{[^}]*flex:1[^}]*min-height:0[^}]*overflow:auto/);
+  assert.match(canvasCss, /\.canvas-schedule-copy-list\s*\{[^}]*display:\s*grid[^}]*grid-template-columns:/, "Canvas scheduler copy-pool entries must retain their selectable grid layout.");
 
   writeFileSync(path.join(temp, "toapis-image-api.js"), "exports.toApisImageRatios=['1:1'];exports.toApis4kImageRatios=['16:9'];", "utf8");
   writeFileSync(path.join(temp, "feishu-publish-mode.js"), "exports.feishuPublishModeOptions=[{value:'full',label:'full'},{value:'text',label:'text'},{value:'media',label:'media'}];exports.normalizeFeishuPublishMode=(value)=>value===undefined?'full':['full','text','media'].includes(value)?value:(()=>{throw new Error('invalid mode')})();", "utf8");
