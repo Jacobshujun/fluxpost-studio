@@ -4,7 +4,7 @@ Last updated: 2026-09-02
 
 ## One-Line Status
 
-The unified image asset pool and consumers are implemented and verified; the library now inherits and persists the application theme, and the clean fix is active on port `3001`. Canvas desktop interaction now uses ComfyUI-style pan/Alt-select behavior with a collapsed node library by default, and the batch scheduler desktop workspace now opens full-width.
+The unified image asset pool and consumers are implemented and verified; the library now inherits and persists the application theme, and the clean fix is active on port `3001`. Canvas desktop interaction now uses ComfyUI-style pan/Alt-select behavior with a collapsed node library by default, the batch scheduler desktop workspace now opens full-width, and its image picker keeps square cards with contain-fit thumbnail display.
 
 ## Current Focus
 
@@ -14,6 +14,7 @@ The unified image asset pool and consumers are implemented and verified; the lib
 - Canvas and simple mode use collection/smart-folder filters and freeze accessible asset snapshots before execution; new imports remain idle until manual AI tagging.
 - The library page subscribes to the shared `fluxpost-theme` state and derives its surfaces, text, borders, controls, and accents from the active application theme instead of hardcoded light colors.
 - The Canvas batch scheduler keeps its existing split layout and responsive behavior while using a full-width desktop panel for higher-frequency editing.
+- Batch scheduler image sources use bounded auto-fill cards, 1:1 thumbnail frames, and contain-fit rendering so full-width layouts do not crop images into strips.
 - Canvas interaction source and mocked Chromium checks pass for blank-area pan, Alt-only marquee multi-select, collapsed-by-default node library, mobile drawer access, and 390px overflow.
 - Focused migration/query checks, TypeScript, lint (0 errors, 20 warnings), build, isolated HTTP/SQLite smoke, and the full baseline pass. An isolated 50,000-asset/1,000,000-label PostgreSQL benchmark met all P95 targets.
 
