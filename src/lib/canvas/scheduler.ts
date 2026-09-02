@@ -659,7 +659,7 @@ export async function retryCanvasScheduleV2MainTask(
   for (const child of main.childTasks) {
     if (child.status !== "partial" || !child.runId) continue;
     const run = await getCanvasRun(child.runId, account);
-    if (run && findRetryablePartialImageNode(run.run, run.nodeRuns)) retryableIds.add(child.id);
+    if (run && findRetryableCanvasNode(run.run, run.nodeRuns)) retryableIds.add(child.id);
   }
   if (!retryableIds.size) throw new Error("This row has no failed or retryable partial card tasks to retry.");
   const now = new Date().toISOString();
@@ -1316,7 +1316,7 @@ async function reconcileCanvasScheduleV2(current: CanvasSchedule) {
       const retryable = status === "failed"
         ? Boolean(findRetryableCanvasNode(run, nodeRuns))
         : status === "partial"
-          ? Boolean(findRetryablePartialImageNode(run, nodeRuns))
+          ? Boolean(findRetryableCanvasNode(run, nodeRuns))
           : false;
       if (child.status !== status || stableSerialize(child.resultArtifacts) !== stableSerialize(resultArtifacts) || child.error !== error || child.retryable !== retryable) {
         child.status = status;
@@ -2018,7 +2018,7 @@ function findRetryablePartialImageNode(run: Pick<CanvasRun, "steps">, nodeRuns: 
 async function requireRetryableCanvasScheduleRun(runId: string, account: WorkspaceAccessActor) {
   const run = await getCanvasRun(runId, account);
   if (!run) throw new Error("Canvas child run not found");
-  if (!findRetryablePartialImageNode(run.run, run.nodeRuns)) throw new Error("No failed per-image Canvas child is available to retry.");
+  if (!findRetryableCanvasNode(run.run, run.nodeRuns)) throw new Error("No retryable Canvas node is available.");
 }
 
 function extractImageUrls(nodeRuns: Awaited<ReturnType<typeof listCanvasNodeRunsFromDb>>, nodeId: string) {

@@ -1365,6 +1365,18 @@ try {
   assert.equal(terminalPartialSchedule.mainTasks[0].childTasks[0].retryable, true, "targeted terminal schedule reads must compute partial-child retryability");
 
   storedSchedule = structuredClone(rowRetrySchedule);
+  storedSchedule.mainTasks[0].childTasks = [storedSchedule.mainTasks[0].childTasks[0]];
+  storedSchedule.mainTasks[0].childTasks[0].retryable = undefined;
+  storedSchedule.status = "completed";
+  canvasRunFixture = {
+    run: { id: "child-run-1", steps: [{ nodeId: "failed-image-node" }] },
+    nodeRuns: [{ nodeId: "failed-image-node", nodeType: "model.gpt-image", attempt: 1, status: "failed" }],
+  };
+  listedSchedules = [structuredClone(storedSchedule)];
+  const terminalLegacyPartialSchedule = await scheduler.getCanvasSchedule(storedSchedule.id, account);
+  assert.equal(terminalLegacyPartialSchedule.mainTasks[0].childTasks[0].retryable, true, "partial children with a failed legacy image node must remain retryable");
+
+  storedSchedule = structuredClone(rowRetrySchedule);
   storedSchedule.mainTasks[0].childTasks = [storedSchedule.mainTasks[0].childTasks[1]];
   storedSchedule.mainTasks[0].childTasks[0].id = "child-1";
   storedSchedule.mainTasks[0].childTasks[0].runId = "child-run-1";
@@ -1408,7 +1420,7 @@ try {
   };
   await assert.rejects(
     scheduler.retryCanvasScheduleV2ChildTask(storedSchedule.id, account, { mainTaskId: "main-1", childTaskId: "child-1" }),
-    /No failed per-image Canvas child is available to retry/,
+    /No retryable Canvas node is available/,
     "generic partial child tasks must remain non-retryable",
   );
   canvasRunFixture = {
@@ -1416,11 +1428,9 @@ try {
     nodeRuns: [{ nodeId: "ordinary-failure", nodeType: "model.gpt-text", attempt: 1, status: "failed" }],
   };
   storedSchedule.mainTasks[0].childTasks[0].runId = "ordinary-failure-partial-run";
-  await assert.rejects(
-    scheduler.retryCanvasScheduleV2ChildTask(storedSchedule.id, account, { mainTaskId: "main-1", childTaskId: "child-1" }),
-    /No failed per-image Canvas child is available to retry/,
-    "partial child tasks without failed per-image metadata must remain non-retryable even when another node failed",
-  );
+  const retriedLegacyPartial = await scheduler.retryCanvasScheduleV2ChildTask(storedSchedule.id, account, { mainTaskId: "main-1", childTaskId: "child-1" });
+  assert.equal(retriedLegacyPartial.mainTasks[0].childTasks[0].retryPending, true, "partial child tasks with an ordinary failed node must be retryable");
+  assert.equal(retriedLegacyPartial.mainTasks[0].childTasks[0].status, "pending");
   canvasRunFixture = {
     run: { id: "shared-run-failed", steps: [{ nodeId: "shared-vision" }, { nodeId: "shared-select" }] },
     nodeRuns: [
@@ -1507,7 +1517,12 @@ try {
   assert.match(
     schedulerSource,
     /function findRetryableCanvasNode[\s\S]*findFailedCanvasNode[\s\S]*findRetryablePartialImageNode[\s\S]*nodeRun\.nodeType === "model\.gpt-image-each"[\s\S]*failedIndices/,
-    "V2 partial retry must fall back only to per-image nodes with failed child metadata.",
+    "V2 retry must prioritize failed nodes and support per-image nodes with failed child metadata.",
+  );
+  assert.match(
+    schedulerSource,
+    /status === "partial"[\s\S]*Boolean\(findRetryableCanvasNode\(run, nodeRuns\)\)/,
+    "Partial V2 children must expose retryability for legacy failed image nodes.",
   );
   assert.match(
     schedulerSource,
