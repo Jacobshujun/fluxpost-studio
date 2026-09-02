@@ -12,6 +12,8 @@ import {
   preflightCanvasSchedule,
   resampleCanvasSchedule,
   retryCanvasScheduleImageTask,
+  retryCanvasScheduleContentTask,
+  retryCanvasScheduleFailedTasks,
   retryCanvasScheduleV2ChildTask,
   retryCanvasScheduleV2MainTask,
   retryCanvasScheduleV2SharedTask,
@@ -24,7 +26,7 @@ import { canvasScheduleResponse } from "@/lib/canvas/schedule-response";
 
 export const runtime = "nodejs";
 type RouteContext = { params: Promise<{ id: string }> };
-type ScheduleAction = "save" | "preflight" | "resample" | "launch" | "duplicate" | "convert-v2" | "pause" | "resume" | "cancel" | "retry" | "retry-row" | "retry-shared" | "accept-candidates";
+type ScheduleAction = "save" | "preflight" | "resample" | "launch" | "duplicate" | "convert-v2" | "pause" | "resume" | "cancel" | "retry" | "retry-content" | "retry-row" | "retry-shared" | "retry-all" | "accept-candidates";
 
 export async function GET(request: Request, context: RouteContext) {
   try {
@@ -101,9 +103,14 @@ export async function PATCH(request: Request, context: RouteContext) {
     } else if (action === "retry-shared") {
       if (!body.mainTaskId) return badRequest("mainTaskId is required.");
       schedule = await retryCanvasScheduleV2SharedTask(scheduleId, account, { mainTaskId: body.mainTaskId });
+    } else if (action === "retry-content") {
+      if (!body.batchId || !body.contentTaskId) return badRequest("batchId and contentTaskId are required.");
+      schedule = await retryCanvasScheduleContentTask(scheduleId, account, { batchId: body.batchId, contentTaskId: body.contentTaskId });
     } else if (action === "retry-row") {
       if (!body.mainTaskId) return badRequest("mainTaskId is required.");
       schedule = await retryCanvasScheduleV2MainTask(scheduleId, account, { mainTaskId: body.mainTaskId });
+    } else if (action === "retry-all") {
+      schedule = await retryCanvasScheduleFailedTasks(scheduleId, account);
     } else if (action === "accept-candidates") {
       if (body.mainTaskId) {
         schedule = await acceptCanvasScheduleV2Candidates(scheduleId, account, { mainTaskId: body.mainTaskId });

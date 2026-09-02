@@ -537,6 +537,8 @@ export type CanvasLatestSuccessfulNodeRun = CanvasLatestNodeAttempt;
 
 export type CanvasScheduleStatus = "draft" | "ready" | "queued" | "running" | "paused" | "completed" | "partial" | "failed" | "cancelled";
 export type CanvasScheduleTaskStatus = "pending" | "queued" | "running" | "completed" | "partial" | "failed" | "cancelled";
+export type CanvasScheduleLeafStatus = Exclude<CanvasScheduleTaskStatus, "partial">;
+export type CanvasScheduleResultSummary = { produced: number; failed: number };
 
 export type CanvasScheduleAssetFilter = {
   mode: "manual" | "random";
@@ -675,9 +677,10 @@ export type CanvasScheduleV2SharedArtifact = CanvasScheduleV2SharedOutput & {
 export type CanvasScheduleV2ChildTask = {
   id: string;
   parameterValues: Record<string, CanvasScheduleParameterValue>;
-  status: CanvasScheduleTaskStatus;
+  status: CanvasScheduleLeafStatus;
   /** Set during schedule reconciliation when the persisted Canvas run has a safe retry target. */
   retryable?: boolean;
+  resultSummary?: CanvasScheduleResultSummary;
   runId?: string;
   resultArtifacts: CanvasScheduleAggregateArtifact[];
   error?: string;
@@ -720,9 +723,11 @@ export type CanvasBatchBindableField = {
 export type CanvasScheduleImageTask = {
   id: string;
   vehicle: CanvasScheduleAssetSnapshot;
-  status: CanvasScheduleTaskStatus;
+  status: CanvasScheduleLeafStatus;
   runId?: string;
   imageUrls: string[];
+  resultSummary?: CanvasScheduleResultSummary;
+  retryable?: boolean;
   error?: string;
   createdAt: string;
   updatedAt: string;

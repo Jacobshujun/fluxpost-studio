@@ -1077,7 +1077,7 @@ export default function CanvasPage() {
       return;
     }
     if (wouldCreateCycle(edges, connection.source, connection.target)) {
-      setMessage("V1 仅支持无环工作流");
+      setMessage("当前批量模式仅支持无环工作流");
       return;
     }
     const edgeColor = source ? getCanvasNodeDefinition(source.type, source.version)?.color : undefined;
@@ -3925,7 +3925,7 @@ function CanvasScheduleCenter({ workflow, graph, onSaveBindings, onPreview, onCl
         <nav className="canvas-schedule-list" aria-label="批量任务列表">
           {schedules.map((schedule) => <button type="button" key={schedule.id} className={selected?.id === schedule.id ? "is-selected" : ""} onClick={() => adoptSchedule(schedule)}>
             <StatusIcon status={schedule.status} />
-            <span><strong>{schedule.name}</strong><small>{schedule.schemaVersion === 2 ? `${schedule.totalMainTasks || 0} 主任务 · ${schedule.totalChildTasks || 0} 子任务` : `${schedule.totalContentTasks} 篇 · ${schedule.totalImageTasks} 图`} · {formatCanvasRunTime(schedule.updatedAt)}</small></span>
+            <span><strong>{schedule.name}</strong><small>{schedule.schemaVersion === 2 ? `${schedule.totalMainTasks || 0} 个任务组 · ${schedule.totalChildTasks || 0} 个结果项` : `${schedule.totalContentTasks} 篇 · ${schedule.totalImageTasks} 个图片结果`} · {formatCanvasRunTime(schedule.updatedAt)}</small></span>
             <em>{canvasScheduleStatusLabel(schedule.status)}</em>
           </button>)}
           {!schedules.length && !busy ? <div className="canvas-task-empty"><ListChecks /><span>当前还没有批量任务</span></div> : null}
@@ -3955,8 +3955,8 @@ function CanvasScheduleCenter({ workflow, graph, onSaveBindings, onPreview, onCl
               <span className={`is-${selected.status}`}>{canvasScheduleStatusLabel(selected.status)}</span>
             </div>
             <div className="canvas-schedule-metrics">
-              <div><small>{selected.schemaVersion === 2 ? "主任务" : "图文任务"}</small><strong>{selected.schemaVersion === 2 ? selected.totalMainTasks || 0 : selected.totalContentTasks}</strong></div>
-              <div><small>{selected.schemaVersion === 2 ? "子任务" : "图片子任务"}</small><strong>{selected.schemaVersion === 2 ? selected.totalChildTasks || 0 : selected.totalImageTasks}</strong></div>
+              <div><small>{selected.schemaVersion === 2 ? "任务组" : "内容项"}</small><strong>{selected.schemaVersion === 2 ? selected.totalMainTasks || 0 : selected.totalContentTasks}</strong></div>
+              <div><small>{selected.schemaVersion === 2 ? "结果项" : "图片结果"}</small><strong>{selected.schemaVersion === 2 ? selected.totalChildTasks || 0 : selected.totalImageTasks}</strong></div>
               <div><small>画布版本</small><strong>r{selected.workflowRevision}</strong></div>
             </div>
             {editable ? selected.schemaVersion === 2 ? <CanvasScheduleV2Editor
@@ -4046,7 +4046,7 @@ function CanvasScheduleV2Editor({ schedule, graph, busy, onDefinitionChange, onA
     if (scope === "main" && source.mode === "library-filter") source.filter.mode = "manual";
     patchDefinition({ parameters: [...definition.parameters, {
       id: nextCanvasScheduleParameterId(),
-      name: scope === "main" ? `主任务参数 ${definition.parameters.filter((parameter) => parameter.scope === scope).length + 1}` : `子任务参数 ${definition.parameters.filter((parameter) => parameter.scope === scope).length + 1}`,
+      name: scope === "main" ? `任务组参数 ${definition.parameters.filter((parameter) => parameter.scope === scope).length + 1}` : `结果项参数 ${definition.parameters.filter((parameter) => parameter.scope === scope).length + 1}`,
       scope,
       valueType,
       source,
@@ -4137,13 +4137,13 @@ function CanvasScheduleV2Editor({ schedule, graph, busy, onDefinitionChange, onA
   });
   return <div className="canvas-schedule-v2">
     <section className="canvas-scheduler-bindings">
-      <header><span><strong>执行节点</strong><small>子任务输出会在主任务阶段替换为冻结结果</small></span><button type="button" disabled={!workbookNode || !workbookImageNode || !workbookComposeNode} onClick={applyCompetitorWorkbookPreset}><Sheet />竞品 Excel 预设</button><button type="button" disabled={!sourceVideoNode || !promptNode || !reconstructNode} onClick={applyVideoReconstructPreset}><Video />视频重构预设</button><button type="button" disabled={graph.nodes.filter((node) => getCanvasBatchBindableFields(node).some((field) => field.parameterTypes.includes("image"))).length < 3} onClick={applyPeopleSceneVehiclePreset}><Images />人物场景预设</button></header>
+      <header><span><strong>执行节点</strong><small>结果项输出会在任务组阶段替换为冻结结果</small></span><button type="button" disabled={!workbookNode || !workbookImageNode || !workbookComposeNode} onClick={applyCompetitorWorkbookPreset}><Sheet />竞品 Excel 预设</button><button type="button" disabled={!sourceVideoNode || !promptNode || !reconstructNode} onClick={applyVideoReconstructPreset}><Video />视频重构预设</button><button type="button" disabled={graph.nodes.filter((node) => getCanvasBatchBindableFields(node).some((field) => field.parameterTypes.includes("image"))).length < 3} onClick={applyPeopleSceneVehiclePreset}><Images />人物场景预设</button></header>
       <div>
-        <label><span>子任务结果</span><select value={`${definition.childResult.nodeId}::${definition.childResult.outputPort}`} onChange={(event) => {
+        <label><span>结果项输出</span><select value={`${definition.childResult.nodeId}::${definition.childResult.outputPort}`} onChange={(event) => {
           const output = childOutputs.find((candidate) => `${candidate.node.id}::${candidate.port.id}` === event.target.value);
           if (output && ["text", "images", "videos"].includes(output.port.kind)) patchDefinition({ childResult: { nodeId: output.node.id, outputPort: output.port.id, artifactKind: output.port.kind as "text" | "images" | "videos" } });
         }}><option value="::">未选择</option>{childOutputs.map((output) => <option key={`${output.node.id}-${output.port.id}`} value={`${output.node.id}::${output.port.id}`}>{output.label}</option>)}</select></label>
-        <label><span>主任务目标（可选）</span><select value={definition.mainTargetNodeId || ""} onChange={(event) => patchDefinition({ mainTargetNodeId: event.target.value || undefined })}><option value="">仅汇总子任务结果</option>{mainTargets.map((node) => <option key={node.id} value={node.id}>{canvasNodeOptionLabel(node)}</option>)}</select></label>
+        <label><span>任务组目标（可选）</span><select value={definition.mainTargetNodeId || ""} onChange={(event) => patchDefinition({ mainTargetNodeId: event.target.value || undefined })}><option value="">仅汇总结果项</option>{mainTargets.map((node) => <option key={node.id} value={node.id}>{canvasNodeOptionLabel(node)}</option>)}</select></label>
         <label><span>失败聚合</span><select value={definition.aggregationPolicy} onChange={(event) => patchDefinition({ aggregationPolicy: event.target.value as CanvasScheduleV2Definition["aggregationPolicy"] })}><option value="at-least-one">至少一个成功</option><option value="all">必须全部成功</option></select></label>
       </div>
       {workbookSource?.mode === "competitor-workbook" ? <div className="canvas-workbook-schedule-source">
@@ -4152,7 +4152,7 @@ function CanvasScheduleV2Editor({ schedule, graph, busy, onDefinitionChange, onA
         <div><label><span>起始行</span><input type="number" min={2} value={workbookSource.rowStart || 2} onChange={(event) => patchWorkbookSource({ rowStart: Number(event.target.value) })} /></label><label><span>结束行</span><input type="number" min={2} placeholder="全部" value={workbookSource.rowEnd || ""} onChange={(event) => patchWorkbookSource({ rowEnd: event.target.value ? Number(event.target.value) : undefined })} /></label></div>
       </div> : null}
       <div className="canvas-schedule-shared-outputs">
-        <header><span><strong>主任务共享输出</strong><small>{invalidSharedOutputs.length ? `${invalidSharedOutputs.length} 项选择已失效，请移除后预演` : sharedOutputs.length ? `已选择 ${sharedOutputs.length} 项 · 每个主任务执行一次` : "未启用时保持现有子任务执行方式"}</small></span>{invalidSharedOutputs.length ? <button type="button" onClick={() => patchDefinition({ sharedOutputs: sharedOutputs.filter(isValidSharedOutput) })}><Trash2 />移除失效项</button> : <Share2 />}</header>
+        <header><span><strong>任务组共享输出</strong><small>{invalidSharedOutputs.length ? `${invalidSharedOutputs.length} 项选择已失效，请移除后预演` : sharedOutputs.length ? `已选择 ${sharedOutputs.length} 项 · 每个任务组执行一次` : "未启用时保持现有结果项执行方式"}</small></span>{invalidSharedOutputs.length ? <button type="button" onClick={() => patchDefinition({ sharedOutputs: sharedOutputs.filter(isValidSharedOutput) })}><Trash2 />移除失效项</button> : <Share2 />}</header>
         {sharedOutputCandidates.length ? <div role="group" aria-label="主任务共享输出">
           {sharedOutputCandidates.map((candidate) => {
             const selected = sharedOutputs.some((output) => output.nodeId === candidate.node.id && output.outputPort === candidate.port.id);
@@ -4170,7 +4170,7 @@ function CanvasScheduleV2Editor({ schedule, graph, busy, onDefinitionChange, onA
       </div>
     </section>
     {(["main", "child"] as const).map((scope) => <section className="canvas-schedule-parameter-section" key={scope}>
-      <header><span><strong>{scope === "main" ? "主任务参数" : "子任务参数"}</strong><small>{definition.parameters.filter((parameter) => parameter.scope === scope).length} 个参数</small></span><label><span>组合</span><select value={definition.expansion[scope]} onChange={(event) => patchDefinition({ expansion: { ...definition.expansion, [scope]: event.target.value as "cartesian" | "zip" } })}><option value="cartesian">笛卡尔积</option><option value="zip">按序配对</option></select></label><button className="canvas-schedule-add" type="button" onClick={() => addParameter(scope)}><Plus />添加参数</button></header>
+      <header><span><strong>{scope === "main" ? "任务组参数" : "结果项参数"}</strong><small>{definition.parameters.filter((parameter) => parameter.scope === scope).length} 个参数</small></span><label><span>组合</span><select value={definition.expansion[scope]} onChange={(event) => patchDefinition({ expansion: { ...definition.expansion, [scope]: event.target.value as "cartesian" | "zip" } })}><option value="cartesian">笛卡尔积</option><option value="zip">按序配对</option></select></label><button className="canvas-schedule-add" type="button" onClick={() => addParameter(scope)}><Plus />添加参数</button></header>
       <div>{definition.parameters.filter((parameter) => parameter.scope === scope).map((parameter) => <CanvasScheduleParameterEditor
         key={parameter.id}
         parameter={parameter}
@@ -4179,7 +4179,7 @@ function CanvasScheduleV2Editor({ schedule, graph, busy, onDefinitionChange, onA
         onChange={(next) => patchParameter(parameter.id, () => next)}
         onRemove={() => patchDefinition({ parameters: definition.parameters.filter((candidate) => candidate.id !== parameter.id) })}
       />)}</div>
-      {!definition.parameters.some((parameter) => parameter.scope === scope) ? <div className="canvas-task-empty"><Plus /><span>添加一个{scope === "main" ? "主任务" : "子任务"}参数</span></div> : null}
+      {!definition.parameters.some((parameter) => parameter.scope === scope) ? <div className="canvas-task-empty"><Plus /><span>添加一个{scope === "main" ? "任务组" : "结果项"}参数</span></div> : null}
     </section>)}
     {schedule.mainTasks?.length ? <ScheduleV2Preview schedule={schedule} onPreview={onPreview} /> : null}
     <div className="canvas-schedule-primary-actions">
@@ -4334,7 +4334,7 @@ function ScheduleV2Preview({ schedule, onPreview }: {
   onPreview: (preview: Extract<NonNullable<PreviewState>, { kind: "image" }>) => void;
 }) {
   const hasSharedOutputs = Boolean(schedule.definition?.sharedOutputs?.length);
-  return <div className="canvas-schedule-preview canvas-schedule-v2-preview"><header><span>展开预览 · {schedule.totalMainTasks || 0} 主任务 · {schedule.totalChildTasks || 0} 子任务</span></header><div>{(schedule.mainTasks || []).map((main, index) => <article key={main.id}><div className="canvas-schedule-v2-main-task"><ScheduleV2PreviewImages values={main.parameterValues} label={`主任务 ${index + 1}`} onPreview={onPreview} /><span><strong>{main.workbookRow ? `Excel 第 ${main.workbookRow.excelRowNumber} 行` : `主任务 ${index + 1}`} · {main.childTasks.length} 子任务</strong><small>{main.workbookRow?.title || formatCanvasScheduleParameterValues(main.parameterValues)}</small></span></div>{hasSharedOutputs ? <CanvasScheduleSharedStage main={main} preview /> : null}<div>{main.childTasks.map((child, childIndex) => <span className="canvas-schedule-v2-child-task" key={child.id}><ScheduleV2PreviewImages values={child.parameterValues} label={`子任务 ${childIndex + 1}`} onPreview={onPreview} /><strong>{child.workbookCard ? `参数卡片 ${child.workbookCard.cardIndex}` : `子任务 ${childIndex + 1}`}</strong><small>{child.workbookCard?.text || formatCanvasScheduleParameterValues(child.parameterValues)}</small></span>)}</div></article>)}</div></div>;
+  return <div className="canvas-schedule-preview canvas-schedule-v2-preview"><header><span>展开预览 · {schedule.totalMainTasks || 0} 个任务组 · {schedule.totalChildTasks || 0} 个结果项</span></header><div>{(schedule.mainTasks || []).map((main, index) => <article key={main.id}><div className="canvas-schedule-v2-main-task"><ScheduleV2PreviewImages values={main.parameterValues} label={`任务组 ${index + 1}`} onPreview={onPreview} /><span><strong>{main.workbookRow ? `Excel 第 ${main.workbookRow.excelRowNumber} 行` : `任务组 ${index + 1}`} · {main.childTasks.length} 个结果项</strong><small>{main.workbookRow?.title || formatCanvasScheduleParameterValues(main.parameterValues)}</small></span></div>{hasSharedOutputs ? <CanvasScheduleSharedStage main={main} preview /> : null}<div>{main.childTasks.map((child, childIndex) => <span className="canvas-schedule-v2-child-task" key={child.id}><ScheduleV2PreviewImages values={child.parameterValues} label={`结果项 ${childIndex + 1}`} onPreview={onPreview} /><strong>{child.workbookCard ? `参数卡片 ${child.workbookCard.cardIndex}` : `结果项 ${childIndex + 1}`}</strong><small>{child.workbookCard?.text || formatCanvasScheduleParameterValues(child.parameterValues)}</small></span>)}</div></article>)}</div></div>;
 }
 
 function ScheduleV2PreviewImages({ values, label, onPreview }: {
@@ -4360,22 +4360,25 @@ function ScheduleV2PreviewImages({ values, label, onPreview }: {
 function ScheduleV2RuntimeTree({ schedule, busy, onAction }: { schedule: CanvasSchedule; busy: boolean; onAction: (action: string, payload?: Record<string, unknown>) => void }) {
   const mainTasks = schedule.mainTasks || [];
   const completed = mainTasks.filter((main) => ["completed", "partial"].includes(main.status)).length;
+  const retryableCount = mainTasks.reduce((count, main) => count + main.childTasks.filter(isCanvasScheduleV2ChildRetryable).length + (main.sharedStatus === "failed" ? 1 : 0), 0);
+  const failedCount = mainTasks.reduce((count, main) => count + main.childTasks.filter((child) => child.status === "failed").length + (main.sharedStatus === "failed" ? 1 : 0), 0);
   return <div className="canvas-schedule-runtime">
     <div className="canvas-schedule-runtime-actions">
       {["queued", "running"].includes(schedule.status) ? <button type="button" onClick={() => onAction("pause")} disabled={busy}><Square />暂停</button> : null}
       {schedule.status === "paused" ? <button type="button" onClick={() => onAction("resume")} disabled={busy}><Play />继续</button> : null}
       {["queued", "running", "paused"].includes(schedule.status) ? <button className="danger" type="button" onClick={() => onAction("cancel")} disabled={busy}><X />取消</button> : null}
-      <span>{completed}/{mainTasks.length} 主任务完成</span>
+      {retryableCount ? <button type="button" onClick={() => onAction("retry-all")} disabled={busy}><RotateCcw />重试全部失败项（{retryableCount}）</button> : null}
+      <span>完成 {completed}/{mainTasks.length} 组 · 失败 {failedCount} · 可重试 {retryableCount}</span>
     </div>
-    {mainTasks.map((main, index) => <details key={main.id} open><summary><StatusIcon status={main.status} /><strong>{main.workbookRow ? `Excel 第 ${main.workbookRow.excelRowNumber} 行 · ${main.workbookRow.title}` : `主任务 ${index + 1} · ${formatCanvasScheduleParameterValues(main.parameterValues)}`}</strong><span>{main.childTasks.filter((child) => child.status === "completed").length}/{main.childTasks.length}</span><em>{canvasScheduleStatusLabel(main.status)}</em></summary><div className="canvas-schedule-runtime-content">
+    {mainTasks.map((main, index) => <details key={main.id} open><summary><StatusIcon status={main.status} /><strong>{main.workbookRow ? `Excel 第 ${main.workbookRow.excelRowNumber} 行 · ${main.workbookRow.title}` : `任务组 ${index + 1} · ${formatCanvasScheduleParameterValues(main.parameterValues)}`}</strong><span>{main.childTasks.filter((child) => child.status === "completed").length}/{main.childTasks.length}</span><em>{canvasScheduleStatusLabel(main.status)}</em></summary><div className="canvas-schedule-runtime-content">
       {schedule.definition?.sharedOutputs?.length || main.sharedStatus ? <CanvasScheduleSharedStage main={main} busy={busy} onRetry={() => onAction("retry-shared", { mainTaskId: main.id })} /> : null}
       {main.resultArtifacts.length ? <CanvasScheduleArtifactSummary artifacts={main.resultArtifacts} /> : null}
       {main.generatedPostId ? <Link href={`/review?postId=${encodeURIComponent(main.generatedPostId)}`}>打开评审草稿</Link> : null}
       {["completed", "partial"].includes(main.status) && main.mainRunId ? <CanvasScheduleMainImageDownload runId={main.mainRunId} /> : null}
       {main.pendingCandidateSync ? <button type="button" onClick={() => onAction("accept-candidates", { mainTaskId: main.id })} disabled={busy}>接受新增候选图</button> : null}
-      {main.childTasks.some(isCanvasScheduleV2ChildRetryable) ? <button type="button" onClick={() => onAction("retry-row", { mainTaskId: main.id })} disabled={busy}><RotateCcw />重试本行失败项</button> : null}
+      {main.childTasks.some(isCanvasScheduleV2ChildRetryable) ? <button type="button" onClick={() => onAction("retry-row", { mainTaskId: main.id })} disabled={busy}><RotateCcw />重试本组失败项（{main.childTasks.filter(isCanvasScheduleV2ChildRetryable).length}）</button> : null}
       {main.error ? <p>{main.error}</p> : null}
-      <ul>{main.childTasks.map((child, childIndex) => <li key={child.id}><StatusIcon status={child.status} /><span>{child.workbookCard ? `参数卡片 ${child.workbookCard.cardIndex} · ${child.workbookCard.text}` : `子任务 ${childIndex + 1} · ${formatCanvasScheduleParameterValues(child.parameterValues)}`}</span><em>{canvasScheduleStatusLabel(child.status)}</em>{child.error ? <small>{child.error}</small> : null}{isCanvasScheduleV2ChildRetryable(child) ? <button type="button" onClick={() => onAction("retry", { mainTaskId: main.id, childTaskId: child.id })} disabled={busy}><RotateCcw />{child.status === "partial" ? "重试失败图片" : "重试"}</button> : null}</li>)}</ul>
+      <ul>{main.childTasks.map((child, childIndex) => <li key={child.id}><StatusIcon status={child.status} /><span>{child.workbookCard ? `参数卡片 ${child.workbookCard.cardIndex} · ${child.workbookCard.text}` : `结果项 ${childIndex + 1} · ${formatCanvasScheduleParameterValues(child.parameterValues)}`}</span><em>{canvasScheduleStatusLabel(child.status)}</em>{child.resultSummary && (child.resultSummary.produced || child.resultSummary.failed) ? <small>已生成 {child.resultSummary.produced}，失败 {child.resultSummary.failed}</small> : null}{child.error ? <small>{child.error}</small> : null}{isCanvasScheduleV2ChildRetryable(child) ? <button type="button" onClick={() => onAction("retry", { mainTaskId: main.id, childTaskId: child.id })} disabled={busy}><RotateCcw />{child.resultSummary?.failed ? "重试失败项" : "重试"}</button> : null}</li>)}</ul>
     </div></details>)}
   </div>;
 }
@@ -4796,24 +4799,28 @@ function SchedulePreview({ batch, busy, onResample }: { batch: CanvasScheduleBat
 
 function ScheduleRuntimeTree({ schedule, busy, onAction }: { schedule: CanvasSchedule; busy: boolean; onAction: (action: string, payload?: Record<string, unknown>) => void }) {
   const completed = schedule.batches.flatMap((batch) => batch.contentTasks).filter((task) => ["completed", "partial"].includes(task.status)).length;
+  const retryableCount = schedule.batches.flatMap((batch) => batch.contentTasks.flatMap((content) => content.imageTasks)).filter((task) => task.status === "failed" && task.retryable === true).length;
+  const failedCount = schedule.batches.flatMap((batch) => batch.contentTasks.flatMap((content) => content.imageTasks)).filter((task) => task.status === "failed").length;
   return <div className="canvas-schedule-runtime">
     <div className="canvas-schedule-runtime-actions">
       {["queued", "running"].includes(schedule.status) ? <button type="button" onClick={() => onAction("pause")} disabled={busy}><Square />暂停</button> : null}
       {schedule.status === "paused" ? <button type="button" onClick={() => onAction("resume")} disabled={busy}><Play />继续</button> : null}
       {["queued", "running", "paused"].includes(schedule.status) ? <button className="danger" type="button" onClick={() => onAction("cancel")} disabled={busy}><X />取消</button> : null}
+      {retryableCount ? <button type="button" onClick={() => onAction("retry-all")} disabled={busy}><RotateCcw />重试全部失败项（{retryableCount}）</button> : null}
       <button type="button" onClick={() => onAction("duplicate")} disabled={busy}><CopyPlus />复制重跑</button>
-      <span>{completed}/{schedule.totalContentTasks} 篇完成</span>
+      <span>完成 {completed}/{schedule.totalContentTasks} 项 · 失败 {failedCount} · 可重试 {retryableCount}</span>
     </div>
     {schedule.batches.map((batch) => <details key={batch.id} open>
       <summary><StatusIcon status={batch.status} /><strong>{batch.name}</strong><span>{batch.contentTasks.filter((task) => ["completed", "partial"].includes(task.status)).length}/{batch.contentTasks.length}</span><em>{canvasScheduleStatusLabel(batch.status)}</em></summary>
       <div>{batch.contentTasks.map((content, index) => <details key={content.id} className={`is-${content.status}`}>
-        <summary><StatusIcon status={content.status} /><strong>图文 {index + 1}</strong><span>{content.candidateImageUrls.length}/{content.imageTasks.length} 图</span><em>{canvasScheduleStatusLabel(content.status)}</em></summary>
+        <summary><StatusIcon status={content.status} /><strong>内容项 {index + 1}</strong><span>已生成 {content.candidateImageUrls.length}/{content.imageTasks.length} · 失败 {content.imageTasks.filter((task) => task.status === "failed").length}</span><em>{canvasScheduleStatusLabel(content.status)}</em></summary>
         <div className="canvas-schedule-runtime-content">
           <div className="canvas-schedule-runtime-media"><Image src={content.scene.url} alt="" width={90} height={64} unoptimized referrerPolicy="no-referrer" />{content.candidateImageUrls.map((url) => <Image key={url} src={url} alt="" width={70} height={52} unoptimized referrerPolicy="no-referrer" />)}</div>
           {content.generatedPostId ? <Link href={`/review?postId=${encodeURIComponent(content.generatedPostId)}`}>打开评审草稿</Link> : null}
           {content.pendingCandidateSync ? <button type="button" onClick={() => onAction("accept-candidates", { batchId: batch.id, contentTaskId: content.id })} disabled={busy}>接受新增候选图</button> : null}
+          {content.imageTasks.filter((task) => task.status === "failed" && task.retryable === true).length ? <button type="button" onClick={() => onAction("retry-content", { batchId: batch.id, contentTaskId: content.id })} disabled={busy}><RotateCcw />重试本组失败项（{content.imageTasks.filter((task) => task.status === "failed" && task.retryable === true).length}）</button> : null}
           {content.error ? <p>{content.error}</p> : null}
-          <ul>{content.imageTasks.map((task, taskIndex) => <li key={task.id}><StatusIcon status={task.status} /><span>图片 {taskIndex + 1} · {task.vehicle.name || task.vehicle.id}</span><em>{canvasScheduleStatusLabel(task.status)}</em>{task.error ? <small>{task.error}</small> : null}{task.status === "failed" ? <button type="button" onClick={() => onAction("retry", { batchId: batch.id, contentTaskId: content.id, imageTaskId: task.id })} disabled={busy}><RotateCcw />重试</button> : null}</li>)}</ul>
+          <ul>{content.imageTasks.map((task, taskIndex) => <li key={task.id}><StatusIcon status={task.status} /><span>图片结果 {taskIndex + 1} · {task.vehicle.name || task.vehicle.id}</span><em>{canvasScheduleStatusLabel(task.status)}</em>{task.resultSummary && (task.resultSummary.produced || task.resultSummary.failed) ? <small>已生成 {task.resultSummary.produced}，失败 {task.resultSummary.failed}</small> : null}{task.error ? <small>{task.error}</small> : null}{task.status === "failed" && task.retryable === true ? <button type="button" onClick={() => onAction("retry", { batchId: batch.id, contentTaskId: content.id, imageTaskId: task.id })} disabled={busy}><RotateCcw />{task.resultSummary?.failed ? "重试失败项" : "重试"}</button> : null}</li>)}</ul>
         </div>
       </details>)}</div>
     </details>)}
