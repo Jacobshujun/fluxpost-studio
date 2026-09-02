@@ -28,6 +28,7 @@ import {
   normalizeStringList,
 } from "./library-tags";
 import { compareLibraryText, libraryListSortDirection, normalizeLibraryListSort } from "./library-sort";
+import { libraryThumbnailVersion } from "./library-thumbnails";
 import { deleteRuntimeMediaObject, persistLibraryObject } from "./runtime-media-storage";
 import type {
   LibraryAsset,
@@ -695,7 +696,11 @@ function assetSortValue(asset: LibraryAsset, sort: LibraryListSort) {
 }
 
 function libraryAssetView(account: WorkspaceAccessActor, asset: LibraryAsset): LibraryAsset {
-  return { ...asset, canEdit: canEditAsset(account, asset), thumbnailUrl: `/api/library/assets/${encodeURIComponent(asset.id)}/thumbnail` };
+  return {
+    ...asset,
+    canEdit: canEditAsset(account, asset),
+    thumbnailUrl: `/api/library/assets/${encodeURIComponent(asset.id)}/thumbnail?version=${libraryThumbnailVersion}`,
+  };
 }
 
 async function requireEditableAsset(account: WorkspaceAccessActor, assetId: string) {

@@ -8,6 +8,7 @@ import type { LibraryAsset } from "./types";
 
 export const libraryThumbnailWidth = 240;
 export const libraryThumbnailHeight = 144;
+export const libraryThumbnailVersion = 2;
 export const librarySquareThumbnailSize = 240;
 export const librarySquareThumbnailVersion = 2;
 export const libraryThumbnailMimeType = "image/webp";
@@ -54,7 +55,7 @@ export async function getLibraryThumbnail(
 
 export function libraryThumbnailPath(sha256: string, cacheDirectory = cacheRoot, variant: LibraryThumbnailVariant = "landscape") {
   const key = normalizeSha256(sha256);
-  return path.join(cacheDirectory, `${key}${variant === "square" ? `-square-v${librarySquareThumbnailVersion}` : ""}.webp`);
+  return path.join(cacheDirectory, `${key}${variant === "square" ? `-square-v${librarySquareThumbnailVersion}` : `-v${libraryThumbnailVersion}`}.webp`);
 }
 
 function assertAssetThumbnailSource(asset: Pick<LibraryAsset, "publicUrl" | "sha256">, isManagedSource: (url: string) => boolean) {
@@ -70,7 +71,7 @@ async function generateOrReadThumbnail(
 ): Promise<LibraryThumbnailResult> {
   const dimensions = variant === "square"
     ? { width: librarySquareThumbnailSize, height: librarySquareThumbnailSize, fit: "contain" as const }
-    : { width: libraryThumbnailWidth, height: libraryThumbnailHeight, fit: "cover" as const };
+    : { width: libraryThumbnailWidth, height: libraryThumbnailHeight, fit: "contain" as const };
   const filePath = libraryThumbnailPath(asset.sha256, cacheDirectory, variant);
   const cached = await readValidThumbnail(filePath, dimensions.width, dimensions.height);
   if (cached) return { bytes: cached, cacheStatus: "hit", etag: thumbnailEtag(asset.sha256, variant) };
@@ -80,7 +81,7 @@ async function generateOrReadThumbnail(
   try {
     bytes = await sharp(source, { failOn: "error", limitInputPixels: 80_000_000 })
       .rotate()
-      .resize(dimensions.width, dimensions.height, { fit: dimensions.fit, position: dimensions.fit === "cover" ? "attention" : undefined })
+      .resize(dimensions.width, dimensions.height, { fit: dimensions.fit })
       .webp({ quality: 72, effort: 4 })
       .toBuffer();
   } catch (error) {
@@ -161,7 +162,7 @@ function normalizeSha256(value: string) {
 }
 
 function thumbnailEtag(sha256: string, variant: LibraryThumbnailVariant) {
-  return `"library-thumbnail-${variant === "square" ? `v${librarySquareThumbnailVersion}-square-contain` : "v1"}-${normalizeSha256(sha256)}"`;
+  return `"library-thumbnail-${variant === "square" ? `v${librarySquareThumbnailVersion}-square-contain` : `v${libraryThumbnailVersion}-contain`}-${normalizeSha256(sha256)}"`;
 }
 
 function errorMessage(error: unknown) {
