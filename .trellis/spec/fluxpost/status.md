@@ -4,7 +4,7 @@ Last updated: 2026-09-03
 
 ## One-Line Status
 
-Review desk approval now keeps the approved post selected instead of automatically advancing; the change and full offline baseline are verified, and the clean fix is not yet activated on port `3001`.
+Canvas now includes a user-configurable "遮罩" media node for image/video derivatives; the implementation and full offline baseline are verified, and the clean fix is not yet activated on port `3001`.
 
 ## Current Focus
 
@@ -26,6 +26,7 @@ Review desk approval now keeps the approved post selected instead of automatical
 - 2026-09-03 review desk approval behavior: the "审查通过" action still saves the approved post and updates its local row, but no longer calculates or selects the next unreviewed post. The focused review desk check and complete offline baseline passed.
 - 2026-09-02 Canvas batch retry regression fix: V2 child reconciliation now persists safe retryability from Canvas node attempts; failed children remain directly retryable for historical schedules. A targeted read of terminal schedules now recomputes retryability, and partial children with legacy failed `model.gpt-image` nodes are retryable as well as per-image failed-index runs. The schedule center loads that detail before rendering actions. Canvas scheduler check, TypeScript, lint (0 errors, 20 warnings), build, isolated HTTP/SQLite smoke, and the full offline baseline passed.
 - 2026-09-02 Canvas batch result model: V1/V2 implementation differences are hidden behind one result-item projection. Leaf results now expose only queued/running/completed/failed/cancelled; failed image batches retain produced/failed counts and retryability. Task groups and top-level batches retain partial aggregation, with per-item, group, and batch-level retry actions. Historical records are corrected lazily while raw CanvasRun diagnostics remain unchanged. Canvas scheduler check, TypeScript, lint (0 errors, 20 warnings), build, isolated HTTP/SQLite smoke, and the full offline baseline passed.
+- 2026-09-03 Canvas media mask node: added typed image/video `utility.media-mask` execution with normalized rectangle/rounded-rectangle regions, solid/blur/mosaic/image modes, video intervals/keyframe geometry, source-preserving deterministic derived-media caching, inspector controls, and an isolated contract check. TypeScript, lint (0 errors, existing warnings), build, HTTP/SQLite smoke, and the complete offline baseline passed.
 
 ## Next Entry
 

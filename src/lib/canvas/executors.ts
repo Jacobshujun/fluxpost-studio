@@ -11,7 +11,7 @@ import type { GeneratedPost, SourceImageTask } from "../types";
 import type { WorkspaceAccessActor } from "../workspace-ownership";
 import { ArkSeedanceNeedsConfigError, queryArkSeedanceVideo, submitArkSeedanceVideo } from "./seedance";
 import { resolveSeedanceInput } from "./seedance-references";
-import { CanvasMediaNeedsConfigError, extractCanvasVideoFrames, reconstructCanvasVideo, transformCanvasImages, renderCanvasImageSlideshow } from "./media-tools";
+import { CanvasMediaNeedsConfigError, extractCanvasVideoFrames, reconstructCanvasVideo, transformCanvasImages, renderCanvasImageSlideshow, maskCanvasMedia } from "./media-tools";
 import { revalidateCanvasDirectoryGroup } from "./directory-snapshots";
 import { canvasVisionPresets, concatenateCanvasText, parseCanvasImageSelection, renderCanvasPromptTemplate, splitCanvasText } from "./node-utils";
 import { normalizeUrlList } from "./registry";
@@ -24,6 +24,7 @@ import type {
   CanvasImageBatchSummary,
   CanvasImageEachChild,
   CanvasImageEachRunMetadata,
+  CanvasMediaMaskConfig,
   CanvasMediaReference,
   CanvasNode,
   CanvasNodeRun,
@@ -101,6 +102,7 @@ const executors: Record<CanvasNode["type"], CanvasNodeExecutor> = {
   "utility.image-select": executeImageSelect,
   "utility.image-transform": executeImageTransform,
   "utility.video-frames": executeVideoFrames,
+  "utility.media-mask": executeMediaMask,
   "compose.social-post": executeComposition,
   "publish.feishu": executeFeishuPublish,
 };
@@ -340,6 +342,23 @@ async function executeGptText({ node, inputs }: CanvasNodeExecutionContext) {
   const prompt = source ? `${instruction}\n\n输入：\n${source}` : instruction;
   const value = await callOpenAIForText(prompt, { logLabel: `Canvas GPT text node ${node.id}` });
   return { outputs: { text: { kind: "text" as const, value } } };
+}
+
+async function executeMediaMask({ node, inputs }: CanvasNodeExecutionContext): Promise<CanvasNodeExecutionResult> {
+  const imageArtifacts = (inputs.images || []).filter((artifact) => artifact.kind === "images");
+  const videoArtifacts = (inputs.videos || []).filter((artifact) => artifact.kind === "videos");
+  if (imageArtifacts.length && videoArtifacts.length) throw new CanvasNeedsConfigError("遮罩节点只能连接图片或视频中的一种输入。");
+  const images = imageArtifacts.flatMap((artifact) => artifact.kind === "images" ? artifact.items : []);
+  const videos = videoArtifacts.flatMap((artifact) => artifact.kind === "videos" ? artifact.items : []);
+  if (!images.length && !videos.length) throw new CanvasNeedsConfigError("遮罩节点需要连接图片或视频输入。");
+  try {
+    const config = (node.config.mask && typeof node.config.mask === "object" && !Array.isArray(node.config.mask) ? node.config.mask : undefined) as CanvasMediaMaskConfig | undefined;
+    if (images.length) return { outputs: { images: { kind: "images" as const, items: await maskCanvasMedia({ kind: "image", items: images, config: config || { protocolVersion: 1, regions: [] } }) } } };
+    return { outputs: { videos: { kind: "videos" as const, items: await maskCanvasMedia({ kind: "video", items: videos, config: config || { protocolVersion: 1, regions: [] } }) } } };
+  } catch (error) {
+    if (error instanceof CanvasMediaNeedsConfigError) throw new CanvasNeedsConfigError(error.message);
+    throw error;
+  }
 }
 
 async function executeGptVision({ node, inputs }: CanvasNodeExecutionContext) {

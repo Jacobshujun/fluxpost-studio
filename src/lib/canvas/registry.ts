@@ -1,3 +1,4 @@
+import { defaultCanvasMediaMaskConfig, validateCanvasMediaMaskConfig } from "./types";
 import type { CanvasBatchBindableField, CanvasGraph, CanvasNode, CanvasNodeConfig, CanvasNodeDefinition, CanvasNodeExecutionMode, CanvasNodeType } from "./types";
 import { toApis4kImageRatios, toApisImageRatios } from "../toapis-image-api";
 import { validateCanvasImageFilenamePrefix } from "./save-images";
@@ -527,6 +528,25 @@ const canvasNodeDefinitionVersions: CanvasNodeDefinition[] = [
     bypass: { inputPort: "images", outputPort: "images" },
   },
   {
+    type: "utility.media-mask",
+    version: 1,
+    label: "遮罩",
+    description: "对图片或视频应用可配置的区域遮挡、模糊、马赛克或图片覆盖。",
+    category: "utility",
+    icon: "Scan",
+    color: "#0f766e",
+    inputs: [
+      { id: "images", label: "图片", kind: "images", multiple: true },
+      { id: "videos", label: "视频", kind: "videos", multiple: true },
+    ],
+    outputs: [
+      { id: "images", label: "遮罩图片", kind: "images" },
+      { id: "videos", label: "遮罩视频", kind: "videos" },
+    ],
+    fields: [],
+    defaultConfig: { mask: structuredClone(defaultCanvasMediaMaskConfig) },
+  },
+  {
     type: "utility.video-frames",
     version: 1,
     label: "视频抽帧",
@@ -926,6 +946,7 @@ export function validateCanvasNodeConfig(type: CanvasNodeType, config: CanvasNod
   if (type === "utility.video-frames") {
     try { parseCanvasVideoTimestamps(config); } catch (error) { errors.push(error instanceof Error ? error.message : "Video frame settings are invalid."); }
   }
+  if (type === "utility.media-mask") errors.push(...validateCanvasMediaMaskConfig(config.mask));
   if (type === "input.competitor-workbook") {
     const snapshot = config.snapshot;
     const hasSnapshot = Boolean(snapshot && typeof snapshot === "object" && !Array.isArray(snapshot) && "rows" in snapshot);

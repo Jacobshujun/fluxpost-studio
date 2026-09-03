@@ -94,6 +94,7 @@ const nodeChecks = [
   ["Canvas workflow draft persistence check", "canvas_workflow_draft_persistence_check.mjs"],
   ["Canvas image download check", "canvas_image_download_check.mjs"],
   ["Canvas video reconstruction check", "canvas_video_reconstruction_check.mjs"],
+  ["Canvas media mask check", "canvas_media_mask_check.mjs"],
   ["Canvas video subtitles check", "canvas_video_subtitles_check.mjs"],
   ["Canvas subtitle editor check", "canvas_subtitle_editor_check.mjs"],
   ["Seedance prompt assistant check", "seedance_prompt_assistant_check.mjs"],

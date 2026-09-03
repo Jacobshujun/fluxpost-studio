@@ -35,6 +35,109 @@ export type CanvasMediaReference = {
   localPath?: string;
 };
 
+export type CanvasMaskKeyframe = {
+  timeMs: number;
+  x: number;
+  y: number;
+  width: number;
+  height: number;
+};
+
+export type CanvasMaskRegion = {
+  id: string;
+  shape: "rectangle" | "rounded-rectangle";
+  mode: "solid" | "blur" | "mosaic" | "image";
+  x: number;
+  y: number;
+  width: number;
+  height: number;
+  opacity: number;
+  color: string;
+  imageUrl?: string;
+  startMs?: number;
+  endMs?: number;
+  radius?: number;
+  feather?: number;
+  keyframes?: CanvasMaskKeyframe[];
+};
+
+export type CanvasMediaMaskConfig = {
+  protocolVersion: 1;
+  regions: CanvasMaskRegion[];
+  itemOverrides?: Record<string, CanvasMaskRegion[]>;
+};
+
+export const defaultCanvasMediaMaskConfig: CanvasMediaMaskConfig = {
+  protocolVersion: 1,
+  regions: [],
+};
+
+export function normalizeCanvasMediaMaskConfig(value: unknown): CanvasMediaMaskConfig {
+  const source = value && typeof value === "object" && !Array.isArray(value) ? value as Partial<CanvasMediaMaskConfig> : {};
+  const regions = Array.isArray(source.regions) ? source.regions : [];
+  const normalizeRegion = (region: unknown, index: number): CanvasMaskRegion => {
+    const item = region && typeof region === "object" && !Array.isArray(region) ? region as Partial<CanvasMaskRegion> : {};
+    return {
+      id: String(item.id || `mask-${index + 1}`),
+      shape: item.shape === "rounded-rectangle" ? "rounded-rectangle" : "rectangle",
+      mode: item.mode === "blur" || item.mode === "mosaic" || item.mode === "image" ? item.mode : "solid",
+      x: Number(item.x ?? 0.72), y: Number(item.y ?? 0.04), width: Number(item.width ?? 0.22), height: Number(item.height ?? 0.08),
+      opacity: Number(item.opacity ?? 1), color: String(item.color || "#000000"),
+      ...(item.imageUrl ? { imageUrl: String(item.imageUrl) } : {}),
+      ...(item.startMs !== undefined ? { startMs: Number(item.startMs) } : {}),
+      ...(item.endMs !== undefined ? { endMs: Number(item.endMs) } : {}),
+      ...(item.radius !== undefined ? { radius: Number(item.radius) } : {}),
+      ...(item.feather !== undefined ? { feather: Number(item.feather) } : {}),
+      ...(Array.isArray(item.keyframes) ? { keyframes: item.keyframes.map((frame) => ({
+        timeMs: Number(frame?.timeMs), x: Number(frame?.x), y: Number(frame?.y), width: Number(frame?.width), height: Number(frame?.height),
+      })) } : {}),
+    };
+  };
+  const itemOverrides = source.itemOverrides && typeof source.itemOverrides === "object" && !Array.isArray(source.itemOverrides)
+    ? Object.fromEntries(Object.entries(source.itemOverrides).map(([key, list]) => [key, Array.isArray(list) ? list.map(normalizeRegion) : []]))
+    : undefined;
+  return { protocolVersion: 1, regions: regions.map(normalizeRegion), ...(itemOverrides ? { itemOverrides } : {}) };
+}
+
+export function validateCanvasMediaMaskConfig(value: unknown): string[] {
+  const config = normalizeCanvasMediaMaskConfig(value);
+  const errors: string[] = [];
+  if (config.protocolVersion !== 1) errors.push("Media mask protocol version is unsupported.");
+  const validateRegions = (regions: CanvasMaskRegion[], prefix: string) => {
+    if (!regions.length) { errors.push(`${prefix} must contain at least one region.`); return; }
+    const ids = new Set<string>();
+    for (const [index, region] of regions.entries()) {
+      const label = `${prefix} region ${index + 1}`;
+      if (!region.id.trim() || ids.has(region.id)) errors.push(`${label} id must be unique and non-empty.`);
+      ids.add(region.id);
+      if (!["rectangle", "rounded-rectangle"].includes(region.shape)) errors.push(`${label} shape is invalid.`);
+      if (!["solid", "blur", "mosaic", "image"].includes(region.mode)) errors.push(`${label} mode is invalid.`);
+      for (const [key, number] of [["x", region.x], ["y", region.y], ["width", region.width], ["height", region.height], ["opacity", region.opacity]] as const) {
+        if (!Number.isFinite(number)) errors.push(`${label} ${key} must be finite.`);
+      }
+      if (region.x < 0 || region.y < 0 || region.width <= 0 || region.height <= 0 || region.x + region.width > 1 || region.y + region.height > 1) errors.push(`${label} must fit inside normalized 0..1 bounds.`);
+      if (region.opacity < 0 || region.opacity > 1) errors.push(`${label} opacity must be between 0 and 1.`);
+      if (!/^#[0-9a-f]{6}(?:[0-9a-f]{2})?$/i.test(region.color)) errors.push(`${label} color must be a hex color.`);
+      if (region.mode === "image" && !region.imageUrl?.trim()) errors.push(`${label} image mode requires imageUrl.`);
+      if (region.startMs !== undefined && (!Number.isFinite(region.startMs) || region.startMs < 0)) errors.push(`${label} startMs is invalid.`);
+      if (region.endMs !== undefined && (!Number.isFinite(region.endMs) || region.endMs < 0)) errors.push(`${label} endMs is invalid.`);
+      if (region.startMs !== undefined && region.endMs !== undefined && region.endMs <= region.startMs) errors.push(`${label} endMs must be greater than startMs.`);
+      if (region.radius !== undefined && (!Number.isFinite(region.radius) || region.radius < 0 || region.radius > 1)) errors.push(`${label} radius is invalid.`);
+      if (region.feather !== undefined && (!Number.isFinite(region.feather) || region.feather < 0 || region.feather > 1)) errors.push(`${label} feather is invalid.`);
+      let previousTime = -1;
+      for (const [frameIndex, frame] of (region.keyframes || []).entries()) {
+        if (!Number.isFinite(frame.timeMs) || frame.timeMs < 0 || frame.timeMs <= previousTime) errors.push(`${label} keyframe ${frameIndex + 1} time must be ascending.`);
+        previousTime = frame.timeMs;
+        if (![frame.x, frame.y, frame.width, frame.height].every(Number.isFinite)) errors.push(`${label} keyframe ${frameIndex + 1} geometry must be finite.`);
+        if (frame.x < 0 || frame.y < 0 || frame.width <= 0 || frame.height <= 0 || frame.x + frame.width > 1 || frame.y + frame.height > 1) errors.push(`${label} keyframe ${frameIndex + 1} must fit inside normalized bounds.`);
+      }
+    }
+  };
+  validateRegions(config.regions, "Media mask config");
+  for (const [key, regions] of Object.entries(config.itemOverrides || {})) validateRegions(regions, `Media mask override ${key}`);
+  return errors;
+}
+
 export type CanvasDirectoryMediaKind = "image" | "audio" | "video";
 export type CanvasDirectoryMedia = CanvasMediaReference & {
   id: string;
@@ -213,6 +316,7 @@ export type CanvasNodeType =
   | "utility.image-select"
   | "utility.image-transform"
   | "utility.video-frames"
+  | "utility.media-mask"
   | "compose.social-post"
   | "publish.feishu";
 
@@ -234,7 +338,7 @@ export const CANVAS_SCHEDULER_ROLE_LABELS: Record<CanvasSchedulerRole, string> =
   "copy-input": "文案库输入",
 };
 
-export type CanvasConfigValue = string | number | boolean | string[] | CanvasVideoSnapshot[] | CanvasSubtitleRevisionSnapshot | CanvasImageBatchSummary | CompetitorWorkbookSnapshot | CompetitorWorkbookRowSnapshot | CompetitorWorkbookCardSnapshot | null | undefined;
+export type CanvasConfigValue = string | number | boolean | string[] | CanvasVideoSnapshot[] | CanvasSubtitleRevisionSnapshot | CanvasImageBatchSummary | CompetitorWorkbookSnapshot | CompetitorWorkbookRowSnapshot | CompetitorWorkbookCardSnapshot | CanvasMediaMaskConfig | CanvasMaskRegion[] | Record<string, CanvasMaskRegion[]> | null | undefined;
 export type CanvasNodeConfig = Record<string, CanvasConfigValue>;
 
 export type CanvasPosition = { x: number; y: number };

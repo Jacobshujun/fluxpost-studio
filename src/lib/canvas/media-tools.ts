@@ -6,7 +6,8 @@ import { runWithConcurrencyPool } from "../concurrency";
 import { materializeRuntimeMedia } from "../runtime-media-materializer";
 import { findExistingRuntimeMedia, persistRuntimeMedia } from "../runtime-media-storage";
 import { parseCanvasVideoTimestamps, resolveCanvasImageDimensions } from "./node-utils";
-import type { CanvasMediaReference, CanvasNodeConfig, CanvasSlideshowTextStyle } from "./types";
+import { normalizeCanvasMediaMaskConfig, validateCanvasMediaMaskConfig } from "./types";
+import type { CanvasMediaMaskConfig, CanvasMaskRegion, CanvasMediaReference, CanvasNodeConfig, CanvasSlideshowTextStyle } from "./types";
 
 const maxImageBytes = 30 * 1024 * 1024;
 const maxVideoBytes = 512 * 1024 * 1024;
@@ -318,6 +319,116 @@ export async function transformCanvasImages(items: CanvasMediaReference[], confi
     }
   }
   return outputs;
+}
+
+export async function maskCanvasMedia(input: { kind: "image" | "video"; items: CanvasMediaReference[]; config: CanvasMediaMaskConfig }) {
+  const configErrors = validateCanvasMediaMaskConfig(input.config);
+  if (configErrors.length) throw new CanvasMediaNeedsConfigError(configErrors.join(" "));
+  const normalized = normalizeCanvasMediaMaskConfig(input.config);
+  const limit = input.kind === "image" ? maxImages : maxVideos;
+  if (!input.items.length || input.items.length > limit) throw new Error(`Media mask accepts 1-${limit} ${input.kind === "image" ? "images" : "videos"}.`);
+  const outputs: CanvasMediaReference[] = [];
+  for (const item of input.items) {
+    const regions = normalized.itemOverrides?.[item.url] || normalized.itemOverrides?.[item.sha256 || ""] || normalized.regions;
+    const fingerprint = mediaFingerprint("media-mask", item.url, { kind: input.kind, config: JSON.stringify({ ...normalized, regions }) } as unknown as Record<string, string | number>);
+    const extension = input.kind === "image" ? "png" : "mp4";
+    const mimeType = input.kind === "image" ? "image/png" : "video/mp4";
+    const publicPath = `/generated/canvas-tools/${fingerprint}.${extension}`;
+    const existing = await existingOutput(publicPath);
+    if (existing) {
+      outputs.push({ ...item, url: existing, mimeType });
+      continue;
+    }
+    const source = await materializeCanvasMediaReference(item, input.kind, input.kind === "image" ? maxImageBytes : maxVideoBytes);
+    let stagingPath = "";
+    const overlays: Array<{ filePath: string; cleanup: () => Promise<void> }> = [];
+    try {
+      const metadata = input.kind === "video" ? await probeCanvasMediaFile(source.filePath) : undefined;
+      const outputPath = path.join(outputRoot, `${fingerprint}.${extension}`);
+      stagingPath = path.join(outputRoot, `.${fingerprint}-${randomUUID()}.tmp.${extension}`);
+      await mkdir(outputRoot, { recursive: true });
+      const built = await buildMaskFilter(regions, input.kind, metadata?.width || item.width || 1, metadata?.height || item.height || 1, metadata?.durationSeconds || 0, overlays);
+      const args = ["-hide_banner", "-loglevel", "error", "-y", "-i", source.filePath, ...built.inputs.flatMap((filePath) => ["-i", filePath]), "-filter_complex", built.filter, "-map", "[masked]", ...(input.kind === "video" && metadata?.hasAudio ? ["-map", "0:a:0?", "-c:a", "aac", "-b:a", "160k"] : []), "-c:v", input.kind === "video" ? "libx264" : "png", ...(input.kind === "video" ? ["-pix_fmt", "yuv420p", "-movflags", "+faststart", "-t", formatSeconds(metadata?.durationSeconds || 0)] : ["-frames:v", "1"]), stagingPath];
+      const run = () => runMediaCommand("ffmpeg", args, input.kind === "video" ? videoEncodeTimeoutMs : mediaTimeoutMs);
+      if (input.kind === "video") await runWithConcurrencyPool("localVideo", run); else await run();
+      const encoded = await stat(stagingPath);
+      if (!encoded.isFile() || !encoded.size) throw new Error("FFmpeg produced an empty masked media file.");
+      await rename(stagingPath, outputPath); stagingPath = "";
+      const url = await persistRuntimeMedia({ filePath: outputPath, publicPath, contentType: mimeType, overwrite: false });
+      outputs.push({ ...item, url, mimeType, ...(metadata ? { width: metadata.width, height: metadata.height, durationSeconds: metadata.durationSeconds } : { width: item.width, height: item.height }) });
+    } finally {
+      if (stagingPath) await rm(stagingPath, { force: true });
+      await source.cleanup();
+      await Promise.all(overlays.map((overlay) => overlay.cleanup()));
+    }
+  }
+  return outputs;
+}
+
+async function buildMaskFilter(regions: CanvasMaskRegion[], kind: "image" | "video", width: number, height: number, duration: number, overlays: Array<{ filePath: string; cleanup: () => Promise<void> }>) {
+  let current = "0:v";
+  const filters: string[] = [];
+  const inputs: string[] = [];
+  for (const [index, region] of regions.entries()) {
+    const geometry = maskGeometryExpressions(region, width, height);
+    const x = geometry.x; const y = geometry.y; const w = geometry.width; const h = geometry.height;
+    const staticWidth = Math.max(1, Math.round(region.width * width)); const staticHeight = Math.max(1, Math.round(region.height * height));
+    const enable = kind === "video" ? `:enable='between(t,${formatSeconds((region.startMs || 0) / 1000)},${formatSeconds((region.endMs === undefined ? duration * 1000 : region.endMs) / 1000)})'` : "";
+    const out = `mask${index}`;
+    if (region.mode === "solid" && region.shape === "rounded-rectangle" && !(region.keyframes?.length)) {
+      const rounded = await createRoundedMaskOverlay(region, staticWidth, staticHeight);
+      overlays.push(rounded);
+      const overlayIndex = inputs.length + 1;
+      inputs.push(rounded.filePath);
+      filters.push(`[${current}][${overlayIndex}:v]overlay=${Math.round(region.x * width)}:${Math.round(region.y * height)}:format=auto${enable}[${out}]`);
+    } else if (region.mode === "solid") {
+      filters.push(`[${current}]drawbox=x=${x}:y=${y}:w=${w}:h=${h}:color=${region.color}@${Math.max(0, Math.min(1, region.opacity))}:t=fill${enable}[${out}]`);
+    } else if (region.mode === "image") {
+      if (!region.imageUrl) throw new CanvasMediaNeedsConfigError(`Mask region ${region.id} image overlay is missing.`);
+      const overlay = await materializeRuntimeMedia(region.imageUrl, { maxBytes: maxImageBytes, kind: "image" });
+      overlays.push(overlay);
+      const overlayIndex = inputs.length + 1;
+      inputs.push(overlay.filePath);
+      filters.push(`[${overlayIndex}:v]format=rgba,scale=${w}:${h},colorchannelmixer=aa=${Math.max(0, Math.min(1, region.opacity))}[${out}src];[${current}][${out}src]overlay=${x}:${y}:format=auto${enable}[${out}]`);
+    } else {
+      const splitA = `m${index}a`; const splitB = `m${index}b`; const effect = region.mode === "blur" ? `boxblur=10` : `scale=${Math.max(1, Math.floor(staticWidth / 12))}:${Math.max(1, Math.floor(staticHeight / 12))}:flags=area,scale=${staticWidth}:${staticHeight}:flags=neighbor`;
+      filters.push(`[${current}]split=2[${splitA}][${splitB}];[${splitB}]crop=${w}:${h}:${x}:${y},${effect}[${out}src];[${splitA}][${out}src]overlay=${x}:${y}${enable}[${out}]`);
+    }
+    current = out;
+  }
+  if (!regions.length) filters.push(`[0:v]null[masked]`); else filters.push(`[${current}]null[masked]`);
+  return { filter: filters.join(";"), inputs };
+}
+
+async function createRoundedMaskOverlay(region: CanvasMaskRegion, width: number, height: number) {
+  const { default: sharp } = await import("sharp");
+  const filePath = path.join(outputRoot, `.mask-${randomUUID()}.png`);
+  const radius = Math.max(0, Math.min(Math.min(width, height) / 2, (region.radius ?? 0.18) * Math.min(width, height)));
+  const svg = `<svg width="${width}" height="${height}" xmlns="http://www.w3.org/2000/svg"><rect width="${width}" height="${height}" rx="${radius}" fill="${region.color}" fill-opacity="${Math.max(0, Math.min(1, region.opacity))}"/></svg>`;
+  await sharp(Buffer.from(svg)).png().toFile(filePath);
+  return { filePath, cleanup: () => rm(filePath, { force: true }) };
+}
+
+function maskGeometryExpressions(region: CanvasMaskRegion, width: number, height: number) {
+  const keyframes = region.keyframes || [];
+  const value = (property: "x" | "y" | "width" | "height", fallback: number) => {
+    if (keyframes.length < 2) return String(Math.max(1, Math.round(fallback)));
+    const points = keyframes.map((frame) => ({ time: frame.timeMs / 1000, value: Number(frame[property]) * (property === "x" || property === "width" ? width : height) }));
+    let expression = String(Math.round(points[points.length - 1].value));
+    for (let index = points.length - 2; index >= 0; index -= 1) {
+      const left = points[index]; const right = points[index + 1];
+      const slope = (right.value - left.value) / Math.max(0.001, right.time - left.time);
+      const interpolated = `${left.value}+(${slope})*(t-${left.time})`;
+      expression = `if(lt(t\\,${right.time})\\,${interpolated}\\,${expression})`;
+    }
+    return expression;
+  };
+  return {
+    x: value("x", region.x * width),
+    y: value("y", region.y * height),
+    width: value("width", region.width * width),
+    height: value("height", region.height * height),
+  };
 }
 
 export async function extractCanvasVideoFrames(items: CanvasMediaReference[], config: CanvasNodeConfig) {
