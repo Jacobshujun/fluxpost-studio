@@ -10,6 +10,7 @@ const typesSource = read("src/lib/canvas/types.ts");
 const registrySource = read("src/lib/canvas/registry.ts");
 const toolsSource = read("src/lib/canvas/media-tools.ts");
 const pageSource = read("src/app/canvas/page.tsx");
+const serializationSource = read("src/lib/canvas/serialization.ts");
 
 assert.match(typesSource, /"utility\.media-mask"/);
 assert.match(typesSource, /shape: "rectangle" \| "rounded-rectangle"/);
@@ -22,6 +23,7 @@ assert.match(toolsSource, /runWithConcurrencyPool\("localVideo"/);
 assert.match(toolsSource, /maskGeometryExpressions/);
 assert.match(pageSource, /CanvasMediaMaskEditor/);
 assert.match(pageSource, /utility\.media-mask/);
+assert.match(serializationSource, /nodeType === "utility\.media-mask" && key === "mask"/);
 
 const types = loadTsModule("src/lib/canvas/types.ts");
 const valid = {

@@ -142,6 +142,10 @@ function isCanvasIdentifier(value: unknown): value is string {
 function isCanvasNodeConfig(value: unknown, nodeType: CanvasNode["type"]): value is CanvasNode["config"] {
   if (!isRecord(value)) return false;
   return Object.entries(value).every(([key, item]) => {
+    if (nodeType === "utility.media-mask" && key === "mask") {
+      if (!isRecord(item) || item.protocolVersion !== 1 || !Array.isArray(item.regions)) return false;
+      return item.regions.every((region) => isRecord(region));
+    }
     if (nodeType === "input.video-loader" && key === "videos") {
       if (!Array.isArray(item) || item.length > MAX_CANVAS_VIDEO_LOADER_ITEMS) return false;
       const ids = new Set<string>();
