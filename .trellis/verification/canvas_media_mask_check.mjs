@@ -24,6 +24,7 @@ assert.match(toolsSource, /maskGeometryExpressions/);
 assert.match(pageSource, /CanvasMediaMaskEditor/);
 assert.match(pageSource, /utility\.media-mask/);
 assert.match(serializationSource, /nodeType === "utility\.media-mask" && key === "mask"/);
+assert.match(pageSource, /const activeRunId = selectedRunIdRef\.current;[\s\S]*const routeRun = !activeRunId && runId[\s\S]*const selectedRun = explicitRun/);
 
 const types = loadTsModule("src/lib/canvas/types.ts");
 const valid = {

@@ -1242,13 +1242,18 @@ export default function CanvasPage() {
       if (activeWorkflowIdRef.current !== workflowId || loadRunsRequestRef.current !== requestId) return;
       setLatestNodeAttempts(new Map(data.latestNodeAttempts.map((item) => [item.nodeRun.nodeId, item])));
       setLatestSuccessfulNodeRuns(new Map(data.latestSuccessfulNodeRuns.map((item) => [item.nodeRun.nodeId, item])));
-      const explicitRun = runSelectionIsExplicitRef.current
-        ? data.runs.find((run) => run.id === selectedRunIdRef.current)
-        : runId
-          ? data.runs.find((run) => run.id === runId)
-          : undefined;
-      const selectedRun = explicitRun || data.runs[0];
-      const isExplicit = Boolean(explicitRun);
+      const activeRunId = selectedRunIdRef.current;
+      const explicitRun = runSelectionIsExplicitRef.current && activeRunId
+        ? data.runs.find((run) => run.id === activeRunId)
+        : undefined;
+      const routeRun = !activeRunId && runId
+        ? data.runs.find((run) => run.id === runId)
+        : undefined;
+      const selectedRun = explicitRun
+        || (activeRunId ? data.runs.find((run) => run.id === activeRunId) : undefined)
+        || routeRun
+        || data.runs[0];
+      const isExplicit = Boolean(explicitRun || routeRun);
       runSelectionIsExplicitRef.current = isExplicit;
       setDisplayingExplicitRun(isExplicit);
       if (selectedRun) {
