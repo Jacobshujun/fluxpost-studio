@@ -313,7 +313,7 @@ export default function ReviewPage() {
     setDraft(nextPosts.find((post) => post.id === nextSelectedId) || null);
   }
 
-  async function saveDraft(patch?: Partial<GeneratedPost>, instruction?: string, options?: { nextPostId?: string; busyState?: BusyState }) {
+  async function saveDraft(patch?: Partial<GeneratedPost>, instruction?: string, options?: { busyState?: BusyState }) {
     if (!draft) return;
     setBusy(options?.busyState || (instruction ? "review" : "save"));
     setMessage("");
@@ -336,8 +336,7 @@ export default function ReviewPage() {
       });
       const data = (await res.json()) as { post?: GeneratedPost; error?: string };
       if (!res.ok || !data.post) throw new Error(data.error || "保存审查修改失败");
-      const nextSelectedId = options?.nextPostId || data.post.id;
-      mergeSavedPost(data.post, nextSelectedId);
+      mergeSavedPost(data.post, data.post.id);
       setMessage(data.post.status === "approved" ? "已通过审查" : "已保存修改");
     } catch (error) {
       setMessage(error instanceof Error ? error.message : "保存审查修改失败");
@@ -348,8 +347,7 @@ export default function ReviewPage() {
 
   async function approveDraft() {
     if (!draft) return;
-    const nextPostId = findNextUnreviewedPostId(posts, draft.id);
-    await saveDraft({ status: "approved" }, undefined, { nextPostId, busyState: "approve" });
+    await saveDraft({ status: "approved" }, undefined, { busyState: "approve" });
   }
 
   function moveDraftImage(index: number, delta: -1 | 1) {
@@ -1380,13 +1378,6 @@ function buildAuthorOptions(posts: GeneratedPost[]) {
 
 function buildPlatformOptions(posts: GeneratedPost[]) {
   return Array.from(new Set(posts.map((post) => post.platform))).sort((a, b) => (platformLabels[a] || a).localeCompare(platformLabels[b] || b, "zh-CN"));
-}
-
-function findNextUnreviewedPostId(posts: GeneratedPost[], currentPostId: string) {
-  const candidates = posts.filter((post) => post.id !== currentPostId && post.status !== "approved" && post.status !== "published");
-  if (!candidates.length) return undefined;
-  const currentIndex = posts.findIndex((post) => post.id === currentPostId);
-  return candidates.find((post) => posts.findIndex((item) => item.id === post.id) > currentIndex)?.id || candidates[0]?.id;
 }
 
 function upsertReviewPost(posts: GeneratedPost[], savedPost: GeneratedPost) {

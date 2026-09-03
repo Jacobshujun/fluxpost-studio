@@ -144,10 +144,10 @@ assertNotContains(
   "Approve action should pass review immediately without a confirmation dialog.",
 );
 
-assertContains(
+assertNotContains(
   reviewPage,
-  /function findNextUnreviewedPostId\(/,
-  "Approve action should locate the next unreviewed generated post.",
+  /findNextUnreviewedPostId|nextPostId/,
+  "Approve action should keep the current review item selected instead of navigating to the next post.",
 );
 
 assertContains(
@@ -158,8 +158,8 @@ assertContains(
 
 assertContains(
   reviewPage,
-  /const nextSelectedId = options\?\.nextPostId \|\| data\.post\.id;[\s\S]*mergeSavedPost\(data\.post,\s*nextSelectedId\)/,
-  "Approve action should jump to the next unreviewed post after saving without a full list refresh.",
+  /mergeSavedPost\(data\.post,\s*data\.post\.id\)/,
+  "Review save should keep the saved post selected after approval instead of jumping to another post.",
 );
 
 assertNotContains(
@@ -200,7 +200,7 @@ assertContains(
 
 assertContains(
   reviewPage,
-  /await saveDraft\(\{ status: "approved" \}, undefined, \{ nextPostId,\s*busyState: "approve" \}\)/,
+  /await saveDraft\(\{ status: "approved" \}, undefined, \{ busyState: "approve" \}\)/,
   "Approve action should set an approve-specific busy state.",
 );
 
