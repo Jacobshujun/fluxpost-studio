@@ -45,21 +45,26 @@ export function makeDemoSourceItems(platform: Platform, count: number): Normaliz
 }
 
 export function makeDemoPost(source: NormalizedSourceItem, materialPaths: string[], includeSourceVideo = false): GeneratedPost {
+  const title = typeof source.title === "string" ? source.title.trim() : "";
+  const body = typeof source.contentText === "string" ? source.contentText.trim() : "";
   return {
     id: `post-${source.id}`,
     sourceItemId: source.id,
     platform: source.platform,
-    title: "把普通素材做成高点击图文，我会先改这 3 个地方",
-    body:
-      "很多图文不是内容不行，而是第一眼没有让用户停下来。\n\n我的处理顺序是：先确定一个强视觉焦点，再把标题压缩成一句有结果感的话，最后让正文只解释一个核心判断。\n\n如果素材本身比较生活化，可以保留真实感，但背景、光线和画面层级要更干净。这样既不像硬广，也更容易被收藏。",
+    title,
+    body,
     imagePrompt:
-      "社交媒体图文封面，保留用户提供素材的主体，背景改为干净的城市工作室，玻璃反光，高级编辑台氛围，清晰可读的中文标题区域，真实摄影质感",
+      "社交媒体图文配图，保留用户提供素材的主体，背景干净现代，真实摄影质感，不添加文字、水印、二维码或额外品牌露出",
     imageUrls: [],
     videoUrls: includeSourceVideo ? resolveSourceVideoUrls(source) : [],
     imageTasks: buildDefaultImageTasks(source),
     materialPaths,
     status: "draft",
-    aiNotes: ["当前为未配置 OpenAI API Key 时生成的本地演示草稿。", "接入模型后会返回结构化仿写策略和图片 prompt。"],
+    aiNotes: [
+      "当前为未配置 OpenAI API Key 时的本地回退，未改写不存在的源字段。",
+      ...(!title ? ["采集内容没有可确认的标题，已保留标题为空。"] : []),
+      ...(!body ? ["采集内容没有可确认的正文，已保留正文为空。"] : []),
+    ],
     updatedAt: new Date().toISOString(),
   };
 }

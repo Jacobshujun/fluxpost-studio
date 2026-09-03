@@ -1182,11 +1182,9 @@ function dedupeDouyinRecords(records: JsonRecord[]) {
 }
 
 function extractSourceTitle(record: JsonRecord, platform: Platform) {
-  if (platform === "douyin") {
-    const title = firstString(record, ["title", "display_title", "displayTitle"]);
-    return title && !isDouyinNonContentTitle(title) ? title : undefined;
-  }
-  return firstString(record, ["title", "display_title", "displayTitle", "desc", "content", "text_raw"]);
+  const title = firstString(record, ["title", "display_title", "displayTitle"]);
+  if (platform === "douyin") return title && !isDouyinNonContentTitle(title) ? title : undefined;
+  return title;
 }
 
 function isDouyinNonContentTitle(title: string) {

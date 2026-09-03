@@ -16,7 +16,6 @@ import { resolveSourceVideoUrls } from "./source-video-reference";
 import {
   clampGeneratedTitleMax,
   countVisibleTitleChars,
-  fitTitleLength,
   formatTitleStyleInstruction,
   isGeneratedTitleLengthValid,
   normalizeGeneratedTitle,
@@ -62,6 +61,10 @@ type JsonModelOptions = {
 };
 
 export async function generatePost(input: RewriteInput): Promise<GeneratedPost> {
+  const sourceTitle = normalizeSourceText(input.source.title);
+  const sourceBody = normalizeSourceText(input.source.contentText);
+  const hasSourceTitle = Boolean(sourceTitle);
+  const hasSourceBody = Boolean(sourceBody);
   if (!appConfig.openaiApiKey) {
     const source = input.source;
     const demoPost = makeDemoPost(input.source, input.materialPaths);
@@ -70,9 +73,13 @@ export async function generatePost(input: RewriteInput): Promise<GeneratedPost> 
       body: truncateFinishedBody(demoPost.body),
       bodyPolicyVersion: FINISHED_BODY_POLICY_VERSION,
       videoUrls: input.includeSourceVideo === true ? resolveSourceVideoUrls(source) : [],
-      title: clampGeneratedTitleMax(demoPost.title),
+      title: clampGeneratedTitleMax(demoPost.title, ""),
       imageTasks: input.imageTasks,
     };
+  }
+
+  if (!hasSourceTitle && !hasSourceBody) {
+    return buildTextlessDraft(input);
   }
 
   const titleProfile = pickTitleLengthProfile();
@@ -89,23 +96,26 @@ export async function generatePost(input: RewriteInput): Promise<GeneratedPost> 
     "如果图片任务的处理方式是保持原图，该图片会直接使用原图，不需要写入 imagePrompt 的生成要求。",
     "你是社交媒体图文内容制作专家。请学习爆款内容的结构、节奏和视觉策略，但不要复刻原文。",
     "输出严格 JSON，字段为 title, body, imagePrompt, aiNotes。",
-    titleStyleInstruction,
-    "body 用中文，适合社交媒体图文发布，保留段落换行。",
-    FINISHED_BODY_TARGET_INSTRUCTION,
+    hasSourceTitle ? titleStyleInstruction : "源内容没有可确认的标题，title 必须返回空字符串，不要从正文、关键词或车型元数据编造标题。",
+    hasSourceBody ? "body 用中文，适合社交媒体图文发布，保留段落换行；原文较短时保持相应长度，不要为了达到字数补造事实。" : "源内容没有可确认的正文，body 必须返回空字符串，不要根据标题、图片或车型元数据编造正文。",
+    hasSourceBody ? FINISHED_BODY_TARGET_INSTRUCTION : "",
+    "任务关键词/车型字段仅是元数据，不是普通改写的内容上下文；只有原始文本或用户提示词明确提及时才可使用。",
     `平台: ${input.source.platform}`,
-    `原标题: ${input.source.title || ""}`,
-    `原内容: ${input.source.contentText || ""}`,
+    `原标题: ${sourceTitle}`,
+    `原内容: ${sourceBody}`,
     `数据: ${JSON.stringify(input.source.metrics)}`,
     `用户素材路径: ${input.materialPaths.join(", ") || "未提供"}`,
   ].join("\n");
 
   const json = await callOpenAIForJson(prompt);
-  const body = await finalizeAiFinishedBody(stringFromJson(json.body, ""), {
-    context: `平台: ${input.source.platform}\n原标题: ${input.source.title || ""}`,
-    logLabel: "生成正文压缩",
-  });
-  const rawTitle = stringFromJson(json.title, "未命名图文草稿");
-  const title = await repairGeneratedTitleIfNeeded(rawTitle, input, body, titleProfile);
+  const body = hasSourceBody
+    ? await finalizeAiFinishedBody(stringFromJson(json.body, sourceBody), {
+        context: `平台: ${input.source.platform}\n原标题: ${sourceTitle}`,
+        logLabel: "生成正文压缩",
+      })
+    : "";
+  const rawTitle = hasSourceTitle ? stringFromJson(json.title, sourceTitle) : "";
+  const title = hasSourceTitle ? await repairGeneratedTitleIfNeeded(rawTitle, input, body, titleProfile) : "";
 
   return {
     id: `post-${input.source.id}-${Date.now()}`,
@@ -121,9 +131,38 @@ export async function generatePost(input: RewriteInput): Promise<GeneratedPost> 
     imageTasks: input.imageTasks,
     materialPaths: input.materialPaths,
     status: "draft",
-    aiNotes: arrayOfStrings(json.aiNotes),
+    aiNotes: [
+      ...arrayOfStrings(json.aiNotes),
+      ...buildMissingSourceTextNotes(hasSourceTitle, hasSourceBody),
+    ],
     updatedAt: new Date().toISOString(),
   };
+}
+
+function buildTextlessDraft(input: RewriteInput): GeneratedPost {
+  const source = input.source;
+  return {
+    id: `post-${source.id}-${Date.now()}`,
+    sourceItemId: source.id,
+    platform: source.platform,
+    title: "",
+    body: "",
+    bodyPolicyVersion: FINISHED_BODY_POLICY_VERSION,
+    imagePrompt: "",
+    imageUrls: [],
+    videoUrls: input.includeSourceVideo === true ? resolveSourceVideoUrls(source) : [],
+    contentTags: source.contentTagging?.tags || [],
+    imageTasks: input.imageTasks,
+    materialPaths: input.materialPaths,
+    status: "draft",
+    aiNotes: ["采集内容缺少可确认的标题和正文，请先补充文字后再生成。"],
+    updatedAt: new Date().toISOString(),
+  };
+}
+
+function buildMissingSourceTextNotes(hasTitle: boolean, hasBody: boolean) {
+  if (hasTitle && hasBody) return [];
+  return [hasTitle ? "采集内容没有可确认的正文，已保留正文为空。" : "采集内容没有可确认的标题，已保留标题为空。"];
 }
 
 export async function editPostWithPrompt(input: ReviewEditInput): Promise<GeneratedPost> {
@@ -131,7 +170,7 @@ export async function editPostWithPrompt(input: ReviewEditInput): Promise<Genera
     const body = truncateFinishedBody(`${input.post.body}\n\n修改备注：${input.instruction}`);
     return {
       ...input.post,
-      title: clampGeneratedTitleMax(input.post.title),
+      title: clampGeneratedTitleMax(input.post.title, ""),
       body,
       bodyPolicyVersion: FINISHED_BODY_POLICY_VERSION,
       aiNotes: [...input.post.aiNotes, "当前为未配置 OpenAI API Key 时的本地编辑回显。"],
@@ -160,7 +199,7 @@ export async function editPostWithPrompt(input: ReviewEditInput): Promise<Genera
   });
   return {
     ...input.post,
-    title: clampGeneratedTitleMax(stringFromJson(json.title, input.post.title)),
+    title: clampGeneratedTitleMax(stringFromJson(json.title, input.post.title), ""),
     body,
     bodyPolicyVersion: FINISHED_BODY_POLICY_VERSION,
     imagePrompt: stringFromJson(json.imagePrompt, input.post.imagePrompt),
@@ -484,7 +523,7 @@ async function repairGeneratedTitleIfNeeded(title: string, input: RewriteInput, 
     });
   }
 
-  const fallback = buildLocalTitleFallback(normalized, input, body, profile);
+  const fallback = buildLocalTitleFallback(normalized);
   await recordExecutionLog({
     scope: "openai/text",
     action: "Generated title normalized",
@@ -501,59 +540,10 @@ async function repairGeneratedTitleIfNeeded(title: string, input: RewriteInput, 
   return fallback;
 }
 
-function buildLocalTitleFallback(title: string, input: RewriteInput, body: string, profile: TitleLengthProfile) {
-  const context = [title, input.source.title, input.source.contentText, body].filter(Boolean).join("\n");
-  const vehicle = extractVehicleName(context);
-  const scene = extractTitleScene(context);
-  const core = stripWeakTitleWords(title);
-  const candidates = [
-    core ? `${vehicle}${scene}：${core}` : "",
-    `${vehicle}${scene}这次值得细看`,
-    `${vehicle}${scene}我认真看完了`,
-    `${vehicle}真实体验这次值得聊`,
-    `${vehicle}${scene}这些细节比参数更值得聊`,
-    `${vehicle}${scene}看完我更在意这些细节`,
-  ].filter(Boolean);
-
-  return fitTitleLength(candidates.find((candidate) => isGeneratedTitleLengthValid(candidate, profile)) || candidates[0] || title || "小鹏汽车真实体验值得细聊", profile);
+function buildLocalTitleFallback(title: string) {
+  return clampGeneratedTitleMax(title, "");
 }
 
-function extractVehicleName(text: string) {
-  const normalized = text.toLowerCase();
-  const patterns: Array<[RegExp, string]> = [
-    [/小鹏\s*p7\+?/i, "小鹏P7"],
-    [/小鹏\s*x9/i, "小鹏X9"],
-    [/小鹏\s*gx/i, "小鹏GX"],
-    [/小鹏\s*g9/i, "小鹏G9"],
-    [/小鹏\s*g6/i, "小鹏G6"],
-    [/p7\+/i, "小鹏P7+"],
-    [/\bp7\b/i, "小鹏P7"],
-    [/\bx9\b/i, "小鹏X9"],
-    [/\bgx\b/i, "小鹏GX"],
-    [/\bg9\b/i, "小鹏G9"],
-    [/\bg6\b/i, "小鹏G6"],
-    [/mona/i, "小鹏MONA"],
-  ];
-  return patterns.find(([pattern]) => pattern.test(normalized))?.[1] || "小鹏汽车";
-}
-
-function extractTitleScene(text: string) {
-  if (/试驾|试完|开了|开过|体验/.test(text)) return "试驾体验";
-  if (/颜色|车色|丹霞|昆仑|实拍|上镜/.test(text)) return "车色实拍";
-  if (/销量|订单|价格|预售|上市|费用/.test(text)) return "价格销量";
-  if (/六座|家用|空间|二胎|家庭/.test(text)) return "家用场景";
-  if (/配置|版本|Ultra|Max|鹏翼/i.test(text)) return "配置选择";
-  return "真实体验";
-}
-
-function stripWeakTitleWords(title: string) {
-  return title
-    .replace(/^这台车?/, "")
-    .replace(/^这车/, "")
-    .replace(/有点/g, "")
-    .replace(/看完了?$/, "")
-    .replace(/到了$/, "")
-    .replace(/纠结了?$/, "纠结")
-    .replace(/\s+/g, "")
-    .trim();
+function normalizeSourceText(value: unknown) {
+  return typeof value === "string" ? value.trim() : "";
 }

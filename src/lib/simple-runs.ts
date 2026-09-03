@@ -2323,11 +2323,11 @@ function resolveSimpleImagePrompt(draft: GeneratedPost, source: NormalizedSource
   const context = compactPromptText(draft.body || source.contentText, 360);
 
   return [
-    "为这篇汽车社交媒体图文生成一张适合发布的配图。",
+    "为这篇社交媒体图文生成一张适合发布的配图，严格依据已有文字和媒体素材。",
     title ? `图文标题: ${title}` : "",
     sourceTitle && sourceTitle !== title ? `原始内容标题: ${sourceTitle}` : "",
     context ? `正文/语境: ${context}` : "",
-    "画面干净现代，突出智能电动车话题和社交媒体传播感；不要添加文字、水印、二维码或额外品牌露出。",
+    "画面干净现代，突出原始素材的主题和社交媒体传播感；不要添加文字、水印、二维码或额外品牌露出。",
   ]
     .filter(Boolean)
     .join("\n");

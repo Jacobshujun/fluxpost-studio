@@ -53,7 +53,7 @@ export async function saveGeneratedPost(post: GeneratedPost, account?: Workspace
   const nextPost: GeneratedPost = {
     ...applyWorkspaceOwner(post, ownerAccount, previous || post),
     ...finishedBody,
-    title: clampGeneratedTitleMax(post.title),
+    title: clampGeneratedTitleMax(post.title, ""),
     createdAt: post.createdAt || previous?.createdAt || new Date().toISOString(),
     version: post.version || previous?.version || 1,
     updatedAt: post.updatedAt || new Date().toISOString(),

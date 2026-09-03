@@ -63,13 +63,13 @@ assertContains(
 
 assertContains(
   openai,
-  /const titleProfile = pickTitleLengthProfile\(\);[\s\S]*const titleStyleInstruction = formatTitleStyleInstruction\(titleProfile\);[\s\S]*titleStyleInstruction,[\s\S]*body 用中文/,
+  /const titleProfile = pickTitleLengthProfile\(\);[\s\S]*hasSourceTitle[\s\S]*titleStyleInstruction[\s\S]*hasSourceBody[\s\S]*body 用中文/,
   "The randomized title style instruction should be part of the primary generatePost prompt.",
 );
 
 assertContains(
   openai,
-  /const title = await repairGeneratedTitleIfNeeded\(rawTitle,\s*input,\s*body,\s*titleProfile\);[\s\S]*title,/,
+  /const title = hasSourceTitle \? await repairGeneratedTitleIfNeeded\(rawTitle,\s*input,\s*body,\s*titleProfile\) : "";[\s\S]*title,/,
   "generatePost should validate and repair model-returned titles against the selected profile before saving.",
 );
 
@@ -87,26 +87,28 @@ assertContains(
 
 assertContains(
   openai,
-  /const demoPost = makeDemoPost\(input\.source,\s*input\.materialPaths\);[\s\S]*title: clampGeneratedTitleMax\(demoPost\.title\)/,
-  "Demo generation fallback must also clamp titles to the global maximum.",
+  /const demoPost = makeDemoPost\(input\.source,\s*input\.materialPaths\);[\s\S]*title: clampGeneratedTitleMax\(demoPost\.title,\s*""\)/,
+  "Demo generation fallback must preserve an absent title instead of inserting a placeholder.",
 );
 
 assertContains(
   openai,
-  /export async function editPostWithPrompt[\s\S]*const titleProfile = pickTitleLengthProfile\(\);[\s\S]*formatTitleStyleInstruction\(titleProfile\)[\s\S]*title: clampGeneratedTitleMax\(stringFromJson\(json\.title,\s*input\.post\.title\)\)/,
+  /export async function editPostWithPrompt[\s\S]*const titleProfile = pickTitleLengthProfile\(\);[\s\S]*formatTitleStyleInstruction\(titleProfile\)[\s\S]*title: clampGeneratedTitleMax\(stringFromJson\(json\.title,\s*input\.post\.title\),\s*""\)/,
   "AI review edits must include the title rule in the prompt and clamp returned titles.",
 );
 
 assertContains(
   openai,
-  /function buildLocalTitleFallback\(title: string,\s*input: RewriteInput,\s*body: string,\s*profile: TitleLengthProfile\)/,
-  "Title guard should include a local context-based fallback if model repair stays invalid.",
+  /function buildLocalTitleFallback\(title: string\)[\s\S]*clampGeneratedTitleMax\(title,\s*""\)/,
+  "Title repair fallback must preserve source title text without inventing context.",
 );
+
+assertNotContains(openai, /小鹏汽车|小鹏P7|小鹏X9|小鹏G6|小鹏G9|小鹏MONA/, "Title fallback must not inject Xpeng vehicle copy.");
 
 assertContains(
   generatedPosts,
-  /import \{ clampGeneratedTitleMax \} from "\.\/title-guard";[\s\S]*title: clampGeneratedTitleMax\(post\.title\)/,
-  "Generated post persistence must clamp every saved title to the global maximum.",
+  /import \{ clampGeneratedTitleMax \} from "\.\/title-guard";[\s\S]*title: clampGeneratedTitleMax\(post\.title,\s*""\)/,
+  "Generated post persistence must clamp titles without filling absent titles.",
 );
 
 assertNotContains(
