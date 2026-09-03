@@ -24,6 +24,7 @@ import {
   X,
 } from "lucide-react";
 import { getStoredTheme, setStoredTheme, subscribeTheme, type ThemeMode } from "@/lib/theme";
+import { optionalStringCodec, useUrlQueryState } from "@/lib/use-url-query-state";
 import type {
   AdvancedConfigField,
   AdvancedConfigPatchValue,
@@ -92,7 +93,7 @@ export default function AdvancedConfigPage() {
   const [policySample, setPolicySample] = useState<PolicySample>({ title: "", contentText: "", authorName: "" });
   const [policyTestResult, setPolicyTestResult] = useState<PolicyTestResponse | null>(null);
   const [draft, setDraft] = useState<Record<string, DraftField>>({});
-  const [activeGroupId, setActiveGroupId] = useState("");
+  const [activeGroupId, setActiveGroupId, activeGroupIdHydrated] = useUrlQueryState("group", "", optionalStringCodec());
   const [message, setMessage] = useState("");
   const [imageTransportHealth, setImageTransportHealth] = useState<ImageTransportHealth | null>(null);
   const [busy, setBusy] = useState<"load" | "save" | "policy-save" | "policy-reset" | "policy-local-test" | "policy-model-test" | "tos-check" | "tos-reconcile" | "media-scan" | "media-repair" | "image-transport-check" | "image-primary-check" | "image-backup-check" | null>("load");
@@ -133,7 +134,7 @@ export default function AdvancedConfigPage() {
         return result;
       }, {}),
     );
-  }, []);
+  }, [setActiveGroupId]);
 
   const loadPage = useCallback(async () => {
     setBusy("load");
@@ -167,11 +168,12 @@ export default function AdvancedConfigPage() {
     } finally {
       setBusy(null);
     }
-  }, [applySnapshot]);
+  }, [applySnapshot, setActiveGroupId]);
 
   useEffect(() => {
+    if (!activeGroupIdHydrated) return;
     void Promise.resolve().then(loadPage);
-  }, [loadPage]);
+  }, [activeGroupIdHydrated, loadPage]);
 
   async function savePolicy() {
     if (!policy || !policyDraft || busy || !policyDirty || account?.role !== "admin") return;

@@ -107,6 +107,7 @@ const nodeChecks = [
   ["Generated posts row-level mutation check", "generated_posts_upsert_check.mjs"],
   ["Original batch workspace check", "original_batch_workspace_check.mjs"],
   ["Original card orchestrator mock check", "original_card_orchestrator_mock_check.mjs"],
+  ["Route state persistence check", "route_state_check.mjs"],
 ];
 
 process.chdir(projectRoot);

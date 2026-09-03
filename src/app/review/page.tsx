@@ -35,6 +35,7 @@ import { toRemoteImagePreviewSrc } from "@/lib/media-preview";
 import { feishuPublishModeIncludesMedia, feishuPublishModeOptions, formatFeishuPublishMode } from "@/lib/feishu-publish-mode";
 import { FINISHED_BODY_MAX_CHARS, clampFinishedBodyInput, countFinishedBodyChars } from "@/lib/finished-body-policy";
 import { getStoredTheme, setStoredTheme, subscribeTheme, type ThemeMode } from "@/lib/theme";
+import { enumCodec, optionalStringCodec, useUrlQueryState } from "@/lib/use-url-query-state";
 import type { FeishuPostPublishState, FeishuPublishJob, FeishuPublishMode, GeneratedPost, Platform, XhsCard } from "@/lib/types";
 
 type ReviewFilter = GeneratedPost["status"] | "all" | "ready";
@@ -117,6 +118,10 @@ const reviewTimeFilters: Array<{ value: ReviewTimeFilter; label: string }> = [
   { value: "30d", label: "近 30 天" },
 ];
 
+const reviewFilterCodec = enumCodec(reviewFilters.map((item) => item.value), "ready");
+const reviewTimeFilterCodec = enumCodec(reviewTimeFilters.map((item) => item.value), "all");
+const platformFilterCodec = enumCodec<Platform | "all">(["all", "xiaohongshu", "douyin", "weibo", "wechat_channels", "xiaopeng_bbs", "dongchedi", "feishu", "original"], "all");
+
 const themeOptions: Array<{ value: ThemeMode; label: string; icon: ReactNode }> = [
   { value: "professional", label: "专业浅色", icon: <Sun className="h-3.5 w-3.5" /> },
   { value: "editorial", label: "编辑室", icon: <Sparkles className="h-3.5 w-3.5" /> },
@@ -136,14 +141,15 @@ const platformLabels: Record<Platform, string> = {
 
 export default function ReviewPage() {
   const [posts, setPosts] = useState<GeneratedPost[]>([]);
-  const [selectedPostId, setSelectedPostId] = useState("");
+  const [selectedPostId, setSelectedPostId, selectedPostHydrated] = useUrlQueryState("postId", "", optionalStringCodec());
+  const [sourceBatchId, , sourceBatchHydrated] = useUrlQueryState("sourceBatchId", "", optionalStringCodec());
   const [selectedPostIds, setSelectedPostIds] = useState<string[]>([]);
   const [draft, setDraft] = useState<GeneratedPost | null>(null);
-  const [filter, setFilter] = useState<ReviewFilter>("ready");
-  const [timeFilter, setTimeFilter] = useState<ReviewTimeFilter>("all");
-  const [keywordFilter, setKeywordFilter] = useState("");
-  const [authorFilter, setAuthorFilter] = useState("");
-  const [platformFilter, setPlatformFilter] = useState<Platform | "all">("all");
+  const [filter, setFilter] = useUrlQueryState<ReviewFilter>("status", "ready", reviewFilterCodec);
+  const [timeFilter, setTimeFilter] = useUrlQueryState<ReviewTimeFilter>("time", "all", reviewTimeFilterCodec);
+  const [keywordFilter, setKeywordFilter] = useUrlQueryState("q", "", optionalStringCodec());
+  const [authorFilter, setAuthorFilter] = useUrlQueryState("author", "", optionalStringCodec());
+  const [platformFilter, setPlatformFilter] = useUrlQueryState<Platform | "all">("platform", "all", platformFilterCodec);
   const [reviewPrompt, setReviewPrompt] = useState("");
   const [imagePromptByIndex, setImagePromptByIndex] = useState<Record<string, string>>({});
   const [imageBusyKey, setImageBusyKey] = useState("");
@@ -173,7 +179,6 @@ export default function ReviewPage() {
       const res = await fetch("/api/production/posts");
       const data = (await res.json()) as { posts?: GeneratedPost[]; error?: string };
       if (!res.ok) throw new Error(data.error || "加载生成稿失败");
-      const sourceBatchId = new URLSearchParams(window.location.search).get("sourceBatchId");
       const nextPosts = sourceBatchId ? (data.posts || []).filter((post) => post.sourceBatchId === sourceBatchId) : data.posts || [];
       const nextSelectedId =
         preferredPostId && nextPosts.some((post) => post.id === preferredPostId)
@@ -190,7 +195,7 @@ export default function ReviewPage() {
     } finally {
       setBusy(null);
     }
-  }, [selectedPostId]);
+  }, [selectedPostId, setSelectedPostId, sourceBatchId]);
 
   const pollPublishJob = useCallback(async (jobId: string) => {
     try {
@@ -218,8 +223,9 @@ export default function ReviewPage() {
   }, [draft, loadPosts, selectedPostId, selectedPosts]);
 
   useEffect(() => {
+    if (!selectedPostHydrated || !sourceBatchHydrated) return;
     void loadPosts();
-  }, [loadPosts]);
+  }, [loadPosts, selectedPostHydrated, sourceBatchHydrated]);
 
   useEffect(() => {
     async function restoreActivePublishJob() {

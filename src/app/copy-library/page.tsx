@@ -9,26 +9,28 @@ import { FINISHED_BODY_MAX_CHARS, clampFinishedBodyInput, countFinishedBodyChars
 import { useLibraryListSort } from "@/lib/use-library-list-sort";
 import { useMarqueeSelection } from "@/lib/use-marquee-selection";
 import type { CopyLibraryEntryView, LibraryVisibility } from "@/lib/types";
+import { enumCodec, listCodec, optionalStringCodec, useUrlQueryState, type UrlQueryCodec } from "@/lib/use-url-query-state";
 import styles from "./copy-library.module.css";
 
 type CopyLibraryResponse = { entries: CopyLibraryEntryView[]; tags: string[]; error?: string };
 type Draft = { title: string; body: string; tags: string[]; visibility: LibraryVisibility };
 const emptyDraft: Draft = { title: "", body: "", tags: [], visibility: "team" };
 const copyLibrarySortStorageKey = "fluxpost-copy-library-sort";
+const copyVisibilityCodec = enumCodec(["", "private", "team"] as const, "");
 
 export default function CopyLibraryPage() {
   const [data, setData] = useState<CopyLibraryResponse>({ entries: [], tags: [] });
-  const [selectedId, setSelectedId] = useState<string>();
+  const [selectedId, setSelectedId] = useUrlQueryState("entryId", "", optionalStringCodec());
   const [selectedIds, setSelectedIds] = useState<Set<string>>(new Set());
   const selectedIdRef = useRef<string | undefined>(undefined);
   const selectionAnchorIdRef = useRef<string | undefined>(undefined);
   const selectAllRef = useRef<HTMLInputElement>(null);
   const listRef = useRef<HTMLDivElement>(null);
   const [draft, setDraft] = useState<Draft>(emptyDraft);
-  const [search, setSearch] = useState("");
-  const [visibility, setVisibility] = useState("");
+  const [search, setSearch, searchHydrated] = useUrlQueryState("q", "", optionalStringCodec());
+  const [visibility, setVisibility] = useUrlQueryState<string>("visibility", "", copyVisibilityCodec as UrlQueryCodec<string>);
   const [sort, setSort] = useLibraryListSort(copyLibrarySortStorageKey);
-  const [filterTags, setFilterTags] = useState<string[]>([]);
+  const [filterTags, setFilterTags] = useUrlQueryState("tag", [], listCodec());
   const [tagDraft, setTagDraft] = useState("");
   const [loading, setLoading] = useState(true);
   const [busy, setBusy] = useState(false);
@@ -62,7 +64,7 @@ export default function CopyLibraryPage() {
         : result.entries[0]?.id;
       const nextEntry = result.entries.find((entry) => entry.id === nextId);
       selectedIdRef.current = nextId;
-      setSelectedId(nextId);
+      setSelectedId(nextId || "");
       setDraft(nextEntry ? draftFromEntry(nextEntry) : emptyDraft);
       setTagDraft("");
       setMessage("");
@@ -71,12 +73,14 @@ export default function CopyLibraryPage() {
     } finally {
       setLoading(false);
     }
-  }, [query]);
+  }, [query, setSelectedId]);
 
   useEffect(() => {
+    if (!searchHydrated) return;
+    selectedIdRef.current = selectedId || undefined;
     const timer = window.setTimeout(() => void load(), 0);
     return () => window.clearTimeout(timer);
-  }, [load]);
+  }, [load, searchHydrated, selectedId]);
 
   const clearBatchSelection = useCallback(() => {
     selectionAnchorIdRef.current = undefined;
@@ -121,7 +125,7 @@ export default function CopyLibraryPage() {
 
   function startNew() {
     selectedIdRef.current = undefined;
-    setSelectedId(undefined);
+    setSelectedId("");
     setDraft(emptyDraft);
     setMessage("");
     setDeleteOpen(false);
@@ -198,7 +202,7 @@ export default function CopyLibraryPage() {
       if (!response.ok || !result.deleted) throw new Error(result.error || "文案删除失败");
       setData((current) => ({ ...current, entries: current.entries.filter((entry) => entry.id !== selected.id) }));
       selectedIdRef.current = undefined;
-      setSelectedId(undefined);
+      setSelectedId("");
       setDraft(emptyDraft);
       setDeleteOpen(false);
       setMessage("文案已删除");

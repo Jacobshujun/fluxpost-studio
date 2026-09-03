@@ -9,6 +9,7 @@ import {
 import { useCallback, useEffect, useMemo, useRef, useState, useSyncExternalStore, type DragEvent, type ReactNode } from "react";
 import { getLibraryUnifiedTagsForAsset } from "@/lib/library-tags";
 import { getStoredTheme, subscribeTheme, type ThemeMode } from "@/lib/theme";
+import { enumCodec, listCodec, optionalStringCodec, useUrlQueryState } from "@/lib/use-url-query-state";
 import type {
   LibraryAsset, LibraryAssetFilters, LibraryAssetPage, LibraryCollection, LibraryListSort, LibraryNavigation,
   LibrarySelection, LibrarySmartFolder, LibrarySmartFolderCondition, LibraryTagSuggestion, LibraryVisibility,
@@ -20,21 +21,41 @@ type ImportRow = { id: string; name: string; state: "loading" | "done" | "duplic
 type SmartDraft = Pick<LibrarySmartFolder, "name" | "visibility" | "match" | "conditions"> & { id?: string };
 const emptyNavigation: LibraryNavigation = { collections: [], smartFolders: [], counts: { all: 0, uncategorized: 0, favorites: 0 } };
 const emptyPage: LibraryAssetPage = { assets: [], total: 0 };
+const libraryViewCodec = {
+  parse: (params: URLSearchParams, key: string): View => {
+    const raw = params.get(key) || "all";
+    if (raw === "uncategorized" || raw === "favorites") return { kind: raw };
+    const separator = raw.indexOf(":");
+    if (separator > 0) {
+      const kind = raw.slice(0, separator);
+      const id = raw.slice(separator + 1);
+      if ((kind === "collection" || kind === "smart") && id) return { kind, id } as View;
+    }
+    return { kind: "all" };
+  },
+  serialize: (value: View): string[] => value.kind === "all" ? [] : [value.kind === "collection" || value.kind === "smart" ? `${value.kind}:${value.id}` : value.kind],
+};
+const libraryVisibilityCodec = enumCodec(["", "private", "team"] as const, "");
+const libraryTaggingCodec = enumCodec(["", "pending", "success", "failed", "skipped"] as const, "");
+const librarySortCodec = enumCodec(["newest", "oldest", "name-asc", "name-desc", "owner-asc", "owner-desc"] as const, "newest");
 
 export default function LibraryPage() {
   const theme = useSyncExternalStore(subscribeTheme, getStoredTheme, () => "professional" as ThemeMode);
   const [navigation, setNavigation] = useState(emptyNavigation);
   const [data, setData] = useState(emptyPage);
-  const [view, setView] = useState<View>({ kind: "all" });
+  const [view, setView] = useUrlQueryState<View>("view", { kind: "all" }, libraryViewCodec);
   const [searchDraft, setSearchDraft] = useState("");
-  const [search, setSearch] = useState("");
-  const [tags, setTags] = useState<string[]>([]);
+  const [search, setSearch, searchHydrated] = useUrlQueryState("q", "", optionalStringCodec());
+  const [tags, setTags] = useUrlQueryState("tag", [], listCodec());
   const [tagDraft, setTagDraft] = useState("");
   const [suggestions, setSuggestions] = useState<LibraryTagSuggestion[]>([]);
-  const [visibility, setVisibility] = useState<"" | LibraryVisibility>("");
-  const [taggingStatus, setTaggingStatus] = useState("");
-  const [sort, setSort] = useState<LibraryListSort>("newest");
-  const [includeDescendants, setIncludeDescendants] = useState(true);
+  const [visibility, setVisibility] = useUrlQueryState<"" | LibraryVisibility>("visibility", "", libraryVisibilityCodec);
+  const [taggingStatus, setTaggingStatus] = useUrlQueryState("taggingStatus", "", libraryTaggingCodec);
+  const [sort, setSort] = useUrlQueryState<LibraryListSort>("sort", "newest", librarySortCodec);
+  const [includeDescendants, setIncludeDescendants] = useUrlQueryState("descendants", true, {
+    parse: (params, key) => params.get(key) !== "0",
+    serialize: (value) => value ? [] : ["0"],
+  });
   const [loading, setLoading] = useState(true);
   const [loadingMore, setLoadingMore] = useState(false);
   const [busy, setBusy] = useState(false);
@@ -42,13 +63,14 @@ export default function LibraryPage() {
   const [selected, setSelected] = useState(new Set<string>());
   const [allMatching, setAllMatching] = useState(false);
   const [excluded, setExcluded] = useState(new Set<string>());
-  const [detailId, setDetailId] = useState<string>();
+  const [detailId, setDetailId] = useUrlQueryState("asset", "", optionalStringCodec());
   const [previewIndex, setPreviewIndex] = useState<number>();
   const [imports, setImports] = useState<ImportRow[]>([]);
   const [dragging, setDragging] = useState(false);
   const [smartDraft, setSmartDraft] = useState<SmartDraft>();
   const fileInputRef = useRef<HTMLInputElement>(null);
   const requestRef = useRef(0);
+  const searchInitializedRef = useRef(false);
 
   useEffect(() => {
     document.documentElement.dataset.theme = theme;
@@ -72,17 +94,27 @@ export default function LibraryPage() {
   const loadNavigation = useCallback(async () => setNavigation(await api<LibraryNavigation>("/api/library/navigation")), []);
   const reloadAssets = useCallback(async () => setData(await api<LibraryAssetPage>(`/api/library/assets?${queryString}`)), [queryString]);
 
-  useEffect(() => { const timer = setTimeout(() => setSearch(searchDraft.trim()), 300); return () => clearTimeout(timer); }, [searchDraft]);
+  useEffect(() => { const timer = setTimeout(() => setSearch(searchDraft.trim()), 300); return () => clearTimeout(timer); }, [searchDraft, setSearch]);
+  useEffect(() => {
+    if (searchHydrated && !searchInitializedRef.current) {
+      searchInitializedRef.current = true;
+      setSearchDraft(search);
+    }
+  }, [search, searchHydrated]);
   useEffect(() => { void loadNavigation().catch((error) => setMessage(errorMessage(error))); }, [loadNavigation]);
   useEffect(() => {
+    if (!searchHydrated) return;
     const id = ++requestRef.current; const controller = new AbortController();
-    setLoading(true); setMessage(""); clearSelectionState(setSelected, setExcluded, setAllMatching); setDetailId(undefined);
+    setLoading(true); setMessage(""); clearSelectionState(setSelected, setExcluded, setAllMatching);
     void api<LibraryAssetPage>(`/api/library/assets?${queryString}`, { signal: controller.signal })
       .then((result) => { if (id === requestRef.current) setData(result); })
       .catch((error) => { if (!controller.signal.aborted && id === requestRef.current) setMessage(errorMessage(error)); })
       .finally(() => { if (!controller.signal.aborted && id === requestRef.current) setLoading(false); });
     return () => controller.abort();
-  }, [queryString]);
+  }, [queryString, searchHydrated, setDetailId]);
+  useEffect(() => {
+    if (searchHydrated && detailId && !loading && data.assets.length && !data.assets.some((asset) => asset.id === detailId)) setDetailId("");
+  }, [data.assets, detailId, loading, searchHydrated, setDetailId]);
   useEffect(() => {
     if (!tagDraft.trim()) { setSuggestions([]); return; }
     const controller = new AbortController();
@@ -196,13 +228,13 @@ export default function LibraryPage() {
         <div className={styles.tree}>{navigation.smartFolders.map((folder) => <div className={styles.navRow} key={folder.id}><button className={view.kind === "smart" && view.id === folder.id ? styles.navActive : styles.navButton} onClick={() => setView({ kind: "smart", id: folder.id })}><WandSparkles /><span>{folder.name}</span>{folder.visibility === "team" ? <UsersRound /> : null}</button>{folder.canEdit ? <div className={styles.rowActions}><button title="编辑" onClick={() => setSmartDraft({ ...folder })}><Pencil /></button><button title="删除" onClick={() => void deleteSmartFolder(folder)}><Trash2 /></button></div> : null}</div>)}</div>
       </aside>
       <section className={styles.content}>
-        <LibraryToolbar search={searchDraft} tags={tags} tagDraft={tagDraft} suggestions={suggestions} visibility={visibility} taggingStatus={taggingStatus} sort={sort} includeDescendants={includeDescendants} showDescendants={view.kind === "collection"} onSearch={setSearchDraft} onTagDraft={setTagDraft} onAddTag={(tag) => { setTags((current) => current.includes(tag) ? current : [...current, tag]); setTagDraft(""); }} onRemoveTag={(tag) => setTags((current) => current.filter((item) => item !== tag))} onVisibility={setVisibility} onTaggingStatus={setTaggingStatus} onSort={setSort} onDescendants={setIncludeDescendants} />
+        <LibraryToolbar search={searchDraft} tags={tags} tagDraft={tagDraft} suggestions={suggestions} visibility={visibility} taggingStatus={taggingStatus} sort={sort} includeDescendants={includeDescendants} showDescendants={view.kind === "collection"} onSearch={setSearchDraft} onTagDraft={setTagDraft} onAddTag={(tag) => { setTags((current) => current.includes(tag) ? current : [...current, tag]); setTagDraft(""); }} onRemoveTag={(tag) => setTags((current) => current.filter((item) => item !== tag))} onVisibility={setVisibility} onTaggingStatus={(value) => setTaggingStatus(value as typeof taggingStatus)} onSort={setSort} onDescendants={setIncludeDescendants} />
         {selectedCount ? <BatchBar count={selectedCount} allMatching={allMatching} canSelectAll={!allMatching && selected.size === data.assets.length && data.total > data.assets.length} busy={busy} onSelectAll={() => { setAllMatching(true); setSelected(new Set()); }} onAddTag={() => { const value = window.prompt("添加标签"); if (value?.trim()) void updateTags(splitComma(value)); }} onRemoveTag={() => { const value = window.prompt("移除标签"); if (value?.trim()) void updateTags([], splitComma(value)); }} onFavorite={() => void runBatch({ action: "set_favorite", favorite: true }, "已收藏")} onTeam={() => void runBatch({ action: "set_visibility", visibility: "team" }, "已共享")} onPrivate={() => void runBatch({ action: "set_visibility", visibility: "private" }, "已设为个人")} onCollection={() => { const id = window.prompt(`图集 ID\n${navigation.collections.map((item) => `${item.name}: ${item.id}`).join("\n")}`); if (id) void runBatch({ action: "add_to_collections", collectionIds: [id] }, "已加入图集"); }} onTagging={() => void api("/api/library/tagging", { method: "POST", headers: jsonHeaders, body: JSON.stringify({ selection, mode: "all" }) }).then(() => { setMessage("已提交打标"); clearSelection(); }).catch((error) => setMessage(errorMessage(error)))} onDelete={() => { if (window.confirm(`永久删除 ${selectedCount} 张图片？此操作不可撤销。`)) void runBatch({ action: "delete", confirm: true }, "已删除"); }} onClear={clearSelection} /> : null}
         {message ? <div className={styles.message}>{message}<button onClick={() => setMessage("")}><X /></button></div> : null}
         <div className={styles.grid} aria-busy={loading}>{loading ? <div className={styles.state}><LoaderCircle className={styles.spin} />加载中</div> : null}{!loading && !data.assets.length ? <div className={styles.state}><ImageIcon />暂无图片</div> : null}{data.assets.map((asset, index) => <AssetCard key={asset.id} asset={asset} selected={isSelected(asset.id)} onSelect={() => toggleAsset(asset.id)} onDetail={() => setDetailId(asset.id)} onPreview={() => setPreviewIndex(index)} onFavorite={() => void toggleFavorite(asset)} />)}</div>
         {data.nextCursor ? <button className={styles.loadMore} disabled={loadingMore} onClick={() => void loadMore()}>{loadingMore ? <LoaderCircle className={styles.spin} /> : <MoreHorizontal />}{loadingMore ? "加载中" : "加载更多"}</button> : null}
       </section>
-      {detail ? <DetailPanel key={detail.id} asset={detail} collections={navigation.collections} busy={busy} onClose={() => setDetailId(undefined)} onSave={(patch) => patchAsset(detail.id, patch)} onFavorite={() => void toggleFavorite(detail)} onPreview={() => setPreviewIndex(data.assets.findIndex((item) => item.id === detail.id))} /> : null}
+      {detail ? <DetailPanel key={detail.id} asset={detail} collections={navigation.collections} busy={busy} onClose={() => setDetailId("")} onSave={(patch) => patchAsset(detail.id, patch)} onFavorite={() => void toggleFavorite(detail)} onPreview={() => setPreviewIndex(data.assets.findIndex((item) => item.id === detail.id))} /> : null}
     </div>
     {previewIndex !== undefined && data.assets[previewIndex] ? <Preview assets={data.assets} index={previewIndex} onIndex={setPreviewIndex} onClose={() => setPreviewIndex(undefined)} /> : null}
     {smartDraft ? <SmartFolderDialog draft={smartDraft} collections={navigation.collections} busy={busy} onChange={setSmartDraft} onClose={() => setSmartDraft(undefined)} onSave={() => void saveSmartFolder()} /> : null}

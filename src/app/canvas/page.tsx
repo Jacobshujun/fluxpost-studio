@@ -137,6 +137,7 @@ import {
   CANVAS_SCHEDULER_ROLE_LABELS,
 } from "@/lib/canvas/types";
 import { getStoredTheme, subscribeTheme } from "@/lib/theme";
+import { enumCodec, optionalStringCodec, useUrlQueryState } from "@/lib/use-url-query-state";
 import { selectIdRange } from "@/lib/list-selection";
 import { SubtitleEditorDialog } from "./SubtitleEditorDialog";
 import { contentTagOptions } from "@/lib/types";
@@ -236,9 +237,13 @@ const canvasViewportDetailZoom = { reduced: 0.65, overview: 0.35 } as const;
 const canvasEdgeAnimationDuration = { idle: 3.6, active: 1.8 } as const;
 let canvasScheduleParameterSequence = 0;
 const canvasScheduleParameterTypes = ["image", "image-group", "directory-group", "video", "source-video", "content-pool", "text", "copy", "number", "boolean", "enum"] as const satisfies readonly CanvasScheduleParameterType[];
+const canvasPanelCodec = enumCodec(["", "tasks", "schedules"] as const, "");
 
 export default function CanvasPage() {
   const [workflows, setWorkflows] = useState<CanvasWorkflow[]>([]);
+  const [workflowId, setWorkflowId, workflowIdHydrated] = useUrlQueryState("workflowId", "", optionalStringCodec());
+  const [runId, setRunId] = useUrlQueryState("runId", "", optionalStringCodec());
+  const [panel, setPanel, panelHydrated] = useUrlQueryState<"" | "tasks" | "schedules">("panel", "", canvasPanelCodec);
   const [activeWorkflow, setActiveWorkflow] = useState<CanvasWorkflow | null>(null);
   const [nodes, setNodes] = useState<FlowNode[]>([]);
   const [edges, setEdges] = useState<FlowEdge[]>([]);
@@ -260,6 +265,7 @@ export default function CanvasPage() {
   const [mobilePalette, setMobilePalette] = useState(false);
   const [taskCenterOpen, setTaskCenterOpen] = useState(false);
   const [scheduleCenterOpen, setScheduleCenterOpen] = useState(false);
+  const panelInitializedRef = useRef(false);
   const [taskRuns, setTaskRuns] = useState<CanvasRun[]>([]);
   const [selectedTaskRun, setSelectedTaskRun] = useState<CanvasRunWithNodes>();
   const [selectedTaskRunId, setSelectedTaskRunId] = useState<string>();
@@ -469,8 +475,21 @@ export default function CanvasPage() {
   }, []);
 
   useEffect(() => {
-    void loadWorkflows();
-  }, []);
+    if (workflowIdHydrated) void loadWorkflows(workflowId || undefined);
+    // loadWorkflows is intentionally kept local to this page; it is not memoized because it closes over the editor state.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [workflowId, workflowIdHydrated]);
+
+  useEffect(() => {
+    if (!panelHydrated) return;
+    if (!panelInitializedRef.current) {
+      panelInitializedRef.current = true;
+      setTaskCenterOpen(panel === "tasks");
+      setScheduleCenterOpen(panel === "schedules");
+      return;
+    }
+    setPanel(taskCenterOpen ? "tasks" : scheduleCenterOpen ? "schedules" : "");
+  }, [panel, panelHydrated, scheduleCenterOpen, setPanel, taskCenterOpen]);
 
   useEffect(() => {
     if (!activeWorkflow) return;
@@ -530,6 +549,7 @@ export default function CanvasPage() {
   }
 
   function selectWorkflow(workflow: CanvasWorkflow) {
+    setWorkflowId(workflow.id);
     stageRef.current?.classList.remove("canvas-stage-viewport-moving");
     syncCanvasViewportDetail(stageRef.current, workflow.graph.viewport.zoom);
     if (canvasHistoryTimerRef.current) clearTimeout(canvasHistoryTimerRef.current);
@@ -1222,16 +1242,20 @@ export default function CanvasPage() {
       setLatestSuccessfulNodeRuns(new Map(data.latestSuccessfulNodeRuns.map((item) => [item.nodeRun.nodeId, item])));
       const explicitRun = runSelectionIsExplicitRef.current
         ? data.runs.find((run) => run.id === selectedRunIdRef.current)
-        : undefined;
+        : runId
+          ? data.runs.find((run) => run.id === runId)
+          : undefined;
       const selectedRun = explicitRun || data.runs[0];
       const isExplicit = Boolean(explicitRun);
       runSelectionIsExplicitRef.current = isExplicit;
       setDisplayingExplicitRun(isExplicit);
       if (selectedRun) {
         selectedRunIdRef.current = selectedRun.id;
+        setRunId(selectedRun.id);
         await refreshRun(selectedRun.id, workflowId);
       } else {
         selectedRunIdRef.current = undefined;
+        setRunId("");
         setActiveRun(undefined);
       }
     } catch (error) {
@@ -1278,6 +1302,7 @@ export default function CanvasPage() {
   async function loadTaskRun(runId: string, parentRequestId?: number) {
     const requestId = parentRequestId || ++taskCenterRequestRef.current;
     setSelectedTaskRunId(runId);
+    setRunId(runId);
     setTaskCenterBusy(true);
     setTaskCenterError("");
     try {

@@ -4,7 +4,7 @@ Last updated: 2026-09-03
 
 ## One-Line Status
 
-The unified image asset pool and consumers are implemented and verified; missing source title/body handling now preserves incomplete drafts without invented copy or vehicle-specific fallbacks. The clean fix is not yet activated on port `3001`.
+URL-backed navigation state is implemented across the workspace pages and verified by the full offline baseline; the clean fix is not yet activated on port `3001`.
 
 ## Current Focus
 
@@ -22,6 +22,7 @@ The unified image asset pool and consumers are implemented and verified; missing
 - Canvas interaction source and mocked Chromium checks pass for blank-area pan, Alt-only marquee multi-select, collapsed-by-default node library, mobile drawer access, and 390px overflow.
 - Focused migration/query checks, TypeScript, lint (0 errors, 20 warnings), build, isolated HTTP/SQLite smoke, and the full baseline pass. An isolated 50,000-asset/1,000,000-label PostgreSQL benchmark met all P95 targets.
 - 2026-09-03 missing-source generation fix: Weibo and provider normalization no longer infer titles from body text; generation is field-presence aware, textless items skip model calls, no-key fallbacks preserve empty fields, title persistence/repair no longer invents Xpeng copy, and simple image fallback wording is source-generic. Focused source/title/Weibo checks, TypeScript, lint (0 errors, 20 warnings), build, HTTP/SQLite smoke, and the full offline baseline passed.
+- 2026-09-03 route state persistence: shared URL query state now restores page filters, selected entities, Canvas workflow/run, and operational panels across hard refresh and browser navigation; all page routes return 200 without redirecting to `/`. TypeScript, lint (0 errors, existing warnings), build, HTTP smoke, deterministic route-state check, SQLite, and the full offline baseline passed. Playwright browser refresh coverage remains pending because `playwright` is not installed in this workspace.
 - 2026-09-02 Canvas batch retry regression fix: V2 child reconciliation now persists safe retryability from Canvas node attempts; failed children remain directly retryable for historical schedules. A targeted read of terminal schedules now recomputes retryability, and partial children with legacy failed `model.gpt-image` nodes are retryable as well as per-image failed-index runs. The schedule center loads that detail before rendering actions. Canvas scheduler check, TypeScript, lint (0 errors, 20 warnings), build, isolated HTTP/SQLite smoke, and the full offline baseline passed.
 - 2026-09-02 Canvas batch result model: V1/V2 implementation differences are hidden behind one result-item projection. Leaf results now expose only queued/running/completed/failed/cancelled; failed image batches retain produced/failed counts and retryability. Task groups and top-level batches retain partial aggregation, with per-item, group, and batch-level retry actions. Historical records are corrected lazily while raw CanvasRun diagnostics remain unchanged. Canvas scheduler check, TypeScript, lint (0 errors, 20 warnings), build, isolated HTTP/SQLite smoke, and the full offline baseline passed.
 

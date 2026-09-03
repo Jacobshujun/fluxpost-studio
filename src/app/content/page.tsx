@@ -36,6 +36,7 @@ import {
 import { ContentPoolCustomTagPicker } from "@/components/content-pool-custom-tag-picker";
 import { contentPoolCustomTagKey, matchesAllContentPoolCustomTags } from "@/lib/content-pool-tags";
 import { getStoredTheme, setStoredTheme, subscribeTheme, type ThemeMode } from "@/lib/theme";
+import { enumCodec, listCodec, optionalStringCodec, useUrlQueryState } from "@/lib/use-url-query-state";
 import { toRemoteImagePreviewSrc } from "@/lib/media-preview";
 import { selectBestVideoHighlightFrames } from "@/lib/video-frame-policy";
 import { mergeDownloadedAndRemoteImages } from "@/lib/media-url-filter";
@@ -68,6 +69,12 @@ type PoolSortMode = "hot_desc" | "published_desc" | "published_asc" | "crawled_d
 type CrawlInputMode = "keyword" | "links";
 type LinkImportPlatform = SourceLinkPlatform | "auto";
 type BusyState = "load" | "crawl" | "source" | "batch" | "secondary" | "settings" | null;
+
+const crawlInputModeCodec = enumCodec(["keyword", "links"] as const, "keyword");
+const crawlPlatformCodec = enumCodec(["wechat_channels", "xiaohongshu", "douyin", "weibo"] as const, "xiaohongshu");
+const poolStatusCodec = enumCodec(["all", "new", "analyzed", "rewritten", "approved", "published"] as const, "all");
+const poolPlatformCodec = enumCodec(["all", "wechat_channels", "xiaohongshu", "douyin", "weibo", "xiaopeng_bbs", "dongchedi", "feishu", "original"] as const, "all");
+const poolSortCodec = enumCodec(["hot_desc", "published_desc", "published_asc", "crawled_desc", "crawled_asc", "engagement_desc"] as const, "hot_desc");
 
 type LinkImportResultStatus = "imported" | "filtered" | "duplicate" | "unsupported" | "failed";
 
@@ -273,15 +280,15 @@ export default function ContentDeskPage() {
   const [projects, setProjects] = useState<ContentProject[]>([]);
   const [activeProject, setActiveProject] = useState<ContentProject | null>(null);
   const [sources, setSources] = useState<NormalizedSourceItem[]>([]);
-  const [selectedSourceId, setSelectedSourceId] = useState("");
+  const [selectedSourceId, setSelectedSourceId] = useUrlQueryState("sourceId", "", optionalStringCodec());
   const [selectedContentItemIds, setSelectedContentItemIds] = useState<string[]>([]);
-  const [crawlInputMode, setCrawlInputMode] = useState<CrawlInputMode>("keyword");
-  const [platform, setPlatform] = useState<CrawlPlatform>("xiaohongshu");
+  const [crawlInputMode, setCrawlInputMode] = useUrlQueryState<CrawlInputMode>("mode", "keyword", crawlInputModeCodec);
+  const [platform, setPlatform] = useUrlQueryState<CrawlPlatform>("crawlPlatform", "xiaohongshu", crawlPlatformCodec);
   const [linkImportPlatform, setLinkImportPlatform] = useState<LinkImportPlatform>("auto");
   const [linkImportText, setLinkImportText] = useState("");
   const [linkImportResults, setLinkImportResults] = useState<LinkImportResult[]>([]);
   const [linkImportSummary, setLinkImportSummary] = useState<LinkImportSummary | null>(null);
-  const [query, setQuery] = useState("");
+  const [query, setQuery, queryHydrated] = useUrlQueryState("query", "", optionalStringCodec());
   const [targetCount, setTargetCount] = useState(20);
   const [sort, setSort] = useState(defaultPlatformCrawlSettings.xiaohongshu.sort || "general");
   const [noteType, setNoteType] = useState(0);
@@ -297,12 +304,12 @@ export default function ContentDeskPage() {
   const [poolDirectOriginalReference, setPoolDirectOriginalReference] = useState(defaultSimpleRunMediaSettings.directOriginalReference);
   const [poolIncludeSourceVideo, setPoolIncludeSourceVideo] = useState(defaultSimpleRunMediaSettings.includeSourceVideo);
   const [poolEnableVideoTranscription, setPoolEnableVideoTranscription] = useState(defaultSimpleRunMediaSettings.enableVideoTranscription);
-  const [poolStatusFilter, setPoolStatusFilter] = useState<PoolStatusFilter>("all");
-  const [poolPlatformFilter, setPoolPlatformFilter] = useState<PoolPlatformFilter>("all");
-  const [poolSort, setPoolSort] = useState<PoolSortMode>("hot_desc");
-  const [poolSearch, setPoolSearch] = useState("");
-  const [poolContentTagFilters, setPoolContentTagFilters] = useState<ContentTag[]>([]);
-  const [poolCustomTagFilters, setPoolCustomTagFilters] = useState<string[]>([]);
+  const [poolStatusFilter, setPoolStatusFilter] = useUrlQueryState<PoolStatusFilter>("status", "all", poolStatusCodec);
+  const [poolPlatformFilter, setPoolPlatformFilter] = useUrlQueryState<PoolPlatformFilter>("poolPlatform", "all", poolPlatformCodec);
+  const [poolSort, setPoolSort] = useUrlQueryState<PoolSortMode>("poolSort", "hot_desc", poolSortCodec);
+  const [poolSearch, setPoolSearch] = useUrlQueryState("poolQ", "", optionalStringCodec());
+  const [poolContentTagFilters, setPoolContentTagFilters] = useUrlQueryState<ContentTag[]>("contentTag", [], listCodec() as unknown as import("@/lib/use-url-query-state").UrlQueryCodec<ContentTag[]>);
+  const [poolCustomTagFilters, setPoolCustomTagFilters] = useUrlQueryState("customTag", [], listCodec());
   const [batchTagsOpen, setBatchTagsOpen] = useState(false);
   const [batchTagMode, setBatchTagMode] = useState<"add" | "remove">("add");
   const [batchTagFailures, setBatchTagFailures] = useState<ContentPoolTagBatchResult["failures"]>([]);
@@ -381,6 +388,7 @@ export default function ContentDeskPage() {
   }, [theme]);
 
   useEffect(() => {
+    if (!queryHydrated) return;
     void loadInitialData();
     const timer = window.setInterval(() => {
       void loadSimpleRuns();
@@ -388,7 +396,7 @@ export default function ContentDeskPage() {
     }, 3500);
     return () => window.clearInterval(timer);
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, []);
+  }, [queryHydrated]);
 
   useEffect(() => {
     if (!preview) return;

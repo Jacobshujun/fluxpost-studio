@@ -5,6 +5,7 @@ import { useCallback, useEffect, useMemo, useState } from "react";
 import { Check, ClipboardCheck, ExternalLink, Loader2, RefreshCw, Save, ShieldAlert, ShieldCheck, X } from "lucide-react";
 import { defaultDistributionCheckPrompt } from "@/lib/distribution-check-prompt";
 import type { DistributionCheckJob, DistributionCheckResponse, WorkspacePromptSettings } from "@/lib/types";
+import { optionalStringCodec, useUrlQueryState } from "@/lib/use-url-query-state";
 
 type BusyState = "run" | "settings" | "refresh" | null;
 
@@ -14,6 +15,7 @@ export default function DistributionCheckPage() {
   const [numbersText, setNumbersText] = useState("");
   const [busy, setBusy] = useState<BusyState>(null);
   const [message, setMessage] = useState("");
+  const [jobId, setJobId, jobIdHydrated] = useUrlQueryState("jobId", "", optionalStringCodec());
   const [job, setJob] = useState<DistributionCheckJob | null>(null);
   const [jobs, setJobs] = useState<DistributionCheckJob[]>([]);
   const [prompt, setPrompt] = useState(defaultDistributionCheckPrompt);
@@ -30,6 +32,7 @@ export default function DistributionCheckPage() {
   }, []);
 
   useEffect(() => {
+    if (!jobIdHydrated) return;
     let alive = true;
     async function loadInitialState() {
       try {
@@ -40,7 +43,9 @@ export default function DistributionCheckPage() {
         if (settingsData.settings?.distributionCheckPrompt) setPrompt(settingsData.settings.distributionCheckPrompt);
         const latestJobs = jobsData.jobs || [];
         setJobs(latestJobs);
-        setJob(latestJobs[0] || null);
+        const selected = jobId ? latestJobs.find((item) => item.id === jobId) : undefined;
+        setJob(selected || latestJobs[0] || null);
+        if (!selected && latestJobs[0]) setJobId(latestJobs[0].id);
       } catch {
         // The run action will surface auth/config errors; keep the default prompt visible meanwhile.
       }
@@ -49,7 +54,7 @@ export default function DistributionCheckPage() {
     return () => {
       alive = false;
     };
-  }, []);
+  }, [jobId, jobIdHydrated, setJobId]);
 
   useEffect(() => {
     if (!running || !job?.id) return;
@@ -100,6 +105,7 @@ export default function DistributionCheckPage() {
       const data = (await res.json()) as { job?: DistributionCheckJob; error?: string };
       if (!res.ok || !data.job) throw new Error(data.error || "分发审核入队失败");
       setJob(data.job);
+      setJobId(data.job.id);
       setJobs((current) => [data.job!, ...current.filter((item) => item.id !== data.job!.id)].slice(0, 30));
       setMessage(`审核任务已入队：${data.job.total} 条编号，后台会持续回写飞书。`);
     } catch (error) {

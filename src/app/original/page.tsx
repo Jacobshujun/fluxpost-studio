@@ -22,6 +22,7 @@ import {
   XCircle,
 } from "lucide-react";
 import type { OriginalBatch, OriginalBatchInputItem, OriginalBatchSettings, OriginalBatchStatus } from "@/lib/types";
+import { enumCodec, useUrlQueryState } from "@/lib/use-url-query-state";
 import styles from "./original.module.css";
 
 type EditorRow = OriginalBatchInputItem & { id: number };
@@ -46,6 +47,7 @@ const initialSettings: OriginalBatchSettings = {
   imageCount: "auto",
   webSearch: false,
 };
+const originalStatusCodec = enumCodec(["all", "queued", "running", "paused", "completed", "partial", "failed", "cancelled"] as const, "all");
 
 const statusLabels: Record<OriginalBatchStatus, string> = {
   queued: "排队中",
@@ -69,7 +71,7 @@ export default function OriginalBatchPage() {
   const [preflight, setPreflight] = useState<Preflight | null>(null);
   const [duplicateRows, setDuplicateRows] = useState<number[]>([]);
   const [batches, setBatches] = useState<OriginalBatch[]>([]);
-  const [statusFilter, setStatusFilter] = useState<OriginalBatchStatus | "all">("all");
+  const [statusFilter, setStatusFilter, statusFilterHydrated] = useUrlQueryState<OriginalBatchStatus | "all">("status", "all", originalStatusCodec);
 
   const validRows = useMemo(() => rows.map(stripRow).filter((row) => row.topic || row.requirements || row.vehicleKeyword), [rows]);
   const localDuplicateRows = useMemo(() => findDuplicateRows(validRows), [validRows]);
@@ -87,13 +89,14 @@ export default function OriginalBatchPage() {
   }, [statusFilter]);
 
   useEffect(() => {
+    if (!statusFilterHydrated) return;
     let active = true;
     void fetchBatchList(statusFilter)
       .then((next) => { if (active) setBatches(next); })
       .catch((error) => { if (active) setMessage(error instanceof Error ? error.message : "批次加载失败"); })
       .finally(() => { if (active) setBusy((current) => current === "history" ? null : current); });
     return () => { active = false; };
-  }, [statusFilter]);
+  }, [statusFilter, statusFilterHydrated]);
 
   useEffect(() => {
     if (!liveBatch) return;

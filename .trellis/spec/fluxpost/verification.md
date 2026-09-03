@@ -1,6 +1,6 @@
 # Verification
 
-Last updated: 2026-08-28
+Last updated: 2026-09-03
 
 ## Baseline Command
 
@@ -51,6 +51,8 @@ For a production candidate:
 Do not deploy a dirty worktree, branch name, abbreviated SHA, local runtime rows, or unpushed commit.
 
 ## Recent Verification
+
+- 2026-09-03: URL-backed navigation state across content, library, review, Canvas, original, copy-library, distribution-check, and config pages passed the deterministic route-state contract, TypeScript, lint (0 errors with existing warnings), production build, HTTP route checks, SQLite, and the complete offline baseline. Direct browser refresh automation was not run because `playwright` is not installed locally.
 
 - 2026-08-28: Unified assets, nested collections, flat tags, favorites, notes, smart folders, SQL filtering/keyset paging, server query selections, thumbnail UI, role migration, and Canvas/simple frozen consumers passed focused checks, TypeScript, lint (0 errors, 20 warnings), build, isolated HTTP/SQLite smoke, and the complete offline baseline. Mocked Chromium passed at 1440x960 and 390x844 without overflow or live services. An isolated 50,000-asset/1,000,000-label PostgreSQL benchmark measured P95 `9.3ms` default list, `30.2ms` tag filter, `252.6ms` collection subtree, `5.4ms` smart folder, `8.7ms` cursor page, and `11.6ms` navigation metadata.
 - 2026-08-27: Canvas ordinary and batch launches now assign execution, schedule access, derived runs, generated posts, and review attribution to the authenticated launcher while preserving creator audit fields; shared/child/aggregate/finalize/retry/restart paths, owner-filtered history/reuse, indexed PostgreSQL/SQLite owner writes, focused checks, TypeScript, lint (0 errors and 5 existing warnings), build, isolated HTTP smoke, and the full offline baseline passed without external calls.
