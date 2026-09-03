@@ -4,7 +4,7 @@ Last updated: 2026-09-03
 
 ## One-Line Status
 
-Canvas now includes a user-configurable "遮罩" media node for image/video derivatives; the implementation, structured-config fix, and full offline baseline are verified, and commit `2ad27cb1f304d188f53c8215fa2de63e307b244c` is active on port `3001`.
+Canvas now includes a user-configurable "遮罩" media node for image/video derivatives; the implementation, structured-config fix, and full offline baseline are verified, and the current committed HEAD is active on port `3001`.
 
 ## Current Focus
 
