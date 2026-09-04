@@ -21,7 +21,16 @@ Code fixes start from current GitHub `main` in a clean worktree. Run the complet
 - GPT 图片生成接口边界
 - 飞书 CLI 写入多维表格的 payload wrapper
 
-## Latest Updates (2026-07-02)
+## Latest Updates (2026-09-04)
+
+- Added the unified asset library with nested collections, favorites, notes, flat tags, smart folders, owner-aware filtering, cursor paging, thumbnails, and batch collection actions.
+- Expanded Canvas workflows with content-pool selection, local-directory slideshow inputs, ComfyUI-style pan and marquee interactions, and responsive desktop/mobile checks.
+- Improved Canvas batch scheduling with consistent V1/V2 result states, partial-failure aggregation, historical retry actions, and retryability projection for generated review posts.
+- Added the configurable `utility.media-mask` node for image/video derivatives, including rectangle and rounded-rectangle regions, solid/blur/mosaic/image modes, video intervals, and deterministic derived-media caching.
+- Preserved URL-backed navigation state across content, library, review, Canvas, original, copy-library, distribution-check, and configuration pages, including hard refresh and browser navigation.
+- Fixed missing-source generation so textless records remain textless instead of receiving inferred copy; the complete offline verification baseline passes for the current GitHub candidate.
+
+## Earlier Updates (2026-07-02)
 
 - Migrated AI collaboration context from the old Harness files to `.trellis/`, with `npm run trellis:check` as the cross-platform offline baseline entry. The old `docs/harness.disabled/` and `scripts/harness.disabled/` paths are migration archives only.
 - Improved the review desk with theme sync, desktop internal scrolling, per-image Prompt generation, single-image regeneration, paste/upload replacement and append flows, plus approve-and-advance review behavior.
