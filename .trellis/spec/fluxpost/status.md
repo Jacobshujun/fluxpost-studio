@@ -1,12 +1,14 @@
 # FluxPost Current Status
 
-Last updated: 2026-09-03
+Last updated: 2026-09-04
 
 ## One-Line Status
 
 Canvas now includes a user-configurable "遮罩" media node for image/video derivatives; the implementation, structured-config fix, and full offline baseline are verified, and the current committed HEAD is active on port `3001`.
 
 ## Current Focus
+
+- 2026-09-04: The verified local candidate `75d35adb5dd699862d2ecfc90459da0d1a678e1a` is synchronized to GitHub `origin/main`; production remains unchanged.
 
 - Active library types, APIs, URLs, and UI no longer expose `reference | vehicle`; deterministic private migration roots preserve old memberships and Canvas filters.
 - Ordinary nested collections, personal favorites, asset notes, flat tags, one-level `all/any` smart folders, permission-aware SQL filters, signed keyset cursors, and server-side query selections share PostgreSQL/SQLite semantics.
