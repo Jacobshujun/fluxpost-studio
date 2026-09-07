@@ -27,6 +27,7 @@ Use this pattern for UI that is route-specific. Extract a shared component only 
 - Use existing classes and CSS variables from `src/app/globals.css`, such as `field`, `soft-button`, `primary-button`, `status-badge`, `ops-panel`, and page-specific review/distribution classes.
 - Keep card radii and control geometry consistent with the existing operational UI.
 - Do not create nested cards or decorative page sections for tool surfaces.
+- For repeated icon-and-text tool rows, use a fixed icon grid track plus `minmax(0, 1fr)` for the text track. A shared flex-button rule can shrink the icon wrapper according to label length and make otherwise identical rows start at different horizontal positions.
 
 ## Accessibility And Feedback
 

@@ -189,10 +189,10 @@ button {
 .canvas-pane-heading button.canvas-palette-dismiss:hover { color: var(--accent); background: var(--canvas-panel); }
 .canvas-palette-group { padding: 14px 12px 0; }
 .canvas-palette-group > small { display: block; margin-bottom: 7px; color: var(--text-muted); font-size: 10px; font-weight: 800; text-transform: uppercase; letter-spacing: .08em; }
-.canvas-palette-group button { width: 100%; justify-content: flex-start; text-align: left; margin-bottom: 6px; min-height: 50px; }
+.canvas-palette-group button { display: grid; grid-template-columns: 25px minmax(0, 1fr); align-items: center; column-gap: 8px; width: 100%; text-align: left; margin-bottom: 6px; min-height: 50px; }
 .canvas-palette-group button > span:first-child { display: grid; place-items: center; width: 25px; }
 .canvas-palette-group button > span:last-child { min-width: 0; display: grid; gap: 2px; }
-.canvas-palette-group button strong { font-size: 12px; }
+.canvas-palette-group button strong { overflow: hidden; font-size: 12px; text-overflow: ellipsis; white-space: nowrap; }
 .canvas-palette-group button small { color: var(--text-muted); font-size: 10px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
 .canvas-stage { min-width: 0; min-height: 0; position: relative; background: var(--canvas-stage); }
 .canvas-stage .react-flow {
