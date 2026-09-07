@@ -5707,12 +5707,12 @@ function edgeAnimationDelay(edgeId: string, durationSeconds: number) {
 
 function getModelArtifact(nodeType: CanvasNodeType, nodeRun: CanvasNodeRun) {
   const definition = getCanvasNodeDefinition(nodeType);
-  const expectedKind = definition?.outputs.find((port) => port.kind === "text" || port.kind === "images" || port.kind === "videos")?.kind;
-  if (expectedKind !== "text" && expectedKind !== "images" && expectedKind !== "videos") return undefined;
-  const declaredOutputs = (definition?.outputs || [])
-    .filter((port) => port.kind === expectedKind)
-    .map((port) => nodeRun.outputs[port.id]);
-  return [...declaredOutputs, ...Object.values(nodeRun.outputs)].find((artifact) => isPreviewableModelArtifact(artifact, expectedKind));
+  const previewableOutputs = (definition?.outputs || [])
+    .filter((port) => port.kind === "text" || port.kind === "images" || port.kind === "videos");
+  const declaredKinds = new Set(previewableOutputs.map((port) => port.kind));
+  const declaredArtifacts = previewableOutputs.map((port) => nodeRun.outputs[port.id]);
+  return [...declaredArtifacts, ...Object.values(nodeRun.outputs)]
+    .find((artifact) => artifact && declaredKinds.has(artifact.kind) && isPreviewableModelArtifact(artifact));
 }
 
 function getImagesArtifact(nodeRun: CanvasNodeRun) {
@@ -5823,10 +5823,11 @@ function cssAspectRatio(ratio?: string) {
   return width > 0 && height > 0 ? `${width} / ${height}` : "1 / 1";
 }
 
-function isPreviewableModelArtifact(artifact: CanvasArtifact | undefined, expectedKind: "text" | "images" | "videos") {
-  if (!artifact || artifact.kind !== expectedKind) return false;
+function isPreviewableModelArtifact(artifact: CanvasArtifact | undefined) {
+  if (!artifact) return false;
   if (artifact.kind === "text") return Boolean(artifact.value.trim());
-  return artifact.items.length > 0;
+  if (artifact.kind === "images" || artifact.kind === "videos") return artifact.items.length > 0;
+  return false;
 }
 
 function canvasNodeRunStatusLabel(status: CanvasNodeRun["status"]) {

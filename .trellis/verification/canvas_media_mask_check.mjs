@@ -26,6 +26,26 @@ assert.match(pageSource, /utility\.media-mask/);
 assert.match(serializationSource, /nodeType === "utility\.media-mask" && key === "mask"/);
 assert.match(pageSource, /const activeRunId = selectedRunIdRef\.current;[\s\S]*const routeRun = !activeRunId && runId[\s\S]*const selectedRun = explicitRun/);
 
+const getModelArtifact = loadTsFunctions(
+  pageSource,
+  ["getModelArtifact", "isPreviewableModelArtifact"],
+  "getModelArtifact",
+  {
+    getCanvasNodeDefinition: () => ({
+      outputs: [
+        { id: "images", kind: "images" },
+        { id: "videos", kind: "videos" },
+      ],
+    }),
+  },
+);
+const videoArtifact = { kind: "videos", items: [{ url: "/generated/masked.mp4" }] };
+const imageArtifact = { kind: "images", items: [{ url: "/generated/masked.png" }] };
+assert.equal(getModelArtifact("utility.media-mask", { outputs: { videos: videoArtifact } }), videoArtifact, "video-only mask results must remain previewable when images is the first declared output");
+assert.equal(getModelArtifact("utility.media-mask", { outputs: { images: imageArtifact } }), imageArtifact, "image-only mask results must remain previewable");
+assert.equal(getModelArtifact("utility.media-mask", { outputs: { text: { kind: "text", value: "unexpected" } } }), undefined, "undeclared artifact kinds must not become previewable through compatibility fallback lookup");
+assert.equal(getModelArtifact("utility.media-mask", { outputs: {} }), undefined, "empty mask results must keep the existing empty state");
+
 const types = loadTsModule("src/lib/canvas/types.ts");
 const valid = {
   protocolVersion: 1,
@@ -43,4 +63,19 @@ function loadTsModule(relativePath) {
   const sandbox = { module: moduleRecord, exports: moduleRecord.exports, require: () => ({}), console, process, __dirname: path.dirname(path.join(root, relativePath)), __filename: path.join(root, relativePath) };
   vm.runInNewContext(transformed, sandbox, { filename: relativePath });
   return moduleRecord.exports;
+}
+
+function loadTsFunctions(source, names, returnName, scope = {}) {
+  const ast = ts.createSourceFile("canvas-page.tsx", source, ts.ScriptTarget.Latest, true, ts.ScriptKind.TSX);
+  const declarations = names.map((name) => {
+    const declaration = ast.statements.find((statement) => ts.isFunctionDeclaration(statement) && statement.name?.text === name);
+    assert.ok(declaration, `source is missing function ${name}`);
+    return declaration.getText(ast);
+  });
+  const transformed = ts.transpileModule(declarations.join("\n"), {
+    compilerOptions: { module: ts.ModuleKind.None, target: ts.ScriptTarget.ES2022 },
+    fileName: "canvas-page.tsx",
+  }).outputText;
+  const keys = Object.keys(scope);
+  return Function(...keys, `${transformed}\nreturn ${returnName};`)(...keys.map((key) => scope[key]));
 }
