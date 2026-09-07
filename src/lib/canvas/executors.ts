@@ -740,6 +740,7 @@ async function executeComposition({ node, inputs, runId, account, previousNodeRu
   const titles = textValues(inputs.title);
   const imageUrls = mediaUrls(inputs.images, "images");
   const videoUrls = mediaUrls(inputs.videos, "videos");
+  const requireReview = node.config.requireReview !== false;
   const now = new Date().toISOString();
   const previousArtifact = previousNodeRun ? Object.values(previousNodeRun.outputs)
     .find((artifact): artifact is Extract<CanvasArtifact, { kind: "socialPost" }> => artifact.kind === "socialPost") : undefined;
@@ -748,6 +749,7 @@ async function executeComposition({ node, inputs, runId, account, previousNodeRu
     const saved = await updateGeneratedPost(previousPost.id, {
       imageUrls,
       videoUrls,
+      ...(previousPost.status === "published" ? {} : { status: requireReview ? "draft" : "approved" }),
       aiNotes: Array.from(new Set([...previousPost.aiNotes, `由无限画布运行 ${runId} 更新图片结果`])),
     }, account);
     return { outputs: { post: { kind: "socialPost" as const, postId: saved.id, post: saved } } };
@@ -768,7 +770,7 @@ async function executeComposition({ node, inputs, runId, account, previousNodeRu
     imageUrls,
     videoUrls,
     materialPaths: [],
-    status: "draft",
+    status: requireReview ? "draft" : "approved",
     aiNotes: [`由无限画布运行 ${runId} 组装`],
     updatedAt: now,
   };

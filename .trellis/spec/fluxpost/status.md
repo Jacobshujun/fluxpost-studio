@@ -4,10 +4,11 @@ Last updated: 2026-09-07
 
 ## One-Line Status
 
-Canvas now includes a user-configurable "遮罩" media node for image/video derivatives; the implementation, structured-config fix, and full offline baseline are verified, and the current committed HEAD is active on port `3001`.
+Canvas content assembly now exposes a default-on review switch and maps it to draft/approved post status; legacy workflows, focused contracts, and the full offline baseline are verified.
 
 ## Current Focus
 
+- 2026-09-07: Canvas `compose.social-post` now exposes `是否需要审查`, defaults it on for new and legacy workflows, saves review-required posts as drafts, and marks review-skipped posts approved while preserving published posts on rerun. Focused Canvas contracts, TypeScript, lint, build, HTTP/SQLite smoke, and the complete offline baseline passed.
 - 2026-09-07: Canvas media-mask geometry now preserves exact zero-pixel `x`/`y` coordinates while keeping positive width/height, preventing full-width top/bottom masks from exposing the source along the left or top edge. The mask renderer cache version was advanced so prior edge-offset outputs are regenerated. Focused geometry/cache contracts, TypeScript, lint, build, HTTP/SQLite smoke, and the complete offline baseline passed.
 - 2026-09-07: Canvas model-style result projection now checks every declared previewable output, so video-only `utility.media-mask` runs display their produced video instead of the empty-result state. Video/image/empty/undeclared-kind regression checks and the complete offline baseline passed.
 - 2026-09-07: Canvas node-library rows now use a fixed icon grid column so labels align across short and long node descriptions. The focused interaction contract, desktop/mobile browser geometry checks, and full offline baseline passed.

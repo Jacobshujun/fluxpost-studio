@@ -614,8 +614,11 @@ const canvasNodeDefinitionVersions: CanvasNodeDefinition[] = [
       { id: "videos", label: "视频", kind: "videos", multiple: true },
     ],
     outputs: [{ id: "post", label: "内容", kind: "socialPost" }],
-    fields: [{ key: "fallbackTitle", label: "默认标题", kind: "text", placeholder: "上游未连接标题时使用" }],
-    defaultConfig: { fallbackTitle: "画布生成内容" },
+    fields: [
+      { key: "fallbackTitle", label: "默认标题", kind: "text", placeholder: "上游未连接标题时使用" },
+      { key: "requireReview", label: "是否需要审查", kind: "boolean" },
+    ],
+    defaultConfig: { fallbackTitle: "画布生成内容", requireReview: true },
   },
   {
     type: "publish.feishu",
@@ -879,7 +882,8 @@ export function validateCanvasNodeConfig(type: CanvasNodeType, config: CanvasNod
     if (field.kind === "url-list" && value !== undefined && !Array.isArray(value)) {
       errors.push(`${definition.label}: ${field.label} must be a URL list.`);
     }
-    if (field.kind === "boolean" && typeof value !== "boolean") {
+    if (field.kind === "boolean" && typeof value !== "boolean"
+      && !(type === "compose.social-post" && field.key === "requireReview" && value === undefined)) {
       errors.push(`${definition.label}: ${field.label} must be a boolean.`);
     }
   }
@@ -996,6 +1000,14 @@ export function validateCanvasNodeConfig(type: CanvasNodeType, config: CanvasNod
 }
 
 export function upgradeCanvasNode(node: CanvasNode): CanvasNode {
+  if (node.type === "compose.social-post") {
+    const definition = getCanvasNodeDefinition(node.type);
+    return {
+      ...structuredClone(node),
+      executionMode: getCanvasNodeExecutionMode(node),
+      config: { ...definition?.defaultConfig, ...structuredClone(node.config) },
+    };
+  }
   if (node.type === "model.gpt-image-each" && node.version === 1) {
     return {
       ...structuredClone(node),

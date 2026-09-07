@@ -176,7 +176,8 @@ try {
   assert.throws(() => seedanceReferences.resolveSeedanceInput({ prompt: "字".repeat(2001) }, [], []), /2000 characters/i, "Seedance local Prompt length must be validated before the provider adapter");
   assert.deepEqual(getCanvasNodeDefinition("compose.social-post")?.inputs.map((port) => `${port.id}:${port.kind}`), ["title:text", "body:text", "vehicle:text", "images:images", "videos:videos"], "content composition must accept vehicle text from an upstream node");
   assert.ok(!getCanvasNodeDefinition("compose.social-post")?.fields.some((field) => field.key === "vehicle"), "new content composition nodes must not edit vehicle text in node config");
-  assert.deepEqual(getCanvasNodeDefinition("compose.social-post")?.defaultConfig, { fallbackTitle: "画布生成内容" });
+  assert.deepEqual(getCanvasNodeDefinition("compose.social-post")?.fields.map((field) => `${field.key}:${field.kind}`), ["fallbackTitle:text", "requireReview:boolean"]);
+  assert.deepEqual(getCanvasNodeDefinition("compose.social-post")?.defaultConfig, { fallbackTitle: "画布生成内容", requireReview: true });
   assert.equal(getCanvasNodeDefinition("publish.feishu")?.version, 2, "new Feishu publish nodes must use v2");
   assert.equal(getCanvasNodeDefinition("publish.feishu", 1)?.version, 1, "legacy Feishu publish snapshots must remain resolvable");
   assert.deepEqual(getCanvasNodeDefinition("publish.feishu")?.defaultConfig, { publishMode: "full" });
