@@ -1362,7 +1362,7 @@ export type LibraryTaggingJob = {
 export type LibraryAssetPage = {
   assets: LibraryAsset[];
   nextCursor?: string;
-  total: number;
+  total?: number;
 };
 
 export type LibraryNavigation = {

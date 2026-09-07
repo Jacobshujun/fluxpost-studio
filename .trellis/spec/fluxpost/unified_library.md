@@ -1,6 +1,6 @@
 # Unified Library
 
-Last updated: 2026-08-28
+Last updated: 2026-09-07
 
 ## Scenario: Unified, Query-Driven Image Assets
 
@@ -79,4 +79,56 @@ INSERT INTO app_meta (key, value, updated_at) VALUES ($1, $2, $2);
 
 -- Correct: independently typed placeholders keep migration parsing deterministic.
 INSERT INTO app_meta (key, value, updated_at) VALUES ($1, $2, $3);
+```
+
+## Scenario: Canvas Library Picker Performance
+
+### 1. Scope / Trigger
+
+- Applies to the Canvas `input.library-images` inspector, asset list API pagination, thumbnail transport, and Flow-node rendering when a large library is present.
+
+### 2. Signatures
+
+- Canvas list requests use `GET /api/library/assets?limit=24&count=0` plus optional `search`, `tag`, `collectionId`, and signed `cursor`.
+- `LibraryAssetPage.total` is optional; count-free pages return `assets` and `nextCursor` without running `COUNT(*)`.
+- Thumbnail requests use `/api/library/assets/{id}/thumbnail?variant=square&version=2` and support `If-None-Match`/`304`.
+
+### 3. Contracts
+
+- Opening the inspector with no search/tag/collection is idle: no asset or navigation request is made. Navigation loads once on first picker focus.
+- Search/filter changes are debounced, abort prior requests, and apply only the newest generation. First pages render at most 24 cards; subsequent pages append by asset ID.
+- Cards and selected previews use lazy, fixed-size thumbnails. Original URLs remain in the frozen `assetIds`/`assetNames`/`urls` snapshot and are read only for explicit preview (legacy URL-only entries may display their fallback URL).
+- Canvas Flow nodes are memoized and selection comes from React Flow's `selected` prop, not a global selected-node context value.
+
+### 4. Validation & Error Matrix
+
+| Condition | Required result |
+| --- | --- |
+| Empty picker filters | Render empty state; do not call assets API |
+| Stale or aborted search response | Ignore response; preserve newest result |
+| Duplicate IDs across cursor pages | Keep one card and retain cursor progression |
+| More than 30 selected assets | Reject toggle; preserve prior snapshot |
+| Thumbnail cache validator matches | HTTP 304 with cache headers; no image body |
+| Selected asset no longer in current result page | Keep snapshot and render by ID thumbnail; preview stored URL |
+
+### 5. Good/Base/Bad Cases
+
+- Good: focus the picker, type a query, receive 24 thumbnails, load another cursor page without duplicates, and preview one original on click.
+- Base: an old URL-only snapshot continues to display and preview its original URL while new asset-ID snapshots use thumbnails.
+- Bad: fetch 100 unfiltered assets on mount, render originals as CSS backgrounds, or put `selectedNodeId` in the context consumed by every Flow node.
+
+### 6. Tests Required
+
+- `.trellis/verification/canvas_library_performance_check.mjs` asserts idle startup, `limit=24`/`count=0`, lazy thumbnail usage, selected-preview fallback, memoized nodes, count-free DB parsing, and conditional 304 support.
+- Browser/performance coverage should assert no initial asset/navigation calls, stale-request cancellation, 24-card first render, cross-page dedupe, original-on-preview only, 30-item snapshot retention, and 1440px/390px containment.
+- TypeScript, lint, build, isolated HTTP/SQLite smoke, and the complete offline baseline remain required.
+
+### 7. Wrong vs Correct
+
+```tsx
+// Wrong: opening the inspector downloads and decodes every original.
+<button style={{ backgroundImage: `url(${asset.publicUrl})` }} />
+
+// Correct: cards decode a bounded thumbnail; preview resolves the frozen original.
+<Image src={`/api/library/assets/${asset.id}/thumbnail?variant=square&version=2`} loading="lazy" />
 ```

@@ -3644,15 +3644,17 @@ function LibraryImageSnapshotPicker({ node, onPatch, onPreviewImage }: {
     <label className="canvas-picker-search"><Search /><input value={search} onChange={(event) => setSearch(event.target.value)} placeholder="搜索图片" /></label>
     <div className="canvas-picker-filters"><input value={tag} onChange={(event) => setTag(event.target.value)} placeholder="标签" /><select value={collectionId} onChange={(event) => setCollectionId(event.target.value)}><option value="">全部图集</option>{navigation.collections.map((collection) => <option key={collection.id} value={collection.id}>{collection.relativePath || collection.name}</option>)}</select></div>
     {ids.length ? <div className="canvas-picker-selected">{urls.map((url, index) => <div key={`${ids[index]}-${index}`}>
-      <button type="button" className="canvas-picker-thumb" onClick={() => onPreviewImage(url, index)} style={{ backgroundImage: `url(${JSON.stringify(url)})` }} aria-label={`预览素材 ${index + 1}`} />
+      <button type="button" className="canvas-picker-thumb" onClick={() => onPreviewImage(url, index)} aria-label={`预览素材 ${index + 1}`}>
+        <Image src={ids[index] ? `/api/library/assets/${encodeURIComponent(ids[index])}/thumbnail?variant=square&version=2` : url} alt="" width={72} height={72} unoptimized loading="lazy" decoding="async" referrerPolicy="no-referrer" />
+      </button>
       <span>{index + 1}. {names[index] || ids[index]}</span>
       <button type="button" onClick={() => move(index, index - 1)} disabled={index === 0} title="上移"><ArrowUp /></button>
       <button type="button" onClick={() => move(index, index + 1)} disabled={index === ids.length - 1} title="下移"><ArrowDown /></button>
       <button type="button" onClick={() => remove(index)} title="移除"><X /></button>
     </div>)}</div> : null}
-    <div className="canvas-picker-results">{data.assets.map((asset) => <label key={asset.id}><input type="checkbox" checked={ids.includes(asset.id)} onChange={() => toggle(asset)} /><span><Image src={asset.thumbnailUrl || `/api/library/assets/${encodeURIComponent(asset.id)}/thumbnail?variant=square&version=2`} alt="" width={96} height={96} unoptimized loading="lazy" decoding="async" /></span><small>{asset.name}</small></label>)}</div>
+    <div className="canvas-picker-results">{data.assets.map((asset) => <label key={asset.id}><input type="checkbox" checked={ids.includes(asset.id)} onChange={() => toggle(asset)} /><span><Image src={`/api/library/assets/${encodeURIComponent(asset.id)}/thumbnail?variant=square&version=2`} alt="" width={96} height={96} unoptimized loading="lazy" decoding="async" /></span><small>{asset.name}</small></label>)}</div>
     {data.nextCursor ? <button type="button" className="canvas-picker-load-more" onClick={() => void loadMore()} disabled={busy || loadingMore}>{loadingMore ? "正在加载..." : "加载更多"}</button> : null}
-    {data.total > data.assets.length ? <small className="canvas-picker-limit">显示前 {data.assets.length} / {data.total} 张，请使用搜索或筛选缩小范围。</small> : null}
+    {data.total !== undefined && data.total > data.assets.length ? <small className="canvas-picker-limit">显示前 {data.assets.length} / {data.total} 张，请使用搜索或筛选缩小范围。</small> : null}
     {error ? <p className="canvas-picker-error">{error}</p> : null}
   </div>;
 }
@@ -4765,7 +4767,7 @@ function ScheduleAssetFilterEditor({ title, filter, count, onCountChange, onChan
     height: asset.height,
     sequence: data.assets.map((item) => ({ id: item.id, url: item.publicUrl, width: item.width, height: item.height })),
   });
-  const allMatchesSelected = data.total > 0 && selectedAllQuery === queryString;
+  const allMatchesSelected = (data.total ?? 0) > 0 && selectedAllQuery === queryString;
   const status = busy
     ? "正在筛选"
     : selectingAll

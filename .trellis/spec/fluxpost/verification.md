@@ -1,6 +1,6 @@
 # Verification
 
-Last updated: 2026-09-03
+Last updated: 2026-09-07
 
 ## Baseline Command
 
@@ -51,6 +51,8 @@ For a production candidate:
 Do not deploy a dirty worktree, branch name, abbreviated SHA, local runtime rows, or unpushed commit.
 
 ## Recent Verification
+
+- 2026-09-07: Canvas library picker performance contracts passed with idle-until-filtered loading, 24-item count-free pages, lazy versioned thumbnails for result and selected previews, Flow-node memoization, and conditional thumbnail 304 handling. TypeScript, lint, build, isolated HTTP/SQLite smoke, and the complete offline baseline passed; no live services were called.
 
 - 2026-09-03: URL-backed navigation state across content, library, review, Canvas, original, copy-library, distribution-check, and config pages passed the deterministic route-state contract, TypeScript, lint (0 errors with existing warnings), production build, HTTP route checks, SQLite, and the complete offline baseline. Direct browser refresh automation was not run because `playwright` is not installed locally.
 

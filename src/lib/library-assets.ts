@@ -103,7 +103,7 @@ export async function listLibraryAssets(account: WorkspaceAccessActor, filters: 
   const assets = result.assets.map((asset) => libraryAssetView(account, asset));
   return {
     assets,
-    total: result.total ?? 0,
+    ...(result.total === undefined ? {} : { total: result.total }),
     nextCursor: result.hasMore && assets.length ? encodeCursor(assets[assets.length - 1], sort, signature) : undefined,
   };
 }
