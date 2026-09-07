@@ -8,8 +8,8 @@
 
 <!-- @@@auto:current-status -->
 - **Active File**: `journal-2.md`
-- **Total Sessions**: 63
-- **Last Active**: 2026-08-28
+- **Total Sessions**: 64
+- **Last Active**: 2026-09-07
 <!-- @@@/auto:current-status -->
 
 ---
@@ -19,7 +19,7 @@
 <!-- @@@auto:active-documents -->
 | File | Lines | Status |
 |------|-------|--------|
-| `journal-2.md` | ~178 | Active |
+| `journal-2.md` | ~211 | Active |
 | `journal-1.md` | ~1967 | Archived |
 <!-- @@@/auto:active-documents -->
 
@@ -30,6 +30,7 @@
 <!-- @@@auto:session-history -->
 | # | Date | Title | Commits | Branch |
 |---|------|-------|---------|--------|
+| 64 | 2026-09-07 | Fix Canvas video mask preview | `8001886` | `local` |
 | 63 | 2026-08-28 | 统一图库与高性能资源管理 | `b321b7a`, `8f2902c` | `local` |
 | 62 | 2026-08-27 | Canvas execution ownership | `56ae737`, `b8abdfe`, `c1e6430` | `local` |
 | 61 | 2026-08-27 | Content pool tag management | `3b7f9f3`, `0cc8cd3` | `local` |

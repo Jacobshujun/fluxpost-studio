@@ -176,3 +176,36 @@ Assigned ordinary and scheduled Canvas runs, generated posts, and review attribu
 ### Next Steps
 
 - None - task complete
+
+
+## Session 64: Fix Canvas video mask preview
+
+**Date**: 2026-09-07
+**Task**: Fix Canvas video mask preview
+**Branch**: `local`
+
+### Summary
+
+Fixed Canvas model-style result projection to preview the actual non-empty declared output, including video-only media-mask runs; added regression coverage and passed the full offline baseline.
+
+### Main Changes
+
+(Add details)
+
+### Git Commits
+
+| Hash | Message |
+|------|---------|
+| `8001886` | (see git log) |
+
+### Testing
+
+- [OK] (Add test results)
+
+### Status
+
+[OK] **Completed**
+
+### Next Steps
+
+- None - task complete
