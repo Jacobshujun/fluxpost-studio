@@ -12,6 +12,7 @@ const thumbnailRoute = read("src/app/api/library/assets/[id]/thumbnail/route.ts"
 
 assert(page.includes('new URLSearchParams({ limit: "24", count: "0" })'), "Canvas library picker must request a bounded count-free page.");
 assert(page.includes("const hasQuery = Boolean(search.trim() || tag.trim() || collectionId)"), "Canvas library picker must stay idle until a filter is entered.");
+assert(page.includes("!hasQuery ? <div className=\"canvas-picker-empty\""), "Canvas library picker must explain how to start an unfiltered search.");
 assert(page.includes("onFocusCapture={() => void ensureNavigation()}"), "Library navigation must load lazily from picker interaction.");
 assert(page.includes("thumbnail?variant=square&version=2`}") && page.includes('loading="lazy"'), "Canvas library results must use lazy thumbnails.");
 assert(page.includes("className=\"canvas-picker-thumb\" onClick={() => onPreviewImage(url, index)} aria-label") && page.includes("thumbnail?variant=square&version=2` : url"), "Selected library assets must render thumbnails and defer originals to preview.");

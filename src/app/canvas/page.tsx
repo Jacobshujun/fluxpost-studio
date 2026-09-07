@@ -3652,6 +3652,7 @@ function LibraryImageSnapshotPicker({ node, onPatch, onPreviewImage }: {
       <button type="button" onClick={() => move(index, index + 1)} disabled={index === ids.length - 1} title="下移"><ArrowDown /></button>
       <button type="button" onClick={() => remove(index)} title="移除"><X /></button>
     </div>)}</div> : null}
+    {!hasQuery ? <div className="canvas-picker-empty">输入搜索词、标签或选择图集开始查找素材。</div> : null}
     <div className="canvas-picker-results">{data.assets.map((asset) => <label key={asset.id}><input type="checkbox" checked={ids.includes(asset.id)} onChange={() => toggle(asset)} /><span><Image src={`/api/library/assets/${encodeURIComponent(asset.id)}/thumbnail?variant=square&version=2`} alt="" width={96} height={96} unoptimized loading="lazy" decoding="async" /></span><small>{asset.name}</small></label>)}</div>
     {data.nextCursor ? <button type="button" className="canvas-picker-load-more" onClick={() => void loadMore()} disabled={busy || loadingMore}>{loadingMore ? "正在加载..." : "加载更多"}</button> : null}
     {data.total !== undefined && data.total > data.assets.length ? <small className="canvas-picker-limit">显示前 {data.assets.length} / {data.total} 张，请使用搜索或筛选缩小范围。</small> : null}
