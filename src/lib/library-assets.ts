@@ -98,11 +98,12 @@ export async function listLibraryAssets(account: WorkspaceAccessActor, filters: 
     filters: normalized,
     smartFolder,
     cursor,
+    includeTotal: normalized.includeTotal !== false,
   });
   const assets = result.assets.map((asset) => libraryAssetView(account, asset));
   return {
     assets,
-    total: result.total,
+    total: result.total ?? 0,
     nextCursor: result.hasMore && assets.length ? encodeCursor(assets[assets.length - 1], sort, signature) : undefined,
   };
 }
@@ -111,14 +112,14 @@ export async function listLibraryNavigation(account: WorkspaceAccessActor): Prom
   const [collections, smartFolders, all, uncategorized, favorites] = await Promise.all([
     listLibraryCollectionsFromDb(),
     listLibrarySmartFoldersFromDb(),
-    queryLibraryAssetsFromDb({ actorId: account.id, isAdmin: isWorkspaceAdmin(account), filters: { limit: 1 } }),
-    queryLibraryAssetsFromDb({ actorId: account.id, isAdmin: isWorkspaceAdmin(account), filters: { limit: 1, uncategorized: true } }),
-    queryLibraryAssetsFromDb({ actorId: account.id, isAdmin: isWorkspaceAdmin(account), filters: { limit: 1, favorite: true } }),
+    queryLibraryAssetsFromDb({ actorId: account.id, isAdmin: isWorkspaceAdmin(account), filters: { limit: 1 }, includeTotal: true }),
+    queryLibraryAssetsFromDb({ actorId: account.id, isAdmin: isWorkspaceAdmin(account), filters: { limit: 1, uncategorized: true }, includeTotal: true }),
+    queryLibraryAssetsFromDb({ actorId: account.id, isAdmin: isWorkspaceAdmin(account), filters: { limit: 1, favorite: true }, includeTotal: true }),
   ]);
   return {
     collections: collections.filter((item) => canReadOrganizer(account, item)).map((item) => ({ ...item, canEdit: canEditOrganizer(account, item) })),
     smartFolders: smartFolders.filter((item) => canReadOrganizer(account, item)).map((item) => ({ ...item, canEdit: canEditOrganizer(account, item) })),
-    counts: { all: all.total, uncategorized: uncategorized.total, favorites: favorites.total },
+    counts: { all: all.total ?? 0, uncategorized: uncategorized.total ?? 0, favorites: favorites.total ?? 0 },
   };
 }
 
@@ -482,6 +483,7 @@ export function parseLibraryAssetFilters(url: URL): LibraryAssetFilters {
   return normalizeLibraryAssetFilters({
     cursor: url.searchParams.get("cursor") || undefined,
     limit: Number(url.searchParams.get("limit") || 60),
+    includeTotal: url.searchParams.get("count") !== "0" && url.searchParams.get("includeTotal") !== "false",
     search: url.searchParams.get("search") || undefined,
     collectionId: url.searchParams.get("collectionId") || undefined,
     includeDescendants: url.searchParams.get("includeDescendants") !== "false",
@@ -634,7 +636,10 @@ function decodeCursor(value: string | undefined, sort: LibraryListSort, signatur
 }
 
 function filterSignature(filters: LibraryAssetFilters) {
-  const { cursor: _cursor, limit: _limit, ...stable } = filters;
+  const stable = { ...filters };
+  delete stable.cursor;
+  delete stable.limit;
+  delete stable.includeTotal;
   return createHash("sha256").update(stableJson(stable)).digest("hex").slice(0, 16);
 }
 

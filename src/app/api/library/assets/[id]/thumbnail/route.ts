@@ -31,12 +31,18 @@ export async function GET(request: Request, context: RouteContext) {
 
   try {
     const thumbnail = await getLibraryThumbnail(asset, {}, variant);
+    const responseHeaders = {
+      "Cache-Control": libraryThumbnailCacheControl,
+      ETag: thumbnail.etag,
+      "Content-Type": libraryThumbnailMimeType,
+    };
+    if (request.headers.get("if-none-match") === thumbnail.etag) {
+      return new NextResponse(null, { status: 304, headers: responseHeaders });
+    }
     return new NextResponse(new Uint8Array(thumbnail.bytes), {
       headers: {
-        "Cache-Control": libraryThumbnailCacheControl,
+        ...responseHeaders,
         "Content-Length": String(thumbnail.bytes.length),
-        "Content-Type": libraryThumbnailMimeType,
-        ETag: thumbnail.etag,
         "X-FluxPost-Thumbnail-Cache": thumbnail.cacheStatus,
       },
     });

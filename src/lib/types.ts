@@ -1313,6 +1313,7 @@ export type LibrarySmartFolder = {
 export type LibraryAssetFilters = {
   cursor?: string;
   limit?: number;
+  includeTotal?: boolean;
   search?: string;
   collectionId?: string;
   includeDescendants?: boolean;

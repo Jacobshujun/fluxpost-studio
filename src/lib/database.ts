@@ -59,6 +59,7 @@ export type LibraryDatabaseQuery = {
   filters: LibraryAssetFilters;
   smartFolder?: LibrarySmartFolder;
   cursor?: LibraryDatabaseCursor;
+  includeTotal?: boolean;
 };
 
 type SimpleRunQueueRow = {
@@ -305,18 +306,25 @@ export async function queryLibraryAssetsFromDb(input: LibraryDatabaseQuery) {
     FROM library_assets a WHERE ${cursorWhere.join(" AND ")}
     ORDER BY ${libraryOrderSql(input.filters.sort || "newest", postgres)} LIMIT ${limitPlaceholder}`;
 
-  let total: number;
+  let total: number | undefined;
   let rows: Array<JsonRow & { collection_ids: string[] | string; favorite: boolean | number }>;
   if (postgres) {
-    const [countResult, listResult] = await Promise.all([
-      getPostgresPool().query<{ count: string }>(countSql, countValues),
-      getPostgresPool().query<JsonRow & { collection_ids: string[]; favorite: boolean }>(listSql, compiled.params.values),
-    ]);
-    total = Number(countResult.rows[0]?.count || 0);
-    rows = listResult.rows;
+    const listPromise = getPostgresPool().query<JsonRow & { collection_ids: string[]; favorite: boolean }>(listSql, compiled.params.values);
+    if (input.includeTotal === false) {
+      rows = (await listPromise).rows;
+    } else {
+      const [countResult, listResult] = await Promise.all([
+        getPostgresPool().query<{ count: string }>(countSql, countValues),
+        listPromise,
+      ]);
+      total = Number(countResult.rows[0]?.count || 0);
+      rows = listResult.rows;
+    }
   } else {
-    const count = getSqliteDatabase().prepare(countSql).get(...countValues) as { count: number };
-    total = Number(count?.count || 0);
+    if (input.includeTotal !== false) {
+      const count = getSqliteDatabase().prepare(countSql).get(...countValues) as { count: number };
+      total = Number(count?.count || 0);
+    }
     rows = getSqliteDatabase().prepare(listSql).all(...compiled.params.values) as typeof rows;
   }
   const pageRows = rows.slice(0, limit);

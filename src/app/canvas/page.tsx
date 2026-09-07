@@ -87,7 +87,7 @@ import {
   ZoomIn,
   ZoomOut,
 } from "lucide-react";
-import { createContext, useCallback, useContext, useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
+import { createContext, memo, useCallback, useContext, useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
 import { ContentPoolCustomTagPicker } from "@/components/content-pool-custom-tag-picker";
 import { contentPoolCustomTagKey } from "@/lib/content-pool-tags";
 import {
@@ -219,7 +219,6 @@ type CanvasNodeInteraction = {
   displayingExplicitRun: boolean;
   latestNodeRuns: Map<string, CanvasNodeRun>;
   latestSuccessfulNodeRuns: Map<string, CanvasLatestSuccessfulNodeRun>;
-  selectedNodeId?: string;
   canResize: boolean;
   workflowRevision?: number;
   onConfigChange: (nodeId: string, key: string, value: CanvasEditableConfigValue) => void;
@@ -230,7 +229,6 @@ type CanvasNodeInteraction = {
 };
 
 const CanvasNodeInteractionContext = createContext<CanvasNodeInteraction | null>(null);
-const nodeTypes = { canvasNode: CanvasFlowNode };
 const edgeTypes = { flowing: FlowingCanvasEdge };
 const terminalStatuses = new Set(["completed", "partial", "failed", "cancelled"]);
 const canvasHistoryLimit = 50;
@@ -449,7 +447,6 @@ export default function CanvasPage() {
     displayingExplicitRun,
     latestNodeRuns,
     latestSuccessfulNodeRuns,
-    selectedNodeId,
     canResize: !isMobile,
     workflowRevision: activeWorkflow?.revision,
     onConfigChange: updateNodeConfig,
@@ -457,7 +454,7 @@ export default function CanvasPage() {
     onNodeFocus: focusCanvasNode,
     onPreview: setPreview,
     onSubtitleEdit: (node, nodeRun) => setSubtitleEditor({ nodeId: node.id, nodeRunId: nodeRun.id }),
-  }), [activeRun, activeWorkflow?.revision, displayingExplicitRun, focusCanvasNode, isMobile, latestNodeRuns, latestSuccessfulNodeRuns, selectedNodeId, updateNodeConfig, updateNodeExecutionMode]);
+  }), [activeRun, activeWorkflow?.revision, displayingExplicitRun, focusCanvasNode, isMobile, latestNodeRuns, latestSuccessfulNodeRuns, updateNodeConfig, updateNodeExecutionMode]);
 
   useEffect(() => {
     const query = window.matchMedia("(max-width: 820px)");
@@ -1759,7 +1756,8 @@ export default function CanvasPage() {
   );
 }
 
-function CanvasFlowNode({ data, selected }: NodeProps<FlowNode>) {
+const CanvasFlowNode = memo(function CanvasFlowNode({ data, selected }: NodeProps<FlowNode>) {
+  // Selection is provided by React Flow; the old interaction?.selectedNodeId === node.id path is intentionally removed.
   const node = data.canvasNode;
   const definition = getCanvasNodeDefinition(node.type, node.version);
   const interaction = useContext(CanvasNodeInteractionContext);
@@ -1771,7 +1769,10 @@ function CanvasFlowNode({ data, selected }: NodeProps<FlowNode>) {
     : node.type === "model.gpt-image" && node.version >= 2
       ? normalizeConfigUrls(node.config.referenceUrls)
       : [];
-  const visibleImageUrls = imageUrls.slice(0, 4);
+  const imageAssetIds = node.type === "input.library-images" ? configStringList(node.config.assetIds) : [];
+  const visibleImageUrls = imageUrls.slice(0, 4).map((url, index) => node.type === "input.library-images" && imageAssetIds[index]
+    ? `/api/library/assets/${encodeURIComponent(imageAssetIds[index])}/thumbnail?variant=square&version=2`
+    : url);
   const loadedVideos = node.type === "input.video-loader" ? canvasVideoSnapshotsFromConfig(node.config) : [];
   const currentLoadedVideo = node.type === "input.video-loader" ? selectedCanvasVideo(node.config) : undefined;
   const nodeRun = interaction?.latestNodeRuns.get(node.id);
@@ -1795,7 +1796,7 @@ function CanvasFlowNode({ data, selected }: NodeProps<FlowNode>) {
     "compose.social-post",
   ].includes(node.type);
   const executionMode = node.executionMode === "bypass" || node.executionMode === "disabled" ? node.executionMode : "enabled";
-  const isSelected = selected || interaction?.selectedNodeId === node.id;
+  const isSelected = selected;
   const hasEditableSize = Boolean(node.size && interaction?.canResize);
   const portRows = Array.from({ length: Math.max(definition.inputs.length, definition.outputs.length, 1) }, (_, index) => ({
     input: definition.inputs[index],
@@ -1852,9 +1853,9 @@ function CanvasFlowNode({ data, selected }: NodeProps<FlowNode>) {
     {visibleImageUrls.length ? <div className={`canvas-node-image-grid is-count-${visibleImageUrls.length}`}>
       {visibleImageUrls.map((url, index) => <button className="nodrag nopan nowheel" type="button" key={`${url}-${index}`} onClick={(event) => {
         event.stopPropagation();
-        interaction?.onPreview({ kind: "image", url, index });
+        interaction?.onPreview({ kind: "image", url: imageUrls[index] || url, index });
       }} aria-label={`在节点中预览图片 ${index + 1}`} title="预览图片">
-        <Image src={url} alt="" fill sizes="220px" unoptimized draggable={false} referrerPolicy="no-referrer" />
+        <Image src={url} alt="" fill sizes="220px" unoptimized loading="lazy" draggable={false} referrerPolicy="no-referrer" />
         {index === 3 && imageUrls.length > 4 ? <span>+{imageUrls.length - 4}</span> : null}
       </button>)}
     </div> : null}
@@ -1874,7 +1875,7 @@ function CanvasFlowNode({ data, selected }: NodeProps<FlowNode>) {
       </div>)}
     </div>
   </div>;
-}
+});
 
 function CanvasNodeTextEditor({
   nodeId,
@@ -2019,6 +2020,8 @@ function CanvasNodeAttemptSummary({ nodeRun }: { nodeRun: CanvasNodeRun }) {
     <CanvasNodeAttemptDetail nodeRun={nodeRun} />
   </div>;
 }
+
+const nodeTypes = { canvasNode: CanvasFlowNode };
 
 function CanvasNodeAttemptHeader({ nodeRun, detail }: { nodeRun?: CanvasNodeRun; detail?: string }) {
   if (!nodeRun) return null;
@@ -3545,29 +3548,70 @@ function LibraryImageSnapshotPicker({ node, onPatch, onPreviewImage }: {
   const [collectionId, setCollectionId] = useState("");
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState("");
+  const [loadingMore, setLoadingMore] = useState(false);
+  const [navigationLoaded, setNavigationLoaded] = useState(false);
+  const navigationRequestRef = useRef<Promise<void> | undefined>(undefined);
+  const requestGenerationRef = useRef(0);
+  const requestControllerRef = useRef<AbortController | undefined>(undefined);
   const ids = configStringList(node.config.assetIds);
   const names = configStringList(node.config.assetNames);
   const urls = configStringList(node.config.urls);
+  const hasQuery = Boolean(search.trim() || tag.trim() || collectionId);
+  const ensureNavigation = useCallback(() => {
+    if (navigationLoaded) return Promise.resolve();
+    if (!navigationRequestRef.current) {
+      navigationRequestRef.current = api<LibraryNavigation>("/api/library/navigation")
+        .then((result) => { setNavigation(result); setNavigationLoaded(true); })
+        .catch(() => undefined)
+        .finally(() => { navigationRequestRef.current = undefined; });
+    }
+    return navigationRequestRef.current;
+  }, [navigationLoaded]);
   const load = useCallback(async () => {
+    const generation = ++requestGenerationRef.current;
+    requestControllerRef.current?.abort();
+    if (!hasQuery) {
+      setData({ assets: [], total: 0 });
+      setBusy(false);
+      return;
+    }
+    const controller = new AbortController();
+    requestControllerRef.current = controller;
     setBusy(true);
     setError("");
-    const params = new URLSearchParams({ limit: "100" });
+    const params = new URLSearchParams({ limit: "24", count: "0" });
     if (search.trim()) params.set("search", search.trim());
     if (tag.trim()) params.set("tag", tag.trim());
     if (collectionId) params.set("collectionId", collectionId);
     try {
-      setData(await api<LibraryAssetPage>(`/api/library/assets?${params}`));
+      const result = await api<LibraryAssetPage>(`/api/library/assets?${params}`, { signal: controller.signal });
+      if (generation === requestGenerationRef.current) setData(result);
+    } catch (loadError) {
+      if (!controller.signal.aborted && generation === requestGenerationRef.current) setError(errorMessage(loadError));
+    } finally {
+      if (generation === requestGenerationRef.current) setBusy(false);
+    }
+  }, [collectionId, hasQuery, search, tag]);
+  const loadMore = useCallback(async () => {
+    if (!hasQuery || !data.nextCursor || loadingMore) return;
+    setLoadingMore(true);
+    try {
+      const params = new URLSearchParams({ limit: "24", count: "0", cursor: data.nextCursor });
+      if (search.trim()) params.set("search", search.trim());
+      if (tag.trim()) params.set("tag", tag.trim());
+      if (collectionId) params.set("collectionId", collectionId);
+      const result = await api<LibraryAssetPage>(`/api/library/assets?${params}`);
+      setData((current) => ({ ...result, assets: [...current.assets, ...result.assets.filter((asset) => !current.assets.some((item) => item.id === asset.id))] }));
     } catch (loadError) {
       setError(errorMessage(loadError));
     } finally {
-      setBusy(false);
+      setLoadingMore(false);
     }
-  }, [collectionId, search, tag]);
+  }, [collectionId, data.nextCursor, hasQuery, loadingMore, search, tag]);
   useEffect(() => {
     const timer = setTimeout(() => void load(), 250);
     return () => clearTimeout(timer);
   }, [load]);
-  useEffect(() => { void api<LibraryNavigation>("/api/library/navigation").then(setNavigation).catch(() => undefined); }, []);
   const patchSelection = (nextIds: string[], nextNames: string[], nextUrls: string[]) => onPatch({ assetIds: nextIds, assetNames: nextNames, urls: nextUrls, snapshotAt: new Date().toISOString() });
   const toggle = (asset: LibraryAsset) => {
     const index = ids.indexOf(asset.id);
@@ -3595,7 +3639,7 @@ function LibraryImageSnapshotPicker({ node, onPatch, onPreviewImage }: {
       setBusy(false);
     }
   };
-  return <div className="canvas-snapshot-picker">
+  return <div className="canvas-snapshot-picker" onFocusCapture={() => void ensureNavigation()}>
     <div className="canvas-picker-heading"><span>素材库图片</span><small>{ids.length}/30</small><button type="button" onClick={() => void refresh()} disabled={busy || !ids.length} title="刷新所选素材"><RotateCcw className={busy ? "animate-spin" : ""} /></button></div>
     <label className="canvas-picker-search"><Search /><input value={search} onChange={(event) => setSearch(event.target.value)} placeholder="搜索图片" /></label>
     <div className="canvas-picker-filters"><input value={tag} onChange={(event) => setTag(event.target.value)} placeholder="标签" /><select value={collectionId} onChange={(event) => setCollectionId(event.target.value)}><option value="">全部图集</option>{navigation.collections.map((collection) => <option key={collection.id} value={collection.id}>{collection.relativePath || collection.name}</option>)}</select></div>
@@ -3606,7 +3650,8 @@ function LibraryImageSnapshotPicker({ node, onPatch, onPreviewImage }: {
       <button type="button" onClick={() => move(index, index + 1)} disabled={index === ids.length - 1} title="下移"><ArrowDown /></button>
       <button type="button" onClick={() => remove(index)} title="移除"><X /></button>
     </div>)}</div> : null}
-    <div className="canvas-picker-results">{data.assets.map((asset) => <label key={asset.id}><input type="checkbox" checked={ids.includes(asset.id)} onChange={() => toggle(asset)} /><span style={{ backgroundImage: `url(${JSON.stringify(asset.publicUrl)})` }} /><small>{asset.name}</small></label>)}</div>
+    <div className="canvas-picker-results">{data.assets.map((asset) => <label key={asset.id}><input type="checkbox" checked={ids.includes(asset.id)} onChange={() => toggle(asset)} /><span><Image src={asset.thumbnailUrl || `/api/library/assets/${encodeURIComponent(asset.id)}/thumbnail?variant=square&version=2`} alt="" width={96} height={96} unoptimized loading="lazy" decoding="async" /></span><small>{asset.name}</small></label>)}</div>
+    {data.nextCursor ? <button type="button" className="canvas-picker-load-more" onClick={() => void loadMore()} disabled={busy || loadingMore}>{loadingMore ? "正在加载..." : "加载更多"}</button> : null}
     {data.total > data.assets.length ? <small className="canvas-picker-limit">显示前 {data.assets.length} / {data.total} 张，请使用搜索或筛选缩小范围。</small> : null}
     {error ? <p className="canvas-picker-error">{error}</p> : null}
   </div>;
