@@ -21,6 +21,8 @@ assert.match(registrySource, /inputs: \[[\s\S]*id: "images"[\s\S]*id: "videos"/)
 assert.match(toolsSource, /export async function maskCanvasMedia/);
 assert.match(toolsSource, /runWithConcurrencyPool\("localVideo"/);
 assert.match(toolsSource, /maskGeometryExpressions/);
+assert.match(toolsSource, /property === "x" \|\| property === "y" \? Math\.max\(0, rounded\) : Math\.max\(1, rounded\)/, "edge-aligned masks must allow zero-pixel x/y coordinates");
+assert.match(toolsSource, /mediaFingerprint\("media-mask-v2"/, "mask renderer fixes must invalidate older derived-media cache entries");
 assert.match(pageSource, /CanvasMediaMaskEditor/);
 assert.match(pageSource, /utility\.media-mask/);
 assert.match(serializationSource, /nodeType === "utility\.media-mask" && key === "mask"/);
@@ -45,6 +47,13 @@ assert.equal(getModelArtifact("utility.media-mask", { outputs: { videos: videoAr
 assert.equal(getModelArtifact("utility.media-mask", { outputs: { images: imageArtifact } }), imageArtifact, "image-only mask results must remain previewable");
 assert.equal(getModelArtifact("utility.media-mask", { outputs: { text: { kind: "text", value: "unexpected" } } }), undefined, "undeclared artifact kinds must not become previewable through compatibility fallback lookup");
 assert.equal(getModelArtifact("utility.media-mask", { outputs: {} }), undefined, "empty mask results must keep the existing empty state");
+
+const maskGeometryExpressions = loadTsFunctions(toolsSource, ["maskGeometryExpressions"], "maskGeometryExpressions");
+assert.deepEqual(
+  maskGeometryExpressions({ x: 0, y: 0, width: 1, height: 0.1 }, 1920, 1080),
+  { x: "0", y: "0", width: "1920", height: "108" },
+  "full-width edge masks must start at the exact top-left pixel",
+);
 
 const types = loadTsModule("src/lib/canvas/types.ts");
 const valid = {

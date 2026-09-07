@@ -330,7 +330,7 @@ export async function maskCanvasMedia(input: { kind: "image" | "video"; items: C
   const outputs: CanvasMediaReference[] = [];
   for (const item of input.items) {
     const regions = normalized.itemOverrides?.[item.url] || normalized.itemOverrides?.[item.sha256 || ""] || normalized.regions;
-    const fingerprint = mediaFingerprint("media-mask", item.url, { kind: input.kind, config: JSON.stringify({ ...normalized, regions }) } as unknown as Record<string, string | number>);
+    const fingerprint = mediaFingerprint("media-mask-v2", item.url, { kind: input.kind, config: JSON.stringify({ ...normalized, regions }) } as unknown as Record<string, string | number>);
     const extension = input.kind === "image" ? "png" : "mp4";
     const mimeType = input.kind === "image" ? "image/png" : "video/mp4";
     const publicPath = `/generated/canvas-tools/${fingerprint}.${extension}`;
@@ -412,7 +412,10 @@ async function createRoundedMaskOverlay(region: CanvasMaskRegion, width: number,
 function maskGeometryExpressions(region: CanvasMaskRegion, width: number, height: number) {
   const keyframes = region.keyframes || [];
   const value = (property: "x" | "y" | "width" | "height", fallback: number) => {
-    if (keyframes.length < 2) return String(Math.max(1, Math.round(fallback)));
+    if (keyframes.length < 2) {
+      const rounded = Math.round(fallback);
+      return String(property === "x" || property === "y" ? Math.max(0, rounded) : Math.max(1, rounded));
+    }
     const points = keyframes.map((frame) => ({ time: frame.timeMs / 1000, value: Number(frame[property]) * (property === "x" || property === "width" ? width : height) }));
     let expression = String(Math.round(points[points.length - 1].value));
     for (let index = points.length - 2; index >= 0; index -= 1) {

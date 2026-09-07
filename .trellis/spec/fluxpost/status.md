@@ -8,6 +8,7 @@ Canvas now includes a user-configurable "遮罩" media node for image/video deri
 
 ## Current Focus
 
+- 2026-09-07: Canvas media-mask geometry now preserves exact zero-pixel `x`/`y` coordinates while keeping positive width/height, preventing full-width top/bottom masks from exposing the source along the left or top edge. The mask renderer cache version was advanced so prior edge-offset outputs are regenerated. Focused geometry/cache contracts, TypeScript, lint, build, HTTP/SQLite smoke, and the complete offline baseline passed.
 - 2026-09-07: Canvas model-style result projection now checks every declared previewable output, so video-only `utility.media-mask` runs display their produced video instead of the empty-result state. Video/image/empty/undeclared-kind regression checks and the complete offline baseline passed.
 - 2026-09-07: Canvas node-library rows now use a fixed icon grid column so labels align across short and long node descriptions. The focused interaction contract, desktop/mobile browser geometry checks, and full offline baseline passed.
 - 2026-09-07: Canvas `input.library-images` now stays idle until filtered, loads 24-item count-free pages with lazy thumbnails, memoizes Flow nodes, and supports conditional thumbnail 304 responses. Full offline baseline passed.
