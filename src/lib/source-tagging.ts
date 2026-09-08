@@ -80,6 +80,21 @@ const contentTagAliases: Record<string, ContentTag> = {
   交付记录: "提车记录",
 };
 
+export function markItemsAsSkippedTagging(items: NormalizedSourceItem[]): NormalizedSourceItem[] {
+  const taggedAt = new Date().toISOString();
+  return items.map((item) => ({
+    ...item,
+    contentTagging: {
+      tags: [],
+      reasons: [],
+      status: "skipped",
+      error: "Tagging skipped by user request",
+      taggedAt,
+    } satisfies SourceContentTagging,
+    visualTagging: buildSkippedVisualTagging(item, taggedAt, "Tagging skipped by user request"),
+  }));
+}
+
 export async function tagSourceItems(items: NormalizedSourceItem[]) {
   if (!items.length) return items;
   if (!appConfig.openaiApiKey) {

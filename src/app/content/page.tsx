@@ -297,8 +297,10 @@ export default function ContentDeskPage() {
   const [contentType, setContentType] = useState("0");
   const [cookie, setCookie] = useState("");
   const [crawlEnableVideoTranscription, setCrawlEnableVideoTranscription] = useState(false);
+  const [crawlSkipTagging, setCrawlSkipTagging] = useState(false);
   const [linkImportVideoFrameOriginalReference, setLinkImportVideoFrameOriginalReference] = useState(true);
   const [linkImportEnableVideoTranscription, setLinkImportEnableVideoTranscription] = useState(false);
+  const [linkImportSkipTagging, setLinkImportSkipTagging] = useState(false);
   const [poolGenerateImages, setPoolGenerateImages] = useState(defaultSimpleRunMediaSettings.generateImages);
   const [poolUseComfyUiKlein, setPoolUseComfyUiKlein] = useState(defaultSimpleRunMediaSettings.useComfyUiKlein);
   const [poolDirectOriginalReference, setPoolDirectOriginalReference] = useState(defaultSimpleRunMediaSettings.directOriginalReference);
@@ -603,6 +605,7 @@ export default function ContentDeskPage() {
           contentType: platform === "douyin" ? contentType : undefined,
           cookie: platform === "douyin" ? cookie : undefined,
           enableVideoTranscription: crawlEnableVideoTranscription,
+          skipTagging: crawlSkipTagging,
         }),
       });
       const data = (await res.json()) as CrawlJob & { error?: string; project?: ContentProject };
@@ -651,6 +654,7 @@ export default function ContentDeskPage() {
           cookie: linkImportPlatform === "douyin" || linkImportPlatform === "dongchedi" ? cookie : undefined,
           videoFrameOriginalReference: linkImportVideoFrameOriginalReference,
           enableVideoTranscription: linkImportEnableVideoTranscription,
+          skipTagging: linkImportSkipTagging,
         }),
       });
       const data = (await res.json()) as LinkImportResponse;
@@ -1198,6 +1202,9 @@ export default function ContentDeskPage() {
                 <CheckRow checked={crawlEnableVideoTranscription} disabled={Boolean(busy)} onChange={setCrawlEnableVideoTranscription}>
                   启用视频音频转文字
                 </CheckRow>
+                <CheckRow checked={crawlSkipTagging} disabled={Boolean(busy)} onChange={setCrawlSkipTagging}>
+                  跳过自动打标
+                </CheckRow>
                 <button className="soft-button flex h-10 w-full items-center justify-center gap-2" type="button" onClick={saveCurrentPlatformCrawlSettings} disabled={Boolean(busy || !workspaceSettings)}>
                   {busy === "settings" ? <Loader2 className="h-4 w-4 animate-spin" /> : <ShieldCheck className="h-4 w-4" />}
                   保存采集策略
@@ -1238,6 +1245,9 @@ export default function ContentDeskPage() {
                 </CheckRow>
                 <CheckRow checked={linkImportEnableVideoTranscription} disabled={Boolean(busy)} onChange={setLinkImportEnableVideoTranscription}>
                   启用视频音频转文字
+                </CheckRow>
+                <CheckRow checked={linkImportSkipTagging} disabled={Boolean(busy)} onChange={setLinkImportSkipTagging}>
+                  跳过自动打标
                 </CheckRow>
                 {linkImportPlatform === "douyin" || linkImportPlatform === "dongchedi" ? (
                   <label>

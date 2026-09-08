@@ -45,6 +45,7 @@ function parseLinkImportInput(body: {
   cookie?: string;
   videoFrameOriginalReference?: boolean;
   enableVideoTranscription?: boolean;
+  skipTagging?: boolean;
 }) {
   const query = typeof body.query === "string" ? body.query.trim() : "";
   if (!query) throw new Error("Query is required");
@@ -63,6 +64,7 @@ function parseLinkImportInput(body: {
     cookie: typeof body.cookie === "string" ? body.cookie : undefined,
     videoFrameOriginalReference: body.videoFrameOriginalReference !== false,
     enableVideoTranscription: body.enableVideoTranscription === true,
+    skipTagging: body.skipTagging === true,
   };
 }
 

@@ -3,7 +3,7 @@ import { compactError, recordExecutionLog } from "@/lib/activity-log";
 import { ingestCrawlItems } from "@/lib/content-pool";
 import { getContentSafetyPolicy, normalizeContentSafetyPolicySnapshot } from "@/lib/content-safety-policy";
 import { filterUnsafeSourceItems } from "@/lib/source-safety";
-import { tagSourceItems } from "@/lib/source-tagging";
+import { markItemsAsSkippedTagging, tagSourceItems } from "@/lib/source-tagging";
 import { crawlTikHub } from "@/lib/tikhub";
 import { makeDemoSourceItems } from "@/lib/mock-data";
 import { saveJob, listJobs } from "@/lib/store";
@@ -14,6 +14,7 @@ export const runtime = "nodejs";
 
 type CrawlJobRequest = Partial<CrawlInput> & {
   enableVideoTranscription?: boolean;
+  skipTagging?: boolean;
 };
 
 export async function GET(request: Request) {
@@ -86,7 +87,9 @@ export async function POST(request: Request) {
           videoFrames: extractedFrameCount,
         },
       });
-      items = await tagSourceItems(items);
+      items = body.skipTagging
+        ? markItemsAsSkippedTagging(items)
+        : await tagSourceItems(items);
       const taggedContentCount = items.filter((item) => item.contentTagging?.status === "success").length;
       const taggedVisualCount = items.reduce((sum, item) => sum + (item.visualTagging?.assets.length || 0), 0);
       await recordExecutionLog({

@@ -2,7 +2,7 @@ import { compactError, recordExecutionLog } from "./activity-log";
 import { concurrencyConfig, mapWithConcurrency } from "./concurrency";
 import { ingestCrawlItems } from "./content-pool";
 import { filterUnsafeSourceItems } from "./source-safety";
-import { tagSourceItems } from "./source-tagging";
+import { markItemsAsSkippedTagging, tagSourceItems } from "./source-tagging";
 import { detectPlatformFromSourceUrl, fetchTikHubItemBySourceLink } from "./tikhub";
 import { buildDongchediArticleUrl, extractDongchediArticleId, fetchDongchediItemBySource } from "./dongchedi";
 import { buildXiaopengBbsThreadUrl, extractXiaopengBbsThreadId, fetchXiaopengBbsItemBySource } from "./xiaopeng-bbs";
@@ -52,6 +52,7 @@ export type SourceLinkImportInput = {
   enableVideoTranscription?: boolean;
   owner?: WorkspaceAccessActor;
   contentSafetyPolicy: ContentSafetyPolicy;
+  skipTagging?: boolean;
 };
 
 export type SourceLinkResolveInput = {
@@ -130,7 +131,9 @@ export async function importSourceLinks(input: SourceLinkImportInput): Promise<S
     }
   }
 
-  const taggedItems = await tagSourceItems(safetyResult.items);
+  const taggedItems = input.skipTagging
+    ? markItemsAsSkippedTagging(safetyResult.items)
+    : await tagSourceItems(safetyResult.items);
   const importedIds = new Set(taggedItems.map((item) => item.id));
   for (const result of results) {
     if (result.itemId && importedIds.has(result.itemId)) {
