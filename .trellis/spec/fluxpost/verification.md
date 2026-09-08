@@ -1,6 +1,6 @@
 # Verification
 
-Last updated: 2026-09-07
+Last updated: 2026-09-08
 
 ## Baseline Command
 
@@ -34,6 +34,12 @@ The baseline verifies:
 - Isolated production HTTP smoke and SQLite store validation.
 
 The default baseline must not call live TikHub, text/image providers, Seedance, ComfyUI, Feishu writes, Lark replies, or simple-run production.
+
+### Copy-Library New-Draft Regression
+
+- The baseline's `copy_library_check.mjs` enforces selection-independent fetching, explicit new-draft preservation, saved-entry selection, and history restoration contracts.
+- `python .trellis/verification/copy_library_browser_check.py` is a separate mocked Chromium interaction check requiring Python Playwright and system Chrome. Set `BROWSER_BASE_URL` to an existing worker-disabled isolated smoke server to test uncommitted builds; its default is the unchanged port-3001 candidate. All browser API requests are intercepted with in-memory fixtures.
+- It covers 1440px/390px layouts, empty lists, read-only deep links, create via POST, edit via PATCH, selection without reloads, pending tags, delayed filter responses, and back/forward draft restoration. It must fail on the pre-fix build when the new title is replaced by the first existing entry.
 
 ## Candidate Release Checks
 

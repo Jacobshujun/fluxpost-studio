@@ -23,6 +23,7 @@ export default function CopyLibraryPage() {
   const [selectedId, setSelectedId] = useUrlQueryState("entryId", "", optionalStringCodec());
   const [selectedIds, setSelectedIds] = useState<Set<string>>(new Set());
   const selectedIdRef = useRef<string | undefined>(undefined);
+  const creatingRef = useRef(false);
   const selectionAnchorIdRef = useRef<string | undefined>(undefined);
   const selectAllRef = useRef<HTMLInputElement>(null);
   const listRef = useRef<HTMLDivElement>(null);
@@ -59,6 +60,7 @@ export default function CopyLibraryPage() {
       if (!response.ok) throw new Error(result.error || "文案库加载失败");
       setData(result);
       setSelectedIds((current) => new Set([...current].filter((id) => result.entries.some((entry) => entry.id === id))));
+      if (creatingRef.current) return;
       const nextId = preserveSelection && result.entries.some((entry) => entry.id === selectedIdRef.current)
         ? selectedIdRef.current
         : result.entries[0]?.id;
@@ -76,11 +78,29 @@ export default function CopyLibraryPage() {
   }, [query, setSelectedId]);
 
   useEffect(() => {
-    if (!searchHydrated) return;
     selectedIdRef.current = selectedId || undefined;
+  }, [selectedId]);
+
+  useEffect(() => {
+    function restoreSelection() {
+      const entryId = new URLSearchParams(window.location.search).get("entryId") || undefined;
+      const entry = data.entries.find((item) => item.id === entryId);
+      selectedIdRef.current = entryId;
+      creatingRef.current = !entryId;
+      setDraft(entry ? draftFromEntry(entry) : emptyDraft);
+      setTagDraft("");
+      setMessage("");
+    }
+
+    window.addEventListener("popstate", restoreSelection);
+    return () => window.removeEventListener("popstate", restoreSelection);
+  }, [data.entries]);
+
+  useEffect(() => {
+    if (!searchHydrated) return;
     const timer = window.setTimeout(() => void load(), 0);
     return () => window.clearTimeout(timer);
-  }, [load, searchHydrated, selectedId]);
+  }, [load, searchHydrated]);
 
   const clearBatchSelection = useCallback(() => {
     selectionAnchorIdRef.current = undefined;
@@ -124,9 +144,11 @@ export default function CopyLibraryPage() {
   }, [batchDeleteOpen, busy, clearBatchSelection, data.entries.length, deleteOpen, selectAllEntries, selectedIds.size]);
 
   function startNew() {
+    creatingRef.current = true;
     selectedIdRef.current = undefined;
     setSelectedId("");
     setDraft(emptyDraft);
+    setTagDraft("");
     setMessage("");
     setDeleteOpen(false);
     setEditorOpen(true);
@@ -165,6 +187,7 @@ export default function CopyLibraryPage() {
     }
 
     selectionAnchorIdRef.current = entry.id;
+    creatingRef.current = false;
     selectedIdRef.current = entry.id;
     setSelectedId(entry.id);
     setDraft(draftFromEntry(entry));
@@ -184,6 +207,7 @@ export default function CopyLibraryPage() {
       const result = (await response.json()) as { entry?: CopyLibraryEntryView; error?: string };
       if (!response.ok || !result.entry) throw new Error(result.error || "文案保存失败");
       selectedIdRef.current = result.entry.id;
+      creatingRef.current = false;
       await load(true);
       setMessage("文案已保存");
     } catch (error) {

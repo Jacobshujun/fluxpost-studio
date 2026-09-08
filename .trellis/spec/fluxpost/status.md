@@ -1,12 +1,14 @@
 # FluxPost Current Status
 
-Last updated: 2026-09-07
+Last updated: 2026-09-08
 
 ## One-Line Status
 
-Canvas content assembly now exposes a default-on review switch and maps it to draft/approved post status; legacy workflows, focused contracts, and the full offline baseline are verified.
+Copy-library new-draft selection/reload regression is fixed and verified in the worktree; commit and port-3001 candidate activation await user approval.
 
 ## Current Focus
+
+- 2026-09-08: Copy-library list fetching no longer depends on the selected entry. Explicit create mode preserves new drafts across refreshes/slow responses, pending tags clear on New, and history restores editor drafts separately. The new browser regression failed on candidate `67c4c8103def7a85827a4cda9c374309c34acf45` before the fix, then passed on the isolated modified build at 1440px/390px with empty/read-only lists, POST/PATCH saves, selection, delayed filters, and history. Focused contracts and the full offline baseline passed. No real entries or external services were touched; port 3001 still serves the unchanged candidate. Next: obtain approval to commit and activate via `npm run local`.
 
 - 2026-09-07: Canvas `compose.social-post` now exposes `是否需要审查`, defaults it on for new and legacy workflows, saves review-required posts as drafts, and marks review-skipped posts approved while preserving published posts on rerun. Focused Canvas contracts, TypeScript, lint, build, HTTP/SQLite smoke, and the complete offline baseline passed.
 - 2026-09-07: Canvas media-mask geometry now preserves exact zero-pixel `x`/`y` coordinates while keeping positive width/height, preventing full-width top/bottom masks from exposing the source along the left or top edge. The mask renderer cache version was advanced so prior edge-offset outputs are regenerated. Focused geometry/cache contracts, TypeScript, lint, build, HTTP/SQLite smoke, and the complete offline baseline passed.

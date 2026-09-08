@@ -25,6 +25,13 @@ try {
   const canvasCss = read("src/app/globals.css");
   const home = read("src/app/page.tsx");
 
+  assert.match(page, /selectedIdRef\.current = selectedId \|\| undefined;\s*\}, \[selectedId\]\)/, "URL selection must sync independently of list loading.");
+  assert.match(page, /const timer = window\.setTimeout\(\(\) => void load\(\), 0\);\s*return \(\) => window\.clearTimeout\(timer\);\s*\}, \[load, searchHydrated\]\)/, "Selecting or creating a draft must not reload the list.");
+  assert.match(page, /if \(creatingRef\.current\) return;[\s\S]*?const nextId = preserveSelection/, "List responses must preserve an explicit new draft before choosing a default entry.");
+  assert.match(page, /function startNew\(\) \{\s*creatingRef\.current = true;[\s\S]*?setTagDraft\(""\)/, "New must explicitly enter create mode and clear pending tag input.");
+  assert.match(page, /selectedIdRef\.current = result\.entry\.id;\s*creatingRef\.current = false;\s*await load\(true\)/, "Successful creation must select the saved entry before reloading.");
+  assert.match(page, /addEventListener\("popstate", restoreSelection\)/, "Browser history must restore the editor without coupling selection to fetching.");
+
   assert.match(css, /\.filters select option[^}]*background:var\(--panel-solid\)[^}]*color:var\(--foreground\)/, "Copy-library native options must keep a solid, theme-aware background and readable text.");
 
   assert.match(types, /export type CopyLibraryEntry\b/);
