@@ -18,12 +18,12 @@ Fix the confirmed new-entry regression without changing APIs, shared URL hooks, 
 - Focused deterministic contracts, mocked desktop/mobile Chromium, and full offline baseline pass.
 
 ## Boundaries
-No commits, runtime-data writes, external services, or candidate activation. Browser tests use mocked APIs; modified code is tested on an ephemeral worker-disabled smoke server, never by replacing port 3001.
+Initial implementation verification excluded commits, runtime-data writes, external services, and candidate activation. Browser tests use mocked APIs; uncommitted code was tested on an ephemeral worker-disabled smoke server, never by replacing port 3001. The user subsequently approved committing and local activation on 2026-09-08.
 
 ## Verification Results
 - Before the fix, the browser regression failed because New draft became Existing copy on candidate `67c4c8103def7a85827a4cda9c374309c34acf45`.
 - After the fix, all three mocked Chromium cases passed against the modified build on ephemeral port 45678: desktop, mobile, and empty list. This includes POST/PATCH, read-only deep links, ordinary selection, pending tags, delayed refresh, and back/forward restoration.
 - `node .trellis/verification/copy_library_check.mjs`, focused ESLint, and the complete offline baseline passed, including TypeScript, lint, build, HTTP smoke, and SQLite.
-- Port-3001 process 7496 and its candidate SHA remain unchanged; the temporary smoke listener was stopped.
+- Before release approval, port-3001 process 7496 and its candidate SHA remained unchanged; the temporary smoke listener was stopped.
 - Separate shared-hook observation, outside this fix: the address bar can retain the initial entryId on the first New click from a deep link, even though the editor stays in create mode and correctly saves with POST. Shared URL-write behavior is unchanged; its cause is pending confirmation.
-- Implementation is complete. User approval is still required before committing and activating the fixed candidate.
+- Implementation commit `061be8bd662fbb5b9e1121533e565f1bed35ef55` was activated with user-approved `npm run local:lan`. HTTP smoke and all three browser cases passed on port 3001; HEAD, runtime identity, candidate state, and slot marker matched, and LAN binding remained `0.0.0.0`. No GitHub push or remote deployment was performed.
