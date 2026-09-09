@@ -372,6 +372,7 @@ export type PlatformCrawlSettings = Partial<Record<CrawlPlatform, PlatformCrawlS
 export type ImageGenerationOptions = {
   size: string;
   quality: ImageGenerationQuality;
+  allowSourceFallback?: boolean;
   taskConcurrency?: number;
   ratio?: string;
   resolution?: "1k" | "2k" | "4k";

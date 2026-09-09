@@ -81,6 +81,7 @@ const nodeChecks = [
   ["Review desk workflow check", "review_desk_workflow_check.mjs"],
   ["Review desk scroll layout check", "review_desk_scroll_layout_check.mjs"],
   ["Image task fallback check", "image_task_fallback_check.mjs"],
+  ["Simple image discard check", "simple_image_discard_check.mjs"],
   ["ToAPIs GPT-Image-2 adapter check", "toapis_image_api_check.mjs"],
   ["Image provider profiles check", "image_provider_profiles_check.mjs"],
   ["Image transport and Xray recovery check", "image_transport_check.mjs"],

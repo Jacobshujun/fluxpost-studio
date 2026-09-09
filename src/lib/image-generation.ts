@@ -225,7 +225,7 @@ export async function generateImagesFromPrompt(
           taskResultsSummary.push(await recordStrictTaskNeedsReview(task, message, "Strict viral image task needs review"));
           continue;
         }
-        if (isImageTaskSourceFallbackError(error)) {
+        if (imageOptions.allowSourceFallback !== false && isImageTaskSourceFallbackError(error)) {
           const fallback = await resolveSourceFallback(task, message);
           if (!fallback.ok) {
             taskResultsSummary.push(fallback.taskResult);
@@ -630,7 +630,7 @@ async function runSelectedImageTask(
         taskResult: await recordStrictTaskNeedsReview(task, message, "Strict viral image task needs review"),
       };
     }
-    if (shouldFallbackComfyUiKleinTask(task)) {
+    if (imageOptions.allowSourceFallback !== false && shouldFallbackComfyUiKleinTask(task)) {
       const fallback = await resolveSourceFallback(task, message);
       if (!fallback.ok) {
         return { imageUrls: [], taskResult: fallback.taskResult };
@@ -662,7 +662,7 @@ async function runSelectedImageTask(
       };
     }
 
-    if (isImageTaskSourceFallbackError(error)) {
+    if (imageOptions.allowSourceFallback !== false && isImageTaskSourceFallbackError(error)) {
       const fallbackTimeoutMs = resolveImageTaskFallbackTimeoutMs();
       const isTimeout = isImageTaskTimeoutError(error);
       const fallback = await resolveSourceFallback(task, message);
@@ -2302,6 +2302,7 @@ function normalizeImageOptions(options?: Partial<ImageGenerationOptions>): Image
     size: normalizeImageGenerationSize(options?.size),
     quality: normalizeImageQuality(options?.quality),
     taskConcurrency: normalizeTaskConcurrency(options?.taskConcurrency),
+    allowSourceFallback: options?.allowSourceFallback !== false,
     ratio: options?.ratio,
     resolution: options?.resolution,
     outputFormat: options?.outputFormat === "jpeg" ? "jpeg" : "png",

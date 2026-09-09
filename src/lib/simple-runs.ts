@@ -1001,6 +1001,7 @@ async function produceSimpleSourceDraft(
     ? await generateImagesFromPrompt(imagePrompt, 1, draft.imageTasks, {
         size: settings.imageSize,
         quality: settings.imageQuality,
+        allowSourceFallback: false,
         taskConcurrency: isSimpleRunDongchediPageMode(normalizedInput) ? 1 : concurrencyConfig.image,
       })
     : makeImageGenerationSkippedResult(resolveSimpleImageSkipMessage(generateImages, "simple run"));
@@ -1238,6 +1239,7 @@ async function runSimpleViralWorkflow(
       ? await generateImagesFromPrompt(imagePrompt, 1, draft.imageTasks, {
           size: settings.imageSize,
           quality: settings.imageQuality,
+          allowSourceFallback: false,
           taskConcurrency: concurrencyConfig.image,
         })
       : makeImageGenerationSkippedResult(

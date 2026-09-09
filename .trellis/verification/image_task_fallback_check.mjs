@@ -366,8 +366,8 @@ assertContains(
 
 assertContains(
   imageGeneration,
-  /if \(isImageTaskSourceFallbackError\(error\)\) \{[\s\S]*const fallback = await resolveSourceFallback\(task, message\)[\s\S]*Image task failed; using source image[\s\S]*fallbackUrl: task\.url[\s\S]*outputUrl: fallbackUrl[\s\S]*imageUrls: \[fallbackUrl\]/,
-  "Recoverable selected image task failures should use the verified durable source-image fallback.",
+  /if \(imageOptions\.allowSourceFallback !== false && isImageTaskSourceFallbackError\(error\)\) \{[\s\S]*const fallback = await resolveSourceFallback\(task, message\)[\s\S]*Image task failed; using source image[\s\S]*fallbackUrl: task\.url[\s\S]*outputUrl: fallbackUrl[\s\S]*imageUrls: \[fallbackUrl\]/,
+  "Recoverable selected image task failures may use verified source images only when source fallback is allowed.",
 );
 
 assertContains(

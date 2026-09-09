@@ -24,6 +24,8 @@ node --env-file=.env.local .trellis/verification/unified_library_postgres_benchm
 - `node .trellis/verification/canvas_content_collection_check.mjs` covers 20 source-scoped tasks, five-port snapshots, authenticated owner propagation, opt-in tagging, vision/image executors, partial-image retry, serialization and per-node media limits using mocks. The normal baseline includes it.
 - `python .trellis/verification/canvas_content_collection_browser_check.py` separately checks tagging controls, test-link persistence/reset, generic vision preset, five shared ports, 20-task preflight and 1440px/390px layout against a worker-disabled isolated smoke server. Set `BROWSER_BASE_URL`; its default is port 45678, not the live 3001 candidate. All API requests are intercepted; it never starts real collection or launches a batch.
 
+- `simple_image_discard_check.mjs` executes the image-task functions with isolated provider/media stubs: simple-run timeout/provider/Klein failures discard slots without reading original images, successful slots survive, all ordinary failures reject, explicit keep mode and strict review remain intact, and unrelated callers retain their policy. AST checks require both simple-run reference-image entry points to disable source fallback.
+
 The baseline verifies:
 
 - Trellis file existence, context budgets, latest markers, JSON validity, and feature evidence limits.
