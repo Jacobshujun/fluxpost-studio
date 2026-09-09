@@ -353,6 +353,8 @@ function settingsFromRun(run: SimpleRun): WorkspacePromptSettings {
     imageWashPrompt: run.imageWashPrompt,
     imageStrategyPrompts: run.imageStrategyPrompts || defaultWorkspacePromptSettings.imageStrategyPrompts,
     imageSize: run.imageSize,
+    imageRatio: run.imageRatio,
+    imageResolution: run.imageResolution,
     imageQuality: run.imageQuality,
     platformCrawlSettings: run.platformCrawlSettings || defaultWorkspacePromptSettings.platformCrawlSettings,
     simpleRunMediaSettings: {
@@ -1000,6 +1002,8 @@ async function produceSimpleSourceDraft(
   const imageResult = canRunImageTasks
     ? await generateImagesFromPrompt(imagePrompt, 1, draft.imageTasks, {
         size: settings.imageSize,
+        ratio: settings.imageRatio,
+        resolution: settings.imageResolution,
         quality: settings.imageQuality,
         allowSourceFallback: false,
         taskConcurrency: isSimpleRunDongchediPageMode(normalizedInput) ? 1 : concurrencyConfig.image,
@@ -1238,6 +1242,8 @@ async function runSimpleViralWorkflow(
     const imageResult = canRunImageTasks
       ? await generateImagesFromPrompt(imagePrompt, 1, draft.imageTasks, {
           size: settings.imageSize,
+          ratio: settings.imageRatio,
+          resolution: settings.imageResolution,
           quality: settings.imageQuality,
           allowSourceFallback: false,
           taskConcurrency: concurrencyConfig.image,
@@ -1479,6 +1485,8 @@ async function runSimpleOriginalWorkflow(
     const imageResult = generateImages
       ? await generateImagesFromPromptList(draft.imagePrompts, {
           size: settings.imageSize,
+          ratio: settings.imageRatio,
+          resolution: settings.imageResolution,
           quality: settings.imageQuality,
           taskConcurrency: concurrencyConfig.image,
         })
@@ -2545,6 +2553,8 @@ function makeInitialRun(
     imageWashPrompt: settings.imageWashPrompt,
     imageStrategyPrompts: settings.imageStrategyPrompts,
     imageSize: settings.imageSize,
+    imageRatio: settings.imageRatio,
+    imageResolution: settings.imageResolution,
     imageQuality: settings.imageQuality,
     platformCrawlSettings: settings.platformCrawlSettings,
     contentSafetyPolicy,

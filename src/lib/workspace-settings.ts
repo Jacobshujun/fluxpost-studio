@@ -2,6 +2,7 @@ import { defaultImageStrategyPrompts, defaultImageWashPrompt, resolveImageStrate
 import { readAppMetaValue, writeAppMetaValue } from "./database";
 import { defaultDistributionCheckPrompt } from "./distribution-check-prompt";
 import { defaultImageGenerationSize, normalizeImageGenerationSize } from "./image-size-options";
+import { resolveGptImageDimensionSettings } from "./gpt-image-dimensions";
 import { defaultSimpleRunMediaSettings, type CrawlPlatform, type PlatformCrawlSetting, type PlatformCrawlSettings, type SimpleRunMediaSettings, type WorkspacePromptSettings } from "./types";
 
 const settingsMetaKey = "workspace_prompt_settings_v1";
@@ -50,6 +51,9 @@ export async function saveWorkspacePromptSettings(input: Partial<WorkspacePrompt
 }
 
 function normalizeWorkspacePromptSettings(input: Partial<WorkspacePromptSettings>): WorkspacePromptSettings {
+  const dimensions = input.imageRatio !== undefined || input.imageResolution !== undefined
+    ? resolveGptImageDimensionSettings(input)
+    : undefined;
   const imageStrategyPrompts = resolveImageStrategyPrompts({
     ...input.imageStrategyPrompts,
     textImage: input.imageStrategyPrompts?.textImage || input.imageWashPrompt,
@@ -60,6 +64,7 @@ function normalizeWorkspacePromptSettings(input: Partial<WorkspacePromptSettings
     imageStrategyPrompts,
     distributionCheckPrompt: stringOrDefault(input.distributionCheckPrompt, defaultWorkspacePromptSettings.distributionCheckPrompt),
     imageSize: normalizeImageGenerationSize(input.imageSize),
+    ...dimensions,
     imageQuality: normalizeImageQuality(input.imageQuality),
     platformCrawlSettings: normalizePlatformCrawlSettings(input.platformCrawlSettings),
     simpleRunMediaSettings: normalizeSimpleRunMediaSettings(input.simpleRunMediaSettings),

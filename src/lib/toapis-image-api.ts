@@ -1,4 +1,5 @@
 import type { ImageGenerationOptions } from "./types";
+import { ImageProviderError } from "./image-providers/contracts";
 
 export type ToApisImageSize = {
   size: string;
@@ -6,6 +7,7 @@ export type ToApisImageSize = {
 };
 
 export const toApisImageRatios = ["1:1", "3:2", "2:3", "4:3", "3:4", "5:4", "4:5", "16:9", "9:16", "2:1", "1:2", "21:9", "9:21"] as const;
+export const toApisImageResolutions = ["1k", "2k", "4k"] as const;
 export const toApis4kImageRatios = ["16:9", "9:16", "2:1", "1:2", "21:9", "9:21"] as const;
 export const maxToApisReferenceImages = 16;
 export const maxToApisImageOutputs = 10;
@@ -29,26 +31,12 @@ export type ToApisImageTask = {
   };
 };
 
-const toApisImageSizeByPixels: Record<string, ToApisImageSize> = {
-  auto: { size: "1:1", resolution: "1k" },
-  "1024x1024": { size: "1:1", resolution: "1k" },
-  "1024x1536": { size: "2:3", resolution: "1k" },
-  "1536x1024": { size: "3:2", resolution: "1k" },
-  "2048x2048": { size: "1:1", resolution: "2k" },
-  "2048x1152": { size: "16:9", resolution: "2k" },
-  "1152x2048": { size: "9:16", resolution: "2k" },
-  "3840x2160": { size: "16:9", resolution: "4k" },
-  "2160x3840": { size: "9:16", resolution: "4k" },
-  // Historical FluxPost drafts used this custom size; ToAPIs previously normalized it to 1K.
-  "1200x1600": { size: "3:4", resolution: "1k" },
-};
-
 export function resolveToApisImageSize(requestedSize: ImageGenerationOptions["size"]): ToApisImageSize {
-  const mapped = toApisImageSizeByPixels[requestedSize];
-  if (!mapped) {
-    throw new Error(`ToAPIs does not have an explicit size mapping for ${requestedSize}. Select a listed image-size preset.`);
-  }
-  return mapped;
+  if (requestedSize === "auto") return { size: "1:1", resolution: "1k" };
+  throw new ImageProviderError(
+    `当前 ToAPIs 图片适配器仅支持比例和分辨率档位，无法按精确像素 ${requestedSize} 提交。请切换支持精确尺寸的图片接口，或明确选择比例和档位；不会自动替换尺寸或缩放成品。`,
+    { category: "input", retryable: false, failoverAllowed: false },
+  );
 }
 
 export function buildToApisGenerationBody(input: {

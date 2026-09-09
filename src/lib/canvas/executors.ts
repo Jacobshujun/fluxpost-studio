@@ -14,6 +14,7 @@ import { resolveSeedanceInput } from "./seedance-references";
 import { CanvasMediaNeedsConfigError, extractCanvasVideoFrames, reconstructCanvasVideo, transformCanvasImages, renderCanvasImageSlideshow, maskCanvasMedia } from "./media-tools";
 import { revalidateCanvasDirectoryGroup } from "./directory-snapshots";
 import { canvasVisionPresets, concatenateCanvasText, parseCanvasImageSelection, renderCanvasPromptTemplate, splitCanvasText } from "./node-utils";
+import { pixelSizeForRatio } from "../gpt-image-dimensions";
 import { normalizeUrlList } from "./registry";
 import { CANVAS_SAVE_IMAGE_MAX_ITEMS } from "./save-images";
 import { canvasSourceVideoSnapshotFromConfig, isCanvasSourceVideoSnapshotCurrent } from "./source-video-contract";
@@ -680,14 +681,6 @@ async function executeLegacyGptImage({ node, inputs }: CanvasNodeExecutionContex
   });
   if (result.status === "needs_config") throw new CanvasNeedsConfigError(result.message || "GPT-Image-2 is not configured.");
   return { outputs: { images: { kind: "images" as const, items: result.imageUrls.map((url) => ({ url })) } } };
-}
-
-function pixelSizeForRatio(ratio: string, resolution: "1k" | "2k" | "4k") {
-  const [widthRatio, heightRatio] = ratio.split(":").map(Number);
-  const longestSide = resolution === "4k" ? 4096 : resolution === "2k" ? 2048 : 1024;
-  if (!widthRatio || !heightRatio) return "1024x1024";
-  const scale = longestSide / Math.max(widthRatio, heightRatio);
-  return `${Math.max(64, Math.round(widthRatio * scale))}x${Math.max(64, Math.round(heightRatio * scale))}`;
 }
 
 async function executeSeedance({ node, inputs, previousNodeRun, onProviderTaskUpdate }: CanvasNodeExecutionContext) {

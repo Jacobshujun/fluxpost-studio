@@ -43,7 +43,9 @@ import {
 } from "@/lib/creation-controls";
 import { defaultDistributionCheckPrompt } from "@/lib/distribution-check-prompt";
 import { feishuPublishModeOptions, formatFeishuPublishMode, normalizeFeishuPublishMode } from "@/lib/feishu-publish-mode";
-import { defaultImageGenerationSize, imageGenerationSizeOptions, isImageGenerationSize, normalizeImageGenerationSize } from "@/lib/image-size-options";
+import { defaultImageGenerationSize } from "@/lib/image-size-options";
+import { resolveGptImageDimensionSettings } from "@/lib/gpt-image-dimensions";
+import { toApis4kImageRatios, toApisImageRatios, toApisImageResolutions } from "@/lib/toapis-image-api";
 import { toRemoteImagePreviewSrc } from "@/lib/media-preview";
 import { getStoredTheme, setStoredTheme, subscribeTheme, type ThemeMode } from "@/lib/theme";
 import {
@@ -515,8 +517,14 @@ export default function Home() {
     if (!textInstruction) return setMessage("请填写文字内容提示词");
     const missingImageStrategyPrompt = simpleGenerateImages ? getMissingImageStrategyPrompt(workspaceSettings) : "";
     if (missingImageStrategyPrompt) return setMessage(`请填写${missingImageStrategyPrompt}提示词`);
-    const normalizedImageSize = simpleGenerateImages ? normalizeImageSizeInput(workspaceSettings.imageSize) : defaultImageGenerationSize;
-    if (simpleGenerateImages && !normalizedImageSize) return setMessage("请输入有效的 GPT 图片尺寸");
+    let selectedDimensions: ReturnType<typeof resolveGptImageDimensionSettings> | undefined;
+    if (simpleGenerateImages) {
+      try {
+        selectedDimensions = resolveGptImageDimensionSettings(workspaceSettings);
+      } catch (error) {
+        return setMessage(error instanceof Error ? error.message : "请选择图片比例和分辨率");
+      }
+    }
 
     const simpleRunMediaSettings: SimpleRunMediaSettings = {
       generateImages: simpleGenerateImages,
@@ -531,7 +539,7 @@ export default function Home() {
       textInstruction,
       imageStrategyPrompts,
       imageWashPrompt: imageStrategyPrompts.textImage,
-      imageSize: normalizedImageSize,
+      ...selectedDimensions,
       simpleRunMediaSettings,
       updatedAt: new Date().toISOString(),
     };
@@ -884,7 +892,7 @@ function CompactWorkspace(props: {
 
           {sourceMode !== "dongchedi_page" ? <div className="simple-feishu-controls"><label className="simple-write-feishu-row"><input className="mt-1 h-4 w-4 accent-[var(--mint)]" type="checkbox" checked={writeFeishu} onChange={(event) => props.onWriteFeishuChange(event.target.checked)} disabled={busy || settingsBusy} /><span><span className="block text-xs font-black text-white">写入飞书</span><span className="mt-1 block text-[11px] text-white/50">{writeFeishu ? "生成后自动审查并排队写入。" : "只生成本地草稿。"}</span></span></label>{writeFeishu ? <FeishuPublishModeSelector value={feishuPublishMode} disabled={busy || settingsBusy} onChange={props.onFeishuPublishModeChange} /> : null}</div> : null}
 
-          <div className="simple-policy-preview"><div className="flex items-center justify-between gap-3"><PanelTitle icon={<Lightbulb className="h-4 w-4" />} title="提示词与图片策略" /><span className="status-badge text-[10px] text-[var(--mint)]">可自定义</span></div><div className="simple-prompt-stack mt-3"><label><FieldLabel label="文字内容提示词" /><textarea className="field simple-prompt-textarea" aria-label="精简版文字内容提示词" value={settings.textInstruction} onChange={(event) => props.onSettingsChange({ textInstruction: event.target.value })} disabled={busy || settingsBusy} /></label><ImageStrategyPromptEditor settings={settings} disabled={busy || settingsBusy} onChange={props.onSettingsChange} /><label><FieldLabel label="图片生成尺寸" /><ImageSizeInput className="field" value={settings.imageSize} onChange={(value) => props.onSettingsChange({ imageSize: value })} disabled={busy || settingsBusy} ariaLabel="精简版图片生成尺寸" listId="compact-image-size-presets" /></label></div><div className="mt-3 flex flex-wrap gap-2"><span className="status-badge text-[10px] text-white/52">素材 {materialPaths.length} 个</span><span className="status-badge text-[10px] text-white/52">{settings.imageQuality}</span></div><button className="soft-button mt-3 flex h-10 w-full items-center justify-center gap-2 text-xs" type="button" onClick={props.onSaveSettings} disabled={busy || settingsBusy}>{settingsBusy ? <Loader2 className="h-4 w-4 animate-spin" /> : <Check className="h-4 w-4" />}保存当前策略</button></div>
+          <div className="simple-policy-preview"><div className="flex items-center justify-between gap-3"><PanelTitle icon={<Lightbulb className="h-4 w-4" />} title="提示词与图片策略" /><span className="status-badge text-[10px] text-[var(--mint)]">可自定义</span></div><div className="simple-prompt-stack mt-3"><label><FieldLabel label="文字内容提示词" /><textarea className="field simple-prompt-textarea" aria-label="精简版文字内容提示词" value={settings.textInstruction} onChange={(event) => props.onSettingsChange({ textInstruction: event.target.value })} disabled={busy || settingsBusy} /></label><ImageStrategyPromptEditor settings={settings} disabled={busy || settingsBusy} onChange={props.onSettingsChange} /><ImageDimensionSelects settings={settings} onChange={props.onSettingsChange} disabled={busy || settingsBusy} /></div><div className="mt-3 flex flex-wrap gap-2"><span className="status-badge text-[10px] text-white/52">素材 {materialPaths.length} 个</span><span className="status-badge text-[10px] text-white/52">{settings.imageQuality}</span></div><button className="soft-button mt-3 flex h-10 w-full items-center justify-center gap-2 text-xs" type="button" onClick={props.onSaveSettings} disabled={busy || settingsBusy}>{settingsBusy ? <Loader2 className="h-4 w-4 animate-spin" /> : <Check className="h-4 w-4" />}保存当前策略</button></div>
 
           <button className="primary-button flex h-12 w-full items-center justify-center gap-2" type="button" onClick={props.onStart} disabled={busy || settingsBusy || !canStart}>{busy ? <Loader2 className="h-4 w-4 animate-spin" /> : <Send className="h-4 w-4" />}{busy ? "正在自动执行" : writeFeishu ? "开始生产并写入飞书" : "开始生产待审查内容"}</button>
         </div>
@@ -929,8 +937,26 @@ function ImageStrategyPromptEditor({ settings, disabled, onChange }: { settings:
   return <div className="image-strategy-editor-compact"><FieldLabel label="图片标签策略" /><div className="image-strategy-prompt-grid mt-2">{imageStrategyPromptOptions.map((option) => <label key={option.key} className="simple-prompt-block"><span className="mb-2 block text-[11px] font-black text-white/60">{option.title}</span><textarea className="field simple-prompt-textarea-tall" value={settings.imageStrategyPrompts[option.key]} onChange={(event) => onChange({ imageStrategyPrompts: { ...settings.imageStrategyPrompts, [option.key]: event.target.value }, imageWashPrompt: option.key === "textImage" ? event.target.value : settings.imageWashPrompt })} disabled={disabled} /><button className="prompt-reset-button mt-2" type="button" onClick={() => onChange({ imageStrategyPrompts: { ...settings.imageStrategyPrompts, [option.key]: option.defaultPrompt }, imageWashPrompt: option.key === "textImage" ? option.defaultPrompt : settings.imageWashPrompt })} disabled={disabled}>使用默认</button></label>)}</div></div>;
 }
 
-function ImageSizeInput({ value, onChange, disabled, className, ariaLabel, listId }: { value: string; onChange: (value: string) => void; disabled?: boolean; className?: string; ariaLabel: string; listId: string }) {
-  return <><input className={className} value={value} list={listId} aria-label={ariaLabel} onChange={(event) => onChange(event.target.value)} disabled={disabled} /><datalist id={listId}>{imageGenerationSizeOptions.map((option) => <option key={option.value} value={option.value}>{option.label}</option>)}</datalist></>;
+function ImageDimensionSelects({ settings, onChange, disabled }: { settings: WorkspacePromptSettings; onChange: (patch: Partial<WorkspacePromptSettings>) => void; disabled?: boolean }) {
+  const allows4k = toApis4kImageRatios.some((ratio) => ratio === settings.imageRatio);
+  function updateSelection(imageRatio: string | undefined, imageResolution: WorkspacePromptSettings["imageResolution"]) {
+    const selection = { imageRatio, imageResolution };
+    onChange(imageRatio && imageResolution ? resolveGptImageDimensionSettings(selection) : selection);
+  }
+  return <div className="grid gap-2">
+    <div className="grid grid-cols-2 gap-3">
+      <label className="min-w-0"><FieldLabel label="图片比例" /><select className="field" aria-label="图片比例" value={settings.imageRatio || ""} onChange={(event) => updateSelection(event.target.value, settings.imageResolution)} disabled={disabled}>
+        <option value="" disabled>请选择比例</option>
+        {toApisImageRatios.map((ratio) => <option key={ratio} value={ratio} disabled={settings.imageResolution === "4k" && !toApis4kImageRatios.some((supported) => supported === ratio)}>{ratio}</option>)}
+      </select></label>
+      <label className="min-w-0"><FieldLabel label="图片分辨率" /><select className="field" aria-label="图片分辨率" value={settings.imageResolution || ""} onChange={(event) => updateSelection(settings.imageRatio, event.target.value as WorkspacePromptSettings["imageResolution"])} disabled={disabled}>
+        <option value="" disabled>请选择分辨率</option>
+        {toApisImageResolutions.map((resolution) => <option key={resolution} value={resolution} disabled={resolution === "4k" && !allows4k}>{resolution.toUpperCase()}</option>)}
+      </select></label>
+    </div>
+    <p className="text-xs text-white/52">与画布 GPT 图片节点一致；4K 仅支持部分宽屏或长图比例。</p>
+    {!settings.imageRatio && !settings.imageResolution ? <p className="text-xs text-[var(--amber)]">原设置为 {settings.imageSize}，请重新选择比例和分辨率。</p> : null}
+  </div>;
 }
 
 function AccountAccessPanel({ loading, busy, bootstrapRequired, username, password, setupPassword, message, onUsernameChange, onPasswordChange, onSetupPasswordChange, onSubmit }: { loading: boolean; busy: boolean; bootstrapRequired: boolean; username: string; password: string; setupPassword: string; message: string; onUsernameChange: (value: string) => void; onPasswordChange: (value: string) => void; onSetupPasswordChange: (value: string) => void; onSubmit: () => void }) {
@@ -979,7 +1005,6 @@ function splitLines(value: string) { return value.split(/\r?\n/).map((item) => i
 function splitFeishuTaskNumbers(value: string) { return Array.from(new Set(value.split(/[\s,，;；\n]+/).map((item) => item.trim()).filter(Boolean))); }
 function trimImageStrategyPrompts(prompts: ImageStrategyPrompts): ImageStrategyPrompts { return { carExterior: prompts.carExterior.trim(), textImage: prompts.textImage.trim(), peopleWithCar: prompts.peopleWithCar.trim() }; }
 function getMissingImageStrategyPrompt(settings: WorkspacePromptSettings) { return imageStrategyPromptOptions.find((option) => !settings.imageStrategyPrompts[option.key].trim())?.title || ""; }
-function normalizeImageSizeInput(value: string) { const trimmed = value.trim(); if (isImageGenerationSize(trimmed)) return normalizeImageGenerationSize(trimmed); return ""; }
 function isSimpleRunLive(run: SimpleRun) { return run.status === "queued" || run.status === "running"; }
 function canForceTerminateSimpleRun(run: SimpleRun | null | undefined) { return Boolean(run && (isSimpleRunLive(run) || run.status === "paused")); }
 function buildSimpleOverallProgressRuns(runs: SimpleRun[], activeRun: SimpleRun | null) { const liveRuns = runs.filter((run) => isSimpleRunLive(run) || run.status === "paused"); if (liveRuns.length) return liveRuns.slice(0, 8); return activeRun ? [activeRun] : runs.slice(0, 1); }

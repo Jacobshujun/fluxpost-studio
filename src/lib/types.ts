@@ -402,6 +402,8 @@ export type WorkspacePromptSettings = {
   imageStrategyPrompts: ImageStrategyPrompts;
   distributionCheckPrompt: string;
   imageSize: string;
+  imageRatio?: string;
+  imageResolution?: "1k" | "2k" | "4k";
   imageQuality: ImageGenerationQuality;
   platformCrawlSettings: PlatformCrawlSettings;
   simpleRunMediaSettings: SimpleRunMediaSettings;
@@ -963,6 +965,8 @@ export type SimpleRun = {
   imageWashPrompt: string;
   imageStrategyPrompts?: ImageStrategyPrompts;
   imageSize: string;
+  imageRatio?: string;
+  imageResolution?: "1k" | "2k" | "4k";
   imageQuality: ImageGenerationQuality;
   platformCrawlSettings?: PlatformCrawlSettings;
   stages: SimpleRunStage[];

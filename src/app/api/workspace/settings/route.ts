@@ -34,6 +34,8 @@ export async function PATCH(request: Request) {
         peopleWithCarPromptLength: settings.imageStrategyPrompts.peopleWithCar.length,
         distributionCheckPromptLength: settings.distributionCheckPrompt.length,
         imageSize: settings.imageSize,
+        imageRatio: settings.imageRatio ?? null,
+        imageResolution: settings.imageResolution ?? null,
         imageQuality: settings.imageQuality,
       },
     });

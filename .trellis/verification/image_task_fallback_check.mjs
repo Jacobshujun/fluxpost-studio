@@ -73,14 +73,14 @@ assertContains(
 
 assertContains(
   page,
-  /imageGenerationSizeOptions\.map/,
-  "The frontend should render global image size controls from the shared GPT request-size options.",
+  /toApisImageRatios\.map[\s\S]*toApisImageResolutions\.map/,
+  "The frontend should render image dimensions from the same supported choices as Canvas GPT nodes.",
 );
 
 assertContains(
   page,
-  /function ImageSizeInput[\s\S]*<input[\s\S]*list=\{listId\}[\s\S]*<datalist id=\{listId\}[\s\S]*imageGenerationSizeOptions\.map/,
-  "Image size controls should support manual input while still exposing shared GPT request-size presets.",
+  /function ImageDimensionSelects[\s\S]*<select[\s\S]*aria-label="图片比例"[\s\S]*<select[\s\S]*aria-label="图片分辨率"/,
+  "Simple image dimensions must use ratio and resolution selects instead of manual pixel input.",
 );
 
 assertContains(
@@ -265,19 +265,19 @@ assertContains(
 
 assertContains(
   imageGeneration,
-  /const imageUrls = \[\.\.\.\(await saveBase64Images\(base64Images\)\), \.\.\.\(await materializeGeneratedImageUrls\(remoteUrls\)\)\]\.slice\(0, count\)/,
+  /const imageUrls = \[\.\.\.\(await saveBase64Images\(base64Images, options\)\), \.\.\.\(await materializeGeneratedImageUrls\(remoteUrls, options\)\)\]\.slice\(0, count\)/,
   "Images API URL outputs must be downloaded into local generated files before being persisted on posts.",
 );
 
 assertContains(
   imageGeneration,
-  /async function materializeGeneratedImageUrls\(remoteUrls: string\[\]\)/,
+  /async function materializeGeneratedImageUrls\(remoteUrls: string\[\], options: ImageGenerationOptions\)/,
   "Image generation must have a local materialization path for provider-returned remote URLs.",
 );
 
 assertContains(
   imageGeneration,
-  /imageUrls\.push\(await downloadGeneratedImageUrl\(remoteUrl,\s*index\)\)/,
+  /imageUrls\.push\(await downloadGeneratedImageUrl\(remoteUrl,\s*index, options\)\)/,
   "Image generation must download each provider-returned remote URL before returning it.",
 );
 

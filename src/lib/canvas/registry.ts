@@ -1,6 +1,6 @@
 import { defaultCanvasMediaMaskConfig, validateCanvasMediaMaskConfig } from "./types";
 import type { CanvasBatchBindableField, CanvasGraph, CanvasNode, CanvasNodeConfig, CanvasNodeDefinition, CanvasNodeExecutionMode, CanvasNodeType } from "./types";
-import { toApis4kImageRatios, toApisImageRatios } from "../toapis-image-api";
+import { toApis4kImageRatios, toApisImageRatios, toApisImageResolutions } from "../toapis-image-api";
 import { validateCanvasImageFilenamePrefix } from "./save-images";
 import { canvasPromptPresets, canvasVisionPresets, parseCanvasImageSelection, parseCanvasVideoTimestamps, resolveCanvasImageDimensions } from "./node-utils";
 import { defaultCanvasSourceVideoProjectName, isCanvasSourceVideoSnapshotCurrent } from "./source-video-contract";
@@ -683,7 +683,7 @@ const gptImageV2Definition: CanvasNodeDefinition = {
   outputs: [{ id: "images", label: "图片", kind: "images" }],
   fields: [
     { key: "ratio", label: "比例", kind: "select", options: toApisImageRatios.map((value) => ({ value, label: value })) },
-    { key: "resolution", label: "分辨率", kind: "select", options: ["1k", "2k", "4k"].map((value) => ({ value, label: value.toUpperCase() })) },
+    { key: "resolution", label: "分辨率", kind: "select", options: toApisImageResolutions.map((value) => ({ value, label: value.toUpperCase() })) },
     { key: "quality", label: "质量", kind: "select", options: ["low", "medium", "high"].map((value) => ({ value, label: value })) },
     { key: "count", label: "输出数量", kind: "number", min: 1, max: 10 },
     { key: "outputFormat", label: "格式", kind: "select", options: [{ value: "png", label: "PNG" }, { value: "jpeg", label: "JPEG" }] },
@@ -766,7 +766,7 @@ const gptImageEachV1Definition: CanvasNodeDefinition = {
   fields: [
     { key: "concurrency", label: "并发数", kind: "number", min: 1, max: 20 },
     { key: "ratio", label: "比例", kind: "select", options: toApisImageRatios.map((value) => ({ value, label: value })) },
-    { key: "resolution", label: "分辨率", kind: "select", options: ["1k", "2k", "4k"].map((value) => ({ value, label: value.toUpperCase() })) },
+    { key: "resolution", label: "分辨率", kind: "select", options: toApisImageResolutions.map((value) => ({ value, label: value.toUpperCase() })) },
     { key: "quality", label: "质量", kind: "select", options: ["low", "medium", "high"].map((value) => ({ value, label: value })) },
     { key: "outputFormat", label: "格式", kind: "select", options: [{ value: "png", label: "PNG" }, { value: "jpeg", label: "JPEG" }] },
     { key: "outputCompression", label: "JPEG 压缩", kind: "number", min: 0, max: 100 },

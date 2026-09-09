@@ -26,8 +26,8 @@ assertContains(
 
 assertContains(
   page,
-  /<ImageSizeInput[\s\S]*value=\{settings\.imageSize\}[\s\S]*onChange=\{\(value\) => props\.onSettingsChange\(\{\s*imageSize:\s*value\s*\}\)\}[\s\S]*ariaLabel="[^"]+"[\s\S]*listId="compact-image-size-presets"/,
-  "Compact mode should expose a manual GPT image-size input and write into workspace settings.",
+  /<ImageDimensionSelects settings=\{settings\} onChange=\{props\.onSettingsChange\}/,
+  "Compact mode should expose Canvas-compatible dimension selects and write into workspace settings.",
 );
 
 assertContains(

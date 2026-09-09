@@ -86,6 +86,8 @@ const nodeChecks = [
   ["Image provider profiles check", "image_provider_profiles_check.mjs"],
   ["Image transport and Xray recovery check", "image_transport_check.mjs"],
   ["GPT image size request check", "gpt_image_size_request_check.mjs"],
+  ["Exact image pixel output check", "image_exact_pixels_check.mjs"],
+  ["Simple image dimension selects check", "simple_image_dimensions_check.mjs"],
   ["ComfyUI Klein integration check", "comfyui_klein_check.mjs"],
   ["Canvas interaction check", "canvas_interaction_check.mjs"],
   ["Canvas library performance check", "canvas_library_performance_check.mjs"],

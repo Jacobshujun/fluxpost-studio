@@ -6,29 +6,19 @@ import { createRequire } from "node:module";
 const require = createRequire(import.meta.url);
 const ts = require("typescript");
 const projectRoot = process.cwd();
-const contract = loadTypescriptCommonJs("src/lib/toapis-image-api.ts", { "./types": {} });
+const contracts = loadTypescriptCommonJs("src/lib/image-providers/contracts.ts");
+const contract = loadTypescriptCommonJs("src/lib/toapis-image-api.ts", { "./types": {}, "./image-providers/contracts": contracts });
 const imageGeneration = read("src/lib/image-generation.ts");
 const config = read("src/lib/config.ts");
 const providerContracts = read("src/lib/image-providers/contracts.ts");
 
-for (const [input, size, resolution] of [
-  ["auto", "1:1", "1k"],
-  ["1024x1024", "1:1", "1k"],
-  ["1024x1536", "2:3", "1k"],
-  ["1536x1024", "3:2", "1k"],
-  ["2048x2048", "1:1", "2k"],
-  ["2048x1152", "16:9", "2k"],
-  ["1152x2048", "9:16", "2k"],
-  ["3840x2160", "16:9", "4k"],
-  ["2160x3840", "9:16", "4k"],
-  ["1200x1600", "3:4", "1k"],
-]) {
-  assertDeepEqual(contract.resolveToApisImageSize(input), { size, resolution }, `Unexpected ToAPIs mapping for ${input}.`);
+assertDeepEqual(contract.resolveToApisImageSize("auto"), { size: "1:1", resolution: "1k" }, "Auto has no exact-pixel contract.");
+for (const input of ["1024x1024", "1024x1536", "1536x1024", "2048x2048", "2048x1152", "1152x2048", "3840x2160", "2160x3840", "1200x1600", "1234x987"]) {
+  assertThrows(() => contract.resolveToApisImageSize(input), /无法按精确像素/, "Pixel sizes must not silently become ratio/tier requests.");
 }
-assertThrows(() => contract.resolveToApisImageSize("1234x987"), /does not have an explicit size mapping/, "Unknown custom sizes must fail before submission.");
 
 assertDeepEqual(
-  contract.buildToApisGenerationBody({ model: "gpt-image-2", prompt: "city", requestedSize: "1024x1536" }),
+  contract.buildToApisGenerationBody({ model: "gpt-image-2", prompt: "city", ratio: "2:3", resolution: "1k" }),
   { model: "gpt-image-2", prompt: "city", n: 1, size: "2:3", resolution: "1k", quality: "medium", output_format: "png", response_format: "url" },
   "Text-to-image body must follow the documented asynchronous ToAPIs contract.",
 );
@@ -36,7 +26,8 @@ assertDeepEqual(
   contract.buildToApisGenerationBody({
     model: "gpt-image-2",
     prompt: "edit",
-    requestedSize: "2048x1152",
+    ratio: "16:9",
+    resolution: "2k",
     referenceImages: ["https://bucket.example/source.jpg"],
   }),
   {

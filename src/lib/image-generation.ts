@@ -2,6 +2,7 @@ import { execFile } from "node:child_process";
 import { access, mkdir, readFile, rm, writeFile } from "node:fs/promises";
 import { randomUUID } from "node:crypto";
 import path from "node:path";
+import sharp from "sharp";
 import { compactError, recordExecutionLog } from "./activity-log";
 import { isComfyUiKleinConfigured, runComfyUiKleinImageTask } from "./comfyui-klein";
 import { appConfig, isOpenaiImageRouteConfigured, openaiImageApiKey, openaiImageRouteConfig, openaiImageUrl, type OpenaiImageApiRoute } from "./config";
@@ -27,6 +28,7 @@ import {
   getToApisCompletedImageUrls,
   parseRetryAfterMs,
   requireToApisTaskId,
+  resolveToApisImageSize,
   shouldReturnPendingAfterToApisAcceptance,
   type ToApisImageTask,
 } from "./toapis-image-api";
@@ -413,7 +415,7 @@ async function requestSingleProviderImageForProbe(
   const startedAt = Date.now();
   const profile = openaiImageRouteConfig(route).profile;
   const preparedReferences = makeProbePreparedReferences(referenceImages || []);
-  if (profile === "toapis_async") return requestSingleToApisImagesApiForRoute(route, prompt, 1, startedAt, options, preparedReferences);
+  if (profile === "toapis_async") return requestSingleToApisImagesApiForRoute(route, prompt, 1, startedAt, { ...options, ratio: "1:1", resolution: "1k" }, preparedReferences);
   const endpointPath = referenceImages?.length ? "images/edits" : "images/generations";
   if (profile === "openai_json") return requestSingleOpenAiJsonImageForRoute(route, prompt, 1, startedAt, options, preparedReferences, endpointPath);
   return requestSingleStandardImagesApiWithRetryForRoute(route, prompt, 1, startedAt, options, preparedReferences, endpointPath);
@@ -896,7 +898,7 @@ async function callResponsesImageToolInPool(prompt: string, count: number, optio
     .map((item) => item.result as string)
     .slice(0, count);
 
-  const imageUrls = await saveBase64Images(base64Images);
+  const imageUrls = await saveBase64Images(base64Images, options);
   await recordExecutionLog({
     scope: "openai/image",
     action: "Responses image tool completed",
@@ -936,6 +938,9 @@ async function callImagesApiInPool(
   const initialProfile = openaiImageRouteConfig(initialRoute).profile;
   if (asyncTask?.resumeTaskId && initialProfile !== "toapis_async") {
     throw toAcceptedImageProviderError(`Accepted image task ${asyncTask.resumeTaskId} cannot resume because route ${initialRoute} is no longer configured for ToAPIs.`);
+  }
+  if (initialProfile === "toapis_async" && !asyncTask?.resumeTaskId && !options.ratio && !options.resolution) {
+    resolveToApisImageSize(options.size);
   }
   const preparedReferences = asyncTask?.resumeTaskId
     ? makeResumedTaskReferences(referenceImages)
@@ -985,7 +990,7 @@ async function callImagesApiInPool(
   const data = await requestImagesApiWithRetry(prompt, count, startedAt, options, preparedReferences, asyncTask);
   const base64Images = (data.data || []).map((item) => item.b64_json).filter((item): item is string => Boolean(item));
   const remoteUrls = (data.data || []).map((item) => item.url).filter((item): item is string => Boolean(item));
-  const imageUrls = [...(await saveBase64Images(base64Images)), ...(await materializeGeneratedImageUrls(remoteUrls))].slice(0, count);
+  const imageUrls = [...(await saveBase64Images(base64Images, options)), ...(await materializeGeneratedImageUrls(remoteUrls, options))].slice(0, count);
   await recordExecutionLog({
     scope: "openai/image",
     action: "Images API completed",
@@ -1368,7 +1373,6 @@ async function requestSingleToApisImagesApiForRoute(
     await asyncTask.onTaskUpdate?.({ taskId, route, status });
     return pollToApisImageTask(route, taskId, { id: taskId, status }, startedAt, asyncTask, true);
   }
-  const referenceUrls = await prepareToApisReferenceUrls(route, referenceImages, deadline);
   const requestBody = buildToApisGenerationBody({
     model: routeConfig.model,
     prompt,
@@ -1379,8 +1383,9 @@ async function requestSingleToApisImagesApiForRoute(
     count,
     outputFormat: options.outputFormat,
     outputCompression: options.outputCompression,
-    referenceImages: referenceUrls,
   });
+  const referenceUrls = await prepareToApisReferenceUrls(route, referenceImages, deadline);
+  if (referenceUrls.length) requestBody.image_urls = referenceUrls;
   let task: ToApisImageTask | undefined;
   let lastError = "";
   let lastProviderError: ImageProviderError | undefined;
@@ -2351,7 +2356,7 @@ function isImageTaskTimeoutError(error: unknown) {
 }
 
 function isImageTaskSourceFallbackError(error: unknown) {
-  if (error instanceof ImageProviderError && (error.taskAccepted || error.category === "capability")) return false;
+  if (error instanceof ImageProviderError && (error.taskAccepted || error.category === "capability" || error.category === "input")) return false;
   if (/ToAPIs image/i.test(compactError(error))) return false;
   if (isImageProviderCapabilityError(error)) return false;
   if (isImageTaskTimeoutError(error)) return true;
@@ -2402,15 +2407,30 @@ function sleep(ms: number) {
   return new Promise((resolve) => setTimeout(resolve, ms));
 }
 
-async function saveBase64Images(base64Images: string[]) {
+async function assertGeneratedImageSize(buffer: Buffer, options: ImageGenerationOptions) {
+  if (options.ratio || options.resolution) return;
+  const target = parseRequestedPixelSize(options.size);
+  if (!target) return;
+  const metadata = await sharp(buffer).metadata();
+  if (metadata.width !== target.width || metadata.height !== target.height) {
+    throw new ImageProviderError(
+      `图片尺寸不符：要求 ${target.width}x${target.height}，接口实际返回 ${metadata.width ?? "未知"}x${metadata.height ?? "未知"}。该图片未保存为生成结果，也未自动缩放，请检查图片接口的尺寸支持。`,
+      { category: "provider", retryable: false, failoverAllowed: false, taskAccepted: true },
+    );
+  }
+}
+
+async function saveBase64Images(base64Images: string[], options: ImageGenerationOptions) {
   const generatedDir = path.join(process.cwd(), "public", "generated");
   await mkdir(generatedDir, { recursive: true });
 
   const imageUrls: string[] = [];
   for (const [index, image] of base64Images.entries()) {
+    const buffer = Buffer.from(image, "base64");
+    await assertGeneratedImageSize(buffer, options);
     const fileName = `image-${Date.now()}-${randomUUID()}-${index + 1}.png`;
     const filePath = path.join(generatedDir, fileName);
-    await writeFile(filePath, Buffer.from(image, "base64"));
+    await writeFile(filePath, buffer);
     await recordExecutionLog({
       scope: "openai/image",
       action: "Generated image saved",
@@ -2436,15 +2456,15 @@ function isImageProviderCapabilityError(error: unknown) {
   return /model_not_found|no available channel/i.test(compactError(error));
 }
 
-async function materializeGeneratedImageUrls(remoteUrls: string[]) {
+async function materializeGeneratedImageUrls(remoteUrls: string[], options: ImageGenerationOptions) {
   const imageUrls: string[] = [];
   for (const [index, remoteUrl] of remoteUrls.entries()) {
-    imageUrls.push(await downloadGeneratedImageUrl(remoteUrl, index));
+    imageUrls.push(await downloadGeneratedImageUrl(remoteUrl, index, options));
   }
   return imageUrls;
 }
 
-async function downloadGeneratedImageUrl(remoteUrl: string, index: number) {
+async function downloadGeneratedImageUrl(remoteUrl: string, index: number, options: ImageGenerationOptions) {
   const response = await fetchWithTimeout(remoteUrl, {
     headers: buildMediaRequestHeaders(remoteUrl),
   });
@@ -2464,6 +2484,7 @@ async function downloadGeneratedImageUrl(remoteUrl: string, index: number) {
   if (buffer.length > maxGeneratedImageUrlBytes) {
     throw new Error(`generated image URL returned an oversized image (${buffer.length} bytes)`);
   }
+  await assertGeneratedImageSize(buffer, options);
 
   const generatedDir = path.join(process.cwd(), "public", "generated");
   await mkdir(generatedDir, { recursive: true });

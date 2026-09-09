@@ -44,7 +44,7 @@ assertContains(page, /sourceMode === "viral" && simpleGenerateImages && simpleVi
 assertContains(page, /generateImages=\{simpleGenerateImages\}/, "Simple workspace must receive the simple image-generation state.");
 assertContains(page, /onGenerateImagesChange=\{\(value\) => updateSimpleRunMediaSettingsDraft\(\{\s*generateImages:\s*value\s*\}\)\}/, "Simple workspace must update the shared simple image-generation setting.");
 assertContains(page, /checked=\{generateImages\}/, "Simple workspace checkbox must be bound to its image-generation prop.");
-assertContains(page, /simpleGenerateImages \? normalizeImageSizeInput\(workspaceSettings\.imageSize\) : defaultImageGenerationSize/, "Simple UI must not validate image size when image generation is disabled.");
+assertContains(page, /if \(simpleGenerateImages\) \{\s*try \{\s*selectedDimensions = resolveGptImageDimensionSettings\(workspaceSettings\)/, "Simple UI must not validate image dimensions when image generation is disabled.");
 
 assertContains(checkPs1, /Image generation toggle check/, "Trellis baseline must include the image-generation toggle check.");
 

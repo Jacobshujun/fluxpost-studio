@@ -505,7 +505,9 @@ return url;
 ### 3. Contracts
 
 - Submit JSON uses `model`, `prompt`, `n: 1..10`, documented ratio `size`, `resolution: 1k|2k|4k`, `quality`, `output_format`, `response_format: url`, optional JPEG `output_compression`, and up to 16 ordered URL-only `image_urls`.
-- Pixel presets map in `src/lib/toapis-image-api.ts`; unknown custom sizes fail before submission. Historical `1200x1600` maps to `3:4`/`1k`.
+- The current ToAPIs adapter accepts explicit ratio/tier or `auto`, not exact pixels. Exact-pixel requests, including historical `1200x1600`, fail with a non-retryable input error before reference upload/submission; never silently map pixels to a tier. Do not enable native pixel fields without confirmed provider-contract evidence.
+- Simple-mode `WorkspacePromptSettings` and `SimpleRun` persist optional `imageRatio`/`imageResolution` alongside `imageSize`. Selects share Canvas ratio/tier lists and 4K restrictions; `resolveGptImageDimensionSettings` validates selections, and shared `pixelSizeForRatio` supplies the pixel field for pixel-based adapters, not a local resize. Legacy pixel-only settings stay unchanged until the user chooses both controls. Snapshot/resume and reference/viral/original calls preserve both selected fields.
+- Exact-pixel image outputs from JSON, SSE and Responses paths are checked from returned bytes before runtime-media persistence. Mismatches expose expected/actual dimensions and fail without resizing, source fallback or another provider request. Explicit ratio/tier requests do not promise exact pixels; accepted legacy tasks may resume but their exact-pixel outputs must still pass validation.
 - Public TOS/HTTP references pass directly. Local references upload first; generation endpoints never receive base64.
 - Submission returns a task id. Non-Canvas callers retain foreground polling with at least five seconds of jitter and `Retry-After`; Canvas persists the accepted id/route/status, returns pending immediately for non-terminal acceptance, and requeues the run after 30 seconds. A resumed Canvas attempt queries immediately, then releases the image slot again when the provider remains non-terminal. Completed `result.data[].url` values are downloaded into `persistRuntimeMedia` before the 24-hour provider URL expires.
 - Shared remote image work uses `runWithConcurrencyPool("image", ...)`; `WORKER_IMAGE_CONCURRENCY` defaults to 100 and is hard-capped at the provider-confirmed 100 tasks. Ready nodes inside one DAG run use `Promise.all`; separate runs are claimed durably and submit without holding slots for long polling.
@@ -559,6 +561,7 @@ await fetch("/images/generations", {
 - Profiles: `openai_json | openai_sse | toapis_async`.
 - Route config: `{ route, baseUrl, apiKey, model, profile }` for `primary | backup`.
 - Admin probe: `POST /api/config/image-provider-check` with `{ route: "primary" | "backup" }`.
+- Output gate: `assertGeneratedImageSize(buffer: Buffer, options: ImageGenerationOptions): Promise<void>` runs before generated-file writes or runtime-media upload; it decodes metadata without resizing or re-encoding.
 
 ### 3. Contracts
 
@@ -574,6 +577,7 @@ await fetch("/images/generations", {
 - Auth, route, network, gateway, or capability failure before task acceptance -> route failover allowed.
 - Asynchronous task id accepted -> polling retries the same id; terminal/timeout/protocol failure must not fail over or resubmit.
 - Missing sign-in/admin role on probe -> `401`/`403`; saving config never runs a probe.
+- Exact-pixel mismatch -> non-retryable provider error with expected/actual dimensions and `taskAccepted: true`; no persistence, fallback or re-submission. Ratio/tier-only ToAPIs exact-pixel input -> non-retryable input error before reference preparation/upload.
 
 ### 5. Good/Base/Bad Cases
 
@@ -585,6 +589,7 @@ await fetch("/images/generations", {
 
 - `.trellis/verification/image_provider_profiles_check.mjs` asserts profile resolution, capabilities, official JSON fields, output parsing, route/model wiring, probe authorization/cleanup, and no probe-on-save wiring.
 - Existing SSE, ToAPIs, size, fallback, viral, config, lint, type-check, build, and full baseline checks remain required; paid probes remain manual.
+- `image_exact_pixels_check.mjs` executes matching/mismatched PNG/JPEG, corrupt input, byte-preserving persistence, unsupported ToAPIs preflight, accepted-task resume and exact JSON/multipart/Responses request cases with isolated media/provider mocks.
 
 ### 7. Wrong vs Correct
 

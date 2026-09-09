@@ -193,7 +193,7 @@ try {
   assert.match(css, /\.list\{[^}]*flex:1[^}]*min-height:0[^}]*overflow:auto/);
   assert.match(canvasCss, /\.canvas-schedule-copy-list\s*\{[^}]*display:\s*grid[^}]*grid-template-columns:/, "Canvas scheduler copy-pool entries must retain their selectable grid layout.");
 
-  writeFileSync(path.join(temp, "toapis-image-api.js"), "exports.toApisImageRatios=['1:1'];exports.toApis4kImageRatios=['16:9'];", "utf8");
+  writeFileSync(path.join(temp, "toapis-image-api.js"), "exports.toApisImageResolutions=['1k','2k','4k'];exports.toApisImageRatios=['1:1'];exports.toApis4kImageRatios=['16:9'];", "utf8");
   writeFileSync(path.join(temp, "feishu-publish-mode.js"), "exports.feishuPublishModeOptions=[{value:'full',label:'full'},{value:'text',label:'text'},{value:'media',label:'media'}];exports.normalizeFeishuPublishMode=(value)=>value===undefined?'full':['full','text','media'].includes(value)?value:(()=>{throw new Error('invalid mode')})();", "utf8");
   for (const name of ["types", "node-utils", "source-video-contract", "save-images", "seedance-references", "subtitle-style", "subtitle-editor", "video-loader", "content-collection", "registry"]) {
     const source = read(`src/lib/canvas/${name}.ts`).replace('"../toapis-image-api"', '"./toapis-image-api"').replace('"../feishu-publish-mode"', '"./feishu-publish-mode"');
@@ -213,6 +213,7 @@ try {
     "../finished-body-policy": finishedBodyPolicy,
     "../generated-posts": {},
     "../image-generation": {},
+    "../gpt-image-dimensions": {},
     "../image-transport": { IMAGE_NETWORK_WAIT_REASON: "等待图片网络恢复", isImageNetworkUnavailableError: () => false },
     "../openai": {},
     "./seedance": {},

@@ -4,10 +4,11 @@ Last updated: 2026-09-09
 
 ## One-Line Status
 
-Canvas link/ID collection batches and simple-run failed-image discard are verified together. The user authorized a separate discard commit and LAN-preserving local activation; read /api/version and .fluxpost-local-candidate.json for the exact active candidate identity.
+Canvas-style image selects and exact-pixel guards are verified. User authorized local commit only; port 3001 is unchanged.
 
 ## Current Focus
 
+- 2026-09-09 image sizing: Simple runs now share Canvas ratio/tier choices, persist selections through resume and forward them to all image paths. Legacy pixel settings require selection. Full offline and 1440px/390px mocked browser checks pass. Task: .trellis/tasks/archive/2026-09/09-09-exact-image-pixels. Commit authorized; no activation/live call.
 - 2026-09-09 release authorization: Content collection is committed as c482338abcc6c2806424c856ac0598656e0e9e5e. The user additionally approved committing the remaining image-discard changes and updating the single primary-worktree port-3001 candidate with npm run local:lan. Preserve LAN binding, require a clean committed tree, and verify runtime/state/slot SHA agreement after activation. No GitHub push, remote deployment or live provider acceptance was requested.
 
 - 2026-09-09: Added input.content-collection with five title/body/source/images/videos outputs, opt-in tagging, single-link testing and a generic V2 batch preset. Twenty distinct links become twenty main tasks; each collects once through importSourceLinks, and child retries/final aggregation reuse all five frozen outputs. Vision and per-image reconstruction tests, portable config, source isolation, failures, 1440px/390px mocked browser preflight and the offline baseline pass. Link/ID mode is implemented; keyword-result expansion remains a separate design. User authorized a scoped local commit only; no local candidate replacement, live-provider call, push or deployment was requested. Pre-existing image-discard edits remain outside this commit.
@@ -50,6 +51,7 @@ Continue authenticated operator review of the unified library and run the one-ti
 
 ## Risks And Unknowns
 
+- ToAPIs currently uses explicit ratio/tier selection, not custom pixels. Native exact-pixel support is unconfirmed. Existing images and the port-3001 candidate remain unchanged.
 - The real 621-asset runtime database has not been migrated in this dirty-tree verification; the migration was exercised only against isolated fixtures and will run when an approved clean candidate is activated.
 - The PostgreSQL collection-subtree benchmark measured P95 `252.6ms` against the `300ms` target and is the closest performance margin as data grows.
 - No paid model, TOS write, TikHub, Feishu, Lark, publishing, or production action was exercised.

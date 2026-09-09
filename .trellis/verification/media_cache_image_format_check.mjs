@@ -246,6 +246,7 @@ try {
 
   const generatedImages = [];
   const imageGeneration = loadTsModule("src/lib/image-generation.ts", {
+    sharp: requireFromCheck("sharp"),
     "node:child_process": requireFromCheck("node:child_process"),
     "node:crypto": requireFromCheck("node:crypto"),
     "node:fs/promises": requireFromCheck("node:fs/promises"),

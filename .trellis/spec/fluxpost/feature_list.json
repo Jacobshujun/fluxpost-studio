@@ -9,6 +9,19 @@
   ],
   "features": [
     {
+      "id": "exact-image-pixels",
+      "title": "Image dimension selects and exact-pixel validation",
+      "status": "ready_for_review",
+      "definition_of_done": [
+        "No silent pixel-to-tier conversion or output resizing; unsupported exact-pixel requests fail explicitly",
+        "Returned exact-pixel outputs are checked before persistence and mismatches never become successful generated media"
+      ],
+      "evidence": [
+        "2026-09-09 exact-output guards, Canvas-compatible selects, settings/snapshot/resume/API checks, 1440px/390px mocked browser and full offline baseline passed."
+      ],
+      "notes": "Local commit authorized; port 3001 unchanged. Simple mode uses ratio/tier choices; custom-pixel support remains unconfirmed."
+    },
+    {
       "id": "canvas-content-collection",
       "title": "Canvas source-scoped content collection",
       "status": "ready_for_review",

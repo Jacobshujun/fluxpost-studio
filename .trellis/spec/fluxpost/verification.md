@@ -21,6 +21,9 @@ node --env-file=.env.local .trellis/verification/unified_library_postgres_benchm
 
 ## Current Automated Checks
 
+- `simple_image_dimensions_check.mjs` covers dropdown contracts and frozen settings/API propagation; `simple_image_dimensions_browser_check.py` mocks save/reload/launch and 4K restrictions at 1440px/390px.
+
+- `image_exact_pixels_check.mjs` covers exact request fields, unsupported ToAPIs input, PNG/JPEG byte preservation, mismatch/corrupt-output rejection before persistence, no retry/fallback, resume and auto/ratio mode using isolated fixtures.
 - `node .trellis/verification/canvas_content_collection_check.mjs` covers 20 source-scoped tasks, five-port snapshots, authenticated owner propagation, opt-in tagging, vision/image executors, partial-image retry, serialization and per-node media limits using mocks. The normal baseline includes it.
 - `python .trellis/verification/canvas_content_collection_browser_check.py` separately checks tagging controls, test-link persistence/reset, generic vision preset, five shared ports, 20-task preflight and 1440px/390px layout against a worker-disabled isolated smoke server. Set `BROWSER_BASE_URL`; its default is port 45678, not the live 3001 candidate. All API requests are intercepted; it never starts real collection or launches a batch.
 

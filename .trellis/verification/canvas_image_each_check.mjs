@@ -37,7 +37,8 @@ const transpiledRegistry = ts.transpileModule(registrySource, {
 }).outputText;
 const registryModule = { exports: {} };
 const registryStubs = {
-  "../toapis-image-api": { toApis4kImageRatios: ["1:1"], toApisImageRatios: ["1:1", "16:9"] },
+  "../gpt-image-dimensions": { pixelSizeForRatio: () => "1024x1024" },
+  "../toapis-image-api": { toApisImageResolutions: ["1k", "2k", "4k"], toApis4kImageRatios: ["1:1"], toApisImageRatios: ["1:1", "16:9"] },
   "./save-images": { validateCanvasImageFilenamePrefix: () => undefined },
   "./node-utils": { canvasPromptPresets: {}, canvasVisionPresets: {}, parseCanvasImageSelection: () => [], parseCanvasVideoTimestamps: () => [], resolveCanvasImageDimensions: () => ({ width: 1024, height: 1024 }) },
   "./source-video-contract": { defaultCanvasSourceVideoProjectName: "source", isCanvasSourceVideoSnapshotCurrent: () => true },
@@ -119,6 +120,7 @@ const transpiled = ts.transpileModule(executorSource, {
 const cjsModule = { exports: {} };
 const noopAsync = async () => undefined;
 const stubs = {
+  "../gpt-image-dimensions": { pixelSizeForRatio: () => "1024x1024" },
   "../concurrency": { mapWithConcurrency },
   "../feishu-publish-queue": { enqueueFeishuPublishJob: noopAsync, ensureFeishuPublishQueueWorker: () => undefined },
   "../feishu-publish-mode": { normalizeFeishuPublishMode: (value) => value || "full" },
