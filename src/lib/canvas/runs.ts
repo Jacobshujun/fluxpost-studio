@@ -168,7 +168,7 @@ async function resolveCanvasRunPlan(
       steps.push({ nodeId, action: "execute" });
       continue;
     }
-    const executesLocally = nodeId === targetId || node.type.startsWith("input.");
+    const executesLocally = nodeId === targetId || (node.type.startsWith("input.") && node.type !== "input.content-collection");
     if (executesLocally) {
       if (missingInput) {
         const message = `${definition.label}: Missing required input ${missingInput}.`;

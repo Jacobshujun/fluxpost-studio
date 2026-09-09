@@ -9,6 +9,19 @@
   ],
   "features": [
     {
+      "id": "canvas-content-collection",
+      "title": "Canvas source-scoped content collection",
+      "status": "ready_for_review",
+      "definition_of_done": [
+        "Link/ID collection defaults to no AI tagging and outputs source-scoped text, images and videos",
+        "V2 batches collect once per source and reuse frozen outputs for generic downstream nodes, retries and aggregation"
+      ],
+      "evidence": [
+        "2026-09-09 mocked 20-link collection, vision, per-image failure resume, ownership propagation, serialization, 1440px/390px browser preflight and complete offline baseline passed."
+      ],
+      "notes": "Local commit authorized; port 3001 is unchanged. Live provider and authenticated multi-user acceptance remain operator gates. Keyword-result expansion requires separate design."
+    },
+    {
       "id": "trellis-engineering",
       "title": "Trellis Engineering project structure",
       "status": "done",

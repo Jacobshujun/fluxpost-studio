@@ -34,7 +34,7 @@ let executionLogs = [];
 try {
   writeFileSync(path.join(temp, "toapis-image-api.js"), "exports.toApisImageRatios=['1:1'];exports.toApis4kImageRatios=['16:9'];", "utf8");
   writeFileSync(path.join(temp, "feishu-publish-mode.js"), "exports.feishuPublishModeOptions=[{value:'full',label:'full'},{value:'text',label:'text'},{value:'media',label:'media'}];exports.normalizeFeishuPublishMode=(value)=>value===undefined?'full':['full','text','media'].includes(value)?value:(()=>{throw new Error('invalid mode')})();", "utf8");
-  for (const name of ["types", "node-utils", "source-video-contract", "video-loader", "save-images", "seedance-references", "subtitle-style", "subtitle-editor", "registry", "graph", "scheduler-skeleton", "scheduler-v2"]) {
+  for (const name of ["types", "node-utils", "source-video-contract", "video-loader", "content-collection", "content-collection-schedule", "save-images", "seedance-references", "subtitle-style", "subtitle-editor", "registry", "graph", "scheduler-skeleton", "scheduler-v2"]) {
     const source = read(`src/lib/canvas/${name}.ts`).replace('"../toapis-image-api"', '"./toapis-image-api"').replace('"../feishu-publish-mode"', '"./feishu-publish-mode"');
     writeFileSync(path.join(temp, `${name}.js`), ts.transpileModule(source, {
       compilerOptions: { module: ts.ModuleKind.CommonJS, target: ts.ScriptTarget.ES2022 },
@@ -144,6 +144,7 @@ try {
       retryCanvasNode: async (runId, nodeId) => { retriedNode = { runId, nodeId }; },
     }, { get: (target, key) => target[key] || emptyAsync }),
     "./scheduler-v2": schedulerV2,
+    "./content-collection-schedule": require(path.join(temp, "content-collection-schedule.js")),
     "./source-video-contract": require(path.join(temp, "source-video-contract.js")),
     "./video-loader": require(path.join(temp, "video-loader.js")),
     "./source-video-service": {

@@ -33,6 +33,7 @@ import type {
 } from "./types";
 import { addCanvasVideoSubtitles } from "./video-subtitles";
 import { selectedCanvasVideo } from "./video-loader";
+import { collectCanvasContent } from "./content-collection-service";
 
 export class CanvasNeedsConfigError extends Error {
   constructor(message: string) {
@@ -81,6 +82,7 @@ const executors: Record<CanvasNode["type"], CanvasNodeExecutor> = {
   "input.video-loader": executeLiteralNode,
   "input.source-video": executeLiteralNode,
   "input.content-pool": executeLiteralNode,
+  "input.content-collection": async ({ node, account }) => ({ outputs: await collectCanvasContent(node, account) }),
   "input.library-images": executeLiteralNode,
   "input.copy-library": executeLiteralNode,
   "input.competitor-workbook": executeLiteralNode,

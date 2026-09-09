@@ -30,6 +30,7 @@ import { buildCanvasRunPlan } from "./graph";
 import { getCanvasBatchBindableFields, getCanvasNodeDefinition, getCanvasNodeExecutionMode } from "./registry";
 import { isCanvasSourceVideoSnapshot } from "./source-video-contract";
 import { resolveCanvasSourceVideos } from "./source-video-service";
+import { canvasCollectionScheduleDefinition } from "./content-collection-schedule";
 import { canvasVideoSnapshotsFromConfig } from "./video-loader";
 import {
   cancelCanvasRun,
@@ -1581,6 +1582,7 @@ async function reconcileCanvasScheduleV2(current: CanvasSchedule) {
       persisted.definition!.parameters.filter((parameter) => parameter.scope === "main"),
       main.parameterValues,
     );
+    const collectionArtifacts = (main.sharedArtifacts || []).filter((artifact) => graphWithMainParameters.nodes.some((node) => node.id === artifact.nodeId && node.type === "input.content-collection"));
     await createCanvasRunFromGraph({
       id: main.mainRunId!,
       workflow: {
@@ -1588,7 +1590,7 @@ async function reconcileCanvasScheduleV2(current: CanvasSchedule) {
         revision: persisted.workflowRevision,
         ...scopeCanvasScheduleExecutionOwner(persisted),
       },
-      graph: createCanvasScheduleV2AggregateGraph(graphWithMainParameters, persisted.definition!, successfulArtifacts),
+      graph: createCanvasScheduleV2AggregateGraph(createCanvasScheduleV2ChildGraph(graphWithMainParameters, collectionArtifacts), persisted.definition!, successfulArtifacts),
       targetNodeIds: [persisted.definition!.mainTargetNodeId!],
       batchContext: {
         schemaVersion: 2,
@@ -2313,6 +2315,8 @@ function isCanvasScheduleV2(schedule: CanvasSchedule): schedule is CanvasSchedul
 }
 
 function defaultCanvasScheduleV2Definition(graph: CanvasGraph): CanvasScheduleV2Definition {
+  const collection = canvasCollectionScheduleDefinition(graph);
+  if (collection) return collection;
   const preferredChild = graph.nodes.find((node) => node.schedulerRole === "image-target")
     || graph.nodes.find((node) => getCanvasNodeDefinition(node.type, node.version)?.outputs.some((port) => ["text", "images", "videos"].includes(port.kind)));
   const preferredOutput = preferredChild && getCanvasNodeDefinition(preferredChild.type, preferredChild.version)?.outputs.find((port) => ["text", "images", "videos"].includes(port.kind));

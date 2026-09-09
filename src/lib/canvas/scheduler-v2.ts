@@ -3,6 +3,7 @@ import { buildCanvasRunPlan } from "./graph";
 import { getCanvasBatchBindableFields, getCanvasNodeDefinition, getCanvasNodeExecutionMode } from "./registry";
 import { canvasSourceVideoSnapshotConfig, isCanvasSourceVideoSnapshot } from "./source-video-contract";
 import { canvasVideoLoaderConfig, normalizeCanvasVideoSnapshot } from "./video-loader";
+import { freezeCanvasCollectionOutputs } from "./content-collection";
 import type {
   CanvasArtifact,
   CanvasGraph,
@@ -60,6 +61,13 @@ export function validateCanvasScheduleV2Definition(graph: CanvasGraph, definitio
     const field = getCanvasBatchBindableFields(node).find((item) => item.key === parameter.binding.fieldKey);
     if (!field) throw new Error(`${name}: bound node field is not batch-injectable.`);
     if (!field.parameterTypes.includes(parameter.valueType)) throw new Error(`${name}: parameter type is incompatible with ${field.label}.`);
+    if (node.type === "input.content-collection") {
+      if (parameter.scope !== "main") throw new Error("采集链接必须绑定任务组参数，不能按图片重复采集。");
+      if (parameter.source.mode !== "manual-list" && parameter.source.mode !== "fixed") throw new Error("内容采集需要固定的来源链接列表。");
+      const links = parameter.source.values;
+      if (!links.length || links.length > 200 || links.some((link) => typeof link !== "string" || !link.trim() || /[\r\n]/.test(link))) throw new Error("采集链接须为 1–200 条非空单行链接或 ID。");
+      if (new Set(links.map((link) => String(link).trim())).size !== links.length) throw new Error("采集链接列表包含重复项，请去重后重新预演。");
+    }
     const bindingKey = `${node.id}:${field.key}`;
     if (bindings.has(bindingKey)) throw new Error(`${name}: another parameter already binds the same node field.`);
     bindings.add(bindingKey);
@@ -67,6 +75,11 @@ export function validateCanvasScheduleV2Definition(graph: CanvasGraph, definitio
   }
 
   validateCanvasScheduleV2SharedOutputs(graph, definition);
+  const collectionAncestors = collectCanvasGraphAncestors(graph, definition.childResult.nodeId);
+  for (const node of graph.nodes.filter((candidate) => candidate.type === "input.content-collection" && candidate.id !== definition.childResult.nodeId && collectionAncestors.has(candidate.id))) {
+    const ports = getCanvasNodeDefinition(node.type, node.version)!.outputs;
+    if (!ports.every((port) => definition.sharedOutputs?.some((output) => output.nodeId === node.id && output.outputPort === port.id))) throw new Error("内容采集必须共享全部五类输出，确保每条来源只采集一次。请使用内容采集预设。");
+  }
 
   const childNode = graph.nodes.find((node) => node.id === definition.childResult.nodeId);
   const childOutput = childNode && getCanvasNodeDefinition(childNode.type, childNode.version)?.outputs.find((port) => port.id === definition.childResult.outputPort);
@@ -314,7 +327,9 @@ export function createCanvasScheduleV2ChildGraph(
   if (!sharedArtifacts.length) return structuredClone(source);
   const graph = structuredClone(source);
   const byNode = new Map(sharedArtifacts.map((entry) => [entry.nodeId, entry]));
+  const collectionIds = new Set(graph.nodes.filter((node) => node.type === "input.content-collection" && byNode.has(node.id)).map((node) => node.id));
   graph.nodes = graph.nodes.map((node) => {
+    if (collectionIds.has(node.id)) return freezeCanvasCollectionOutputs(node, Object.fromEntries(sharedArtifacts.filter((entry) => entry.nodeId === node.id).map((entry) => [entry.outputPort, entry.artifact])));
     const shared = byNode.get(node.id);
     return shared ? sharedLiteralNode(node, shared.artifact) : node;
   });
@@ -322,7 +337,7 @@ export function createCanvasScheduleV2ChildGraph(
     .filter((edge) => !byNode.has(edge.target))
     .map((edge) => {
       const shared = byNode.get(edge.source);
-      return shared ? { ...edge, sourcePort: shared.artifactKind } : edge;
+      return shared && !collectionIds.has(edge.source) ? { ...edge, sourcePort: shared.artifactKind } : edge;
     });
   return graph;
 }
@@ -415,12 +430,14 @@ function validateCanvasScheduleV2SharedOutputs(graph: CanvasGraph, definition: C
     const node = graph.nodes.find((candidate) => candidate.id === nodeId);
     const registry = node && getCanvasNodeDefinition(node.type, node.version);
     if (!node || !registry) throw new Error(`Shared output node ${nodeId} was not found.`);
-    if (registry.category === "input") throw new Error("Input nodes cannot be shared outputs.");
+    const collection = node.type === "input.content-collection";
+    if (registry.category === "input" && !collection) throw new Error("Input nodes cannot be shared outputs.");
     if (registry.passiveSink) throw new Error("Passive display nodes cannot be shared outputs.");
     if (registry.capability === "external_write") throw new Error("External-write nodes cannot be shared outputs.");
     if (getCanvasNodeExecutionMode(node) === "disabled") throw new Error("Disabled nodes cannot be shared outputs.");
-    if (registry.outputs.length !== 1) throw new Error("Shared output nodes must have exactly one output.");
-    const registryOutput = registry.outputs[0];
+    if (registry.outputs.length !== 1 && !collection) throw new Error("Shared output nodes must have exactly one output.");
+    const registryOutput = collection ? registry.outputs.find((port) => port.id === outputPort) : registry.outputs[0];
+    if (!registryOutput) throw new Error("Shared output port was not found.");
     if (!["text", "images", "videos"].includes(registryOutput.kind)) throw new Error("Shared outputs must produce text, images, or videos.");
     if (registryOutput.id !== outputPort || registryOutput.kind !== output.artifactKind) {
       throw new Error(`Shared output ${nodeId}:${outputPort} no longer matches the node registry.`);

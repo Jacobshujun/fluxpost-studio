@@ -9,6 +9,7 @@ import { validateSeedanceReferenceConfig } from "./seedance-references";
 import { canvasSubtitleStyleConfig, defaultCanvasSubtitleStyle, validateCanvasSubtitleStyle } from "./subtitle-style";
 import { decodeCanvasSubtitleRevisionSnapshot } from "./subtitle-editor";
 import { validateCanvasVideoLoaderConfig } from "./video-loader";
+import { validateCanvasCollectionConfig } from "./content-collection";
 
 const canvasNodeDefinitionVersions: CanvasNodeDefinition[] = [
   {
@@ -100,6 +101,37 @@ const canvasNodeDefinitionVersions: CanvasNodeDefinition[] = [
       { key: "projectName", label: "内容池项目", kind: "text", placeholder: defaultCanvasSourceVideoProjectName },
     ],
     defaultConfig: { sourceUrl: "", projectName: defaultCanvasSourceVideoProjectName },
+  },
+  {
+    type: "input.content-collection",
+    version: 1,
+    label: "内容采集",
+    description: "采集链接或 ID，默认不打标；批量调度按来源独立处理。",
+    category: "input",
+    icon: "Download",
+    color: "#2563eb",
+    inputs: [],
+    outputs: [
+      { id: "title", label: "标题", kind: "text" },
+      { id: "body", label: "正文", kind: "text" },
+      { id: "source", label: "来源", kind: "text" },
+      { id: "images", label: "图片", kind: "images" },
+      { id: "videos", label: "视频", kind: "videos" },
+    ],
+    fields: [
+      { key: "links", label: "来源链接 / ID（每行一条）", kind: "textarea", placeholder: "粘贴链接；多条内容请使用批量调度" },
+      { key: "projectName", label: "内容池项目", kind: "text" },
+      { key: "platform", label: "采集平台", kind: "select", options: [
+        { value: "auto", label: "自动识别链接" }, { value: "xiaohongshu", label: "小红书" },
+        { value: "douyin", label: "抖音" }, { value: "wechat_channels", label: "视频号" },
+        { value: "weibo", label: "微博" }, { value: "xiaopeng_bbs", label: "小鹏社区" },
+        { value: "dongchedi", label: "懂车帝" },
+      ] },
+      { key: "automaticTagging", label: "自动打标", kind: "boolean" },
+      { key: "videoFrameOriginalReference", label: "提取视频参考帧", kind: "boolean" },
+      { key: "enableVideoTranscription", label: "提取视频口播", kind: "boolean" },
+    ],
+    defaultConfig: { links: "", sourceLink: "", projectName: "画布内容采集", platform: "auto", automaticTagging: false, videoFrameOriginalReference: true, enableVideoTranscription: false },
   },
   {
     type: "input.content-pool",
@@ -801,6 +833,9 @@ export function getCanvasNodeDefinition(type: CanvasNodeType, version?: number) 
 export function getCanvasBatchBindableFields(node: Pick<CanvasNode, "type" | "version">): CanvasBatchBindableField[] {
   const definition = getCanvasNodeDefinition(node.type, node.version);
   if (!definition) return [];
+  if (node.type === "input.content-collection") {
+    return [{ key: "sourceLink", label: "采集链接", parameterTypes: ["text"], adapter: "config-value" }];
+  }
   if (node.type === "input.video-loader") {
     return [{ key: "videos", label: "视频队列", parameterTypes: ["video"], adapter: "video-input" }];
   }
@@ -883,6 +918,7 @@ export function validateCanvasNodeConfig(type: CanvasNodeType, config: CanvasNod
       errors.push(`${definition.label}: ${field.label} must be a URL list.`);
     }
     if (field.kind === "boolean" && typeof value !== "boolean"
+      && !(type === "input.content-collection" && field.key === "automaticTagging" && value === undefined)
       && !(type === "compose.social-post" && field.key === "requireReview" && value === undefined)) {
       errors.push(`${definition.label}: ${field.label} must be a boolean.`);
     }
@@ -901,6 +937,7 @@ export function validateCanvasNodeConfig(type: CanvasNodeType, config: CanvasNod
     errors.push(`${definition.label}至少需要一个 URL。`);
   }
   if (type === "input.video-loader") errors.push(...validateCanvasVideoLoaderConfig(config));
+  if (type === "input.content-collection") errors.push(...validateCanvasCollectionConfig(config));
   if (type === "input.source-video") {
     if (!String(config.sourceUrl || "").trim()) errors.push("源视频链接不能为空。");
     if (!String(config.projectName || "").trim()) errors.push("源视频内容池项目不能为空。");

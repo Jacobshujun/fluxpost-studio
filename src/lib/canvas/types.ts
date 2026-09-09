@@ -295,6 +295,7 @@ export type CanvasNodeType =
   | "input.video-loader"
   | "input.source-video"
   | "input.content-pool"
+  | "input.content-collection"
   | "input.library-images"
   | "input.copy-library"
   | "input.competitor-workbook"

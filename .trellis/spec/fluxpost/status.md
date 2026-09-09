@@ -1,12 +1,14 @@
 # FluxPost Current Status
 
-Last updated: 2026-09-08
+Last updated: 2026-09-09
 
 ## One-Line Status
 
-Copy-library new-draft selection/reload regression is fixed, committed, and browser-verified on the local port-3001 candidate; LAN access is preserved.
+Canvas content collection now supports default-untagged link/ID batches and generic downstream nodes through per-source frozen outputs. Offline baseline and mocked desktop/mobile checks pass. Local commit is authorized; the port-3001 candidate remains unchanged.
 
 ## Current Focus
+
+- 2026-09-09: Added input.content-collection with five title/body/source/images/videos outputs, opt-in tagging, single-link testing and a generic V2 batch preset. Twenty distinct links become twenty main tasks; each collects once through importSourceLinks, and child retries/final aggregation reuse all five frozen outputs. Vision and per-image reconstruction tests, portable config, source isolation, failures, 1440px/390px mocked browser preflight and the offline baseline pass. Link/ID mode is implemented; keyword-result expansion remains a separate design. User authorized a scoped local commit only; no local candidate replacement, live-provider call, push or deployment was requested. Pre-existing image-discard edits remain outside this commit.
 
 - 2026-09-08: Copy-library list fetching no longer depends on the selected entry. Explicit create mode preserves new drafts across refreshes/slow responses, pending tags clear on New, and history restores editor drafts separately. Implementation commit `061be8bd662fbb5b9e1121533e565f1bed35ef55` passed the full offline baseline and user-approved `npm run local:lan` activation. Mocked browser checks passed on port 3001 at 1440px/390px with empty/read-only lists, POST/PATCH saves, selection, delayed filters, and history; no real entries were mutated by these checks. Runtime, candidate state, and slot marker matched the activated HEAD, with LAN binding preserved. Release-record commits do not change application code; read `/api/version` and `.fluxpost-local-candidate.json` for the exact current candidate identity. No GitHub push or remote deployment was requested or performed.
 

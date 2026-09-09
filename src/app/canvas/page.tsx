@@ -98,6 +98,8 @@ import {
   type CanvasClipboardPayload,
 } from "@/lib/canvas/clipboard";
 import { canvasNodeDefinitions, createCanvasNode, getCanvasBatchBindableFields, getCanvasNodeDefinition, getCanvasNodeExecutionMode } from "@/lib/canvas/registry";
+import { canvasCollectionLinks } from "@/lib/canvas/content-collection";
+import { canvasCollectionScheduleDefinition } from "@/lib/canvas/content-collection-schedule";
 import { CANVAS_SAVE_IMAGE_MAX_ITEMS } from "@/lib/canvas/save-images";
 import { canvasSubtitleStyleConfig, canvasSubtitleStyleFromConfig, normalizeCanvasSubtitlePresetName } from "@/lib/canvas/subtitle-style";
 import { createCanvasSchedulerSkeleton } from "@/lib/canvas/scheduler-skeleton";
@@ -388,7 +390,7 @@ export default function CanvasPage() {
     setNodes((current) => current.map((node) => {
       if (node.id !== nodeId) return node;
       const currentNode = node.data.canvasNode;
-      const nextConfig = { ...currentNode.config, [key]: value };
+      const nextConfig = { ...currentNode.config, [key]: value, ...(currentNode.type === "input.content-collection" && key === "links" ? { sourceLink: "" } : {}) };
       const config = currentNode.type === "input.source-video" && (key === "sourceUrl" || key === "projectName")
         ? clearCanvasSourceVideoSnapshot(nextConfig)
         : nextConfig;
@@ -2443,6 +2445,14 @@ function NodeInspector({
     if (normalized !== node.label) onLabelChange(normalized);
   };
   return <div className="canvas-inspector-content">
+    {node.type === "input.content-collection" ? <div className="canvas-source-video-resolver">
+      <p>单条测试：选择链接后运行此节点或运行全部。批量处理：打开批量调度，新建灵活调度，按链接自动执行下游。</p>
+      <label><span>单条测试链接（不影响批量列表）</span><select aria-label="单条测试链接" value={String(node.config.sourceLink || "")} onChange={(event) => onPatch({ sourceLink: event.target.value })}>
+        <option value="">{canvasCollectionLinks(node.config.links).length === 1 ? "使用唯一链接" : "请选择测试链接"}</option>
+        {canvasCollectionLinks(node.config.links).map((link, index) => <option key={link} value={link}>{index + 1}. {link}</option>)}
+      </select></label>
+      <small>支持视觉识别、逐图重构及其他兼容下游。默认不打标；批量预演不调用采集服务，确认启动后才采集。</small>
+    </div> : null}
     <div className="canvas-inspector-title"><span style={{ color: definition.color }}>{iconForNode(node.type)}</span><div><strong>{definition.label}</strong><small>{definition.description}</small></div></div>
     <label><span>节点名称</span><input ref={labelInputRef} maxLength={80} value={labelDraft} placeholder={definition.label} onChange={(event) => setLabelDraft(event.target.value)} onBlur={commitLabel} onKeyDown={(event) => { if (event.key === "Enter") event.currentTarget.blur(); }} /></label>
     <label><span>节点状态</span><select value={executionMode} onChange={(event) => onExecutionModeChange(event.target.value as CanvasNodeExecutionMode)}>
@@ -4122,6 +4132,7 @@ function CanvasScheduleV2Editor({ schedule, graph, busy, onDefinitionChange, onA
 }) {
   const definition = schedule.definition;
   if (!definition) return <div className="canvas-task-empty"><AlertTriangle /><span>灵活调度定义缺失</span></div>;
+  const collectionPreset = canvasCollectionScheduleDefinition(graph);
   const childOutputs = graph.nodes.flatMap((node) => {
     const nodeDefinition = getCanvasNodeDefinition(node.type, node.version);
     return (nodeDefinition?.outputs || []).filter((port) => ["text", "images", "videos"].includes(port.kind)).map((port) => ({
@@ -4239,6 +4250,7 @@ function CanvasScheduleV2Editor({ schedule, graph, busy, onDefinitionChange, onA
     }),
   });
   return <div className="canvas-schedule-v2">
+    {collectionPreset ? <div className="canvas-schedule-primary-actions" style={{ flexWrap: "wrap" }}><button type="button" style={{ flexShrink: 0, whiteSpace: "nowrap" }} disabled={busy} onClick={() => onDefinitionChange(collectionPreset)}><Download />内容采集预设</button><small style={{ flex: "1 1 260px" }}>按链接拆任务，每条内容只采集一次，自动执行所选下游。预设支持文字、图片或视频结果；修改节点链接后请重新应用预设。并发使用现有任务队列，叠加逐图节点内部并发，请按需调低。</small></div> : null}
     <section className="canvas-scheduler-bindings">
       <header><span><strong>执行节点</strong><small>结果项输出会在任务组阶段替换为冻结结果</small></span><button type="button" disabled={!workbookNode || !workbookImageNode || !workbookComposeNode} onClick={applyCompetitorWorkbookPreset}><Sheet />竞品 Excel 预设</button><button type="button" disabled={!sourceVideoNode || !promptNode || !reconstructNode} onClick={applyVideoReconstructPreset}><Video />视频重构预设</button><button type="button" disabled={graph.nodes.filter((node) => getCanvasBatchBindableFields(node).some((field) => field.parameterTypes.includes("image"))).length < 3} onClick={applyPeopleSceneVehiclePreset}><Images />人物场景预设</button></header>
       <div>
@@ -4262,8 +4274,8 @@ function CanvasScheduleV2Editor({ schedule, graph, busy, onDefinitionChange, onA
             return <label key={`${candidate.node.id}-${candidate.port.id}`} className={selected ? "is-selected" : ""}>
               <input type="checkbox" checked={selected} onChange={(event) => patchDefinition({
                 sharedOutputs: event.target.checked
-                  ? [...sharedOutputs, { nodeId: candidate.node.id, outputPort: candidate.port.id, artifactKind: candidate.artifactKind }]
-                  : sharedOutputs.filter((output) => output.nodeId !== candidate.node.id || output.outputPort !== candidate.port.id),
+                  ? [...sharedOutputs.filter((output) => candidate.node.type !== "input.content-collection" || output.nodeId !== candidate.node.id), ...sharedOutputCandidates.filter((item) => item.node.id === candidate.node.id && (candidate.node.type === "input.content-collection" || item.port.id === candidate.port.id)).map((item) => ({ nodeId: item.node.id, outputPort: item.port.id, artifactKind: item.artifactKind }))]
+                  : sharedOutputs.filter((output) => output.nodeId !== candidate.node.id || (candidate.node.type !== "input.content-collection" && output.outputPort !== candidate.port.id)),
               })} />
               <span><strong>{canvasNodeDisplayName(candidate.node)}</strong><small>{candidate.port.label} · {portKindLabel(candidate.port.kind)} · 每个主任务 1 次</small></span>
               <CheckCircle2 />
@@ -6095,18 +6107,20 @@ function canvasScheduleSharedOutputCandidates(
     const nodeDefinition = getCanvasNodeDefinition(node.type, node.version);
     const port = nodeDefinition?.outputs[0];
     if (!nodeDefinition
-      || nodeDefinition.category === "input"
+      || (nodeDefinition.category === "input" && node.type !== "input.content-collection")
       || nodeDefinition.passiveSink
       || nodeDefinition.capability === "external_write"
       || getCanvasNodeExecutionMode(node) === "disabled"
-      || nodeDefinition.outputs.length !== 1
+      || (nodeDefinition.outputs.length !== 1 && node.type !== "input.content-collection")
       || !port
       || !isCanvasScheduleArtifactKind(port.kind)
       || node.id === definition.childResult.nodeId
       || !hasCanvasGraphPath(graph, node.id, definition.childResult.nodeId)) continue;
     const ancestors = collectCanvasGraphAncestors(graph, node.id);
     if (Array.from(childBindingNodeIds).some((nodeId) => ancestors.has(nodeId))) continue;
-    candidates.push({ node, port, artifactKind: port.kind });
+    for (const output of nodeDefinition.outputs) {
+      if (isCanvasScheduleArtifactKind(output.kind)) candidates.push({ node, port: output, artifactKind: output.kind });
+    }
   }
   return candidates;
 }
@@ -6219,6 +6233,7 @@ function iconForNode(type: CanvasNodeType) {
   if (type === "input.text") return <Type {...props} />;
   if (type === "input.images") return <ImageIcon {...props} />;
   if (type === "input.source-video") return <FileVideo2 {...props} />;
+  if (type === "input.content-collection") return <Download {...props} />;
   if (type === "input.video-loader") return <FileUp {...props} />;
   if (type === "input.videos") return <Video {...props} />;
   if (type === "input.content-pool") return <Layers3 {...props} />;
