@@ -4,15 +4,15 @@ Last updated: 2026-09-10
 
 ## One-Line Status
 
-ToAPIs .cn fix passes baseline; not activated.
+Image body rollback prepared; not active.
 
 ## Current Focus
 
-- ToAPIs diagnosis: pitfalls.md; no runtime changes.
+- Request rollback: pitfalls.md; activation pending.
 
 - Image proxy release authorized; offline evidence and pending checks: .trellis/tasks/archive/2026-09/09-10-image-proxy-toggle/verification.md.
 
-- 2026-09-10 quality/background: Offline and 1440px/390px checks pass. Evidence: .trellis/tasks/archive/2026-09/09-10-simple-image-quality-background/verification.md. Commit authorized; no activation. Live support untested.
+- 2026-09-10 request rollback restores September 9 bodies; saved background settings are retained but not sent. No activation/live test. Earlier UI evidence: .trellis/tasks/archive/2026-09/09-10-simple-image-quality-background/verification.md.
 
 - 2026-09-10 iteration repair: Handles and nested deletion pass offline/browser checks. Evidence: .trellis/tasks/archive/2026-09/09-10-canvas-iteration-interactions/verification.md. Commit authorized; no activation/push/live calls.
 

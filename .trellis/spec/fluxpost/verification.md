@@ -25,7 +25,7 @@ node --env-file=.env.local .trellis/verification/unified_library_postgres_benchm
 - `python .trellis/verification/canvas_iteration_browser_check.py` checks region editing, persistence, result repair/refresh and shared outputs at 1440px/390px using intercepted APIs. Use `BROWSER_BASE_URL` with an existing worker-disabled loopback smoke server; port 3001 is rejected.
 
 - `simple_image_dimensions_check.mjs` checks settings/launch/resume. Its browser companion checks 1440px/390px persistence/layout via `BROWSER_BASE_URL`; use worker-disabled loopback, never port 3001.
-- `image_background_check.mjs` checks adapter payloads, validation and legacy omission offline; live background support is untested.
+- `image_background_check.mjs` verifies September 9 request bodies, background omission and saved-setting validation offline.
 
 - `image_exact_pixels_check.mjs` covers exact request fields, unsupported ToAPIs input, PNG/JPEG byte preservation, mismatch/corrupt-output rejection before persistence, no retry/fallback, resume and auto/ratio mode using isolated fixtures.
 - `node .trellis/verification/canvas_content_collection_check.mjs` covers 20 source-scoped tasks, five-port snapshots, authenticated owner propagation, opt-in tagging, vision/image executors, partial-image retry, serialization and per-node media limits using mocks. The normal baseline includes it.

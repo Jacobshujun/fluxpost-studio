@@ -46,19 +46,20 @@ const reference = { filePath: "fixture.png", fileName: "fixture.png", mimeType: 
 
 for (const background of ["auto", "transparent", "opaque"]) {
   for (const quality of ["low", "medium", "high"]) {
-    const options = runtime.normalizeImageOptions({ size: "1024x1024", quality, background });
-    assert.equal(options.background, background);
-    assert.equal(options.quality, quality);
+    const normalized = runtime.normalizeImageOptions({ size: "1024x1024", quality, background });
+    assert.equal(normalized.background, undefined);
+    assert.equal(normalized.quality, quality);
+    const options = { ...normalized, background };
     for (const references of [[], [reference]]) {
       for (const builder of [runtime.buildStandardImagesApiRequest, runtime.buildOpenAiJsonRequest]) {
         const request = await builder("primary", "fixture", 1, options, references, true, false);
         if (references.length) {
-          assert.equal(request.body.get("background"), background);
+          assert.equal(request.body.has("background"), false);
           assert.equal(request.body.get("quality"), quality);
           assert.equal(request.body.getAll("image[]").length, 1);
         } else {
           const body = JSON.parse(request.body);
-          assert.equal(body.background, background);
+          assert.equal("background" in body, false);
           assert.equal(body.quality, quality);
         }
       }
@@ -68,26 +69,27 @@ for (const background of ["auto", "transparent", "opaque"]) {
         ...options, ratio: "1:1", resolution: "1k",
       }, { values }), (error) => error === boundary);
       const body = captured.at(-1).body;
-      assert.equal(body.background, background);
+      assert.equal("background" in body, false);
       assert.equal(body.quality, quality);
       assert.deepEqual(body.image_urls || [], values);
-      assert.equal(body.output_format, "png");
+      assert.deepEqual(body, {
+        model: "fixture-model", prompt: "fixture", n: 1, size: "1:1", resolution: "1k", quality,
+        output_format: "png", response_format: "url", ...(values.length ? { image_urls: values } : {}),
+      });
     }
     await assert.rejects(runtime.callResponsesImageToolInPool("fixture", 1, options), (error) => error === boundary);
-    assert.equal(captured.at(-1).body.tools[0].background, background);
-    assert.equal(captured.at(-1).body.tools[0].quality, quality);
+    assert.deepEqual(captured.at(-1).body.tools[0], {
+      type: "image_generation", model: "fixture-image", size: "1024x1024",
+    });
   }
 }
 
 const explicitInputError = (error) => error instanceof contracts.ImageProviderError && error.category === "input"
   && error.retryable === false && error.failoverAllowed === false;
 for (const background of ["invalid", "", null, 1]) {
-  assert.throws(() => runtime.normalizeImageOptions({ background }), explicitInputError);
-  assert.throws(() => contracts.buildOpenAiJsonGenerationBody({ model: "fixture", prompt: "fixture", size: "1024x1024", background }), explicitInputError);
-  assert.throws(() => toApis.buildToApisGenerationBody({ model: "fixture", prompt: "fixture", ratio: "1:1", resolution: "1k", background }), explicitInputError);
+  assert.throws(() => contracts.validateImageBackground(background), explicitInputError);
 }
-assert.throws(() => runtime.normalizeImageOptions({ background: "transparent", outputFormat: "jpeg" }), explicitInputError);
-assert.throws(() => toApis.buildToApisGenerationBody({ model: "fixture", prompt: "fixture", ratio: "1:1", resolution: "1k", background: "transparent", outputFormat: "jpeg" }), explicitInputError);
+assert.throws(() => contracts.validateImageBackground("transparent", "jpeg"), explicitInputError);
 
 const legacy = runtime.normalizeImageOptions();
 assert.equal(legacy.background, undefined, "Unrelated callers retain their existing provider defaults");
@@ -98,7 +100,21 @@ for (const references of [[], [reference]]) {
   }
 }
 assert.equal("background" in toApis.buildToApisGenerationBody({ model: "fixture", prompt: "fixture", ratio: "1:1", resolution: "1k" }), false);
-console.log("Image quality/background checks passed: normalized options, JSON/SSE generation+edit, ToAPIs, Responses, invalid input, transparent JPEG and legacy omission.");
+for (const outputFormat of ["png", "jpeg"]) {
+  assert.deepEqual(toApis.buildToApisGenerationBody({
+    model: "gpt-image-2.5-sunburst", prompt: "fixture", ratio: "3:4", resolution: "2k",
+    quality: "medium", background: "auto", count: 1, outputFormat, outputCompression: 100,
+    referenceImages: ["https://fixture.invalid/reference.png"],
+  }), {
+    model: "gpt-image-2.5-sunburst", prompt: "fixture", n: 1, size: "3:4", resolution: "2k", quality: "medium",
+    output_format: outputFormat, ...(outputFormat === "jpeg" ? { output_compression: 100 } : {}),
+    response_format: "url", image_urls: ["https://fixture.invalid/reference.png"],
+  });
+}
+assert.deepEqual(contracts.buildOpenAiJsonGenerationBody({
+  model: "fixture", prompt: "fixture", size: "1024x1024", quality: "high", background: "auto",
+}), { model: "fixture", prompt: "fixture", n: 1, size: "1024x1024", quality: "high" });
+console.log("September 9 image request rollback checks passed: JSON/SSE generation+edit, ToAPIs PNG/JPEG golden bodies, Responses, background omission and saved-setting validation.");
 
 function load(file, dependencies = {}) {
   const output = ts.transpileModule(readFileSync(file, "utf8"), {

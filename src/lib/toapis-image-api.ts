@@ -1,5 +1,5 @@
 import type { ImageGenerationOptions } from "./types";
-import { ImageProviderError, validateImageBackground } from "./image-providers/contracts";
+import { ImageProviderError } from "./image-providers/contracts";
 
 export type ToApisImageSize = {
   size: string;
@@ -46,7 +46,6 @@ export function buildToApisGenerationBody(input: {
   ratio?: string;
   resolution?: string;
   quality?: string;
-  background?: string;
   count?: number;
   outputFormat?: string;
   outputCompression?: number;
@@ -62,7 +61,6 @@ export function buildToApisGenerationBody(input: {
   const count = validateIntegerRange(input.count ?? 1, 1, maxToApisImageOutputs, "ToAPIs image count");
   const quality = validateChoice(input.quality || "medium", ["low", "medium", "high"], "ToAPIs image quality");
   const outputFormat = validateChoice(input.outputFormat || "png", ["png", "jpeg"], "ToAPIs output format") as ToApisImageOutputFormat;
-  const background = validateImageBackground(input.background, outputFormat);
   const outputCompression = validateIntegerRange(input.outputCompression ?? 100, 0, 100, "ToAPIs JPEG compression");
   return {
     model: input.model,
@@ -71,7 +69,6 @@ export function buildToApisGenerationBody(input: {
     size: dimensions.size,
     resolution: dimensions.resolution,
     quality,
-    ...(background ? { background } : {}),
     output_format: outputFormat,
     ...(outputFormat === "jpeg" ? { output_compression: outputCompression } : {}),
     response_format: "url" as const,

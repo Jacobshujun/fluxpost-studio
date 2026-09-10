@@ -103,18 +103,15 @@ export function buildOpenAiJsonGenerationBody(input: {
   prompt: string;
   size: string;
   quality?: string;
-  background?: string;
   count?: number;
 }) {
   assertOpenAiJsonSize(input.size);
-  const background = validateImageBackground(input.background);
   return {
     model: input.model,
     prompt: input.prompt,
     n: input.count || 1,
     size: input.size,
     ...(input.quality ? { quality: input.quality } : {}),
-    ...(background ? { background } : {}),
   };
 }
 
