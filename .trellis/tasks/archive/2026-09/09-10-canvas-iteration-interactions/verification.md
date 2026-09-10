@@ -16,4 +16,6 @@
 
 ## Release boundary
 
-This repair is uncommitted. No commit, port-3001 activation, push, deployment or live provider acceptance was authorized or performed. The isolated port-45678 server disables background workers and is stopped after verification.
+Commit-time recheck: iteration contracts pass. The current mixed worktree baseline stops at the Trellis context gate (71,891 bytes versus 71,680), after unrelated image-proxy status additions. The prior full baseline/browser evidence above remains valid for the repair; unrelated proxy changes are excluded from this commit.
+
+On 2026-09-10 the user authorized a local commit of this repair only. No port-3001 activation, push, deployment or live provider acceptance was authorized or performed. The isolated port-45678 server disabled background workers and was stopped after verification.

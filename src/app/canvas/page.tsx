@@ -16,6 +16,7 @@ import {
   applyEdgeChanges,
   applyNodeChanges,
   getBezierPath,
+  useUpdateNodeInternals,
   type Connection,
   type Edge,
   type EdgeChange,
@@ -1662,7 +1663,7 @@ export default function CanvasPage() {
             nodesDraggable={!isMobile}
             nodesConnectable={!isMobile}
             elementsSelectable
-            deleteKeyCode={isMobile ? null : ["Backspace", "Delete"]}
+            deleteKeyCode={isMobile || iterationEditorId ? null : ["Backspace", "Delete"]}
             fitView={nodes.length > 0}
             colorMode={flowColorMode}
           >
@@ -1790,6 +1791,11 @@ const CanvasFlowNode = memo(function CanvasFlowNode({ data, selected }: NodeProp
   const node = data.canvasNode;
   const definition = getCanvasNodeDefinition(node.type, node.version);
   const interaction = useContext(CanvasNodeInteractionContext);
+  const updateNodeInternals = useUpdateNodeInternals();
+  const outputPortIds = getCanvasIterationOutputPorts(node).map((port) => port.id).join(",");
+  useEffect(() => {
+    updateNodeInternals(node.id);
+  }, [node.id, outputPortIds, updateNodeInternals]);
   if (!definition) return null;
   const imageUrls = node.type === "input.images" || node.type === "input.library-images"
     ? normalizeConfigUrls(node.config.urls)
@@ -2042,7 +2048,7 @@ function CanvasIterationEditor({ node, colorMode, onChange, onClose }: {
           minZoom={0.2}
           fitView
           colorMode={colorMode}
-          deleteKeyCode={["Backspace", "Delete"]}
+          deleteKeyCode={innerPreview ? null : ["Backspace", "Delete"]}
         ><Background variant={BackgroundVariant.Dots} gap={22} /><Controls showInteractive={false} /></ReactFlow> : null}</CanvasNodeInteractionContext.Provider>
       </div>
       <aside className="canvas-iteration-properties">

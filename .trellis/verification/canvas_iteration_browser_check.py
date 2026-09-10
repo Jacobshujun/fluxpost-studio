@@ -19,6 +19,76 @@ def make_node(node_id, node_type, config, position, **extra):
             "position": position, "executionMode": "enabled", **extra}
 
 
+async def check_editor_interactions(page, width, saved_workflow):
+    outer = page.locator('.react-flow__node[data-id="region"]')
+    await outer.evaluate("element => element.dispatchEvent(new MouseEvent('click', {bubbles: true}))")
+    await page.get_by_role("button", name="编辑逐图区域", exact=True).click()
+    dialog = page.get_by_role("dialog", name="逐图区域编辑器")
+    await dialog.get_by_label("区域文字输出").select_option("")
+    await dialog.get_by_label("区域图片输出").select_option('["root","images"]')
+    await dialog.get_by_role("button", name="返回外层画布", exact=True).click()
+    if width > 820:
+        source = outer.locator('.react-flow__handle.source[data-handleid="images"]')
+        target = page.locator('.react-flow__node[data-id="image-sink"] .react-flow__handle.target[data-handleid="images"]')
+        await source.scroll_into_view_if_needed()
+        source_box = await source.bounding_box()
+        target_box = await target.bounding_box()
+        await page.mouse.move(source_box["x"] + source_box["width"] / 2, source_box["y"] + source_box["height"] / 2)
+        await page.mouse.down()
+        await page.mouse.move(target_box["x"] + target_box["width"] / 2, target_box["y"] + target_box["height"] / 2, steps=15)
+        await page.mouse.up()
+        await expect(page.locator('.react-flow__edge')).to_have_count(1)
+        await page.wait_for_function("!document.querySelector('.canvas-message .is-dirty')")
+        assert any(edge["source"] == "region" and edge["sourcePort"] == "images" and edge["target"] == "image-sink"
+                   for edge in saved_workflow()["graph"]["edges"]), "Changed image output must support pointer connections before reload"
+    await outer.evaluate("element => element.dispatchEvent(new MouseEvent('click', {bubbles: true}))")
+    await page.get_by_role("button", name="编辑逐图区域", exact=True).click()
+    for key in ["Delete", "Backspace"]:
+        await dialog.get_by_label("编辑内层节点").select_option("root")
+        await dialog.locator('.react-flow__node[data-id="root"]').focus()
+        await page.keyboard.press(key)
+        await expect(dialog).to_be_visible()
+        await expect(outer).to_have_count(1)
+        await expect(dialog.locator('.react-flow__node[data-id="root"]')).to_have_count(1)
+    await dialog.get_by_label("编辑内层节点").select_option("vision")
+    await dialog.locator('.react-flow__node[data-id="vision"]').focus()
+    await page.keyboard.press("Delete")
+    await expect(dialog).to_be_visible()
+    await expect(dialog.locator('.react-flow__node[data-id="vision"]')).to_have_count(0)
+    await expect(dialog.locator('.react-flow__edge')).to_have_count(0)
+    await dialog.get_by_label("内层节点库").select_option("input.text")
+    await dialog.get_by_role("button", name="添加内层节点", exact=True).click()
+    name = dialog.get_by_label("内层节点名称")
+    await name.fill("保留文字")
+    await name.press("Backspace")
+    await expect(name).to_have_value("保留文")
+    await name.press("Delete")
+    await expect(name).to_have_value("保留文")
+    text_id = await dialog.get_by_label("编辑内层节点").input_value()
+    await dialog.locator(f'.react-flow__node[data-id="{text_id}"]').focus()
+    await page.keyboard.press("Backspace")
+    await expect(dialog).to_be_visible()
+    await expect(dialog.locator('.react-flow__node')).to_have_count(1)
+    await dialog.get_by_role("button", name="返回外层画布", exact=True).click()
+    await page.wait_for_function("!document.querySelector('.canvas-message .is-dirty')")
+    saved_region = next(node for node in saved_workflow()["graph"]["nodes"] if node["id"] == "region")
+    assert [node["id"] for node in saved_region["iteration"]["graph"]["nodes"]] == ["root"]
+    assert saved_region["iteration"]["graph"]["edges"] == []
+    if width > 820:
+        assert len(saved_workflow()["graph"]["edges"]) == 1, "Inner deletion must preserve the region's outer connection"
+    await page.reload(wait_until="networkidle")
+    await expect(page.locator('.react-flow__node[data-id="region"]')).to_have_count(1)
+    await expect(page.locator('.react-flow__edge')).to_have_count(1 if width > 820 else 0)
+    if width > 820:
+        sink = page.locator('.react-flow__node[data-id="image-sink"]')
+        await sink.evaluate("element => element.dispatchEvent(new MouseEvent('click', {bubbles: true}))")
+        await sink.focus()
+        await page.keyboard.press("Delete")
+        await expect(sink).to_have_count(0)
+        await expect(page.locator('.react-flow__node[data-id="region"]')).to_have_count(1)
+        await page.wait_for_function("!document.querySelector('.canvas-message .is-dirty')")
+
+
 async def check(browser, width):
     page = await browser.new_page(viewport={"width": width, "height": 960}, accept_downloads=True)
     errors = []
@@ -40,7 +110,8 @@ async def check(browser, width):
         "ownerUserId": "browser-owner", "ownerDisplayName": "Browser owner",
         "isTemplate": False, "createdAt": NOW, "updatedAt": NOW,
         "graph": {"viewport": {"x": 0, "y": 0, "zoom": 1}, "nodes": [region,
-            make_node("after", "utility.text-concatenate", {"delimiter": "\n", "clean_whitespace": False}, {"x": 450, "y": 80})],
+            make_node("after", "utility.text-concatenate", {"delimiter": "\n", "clean_whitespace": False}, {"x": 450, "y": 80}),
+            make_node("image-sink", "utility.image-preview", {}, {"x": 450, "y": 450})],
             "edges": [{"id": "outer-text", "source": "region", "sourcePort": "text", "target": "after", "targetPort": "text_a"}]},
     }
     metadata = {"schemaVersion": 1, "inputFingerprint": "mock", "revision": 1, "deliveredRevision": 1, "downstreamStale": False,
@@ -135,6 +206,10 @@ async def check(browser, width):
 
     await page.route("**/*", route_handler)
     await page.goto(f"{BASE_URL}/canvas?workflowId=iteration-workflow&runId=iteration-run", wait_until="networkidle")
+    original_workflow = copy.deepcopy(workflow)
+    await check_editor_interactions(page, width, lambda: workflow)
+    workflow = original_workflow
+    await page.reload(wait_until="networkidle")
     if width > 820:
         await page.get_by_role("button", name="显示节点库", exact=True).click()
         palette = page.locator(".canvas-palette")

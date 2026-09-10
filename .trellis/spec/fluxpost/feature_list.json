@@ -19,7 +19,7 @@
       "evidence": [
         "2026-09-09 full offline baseline, SQLite wake/recovery and 1440px/390px mocked browser checks pass; evidence in archived canvas-image-iteration task."
       ],
-      "notes": "Local commit authorized 2026-09-10; no activation, push or live acceptance."
+      "notes": "Iteration repair commit authorized 2026-09-10; no activation/push/live acceptance."
     },
     {
       "id": "exact-image-pixels",

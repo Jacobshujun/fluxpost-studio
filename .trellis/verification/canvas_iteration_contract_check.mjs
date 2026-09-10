@@ -9,6 +9,10 @@ const temp = mkdtempSync(path.join(tmpdir(), "fluxpost-iteration-contract-"));
 const require = createRequire(import.meta.url);
 const read = (relative) => readFileSync(path.join(process.cwd(), relative), "utf8");
 try {
+  const pageSource = read("src/app/canvas/page.tsx");
+  assert.match(pageSource, /deleteKeyCode=\{isMobile \|\| iterationEditorId \? null : \["Backspace", "Delete"\]\}/, "outer deletion must pause while the iteration editor owns keyboard input");
+  assert.match(pageSource, /const outputPortIds = getCanvasIterationOutputPorts\(node\)\.map\(\(port\) => port\.id\)\.join\(","\)/, "port identity changes must invalidate handle geometry even at the same node size");
+  assert.match(pageSource, /updateNodeInternals\(node\.id\);\s*\}, \[node\.id, outputPortIds, updateNodeInternals\]\)/);
   writeFileSync(path.join(temp, "toapis-image-api.js"), "exports.toApisImageResolutions=['1k','2k','4k'];exports.toApisImageRatios=['1:1'];exports.toApis4kImageRatios=['16:9'];");
   writeFileSync(path.join(temp, "feishu-publish-mode.js"), "exports.feishuPublishModeOptions=[{value:'full',label:'full'}];exports.normalizeFeishuPublishMode=(value)=>value||'full';");
   for (const name of ["types", "node-utils", "source-video-contract", "video-loader", "content-collection", "content-collection-schedule", "save-images", "seedance-references", "subtitle-style", "subtitle-editor", "registry", "graph", "iteration", "serialization", "clipboard", "workflow-file", "scheduler-v2"]) {
