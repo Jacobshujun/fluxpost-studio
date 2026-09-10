@@ -47,6 +47,20 @@ const generationBody = contracts.buildOpenAiJsonGenerationBody({
   size: "1024x1024",
   quality: "high",
 });
+
+for (const hostname of ["toapis.com", "api.toapis.com", "toapis.cn", "api.toapis.cn", "img.toapis.cn", "API.TOAPIS.CN"]) {
+  const baseUrl = `https://${hostname}/v1`;
+  for (const legacyDialect of [undefined, "auto"]) {
+    assert.equal(contracts.resolveImageProviderProfile({ baseUrl, legacyDialect }), "toapis_async", baseUrl);
+  }
+  for (const explicitProfile of contracts.IMAGE_PROVIDER_PROFILES) {
+    assert.equal(contracts.resolveImageProviderProfile({ baseUrl, explicitProfile }), explicitProfile);
+  }
+  assert.equal(contracts.resolveImageProviderProfile({ baseUrl, legacyDialect: "openai" }), "openai_sse");
+}
+for (const hostname of ["nottoapis.cn", "toapis.cn.example", "api.toapis.com.example", "relay.example"]) {
+  assert.equal(contracts.resolveImageProviderProfile({ baseUrl: `https://${hostname}/v1` }), "openai_sse");
+}
 assert.deepEqual(generationBody, {
   model: "gpt-image-2",
   prompt: "probe",
@@ -90,6 +104,63 @@ assert.equal(acceptedError.failoverAllowed, false);
 const config = read("src/lib/config.ts");
 const types = read("src/lib/types.ts");
 const imageGeneration = read("src/lib/image-generation.ts");
+const toApis = loadTypescriptCommonJs("src/lib/toapis-image-api.ts", { "./image-providers/contracts": contracts });
+const imageAst = ts.createSourceFile("image-generation.ts", imageGeneration, ts.ScriptTarget.Latest, true);
+const requestFunctions = ["requestSingleStandardImagesApiWithRetryForRoute", "requestSingleToApisImagesApiForRoute"];
+const requestSource = requestFunctions.map((name) => {
+  const declaration = imageAst.statements.find((statement) => ts.isFunctionDeclaration(statement) && statement.name?.text === name);
+  assert.ok(declaration, name);
+  return declaration.getText(imageAst);
+}).join("\n");
+const requestCode = ts.transpileModule(requestSource, { compilerOptions: { target: ts.ScriptTarget.ES2022 } }).outputText;
+const requestBoundary = new Error("Stop at the mocked provider boundary");
+for (const hostname of ["toapis.com", "api.toapis.com", "toapis.cn", "api.toapis.cn"]) {
+  for (const route of ["primary", "backup"]) {
+    for (const model of ["gpt-image-2.5-flare", "gpt-image-2.5-sunburst"]) {
+      const baseUrl = `https://${hostname}/v1`;
+      const routeConfig = { baseUrl, model, profile: contracts.resolveImageProviderProfile({ baseUrl }) };
+      const requests = [];
+      const dependencies = {
+        openaiImageRouteConfig: (selectedRoute) => { assert.equal(selectedRoute, route); return routeConfig; },
+        buildToApisGenerationBody: toApis.buildToApisGenerationBody,
+        prepareToApisReferenceUrls: async (selectedRoute, references) => { assert.equal(selectedRoute, route); return references.urls; },
+        imageRequestTimeoutMs: 1000,
+        maxImageAttempts: 1,
+        getRemainingTimeoutMs: () => 1000,
+        openaiImageUrl: (endpoint, selectedRoute) => { assert.equal(selectedRoute, route); return `${baseUrl}/${endpoint}`; },
+        openaiImageHeaders: (json, selectedRoute) => {
+          assert.equal(json, true);
+          assert.equal(selectedRoute, route);
+          return { "Content-Type": "application/json" };
+        },
+        fetchWithTimeout: async (url, request) => { requests.push({ url, ...request }); throw requestBoundary; },
+        toImageProviderTransportError: (error) => error,
+      };
+      const submit = new Function(...Object.keys(dependencies), `${requestCode}\nreturn requestSingleStandardImagesApiWithRetryForRoute;`)(...Object.values(dependencies));
+      for (const urls of [[], ["https://fixture.invalid/reference.png"]]) {
+        await assert.rejects(submit(route, "fixture prompt", 1, Date.now(), {
+          size: "1536x2048", ratio: "3:4", resolution: "2k", quality: "medium",
+        }, { urls }, urls.length ? "images/edits" : "images/generations"), (error) => error === requestBoundary);
+        const request = requests.at(-1);
+        assert.equal(request.url, `${baseUrl}/images/generations`);
+        assert.equal(request.method, "POST");
+        assert.equal(request.headers["Content-Type"], "application/json");
+        const body = JSON.parse(request.body);
+        assert.equal(body.model, model);
+        assert.equal(body.prompt, "fixture prompt");
+        assert.equal(body.n, 1);
+        assert.equal(body.size, "3:4");
+        assert.equal(body.resolution, "2k");
+        assert.equal(body.quality, "medium");
+        assert.equal(body.response_format, "url");
+        assert.deepEqual(body.image_urls || [], urls);
+        assert.equal("stream" in body, false);
+        assert.equal("input_fidelity" in body, false);
+      }
+      assert.equal(requests.length, 2, "Each request reaches the provider boundary exactly once.");
+    }
+  }
+}
 const configPage = read("src/app/config/page.tsx");
 const probeRoute = read("src/app/api/config/image-provider-check/route.ts");
 const configRoute = read("src/app/api/config/route.ts");

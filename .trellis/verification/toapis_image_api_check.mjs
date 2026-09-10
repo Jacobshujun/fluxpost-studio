@@ -10,7 +10,6 @@ const contracts = loadTypescriptCommonJs("src/lib/image-providers/contracts.ts")
 const contract = loadTypescriptCommonJs("src/lib/toapis-image-api.ts", { "./types": {}, "./image-providers/contracts": contracts });
 const imageGeneration = read("src/lib/image-generation.ts");
 const config = read("src/lib/config.ts");
-const providerContracts = read("src/lib/image-providers/contracts.ts");
 
 assertDeepEqual(contract.resolveToApisImageSize("auto"), { size: "1:1", resolution: "1k" }, "Auto has no exact-pixel contract.");
 for (const input of ["1024x1024", "1024x1536", "1536x1024", "2048x2048", "2048x1152", "1152x2048", "3840x2160", "2160x3840", "1200x1600", "1234x987"]) {
@@ -93,7 +92,9 @@ assertEqual(contract.parseRetryAfterMs("7", 1_000), 7_000, "Retry-After seconds 
 assertEqual(contract.parseRetryAfterMs("Thu, 01 Jan 1970 00:00:11 GMT", 1_000), 10_000, "Retry-After dates must be honored.");
 
 assertContains(config, /OPENAI_IMAGE_API_DIALECT[\s\S]*options:\s*\["auto",\s*"openai",\s*"toapis"\]/, "Advanced config must expose the image API dialect.");
-assertContains(providerContracts, /hostname === "toapis\.com" \|\| hostname\.endsWith\("\.toapis\.com"\)/, "Auto profile resolution must recognize ToAPIs hosts.");
+for (const hostname of ["toapis.com", "api.toapis.com", "toapis.cn", "api.toapis.cn"]) {
+  assertEqual(contracts.resolveImageProviderProfile({ baseUrl: `https://${hostname}/v1` }), "toapis_async", `Auto profile must recognize ${hostname}.`);
+}
 assertContains(imageGeneration, /profile === "toapis_async"[\s\S]*requestSingleToApisImagesApiForRoute/, "Route dispatch must select the ToAPIs adapter before OpenAI profiles.");
 assertContains(imageGeneration, /profile === "toapis_async"[\s\S]*return requestSingleToApisImagesApiForRoute[\s\S]*profile === "openai_json"/, "ToAPIs must use structured size fields without inheriting OpenAI request fields.");
 assertContains(imageGeneration, /openaiImageUrl\("images\/generations", route\)[\s\S]*JSON\.stringify\(requestBody\)/, "ToAPIs submission must use JSON POST /images/generations.");

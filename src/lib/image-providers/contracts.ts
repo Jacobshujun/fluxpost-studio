@@ -77,7 +77,8 @@ export function resolveImageProviderProfile(input: {
   if (legacy === "toapis") return "toapis_async";
 
   const hostname = new URL(input.baseUrl).hostname.toLowerCase();
-  return hostname === "toapis.com" || hostname.endsWith(".toapis.com") ? "toapis_async" : "openai_sse";
+  const isToApis = ["toapis.com", "toapis.cn"].some((domain) => hostname === domain || hostname.endsWith(`.${domain}`));
+  return isToApis ? "toapis_async" : "openai_sse";
 }
 
 const openAiJsonSizes = new Set(["auto", "1024x1024", "1024x1536", "1536x1024"]);

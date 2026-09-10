@@ -4,9 +4,11 @@ Last updated: 2026-09-10
 
 ## One-Line Status
 
-Image proxy toggle passes offline checks; commit and LAN-3001 activation authorized.
+ToAPIs .cn fix passes baseline; not activated.
 
 ## Current Focus
+
+- ToAPIs diagnosis: pitfalls.md; no runtime changes.
 
 - Image proxy release authorized; offline evidence and pending checks: .trellis/tasks/archive/2026-09/09-10-image-proxy-toggle/verification.md.
 
