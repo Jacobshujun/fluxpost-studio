@@ -1,3 +1,5 @@
+import type { ImageGenerationBackground } from "../types";
+
 export const IMAGE_PROVIDER_PROFILES = ["openai_json", "openai_sse", "toapis_async"] as const;
 
 export type ImageProviderProfile = (typeof IMAGE_PROVIDER_PROFILES)[number];
@@ -80,20 +82,38 @@ export function resolveImageProviderProfile(input: {
 
 const openAiJsonSizes = new Set(["auto", "1024x1024", "1024x1536", "1536x1024"]);
 
+export function validateImageBackground(background: unknown, outputFormat?: string): ImageGenerationBackground | undefined {
+  if (background === undefined) return undefined;
+  if (background !== "auto" && background !== "transparent" && background !== "opaque") {
+    throw new ImageProviderError("图片背景无效，请选择自动、透明或不透明。", {
+      category: "input", retryable: false, failoverAllowed: false,
+    });
+  }
+  if (background === "transparent" && outputFormat === "jpeg") {
+    throw new ImageProviderError("透明背景不支持 JPEG，请使用 PNG。", {
+      category: "input", retryable: false, failoverAllowed: false,
+    });
+  }
+  return background;
+}
+
 export function buildOpenAiJsonGenerationBody(input: {
   model: string;
   prompt: string;
   size: string;
   quality?: string;
+  background?: string;
   count?: number;
 }) {
   assertOpenAiJsonSize(input.size);
+  const background = validateImageBackground(input.background);
   return {
     model: input.model,
     prompt: input.prompt,
     n: input.count || 1,
     size: input.size,
     ...(input.quality ? { quality: input.quality } : {}),
+    ...(background ? { background } : {}),
   };
 }
 

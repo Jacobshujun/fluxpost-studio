@@ -334,6 +334,7 @@ export type SourceImageTask = {
 };
 
 export type ImageGenerationQuality = "low" | "medium" | "high";
+export type ImageGenerationBackground = "auto" | "transparent" | "opaque";
 
 export type ImageStrategyPrompts = {
   carExterior: string;
@@ -372,6 +373,7 @@ export type PlatformCrawlSettings = Partial<Record<CrawlPlatform, PlatformCrawlS
 export type ImageGenerationOptions = {
   size: string;
   quality: ImageGenerationQuality;
+  background?: ImageGenerationBackground;
   allowSourceFallback?: boolean;
   taskConcurrency?: number;
   ratio?: string;
@@ -405,6 +407,7 @@ export type WorkspacePromptSettings = {
   imageRatio?: string;
   imageResolution?: "1k" | "2k" | "4k";
   imageQuality: ImageGenerationQuality;
+  imageBackground?: ImageGenerationBackground;
   platformCrawlSettings: PlatformCrawlSettings;
   simpleRunMediaSettings: SimpleRunMediaSettings;
   updatedAt: string;
@@ -968,6 +971,7 @@ export type SimpleRun = {
   imageRatio?: string;
   imageResolution?: "1k" | "2k" | "4k";
   imageQuality: ImageGenerationQuality;
+  imageBackground?: ImageGenerationBackground;
   platformCrawlSettings?: PlatformCrawlSettings;
   stages: SimpleRunStage[];
   platformResults: SimpleRunPlatformResult[];

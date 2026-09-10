@@ -293,6 +293,7 @@ try {
       ImageProviderError: class ImageProviderError extends Error {},
       IMAGE_PROVIDER_CAPABILITIES: {},
       buildOpenAiJsonGenerationBody: () => ({}),
+      validateImageBackground: (value) => value,
       parseOpenAiJsonImageResponse: () => ({ imageUrls: [] }),
     },
     "./toapis-image-api": {

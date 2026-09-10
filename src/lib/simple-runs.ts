@@ -356,6 +356,7 @@ function settingsFromRun(run: SimpleRun): WorkspacePromptSettings {
     imageRatio: run.imageRatio,
     imageResolution: run.imageResolution,
     imageQuality: run.imageQuality,
+    imageBackground: run.imageBackground ?? defaultWorkspacePromptSettings.imageBackground,
     platformCrawlSettings: run.platformCrawlSettings || defaultWorkspacePromptSettings.platformCrawlSettings,
     simpleRunMediaSettings: {
       ...defaultWorkspacePromptSettings.simpleRunMediaSettings,
@@ -1005,6 +1006,7 @@ async function produceSimpleSourceDraft(
         ratio: settings.imageRatio,
         resolution: settings.imageResolution,
         quality: settings.imageQuality,
+        background: settings.imageBackground,
         allowSourceFallback: false,
         taskConcurrency: isSimpleRunDongchediPageMode(normalizedInput) ? 1 : concurrencyConfig.image,
       })
@@ -1245,6 +1247,7 @@ async function runSimpleViralWorkflow(
           ratio: settings.imageRatio,
           resolution: settings.imageResolution,
           quality: settings.imageQuality,
+          background: settings.imageBackground,
           allowSourceFallback: false,
           taskConcurrency: concurrencyConfig.image,
         })
@@ -1488,6 +1491,7 @@ async function runSimpleOriginalWorkflow(
           ratio: settings.imageRatio,
           resolution: settings.imageResolution,
           quality: settings.imageQuality,
+          background: settings.imageBackground,
           taskConcurrency: concurrencyConfig.image,
         })
       : makeImageGenerationSkippedResult("Image generation is disabled for this original run.");
@@ -2556,6 +2560,7 @@ function makeInitialRun(
     imageRatio: settings.imageRatio,
     imageResolution: settings.imageResolution,
     imageQuality: settings.imageQuality,
+    imageBackground: settings.imageBackground,
     platformCrawlSettings: settings.platformCrawlSettings,
     contentSafetyPolicy,
     stages: (Object.keys(stageTitles) as SimpleRunStageId[]).map((id) =>

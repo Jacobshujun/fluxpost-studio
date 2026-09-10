@@ -26,6 +26,7 @@ const scope = {
   concurrencyConfig: { image: 3 },
   normalizeImageGenerationSize: (value) => value || "auto",
   normalizeImageQuality: (value) => value || "medium",
+  validateImageBackground: (value) => value,
   isImageProviderConfigured: () => true,
   isComfyUiKleinConfigured: () => true,
   openaiImageRouteConfig: () => ({ profile: "openai_sse" }),

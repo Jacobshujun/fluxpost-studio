@@ -122,6 +122,7 @@ const defaultWorkspaceSettings: WorkspacePromptSettings = {
   distributionCheckPrompt: defaultDistributionCheckPrompt,
   imageSize: defaultImageGenerationSize,
   imageQuality: "medium",
+  imageBackground: "auto",
   platformCrawlSettings: defaultPlatformCrawlSettings,
   simpleRunMediaSettings: defaultSimpleRunMediaSettings,
   updatedAt: new Date(0).toISOString(),
@@ -953,8 +954,19 @@ function ImageDimensionSelects({ settings, onChange, disabled }: { settings: Wor
         <option value="" disabled>请选择分辨率</option>
         {toApisImageResolutions.map((resolution) => <option key={resolution} value={resolution} disabled={resolution === "4k" && !allows4k}>{resolution.toUpperCase()}</option>)}
       </select></label>
+      <label className="min-w-0"><FieldLabel label="图片质量" /><select className="field" aria-label="图片质量" value={settings.imageQuality} onChange={(event) => onChange({ imageQuality: event.target.value as WorkspacePromptSettings["imageQuality"] })} disabled={disabled}>
+        <option value="low">低</option>
+        <option value="medium">中</option>
+        <option value="high">高</option>
+      </select></label>
+      <label className="min-w-0"><FieldLabel label="图片背景" /><select className="field" aria-label="图片背景" value={settings.imageBackground ?? "auto"} onChange={(event) => onChange({ imageBackground: event.target.value as WorkspacePromptSettings["imageBackground"] })} disabled={disabled}>
+        <option value="auto">自动</option>
+        <option value="transparent">透明</option>
+        <option value="opaque">不透明</option>
+      </select></label>
     </div>
-    <p className="text-xs text-white/52">与画布 GPT 图片节点一致；4K 仅支持部分宽屏或长图比例。</p>
+    <p className="text-xs text-white/52">比例和分辨率与画布 GPT 图片节点一致；4K 仅支持部分宽屏或长图比例。</p>
+    <p className="text-xs text-white/52">质量和背景用于 GPT 图片生成；直接引用原图或本地 Klein 不使用这两个参数。透明背景需要图片接口和模型支持。</p>
     {!settings.imageRatio && !settings.imageResolution ? <p className="text-xs text-[var(--amber)]">原设置为 {settings.imageSize}，请重新选择比例和分辨率。</p> : null}
   </div>;
 }

@@ -37,6 +37,7 @@ export async function PATCH(request: Request) {
         imageRatio: settings.imageRatio ?? null,
         imageResolution: settings.imageResolution ?? null,
         imageQuality: settings.imageQuality,
+        imageBackground: settings.imageBackground ?? null,
       },
     });
     return NextResponse.json({ settings });

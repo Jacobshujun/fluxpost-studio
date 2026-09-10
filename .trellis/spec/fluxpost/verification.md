@@ -1,6 +1,6 @@
 # Verification
 
-Last updated: 2026-09-09
+Last updated: 2026-09-10
 
 ## Baseline Command
 
@@ -24,7 +24,8 @@ node --env-file=.env.local .trellis/verification/unified_library_postgres_benchm
 - `canvas_iteration_contract_check.mjs`, `canvas_iteration_runtime_check.mjs`, `canvas_iteration_runs_check.mjs`, `canvas_iteration_actions_check.mjs`, and `canvas_iteration_queue_check.mjs` cover nested graph validation, multi-port snapshots, identity/order, bounded admission, repair versus delivery, owner/published guards, durable wake/park races, cancellation and SQLite recovery. PostgreSQL queue SQL is checked structurally, not against a live server. All are part of the offline baseline.
 - `python .trellis/verification/canvas_iteration_browser_check.py` checks region editing, persistence, result repair/refresh and shared outputs at 1440px/390px using intercepted APIs. Use `BROWSER_BASE_URL` with an existing worker-disabled loopback smoke server; port 3001 is rejected.
 
-- `simple_image_dimensions_check.mjs` covers dropdown contracts and frozen settings/API propagation; `simple_image_dimensions_browser_check.py` mocks save/reload/launch and 4K restrictions at 1440px/390px.
+- `simple_image_dimensions_check.mjs` checks settings/launch/resume. Its browser companion checks 1440px/390px persistence/layout via `BROWSER_BASE_URL`; use worker-disabled loopback, never port 3001.
+- `image_background_check.mjs` checks adapter payloads, validation and legacy omission offline; live background support is untested.
 
 - `image_exact_pixels_check.mjs` covers exact request fields, unsupported ToAPIs input, PNG/JPEG byte preservation, mismatch/corrupt-output rejection before persistence, no retry/fallback, resume and auto/ratio mode using isolated fixtures.
 - `node .trellis/verification/canvas_content_collection_check.mjs` covers 20 source-scoped tasks, five-port snapshots, authenticated owner propagation, opt-in tagging, vision/image executors, partial-image retry, serialization and per-node media limits using mocks. The normal baseline includes it.

@@ -4,13 +4,15 @@ Last updated: 2026-09-10
 
 ## One-Line Status
 
-Canvas image iteration passes offline and mocked browser checks. Local commit authorized; 3001 unchanged.
+Simple image quality/background passes offline/browser checks; local commit authorized, 3001 unchanged.
 
 ## Current Focus
 
-- 2026-09-10 image iteration: Regions, ordered durable items, retry/manual refresh and frozen multi-port sharing pass full offline baseline and 1440px/390px mocked browser checks. Evidence: .trellis/tasks/archive/2026-09/09-09-canvas-image-iteration/verification.md. Live-provider and PostgreSQL concurrency acceptance remain untested. Local commit authorized; no activation, push or deployment.
+- 2026-09-10 quality/background: Offline and 1440px/390px checks pass. Evidence: .trellis/tasks/archive/2026-09/09-10-simple-image-quality-background/verification.md. Commit authorized; no activation. Live support untested.
 
-- 2026-09-09 image sizing: Simple runs now share Canvas ratio/tier choices, persist selections through resume and forward them to all image paths. Legacy pixel settings require selection. Full offline and 1440px/390px mocked browser checks pass. Task: .trellis/tasks/archive/2026-09/09-09-exact-image-pixels. Commit authorized; no activation/live call.
+- 2026-09-10 image iteration: Offline and 1440px/390px mocked checks pass; live-provider/PostgreSQL concurrency remain untested. Evidence: .trellis/tasks/archive/2026-09/09-09-canvas-image-iteration/verification.md. Local commit authorized; no activation/push/deployment.
+
+- 2026-09-09 image sizing: Shared Canvas ratio/tier choices, frozen resume and legacy reselection pass offline/browser checks. Task: .trellis/tasks/archive/2026-09/09-09-exact-image-pixels. Commit authorized; no activation/live call.
 - 2026-09-09 release authorization: Content collection is committed as c482338abcc6c2806424c856ac0598656e0e9e5e. The user additionally approved committing the remaining image-discard changes and updating the single primary-worktree port-3001 candidate with npm run local:lan. Preserve LAN binding, require a clean committed tree, and verify runtime/state/slot SHA agreement after activation. No GitHub push, remote deployment or live provider acceptance was requested.
 
 - Collection, simple image-discard and September 8 copy-library verification/release evidence: see archive/status-2026-09-09.md. Their feature states are unchanged.

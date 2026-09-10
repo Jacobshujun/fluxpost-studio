@@ -19,6 +19,7 @@ import {
   ImageProviderError,
   IMAGE_PROVIDER_CAPABILITIES,
   buildOpenAiJsonGenerationBody,
+  validateImageBackground,
   parseOpenAiJsonImageResponse,
   type NormalizedImageProviderResponse,
 } from "./image-providers/contracts";
@@ -870,6 +871,8 @@ async function callResponsesImageToolInPool(prompt: string, count: number, optio
           type: "image_generation",
           model: appConfig.openaiImageModel,
           size: options.size,
+          quality: options.quality,
+          ...(options.background ? { background: options.background } : {}),
         },
       ],
       tool_choice: { type: "image_generation" },
@@ -1321,6 +1324,7 @@ async function buildOpenAiJsonRequest(
     prompt,
     size: options.size,
     quality: sendQuality ? options.quality : undefined,
+    background: options.background,
     count,
   });
   if (!referenceImages.length) {
@@ -1337,6 +1341,7 @@ async function buildOpenAiJsonRequest(
   form.append("n", String(fields.n));
   form.append("size", fields.size);
   if (fields.quality) form.append("quality", fields.quality);
+  if (fields.background) form.append("background", fields.background);
   for (const referenceImage of referenceImages) {
     const file = await readFile(referenceImage.filePath);
     form.append("image[]", new Blob([new Uint8Array(file)], { type: referenceImage.mimeType }), referenceImage.fileName);
@@ -1380,6 +1385,7 @@ async function requestSingleToApisImagesApiForRoute(
     ratio: options.ratio,
     resolution: options.resolution,
     quality: options.quality,
+    background: options.background,
     count,
     outputFormat: options.outputFormat,
     outputCompression: options.outputCompression,
@@ -1683,6 +1689,7 @@ async function buildStandardImagesApiRequest(
   form.append("response_format", "b64_json");
   form.append("stream", "true");
   if (sendQuality) form.append("quality", options.quality);
+  if (options.background) form.append("background", options.background);
   if (sendInputFidelity) form.append("input_fidelity", "high");
 
   for (const referenceImage of referenceImages) {
@@ -1704,6 +1711,7 @@ function buildStandardImagesGenerationBody(model: string, prompt: string, count:
     n: count,
     size: options.size,
     ...(sendQuality ? { quality: options.quality } : {}),
+    ...(options.background ? { background: options.background } : {}),
     output_format: options.outputFormat || "png",
     ...((options.outputFormat || "png") === "jpeg" ? { output_compression: options.outputCompression ?? 100 } : {}),
     response_format: "b64_json",
@@ -2306,6 +2314,7 @@ function normalizeImageOptions(options?: Partial<ImageGenerationOptions>): Image
   return {
     size: normalizeImageGenerationSize(options?.size),
     quality: normalizeImageQuality(options?.quality),
+    background: validateImageBackground(options?.background, options?.outputFormat),
     taskConcurrency: normalizeTaskConcurrency(options?.taskConcurrency),
     allowSourceFallback: options?.allowSourceFallback !== false,
     ratio: options?.ratio,

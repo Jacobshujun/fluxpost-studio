@@ -22,6 +22,7 @@ export const defaultWorkspacePromptSettings: WorkspacePromptSettings = {
   distributionCheckPrompt: defaultDistributionCheckPrompt,
   imageSize: defaultImageGenerationSize,
   imageQuality: "medium",
+  imageBackground: "auto",
   platformCrawlSettings: defaultPlatformCrawlSettings,
   simpleRunMediaSettings: defaultSimpleRunMediaSettings,
   updatedAt: new Date(0).toISOString(),
@@ -66,6 +67,7 @@ function normalizeWorkspacePromptSettings(input: Partial<WorkspacePromptSettings
     imageSize: normalizeImageGenerationSize(input.imageSize),
     ...dimensions,
     imageQuality: normalizeImageQuality(input.imageQuality),
+    imageBackground: normalizeImageBackground(input.imageBackground),
     platformCrawlSettings: normalizePlatformCrawlSettings(input.platformCrawlSettings),
     simpleRunMediaSettings: normalizeSimpleRunMediaSettings(input.simpleRunMediaSettings),
     updatedAt: input.updatedAt || new Date().toISOString(),
@@ -78,6 +80,12 @@ function stringOrDefault(value: unknown, fallback: string) {
 
 function normalizeImageQuality(value: unknown): WorkspacePromptSettings["imageQuality"] {
   return value === "low" || value === "medium" || value === "high" ? value : defaultWorkspacePromptSettings.imageQuality;
+}
+
+function normalizeImageBackground(value: unknown): WorkspacePromptSettings["imageBackground"] {
+  if (value === undefined) return "auto";
+  if (value === "auto" || value === "transparent" || value === "opaque") return value;
+  throw new Error("图片背景无效，请选择自动、透明或不透明。");
 }
 
 function normalizeSimpleRunMediaSettings(input: unknown): SimpleRunMediaSettings {

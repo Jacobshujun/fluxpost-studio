@@ -23,6 +23,8 @@ const legacy = await workspace.getWorkspacePromptSettings();
 assert.equal(legacy.imageSize, "1200x1600");
 assert.equal(legacy.imageRatio, undefined, "Old exact pixels must not silently become ratio mode");
 assert.equal(legacy.imageResolution, undefined);
+assert.equal(legacy.imageQuality, "medium");
+assert.equal(legacy.imageBackground, "auto");
 assert.throws(() => dimensions.resolveGptImageDimensionSettings(legacy), /请选择/);
 assert.equal(writes, 0, "Reading legacy settings must not migrate runtime data");
 
@@ -61,20 +63,62 @@ const declarations = names.map((name) => {
 }).join("\n");
 const compiled = ts.transpileModule(declarations, { compilerOptions: { target: ts.ScriptTarget.ES2022 } }).outputText;
 const snapshots = new Function("defaultWorkspacePromptSettings", "stageTitles", `${compiled}\nreturn { ${names.join(",")} };`)(workspace.defaultWorkspacePromptSettings, {});
-const chosen = await workspace.saveWorkspacePromptSettings({ imageRatio: "3:4", imageResolution: "2k" });
+for (const imageQuality of ["low", "medium", "high"]) {
+  for (const imageBackground of ["auto", "transparent", "opaque"]) {
+    await workspace.saveWorkspacePromptSettings({ imageQuality, imageBackground });
+    const restored = await workspace.getWorkspacePromptSettings();
+    assert.equal(restored.imageQuality, imageQuality);
+    assert.equal(restored.imageBackground, imageBackground);
+  }
+}
+for (const imageBackground of ["invalid", "", null, 1]) {
+  const previous = stored;
+  await assert.rejects(workspace.saveWorkspacePromptSettings({ imageBackground }), /图片背景无效/);
+  assert.equal(stored, previous, "Invalid background must not overwrite saved settings");
+}
+const chosen = await workspace.saveWorkspacePromptSettings({ imageRatio: "3:4", imageResolution: "2k", imageQuality: "high", imageBackground: "transparent" });
 const run = JSON.parse(JSON.stringify(snapshots.makeInitialRun({ sourceMode: "links" }, chosen, {})));
-await workspace.saveWorkspacePromptSettings({ imageRatio: "16:9", imageResolution: "4k" });
+await workspace.saveWorkspacePromptSettings({ imageRatio: "16:9", imageResolution: "4k", imageQuality: "low", imageBackground: "opaque" });
 const resumed = snapshots.settingsFromRun(run);
 assert.equal(resumed.imageRatio, "3:4");
 assert.equal(resumed.imageResolution, "2k");
+assert.equal(resumed.imageQuality, "high");
+assert.equal(resumed.imageBackground, "transparent");
+assert.equal(snapshots.settingsFromRun({ ...run, imageBackground: undefined }).imageBackground, "auto");
 assert.equal(resumed.imageSize, "1536x2048", "Resuming must use the frozen task selection, not newer settings");
 assert.equal(snapshots.settingsFromRun({ ...run, imageRatio: undefined, imageResolution: undefined, imageSize: "1200x1600" }).imageRatio, undefined);
 
+const route = load("src/app/api/simple/runs/route.ts", {
+  "next/server": { NextResponse: { json: (body, init) => Response.json(body, init) } },
+  "@/lib/activity-log": { compactError: String, recordExecutionLog: async () => {} },
+  "@/lib/config": { appConfig: {} },
+  "@/lib/library-assets": { resolveLibraryAssetSelections: async () => [] },
+  "@/lib/feishu-publish-mode": { normalizeFeishuPublishMode: () => "full" },
+  "@/lib/workspace-accounts": { requireWorkspaceAccount: async () => ({ id: "fixture", displayName: "fixture" }) },
+  "@/lib/simple-runs": { startSimpleRun: async (input) => snapshots.makeInitialRun(input, await workspace.saveWorkspacePromptSettings(input.settings), {}) },
+});
+const request = (settings) => new Request("http://fixture.invalid/api/simple/runs", {
+  method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ sourceMode: "links", settings }),
+});
+const accepted = await route.POST(request(chosen));
+assert.equal(accepted.status, 200);
+const submitted = (await accepted.json()).run;
+assert.equal(submitted.imageQuality, "high");
+assert.equal(submitted.imageBackground, "transparent");
+const previous = stored;
+const rejected = await route.POST(request({ imageBackground: "invalid" }));
+assert.equal(rejected.status, 400);
+assert.match((await rejected.json()).error, /图片背景无效/);
+assert.equal(stored, previous);
+
 const forwarded = simple.match(/size: settings\.imageSize,\s*ratio: settings\.imageRatio,\s*resolution: settings\.imageResolution,/g) || [];
 assert.equal(forwarded.length, 3, "Reference, viral and original image calls must all forward the selection");
+assert.equal((simple.match(/quality: settings\.imageQuality,\s*background: settings\.imageBackground,/g) || []).length, 3);
 const page = readFileSync("src/app/page.tsx", "utf8");
 assert.match(page, /<select[^>]*aria-label="图片比例"/);
 assert.match(page, /<select[^>]*aria-label="图片分辨率"/);
+assert.match(page, /<select[^\r\n]*aria-label="图片质量"[^\r\n]*disabled=\{disabled\}/);
+assert.match(page, /<select[^\r\n]*aria-label="图片背景"[^\r\n]*disabled=\{disabled\}/);
 assert.match(page, /toApisImageRatios\.map/);
 assert.match(page, /toApisImageResolutions\.map/);
 assert.match(page, /disabled=\{resolution === "4k" && !allows4k\}/);

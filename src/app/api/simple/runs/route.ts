@@ -110,7 +110,7 @@ export async function POST(request: Request) {
       message: compactError(error),
       durationMs: Date.now() - startedAt,
     });
-    const status = /sign-in/i.test(message) ? 401 : /requires|required|platform/i.test(message) ? 400 : /dongchedi category|dongchedi cookie|encryption key/i.test(message) ? 400 : /library asset/i.test(message) ? 400 : 500;
+    const status = /sign-in/i.test(message) ? 401 : /requires|required|platform/i.test(message) ? 400 : /dongchedi category|dongchedi cookie|encryption key/i.test(message) ? 400 : /library asset|图片背景无效/i.test(message) ? 400 : 500;
     return NextResponse.json({ error: message }, { status });
   }
 }
