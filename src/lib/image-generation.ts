@@ -1751,7 +1751,7 @@ function parseJsonResponse<T>(body: string, response: Response, label: string, c
 function toImageProviderTransportError(error: unknown) {
   if (error instanceof ImageProviderError) return error;
   if (isImageNetworkUnavailableError(error)) {
-    return new ImageProviderError("图片网络不可用，请检查 Xray 是否正在运行。", {
+    return new ImageProviderError(toImageTransportUnavailableError(error).message, {
       category: "network",
       retryable: true,
       failoverAllowed: true,

@@ -1,5 +1,5 @@
 import net from "node:net";
-import { ProxyAgent, type Dispatcher } from "undici";
+import { Agent, ProxyAgent, type Dispatcher } from "undici";
 import { appConfig, isOpenaiImageRouteConfigured, openaiImageRouteConfig } from "./config";
 import type { ImageTransportHealth, ImageTransportRouteHealth } from "./types";
 
@@ -20,20 +20,22 @@ const networkErrorCodes = new Set([
 
 let cachedProxyUrl = "";
 let cachedProxyAgent: ProxyAgent | undefined;
+const directAgent = new Agent();
 
 export class ImageTransportUnavailableError extends Error {
   readonly code?: string;
 
   constructor(cause: unknown, timedOut = false) {
-    super(timedOut ? "图片网络请求超时，请检查 Xray。" : "图片网络不可用，请检查 Xray 是否正在运行。", { cause });
+    const guidance = appConfig.openaiImageProxyEnabled ? "请检查 Xray 是否正在运行。" : "当前为直连模式，请检查网络连接和图片通道地址。";
+    super(`${timedOut ? "图片网络请求超时" : "图片网络不可用"}，${guidance}`, { cause });
     this.name = "ImageTransportUnavailableError";
     this.code = findNetworkErrorCode(cause) || (timedOut ? "IMAGE_TRANSPORT_TIMEOUT" : undefined);
   }
 }
 
 export async function fetchImageTransport(url: string | URL | Request, init: RequestInit = {}) {
-  const dispatcher = shouldBypassImageProxy(url) ? undefined : imageProxyDispatcher();
-  return fetch(url, dispatcher ? ({ ...init, dispatcher } as RequestInit & { dispatcher: Dispatcher }) : init);
+  const dispatcher = shouldBypassImageProxy(url) ? directAgent : imageProxyDispatcher() ?? directAgent;
+  return fetch(url, { ...init, dispatcher } as RequestInit & { dispatcher: Dispatcher });
 }
 
 export function isImageNetworkUnavailableError(error: unknown) {
@@ -59,7 +61,7 @@ export function toImageTransportUnavailableError(error: unknown, timedOut = fals
 
 export async function checkImageTransportHealth(timeoutMs = defaultHealthTimeoutMs): Promise<ImageTransportHealth> {
   const startedAt = Date.now();
-  const proxyUrl = appConfig.openaiImageProxyUrl;
+  const proxyUrl = appConfig.openaiImageProxyEnabled ? appConfig.openaiImageProxyUrl : "";
   const proxy = proxyUrl
     ? await probeProxyListener(proxyUrl, timeoutMs)
     : { configured: false, reachable: true, endpoint: "direct" };
@@ -92,6 +94,7 @@ export async function checkImageTransportHealth(timeoutMs = defaultHealthTimeout
 }
 
 function imageProxyDispatcher() {
+  if (!appConfig.openaiImageProxyEnabled) return undefined;
   const proxyUrl = appConfig.openaiImageProxyUrl;
   if (!proxyUrl) return undefined;
   if (cachedProxyAgent && cachedProxyUrl === proxyUrl) return cachedProxyAgent;

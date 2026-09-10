@@ -1,5 +1,9 @@
 import { existsSync, readFileSync } from "node:fs";
 import path from "node:path";
+import assert from "node:assert/strict";
+import vm from "node:vm";
+import { createRequire } from "node:module";
+import ts from "typescript";
 
 const projectRoot = process.cwd();
 
@@ -48,7 +52,101 @@ assertContains(files.home, /currentAccount\.role === "admin"[\s\S]*href="\/confi
 assertNotContains(files.page, /dangerouslySetInnerHTML/, "Advanced config page must not render config values through raw HTML.");
 assertNotContains(files.route, /process\.env\[[^\]]+\][\s\S]*NextResponse\.json/, "Config route must not directly return arbitrary process.env values.");
 
-console.log("Advanced config admin boundary check passed.");
+checkImageProxyConfiguration();
+console.log("Advanced config admin boundary and image proxy persistence checks passed.");
+
+function checkImageProxyConfiguration() {
+  for (const platform of ["win32", "linux"]) {
+    const defaults = loadConfig(platform);
+    assert.equal(defaults.config.appConfig.openaiImageProxyEnabled, platform === "win32");
+    assert.equal(defaults.config.appConfig.openaiImageProxyUrl, platform === "win32" ? "http://127.0.0.1:10808" : "");
+    const legacy = loadConfig(platform, { OPENAI_IMAGE_PROXY_URL: "http://127.0.0.1:10809" });
+    assert.equal(legacy.config.appConfig.openaiImageProxyEnabled, true);
+    const cleared = loadConfig(platform, { OPENAI_IMAGE_PROXY_URL: "" });
+    assert.equal(cleared.config.appConfig.openaiImageProxyEnabled, false);
+    const disabled = loadConfig(platform, { OPENAI_IMAGE_PROXY_ENABLED: "false" });
+    assert.equal(disabled.config.appConfig.openaiImageProxyEnabled, false);
+  }
+
+  const runtime = loadConfig("win32");
+  const retainedUrl = "http://127.0.0.1:10809";
+  runtime.config.saveAdvancedConfigPatch({ values: { OPENAI_IMAGE_PROXY_URL: retainedUrl } });
+  const snapshot = runtime.config.saveAdvancedConfigPatch({ values: { OPENAI_IMAGE_PROXY_ENABLED: false } });
+  const toggle = snapshot.groups.flatMap((group) => group.fields).find((field) => field.key === "OPENAI_IMAGE_PROXY_ENABLED");
+  assert.equal(toggle.kind, "boolean");
+  assert.equal(toggle.value, "false");
+  assert.equal(runtime.config.appConfig.openaiImageProxyEnabled, false);
+  assert.equal(runtime.config.appConfig.openaiImageProxyUrl, retainedUrl);
+  assert.match(runtime.persisted(), /OPENAI_IMAGE_PROXY_ENABLED=false/);
+  const restarted = loadConfig("win32", {}, runtime.persisted());
+  assert.equal(restarted.config.appConfig.openaiImageProxyEnabled, false);
+  assert.equal(restarted.config.appConfig.openaiImageProxyUrl, retainedUrl);
+  restarted.config.saveAdvancedConfigPatch({ values: { OPENAI_IMAGE_PROXY_ENABLED: true } });
+  assert.equal(restarted.config.appConfig.openaiImageProxyEnabled, true);
+  assert.equal(restarted.config.appConfig.openaiImageProxyUrl, retainedUrl);
+  assert.equal(loadConfig("win32", {}, restarted.persisted()).config.appConfig.openaiImageProxyEnabled, true);
+
+  for (const values of [
+    { OPENAI_IMAGE_PROXY_ENABLED: "invalid" },
+    { OPENAI_IMAGE_PROXY_URL: "socks5://127.0.0.1:10808" },
+    { OPENAI_IMAGE_PROXY_URL: "http://user:password@127.0.0.1:10808" },
+    { OPENAI_IMAGE_PROXY_URL: "not-a-url" },
+  ]) {
+    const before = runtime.persisted();
+    assert.throws(() => runtime.config.saveAdvancedConfigPatch({ values }));
+    assert.equal(runtime.persisted(), before, "invalid proxy changes must not be persisted");
+    assert.equal(runtime.config.appConfig.openaiImageProxyUrl, retainedUrl);
+  }
+  const noAddress = loadConfig("linux");
+  assert.throws(() => noAddress.config.saveAdvancedConfigPatch({ values: { OPENAI_IMAGE_PROXY_ENABLED: true } }), /代理地址/);
+  assert.equal(noAddress.persisted(), "");
+  assert.equal(noAddress.config.appConfig.openaiImageProxyEnabled, false);
+  noAddress.config.saveAdvancedConfigPatch({ values: { OPENAI_IMAGE_PROXY_ENABLED: true, OPENAI_IMAGE_PROXY_URL: retainedUrl } });
+  assert.equal(noAddress.config.appConfig.openaiImageProxyEnabled, true);
+  assert.throws(() => noAddress.config.saveAdvancedConfigPatch({ values: { OPENAI_IMAGE_PROXY_URL: null } }), /代理地址/);
+  noAddress.config.saveAdvancedConfigPatch({ values: { OPENAI_IMAGE_PROXY_ENABLED: false, OPENAI_IMAGE_PROXY_URL: null } });
+  assert.equal(noAddress.config.appConfig.openaiImageProxyEnabled, false);
+  assert.equal(noAddress.config.appConfig.openaiImageProxyUrl, "");
+}
+
+function loadConfig(platform, values = {}, persisted = "") {
+  const configPath = path.join(projectRoot, "isolated-config-fixture", ".env.local");
+  const environment = { ...values, FLUXPOST_CONFIG_FILE: configPath };
+  const nativeRequire = createRequire(import.meta.url);
+  const fakeFs = {
+    existsSync: (file) => file === configPath && Boolean(persisted),
+    readFileSync: (file) => {
+      assert.equal(file, configPath);
+      return persisted;
+    },
+    writeFileSync: (file, content) => {
+      assert.equal(file, configPath);
+      persisted = content;
+    },
+  };
+  function load(relative) {
+    const loadedModule = { exports: {} };
+    const output = ts.transpileModule(read(relative), {
+      compilerOptions: { esModuleInterop: true, module: ts.ModuleKind.CommonJS, target: ts.ScriptTarget.ES2022 },
+      fileName: relative,
+    }).outputText;
+    vm.runInNewContext(output, {
+      module: loadedModule,
+      exports: loadedModule.exports,
+      process: { env: environment, platform, cwd: () => projectRoot },
+      URL,
+      require: (name) => {
+        if (name === "node:fs") return fakeFs;
+        if (name === "./database") return { getDatabaseRuntimeStatus: () => ({}) };
+        if (name === "./feishu-table-id") return load("src/lib/feishu-table-id.ts");
+        if (name === "./image-providers/contracts") return load("src/lib/image-providers/contracts.ts");
+        return nativeRequire(name);
+      },
+    }, { filename: relative });
+    return loadedModule.exports;
+  }
+  return { config: load("src/lib/config.ts"), persisted: () => persisted };
+}
 
 function read(relativePath) {
   const filePath = path.join(projectRoot, relativePath);

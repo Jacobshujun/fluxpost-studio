@@ -14,6 +14,8 @@
 ## 3. Contracts
 
 - Windows default: `OPENAI_IMAGE_PROXY_URL=http://127.0.0.1:10808`; non-Windows has no implicit local proxy.
+- Admin-only `OPENAI_IMAGE_PROXY_ENABLED` controls subsequent remote image requests without restart. When unset, it preserves legacy routing based on the resolved URL; false retains the address while selecting an explicit direct dispatcher.
+- Enabled proxy requires a valid address; validate proxy edits before persisting. Direct health skips the proxy listener, returns `proxy.configured=false`, and checks provider origins directly. Transport errors describe the active mode.
 - Proxy URLs must use HTTP(S), contain no credentials, and never disable TLS certificate verification.
 - Do not inherit Windows system proxy settings, `HTTP_PROXY`, `HTTPS_PROXY`, or `NODE_USE_ENV_PROXY` for image traffic.
 - Network-unavailable Canvas image nodes remain `running`, persist `waitReason="等待图片网络恢复"`, and requeue the same run after 30 seconds.

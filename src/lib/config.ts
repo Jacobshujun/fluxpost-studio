@@ -43,6 +43,7 @@ if (configuredEnvironmentFile) loadEnvironmentOverrides(advancedEnvironmentFileP
 export let appConfig = readAppConfig();
 
 function readAppConfig() {
+  const imageProxy = readImageProxyConfig(process.env);
   return {
   tikhubBaseUrl: process.env.TIKHUB_BASE_URL || "https://api.tikhub.io",
   tikhubApiKey: process.env.TIKHUB_API_KEY || "",
@@ -62,7 +63,7 @@ function readAppConfig() {
   openaiImageBackupApiProfile: parseOptionalImageProviderProfile("OPENAI_IMAGE_BACKUP_API_PROFILE", process.env.OPENAI_IMAGE_BACKUP_API_PROFILE),
   openaiImageModel: process.env.OPENAI_IMAGE_MODEL || "gpt-image-2",
   openaiImageBackupModel: process.env.OPENAI_IMAGE_BACKUP_MODEL || process.env.OPENAI_IMAGE_MODEL || "gpt-image-2",
-  openaiImageProxyUrl: normalizeImageProxyUrl(process.env.OPENAI_IMAGE_PROXY_URL ?? (process.platform === "win32" ? "http://127.0.0.1:10808" : "")),
+  ...imageProxy,
   openaiImageRequestTimeoutMs: numberOrDefault(process.env.OPENAI_IMAGE_REQUEST_TIMEOUT_MS, 180_000),
   viralImageImitationPrompt: stringOrDefault(process.env.VIRAL_IMAGE_IMITATION_PROMPT, defaultViralImageImitationPrompt),
   comfyUiKleinEnabled: booleanOrDefault(process.env.COMFYUI_KLEIN_ENABLED, false),
@@ -305,6 +306,13 @@ function normalizeOptionalBaseUrl(value: string) {
   return trimmed ? normalizeBaseUrl(trimmed) : "";
 }
 
+function readImageProxyConfig(environment: NodeJS.ProcessEnv) {
+  const openaiImageProxyUrl = normalizeImageProxyUrl(environment.OPENAI_IMAGE_PROXY_URL ?? (process.platform === "win32" ? "http://127.0.0.1:10808" : ""));
+  const openaiImageProxyEnabled = booleanOrDefault(environment.OPENAI_IMAGE_PROXY_ENABLED, Boolean(openaiImageProxyUrl));
+  if (openaiImageProxyEnabled && !openaiImageProxyUrl) throw new Error("开启 Xray 代理前请填写图片代理地址。");
+  return { openaiImageProxyUrl, openaiImageProxyEnabled };
+}
+
 function normalizeImageProxyUrl(value: string) {
   const trimmed = value.trim();
   if (!trimmed) return "";
@@ -529,7 +537,10 @@ const advancedConfigGroups: ConfigDefinitionGroup[] = [
       configField("OPENAI_IMAGE_BACKUP_MODEL", "备用图片模型", "留空时使用主通道图片模型。", "text", "openai-image", {
         read: () => appConfig.openaiImageBackupModel,
       }),
-      configField("OPENAI_IMAGE_PROXY_URL", "图片代理地址", "仅远程图片请求使用；Windows 本地默认 http://127.0.0.1:10808。", "text", "openai-image", {
+      configField("OPENAI_IMAGE_PROXY_ENABLED", "使用 Xray 代理", "仅影响远程图片请求；关闭后直连并保留代理地址。保存后对后续请求生效，不会启动或关闭 Xray 程序。", "boolean", "openai-image", {
+        read: () => String(appConfig.openaiImageProxyEnabled),
+      }),
+      configField("OPENAI_IMAGE_PROXY_URL", "图片代理地址", "开启代理时使用；Windows 本地默认 http://127.0.0.1:10808。关闭代理无需清空地址。", "text", "openai-image", {
         read: () => appConfig.openaiImageProxyUrl,
       }),
       configField("OPENAI_IMAGE_ENDPOINT", "图片接口形态", "images 为 Images API；responses 为兼容旧通道。", "select", "openai-image", {
@@ -744,6 +755,14 @@ function normalizeAdvancedConfigPatch(patch: AdvancedConfigPatch) {
     const definition = advancedConfigByKey.get(key);
     if (!definition) throw new Error(`Unsupported config key: ${key}`);
     result[key] = normalizeAdvancedConfigValue(definition, value);
+  }
+  if ("OPENAI_IMAGE_PROXY_ENABLED" in result || "OPENAI_IMAGE_PROXY_URL" in result) {
+    const environment = { ...process.env };
+    for (const [key, value] of Object.entries(result)) {
+      if (value === "") delete environment[key];
+      else environment[key] = value;
+    }
+    readImageProxyConfig(environment);
   }
   return result;
 }

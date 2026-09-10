@@ -4,9 +4,11 @@ Last updated: 2026-09-10
 
 ## One-Line Status
 
-Simple image quality/background passes offline/browser checks; local commit authorized, 3001 unchanged.
+Image proxy toggle passes offline checks; commit and LAN-3001 activation authorized.
 
 ## Current Focus
+
+- Image proxy release authorized; offline evidence and pending checks: .trellis/tasks/archive/2026-09/09-10-image-proxy-toggle/verification.md.
 
 - 2026-09-10 quality/background: Offline and 1440px/390px checks pass. Evidence: .trellis/tasks/archive/2026-09/09-10-simple-image-quality-background/verification.md. Commit authorized; no activation. Live support untested.
 

@@ -10,8 +10,24 @@ import ts from "typescript";
 const root = process.cwd();
 const read = (relative) => readFileSync(path.join(root, relative), "utf8");
 const nativeRequire = createRequire(import.meta.url);
+const undici = nativeRequire("undici");
+const directAgents = [];
+const dispatchers = [];
+const localUndici = {
+  ...undici,
+  Agent: class extends undici.Agent {
+    constructor() {
+      super({ connect: { lookup: (hostname, options, callback) => {
+        assert.equal(hostname, "image-provider.test");
+        if (options.all) callback(null, [{ address: "127.0.0.1", family: 4 }]);
+        else callback(null, "127.0.0.1", 4);
+      } } });
+      directAgents.push(this);
+    }
+  },
+};
 const config = {
-  appConfig: { openaiImageProxyUrl: "" },
+  appConfig: { openaiImageProxyUrl: "", openaiImageProxyEnabled: true },
   isOpenaiImageRouteConfigured: (route) => route === "primary",
   openaiImageRouteConfig: () => ({ baseUrl: "http://127.0.0.1:1" }),
 };
@@ -24,17 +40,20 @@ const cjsModule = { exports: {} };
 vm.runInNewContext(output, {
   module: cjsModule,
   exports: cjsModule.exports,
-  require: (name) => name === "./config" ? config : name === "./types" ? {} : nativeRequire(name),
+  require: (name) => name === "./config" ? config : name === "./types" ? {} : name === "undici" ? localUndici : nativeRequire(name),
   AbortController,
   Error,
   Request,
   Response,
   URL,
   clearTimeout,
-  fetch,
+  fetch: (url, init) => {
+    dispatchers.push(init.dispatcher);
+    return fetch(url, init);
+  },
   setTimeout,
 }, { filename: "image-transport.ts" });
-const { checkImageTransportHealth, fetchImageTransport, isImageNetworkUnavailableError } = cjsModule.exports;
+const { checkImageTransportHealth, fetchImageTransport, isImageNetworkUnavailableError, toImageTransportUnavailableError } = cjsModule.exports;
 
 const origin = http.createServer((request, response) => {
   response.writeHead(204, { "x-image-transport-test": request.method || "" });
@@ -80,6 +99,18 @@ try {
   assert.equal(health.backup.configured, false);
   assert.equal(health.ok, true);
 
+  const proxyConnections = connectCount;
+  config.appConfig.openaiImageProxyEnabled = false;
+  const directResponse = await fetchImageTransport(`http://image-provider.test:${originPort}/direct`);
+  assert.equal(directResponse.status, 204);
+  assert.equal(connectCount, proxyConnections, "disabled proxy must not receive remote requests");
+  assert.equal(dispatchers.at(-1), directAgents[0], "direct mode must override ambient dispatchers explicitly");
+  assert.equal(config.appConfig.openaiImageProxyUrl, `http://127.0.0.1:${proxyPort}`, "turning off must retain the URL");
+  config.appConfig.openaiImageProxyEnabled = true;
+  const resumedResponse = await fetchImageTransport(`http://image-provider.test:${originPort}/resumed`);
+  assert.equal(resumedResponse.status, 204);
+  assert.ok(dispatchers.at(-1) instanceof undici.ProxyAgent, "turning on must restore proxy routing immediately");
+
   const closedPort = await reserveClosedPort();
   config.appConfig.openaiImageProxyUrl = `http://127.0.0.1:${closedPort}`;
   await assert.rejects(
@@ -92,7 +123,28 @@ try {
   assert.equal(unavailable.ok, false);
   assert.equal(unavailable.proxy.reachable, false);
   assert.match(unavailable.proxy.error, /Xray/);
+  assert.match(toImageTransportUnavailableError(new Error("fetch failed")).message, /Xray/);
+
+  config.appConfig.openaiImageProxyEnabled = false;
+  const directHealth = await checkImageTransportHealth(2_000);
+  assert.equal(directHealth.ok, true, "a closed proxy must not block direct health checks");
+  assert.equal(directHealth.proxy.configured, false);
+  assert.equal(directHealth.proxy.endpoint, "direct");
+  assert.equal(directHealth.primary.reachable, true);
+  for (const timedOut of [false, true]) {
+    const error = toImageTransportUnavailableError(new Error("fetch failed"), timedOut);
+    assert.match(error.message, /直连/);
+    assert.doesNotMatch(error.message, /Xray/);
+    assert.equal(isImageNetworkUnavailableError(error), true);
+  }
+  config.openaiImageRouteConfig = () => ({ baseUrl: `http://image-provider.test:${closedPort}` });
+  const failedDirectHealth = await checkImageTransportHealth(500);
+  assert.equal(failedDirectHealth.ok, false);
+  assert.equal(failedDirectHealth.proxy.configured, false);
+  assert.equal(failedDirectHealth.primary.reachable, false);
+  assert.doesNotMatch(failedDirectHealth.primary.error, /Xray/);
 } finally {
+  await Promise.all(directAgents.map((agent) => agent.close()));
   await Promise.all([close(origin), close(proxy)]);
 }
 
@@ -105,6 +157,8 @@ assert.ok(imageGeneration.includes("isImageNetworkUnavailableError(error)"), "ac
 assert.ok(!/\breturn await fetch\(/.test(imageGeneration), "shared image requests must not call global fetch directly");
 assert.ok(!read("src/lib/openai.ts").includes("image-transport"), "text requests must not use the image proxy");
 assert.ok(!read("src/lib/comfyui-klein.ts").includes("image-transport"), "ComfyUI must remain direct/local");
+assert.ok(imageGeneration.includes("new ImageProviderError(toImageTransportUnavailableError(error).message"));
+assert.ok(read("src/app/canvas/page.tsx").includes("高级配置中的图片网络"), "Canvas must direct users to image network configuration");
 
 const runs = read("src/lib/canvas/runs.ts");
 assert.ok(runs.includes("waitReason: IMAGE_NETWORK_WAIT_REASON"));

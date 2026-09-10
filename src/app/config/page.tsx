@@ -302,6 +302,7 @@ export default function AdvancedConfigPage() {
       const data = (await res.json()) as ConfigResponse;
       if (!res.ok || !data.advanced || !data.status) throw new Error(data.error || "高级配置保存失败");
       applySnapshot(data.advanced, data.status);
+      setImageTransportHealth(null);
       setMessage("高级配置已保存到 .env.local；当前服务内的配置状态已刷新。");
     } catch (error) {
       setMessage(error instanceof Error ? error.message : "高级配置保存失败");
@@ -413,7 +414,7 @@ export default function AdvancedConfigPage() {
       const data = (await res.json()) as ImageTransportHealthResponse;
       if (!data.health) throw new Error(data.error || "图片网络检测失败");
       setImageTransportHealth(data.health);
-      setMessage(data.health.ok ? "Xray 与图片通道连接正常。" : imageTransportHealthMessage(data.health));
+      setMessage(data.health.ok ? (data.health.proxy.configured ? "Xray 与图片通道连接正常。" : "图片通道直连正常。") : imageTransportHealthMessage(data.health));
     } catch (error) {
       setMessage(error instanceof Error ? error.message : "图片网络检测失败");
     } finally {
@@ -592,7 +593,7 @@ export default function AdvancedConfigPage() {
                       type="button"
                       onClick={checkImageTransport}
                       disabled={Boolean(busy) || dirtyCount > 0}
-                      title="免费检测 Xray 与图片通道，不生成图片"
+                      title="按已保存配置免费检测代理或直连及图片通道，不生成图片"
                     >
                       {busy === "image-transport-check" ? <Loader2 className="h-4 w-4 animate-spin" /> : <RefreshCw className="h-4 w-4" />}
                       检测图片网络
@@ -627,7 +628,7 @@ export default function AdvancedConfigPage() {
 
               {activeGroup?.id === "openai-image" && imageTransportHealth ? (
                 <div className="config-status-strip">
-                  <StatusTile label="Xray" ok={imageTransportHealth.proxy.reachable} meta={imageTransportHealth.proxy.endpoint} />
+                  <StatusTile label={imageTransportHealth.proxy.configured ? "Xray" : "直连模式"} ok={imageTransportHealth.proxy.reachable} meta={imageTransportHealth.proxy.configured ? imageTransportHealth.proxy.endpoint : "不使用代理"} />
                   <StatusTile label="图片主线路" ok={imageTransportHealth.primary.reachable} />
                   <StatusTile label="图片备用线路" ok={!imageTransportHealth.backup.configured || imageTransportHealth.backup.reachable} meta={imageTransportHealth.backup.configured ? undefined : "未配置"} />
                   <StatusTile label="主备线路" ok={!imageTransportHealth.duplicateOrigins} meta={imageTransportHealth.duplicateOrigins ? "地址相同" : "独立"} />
@@ -1128,10 +1129,10 @@ function StatusTile({ label, ok, meta }: { label: string; ok: boolean; meta?: st
 }
 
 function imageTransportHealthMessage(health: ImageTransportHealth) {
-  if (!health.proxy.reachable) return "Xray 未运行，请启动 v2rayN 后重试。";
+  if (health.proxy.configured && !health.proxy.reachable) return "Xray 未运行，请启动 v2rayN 或检查图片代理地址后重试。";
   if (health.duplicateOrigins) return "图片主线路和备用线路地址相同，当前没有真正的备用通道。";
-  if (!health.primary.reachable) return "图片主线路网络不可达。";
-  if (health.backup.configured && !health.backup.reachable) return "图片备用线路网络不可达。";
+  if (!health.primary.reachable) return health.proxy.configured ? "图片主线路网络不可达。" : "图片主线路直连不可达，请检查网络连接和通道地址。";
+  if (health.backup.configured && !health.backup.reachable) return health.proxy.configured ? "图片备用线路网络不可达。" : "图片备用线路直连不可达，请检查网络连接和通道地址。";
   return "图片网络配置需要检查。";
 }
 

@@ -2245,7 +2245,7 @@ function CanvasNodeAttemptHeader({ nodeRun, detail }: { nodeRun?: CanvasNodeRun;
 function CanvasNodeAttemptDetail({ nodeRun }: { nodeRun?: CanvasNodeRun }) {
   if (!nodeRun) return null;
   const detail = nodeRun.waitReason
-    ? `${nodeRun.waitReason}${nodeRun.waitReason.includes("图片网络") ? "，请检查 Xray" : ""}`
+    ? `${nodeRun.waitReason}${nodeRun.waitReason.includes("图片网络") ? "，请检查 Xray 或高级配置中的图片网络" : ""}`
     : nodeRun.error;
   if (!detail) return null;
   return <p className={nodeRun.waitReason ? "canvas-node-result-wait" : undefined}>{nodeRun.waitReason ? <LoaderCircle /> : <AlertTriangle />}{detail}</p>;

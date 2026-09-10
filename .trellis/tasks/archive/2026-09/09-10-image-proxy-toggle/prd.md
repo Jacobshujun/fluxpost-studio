@@ -10,14 +10,14 @@ Let administrators switch remote image traffic between Xray and direct access wi
 - Reuse admin-only configuration persistence and apply to subsequent requests without restarting.
 - Direct mode skips proxy listener checks and shows accurate network guidance.
 - Keep text, Feishu, ComfyUI, loopback bypass and accepted-task recovery unchanged.
-- Preserve unrelated edits; no commit, port-3001 activation, real configuration writes or live provider calls.
+- Preserve unrelated edits, real configuration and live provider boundaries. On 2026-09-10 the user subsequently authorized commit and port-3001 activation; preserve LAN binding, with no push or remote deployment.
 
 ## Acceptance Criteria
 
-- [ ] Isolated checks cover defaults, validation, persistence and off/on address retention.
-- [ ] Local checks cover proxy/direct/off/on, closed proxy and direct health/errors.
-- [ ] Admin boundaries, focused contracts and complete offline baseline pass.
-- [ ] Trellis records verification and pending manual acceptance.
+- [x] Isolated checks cover defaults, validation, persistence and off/on address retention.
+- [x] Local checks cover proxy/direct/off/on, closed proxy and direct health/errors.
+- [x] Admin boundaries, focused contracts and complete offline baseline pass.
+- [x] Trellis records verification and pending manual acceptance.
 
 ## Notes
 
