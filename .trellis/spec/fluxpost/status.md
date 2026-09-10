@@ -1,21 +1,19 @@
 # FluxPost Current Status
 
-Last updated: 2026-09-09
+Last updated: 2026-09-10
 
 ## One-Line Status
 
-Canvas-style image selects and exact-pixel guards are verified. User authorized local commit only; port 3001 is unchanged.
+Canvas image iteration passes offline and mocked browser checks. Local commit authorized; 3001 unchanged.
 
 ## Current Focus
+
+- 2026-09-10 image iteration: Regions, ordered durable items, retry/manual refresh and frozen multi-port sharing pass full offline baseline and 1440px/390px mocked browser checks. Evidence: .trellis/tasks/archive/2026-09/09-09-canvas-image-iteration/verification.md. Live-provider and PostgreSQL concurrency acceptance remain untested. Local commit authorized; no activation, push or deployment.
 
 - 2026-09-09 image sizing: Simple runs now share Canvas ratio/tier choices, persist selections through resume and forward them to all image paths. Legacy pixel settings require selection. Full offline and 1440px/390px mocked browser checks pass. Task: .trellis/tasks/archive/2026-09/09-09-exact-image-pixels. Commit authorized; no activation/live call.
 - 2026-09-09 release authorization: Content collection is committed as c482338abcc6c2806424c856ac0598656e0e9e5e. The user additionally approved committing the remaining image-discard changes and updating the single primary-worktree port-3001 candidate with npm run local:lan. Preserve LAN binding, require a clean committed tree, and verify runtime/state/slot SHA agreement after activation. No GitHub push, remote deployment or live provider acceptance was requested.
 
-- 2026-09-09: Added input.content-collection with five title/body/source/images/videos outputs, opt-in tagging, single-link testing and a generic V2 batch preset. Twenty distinct links become twenty main tasks; each collects once through importSourceLinks, and child retries/final aggregation reuse all five frozen outputs. Vision and per-image reconstruction tests, portable config, source isolation, failures, 1440px/390px mocked browser preflight and the offline baseline pass. Link/ID mode is implemented; keyword-result expansion remains a separate design. User authorized a scoped local commit only; no local candidate replacement, live-provider call, push or deployment was requested. Pre-existing image-discard edits remain outside this commit.
-
-- 2026-09-09: Simple-run reference-image generation explicitly disables source fallback, including Klein failures. Successful slots and explicit keep mode remain unchanged; strict dual-reference failures still require review, and all failed ordinary slots still fail that content item without stopping other items. Mocked runtime discard checks, existing image fallback/Klein/link checks, and the complete offline baseline pass, including lint (17 existing warnings, no errors), TypeScript, build (existing tracing warnings), HTTP smoke, and SQLite checks. A separate commit and local activation are now user-authorized; no remote deployment was requested.
-
-- 2026-09-08: Copy-library list fetching no longer depends on the selected entry. Explicit create mode preserves new drafts across refreshes/slow responses, pending tags clear on New, and history restores editor drafts separately. Implementation commit `061be8bd662fbb5b9e1121533e565f1bed35ef55` passed the full offline baseline and user-approved `npm run local:lan` activation. Mocked browser checks passed on port 3001 at 1440px/390px with empty/read-only lists, POST/PATCH saves, selection, delayed filters, and history; no real entries were mutated by these checks. Runtime, candidate state, and slot marker matched the activated HEAD, with LAN binding preserved. Release-record commits do not change application code; read `/api/version` and `.fluxpost-local-candidate.json` for the exact current candidate identity. No GitHub push or remote deployment was requested or performed.
+- Collection, simple image-discard and September 8 copy-library verification/release evidence: see archive/status-2026-09-09.md. Their feature states are unchanged.
 
 - 2026-09-07: Canvas `compose.social-post` now exposes `是否需要审查`, defaults it on for new and legacy workflows, saves review-required posts as drafts, and marks review-skipped posts approved while preserving published posts on rerun. Focused Canvas contracts, TypeScript, lint, build, HTTP/SQLite smoke, and the complete offline baseline passed.
 - 2026-09-07: Canvas media-mask geometry now preserves exact zero-pixel `x`/`y` coordinates while keeping positive width/height, preventing full-width top/bottom masks from exposing the source along the left or top edge. The mask renderer cache version was advanced so prior edge-offset outputs are regenerated. Focused geometry/cache contracts, TypeScript, lint, build, HTTP/SQLite smoke, and the complete offline baseline passed.

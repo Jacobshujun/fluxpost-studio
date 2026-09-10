@@ -1443,6 +1443,7 @@ async function reconcileCanvasScheduleV2(current: CanvasSchedule) {
       if (!child.runId) continue;
       const run = await getCanvasRunFromDb(child.runId);
       if (!run) continue;
+      if (run.iterationRepairing) continue;
       const nodeRuns = terminalRunStatuses.has(run.status) ? await listCanvasNodeRunsFromDb(run.id) : [];
       const latest = latestNodeAttempts(nodeRuns).get(definition.childResult.nodeId);
       const resultArtifacts = terminalRunStatuses.has(run.status)
@@ -1582,7 +1583,21 @@ async function reconcileCanvasScheduleV2(current: CanvasSchedule) {
       persisted.definition!.parameters.filter((parameter) => parameter.scope === "main"),
       main.parameterValues,
     );
-    const collectionArtifacts = (main.sharedArtifacts || []).filter((artifact) => graphWithMainParameters.nodes.some((node) => node.id === artifact.nodeId && node.type === "input.content-collection"));
+    const collectionArtifacts = (main.sharedArtifacts || []).filter((artifact) => graphWithMainParameters.nodes.some((node) => node.id === artifact.nodeId && (node.type === "input.content-collection" || node.type === "utility.image-iterate")));
+    const resultRegion = graphWithMainParameters.nodes.find((node) => node.id === persisted.definition!.childResult.nodeId && node.type === "utility.image-iterate");
+    let regionOutputs: Record<string, CanvasArtifact> | undefined;
+    if (resultRegion?.iteration) {
+      regionOutputs = {};
+      const childOutputs = await Promise.all(successfulChildren.map(async (child) => latestNodeAttempts(await listCanvasNodeRunsFromDb(child.runId!)).get(resultRegion.id)?.outputs || {}));
+      for (const kind of ["text", "images"] as const) {
+        if (!resultRegion.iteration.outputs[kind]) continue;
+        const artifacts = childOutputs.map((outputs) => outputs[kind]);
+        if (artifacts.some((artifact) => artifact?.kind !== kind)) throw new Error(`Iteration aggregate is missing ${kind} output.`);
+        regionOutputs[kind] = kind === "text"
+          ? { kind: "text", value: artifacts.flatMap((artifact) => artifact.kind === "text" ? [artifact.value] : []).join("\n\n") }
+          : { kind: "images", items: artifacts.flatMap((artifact) => artifact.kind === "images" ? artifact.items : []) };
+      }
+    }
     await createCanvasRunFromGraph({
       id: main.mainRunId!,
       workflow: {
@@ -1590,7 +1605,7 @@ async function reconcileCanvasScheduleV2(current: CanvasSchedule) {
         revision: persisted.workflowRevision,
         ...scopeCanvasScheduleExecutionOwner(persisted),
       },
-      graph: createCanvasScheduleV2AggregateGraph(createCanvasScheduleV2ChildGraph(graphWithMainParameters, collectionArtifacts), persisted.definition!, successfulArtifacts),
+      graph: createCanvasScheduleV2AggregateGraph(createCanvasScheduleV2ChildGraph(graphWithMainParameters, collectionArtifacts), persisted.definition!, successfulArtifacts, regionOutputs),
       targetNodeIds: [persisted.definition!.mainTargetNodeId!],
       batchContext: {
         schemaVersion: 2,
@@ -1754,6 +1769,57 @@ function resolvedCanvasScheduleV2Parameter(
   sourceValues: CanvasScheduleParameterValue[],
 ): ResolvedCanvasScheduleParameter {
   return { ...structuredClone(parameter), source: { mode: sourceMode, values: structuredClone(sourceValues) } };
+}
+
+export async function refreshCanvasScheduleIterationResult(run: CanvasRun, regionNodeId: string, account: WorkspaceAccessActor, validateOnly = false) {
+  const context = run.batchContext;
+  if (context?.schemaVersion !== 2 || context.phase !== "child") throw new Error("Iteration refresh requires a V2 child run.");
+  const current = await requireSchedule(context.scheduleId, account);
+  if (!isCanvasScheduleV2(current)) throw new Error("V2 schedule not found.");
+  if (current.status === "cancelled") throw new Error("Cancelled schedules cannot be refreshed. Start a new schedule.");
+  if (current.status === "paused") throw new Error("Resume the schedule before refreshing iteration results.");
+  const main = current.mainTasks.find((item) => item.id === context.mainTaskId);
+  const child = main?.childTasks.find((item) => item.id === context.childTaskId && item.runId === run.id);
+  if (!main || !child) throw new Error("Schedule iteration child not found.");
+  if (main.generatedPostId && (await getGeneratedPost(main.generatedPostId, account))?.status === "published") {
+    throw new Error("Published content cannot be overwritten. Start a new schedule.");
+  }
+  const target = current.definition.mainTargetNodeId;
+  if (target && buildCanvasRunPlan(current.workflowSnapshot!, [target]).capabilities.includes("external_write")) {
+    throw new Error("Iteration refresh cannot execute a publishing target. Use a new reviewed workflow.");
+  }
+  if (validateOnly) return run;
+  const nodeRuns = await listCanvasNodeRunsFromDb(run.id);
+  const region = latestNodeAttempts(nodeRuns).get(regionNodeId);
+  const metadata = region?.internalMetadata?.iteration;
+  if (!region || !metadata) throw new Error("Iteration results are missing.");
+  if (child.iterationDeliveredRevisions?.[regionNodeId] === metadata.revision) return { ...run, iterationRepairing: false };
+  if (!metadata.downstreamStale) throw new Error("Iteration downstream is already current.");
+  const resultNode = latestNodeAttempts(nodeRuns).get(current.definition.childResult.nodeId);
+  const artifacts = extractCanvasScheduleV2Artifacts(resultNode?.outputs, current.definition.childResult.outputPort, current.definition.childResult.artifactKind);
+  if (!artifacts.length) throw new Error("Iteration produced no schedule result.");
+  const now = new Date().toISOString();
+  const next = structuredClone(current);
+  const nextMain = next.mainTasks!.find((item) => item.id === main.id)!;
+  const nextChild = nextMain.childTasks.find((item) => item.id === child.id)!;
+  nextChild.iterationDeliveredRevisions = { ...nextChild.iterationDeliveredRevisions, [regionNodeId]: metadata.revision };
+  nextChild.resultArtifacts = artifacts;
+  nextChild.resultSummary = summarizeCanvasScheduleArtifacts(artifacts);
+  nextChild.status = "completed";
+  nextChild.updatedAt = now;
+  nextMain.status = "queued";
+  nextMain.mainRunId = undefined;
+  nextMain.resultArtifacts = [];
+  nextMain.generatedPostId = undefined;
+  nextMain.generatedPostUpdatedAt = undefined;
+  nextMain.updatedAt = now;
+  next.status = "running";
+  next.completedAt = undefined;
+  next.revision += 1;
+  next.updatedAt = now;
+  await saveUpdatedSchedule(next, current.revision);
+  kickCanvasSchedulerWorker();
+  return { ...run, iterationRepairing: false, updatedAt: now };
 }
 
 async function resolveScheduleContentPool(
@@ -2143,6 +2209,9 @@ function findFailedCanvasNode(run: Pick<CanvasRun, "steps">, nodeRuns: Awaited<R
 }
 
 function findRetryableCanvasNode(run: Pick<CanvasRun, "steps">, nodeRuns: CanvasNodeRun[]) {
+  const iteration = Array.from(latestNodeAttempts(nodeRuns).values()).find((nodeRun) => nodeRun.nodeType === "utility.image-iterate"
+    && nodeRun.internalMetadata?.iteration?.items.some((item) => ["failed", "partial", "cancelled"].includes(item.status)));
+  if (iteration) return iteration;
   const failedNode = findFailedCanvasNode(run, nodeRuns);
   if (failedNode) return failedNode;
   return findRetryablePartialImageNode(run, nodeRuns);

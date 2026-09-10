@@ -1,6 +1,7 @@
 import { validateCanvasGraphForPersistence } from "./graph";
 import { upgradeCanvasGraph } from "./registry";
 import { decodeCanvasGraph } from "./serialization";
+import { stripPortableCanvasNode } from "./iteration";
 import type { CanvasGraph } from "./types";
 
 export const CANVAS_WORKFLOW_FILE_MAX_BYTES = 10 * 1024 * 1024;
@@ -29,7 +30,7 @@ export function createCanvasWorkflowFile(name: string, graph: CanvasGraph): Canv
 function redactPortableCanvasGraph(graph: CanvasGraph): CanvasGraph {
   return {
     ...graph,
-    nodes: graph.nodes.map((node) => node.type === "input.local-directory"
+    nodes: graph.nodes.map(stripPortableCanvasNode).map((node) => node.type === "input.local-directory"
       ? { ...node, config: { ...node.config, path: "", snapshotId: "", groupId: "", selectedAudioId: "" } }
       : node),
   };
@@ -48,7 +49,7 @@ export function parseCanvasWorkflowFile(value: string): CanvasWorkflowFileV1 {
   if (candidate.version !== workflowFileVersion) {
     throw new Error("FluxPost Canvas workflow files must use version 1.");
   }
-  const graph = upgradeCanvasGraph(decodeCanvasGraph(candidate.graph));
+  const graph = redactPortableCanvasGraph(upgradeCanvasGraph(decodeCanvasGraph(candidate.graph)));
   assertValidCanvasWorkflowGraph(graph);
   return {
     kind: workflowFileKind,

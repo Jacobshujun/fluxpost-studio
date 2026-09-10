@@ -44,6 +44,7 @@ export class CanvasNeedsConfigError extends Error {
 }
 
 export type CanvasNodeExecutionContext = {
+  iterationRefresh?: boolean;
   runId: string;
   node: CanvasNode;
   inputs: Record<string, CanvasArtifact[]>;
@@ -62,6 +63,7 @@ export type CanvasNodeExecutionContext = {
 };
 
 export type CanvasNodeExecutionResult = {
+  failure?: string;
   outputs: Record<string, CanvasArtifact>;
   internalMetadata?: CanvasNodeRunInternalMetadata;
   resolvedInputs?: Record<string, CanvasArtifact[]>;
@@ -76,6 +78,8 @@ export type CanvasNodeExecutionResult = {
 type CanvasNodeExecutor = (context: CanvasNodeExecutionContext) => Promise<CanvasNodeExecutionResult>;
 
 const executors: Record<CanvasNode["type"], CanvasNodeExecutor> = {
+  "utility.image-iterate": async () => { throw new Error("Iteration regions require a durable Canvas run."); },
+  "input.iteration-item": async () => { throw new Error("Iteration input requires its owning item run."); },
   "input.text": executeLiteralNode,
   "input.images": executeLiteralNode,
   "input.local-directory": executeLocalDirectory,
@@ -730,7 +734,7 @@ async function executeSeedance({ node, inputs, previousNodeRun, onProviderTaskUp
   }
 }
 
-async function executeComposition({ node, inputs, runId, account, previousNodeRun }: CanvasNodeExecutionContext) {
+async function executeComposition({ node, inputs, runId, account, previousNodeRun, iterationRefresh }: CanvasNodeExecutionContext) {
   const bodies = textValues(inputs.body);
   const titles = textValues(inputs.title);
   const imageUrls = mediaUrls(inputs.images, "images");
@@ -741,7 +745,9 @@ async function executeComposition({ node, inputs, runId, account, previousNodeRu
     .find((artifact): artifact is Extract<CanvasArtifact, { kind: "socialPost" }> => artifact.kind === "socialPost") : undefined;
   const previousPost = previousArtifact ? await getGeneratedPost(previousArtifact.postId, account) : undefined;
   if (previousPost) {
+    if (iterationRefresh && previousPost.status === "published") throw new Error("Published content cannot be replaced by iteration refresh. Create a new run.");
     const saved = await updateGeneratedPost(previousPost.id, {
+      ...(iterationRefresh ? { title: titles.join(" ").trim() || String(node.config.fallbackTitle || "画布生成内容"), body: truncateFinishedBody(bodies.join("\n\n")) } : {}),
       imageUrls,
       videoUrls,
       ...(previousPost.status === "published" ? {} : { status: requireReview ? "draft" : "approved" }),

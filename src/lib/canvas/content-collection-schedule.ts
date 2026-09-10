@@ -1,5 +1,6 @@
 import { canvasCollectionLinks } from "./content-collection";
 import { getCanvasNodeDefinition } from "./registry";
+import { getCanvasIterationOutputPorts } from "./iteration";
 import type { CanvasGraph, CanvasScheduleV2Definition } from "./types";
 
 export function canvasCollectionScheduleDefinition(graph: CanvasGraph): CanvasScheduleV2Definition | undefined {
@@ -18,7 +19,7 @@ export function canvasCollectionScheduleDefinition(graph: CanvasGraph): CanvasSc
     const node = graph.nodes.find((candidate) => candidate.id === nodeId)!;
     const definition = getCanvasNodeDefinition(node.type, node.version);
     if (definition?.capability === "external_write" || definition?.passiveSink) return [];
-    const port = definition?.outputs.find((output) => ["text", "images", "videos"].includes(output.kind));
+    const port = getCanvasIterationOutputPorts(node).find((output) => ["text", "images", "videos"].includes(output.kind));
     return port ? [{ node, port }] : [];
   });
   const target = candidates.find(({ node }) => node.schedulerRole === "image-target") || candidates[0];

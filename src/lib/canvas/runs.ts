@@ -15,6 +15,9 @@ import {
   requeueCanvasRunQueueItem,
   saveCanvasNodeRunToDb,
   saveCanvasRunToDb,
+  parkCanvasIterationRun,
+  recoverCanvasIterationRuns,
+  wakeCanvasIterationRun,
 } from "../database";
 import { recordExecutionLog } from "../activity-log";
 import {
@@ -24,7 +27,7 @@ import {
 } from "../workspace-ownership";
 import { concurrencyConfig } from "../concurrency";
 import { IMAGE_NETWORK_WAIT_REASON, isImageNetworkUnavailableError } from "../image-transport";
-import { CanvasNeedsConfigError, executeCanvasNode, resolveCanvasLiteralOutputs } from "./executors";
+import { CanvasNeedsConfigError, executeCanvasNode, resolveCanvasLiteralOutputs, type CanvasNodeExecutionResult } from "./executors";
 import { ArkSeedanceNeedsConfigError, getArkSeedanceReadiness } from "./seedance";
 import { buildCanvasRunPlan, collectDescendants } from "./graph";
 import { getCanvasNodeDefinition, getCanvasNodeExecutionMode, normalizeUrlList } from "./registry";
@@ -44,6 +47,7 @@ import type {
   CanvasRunWithNodes,
 } from "./types";
 import { getCanvasWorkflow } from "./workflows";
+import { executeCanvasIteration, resetCanvasIterationFailures } from "./iteration-runtime";
 
 const queueLockMs = 10 * 60_000;
 const queueHeartbeatMs = 30_000;
@@ -56,6 +60,7 @@ const storedQueueState = ((globalThis as CanvasQueueGlobalState).__fluxpostCanva
 storedQueueState.activeWorkers ??= 0;
 storedQueueState.sequence ??= 0;
 const queueState = storedQueueState as Required<typeof storedQueueState>;
+let iterationRecovery: Promise<void> | undefined;
 
 export async function planCanvasRun(workflowId: string, account: WorkspaceAccessActor, targetNodeIds?: string[]) {
   return planCanvasRunWithMode(workflowId, account, targetNodeIds, "with-upstream");
@@ -127,6 +132,7 @@ async function resolveCanvasRunPlan(
   const targetId = targets[0];
   const candidatesByNode = new Map<string, Array<{ run: CanvasRun; nodeRun: CanvasNodeRun }>>();
   for (const candidate of await listCanvasSuccessfulNodeRunsForWorkflowFromDb(workflowId)) {
+    if (candidate.run.iterationContext) continue;
     if (!canAccessWorkspaceOwner(account, candidate.run.ownerUserId)) continue;
     const candidates = candidatesByNode.get(candidate.nodeRun.nodeId) || [];
     candidates.push(candidate);
@@ -201,9 +207,14 @@ async function resolveCanvasRunPlan(
   }
 
   const executableIds = new Set(steps.filter((step) => step.action === "execute").map((step) => step.nodeId));
-  const confirmationNodeIds = base.order.filter((nodeId) => executableIds.has(nodeId) && getCanvasNodeDefinition(findNode(graph.nodes, nodeId).type)?.capability);
+  const confirmationNodeIds = base.confirmationNodeIds.filter((nodeId) => executableIds.has(nodeId));
   const capabilities = Array.from(new Set(confirmationNodeIds
-    .map((nodeId) => getCanvasNodeDefinition(findNode(graph.nodes, nodeId).type)?.capability)
+    .flatMap((nodeId) => {
+      const node = findNode(graph.nodes, nodeId);
+      return node.iteration && !node.frozenOutputs
+        ? buildCanvasRunPlan(node.iteration.graph, Object.values(node.iteration.outputs).map((output) => output.nodeId)).capabilities
+        : [getCanvasNodeDefinition(node.type)?.capability];
+    })
     .filter((capability): capability is NonNullable<typeof capability> => Boolean(capability))));
   return { ...base, steps, blockers, confirmationNodeIds, capabilities, preflightBlocked: blockers.length > 0 };
 }
@@ -216,6 +227,7 @@ function isReusableCandidate(
   sourceNodeRun: CanvasNodeRun,
 ) {
   const sourceNode = sourceRun.graphSnapshot.nodes.find((item) => item.id === node.id);
+  if (sourceRun.iterationContext || sourceNodeRun.internalMetadata?.iteration?.downstreamStale) return false;
   if (!sourceNode || sourceNode.type !== node.type || sourceNode.version !== node.version || !Object.keys(sourceNodeRun.outputs).length) return false;
   if (node.type === "utility.image-preview") {
     return stableSerialize(incomingEdgeIdentity(graph, node.id)) === stableSerialize(incomingEdgeIdentity(sourceRun.graphSnapshot, node.id));
@@ -394,7 +406,7 @@ export async function listCanvasRuns(account: WorkspaceAccessActor, workflowId?:
   const runs = workflowId
     ? await listCanvasRunsForWorkflowFromDb(workflowId, 50)
     : await listCanvasRunsFromDb(50);
-  return filterWorkspaceOwnedRecords(runs, account);
+  return filterWorkspaceOwnedRecords(runs.filter((run) => !run.iterationContext), account);
 }
 
 export async function listCanvasRunHistory(account: WorkspaceAccessActor, workflowId?: string) {
@@ -429,6 +441,7 @@ export async function listCanvasRunHistory(account: WorkspaceAccessActor, workfl
 }
 
 function projectCanvasNodeRun(run: CanvasRun, nodeRun: CanvasNodeRun): CanvasLatestNodeAttempt | undefined {
+  if (run.iterationContext) return undefined;
   const snapshotNode = run.graphSnapshot.nodes.find((item) => item.id === nodeRun.nodeId);
   if (!snapshotNode) return undefined;
   return {
@@ -459,6 +472,18 @@ export async function cancelCanvasRun(runId: string, account: WorkspaceAccessAct
     updatedAt: now,
     ...(current.run.status === "queued" ? { completedAt: now } : {}),
   });
+  for (const nodeRun of latestNodeRuns(current.nodeRuns).values()) {
+    for (const item of nodeRun.internalMetadata?.iteration?.items || []) {
+      const child = await getCanvasRunFromDb(item.runId);
+      if (child && !["completed", "failed", "partial", "cancelled"].includes(child.status)) {
+        await cancelCanvasRun(child.id, account);
+      }
+    }
+  }
+  if (current.run.iterationWaiting) {
+    await wakeCanvasIterationRun(run.id);
+    ensureCanvasRunWorker();
+  }
   return run;
 }
 
@@ -470,6 +495,7 @@ export async function retryCanvasNode(
 ) {
   const current = await getCanvasRun(runId, account);
   if (!current) throw new Error("Canvas run not found");
+  if (current.run.iterationContext) throw new Error("Retry image items from their iteration region.");
   if (current.run.batchContext?.schemaVersion === 2 && current.run.batchContext.phase === "shared") {
     if (current.run.status === "completed") {
       throw new Error("Completed shared Canvas results are frozen and cannot be retried.");
@@ -480,17 +506,27 @@ export async function retryCanvasNode(
   }
   const plan = buildCanvasRunPlan(current.run.graphSnapshot, current.run.targetNodeIds);
   if (!plan.includedNodeIds.includes(nodeId)) throw new Error("Canvas node is not part of this run.");
-  const retryNodeIds = Array.from(collectDescendants(current.run.graphSnapshot, [nodeId])).filter((id) => plan.includedNodeIds.includes(id));
+  const nodeRun = latestNodeRuns(current.nodeRuns).get(nodeId);
+  const iteration = nodeRun?.internalMetadata?.iteration;
+  if (nodeRun?.reusedFrom && iteration) throw new Error("Reused iteration results are frozen. Start a new run to repair images.");
+  if (iteration) {
+    if (current.run.status === "running" || current.run.status === "queued") throw new Error("Iteration is still running.");
+    if (!await resetCanvasIterationFailures(current.run, nodeRun!)) throw new Error("Iteration has no failed items.");
+    await saveCanvasNodeRunToDb({ ...nodeRun!, internalMetadata: { ...nodeRun!.internalMetadata, iteration } });
+  }
+  const retryNodeIds = iteration?.deliveredRevision !== undefined ? [nodeId]
+    : Array.from(collectDescendants(current.run.graphSnapshot, [nodeId])).filter((id) => plan.includedNodeIds.includes(id));
   const now = new Date().toISOString();
   const run = await saveCanvasRunToDb({
     ...current.run,
     status: "queued",
     retryNodeIds,
+    ...(iteration?.deliveredRevision !== undefined ? { iterationRepairing: true } : {}),
     cancelRequestedAt: undefined,
     completedAt: undefined,
     error: undefined,
     updatedAt: now,
-  });
+  }, { resetCancellation: true });
   if (!(await requeueCanvasRunQueueItem(run.id))) await enqueueCanvasRunQueueItem(run);
   ensureCanvasRunWorker();
   return run;
@@ -511,6 +547,9 @@ export function ensureCanvasRunWorker() {
 }
 
 async function drainCanvasRuns(workerId: string) {
+  iterationRecovery ||= recoverCanvasIterationRuns();
+  await iterationRecovery;
+  await recoverCanvasIterationRuns({ restoreWaiting: false });
   await requeueExpiredCanvasRunQueueItemsWithProviderTasks();
   while (true) {
     const queueItem = await claimNextCanvasRunQueueItem(workerId, queueLockMs);
@@ -527,6 +566,8 @@ async function drainCanvasRuns(workerId: string) {
       if (!run) throw new Error("Canvas run not found");
       batchRun = run;
       if (run.cancelRequestedAt || run.status === "cancelled") {
+        const now = new Date().toISOString();
+        batchRun = await saveCanvasRunToDb({ ...run, status: "cancelled", updatedAt: now, completedAt: now });
         await finishCanvasRunQueueItem(queueItem.id, workerId, "cancelled");
         batchRunTerminal = true;
         continue;
@@ -534,6 +575,10 @@ async function drainCanvasRuns(workerId: string) {
       const finalRun = await executeCanvasRun(run);
       batchRun = finalRun;
       if (finalRun.status === "running") {
+        if (finalRun.iterationWaiting) {
+          await parkCanvasIterationRun(queueItem.id, workerId);
+          continue;
+        }
         // A provider accepted the task but has not produced a terminal result yet.
         // Requeue the same run so the next attempt queries its persisted submit_id.
         await requeueCanvasRunQueueItem(finalRun.id, 30_000);
@@ -546,6 +591,12 @@ async function drainCanvasRuns(workerId: string) {
     } catch (error) {
       const message = error instanceof Error ? error.message : "Canvas run failed";
       const run = await getCanvasRunFromDb(queueItem.runId);
+      if (run?.iterationContext && ["completed", "partial", "failed", "cancelled"].includes(run.status)) {
+        batchRun = run;
+        await finishCanvasRunQueueItem(queueItem.id, workerId, run.status === "completed" ? "completed" : run.status === "cancelled" ? "cancelled" : "failed", run.error);
+        batchRunTerminal = true;
+        continue;
+      }
       if (run) {
         const now = new Date().toISOString();
         batchRun = await saveCanvasRunToDb({ ...run, status: "failed", error: message, updatedAt: now, completedAt: now });
@@ -566,6 +617,13 @@ function notifyCanvasScheduleRunTerminal(run: CanvasRun) {
 }
 
 async function executeCanvasRun(run: CanvasRun) {
+  if (run.iterationContext) {
+    const parent = await getCanvasRunFromDb(run.iterationContext.parentRunId);
+    if (!parent || parent.cancelRequestedAt || parent.status === "cancelled") {
+      const now = new Date().toISOString();
+      return saveCanvasRunToDb({ ...run, status: "cancelled", cancelRequestedAt: now, updatedAt: now, completedAt: now });
+    }
+  }
   const now = new Date().toISOString();
   run = await saveCanvasRunToDb({ ...run, status: "running", startedAt: run.startedAt || now, updatedAt: now });
   const plan = buildCanvasRunPlan(run.graphSnapshot, run.targetNodeIds);
@@ -582,8 +640,9 @@ async function executeCanvasRun(run: CanvasRun) {
   const pending = new Set(plan.includedNodeIds.filter((id) => !outputs.has(id)));
   while (pending.size) {
     const refreshed = await getCanvasRunFromDb(run.id);
-    if (refreshed?.cancelRequestedAt) {
-      return finishCancelledRun(refreshed, pending, latest);
+    const parent = run.iterationContext ? await getCanvasRunFromDb(run.iterationContext.parentRunId) : undefined;
+    if (refreshed?.cancelRequestedAt || parent?.cancelRequestedAt || parent?.status === "cancelled") {
+      return finishCancelledRun(refreshed || run, pending, latest);
     }
     const ready = Array.from(pending).filter((nodeId) => dependencies(run.graphSnapshot.edges, nodeId)
       .every((id) => outputs.has(id) || isTerminalNodeStatus(latest.get(id)?.status)));
@@ -604,6 +663,7 @@ async function executeCanvasRun(run: CanvasRun) {
 
   const relevant = plan.includedNodeIds.map((id) => latest.get(id)).filter((item): item is CanvasNodeRun => Boolean(item));
   const pendingNode = relevant.find((item) => item.status === "running");
+  const iterationWaiting = Boolean(pendingNode) && relevant.filter((item) => item.status === "running").every((item) => item.nodeType === "utility.image-iterate");
   const hasPendingProvider = Boolean(pendingNode);
   const failures = relevant.filter((item) => isFailure(item.status));
   const completed = relevant.filter((item) => isSuccessfulNodeStatus(item.status));
@@ -614,9 +674,27 @@ async function executeCanvasRun(run: CanvasRun) {
     : failures.length
       ? completed.length ? "partial" : "failed"
       : completed.length === plan.includedNodeIds.length ? hasPartialResult ? "partial" : "completed" : "failed";
+  if (status === "completed" && run.iterationRefreshRegionIds?.length) {
+    for (const nodeId of run.iterationRefreshRegionIds) {
+      if (run.batchContext?.schemaVersion === 2 && run.batchContext.phase === "child") {
+        const { refreshCanvasScheduleIterationResult } = await import("./scheduler");
+        await refreshCanvasScheduleIterationResult(run, nodeId, { id: run.ownerUserId, displayName: run.ownerDisplayName, role: "operator" });
+      }
+      const nodeRun = latest.get(nodeId);
+      const iteration = nodeRun?.internalMetadata?.iteration;
+      if (nodeRun && iteration) await saveCanvasNodeRunToDb({
+        ...nodeRun, internalMetadata: { ...nodeRun.internalMetadata, iteration: { ...iteration, downstreamStale: false, deliveredRevision: iteration.revision } }, updatedAt: finishedAt,
+      });
+    }
+    run.iterationRepairing = false;
+    run.iterationRefreshRegionIds = undefined;
+  }
+  const freshRun = await getCanvasRunFromDb(run.id);
+  if (freshRun?.cancelRequestedAt) return finishCancelledRun(freshRun, new Set(), latest);
   return saveCanvasRunToDb({
     ...run,
     status,
+    iterationWaiting,
     retryNodeIds: hasPendingProvider ? run.retryNodeIds : undefined,
     error: status === "running"
       ? undefined
@@ -635,6 +713,12 @@ async function runPlannedNode(
   outputs: Map<string, Record<string, CanvasArtifact>>,
 ) {
   const inputs = collectInputs(run.graphSnapshot.edges, node.id, outputs);
+  if (run.iterationRepairing && !run.iterationRefreshRegionIds?.length && !run.retryNodeIds?.includes(node.id)) {
+    const existing = latest.get(node.id);
+    if (existing) return { nodeId: node.id, nodeRun: existing };
+    const nodeRun = await saveTerminalNodeRun(run, node, latest, "blocked", {}, "Iteration results changed. Refresh downstream explicitly.", inputs);
+    return { nodeId: node.id, nodeRun };
+  }
   if (step.action === "disabled") {
     const nodeRun = await saveTerminalNodeRun(run, node, latest, "disabled", {}, undefined, inputs);
     return { nodeId: node.id, nodeRun };
@@ -645,7 +729,7 @@ async function runPlannedNode(
   }
   if (step.action === "reuse") return runReusedNode(run, node, step, latest, inputs);
   if (step.action === "bypass") return runBypassedNode(run, node, latest, inputs);
-  const missingInput = missingRequiredInput(node, inputs);
+  const missingInput = node.frozenOutputs ? undefined : missingRequiredInput(node, inputs);
   if (missingInput) {
     const definition = getCanvasNodeDefinition(node.type, node.version);
     const nodeRun = await saveTerminalNodeRun(
@@ -733,7 +817,7 @@ async function runReadyNode(
   inputs: Record<string, CanvasArtifact[]>,
 ) {
   const previousNodeRun = latest.get(node.id);
-  const resumableNodeRun = previousNodeRun?.status === "running" && previousNodeRun.providerTaskId
+  const resumableNodeRun = previousNodeRun?.status === "running" && (previousNodeRun.providerTaskId || previousNodeRun.internalMetadata?.iteration)
     ? previousNodeRun
     : undefined;
   const attempt = resumableNodeRun?.attempt || (previousNodeRun?.attempt || 0) + 1;
@@ -747,6 +831,11 @@ async function runReadyNode(
     status: "running",
     inputs,
     outputs: {},
+    ...(node.type === "utility.image-iterate" && previousNodeRun?.internalMetadata?.iteration
+      ? { internalMetadata: structuredClone(previousNodeRun.internalMetadata) } : {}),
+    ...(run.iterationContext && previousNodeRun?.providerTaskId && previousNodeRun.providerStatus !== "failed" ? {
+      providerTaskId: previousNodeRun.providerTaskId, providerTaskRoute: previousNodeRun.providerTaskRoute, providerStatus: previousNodeRun.providerStatus,
+    } : {}),
     createdAt: startedAt,
     updatedAt: startedAt,
     startedAt,
@@ -760,7 +849,17 @@ async function runReadyNode(
     return interimSave;
   };
   try {
-    const result = await executeCanvasNode({
+    const result: CanvasNodeExecutionResult = node.type === "utility.image-iterate"
+      ? await executeCanvasIteration({ run, node, inputs, previousNodeRun, saveMetadata: async (iteration) => {
+        await queueInterimSave((current) => ({ ...current, internalMetadata: { iteration }, updatedAt: new Date().toISOString() }));
+      } })
+      : node.type === "input.iteration-item"
+        ? (() => {
+          if (!run.iterationContext || !run.iterationInputs) throw new Error("Iteration input requires an owning item run.");
+          return { outputs: run.iterationInputs };
+        })()
+        : await executeCanvasNode({
+      iterationRefresh: Boolean(run.iterationRefreshRegionIds?.length),
       runId: run.id,
       node,
       inputs,
@@ -793,7 +892,8 @@ async function runReadyNode(
     const endedAt = new Date().toISOString();
     nodeRun = await saveCanvasNodeRunToDb({
       ...nodeRun,
-      status: result.pending ? "running" : result.partial ? "partial" : "completed",
+      status: result.pending ? "running" : result.failure ? "failed" : result.partial ? "partial" : "completed",
+      error: result.failure,
       inputs: result.resolvedInputs || (resumableNodeRun ? nodeRun.inputs : inputs),
       outputs: result.outputs,
       internalMetadata: result.internalMetadata,
@@ -852,6 +952,7 @@ async function saveTerminalNodeRun(
   inputs: Record<string, CanvasArtifact[]> = {},
 ) {
   const now = new Date().toISOString();
+  const previous = status === "cancelled" ? latest.get(node.id) : undefined;
   return saveCanvasNodeRunToDb({
     id: `canvas-node-run-${randomUUID()}`,
     runId: run.id,
@@ -861,6 +962,13 @@ async function saveTerminalNodeRun(
     status,
     inputs,
     outputs,
+    ...(previous ? {
+      inputs: previous.inputs,
+      internalMetadata: previous.internalMetadata,
+      providerTaskId: previous.providerTaskId,
+      providerTaskRoute: previous.providerTaskRoute,
+      providerStatus: previous.providerStatus,
+    } : {}),
     ...(error ? { error } : {}),
     createdAt: now,
     updatedAt: now,
@@ -915,7 +1023,7 @@ function mergeArtifacts(artifacts: CanvasArtifact[]): CanvasArtifact | undefined
 
 function fingerprintCanvasNodeExecution(node: CanvasNode, inputs: Record<string, CanvasArtifact[]>) {
   const value = {
-    node: { id: node.id, type: node.type, version: node.version, config: node.config, executionMode: getCanvasNodeExecutionMode(node) },
+    node: { id: node.id, type: node.type, version: node.version, config: node.config, executionMode: getCanvasNodeExecutionMode(node), ...(node.iteration ? { iteration: node.iteration } : {}) },
     inputs: normalizeFingerprintInputs(node, inputs),
   };
   return createHash("sha256").update(stableSerialize(value)).digest("hex");

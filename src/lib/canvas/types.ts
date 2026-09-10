@@ -288,6 +288,8 @@ export type CanvasArtifact =
   | { kind: "publishJobRef"; jobId: string; status: string };
 
 export type CanvasNodeType =
+  | "utility.image-iterate"
+  | "input.iteration-item"
   | "input.text"
   | "input.images"
   | "input.local-directory"
@@ -381,6 +383,33 @@ export type CanvasNode = {
   label?: string;
   executionMode?: CanvasNodeExecutionMode;
   schedulerRole?: CanvasSchedulerRole;
+  iteration?: CanvasIterationDefinition;
+  frozenOutputs?: Partial<Record<"text" | "images", CanvasArtifact>>;
+};
+
+export type CanvasIterationDefinition = {
+  graph: CanvasGraph;
+  outputs: Partial<Record<"text" | "images", { nodeId: string; outputPort: string }>>;
+};
+
+export type CanvasIterationItem = {
+  id: string;
+  index: number;
+  source: CanvasMediaReference;
+  runId: string;
+  status: CanvasRunStatus;
+  outputs?: Partial<Record<"text" | "images", CanvasArtifact>>;
+  error?: string;
+};
+
+export type CanvasIterationRunMetadata = {
+  schemaVersion: 1;
+  inputFingerprint: string;
+  items: CanvasIterationItem[];
+  revision: number;
+  deliveredRevision?: number;
+  downstreamStale?: boolean;
+  outputFingerprint?: string;
 };
 
 export type CanvasEdge = {
@@ -457,6 +486,7 @@ export type CanvasImageEachRunMetadata = CanvasImageEachRunMetadataBase & (
 );
 
 export type CanvasNodeRunInternalMetadata = {
+  iteration?: CanvasIterationRunMetadata;
   subtitle?: CanvasSubtitleRunMetadata;
   imageEach?: CanvasImageEachRunMetadata;
 };
@@ -489,6 +519,12 @@ export type CanvasRun = {
   steps?: CanvasRunPlanStep[];
   targetNodeIds?: string[];
   retryNodeIds?: string[];
+  iterationContext?: { parentRunId: string; regionNodeId: string; itemId: string; index: number };
+  iterationWaiting?: boolean;
+  iterationInputs?: Record<string, CanvasArtifact>;
+  iterationAdmissionPending?: boolean;
+  iterationRepairing?: boolean;
+  iterationRefreshRegionIds?: string[];
   batchContext?: {
     schemaVersion?: 1;
     scheduleId: string;
@@ -543,7 +579,7 @@ export type CanvasNodeRun = {
 export type CanvasRunQueueItem = {
   id: string;
   runId: string;
-  status: "queued" | "running" | "completed" | "failed" | "cancelled";
+  status: "queued" | "running" | "waiting" | "completed" | "failed" | "cancelled";
   priority: number;
   attempts: number;
   maxAttempts: number;
@@ -780,6 +816,7 @@ export type CanvasScheduleV2SharedArtifact = CanvasScheduleV2SharedOutput & {
 };
 
 export type CanvasScheduleV2ChildTask = {
+  iterationDeliveredRevisions?: Record<string, number>;
   id: string;
   parameterValues: Record<string, CanvasScheduleParameterValue>;
   status: CanvasScheduleLeafStatus;

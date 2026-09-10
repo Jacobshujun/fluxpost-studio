@@ -4,6 +4,7 @@ import { getCanvasBatchBindableFields, getCanvasNodeDefinition, getCanvasNodeExe
 import { canvasSourceVideoSnapshotConfig, isCanvasSourceVideoSnapshot } from "./source-video-contract";
 import { canvasVideoLoaderConfig, normalizeCanvasVideoSnapshot } from "./video-loader";
 import { freezeCanvasCollectionOutputs } from "./content-collection";
+import { freezeCanvasIterationOutputs, getCanvasIterationOutputPorts } from "./iteration";
 import type {
   CanvasArtifact,
   CanvasGraph,
@@ -82,7 +83,7 @@ export function validateCanvasScheduleV2Definition(graph: CanvasGraph, definitio
   }
 
   const childNode = graph.nodes.find((node) => node.id === definition.childResult.nodeId);
-  const childOutput = childNode && getCanvasNodeDefinition(childNode.type, childNode.version)?.outputs.find((port) => port.id === definition.childResult.outputPort);
+  const childOutput = childNode && getCanvasIterationOutputPorts(childNode).find((port) => port.id === definition.childResult.outputPort);
   if (!childNode || !childOutput) throw new Error("The selected child result output no longer exists.");
   if (childOutput.kind !== definition.childResult.artifactKind) throw new Error("Child result artifact type does not match the selected output.");
   if (definition.mainTargetNodeId) {
@@ -312,10 +313,20 @@ export function createCanvasScheduleV2AggregateGraph(
   source: CanvasGraph,
   definition: CanvasScheduleV2Definition,
   artifacts: CanvasScheduleAggregateArtifact[],
+  regionOutputs?: Record<string, CanvasArtifact>,
 ) {
   if (!artifacts.length) throw new Error("At least one child result is required for aggregation.");
   const graph = structuredClone(source);
-  graph.nodes = graph.nodes.map((node) => node.id !== definition.childResult.nodeId ? node : aggregateLiteralNode(node, definition.childResult.artifactKind, artifacts));
+  graph.nodes = graph.nodes.map((node) => {
+    if (node.id !== definition.childResult.nodeId) return node;
+    if (node.type !== "utility.image-iterate") return aggregateLiteralNode(node, definition.childResult.artifactKind, artifacts);
+    const kind = definition.childResult.artifactKind;
+    if (kind !== "text" && kind !== "images") throw new Error("Iteration regions cannot aggregate videos.");
+    const selected: CanvasArtifact = kind === "text"
+      ? { kind: "text", value: artifacts.flatMap((artifact) => artifact.kind === "text" ? [artifact.value] : []).join("\n\n") }
+      : { kind: "images", items: artifacts.flatMap((artifact) => artifact.kind === "images" ? artifact.items : []) };
+    return freezeCanvasIterationOutputs(node, { ...regionOutputs, [kind]: selected });
+  });
   graph.edges = graph.edges.filter((edge) => edge.target !== definition.childResult.nodeId);
   return graph;
 }
@@ -328,7 +339,9 @@ export function createCanvasScheduleV2ChildGraph(
   const graph = structuredClone(source);
   const byNode = new Map(sharedArtifacts.map((entry) => [entry.nodeId, entry]));
   const collectionIds = new Set(graph.nodes.filter((node) => node.type === "input.content-collection" && byNode.has(node.id)).map((node) => node.id));
+  const iterationIds = new Set(graph.nodes.filter((node) => node.type === "utility.image-iterate" && byNode.has(node.id)).map((node) => node.id));
   graph.nodes = graph.nodes.map((node) => {
+    if (iterationIds.has(node.id)) return freezeCanvasIterationOutputs(node, Object.fromEntries(sharedArtifacts.filter((entry) => entry.nodeId === node.id).map((entry) => [entry.outputPort, entry.artifact])));
     if (collectionIds.has(node.id)) return freezeCanvasCollectionOutputs(node, Object.fromEntries(sharedArtifacts.filter((entry) => entry.nodeId === node.id).map((entry) => [entry.outputPort, entry.artifact])));
     const shared = byNode.get(node.id);
     return shared ? sharedLiteralNode(node, shared.artifact) : node;
@@ -337,7 +350,7 @@ export function createCanvasScheduleV2ChildGraph(
     .filter((edge) => !byNode.has(edge.target))
     .map((edge) => {
       const shared = byNode.get(edge.source);
-      return shared && !collectionIds.has(edge.source) ? { ...edge, sourcePort: shared.artifactKind } : edge;
+      return shared && !collectionIds.has(edge.source) && !iterationIds.has(edge.source) ? { ...edge, sourcePort: shared.artifactKind } : edge;
     });
   return graph;
 }
@@ -431,12 +444,13 @@ function validateCanvasScheduleV2SharedOutputs(graph: CanvasGraph, definition: C
     const registry = node && getCanvasNodeDefinition(node.type, node.version);
     if (!node || !registry) throw new Error(`Shared output node ${nodeId} was not found.`);
     const collection = node.type === "input.content-collection";
+    const iteration = node.type === "utility.image-iterate";
     if (registry.category === "input" && !collection) throw new Error("Input nodes cannot be shared outputs.");
     if (registry.passiveSink) throw new Error("Passive display nodes cannot be shared outputs.");
     if (registry.capability === "external_write") throw new Error("External-write nodes cannot be shared outputs.");
     if (getCanvasNodeExecutionMode(node) === "disabled") throw new Error("Disabled nodes cannot be shared outputs.");
-    if (registry.outputs.length !== 1 && !collection) throw new Error("Shared output nodes must have exactly one output.");
-    const registryOutput = collection ? registry.outputs.find((port) => port.id === outputPort) : registry.outputs[0];
+    if (registry.outputs.length !== 1 && !collection && !iteration) throw new Error("Shared output nodes must have exactly one output.");
+    const registryOutput = collection || iteration ? getCanvasIterationOutputPorts(node).find((port) => port.id === outputPort) : registry.outputs[0];
     if (!registryOutput) throw new Error("Shared output port was not found.");
     if (!["text", "images", "videos"].includes(registryOutput.kind)) throw new Error("Shared outputs must produce text, images, or videos.");
     if (registryOutput.id !== outputPort || registryOutput.kind !== output.artifactKind) {
@@ -448,6 +462,7 @@ function validateCanvasScheduleV2SharedOutputs(graph: CanvasGraph, definition: C
     const ancestors = collectCanvasGraphAncestors(graph, nodeId);
     const childDependency = Array.from(childBindings).find((bindingNodeId) => ancestors.has(bindingNodeId));
     if (childDependency) throw new Error("Shared output dependencies cannot include child-scoped parameter bindings.");
+    if (iteration && !getCanvasIterationOutputPorts(node).every((port) => selected.has(`${nodeId}:${port.id}`) || sharedOutputs.some((shared) => shared.nodeId === nodeId && shared.outputPort === port.id))) throw new Error("Shared iteration regions must freeze all configured outputs.");
   }
 }
 

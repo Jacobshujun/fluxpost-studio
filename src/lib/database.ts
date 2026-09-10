@@ -3099,10 +3099,10 @@ export async function deleteCanvasScheduleFromDb(scheduleId: string, ownerUserId
 export async function listCanvasRunsFromDb(limit = 40) {
   await ensureDatabaseReady();
   if (getDatabaseBackend() === "postgres") {
-    const result = await getPostgresPool().query<JsonRow>("SELECT data_json FROM canvas_runs ORDER BY created_at DESC LIMIT $1", [limit]);
+    const result = await getPostgresPool().query<JsonRow>("SELECT data_json FROM canvas_runs WHERE data_json->>'iterationContext' IS NULL ORDER BY created_at DESC LIMIT $1", [limit]);
     return result.rows.map((row) => fromJson<CanvasRun>(row.data_json));
   }
-  const rows = getSqliteDatabase().prepare("SELECT data_json FROM canvas_runs ORDER BY created_at DESC LIMIT ?").all(limit) as JsonRow[];
+  const rows = getSqliteDatabase().prepare("SELECT data_json FROM canvas_runs WHERE json_extract(data_json, '$.iterationContext') IS NULL ORDER BY created_at DESC LIMIT ?").all(limit) as JsonRow[];
   return rows.map((row) => fromJson<CanvasRun>(row.data_json));
 }
 
@@ -3110,13 +3110,13 @@ export async function listCanvasRunsForWorkflowFromDb(workflowId: string, limit 
   await ensureDatabaseReady();
   if (getDatabaseBackend() === "postgres") {
     const result = await getPostgresPool().query<JsonRow>(
-      "SELECT data_json FROM canvas_runs WHERE workflow_id = $1 ORDER BY created_at DESC LIMIT $2",
+      "SELECT data_json FROM canvas_runs WHERE workflow_id = $1 AND data_json->>'iterationContext' IS NULL ORDER BY created_at DESC LIMIT $2",
       [workflowId, limit],
     );
     return result.rows.map((row) => fromJson<CanvasRun>(row.data_json));
   }
   const rows = getSqliteDatabase().prepare(
-    "SELECT data_json FROM canvas_runs WHERE workflow_id = ? ORDER BY created_at DESC LIMIT ?",
+    "SELECT data_json FROM canvas_runs WHERE workflow_id = ? AND json_extract(data_json, '$.iterationContext') IS NULL ORDER BY created_at DESC LIMIT ?",
   ).all(workflowId, limit) as JsonRow[];
   return rows.map((row) => fromJson<CanvasRun>(row.data_json));
 }
@@ -3193,23 +3193,44 @@ export async function getCanvasRunFromDb(runId: string) {
   return row ? fromJson<CanvasRun>(row.data_json) : undefined;
 }
 
-export async function saveCanvasRunToDb(run: CanvasRun) {
+export async function saveCanvasRunToDb(run: CanvasRun, options: { resetCancellation?: boolean } = {}) {
   await ensureDatabaseReady();
+  if (options.resetCancellation && (run.status !== "queued" || run.cancelRequestedAt)) throw new Error("Cancellation may only be reset for an explicit queued retry.");
   if (getDatabaseBackend() === "postgres") {
-    await getPostgresPool().query(
+    const result = await getPostgresPool().query<JsonRow>(
       `INSERT INTO canvas_runs (id, workflow_id, owner_user_id, status, created_at, updated_at, data_json)
        VALUES ($1, $2, $3, $4, $5, $6, $7::jsonb)
-       ON CONFLICT(id) DO UPDATE SET status = excluded.status, updated_at = excluded.updated_at, data_json = excluded.data_json`,
-      [run.id, run.workflowId, run.ownerUserId, run.status, run.createdAt, run.updatedAt, toJson(run)],
+       ON CONFLICT(id) DO UPDATE SET
+         status = CASE WHEN NOT $8 AND (canvas_runs.status = 'cancelled' OR
+           (COALESCE(canvas_runs.data_json->>'cancelRequestedAt', '') <> '' AND excluded.status IN ('completed', 'failed', 'partial')))
+           THEN 'cancelled' ELSE excluded.status END,
+         updated_at = excluded.updated_at,
+         data_json = CASE WHEN NOT $8 AND (canvas_runs.status = 'cancelled' OR COALESCE(canvas_runs.data_json->>'cancelRequestedAt', '') <> '')
+           THEN excluded.data_json || jsonb_build_object(
+             'cancelRequestedAt', COALESCE(canvas_runs.data_json->>'cancelRequestedAt', canvas_runs.updated_at::text),
+             'status', CASE WHEN canvas_runs.status = 'cancelled' OR excluded.status IN ('completed', 'failed', 'partial') THEN 'cancelled' ELSE excluded.status END)
+           ELSE excluded.data_json END
+       RETURNING data_json`,
+      [run.id, run.workflowId, run.ownerUserId, run.status, run.createdAt, run.updatedAt, toJson(run), Boolean(options.resetCancellation)],
     );
-    return run;
+    return fromJson<CanvasRun>(result.rows[0].data_json);
   }
-  getSqliteDatabase().prepare(`
+  const row = getSqliteDatabase().prepare(`
     INSERT INTO canvas_runs (id, workflow_id, owner_user_id, status, created_at, updated_at, data_json)
     VALUES (?, ?, ?, ?, ?, ?, ?)
-    ON CONFLICT(id) DO UPDATE SET status = excluded.status, updated_at = excluded.updated_at, data_json = excluded.data_json
-  `).run(run.id, run.workflowId, run.ownerUserId, run.status, run.createdAt, run.updatedAt, toJson(run));
-  return run;
+    ON CONFLICT(id) DO UPDATE SET
+      status = CASE WHEN ? = 0 AND (canvas_runs.status = 'cancelled' OR
+        (COALESCE(json_extract(canvas_runs.data_json, '$.cancelRequestedAt'), '') <> '' AND excluded.status IN ('completed', 'failed', 'partial')))
+        THEN 'cancelled' ELSE excluded.status END,
+      updated_at = excluded.updated_at,
+      data_json = CASE WHEN ? = 0 AND (canvas_runs.status = 'cancelled' OR COALESCE(json_extract(canvas_runs.data_json, '$.cancelRequestedAt'), '') <> '')
+        THEN json_set(excluded.data_json,
+          '$.cancelRequestedAt', COALESCE(json_extract(canvas_runs.data_json, '$.cancelRequestedAt'), canvas_runs.updated_at),
+          '$.status', CASE WHEN canvas_runs.status = 'cancelled' OR excluded.status IN ('completed', 'failed', 'partial') THEN 'cancelled' ELSE excluded.status END)
+        ELSE excluded.data_json END
+    RETURNING data_json
+  `).get(run.id, run.workflowId, run.ownerUserId, run.status, run.createdAt, run.updatedAt, toJson(run), Number(Boolean(options.resetCancellation)), Number(Boolean(options.resetCancellation))) as JsonRow;
+  return fromJson<CanvasRun>(row.data_json);
 }
 
 export async function listCanvasNodeRunsFromDb(runId: string) {
@@ -3364,12 +3385,56 @@ export async function finishCanvasRunQueueItem(queueId: string, workerId: string
   const now = new Date().toISOString();
   if (getDatabaseBackend() === "postgres") {
     await getPostgresPool().query(
-      "UPDATE canvas_run_queue SET status = $1, locked_by = NULL, locked_until = NULL, completed_at = $2, updated_at = $2, error = $3 WHERE id = $4 AND locked_by = $5",
+      `WITH finished AS (
+        UPDATE canvas_run_queue SET status = $1, locked_by = NULL, locked_until = NULL,
+          completed_at = $2, updated_at = $2, error = $3
+        WHERE id = $4 AND locked_by = $5 AND status = 'running' RETURNING run_id
+      ) ${canvasIterationParentWakePostgresSql("$2")}`,
       [status, now, error || null, queueId, workerId],
     );
     return;
   }
-  getSqliteDatabase().prepare("UPDATE canvas_run_queue SET status = ?, locked_by = NULL, locked_until = NULL, completed_at = ?, updated_at = ?, error = ? WHERE id = ? AND locked_by = ?").run(status, now, now, error || null, queueId, workerId);
+  const db = getSqliteDatabase();
+  runSqliteTransaction(db, () => {
+    const finished = db.prepare(`UPDATE canvas_run_queue SET status = ?, locked_by = NULL, locked_until = NULL,
+      completed_at = ?, updated_at = ?, error = ? WHERE id = ? AND locked_by = ? AND status = 'running'
+      RETURNING run_id`).get(status, now, now, error || null, queueId, workerId) as { run_id: string } | undefined;
+    if (finished) wakeCanvasIterationParentSqlite(db, finished.run_id, now);
+  });
+}
+
+function canvasIterationParentWakePostgresSql(nowParameter: "$1" | "$2") {
+  return `UPDATE canvas_run_queue parent_queue SET
+    data_json = jsonb_set(parent_queue.data_json, '{iterationWake}', 'true'::jsonb),
+    status = CASE WHEN parent_queue.status = 'running' THEN 'running' ELSE 'queued' END,
+    attempts = CASE WHEN parent_queue.status = 'running' THEN parent_queue.attempts ELSE 0 END,
+    locked_by = CASE WHEN parent_queue.status = 'running' THEN parent_queue.locked_by ELSE NULL END,
+    locked_until = CASE WHEN parent_queue.status = 'running' THEN parent_queue.locked_until ELSE NULL END,
+    completed_at = NULL, error = NULL, run_after = ${nowParameter}, updated_at = ${nowParameter}
+    WHERE parent_queue.status IN ('queued', 'running', 'waiting') AND parent_queue.run_id IN (
+      SELECT parent.id FROM finished JOIN canvas_runs child ON child.id = finished.run_id
+      JOIN canvas_runs parent ON parent.id = child.data_json->'iterationContext'->>'parentRunId'
+        AND parent.owner_user_id = child.owner_user_id
+      WHERE parent.status IN ('queued', 'running')
+        AND COALESCE(parent.data_json->>'iterationAdmissionPending', 'false') <> 'true'
+    )`;
+}
+
+function wakeCanvasIterationParentSqlite(db: SqliteDatabase, childRunId: string, now: string) {
+  db.prepare(`UPDATE canvas_run_queue SET
+    data_json = json_set(data_json, '$.iterationWake', json('true')),
+    status = CASE WHEN status = 'running' THEN 'running' ELSE 'queued' END,
+    attempts = CASE WHEN status = 'running' THEN attempts ELSE 0 END,
+    locked_by = CASE WHEN status = 'running' THEN locked_by ELSE NULL END,
+    locked_until = CASE WHEN status = 'running' THEN locked_until ELSE NULL END,
+    completed_at = NULL, error = NULL, run_after = ?, updated_at = ?
+    WHERE status IN ('queued', 'running', 'waiting') AND run_id IN (
+      SELECT parent.id FROM canvas_runs child JOIN canvas_runs parent
+        ON parent.id = json_extract(child.data_json, '$.iterationContext.parentRunId')
+        AND parent.owner_user_id = child.owner_user_id
+      WHERE child.id = ? AND parent.status IN ('queued', 'running')
+        AND COALESCE(json_extract(parent.data_json, '$.iterationAdmissionPending'), 0) <> 1
+    )`).run(now, now, childRunId);
 }
 
 export async function requeueCanvasRunQueueItem(runId: string, delayMs = 0) {
@@ -4843,6 +4908,130 @@ function fromFeishuPublishQueueRow(row: FeishuPublishQueueRow): FeishuPublishJob
     completedAt: row.completed_at ? normalizeDateValue(row.completed_at) : undefined,
     error: row.error || data.error,
   };
+}
+
+export async function wakeCanvasIterationRun(runId: string) {
+  await ensureDatabaseReady();
+  const now = new Date().toISOString();
+  if (getDatabaseBackend() === "postgres") {
+    await getPostgresPool().query(`UPDATE canvas_run_queue SET
+      data_json = jsonb_set(data_json, '{iterationWake}', 'true'::jsonb),
+      status = CASE WHEN status = 'running' THEN status ELSE 'queued' END,
+      attempts = CASE WHEN status = 'running' THEN attempts ELSE 0 END,
+      locked_by = CASE WHEN status = 'running' THEN locked_by ELSE NULL END,
+      locked_until = CASE WHEN status = 'running' THEN locked_until ELSE NULL END,
+      completed_at = NULL, error = NULL,
+      run_after = $1, updated_at = $1
+      WHERE run_id = $2 AND status IN ('queued', 'running', 'waiting')
+        AND EXISTS (SELECT 1 FROM canvas_runs run WHERE run.id = canvas_run_queue.run_id
+          AND run.status IN ('queued', 'running') AND COALESCE(run.data_json->>'iterationAdmissionPending', 'false') <> 'true')`, [now, runId]);
+    return;
+  }
+  getSqliteDatabase().prepare(`UPDATE canvas_run_queue SET
+    data_json = json_set(data_json, '$.iterationWake', json('true')),
+    status = CASE WHEN status = 'running' THEN status ELSE 'queued' END,
+    attempts = CASE WHEN status = 'running' THEN attempts ELSE 0 END,
+    locked_by = CASE WHEN status = 'running' THEN locked_by ELSE NULL END,
+    locked_until = CASE WHEN status = 'running' THEN locked_until ELSE NULL END,
+    completed_at = NULL, error = NULL,
+    run_after = ?, updated_at = ? WHERE run_id = ? AND status IN ('queued', 'running', 'waiting')
+      AND EXISTS (SELECT 1 FROM canvas_runs run WHERE run.id = canvas_run_queue.run_id
+        AND run.status IN ('queued', 'running') AND COALESCE(json_extract(run.data_json, '$.iterationAdmissionPending'), 0) <> 1)`).run(now, now, runId);
+}
+
+export async function parkCanvasIterationRun(queueId: string, workerId: string) {
+  await ensureDatabaseReady();
+  const now = new Date().toISOString();
+  if (getDatabaseBackend() === "postgres") {
+    await getPostgresPool().query(`UPDATE canvas_run_queue SET
+      status = CASE WHEN data_json->>'iterationWake' = 'true' THEN 'queued' ELSE 'waiting' END,
+      data_json = data_json - 'iterationWake', attempts = 0, run_after = $1,
+      locked_by = NULL, locked_until = NULL, updated_at = $1
+      WHERE id = $2 AND locked_by = $3 AND status = 'running'`, [now, queueId, workerId]);
+    return;
+  }
+  getSqliteDatabase().prepare(`UPDATE canvas_run_queue SET
+    status = CASE WHEN json_extract(data_json, '$.iterationWake') = 1 THEN 'queued' ELSE 'waiting' END,
+    data_json = json_remove(data_json, '$.iterationWake'), attempts = 0, run_after = ?,
+    locked_by = NULL, locked_until = NULL, updated_at = ?
+    WHERE id = ? AND locked_by = ? AND status = 'running'`).run(now, now, queueId, workerId);
+}
+
+export async function recoverCanvasIterationRuns(options: { restoreWaiting?: boolean } = {}) {
+  await ensureDatabaseReady();
+  const now = new Date().toISOString();
+  const restoreWaiting = options.restoreWaiting !== false;
+  await recoverCanvasIterationTerminalQueues(now);
+  if (getDatabaseBackend() === "postgres") {
+    await getPostgresPool().query(`UPDATE canvas_run_queue queue SET status = 'queued', attempts = 0,
+      run_after = $1, locked_by = NULL, locked_until = NULL, completed_at = NULL, error = NULL,
+      data_json = data_json - 'iterationWake', updated_at = $1
+      WHERE EXISTS (SELECT 1 FROM canvas_runs run WHERE run.id = queue.run_id AND run.status IN ('queued', 'running')
+        AND COALESCE(run.data_json->>'iterationAdmissionPending', 'false') <> 'true'
+        AND (($2 AND queue.status = 'waiting' AND run.data_json->>'iterationContext' IS NULL
+          AND run.data_json->'graphSnapshot'->'nodes' @> '[{"type":"utility.image-iterate"}]'::jsonb)
+        OR (queue.status = 'running' AND (queue.locked_until IS NULL OR queue.locked_until <= $1)
+          AND (run.data_json->>'iterationContext' IS NOT NULL OR run.data_json->'graphSnapshot'->'nodes' @> '[{"type":"utility.image-iterate"}]'::jsonb))))`, [now, restoreWaiting]);
+    return;
+  }
+  getSqliteDatabase().prepare(`UPDATE canvas_run_queue SET status = 'queued', attempts = 0,
+    run_after = ?, locked_by = NULL, locked_until = NULL, completed_at = NULL, error = NULL,
+    data_json = json_remove(data_json, '$.iterationWake'), updated_at = ?
+    WHERE EXISTS (SELECT 1 FROM canvas_runs run WHERE run.id = canvas_run_queue.run_id AND run.status IN ('queued', 'running')
+      AND COALESCE(json_extract(run.data_json, '$.iterationAdmissionPending'), 0) <> 1
+      AND ((? = 1 AND canvas_run_queue.status = 'waiting' AND json_extract(run.data_json, '$.iterationContext') IS NULL
+        AND EXISTS (SELECT 1 FROM json_each(run.data_json, '$.graphSnapshot.nodes') node WHERE json_extract(node.value, '$.type') = 'utility.image-iterate'))
+      OR (canvas_run_queue.status = 'running' AND (canvas_run_queue.locked_until IS NULL OR canvas_run_queue.locked_until <= ?)
+        AND (json_extract(run.data_json, '$.iterationContext') IS NOT NULL OR EXISTS (
+          SELECT 1 FROM json_each(run.data_json, '$.graphSnapshot.nodes') node WHERE json_extract(node.value, '$.type') = 'utility.image-iterate')))))`).run(now, now, Number(restoreWaiting), now);
+}
+
+async function recoverCanvasIterationTerminalQueues(now: string) {
+  if (getDatabaseBackend() === "postgres") {
+    await getPostgresPool().query(`WITH finished AS (
+      UPDATE canvas_run_queue queue SET status = CASE WHEN child.status = 'partial' THEN 'failed' ELSE child.status END,
+        locked_by = NULL, locked_until = NULL,
+        completed_at = COALESCE((child.data_json->>'completedAt')::timestamptz, $1::timestamptz), updated_at = $1,
+        error = child.data_json->>'error', data_json = queue.data_json - 'iterationWake'
+      FROM canvas_runs child WHERE child.id = queue.run_id
+        AND queue.status = 'running' AND (queue.locked_until IS NULL OR queue.locked_until <= $1)
+        AND child.status IN ('completed', 'partial', 'failed', 'cancelled')
+        AND child.data_json->>'iterationContext' IS NOT NULL
+      RETURNING queue.run_id
+    ) ${canvasIterationParentWakePostgresSql("$1")}`, [now]);
+    return;
+  }
+  const db = getSqliteDatabase();
+  runSqliteTransaction(db, () => {
+    const finished = db.prepare(`UPDATE canvas_run_queue SET
+      status = (SELECT CASE WHEN child.status = 'partial' THEN 'failed' ELSE child.status END FROM canvas_runs child WHERE child.id = canvas_run_queue.run_id),
+      locked_by = NULL, locked_until = NULL,
+      completed_at = COALESCE((SELECT json_extract(child.data_json, '$.completedAt') FROM canvas_runs child WHERE child.id = canvas_run_queue.run_id), ?),
+      updated_at = ?, error = (SELECT json_extract(child.data_json, '$.error') FROM canvas_runs child WHERE child.id = canvas_run_queue.run_id),
+      data_json = json_remove(data_json, '$.iterationWake')
+      WHERE status = 'running' AND (locked_until IS NULL OR locked_until <= ?)
+        AND EXISTS (SELECT 1 FROM canvas_runs child WHERE child.id = canvas_run_queue.run_id
+          AND child.status IN ('completed', 'partial', 'failed', 'cancelled')
+          AND json_extract(child.data_json, '$.iterationContext') IS NOT NULL)
+      RETURNING run_id`).all(now, now, now) as Array<{ run_id: string }>;
+    for (const child of finished) wakeCanvasIterationParentSqlite(db, child.run_id, now);
+  });
+}
+
+export async function holdCanvasIterationItemQueue(runId: string) {
+  await ensureDatabaseReady();
+  const now = new Date().toISOString();
+  if (getDatabaseBackend() === "postgres") {
+    await getPostgresPool().query(`UPDATE canvas_run_queue SET status = 'waiting', attempts = 0, completed_at = NULL, error = NULL,
+      locked_by = NULL, locked_until = NULL, data_json = data_json - 'iterationWake', updated_at = $1
+      WHERE run_id = $2 AND status IN ('completed', 'failed', 'cancelled')
+        AND EXISTS (SELECT 1 FROM canvas_runs run WHERE run.id = canvas_run_queue.run_id AND run.data_json->>'iterationContext' IS NOT NULL)`, [now, runId]);
+    return;
+  }
+  getSqliteDatabase().prepare(`UPDATE canvas_run_queue SET status = 'waiting', attempts = 0, completed_at = NULL, error = NULL,
+    locked_by = NULL, locked_until = NULL, data_json = json_remove(data_json, '$.iterationWake'), updated_at = ?
+    WHERE run_id = ? AND status IN ('completed', 'failed', 'cancelled')
+      AND EXISTS (SELECT 1 FROM canvas_runs run WHERE run.id = canvas_run_queue.run_id AND json_extract(run.data_json, '$.iterationContext') IS NOT NULL)`).run(now, runId);
 }
 
 export function legacyLibraryRootId(ownerUserId: string, role: "reference" | "vehicle") {

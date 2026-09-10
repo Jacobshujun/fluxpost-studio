@@ -26,7 +26,7 @@ for (const snippet of [
 ]) assert.ok(registrySource.includes(snippet), `Registry contract is missing ${snippet}`);
 assert.ok(registrySource.includes('if (node.type === "model.gpt-image-each" && node.version === 1)'), "V1 image-each nodes must upgrade to V2.");
 assert.ok(registrySource.includes("gptImageEachV1Definition, gptImageEachV2Definition"), "Both image-each versions must remain readable.");
-assert.ok(runsSource.includes('status: result.pending ? "running" : result.partial ? "partial" : "completed"'), "Partial node results must persist distinctly.");
+assert.ok(runsSource.includes('status: result.pending ? "running" : result.failure ? "failed" : result.partial ? "partial" : "completed"'), "Partial node results must persist distinctly from explicit region failures.");
 assert.ok(runsSource.includes("onInternalMetadataUpdate"), "Child metadata updates must be durably persisted by the Canvas runner.");
 assert.ok(!executorSource.includes("canvasImageBatch"), "Canvas composition must not copy operational image-batch state into review drafts.");
 assert.ok(!queueSource.includes("canvasImageBatch"), "Feishu preflight must ignore legacy Canvas image-batch metadata.");

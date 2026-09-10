@@ -99,6 +99,7 @@ import {
 } from "@/lib/canvas/clipboard";
 import { canvasNodeDefinitions, createCanvasNode, getCanvasBatchBindableFields, getCanvasNodeDefinition, getCanvasNodeExecutionMode } from "@/lib/canvas/registry";
 import { canvasCollectionLinks } from "@/lib/canvas/content-collection";
+import { canvasIterationAllowedNodeTypes, getCanvasIterationOutputPorts } from "@/lib/canvas/iteration";
 import { canvasCollectionScheduleDefinition } from "@/lib/canvas/content-collection-schedule";
 import { CANVAS_SAVE_IMAGE_MAX_ITEMS } from "@/lib/canvas/save-images";
 import { canvasSubtitleStyleConfig, canvasSubtitleStyleFromConfig, normalizeCanvasSubtitlePresetName } from "@/lib/canvas/subtitle-style";
@@ -143,6 +144,8 @@ import { getStoredTheme, subscribeTheme } from "@/lib/theme";
 import { enumCodec, optionalStringCodec, useUrlQueryState } from "@/lib/use-url-query-state";
 import { selectIdRange } from "@/lib/list-selection";
 import { SubtitleEditorDialog } from "./SubtitleEditorDialog";
+import { CanvasIterationResults } from "./CanvasIterationResults";
+import "./iteration.css";
 import { contentTagOptions } from "@/lib/types";
 import type { ContentPoolSelectionFilter, ContentPoolSelectionItem, ContentPoolSelectionPage, CopyLibraryEntryView, LibraryAsset, LibraryAssetPage, LibraryNavigation } from "@/lib/types";
 import type { CompetitorWorkbookInspection, CompetitorWorkbookSnapshot } from "@/lib/competitor-workbook";
@@ -150,6 +153,7 @@ import type {
   CanvasArtifact,
   CanvasEdge,
   CanvasGraph,
+  CanvasIterationDefinition,
   CanvasLatestNodeAttempt,
   CanvasLatestSuccessfulNodeRun,
   CanvasMediaReference,
@@ -228,6 +232,7 @@ type CanvasNodeInteraction = {
   onNodeFocus: (nodeId: string) => void;
   onPreview: (preview: NonNullable<PreviewState>) => void;
   onSubtitleEdit: (node: CanvasNode, nodeRun: CanvasNodeRun) => void;
+  onIterationEdit?: (nodeId: string) => void;
 };
 
 const CanvasNodeInteractionContext = createContext<CanvasNodeInteraction | null>(null);
@@ -251,6 +256,7 @@ export default function CanvasPage() {
   const [edges, setEdges] = useState<FlowEdge[]>([]);
   const [viewport, setViewport] = useState<Viewport>({ x: 0, y: 0, zoom: 1 });
   const [selectedNodeId, setSelectedNodeId] = useState<string>();
+  const [iterationEditorId, setIterationEditorId] = useState<string>();
   const [activeRun, setActiveRun] = useState<CanvasRunWithNodes>();
   const [latestNodeAttempts, setLatestNodeAttempts] = useState<Map<string, CanvasLatestNodeAttempt>>(new Map());
   const [latestSuccessfulNodeRuns, setLatestSuccessfulNodeRuns] = useState<Map<string, CanvasLatestSuccessfulNodeRun>>(new Map());
@@ -405,6 +411,11 @@ export default function CanvasPage() {
     }));
     markDirty();
   }, [markDirty]);
+  const updateNodeIteration = useCallback((nodeId: string, iteration: CanvasIterationDefinition) => {
+    setNodes((current) => current.map((entry) => entry.id === nodeId ? { ...entry, data: { canvasNode: { ...entry.data.canvasNode, iteration } } } : entry));
+    setEdges((current) => current.filter((edge) => edge.source !== nodeId || Object.hasOwn(iteration.outputs, edge.sourceHandle || "")));
+    markDirty();
+  }, [markDirty]);
   const updateSelectedConfigPatch = useCallback((patch: CanvasNode["config"]) => {
     if (selectedNodeId) updateNodeConfigPatch(selectedNodeId, patch);
   }, [selectedNodeId, updateNodeConfigPatch]);
@@ -456,6 +467,7 @@ export default function CanvasPage() {
     onNodeFocus: focusCanvasNode,
     onPreview: setPreview,
     onSubtitleEdit: (node, nodeRun) => setSubtitleEditor({ nodeId: node.id, nodeRunId: nodeRun.id }),
+    onIterationEdit: setIterationEditorId,
   }), [activeRun, activeWorkflow?.revision, displayingExplicitRun, focusCanvasNode, isMobile, latestNodeRuns, latestSuccessfulNodeRuns, updateNodeConfig, updateNodeExecutionMode]);
 
   useEffect(() => {
@@ -550,6 +562,7 @@ export default function CanvasPage() {
   }
 
   function selectWorkflow(workflow: CanvasWorkflow) {
+    setIterationEditorId(undefined);
     setWorkflowId(workflow.id);
     stageRef.current?.classList.remove("canvas-stage-viewport-moving");
     syncCanvasViewportDetail(stageRef.current, workflow.graph.viewport.zoom);
@@ -1087,7 +1100,7 @@ export default function CanvasPage() {
     if (isMobile || !connection.source || !connection.target || !connection.sourceHandle || !connection.targetHandle) return;
     const source = nodes.find((node) => node.id === connection.source)?.data.canvasNode;
     const target = nodes.find((node) => node.id === connection.target)?.data.canvasNode;
-    const output = source && getCanvasNodeDefinition(source.type, source.version)?.outputs.find((port) => port.id === connection.sourceHandle);
+    const output = source && getCanvasIterationOutputPorts(source).find((port) => port.id === connection.sourceHandle);
     const input = target && getCanvasNodeDefinition(target.type, target.version)?.inputs.find((port) => port.id === connection.targetHandle);
     if (!output || !input || !areCanvasPortKindsCompatible(output.kind, input.kind)) {
       setMessage("端口类型不兼容");
@@ -1424,7 +1437,7 @@ export default function CanvasPage() {
 
   useEffect(() => {
     const handleCopy = (event: ClipboardEvent) => {
-      if (isMobile || isEditableClipboardTarget(event.target)) return;
+      if (iterationEditorId || isMobile || isEditableClipboardTarget(event.target)) return;
       const payload = getSelectionPayload();
       if (!payload) return;
       canvasClipboardRef.current = payload;
@@ -1435,7 +1448,7 @@ export default function CanvasPage() {
       setMessage(`已复制 ${payload.nodes.length} 个节点`);
     };
     const handleCut = (event: ClipboardEvent) => {
-      if (isMobile || isEditableClipboardTarget(event.target)) return;
+      if (iterationEditorId || isMobile || isEditableClipboardTarget(event.target)) return;
       const payload = getSelectionPayload();
       if (!payload) return;
       canvasClipboardRef.current = payload;
@@ -1446,7 +1459,7 @@ export default function CanvasPage() {
       removeSelectedNodes();
     };
     const handlePaste = (event: ClipboardEvent) => {
-      if (isEditableClipboardTarget(event.target) || !event.clipboardData) return;
+      if (iterationEditorId || isEditableClipboardTarget(event.target) || !event.clipboardData) return;
       const imageFiles = dataTransferImageFiles(event.clipboardData);
       if (imageFiles.length) {
         const targetImageNodeId = selectedCanvasNode && (selectedCanvasNode.type === "input.images" || (selectedCanvasNode.type === "model.gpt-image" && selectedCanvasNode.version >= 2))
@@ -1465,7 +1478,7 @@ export default function CanvasPage() {
       pasteCanvasPayload(payload);
     };
     const handleKeyDown = (event: KeyboardEvent) => {
-      if (isMobile || preview || subtitleEditor || event.defaultPrevented || isEditableClipboardTarget(event.target)) return;
+      if (iterationEditorId || isMobile || preview || subtitleEditor || event.defaultPrevented || isEditableClipboardTarget(event.target)) return;
       const commandKey = event.ctrlKey || event.metaKey;
       if (event.repeat) return;
       if (commandKey && event.altKey && !event.shiftKey && event.key === "Enter") {
@@ -1602,7 +1615,7 @@ export default function CanvasPage() {
           {(["input", "model", "utility", "compose", "publish"] as const).map((category) => (
             <div className="canvas-palette-group" key={category}>
               <small>{categoryLabel(category)}</small>
-              {canvasNodeDefinitions.filter((definition) => definition.category === category).map((definition) => (
+              {canvasNodeDefinitions.filter((definition) => definition.category === category && definition.type !== "input.iteration-item").map((definition) => (
                 <button key={definition.type} type="button" onClick={() => addNode(definition.type)} disabled={isMobile || !activeWorkflow}>
                   <span style={{ color: definition.color }}>{iconForNode(definition.type)}</span>
                   <span><strong>{definition.label}</strong><small>{definition.description}</small></span>
@@ -1630,6 +1643,7 @@ export default function CanvasPage() {
             onConnectEnd={finishQuickConnection}
             onInit={(instance) => { reactFlowRef.current = instance; syncCanvasViewportDetail(stageRef.current, instance.getViewport().zoom); }}
             onNodeClick={(_, node) => setSelectedNodeId(node.id)}
+            onNodeDoubleClick={(_, node) => { if (node.data.canvasNode.type === "utility.image-iterate") setIterationEditorId(node.id); }}
             onPaneClick={() => { setSelectedNodeId(undefined); setQuickAdd(null); }}
             onSelectionChange={({ nodes: selectedNodes }) => {
               const selectedNode = selectedNodes.at(-1);
@@ -1669,6 +1683,12 @@ export default function CanvasPage() {
 
         <aside className={`canvas-inspector ${selectedCanvasNode ? "canvas-inspector-active" : ""}`}>
           <div className="canvas-pane-heading"><span><PanelRight />属性</span>{selectedCanvasNode ? <button type="button" onClick={() => setSelectedNodeId(undefined)} aria-label="关闭属性"><X /></button> : null}</div>
+          {selectedCanvasNode?.type === "utility.image-iterate" ? <div className="canvas-iteration-inspector">
+            <button type="button" onClick={() => setIterationEditorId(selectedCanvasNode.id)}><Maximize2 />编辑逐图区域</button>
+            <p>每张图片运行同一内层流程，按原图顺序汇总文字和图片。</p>
+            <CanvasIterationOutputSelectors node={selectedCanvasNode} onChange={(iteration) => updateNodeIteration(selectedCanvasNode.id, iteration)} />
+            <CanvasIterationResults key={`${activeRun?.run.id}:${selectedCanvasNode.id}`} runId={activeRun?.run.id} nodeId={selectedCanvasNode.id} metadata={latestAttempts(activeRun?.nodeRuns || []).get(selectedCanvasNode.id)?.internalMetadata?.iteration} locked={activeRun?.run.batchContext?.phase === "shared" && activeRun.run.status === "completed"} onRefreshRun={() => { if (activeRun) void refreshRun(activeRun.run.id); }} />
+          </div> : null}
           {selectedCanvasNode ? <NodeInspector
             node={selectedCanvasNode}
             onChange={updateSelectedConfig}
@@ -1754,6 +1774,13 @@ export default function CanvasPage() {
         onApply={(snapshot) => applySubtitleRevision(subtitleEditor.nodeId, snapshot)}
         onClose={() => setSubtitleEditor(undefined)}
       /> : null}
+      {iterationEditorId && nodes.find((entry) => entry.id === iterationEditorId)?.data.canvasNode.iteration ? <CanvasIterationEditor
+        key={`${activeWorkflow?.id}:${iterationEditorId}`}
+        node={nodes.find((entry) => entry.id === iterationEditorId)!.data.canvasNode}
+        colorMode={flowColorMode}
+        onChange={(iteration) => updateNodeIteration(iterationEditorId, iteration)}
+        onClose={() => setIterationEditorId(undefined)}
+      /> : null}
     </main>
   );
 }
@@ -1800,13 +1827,14 @@ const CanvasFlowNode = memo(function CanvasFlowNode({ data, selected }: NodeProp
   const executionMode = node.executionMode === "bypass" || node.executionMode === "disabled" ? node.executionMode : "enabled";
   const isSelected = selected;
   const hasEditableSize = Boolean(node.size && interaction?.canResize);
-  const portRows = Array.from({ length: Math.max(definition.inputs.length, definition.outputs.length, 1) }, (_, index) => ({
+  const outputPorts = getCanvasIterationOutputPorts(node);
+  const portRows = Array.from({ length: Math.max(definition.inputs.length, outputPorts.length, 1) }, (_, index) => ({
     input: definition.inputs[index],
-    output: definition.outputs[index],
+    output: outputPorts[index],
   }));
   return <div className={`canvas-node ${hasEditableSize ? "canvas-node-resized" : ""} ${isSelected ? "canvas-node-selected" : ""} ${executionMode === "bypass" ? "canvas-node-bypassed" : ""} ${executionMode === "disabled" ? "canvas-node-disabled" : ""}`} style={{ "--node-color": definition.color } as React.CSSProperties}>
     <NodeResizer
-      isVisible={Boolean(isSelected && interaction?.canResize)}
+      isVisible={Boolean(isSelected && interaction?.canResize && node.type !== "input.iteration-item")}
       minWidth={CANVAS_NODE_SIZE_LIMITS.minWidth}
       minHeight={CANVAS_NODE_SIZE_LIMITS.minHeight}
       maxWidth={CANVAS_NODE_SIZE_LIMITS.maxWidth}
@@ -1817,7 +1845,7 @@ const CanvasFlowNode = memo(function CanvasFlowNode({ data, selected }: NodeProp
       lineClassName="canvas-node-resize-line"
     />
     <div className="canvas-node-head"><span>{iconForNode(node.type)}</span><strong>{node.label || definition.label}</strong><small>{executionMode === "enabled" ? `v${node.version}` : executionMode === "bypass" ? "跳过" : "禁用"}</small>
-      <details className="canvas-node-mode-menu nodrag nopan nowheel" onPointerDown={(event) => event.stopPropagation()} onClick={(event) => event.stopPropagation()}>
+      {node.type !== "input.iteration-item" ? <details className="canvas-node-mode-menu nodrag nopan nowheel" onPointerDown={(event) => event.stopPropagation()} onClick={(event) => event.stopPropagation()}>
         <summary aria-label="设置节点状态" title="设置节点状态"><EllipsisVertical /></summary>
         <div role="menu">
           {(["enabled", "bypass", "disabled"] as CanvasNodeExecutionMode[]).map((mode) => <button
@@ -1829,7 +1857,7 @@ const CanvasFlowNode = memo(function CanvasFlowNode({ data, selected }: NodeProp
             onClick={() => interaction?.onExecutionModeChange(node.id, mode)}
           >{mode === "enabled" ? "启用" : mode === "bypass" ? "跳过" : "禁用"}</button>)}
         </div>
-      </details>
+      </details> : null}
     </div>
     <div className="canvas-node-content">
     {node.type === "input.text" ? <CanvasNodeTextEditor
@@ -1851,6 +1879,11 @@ const CanvasFlowNode = memo(function CanvasFlowNode({ data, selected }: NodeProp
       onChange={(key, value) => interaction?.onConfigChange(node.id, key, value)}
       onFocus={() => interaction?.onNodeFocus(node.id)}
     /> : null}
+    {node.type === "utility.image-iterate" ? <div className="canvas-iteration-node nodrag nopan nowheel">
+      <button type="button" onClick={(event) => { event.stopPropagation(); interaction?.onIterationEdit?.(node.id); }}><Maximize2 />展开逐图区域</button>
+      <small>{node.iteration?.graph.nodes.length || 0} 个内层节点 · {nodeRun?.internalMetadata?.iteration ? `${nodeRun.internalMetadata.iteration.items.filter((item) => item.status === "completed").length}/${nodeRun.internalMetadata.iteration.items.length} 项成功` : "等待图片输入"}</small>
+      {nodeRun?.internalMetadata?.iteration?.downstreamStale ? <strong>结果已修复，下游待刷新</strong> : null}
+    </div> : null}
     {!hasDetailedResult && nodeRun ? <CanvasNodeAttemptSummary nodeRun={nodeRun} /> : null}
     {visibleImageUrls.length ? <div className={`canvas-node-image-grid is-count-${visibleImageUrls.length}`}>
       {visibleImageUrls.map((url, index) => <button className="nodrag nopan nowheel" type="button" key={`${url}-${index}`} onClick={(event) => {
@@ -1878,6 +1911,174 @@ const CanvasFlowNode = memo(function CanvasFlowNode({ data, selected }: NodeProp
     </div>
   </div>;
 });
+
+function CanvasIterationOutputSelectors({ node, onChange }: { node: CanvasNode; onChange: (iteration: CanvasIterationDefinition) => void }) {
+  const iteration = node.iteration;
+  if (!iteration) return <p role="alert">区域缺少内层流程，请检查工作流文件。</p>;
+  return <div className="canvas-iteration-outputs">
+    {(["text", "images"] as const).map((kind) => {
+      const candidates = iteration.graph.nodes.flatMap((inner) => getCanvasIterationOutputPorts(inner)
+        .filter((port) => port.kind === kind)
+        .map((port) => ({ nodeId: inner.id, outputPort: port.id, label: `${inner.label || getCanvasNodeDefinition(inner.type, inner.version)?.label} · ${port.label}` })));
+      const selected = iteration.outputs[kind];
+      const value = selected ? JSON.stringify([selected.nodeId, selected.outputPort]) : "";
+      const exists = candidates.some((candidate) => candidate.nodeId === selected?.nodeId && candidate.outputPort === selected?.outputPort);
+      return <label key={kind}><span>{kind === "text" ? "区域文字输出" : "区域图片输出"}</span><select value={value} onChange={(event) => {
+        const candidate = candidates.find((entry) => JSON.stringify([entry.nodeId, entry.outputPort]) === event.target.value);
+        const outputs = { ...iteration.outputs };
+        if (candidate) outputs[kind] = { nodeId: candidate.nodeId, outputPort: candidate.outputPort };
+        else delete outputs[kind];
+        onChange({ ...iteration, outputs });
+      }}>
+        <option value="">不输出</option>
+        {selected && !exists ? <option value={value} disabled>原输出端口已失效，请重新选择</option> : null}
+        {candidates.map((candidate) => <option key={JSON.stringify([candidate.nodeId, candidate.outputPort])} value={JSON.stringify([candidate.nodeId, candidate.outputPort])}>{candidate.label}</option>)}
+      </select></label>;
+    })}
+    {!iteration.outputs.text && !iteration.outputs.images ? <p role="status">请选择至少一个输出后再运行。</p> : null}
+    <small>关闭输出会移除外层对应连线。</small>
+  </div>;
+}
+
+function CanvasIterationEditor({ node, colorMode, onChange, onClose }: {
+  node: CanvasNode;
+  colorMode: "light" | "dark";
+  onChange: (iteration: CanvasIterationDefinition) => void;
+  onClose: () => void;
+}) {
+  const iteration = node.iteration!;
+  const [innerNodes, setInnerNodes] = useState(() => toFlowNodes(iteration.graph.nodes));
+  const [innerEdges, setInnerEdges] = useState(() => toFlowEdges(iteration.graph.edges, iteration.graph.nodes));
+  const [selectedId, setSelectedId] = useState<string>();
+  const [addType, setAddType] = useState<CanvasNodeType>("model.gpt-vision");
+  const [connectionSource, setConnectionSource] = useState("");
+  const [connectionTarget, setConnectionTarget] = useState("");
+  const [notice, setNotice] = useState("");
+  const [innerPreview, setInnerPreview] = useState<PreviewState>(null);
+  const [dialogReady, setDialogReady] = useState(false);
+  const onPreview = setInnerPreview;
+  const dialogRef = useCallback((dialog: HTMLDialogElement | null) => {
+    if (!dialog) return;
+    dialog.showModal();
+    setDialogReady(true);
+    return () => dialog.close();
+  }, []);
+  const flowRef = useRef<ReactFlowInstance<FlowNode, FlowEdge> | null>(null);
+  const sequenceRef = useRef(0);
+  const selected = innerNodes.find((entry) => entry.id === selectedId)?.data.canvasNode;
+  const allowed = canvasNodeDefinitions.filter((definition) => definition.type !== "input.iteration-item" && canvasIterationAllowedNodeTypes.includes(definition.type));
+  const sourcePorts = innerNodes.flatMap((entry) => getCanvasIterationOutputPorts(entry.data.canvasNode).map((port) => ({ node: entry, port, value: JSON.stringify([entry.id, port.id]) })));
+  const targetPorts = innerNodes.flatMap((entry) => (getCanvasNodeDefinition(entry.data.canvasNode.type, entry.data.canvasNode.version)?.inputs || []).map((port) => ({ node: entry, port, value: JSON.stringify([entry.id, port.id]) })));
+
+  function commit(nextNodes: FlowNode[], nextEdges: FlowEdge[], nextViewport = iteration.graph.viewport) {
+    setInnerNodes(nextNodes);
+    setInnerEdges(nextEdges);
+    const outputs = { ...iteration.outputs };
+    for (const kind of ["text", "images"] as const) {
+      const selectedOutput = outputs[kind];
+      if (selectedOutput && !nextNodes.some((entry) => entry.id === selectedOutput.nodeId)) delete outputs[kind];
+    }
+    onChange({ ...iteration, outputs, graph: currentGraph(nextNodes, nextEdges, nextViewport) });
+  }
+
+  function patchNode(nodeId: string, patch: Partial<CanvasNode>) {
+    commit(innerNodes.map((entry) => entry.id === nodeId && entry.data.canvasNode.type !== "input.iteration-item"
+      ? { ...entry, data: { canvasNode: { ...entry.data.canvasNode, ...patch } } } : entry), innerEdges);
+  }
+
+  function patchConfig(nodeId: string, patch: CanvasNode["config"]) {
+    const current = innerNodes.find((entry) => entry.id === nodeId)?.data.canvasNode;
+    if (current) patchNode(nodeId, { config: { ...current.config, ...patch } });
+  }
+
+  function connect(connection: Connection) {
+    const source = sourcePorts.find((entry) => entry.node.id === connection.source && entry.port.id === connection.sourceHandle);
+    const target = targetPorts.find((entry) => entry.node.id === connection.target && entry.port.id === connection.targetHandle);
+    if (!source || !target || !areCanvasPortKindsCompatible(source.port.kind, target.port.kind)) return setNotice("端口类型不兼容");
+    if (!target.port.multiple && innerEdges.some((edge) => edge.target === connection.target && edge.targetHandle === connection.targetHandle)) return setNotice("此输入已有连线，请先移除原连线");
+    if (wouldCreateCycle(innerEdges, connection.source, connection.target)) return setNotice("内层流程不允许循环连线");
+    commit(innerNodes, addEdge({ ...connection, id: `iteration-edge-${Date.now()}-${++sequenceRef.current}`, type: "flowing" }, innerEdges));
+    setNotice("已连接内层节点");
+  }
+
+  const interaction: CanvasNodeInteraction = {
+    displayingExplicitRun: false,
+    latestNodeRuns: new Map(),
+    latestSuccessfulNodeRuns: new Map(),
+    canResize: true,
+    onConfigChange: (nodeId, key, value) => patchConfig(nodeId, { [key]: value }),
+    onExecutionModeChange: (nodeId, mode) => patchNode(nodeId, { executionMode: mode }),
+    onNodeFocus: setSelectedId,
+    onPreview,
+    onSubtitleEdit: () => setNotice("逐图区域不支持视频或字幕节点"),
+  };
+
+  return <dialog ref={dialogRef} className="canvas-iteration-editor" aria-label="逐图区域编辑器" onCancel={(event) => { event.preventDefault(); if (innerPreview) setInnerPreview(null); else onClose(); }}>
+    <header className="canvas-iteration-header"><button type="button" onClick={onClose}><ChevronLeft />返回外层画布</button><div><strong>{node.label || "逐图迭代"}</strong><small>每张原图独立执行 · 固定入口 · 不支持嵌套或发布</small></div></header>
+    <div className="canvas-iteration-layout">
+      <div className="canvas-iteration-stage canvas-stage" data-testid="iteration-stage">
+        <CanvasNodeInteractionContext.Provider value={interaction}>{dialogReady ? <ReactFlow<FlowNode, FlowEdge>
+          nodes={innerNodes.map((entry) => ({ ...entry, selected: entry.id === selectedId, draggable: entry.data.canvasNode.type !== "input.iteration-item", deletable: entry.data.canvasNode.type !== "input.iteration-item" }))}
+          edges={innerEdges}
+          nodeTypes={nodeTypes}
+          edgeTypes={edgeTypes}
+          onInit={(instance) => { flowRef.current = instance; }}
+          onNodeClick={(_, entry) => setSelectedId(entry.id)}
+          onPaneClick={() => setSelectedId(undefined)}
+          onNodesChange={(changes) => {
+            const permitted = changes.filter((change) => !((change.type === "remove" || change.type === "position") && innerNodes.find((entry) => entry.id === change.id)?.data.canvasNode.type === "input.iteration-item"));
+            const next = applyCanvasNodeChanges(permitted, innerNodes);
+            if (permitted.some(isDurableCanvasNodeChange)) commit(next, innerEdges.filter((edge) => next.some((entry) => entry.id === edge.source) && next.some((entry) => entry.id === edge.target)));
+            else setInnerNodes(next);
+          }}
+          onEdgesChange={(changes) => {
+            const next = applyEdgeChanges(changes, innerEdges);
+            if (changes.some((change) => change.type !== "select")) commit(innerNodes, next);
+            else setInnerEdges(next);
+          }}
+          onConnect={connect}
+          onMoveEnd={(_, nextViewport) => commit(innerNodes, innerEdges, nextViewport)}
+          defaultViewport={iteration.graph.viewport}
+          minZoom={0.2}
+          fitView
+          colorMode={colorMode}
+          deleteKeyCode={["Backspace", "Delete"]}
+        ><Background variant={BackgroundVariant.Dots} gap={22} /><Controls showInteractive={false} /></ReactFlow> : null}</CanvasNodeInteractionContext.Provider>
+      </div>
+      <aside className="canvas-iteration-properties">
+        <div className="canvas-iteration-add"><label><span>内层节点库</span><select value={addType} onChange={(event) => setAddType(event.target.value as CanvasNodeType)}>{allowed.map((definition) => <option key={definition.type} value={definition.type}>{definition.label}</option>)}</select></label><button type="button" onClick={() => {
+          const created = createCanvasNode(addType, `iteration-node-${Date.now()}-${++sequenceRef.current}`, { x: 420 + (innerNodes.length % 3) * 280, y: 120 + Math.floor(innerNodes.length / 3) * 260 });
+          const next = toFlowNode(created);
+          commit([...innerNodes, next], innerEdges);
+          setSelectedId(created.id);
+          setNotice("已添加内层节点");
+          void flowRef.current?.fitView({ nodes: [next], padding: 0.6 });
+        }}><Plus />添加内层节点</button></div>
+        <CanvasIterationOutputSelectors node={node} onChange={onChange} />
+        <label><span>编辑内层节点</span><select value={selectedId || ""} onChange={(event) => setSelectedId(event.target.value || undefined)}><option value="">选择节点</option>{innerNodes.map((entry) => <option key={entry.id} value={entry.id}>{entry.data.canvasNode.label || getCanvasNodeDefinition(entry.data.canvasNode.type, entry.data.canvasNode.version)?.label}</option>)}</select></label>
+        {selected?.type === "input.iteration-item" ? <p>固定入口：当前图片、原始索引、共享文字和参考图。不能删除或禁用。</p> : selected ? <div className="canvas-inspector-content">
+          <label><span>内层节点名称</span><input value={selected.label || ""} maxLength={80} onChange={(event) => patchNode(selected.id, { label: event.target.value })} /></label>
+          <CanvasNodeFields node={selected} onChange={(key, value) => patchConfig(selected.id, { [key]: value })} onPatch={(patch) => patchConfig(selected.id, patch)} onPreviewImage={(url, index) => onPreview({ kind: "image", url, index })} />
+          {selected.type === "utility.media-mask" ? <CanvasMediaMaskEditor node={selected} onPatch={(patch) => patchConfig(selected.id, patch)} /> : null}
+          <button type="button" onClick={() => { commit(innerNodes.filter((entry) => entry.id !== selected.id), innerEdges.filter((edge) => edge.source !== selected.id && edge.target !== selected.id)); setSelectedId(undefined); }}><Trash2 />删除内层节点</button>
+        </div> : null}
+        <details className="canvas-iteration-connections"><summary>内层连线（也可拖动端口）</summary>
+          <label><span>连线起点</span><select value={connectionSource} onChange={(event) => setConnectionSource(event.target.value)}><option value="">选择输出端口</option>{sourcePorts.map((entry) => <option key={entry.value} value={entry.value}>{entry.node.data.canvasNode.label || getCanvasNodeDefinition(entry.node.data.canvasNode.type)?.label} · {entry.port.label}</option>)}</select></label>
+          <label><span>连线终点</span><select value={connectionTarget} onChange={(event) => setConnectionTarget(event.target.value)}><option value="">选择输入端口</option>{targetPorts.map((entry) => <option key={entry.value} value={entry.value}>{entry.node.data.canvasNode.label || getCanvasNodeDefinition(entry.node.data.canvasNode.type)?.label} · {entry.port.label}</option>)}</select></label>
+          <button type="button" disabled={!connectionSource || !connectionTarget} onClick={() => {
+            const source = sourcePorts.find((entry) => entry.value === connectionSource);
+            const target = targetPorts.find((entry) => entry.value === connectionTarget);
+            if (source && target) connect({ source: source.node.id, sourceHandle: source.port.id, target: target.node.id, targetHandle: target.port.id });
+          }}>连接内层端口</button>
+          {innerEdges.map((edge, index) => <div key={edge.id}><small>{sourcePorts.find((entry) => entry.node.id === edge.source && entry.port.id === edge.sourceHandle)?.port.label} → {targetPorts.find((entry) => entry.node.id === edge.target && entry.port.id === edge.targetHandle)?.port.label}</small><button type="button" aria-label={`删除内层连线 ${index + 1}`} onClick={() => commit(innerNodes, innerEdges.filter((entry) => entry.id !== edge.id))}><X /></button></div>)}
+        </details>
+        <p role="status">{notice}</p>
+      </aside>
+    </div>
+    {innerPreview?.kind === "image" ? <CanvasImagePreviewDialog preview={innerPreview} onClose={() => setInnerPreview(null)} /> : null}
+    {innerPreview?.kind === "text" ? <CanvasTextPreviewDialog value={innerPreview.value} onClose={() => setInnerPreview(null)} /> : null}
+  </dialog>;
+}
 
 function CanvasNodeTextEditor({
   nodeId,
@@ -2530,7 +2731,21 @@ function NodeInspector({
         <small>{subtitleNodeRun?.internalMetadata?.subtitle ? "修改文字和时间轴" : subtitleNodeRun ? "该结果需重新运行一次后才能校对" : "首次生成字幕后可校对"}</small>
       </div>
       <CanvasSubtitleStyleEditor node={node} media={subtitlePreviewMedia} onPatch={onPatch} />
-    </> : definition.fields.map((field) => {
+    </> : <CanvasNodeFields node={node} onChange={onChange} onPatch={onPatch} onPreviewImage={onPreviewImage} />}
+    <div className="canvas-port-list"><span>输入</span>{definition.inputs.length ? definition.inputs.map((port) => <small key={port.id}>{port.label} · {portKindLabel(port.kind)}{port.required ? " · 必填" : ""}</small>) : <small>无</small>}</div>
+    <div className="canvas-port-list"><span>输出</span>{definition.outputs.length ? definition.outputs.map((port) => <small key={port.id}>{port.label} · {portKindLabel(port.kind)}</small>) : <small>无</small>}</div>
+  </div>;
+}
+
+function CanvasNodeFields({ node, onChange, onPatch, onPreviewImage }: {
+  node: CanvasNode;
+  onChange: (key: string, value: CanvasEditableConfigValue) => void;
+  onPatch: (patch: CanvasNode["config"]) => void;
+  onPreviewImage: (url: string, index: number) => void;
+}) {
+  const definition = getCanvasNodeDefinition(node.type, node.version);
+  if (!definition) return null;
+  return <>{definition.fields.map((field) => {
       if (field.key === "outputCompression" && node.config.outputFormat !== "jpeg") return null;
       if (field.key === "template" && node.config.preset !== "custom") return null;
       if (node.type === "utility.text-split" && (field.key === "delimiter" || field.key === "delimiterIndex") && node.config.mode !== "delimiter") return null;
@@ -2551,17 +2766,15 @@ function NodeInspector({
             const next = event.target.value;
             if (field.key === "resolution" && next === "4k" && !["16:9", "9:16", "2:1", "1:2", "21:9", "9:21"].includes(String(node.config.ratio))) {
               const [width, height] = String(node.config.ratio || "1:1").split(":").map(Number);
-              onChange("ratio", width < height ? "9:16" : "16:9");
+              onPatch({ ratio: width < height ? "9:16" : "16:9", resolution: next });
+              return;
             }
             onChange(field.key, next);
           }}>{options?.map((option) => <option key={option.value} value={option.value}>{option.label}</option>)}</select>
           : field.kind === "boolean" ? <input type="checkbox" checked={value === true} onChange={(event) => onChange(field.key, event.target.checked)} />
           : <input type={field.kind === "number" ? "number" : "text"} min={field.min} max={field.max} value={value === undefined ? "" : String(value)} placeholder={field.placeholder} onChange={(event) => onChange(field.key, field.kind === "number" ? Number(event.target.value) : event.target.value)} />}
       </label>;
-    })}
-    <div className="canvas-port-list"><span>输入</span>{definition.inputs.length ? definition.inputs.map((port) => <small key={port.id}>{port.label} · {portKindLabel(port.kind)}{port.required ? " · 必填" : ""}</small>) : <small>无</small>}</div>
-    <div className="canvas-port-list"><span>输出</span>{definition.outputs.length ? definition.outputs.map((port) => <small key={port.id}>{port.label} · {portKindLabel(port.kind)}</small>) : <small>无</small>}</div>
-  </div>;
+    })}</>;
 }
 
 function CanvasMediaMaskEditor({ node, onPatch }: { node: CanvasNode; onPatch: (patch: CanvasNode["config"]) => void }) {
@@ -4134,8 +4347,7 @@ function CanvasScheduleV2Editor({ schedule, graph, busy, onDefinitionChange, onA
   if (!definition) return <div className="canvas-task-empty"><AlertTriangle /><span>灵活调度定义缺失</span></div>;
   const collectionPreset = canvasCollectionScheduleDefinition(graph);
   const childOutputs = graph.nodes.flatMap((node) => {
-    const nodeDefinition = getCanvasNodeDefinition(node.type, node.version);
-    return (nodeDefinition?.outputs || []).filter((port) => ["text", "images", "videos"].includes(port.kind)).map((port) => ({
+    return getCanvasIterationOutputPorts(node).filter((port) => ["text", "images", "videos"].includes(port.kind)).map((port) => ({
       node,
       port,
       label: `${canvasNodeDisplayName(node)} · ${port.label} · ${node.id.slice(-4)}`,
@@ -4274,8 +4486,8 @@ function CanvasScheduleV2Editor({ schedule, graph, busy, onDefinitionChange, onA
             return <label key={`${candidate.node.id}-${candidate.port.id}`} className={selected ? "is-selected" : ""}>
               <input type="checkbox" checked={selected} onChange={(event) => patchDefinition({
                 sharedOutputs: event.target.checked
-                  ? [...sharedOutputs.filter((output) => candidate.node.type !== "input.content-collection" || output.nodeId !== candidate.node.id), ...sharedOutputCandidates.filter((item) => item.node.id === candidate.node.id && (candidate.node.type === "input.content-collection" || item.port.id === candidate.port.id)).map((item) => ({ nodeId: item.node.id, outputPort: item.port.id, artifactKind: item.artifactKind }))]
-                  : sharedOutputs.filter((output) => output.nodeId !== candidate.node.id || (candidate.node.type !== "input.content-collection" && output.outputPort !== candidate.port.id)),
+                  ? [...sharedOutputs.filter((output) => !(["input.content-collection", "utility.image-iterate"].includes(candidate.node.type)) || output.nodeId !== candidate.node.id), ...sharedOutputCandidates.filter((item) => item.node.id === candidate.node.id && ((["input.content-collection", "utility.image-iterate"].includes(candidate.node.type)) || item.port.id === candidate.port.id)).map((item) => ({ nodeId: item.node.id, outputPort: item.port.id, artifactKind: item.artifactKind }))]
+                  : sharedOutputs.filter((output) => output.nodeId !== candidate.node.id || (!(["input.content-collection", "utility.image-iterate"].includes(candidate.node.type)) && output.outputPort !== candidate.port.id)),
               })} />
               <span><strong>{canvasNodeDisplayName(candidate.node)}</strong><small>{candidate.port.label} · {portKindLabel(candidate.port.kind)} · 每个主任务 1 次</small></span>
               <CheckCircle2 />
@@ -5623,8 +5835,9 @@ function resolveQuickAddConnection(nodes: FlowNode[], params: OnConnectStartPara
 function quickAddChoices(connection: QuickAddConnection | undefined, edges: FlowEdge[]): QuickAddChoice[] {
   if (connection?.handleType === "target" && isQuickAddTargetOccupied(connection, edges)) return [];
   return canvasNodeDefinitions.flatMap((definition) => {
+    if (definition.type === "input.iteration-item") return [];
     if (!connection) return [{ definition }];
-    const ports = connection.handleType === "source" ? definition.inputs : definition.outputs;
+    const ports = connection.handleType === "source" ? definition.inputs : definition.type === "utility.image-iterate" ? getCanvasIterationOutputPorts(createCanvasNode(definition.type, "iteration-preview", { x: 0, y: 0 })) : definition.outputs;
     return ports.filter((port) => isQuickAddPortCompatible(connection, port)).map((port) => ({ definition, port }));
   });
 }
@@ -6105,20 +6318,21 @@ function canvasScheduleSharedOutputCandidates(
   const candidates: Array<{ node: CanvasNode; port: CanvasPortDefinition; artifactKind: CanvasScheduleV2Definition["childResult"]["artifactKind"] }> = [];
   for (const node of graph.nodes) {
     const nodeDefinition = getCanvasNodeDefinition(node.type, node.version);
-    const port = nodeDefinition?.outputs[0];
+    const outputPorts = getCanvasIterationOutputPorts(node);
+    const port = outputPorts[0];
     if (!nodeDefinition
       || (nodeDefinition.category === "input" && node.type !== "input.content-collection")
       || nodeDefinition.passiveSink
       || nodeDefinition.capability === "external_write"
       || getCanvasNodeExecutionMode(node) === "disabled"
-      || (nodeDefinition.outputs.length !== 1 && node.type !== "input.content-collection")
+      || (outputPorts.length !== 1 && node.type !== "input.content-collection" && node.type !== "utility.image-iterate")
       || !port
       || !isCanvasScheduleArtifactKind(port.kind)
       || node.id === definition.childResult.nodeId
       || !hasCanvasGraphPath(graph, node.id, definition.childResult.nodeId)) continue;
     const ancestors = collectCanvasGraphAncestors(graph, node.id);
     if (Array.from(childBindingNodeIds).some((nodeId) => ancestors.has(nodeId))) continue;
-    for (const output of nodeDefinition.outputs) {
+    for (const output of outputPorts) {
       if (isCanvasScheduleArtifactKind(output.kind)) candidates.push({ node, port: output, artifactKind: output.kind });
     }
   }
@@ -6230,6 +6444,8 @@ function categoryLabel(category: string) { return ({ input: "输入", model: "�
 function portKindLabel(kind: CanvasPortKind) { return ({ any: "任意", visual: "图片或视频", text: "文字", images: "图片", audios: "音乐", videos: "视频", socialPost: "内容", publishJobRef: "发布任务" } as Record<CanvasPortKind, string>)[kind]; }
 function iconForNode(type: CanvasNodeType) {
   const props = { className: "h-4 w-4" };
+  if (type === "utility.image-iterate") return <RefreshCw {...props} />;
+  if (type === "input.iteration-item") return <ImageIcon {...props} />;
   if (type === "input.text") return <Type {...props} />;
   if (type === "input.images") return <ImageIcon {...props} />;
   if (type === "input.source-video") return <FileVideo2 {...props} />;

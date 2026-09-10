@@ -21,6 +21,9 @@ node --env-file=.env.local .trellis/verification/unified_library_postgres_benchm
 
 ## Current Automated Checks
 
+- `canvas_iteration_contract_check.mjs`, `canvas_iteration_runtime_check.mjs`, `canvas_iteration_runs_check.mjs`, `canvas_iteration_actions_check.mjs`, and `canvas_iteration_queue_check.mjs` cover nested graph validation, multi-port snapshots, identity/order, bounded admission, repair versus delivery, owner/published guards, durable wake/park races, cancellation and SQLite recovery. PostgreSQL queue SQL is checked structurally, not against a live server. All are part of the offline baseline.
+- `python .trellis/verification/canvas_iteration_browser_check.py` checks region editing, persistence, result repair/refresh and shared outputs at 1440px/390px using intercepted APIs. Use `BROWSER_BASE_URL` with an existing worker-disabled loopback smoke server; port 3001 is rejected.
+
 - `simple_image_dimensions_check.mjs` covers dropdown contracts and frozen settings/API propagation; `simple_image_dimensions_browser_check.py` mocks save/reload/launch and 4K restrictions at 1440px/390px.
 
 - `image_exact_pixels_check.mjs` covers exact request fields, unsupported ToAPIs input, PNG/JPEG byte preservation, mismatch/corrupt-output rejection before persistence, no retry/fallback, resume and auto/ratio mode using isolated fixtures.

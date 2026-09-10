@@ -10,8 +10,33 @@ import { canvasSubtitleStyleConfig, defaultCanvasSubtitleStyle, validateCanvasSu
 import { decodeCanvasSubtitleRevisionSnapshot } from "./subtitle-editor";
 import { validateCanvasVideoLoaderConfig } from "./video-loader";
 import { validateCanvasCollectionConfig } from "./content-collection";
+import { createCanvasIterationDefinition } from "./iteration";
 
 const canvasNodeDefinitionVersions: CanvasNodeDefinition[] = [
+  {
+    type: "utility.image-iterate", version: 1, label: "逐图迭代", description: "对 1–18 张图片分别执行内部流程，按原顺序汇总结果。",
+    category: "utility", icon: "Repeat", color: "#0f9f7f",
+    inputs: [
+      { id: "images", label: "逐张图片", kind: "images", required: true, multiple: true },
+      { id: "text", label: "共享文字", kind: "text", multiple: true },
+      { id: "references", label: "共享参考图", kind: "images", multiple: true },
+    ],
+    outputs: [{ id: "text", label: "汇总文字", kind: "text" }, { id: "images", label: "汇总图片", kind: "images" }],
+    fields: [
+      { key: "concurrency", label: "并发数", kind: "number", min: 1, max: 20 },
+      { key: "failurePolicy", label: "成功条件", kind: "select", options: [{ value: "all", label: "全部成功" }, { value: "at-least-one", label: "至少一项成功" }] },
+    ],
+    defaultConfig: { concurrency: 4, failurePolicy: "all" },
+  },
+  {
+    type: "input.iteration-item", version: 1, label: "当前迭代项", description: "由迭代运行注入当前图片、序号和共享输入。",
+    category: "input", icon: "Image", color: "#0f9f7f", inputs: [],
+    outputs: [
+      { id: "images", label: "当前图片", kind: "images" }, { id: "index", label: "序号", kind: "text" },
+      { id: "text", label: "共享文字", kind: "text" }, { id: "references", label: "共享参考图", kind: "images" },
+    ],
+    fields: [], defaultConfig: {},
+  },
   {
     type: "input.text",
     version: 1,
@@ -891,6 +916,7 @@ export function createCanvasNode(type: CanvasNodeType, id: string, position: { x
     position,
     config: structuredClone(definition.defaultConfig),
     executionMode: "enabled",
+    ...(type === "utility.image-iterate" ? { iteration: createCanvasIterationDefinition() } : {}),
   };
 }
 
@@ -902,6 +928,10 @@ export function validateCanvasNodeConfig(type: CanvasNodeType, config: CanvasNod
   const definition = getCanvasNodeDefinition(type, version);
   if (!definition) return [`Unknown canvas node type: ${type}`];
   const errors: string[] = [];
+  if (type === "utility.image-iterate") {
+    if (!Number.isInteger(config.concurrency) || Number(config.concurrency) < 1 || Number(config.concurrency) > 20) errors.push("Image iteration concurrency must be an integer from 1 to 20.");
+    if (config.failurePolicy !== "all" && config.failurePolicy !== "at-least-one") errors.push("Image iteration failure policy must be all or at-least-one.");
+  }
   for (const field of definition.fields) {
     if (type === "utility.text-split" && field.key === "delimiterIndex" && config.mode !== "delimiter") continue;
     const value = config[field.key];
@@ -1037,6 +1067,9 @@ export function validateCanvasNodeConfig(type: CanvasNodeType, config: CanvasNod
 }
 
 export function upgradeCanvasNode(node: CanvasNode): CanvasNode {
+  if (node.type === "utility.image-iterate" && node.iteration) {
+    return { ...structuredClone(node), executionMode: getCanvasNodeExecutionMode(node), iteration: { ...structuredClone(node.iteration), graph: upgradeCanvasGraph(node.iteration.graph) } };
+  }
   if (node.type === "compose.social-post") {
     const definition = getCanvasNodeDefinition(node.type);
     return {

@@ -1,4 +1,5 @@
 import { decodeCanvasGraphFragment } from "./serialization";
+import { getCanvasGraphBudget, stripPortableCanvasNode } from "./iteration";
 import { CANVAS_GRAPH_LIMITS } from "./types";
 import type { CanvasEdge, CanvasGraph, CanvasNode, CanvasPosition, CanvasSchedulerRole } from "./types";
 
@@ -18,11 +19,13 @@ export function createCanvasClipboardPayload(
   selectedNodeIds: Iterable<string>,
 ): CanvasClipboardPayload | undefined {
   const selected = new Set(selectedNodeIds);
-  const copiedNodes = nodes.filter((node) => selected.has(node.id)).map((node) => structuredClone(node));
+  const copiedNodes = nodes.filter((node) => selected.has(node.id)).map(stripPortableCanvasNode);
   if (!copiedNodes.length || copiedNodes.length > CANVAS_GRAPH_LIMITS.maxNodes) return undefined;
   const copiedIds = new Set(copiedNodes.map((node) => node.id));
   const copiedEdges = edges.filter((edge) => copiedIds.has(edge.source) && copiedIds.has(edge.target)).map((edge) => structuredClone(edge));
   if (copiedEdges.length > CANVAS_GRAPH_LIMITS.maxEdges) return undefined;
+  const budget = getCanvasGraphBudget({ nodes: copiedNodes, edges: copiedEdges });
+  if (budget.nodes > CANVAS_GRAPH_LIMITS.maxNodes || budget.edges > CANVAS_GRAPH_LIMITS.maxEdges) return undefined;
   return { kind: clipboardKind, version: 1, nodes: copiedNodes, edges: copiedEdges };
 }
 
@@ -46,8 +49,20 @@ export function instantiateCanvasClipboardPayload(
   const minX = Math.min(...payload.nodes.map((node) => node.position.x));
   const minY = Math.min(...payload.nodes.map((node) => node.position.y));
   const idMap = new Map(payload.nodes.map((node, index) => [node.id, createId("node", index)]));
+  let nodeIndex = payload.nodes.length;
+  let edgeIndex = payload.edges.length;
+  const cloneNode = (source: CanvasNode): CanvasNode => {
+    const cloned = stripPortableCanvasNode(source);
+    if (!cloned.iteration) return cloned;
+    const graph = cloned.iteration.graph;
+    const innerIds = new Map(graph.nodes.map((node) => [node.id, createId("node", nodeIndex++)]));
+    graph.nodes = graph.nodes.map((node) => ({ ...cloneNode(node), id: innerIds.get(node.id)! }));
+    graph.edges = graph.edges.map((edge) => ({ ...edge, id: createId("edge", edgeIndex++), source: innerIds.get(edge.source)!, target: innerIds.get(edge.target)! }));
+    for (const selector of Object.values(cloned.iteration.outputs)) selector.nodeId = innerIds.get(selector.nodeId)!;
+    return cloned;
+  };
   const nodes = payload.nodes.map((node) => ({
-    ...structuredClone(node),
+    ...cloneNode(node),
     id: idMap.get(node.id) as string,
     position: { x: anchor.x + node.position.x - minX, y: anchor.y + node.position.y - minY },
   }));
@@ -67,10 +82,11 @@ export function prepareCanvasClipboardPaste(
   createId: (kind: "node" | "edge", index: number) => string,
 ) {
   const fragment = instantiateCanvasClipboardPayload(payload, anchor, createId);
-  if (currentGraph.nodes.length + fragment.nodes.length > CANVAS_GRAPH_LIMITS.maxNodes) {
+  const budget = getCanvasGraphBudget({ nodes: [...currentGraph.nodes, ...fragment.nodes], edges: [...currentGraph.edges, ...fragment.edges] });
+  if (budget.nodes > CANVAS_GRAPH_LIMITS.maxNodes) {
     throw new Error(`Canvas supports at most ${CANVAS_GRAPH_LIMITS.maxNodes} nodes.`);
   }
-  if (currentGraph.edges.length + fragment.edges.length > CANVAS_GRAPH_LIMITS.maxEdges) {
+  if (budget.edges > CANVAS_GRAPH_LIMITS.maxEdges) {
     throw new Error(`Canvas supports at most ${CANVAS_GRAPH_LIMITS.maxEdges} edges.`);
   }
   const currentNodeIds = new Set(currentGraph.nodes.map((node) => node.id));

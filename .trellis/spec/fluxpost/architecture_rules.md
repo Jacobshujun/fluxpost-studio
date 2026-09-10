@@ -1593,6 +1593,13 @@ Stop-PortListener -Port 3001
 Start-CandidateServer -Slot $targetSlot -Commit $ReleaseSha
 ```
 
+## Canvas Image Iteration
+
+- Image regions own a one-level inner graph and 1-18 durable image item runs; `iterationContext` is separate from schedule child identity. Inner graphs accept text/image tools only, never collection, nested iteration, post composition or external writes. Snapshot inputs and preserve source indices, including duplicate URLs.
+- Region admission is bounded; parent runs park without polling. Queue completion and parent wake are atomic; recovery reconciles expired leases without resubmitting terminal items. Cancelled attempts retain iteration metadata, and cancellation resets require explicit retry.
+- Region success policy and schedule aggregation policy are independent. Repair after accepted partial delivery never automatically updates downstream; explicit refresh excludes publishing and rejects published outputs. V2 explicit refresh produces a new aggregate draft while retaining the old draft. Shared outputs freeze all configured ports and cannot depend on child-scoped parameters.
+- Shared completion is immutable. Iteration refresh rejects paused/cancelled schedules and records delivered revisions for replay safety. Runtime item history is excluded from ordinary workflow history/reuse; region configuration participates in execution fingerprints.
+
 ## Trellis Rules
 
 - `.trellis/` is the only active persistent AI collaboration system. `.trellis/spec/fluxpost/` is the FluxPost project-memory layer inside that system.

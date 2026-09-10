@@ -10,6 +10,11 @@ const npmCommand = process.platform === "win32" ? "npm.cmd" : "npm";
 const npxCommand = process.platform === "win32" ? "npx.cmd" : "npx";
 
 const nodeChecks = [
+  ["Canvas iteration contracts", "canvas_iteration_contract_check.mjs"],
+  ["Canvas iteration runtime", "canvas_iteration_runtime_check.mjs"],
+  ["Canvas iteration runs", "canvas_iteration_runs_check.mjs"],
+  ["Canvas iteration queue", "canvas_iteration_queue_check.mjs"],
+  ["Canvas iteration actions", "canvas_iteration_actions_check.mjs"],
   ["PostgreSQL schema check", "postgres_schema_check.mjs"],
   ["Workspace accounts check", "workspace_accounts_check.mjs"],
   ["Reference library assets check", "library_assets_check.mjs"],

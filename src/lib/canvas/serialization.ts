@@ -1,4 +1,5 @@
 import { getCanvasNodeDefinition } from "./registry";
+import { getCanvasGraphBudget, getCanvasIterationOutputPorts, stripCanvasConfigSecrets, validateCanvasIteration } from "./iteration";
 import { decodeCanvasSubtitleRevisionSnapshot } from "./subtitle-editor";
 import { MAX_CANVAS_VIDEO_LOADER_ITEMS, normalizeCanvasVideoSnapshot } from "./video-loader";
 import {
@@ -28,7 +29,11 @@ export function decodeCanvasGraph(value: unknown): CanvasGraph {
   return { ...fragment, viewport: decodeCanvasViewport(value.viewport) };
 }
 
-export function decodeCanvasGraphFragment(nodesValue: unknown, edgesValue: unknown, allowEmpty = false) {
+export function decodeCanvasGraphFragment(nodesValue: unknown, edgesValue: unknown, allowEmpty = false): { nodes: CanvasNode[]; edges: CanvasEdge[] } {
+  return decodeGraphFragment(nodesValue, edgesValue, allowEmpty, false);
+}
+
+function decodeGraphFragment(nodesValue: unknown, edgesValue: unknown, allowEmpty: boolean, insideIteration: boolean): { nodes: CanvasNode[]; edges: CanvasEdge[] } {
   if (!Array.isArray(nodesValue) || (!allowEmpty && nodesValue.length === 0)) {
     throw new CanvasSerializationError("Canvas graph must contain at least one node.");
   }
@@ -53,7 +58,11 @@ export function decodeCanvasGraphFragment(nodesValue: unknown, edgesValue: unkno
       throw new CanvasSerializationError(`Unknown canvas node type or version: ${String(valueNode.type || "(missing)")}.`);
     }
     if (!isCanvasPosition(valueNode.position)) throw new CanvasSerializationError(`Node ${valueNode.id} has an invalid position.`);
-    if (!isCanvasNodeConfig(valueNode.config, definition.type)) throw new CanvasSerializationError(`Node ${valueNode.id} has an invalid config.`);
+    if (definition.type === "input.iteration-item" && !insideIteration) throw new CanvasSerializationError("Iteration item roots are only allowed inside image iteration regions.");
+    if (insideIteration && (definition.type === "utility.image-iterate" || valueNode.iteration !== undefined)) throw new CanvasSerializationError("Nested iteration regions are not allowed.");
+    if (definition.type !== "utility.image-iterate" && (valueNode.iteration !== undefined || valueNode.frozenOutputs !== undefined)) throw new CanvasSerializationError("Only image iteration regions may contain iteration graphs or frozen outputs.");
+    const config = isRecord(valueNode.config) ? stripCanvasConfigSecrets(valueNode.config as CanvasNode["config"]) : valueNode.config;
+    if (!isCanvasNodeConfig(config, definition.type)) throw new CanvasSerializationError(`Node ${valueNode.id} has an invalid config.`);
     if (valueNode.label !== undefined && (typeof valueNode.label !== "string" || valueNode.label.length > maxNodeLabelLength)) {
       throw new CanvasSerializationError(`Node ${valueNode.id} has an invalid label.`);
     }
@@ -67,17 +76,32 @@ export function decodeCanvasGraphFragment(nodesValue: unknown, edgesValue: unkno
       throw new CanvasSerializationError(`Node ${valueNode.id} has an invalid scheduler role.`);
     }
     nodeIds.add(valueNode.id);
-    nodes.push({
+    const node: CanvasNode = {
       id: valueNode.id,
       type: definition.type,
       version: definition.version,
       position: { x: valueNode.position.x, y: valueNode.position.y },
-      config: structuredClone(valueNode.config),
+      config: structuredClone(config),
       ...(isCanvasNodeSize(valueNode.size) ? { size: structuredClone(valueNode.size) } : {}),
       ...(typeof valueNode.label === "string" ? { label: valueNode.label } : {}),
       ...(typeof valueNode.executionMode === "string" ? { executionMode: valueNode.executionMode as CanvasNode["executionMode"] } : {}),
       ...(typeof valueNode.schedulerRole === "string" ? { schedulerRole: valueNode.schedulerRole as CanvasNode["schedulerRole"] } : {}),
-    });
+    };
+    if (definition.type === "utility.image-iterate") {
+      const iteration = valueNode.iteration;
+      if (!isRecord(iteration) || !isRecord(iteration.graph) || !isRecord(iteration.outputs)) throw new CanvasSerializationError("Image iteration requires an inner graph and output selectors.");
+      const fragment = decodeGraphFragment(iteration.graph.nodes, iteration.graph.edges, false, true);
+      const outputs: NonNullable<CanvasNode["iteration"]>["outputs"] = {};
+      for (const [kind, selector] of Object.entries(iteration.outputs)) {
+        if ((kind !== "text" && kind !== "images") || !isRecord(selector) || !isCanvasIdentifier(selector.nodeId) || !isCanvasIdentifier(selector.outputPort)) throw new CanvasSerializationError("Invalid image iteration output selector.");
+        outputs[kind] = { nodeId: selector.nodeId, outputPort: selector.outputPort };
+      }
+      node.iteration = { graph: { ...fragment, viewport: decodeCanvasViewport(iteration.graph.viewport) }, outputs };
+      if (valueNode.frozenOutputs !== undefined) node.frozenOutputs = structuredClone(valueNode.frozenOutputs) as CanvasNode["frozenOutputs"];
+      const errors = validateCanvasIteration(node, false);
+      if (errors.length) throw new CanvasSerializationError(errors.join(" "));
+    }
+    nodes.push(node);
   }
 
   const nodesById = new Map(nodes.map((node) => [node.id, node]));
@@ -96,7 +120,7 @@ export function decodeCanvasGraphFragment(nodesValue: unknown, edgesValue: unkno
     if (typeof valueEdge.sourcePort !== "string" || typeof valueEdge.targetPort !== "string") {
       throw new CanvasSerializationError(`Edge ${valueEdge.id} has invalid ports.`);
     }
-    const output = getCanvasNodeDefinition(source.type, source.version)?.outputs.find((port) => port.id === valueEdge.sourcePort);
+    const output = getCanvasIterationOutputPorts(source).find((port) => port.id === valueEdge.sourcePort);
     const input = getCanvasNodeDefinition(target.type, target.version)?.inputs.find((port) => port.id === valueEdge.targetPort);
     if (!output || !input) throw new CanvasSerializationError(`Edge ${valueEdge.id} uses a missing port.`);
     if (!areCanvasPortKindsCompatible(output.kind, input.kind)) {
@@ -112,6 +136,8 @@ export function decodeCanvasGraphFragment(nodesValue: unknown, edgesValue: unkno
     });
   }
   if (hasCycle(nodes, edges)) throw new CanvasSerializationError("Canvas graph must not contain cycles.");
+  const budget = getCanvasGraphBudget({ nodes, edges });
+  if (budget.nodes > CANVAS_GRAPH_LIMITS.maxNodes || budget.edges > CANVAS_GRAPH_LIMITS.maxEdges) throw new CanvasSerializationError("Canvas total node or edge budget exceeded, including iteration children.");
   return { nodes, edges };
 }
 

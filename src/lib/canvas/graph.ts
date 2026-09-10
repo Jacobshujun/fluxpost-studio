@@ -2,6 +2,7 @@ import { getCanvasNodeDefinition, getCanvasNodeExecutionMode, validateCanvasNode
 import { areCanvasPortKindsCompatible, CANVAS_GRAPH_LIMITS, CANVAS_NODE_SIZE_LIMITS, CANVAS_SCHEDULER_ROLES, isCanvasNodeSize } from "./types";
 import type { CanvasEdge, CanvasGraph, CanvasGraphValidation, CanvasNodeCapability, CanvasRunPlan, CanvasSchedulerRole } from "./types";
 import { validateSeedanceGraphNode } from "./seedance-references";
+import { getCanvasGraphBudget, getCanvasIterationOutputPorts, validateCanvasIteration } from "./iteration";
 
 const schedulerRoles = new Set<CanvasSchedulerRole>(CANVAS_SCHEDULER_ROLES);
 
@@ -18,8 +19,9 @@ function validateCanvasGraphWithMode(graph: CanvasGraph, validateExecution: bool
   if (!graph || !Array.isArray(graph.nodes) || !Array.isArray(graph.edges)) {
     return { valid: false, errors: ["Canvas graph must contain nodes and edges."], order: [] };
   }
-  if (graph.nodes.length > CANVAS_GRAPH_LIMITS.maxNodes) errors.push(`Canvas supports at most ${CANVAS_GRAPH_LIMITS.maxNodes} nodes.`);
-  if (graph.edges.length > CANVAS_GRAPH_LIMITS.maxEdges) errors.push(`Canvas supports at most ${CANVAS_GRAPH_LIMITS.maxEdges} edges.`);
+  const budget = getCanvasGraphBudget(graph);
+  if (budget.nodes > CANVAS_GRAPH_LIMITS.maxNodes) errors.push(`Canvas supports at most ${CANVAS_GRAPH_LIMITS.maxNodes} nodes, including iteration children.`);
+  if (budget.edges > CANVAS_GRAPH_LIMITS.maxEdges) errors.push(`Canvas supports at most ${CANVAS_GRAPH_LIMITS.maxEdges} edges, including iteration children.`);
 
   const nodes = new Map<string, (typeof graph.nodes)[number]>();
   const schedulerRoleNodes = new Map<CanvasSchedulerRole, string>();
@@ -37,10 +39,11 @@ function validateCanvasGraphWithMode(graph: CanvasGraph, validateExecution: bool
     }
     if (node.version !== definition.version) errors.push(`${definition.label} node ${node.id} uses unsupported version ${node.version}.`);
     const executionMode = getCanvasNodeExecutionMode(node);
+    errors.push(...validateCanvasIteration(node, validateExecution && executionMode === "enabled"));
     const schedulerBoundImageInput = (node.schedulerRole === "scene-input" || node.schedulerRole === "vehicle-input")
       && (node.type === "input.images" || node.type === "input.library-images");
     const schedulerBoundCopyInput = node.schedulerRole === "copy-input" && node.type === "input.copy-library";
-    if (validateExecution && executionMode === "enabled" && !schedulerBoundImageInput && !schedulerBoundCopyInput) {
+    if (validateExecution && executionMode === "enabled" && !schedulerBoundImageInput && !schedulerBoundCopyInput && !node.frozenOutputs) {
       errors.push(...validateCanvasNodeConfig(node.type, node.config || {}, node.version));
     }
     if (executionMode === "bypass" && !definition.bypass) errors.push(`${definition.label} does not support bypass mode.`);
@@ -71,9 +74,8 @@ function validateCanvasGraphWithMode(graph: CanvasGraph, validateExecution: bool
       continue;
     }
     if (source.id === target.id) errors.push(`Edge ${edge.id} cannot connect a node to itself.`);
-    const sourceDefinition = getCanvasNodeDefinition(source.type, source.version);
     const targetDefinition = getCanvasNodeDefinition(target.type, target.version);
-    const output = sourceDefinition?.outputs.find((port) => port.id === edge.sourcePort);
+    const output = getCanvasIterationOutputPorts(source).find((port) => port.id === edge.sourcePort);
     const input = targetDefinition?.inputs.find((port) => port.id === edge.targetPort);
     if (!output) errors.push(`Edge ${edge.id} uses missing output port ${edge.sourcePort}.`);
     if (!input) errors.push(`Edge ${edge.id} uses missing input port ${edge.targetPort}.`);
@@ -88,7 +90,7 @@ function validateCanvasGraphWithMode(graph: CanvasGraph, validateExecution: bool
   for (const node of graph.nodes) {
     const definition = getCanvasNodeDefinition(node.type, node.version);
     const executionMode = getCanvasNodeExecutionMode(node);
-    const requiredInputs = !validateExecution || executionMode === "disabled"
+    const requiredInputs = !validateExecution || executionMode === "disabled" || node.frozenOutputs
       ? []
       : executionMode === "bypass"
         ? (definition?.inputs || []).filter((input) => input.id === definition?.bypass?.inputPort)
@@ -126,7 +128,7 @@ export function buildCanvasRunPlan(graph: CanvasGraph, targetNodeIds?: string[])
     const executionMode = getCanvasNodeExecutionMode(node);
     if (executionMode === "disabled") return { nodeId, action: "disabled" as const };
 
-    const requiredInputs = executionMode === "bypass"
+    const requiredInputs = node.frozenOutputs ? [] : executionMode === "bypass"
       ? definition.inputs.filter((input) => input.id === definition.bypass?.inputPort)
       : definition.inputs.filter((input) => input.required);
     const missingInput = requiredInputs.find((input) => !graph.edges.some((edge) =>
@@ -143,7 +145,13 @@ export function buildCanvasRunPlan(graph: CanvasGraph, targetNodeIds?: string[])
     }
 
     const action = executionMode === "bypass" ? "bypass" as const : "execute" as const;
-    for (const output of definition.outputs) availableOutputs.add(`${nodeId}:${output.id}`);
+    if (action === "execute" && node.type === "utility.image-iterate" && node.iteration && !node.frozenOutputs) {
+      const innerPlan = buildCanvasRunPlan(node.iteration.graph, Object.values(node.iteration.outputs).map((selector) => selector.nodeId));
+      if (innerPlan.blockers.length) return { nodeId, action: "blocked" as const, message: `Image iteration: ${innerPlan.blockers[0].message}` };
+      if (innerPlan.confirmationNodeIds.length) confirmationNodeIds.push(nodeId);
+      for (const capability of innerPlan.capabilities) if (!capabilities.includes(capability)) capabilities.push(capability);
+    }
+    for (const output of getCanvasIterationOutputPorts(node)) availableOutputs.add(`${nodeId}:${output.id}`);
     if (action === "execute" && definition.capability) {
       confirmationNodeIds.push(nodeId);
       if (!capabilities.includes(definition.capability)) capabilities.push(definition.capability);
