@@ -31,7 +31,7 @@ assertContains(files.config, /const advancedConfigByKey = new Map/, "Advanced co
 assertContains(files.config, /if \(!definition\) throw new Error\(`Unsupported config key:/, "Unknown config keys must be rejected.");
 assertContains(files.config, /process\.env\.FLUXPOST_CONFIG_FILE\?\.trim\(\)/, "Advanced config must support an explicit persistent config file.");
 assertContains(files.config, /path\.join\(process\.cwd\(\),\s*"\.env\.local"\)/, "Local advanced config must still default to .env.local.");
-assertContains(files.config, /if \(configuredEnvironmentFile\) loadEnvironmentOverrides\(advancedEnvironmentFilePath\);[\s\S]*export let appConfig = readAppConfig\(\)/, "Persistent overrides must load before appConfig initialization.");
+assertContains(files.config, /if \(configuredEnvironmentFile\) loadEnvironmentOverrides\(advancedEnvironmentFilePath\);[\s\S]*export const appConfig\s*=/, "Persistent overrides must load before appConfig initialization.");
 assertContains(files.config, /writeFileSync\(envPath,/, "Advanced config must write environment changes through the helper.");
 assertContains(files.config, /const persistEmptyValues = Boolean\(configuredEnvironmentFile\)/, "Persistent config writes must retain clear tombstones.");
 assertContains(files.config, /if \(value === ""\) \{[\s\S]*delete process\.env\[key\]/, "Persistent empty values must clear inherited environment values.");
@@ -53,7 +53,82 @@ assertNotContains(files.page, /dangerouslySetInnerHTML/, "Advanced config page m
 assertNotContains(files.route, /process\.env\[[^\]]+\][\s\S]*NextResponse\.json/, "Config route must not directly return arbitrary process.env values.");
 
 checkImageProxyConfiguration();
-console.log("Advanced config admin boundary and image proxy persistence checks passed.");
+checkConfigSynchronization();
+console.log("Advanced config admin boundary, cross-module synchronization and image proxy persistence checks passed.");
+
+function checkConfigSynchronization() {
+  for (const platform of ["win32", "linux"]) {
+    const runtime = loadConfig(platform, {
+      OPENAI_BASE_URL: "https://old.example/v1",
+      OPENAI_API_KEY: "fixture-fallback-key",
+      OPENAI_IMAGE_BASE_URL: "https://old-image.example/v1",
+      OPENAI_IMAGE_API_KEY: "fixture-old-key",
+      OPENAI_IMAGE_PROXY_ENABLED: "false",
+    });
+    // Production bundling initializes the worker and API as separate module instances.
+    const worker = runtime.config;
+    const retainedConfig = worker.appConfig;
+    const api = runtime.loadModule();
+    api.saveAdvancedConfigPatch({ values: {
+      OPENAI_IMAGE_BASE_URL: "https://new-image.example/v1/",
+      OPENAI_IMAGE_API_KEY: "fixture-new-key",
+      OPENAI_IMAGE_MODEL: "fixture-image-model",
+      OPENAI_IMAGE_API_PROFILE: "openai_json",
+      OPENAI_IMAGE_BACKUP_BASE_URL: "https://backup.example/v1",
+      OPENAI_IMAGE_BACKUP_API_KEY: "fixture-backup-key",
+      OPENAI_IMAGE_BACKUP_MODEL: "fixture-backup-model",
+      OPENAI_IMAGE_BACKUP_API_PROFILE: "openai_sse",
+      OPENAI_TEXT_BASE_URL: "https://text.example/v1",
+      OPENAI_TEXT_MODEL: "fixture-text-model",
+      OPENAI_IMAGE_PROXY_ENABLED: true,
+      OPENAI_IMAGE_PROXY_URL: "http://127.0.0.1:10809",
+    } });
+    assert.equal(worker.openaiImageUrl("images/generations"), "https://new-image.example/v1/images/generations");
+    assert.equal(worker.openaiImageApiKey(), "fixture-new-key");
+    assert.equal(worker.openaiImageRouteConfig().model, "fixture-image-model");
+    assert.equal(worker.openaiImageRouteConfig().profile, "openai_json");
+    assert.equal(worker.openaiImageUrl("images/edits", "backup"), "https://backup.example/v1/images/edits");
+    assert.equal(worker.openaiImageApiKey("backup"), "fixture-backup-key");
+    assert.equal(worker.openaiImageRouteConfig("backup").model, "fixture-backup-model");
+    assert.equal(worker.openaiImageRouteConfig("backup").profile, "openai_sse");
+    assert.equal(worker.openaiTextUrl("responses"), "https://text.example/v1/responses");
+    assert.equal(retainedConfig.openaiTextModel, "fixture-text-model");
+    assert.equal(retainedConfig.openaiImageProxyEnabled, true);
+    assert.equal(retainedConfig.openaiImageProxyUrl, "http://127.0.0.1:10809");
+    assert.equal(worker.appConfig, retainedConfig, "a captured config reference must stay live");
+    assert.equal(api.appConfig, retainedConfig, "independent modules must share the live object");
+
+    const lateModule = runtime.loadModule();
+    assert.equal(lateModule.appConfig, retainedConfig);
+    lateModule.saveAdvancedConfigPatch({ values: {
+      OPENAI_BASE_URL: "https://fallback.example/v1",
+      OPENAI_IMAGE_BASE_URL: null,
+      OPENAI_IMAGE_API_KEY: null,
+      OPENAI_IMAGE_BACKUP_BASE_URL: null,
+      OPENAI_IMAGE_BACKUP_API_KEY: null,
+      OPENAI_IMAGE_PROXY_ENABLED: false,
+      OPENAI_IMAGE_PROXY_URL: null,
+    } });
+    assert.equal(worker.openaiImageUrl("images/generations"), "https://fallback.example/v1/images/generations");
+    assert.equal(api.openaiImageApiKey(), "fixture-fallback-key");
+    assert.equal(worker.isOpenaiImageRouteConfigured("backup"), false);
+    assert.equal(retainedConfig.openaiImageProxyEnabled, false);
+    assert.equal(retainedConfig.openaiImageProxyUrl, platform === "win32" ? "http://127.0.0.1:10808" : "");
+
+    const before = JSON.stringify(retainedConfig);
+    const persisted = runtime.persisted();
+    assert.throws(() => api.saveAdvancedConfigPatch({ values: { OPENAI_IMAGE_API_PROFILE: "invalid" } }));
+    runtime.failWrites(true);
+    assert.throws(() => api.saveAdvancedConfigPatch({ values: { OPENAI_IMAGE_BASE_URL: "https://unsaved.example/v1" } }), /fixture write failure/);
+    runtime.failWrites(false);
+    assert.equal(JSON.stringify(retainedConfig), before);
+    assert.equal(runtime.persisted(), persisted);
+    assert.equal(api.getConfigStatus().openaiImageBaseUrl, worker.getConfigStatus().openaiImageBaseUrl);
+    for (const field of worker.getAdvancedConfigSnapshot().groups.flatMap(group => group.fields).filter(field => field.kind === "secret")) {
+      assert.equal(field.value, undefined, "sharing config must not expose secrets");
+    }
+  }
+}
 
 function checkImageProxyConfiguration() {
   for (const platform of ["win32", "linux"]) {
@@ -113,6 +188,8 @@ function loadConfig(platform, values = {}, persisted = "") {
   const configPath = path.join(projectRoot, "isolated-config-fixture", ".env.local");
   const environment = { ...values, FLUXPOST_CONFIG_FILE: configPath };
   const nativeRequire = createRequire(import.meta.url);
+  const sharedGlobal = {};
+  let failWrites = false;
   const fakeFs = {
     existsSync: (file) => file === configPath && Boolean(persisted),
     readFileSync: (file) => {
@@ -121,6 +198,7 @@ function loadConfig(platform, values = {}, persisted = "") {
     },
     writeFileSync: (file, content) => {
       assert.equal(file, configPath);
+      if (failWrites) throw new Error("fixture write failure");
       persisted = content;
     },
   };
@@ -134,6 +212,7 @@ function loadConfig(platform, values = {}, persisted = "") {
       module: loadedModule,
       exports: loadedModule.exports,
       process: { env: environment, platform, cwd: () => projectRoot },
+      globalThis: sharedGlobal,
       URL,
       require: (name) => {
         if (name === "node:fs") return fakeFs;
@@ -145,7 +224,12 @@ function loadConfig(platform, values = {}, persisted = "") {
     }, { filename: relative });
     return loadedModule.exports;
   }
-  return { config: load("src/lib/config.ts"), persisted: () => persisted };
+  return {
+    config: load("src/lib/config.ts"),
+    loadModule: () => load("src/lib/config.ts"),
+    persisted: () => persisted,
+    failWrites: (value) => { failWrites = value; },
+  };
 }
 
 function read(relativePath) {

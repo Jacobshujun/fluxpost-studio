@@ -131,6 +131,7 @@ Last updated: 2026-07-20
 - Writable keys must be present in the allow-list built from `advancedConfigGroups`; unknown keys are rejected.
 - `null` patch values mean clear/remove the environment key. Local `.env.local` writes remove cleared keys; an explicit `FLUXPOST_CONFIG_FILE` retains empty tombstones so inherited base values stay cleared after restart.
 - Successful writes update the selected environment file, update `process.env` for the current process, and call `reloadAppConfig()`.
+- `appConfig` is one process-global object shared by API and startup-worker bundles. Reload updates that object in place so already loaded modules and retained references see saved values. A module-local snapshot or reassignment does not synchronize separate Next.js bundles. The contract covers subsequent reads in this process, not external file edits or requests already sent.
 - Docker production sets `FLUXPOST_CONFIG_FILE=/app/config/.env.local`, mounts the `fluxpost-config` named volume at `/app/config`, and loads persisted overrides before `appConfig` initialization. Persisted values take precedence over `deploy/env.production` base values.
 
 ### 4. Validation & Error Matrix
@@ -151,6 +152,7 @@ Last updated: 2026-07-20
 
 - `.trellis/verification/advanced_config_check.mjs` must assert plain status compatibility, admin-only advanced read/write, secret masking, allow-list rejection, admin-only navigation, persistent Compose mounting, pre-initialization override loading, clear tombstones, and mount-point ownership.
 - Full baseline must include the advanced config check before lint/type-check/build.
+- `advanced_config_check.mjs` exercises independent modules, repeated saves, clearing/fallbacks, retained references and failed writes. After building, `advanced_config_build_check.mjs` executes the actual API/worker config factories with synthetic environment and in-memory files; real config, database and network access are excluded.
 
 ### 7. Wrong vs Correct
 

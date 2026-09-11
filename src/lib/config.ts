@@ -40,7 +40,14 @@ const advancedEnvironmentFilePath = configuredEnvironmentFile
 
 if (configuredEnvironmentFile) loadEnvironmentOverrides(advancedEnvironmentFilePath);
 
-export let appConfig = readAppConfig();
+type AppConfigGlobalState = typeof globalThis & {
+  __fluxpostAppConfig?: ReturnType<typeof readAppConfig>;
+};
+
+// Next.js can bundle this module separately for API routes and startup workers.
+// Keep one object per process so every bundle, including retained references,
+// observes configuration saves.
+export const appConfig = ((globalThis as AppConfigGlobalState).__fluxpostAppConfig ??= readAppConfig());
 
 function readAppConfig() {
   const imageProxy = readImageProxyConfig(process.env);
@@ -144,7 +151,7 @@ function readAppConfig() {
 }
 
 export function reloadAppConfig() {
-  appConfig = readAppConfig();
+  Object.assign(appConfig, readAppConfig());
   return appConfig;
 }
 

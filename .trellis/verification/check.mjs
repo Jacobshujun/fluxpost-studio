@@ -146,6 +146,7 @@ runStep("OpenAI image SSE check", nodeCommand, [
 runStep("Lint", npmCommand, ["run", "lint"]);
 runStep("TypeScript noEmit", npxCommand, ["--no-install", "tsc", "--noEmit"]);
 runStep("Next build", npmCommand, ["run", "build"]);
+runStep("Built config synchronization", nodeCommand, [".trellis/verification/advanced_config_build_check.mjs"]);
 
 const smokePort = parseSmokePort(process.env.TRELLIS_SMOKE_PORT ?? "3310");
 await runHttpSmoke(smokePort);

@@ -4,13 +4,13 @@ Last updated: 2026-09-11
 
 ## One-Line Status
 
-Rollback active; app image acceptance pending.
+Config sync fixed and verified; see pitfalls.md.
 
 ## Current Focus
 
 - VIP: Flare completed; edits failed. Stop paid retries; billing unknown. See pitfalls.md.
 
-- a616e69 active; minimal generation failed upstream. See pitfalls.md.
+- Earlier provider rejections: see pitfalls.md.
 
 - Image proxy release authorized; offline evidence and pending checks: .trellis/tasks/archive/2026-09/09-10-image-proxy-toggle/verification.md.
 
