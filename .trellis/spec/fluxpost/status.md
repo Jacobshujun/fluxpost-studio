@@ -1,18 +1,20 @@
 # FluxPost Current Status
 
-Last updated: 2026-09-10
+Last updated: 2026-09-11
 
 ## One-Line Status
 
-Image body rollback prepared; not active.
+Rollback active; app image acceptance pending.
 
 ## Current Focus
 
-- Request rollback: pitfalls.md; activation pending.
+- VIP: Flare completed; edits failed. Stop paid retries; billing unknown. See pitfalls.md.
+
+- a616e69 active; minimal generation failed upstream. See pitfalls.md.
 
 - Image proxy release authorized; offline evidence and pending checks: .trellis/tasks/archive/2026-09/09-10-image-proxy-toggle/verification.md.
 
-- 2026-09-10 request rollback restores September 9 bodies; saved background settings are retained but not sent. No activation/live test. Earlier UI evidence: .trellis/tasks/archive/2026-09/09-10-simple-image-quality-background/verification.md.
+- September 9 bodies; background not sent. UI: .trellis/tasks/archive/2026-09/09-10-simple-image-quality-background/verification.md.
 
 - 2026-09-10 iteration repair: Handles and nested deletion pass offline/browser checks. Evidence: .trellis/tasks/archive/2026-09/09-10-canvas-iteration-interactions/verification.md. Commit authorized; no activation/push/live calls.
 
