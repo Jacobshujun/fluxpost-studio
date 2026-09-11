@@ -1,0 +1,8 @@
+# Verification
+
+- Source regression: independent config modules reproduced an old image URL after saving on the pre-fix source; now passes on Windows/Linux fixtures. Covers primary/backup URL/key/model/profile, text settings, proxy state, clear/fallback behavior, late module loads, retained references, invalid patches, write failure and secret masking.
+- Production regression: `node .trellis/verification/advanced_config_build_check.mjs .next-local-a` fails on active pre-fix 6cd471e with old URL versus expected new URL. The adapter executes compiled config factories only, with synthetic env, in-memory filesystem and stubbed database status; no workers/provider calls are started.
+- TypeScript passed after the source fix.
+- Full baseline, including fixed production-artifact regression, lint, TypeScript, production build and isolated HTTP/SQLite smoke passed with exit code 0. Local log: .tmp-config-live-sync-baseline.log. No paid provider calls or runtime configuration edits were used.
+- Local activation follows the verified commit through `npm run local:lan`, preserving LAN binding and the clean-tree guard. Post-activation runtime/state/slot identity and the active slot's compiled regression are checked against that commit; environment-specific results are retained under ignored test-artifacts/config-live-sync/ and reported in the final response.
+- Read-only release preflight: running/queued queue labels were historical (June through September 3), with zero active leases or updates in the last 15 minutes. No current execution was found in these queues. Historical rows are preserved.
