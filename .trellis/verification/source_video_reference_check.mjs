@@ -77,7 +77,7 @@ assertContains(simpleRuns, /includeSourceVideo:\s*normalizedInput\.includeSource
 
 assertContains(reviewRoute, /"imageUrls" \| "videoUrls" \| "imageTasks" \| "feishuVehicle"/, "Review API manual patch must allow videoUrls.");
 assertContains(reviewRoute, /if \("videoUrls" in body\.manualPatch\) allowedPatch\.videoUrls = body\.manualPatch\.videoUrls/, "Review API must preserve videoUrls in manual patches.");
-assertContains(reviewPage, /videoUrls:\s*draft\.videoUrls/, "Review saveDraft must include draft video URLs.");
+assertContains(reviewPage, /changedReviewFields\(draft, persistedPost\(draft\.id\)/, "Review saveDraft must send changed fields, including changed video URLs.");
 assertContains(reviewPage, /removeDraftVideo/, "Review desk must support removing a video material from the draft.");
 assertContains(reviewPage, /<video[\s\S]*controls/, "Review desk must render video materials with playable controls.");
 assertContains(reviewPage, /countPostMedia/, "Review desk media counts must include videos, not only imageUrls.");

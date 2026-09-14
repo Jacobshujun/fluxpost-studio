@@ -1,6 +1,6 @@
 # Verification
 
-Last updated: 2026-09-10
+Last updated: 2026-09-14
 
 ## Baseline Command
 
@@ -11,7 +11,7 @@ $env:TRELLIS_SMOKE_PORT = "45678"
 powershell -ExecutionPolicy Bypass -File .trellis/verification/check.ps1
 ```
 
-`.trellis/verification/check.ps1` wraps `.trellis/verification/check.mjs`. Its isolated smoke server disables workers on a private test port; the port-3001 versioned candidate retains normal worker behavior.
+`check.ps1` wraps `check.mjs`. Smoke disables workers on a private test port; port 3001 keeps workers enabled.
 
 The large PostgreSQL acceptance benchmark is intentionally separate from the default baseline because it creates one million temporary relation rows. It only accepts loopback PostgreSQL by default, creates a unique schema, and drops that schema in `finally`:
 
@@ -20,6 +20,8 @@ node --env-file=.env.local .trellis/verification/unified_library_postgres_benchm
 ```
 
 ## Current Automated Checks
+
+- Review performance: commands and measured limits in `.trellis/tasks/archive/2026-09/09-14-review-desk-performance/verification.md`.
 
 - `canvas_iteration_contract_check.mjs`, `canvas_iteration_runtime_check.mjs`, `canvas_iteration_runs_check.mjs`, `canvas_iteration_actions_check.mjs`, and `canvas_iteration_queue_check.mjs` cover nested graph validation, multi-port snapshots, identity/order, bounded admission, repair versus delivery, owner/published guards, durable wake/park races, cancellation and SQLite recovery. PostgreSQL queue SQL is checked structurally, not against a live server. All are part of the offline baseline.
 - `python .trellis/verification/canvas_iteration_browser_check.py` checks region editing, persistence, result repair/refresh and shared outputs at 1440px/390px using intercepted APIs. Use `BROWSER_BASE_URL` with an existing worker-disabled loopback smoke server; port 3001 is rejected.

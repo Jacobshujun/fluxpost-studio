@@ -967,6 +967,57 @@ export async function readGeneratedPostsFromDb(): Promise<GeneratedPost[]> {
   return readJsonRows<GeneratedPost>("generated_posts", "updated_at DESC");
 }
 
+export async function getGeneratedPostFromDb(id: string) {
+  return readJsonRowById<GeneratedPost>("generated_posts", id);
+}
+
+export async function getGeneratedPostsByIdsFromDb(ids: string[]): Promise<GeneratedPost[]> {
+  if (!ids.length) return [];
+  await ensureDatabaseReady();
+  const rows = getDatabaseBackend() === "postgres"
+    ? (await getPostgresPool().query<JsonRow>("SELECT data_json FROM generated_posts WHERE id = ANY($1::text[])", [ids])).rows
+    : getSqliteDatabase().prepare(`SELECT data_json FROM generated_posts WHERE id IN (${ids.map(() => "?").join(",")})`).all(...ids) as JsonRow[];
+  return rows.map((row) => fromJson<GeneratedPost>(row.data_json));
+}
+
+// SQL is built exclusively by the review query module; values always use parameters.
+export async function queryReviewRowsFromDb<T>(sql: string, values: unknown[]): Promise<T[]> {
+  await ensureDatabaseReady();
+  if (getDatabaseBackend() === "postgres") return (await getPostgresPool().query(sql, values)).rows as T[];
+  return getSqliteDatabase().prepare(sql).all(...values) as T[];
+}
+
+export async function mutateSourceProjectsInDb(sourceItemId: string, mutate: (project: ContentProject) => ContentProject | undefined) {
+  await ensureDatabaseReady();
+  if (getDatabaseBackend() === "postgres") {
+    const client = await getPostgresPool().connect();
+    try {
+      await client.query("BEGIN");
+      const rows = await client.query<JsonRow>(
+        "SELECT data_json FROM content_projects WHERE data_json @> $1::jsonb ORDER BY id FOR UPDATE",
+        [JSON.stringify({ items: [{ id: sourceItemId }] })],
+      );
+      for (const row of rows.rows) {
+        const next = mutate(fromJson<ContentProject>(row.data_json));
+        if (next) await client.query("UPDATE content_projects SET updated_at=$1, data_json=$2::jsonb WHERE id=$3", [next.updatedAt, toJson(next), next.id]);
+      }
+      await client.query("COMMIT");
+    } catch (error) {
+      await client.query("ROLLBACK");
+      throw error;
+    } finally { client.release(); }
+    return;
+  }
+  const db = getSqliteDatabase();
+  runSqliteTransaction(db, () => {
+    const rows = db.prepare("SELECT data_json FROM content_projects WHERE EXISTS (SELECT 1 FROM json_each(data_json, '$.items') WHERE json_extract(value, '$.id')=?) ORDER BY id").all(sourceItemId) as JsonRow[];
+    for (const row of rows) {
+      const next = mutate(fromJson<ContentProject>(row.data_json));
+      if (next) db.prepare("UPDATE content_projects SET updated_at=?, data_json=? WHERE id=?").run(next.updatedAt, toJson(next), next.id);
+    }
+  });
+}
+
 export async function writeGeneratedPostsToDb(posts: GeneratedPost[]) {
   await replaceJsonRows("generated_posts", posts, (post) => [
     post.id,
@@ -3698,6 +3749,11 @@ function createSqliteSchema(db: SqliteDatabase) {
     );
     CREATE INDEX IF NOT EXISTS idx_generated_posts_updated_at ON generated_posts(updated_at DESC);
     CREATE INDEX IF NOT EXISTS idx_generated_posts_source_item_id ON generated_posts(source_item_id);
+    CREATE INDEX IF NOT EXISTS idx_review_owner_updated ON generated_posts(json_extract(data_json, '$.ownerUserId'), updated_at DESC, id DESC);
+    CREATE INDEX IF NOT EXISTS idx_review_owner_status_updated ON generated_posts(json_extract(data_json, '$.ownerUserId'), status, updated_at DESC, id DESC);
+    CREATE INDEX IF NOT EXISTS idx_review_batch_updated ON generated_posts(json_extract(data_json, '$.sourceBatchId'), updated_at DESC, id DESC);
+    CREATE INDEX IF NOT EXISTS idx_review_updated_id ON generated_posts(updated_at DESC, id DESC);
+
 
     CREATE TABLE IF NOT EXISTS batch_jobs (
       id TEXT PRIMARY KEY,
@@ -4203,6 +4259,12 @@ const postgresSchemaSql = `
   );
   CREATE INDEX IF NOT EXISTS idx_generated_posts_updated_at ON generated_posts(updated_at DESC);
   CREATE INDEX IF NOT EXISTS idx_generated_posts_source_item_id ON generated_posts(source_item_id);
+    CREATE INDEX IF NOT EXISTS idx_review_owner_updated ON generated_posts((data_json->>'ownerUserId'), updated_at DESC, id DESC);
+    CREATE INDEX IF NOT EXISTS idx_review_owner_status_updated ON generated_posts((data_json->>'ownerUserId'), status, updated_at DESC, id DESC);
+    CREATE INDEX IF NOT EXISTS idx_review_batch_updated ON generated_posts((data_json->>'sourceBatchId'), updated_at DESC, id DESC);
+    CREATE INDEX IF NOT EXISTS idx_review_updated_id ON generated_posts(updated_at DESC, id DESC);
+    CREATE INDEX IF NOT EXISTS idx_review_source_items ON content_projects USING GIN(data_json jsonb_path_ops);
+
 
   CREATE TABLE IF NOT EXISTS batch_jobs (
     id TEXT PRIMARY KEY,

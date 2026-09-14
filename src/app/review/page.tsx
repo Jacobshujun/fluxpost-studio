@@ -1,9 +1,11 @@
 "use client";
 
 import Link from "next/link";
+import { useReviewData } from "./use-review-data";
+import { changedReviewFields, reviewThumbnailUrl, type ReviewListItem } from "@/lib/review-contract";
 import Image from "next/image";
-import { useCallback, useEffect, useMemo, useState, useSyncExternalStore } from "react";
-import type { ChangeEvent, ClipboardEvent, DragEvent, ReactNode } from "react";
+import { memo, useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState, useSyncExternalStore } from "react";
+import type { ChangeEvent, ClipboardEvent, DragEvent, ReactNode, Dispatch, SetStateAction } from "react";
 import {
   ArrowDown,
   ArrowUp,
@@ -140,11 +142,8 @@ const platformLabels: Record<Platform, string> = {
 };
 
 export default function ReviewPage() {
-  const [posts, setPosts] = useState<GeneratedPost[]>([]);
   const [selectedPostId, setSelectedPostId, selectedPostHydrated] = useUrlQueryState("postId", "", optionalStringCodec());
   const [sourceBatchId, , sourceBatchHydrated] = useUrlQueryState("sourceBatchId", "", optionalStringCodec());
-  const [selectedPostIds, setSelectedPostIds] = useState<string[]>([]);
-  const [draft, setDraft] = useState<GeneratedPost | null>(null);
   const [filter, setFilter] = useUrlQueryState<ReviewFilter>("status", "ready", reviewFilterCodec);
   const [timeFilter, setTimeFilter] = useUrlQueryState<ReviewTimeFilter>("time", "all", reviewTimeFilterCodec);
   const [keywordFilter, setKeywordFilter] = useUrlQueryState("q", "", optionalStringCodec());
@@ -154,7 +153,7 @@ export default function ReviewPage() {
   const [imagePromptByIndex, setImagePromptByIndex] = useState<Record<string, string>>({});
   const [imageBusyKey, setImageBusyKey] = useState("");
   const [imageUploadPanelOpen, setImageUploadPanelOpen] = useState(false);
-  const [busy, setBusy] = useState<BusyState>("load");
+  const [busy, setBusy] = useState<BusyState>(null);
   const [message, setMessage] = useState("");
   const [publish, setPublish] = useState<PublishSnapshot | null>(null);
   const [feishuPublishMode, setFeishuPublishMode] = useState<FeishuPublishMode>("full");
@@ -164,38 +163,11 @@ export default function ReviewPage() {
   const [feishuVehicleOptionsMessage, setFeishuVehicleOptionsMessage] = useState("");
   const theme = useSyncExternalStore(subscribeTheme, getStoredTheme, () => "professional" as ThemeMode);
 
-  const selectedPosts = useMemo(() => posts.filter((post) => selectedPostIds.includes(post.id)), [posts, selectedPostIds]);
-  const filteredPosts = useMemo(
-    () => filterPosts(posts, { statusFilter: filter, timeFilter, keywordFilter, authorFilter, platformFilter }),
-    [posts, filter, timeFilter, keywordFilter, authorFilter, platformFilter],
-  );
-  const summary = useMemo(() => buildSummary(posts), [posts]);
-  const authorOptions = useMemo(() => buildAuthorOptions(posts), [posts]);
-  const platformOptions = useMemo(() => buildPlatformOptions(posts), [posts]);
-
-  const loadPosts = useCallback(async (preferredPostId?: string) => {
-    setBusy((current) => current || "load");
-    try {
-      const res = await fetch("/api/production/posts");
-      const data = (await res.json()) as { posts?: GeneratedPost[]; error?: string };
-      if (!res.ok) throw new Error(data.error || "加载生成稿失败");
-      const nextPosts = sourceBatchId ? (data.posts || []).filter((post) => post.sourceBatchId === sourceBatchId) : data.posts || [];
-      const nextSelectedId =
-        preferredPostId && nextPosts.some((post) => post.id === preferredPostId)
-          ? preferredPostId
-          : selectedPostId && nextPosts.some((post) => post.id === selectedPostId)
-            ? selectedPostId
-            : nextPosts[0]?.id || "";
-      setPosts(nextPosts);
-      setSelectedPostId(nextSelectedId);
-      setSelectedPostIds((current) => current.filter((id) => nextPosts.some((post) => post.id === id)));
-      setDraft(nextPosts.find((post) => post.id === nextSelectedId) || null);
-    } catch (error) {
-      setMessage(error instanceof Error ? error.message : "加载生成稿失败");
-    } finally {
-      setBusy(null);
-    }
-  }, [selectedPostId, setSelectedPostId, sourceBatchId]);
+  const review = useReviewData({ status: filter, time: timeFilter, q: keywordFilter, author: authorFilter, platform: platformFilter, sourceBatchId }, selectedPostId, setSelectedPostId, selectedPostHydrated && sourceBatchHydrated, setMessage);
+  const { posts: filteredPosts, draft, setDraft, selectedPostIds, setSelectedPostIds, selectedPosts, toggleSelection, selectVisible, persistedPost } = review;
+  const { summary, authors: authorOptions, platforms: platformOptions } = review.metadata;
+  const loadPosts = review.refresh;
+  const refreshDetail = review.refreshDetail;
 
   const pollPublishJob = useCallback(async (jobId: string) => {
     try {
@@ -205,7 +177,8 @@ export default function ReviewPage() {
       const sourcePosts = data.job?.posts?.length ? data.job.posts : selectedPosts.length ? selectedPosts : draft ? [draft] : [];
       setPublish(buildPublishSnapshot(sourcePosts, data));
       if (data.job && !isFeishuPublishQueueLive(data.job.status)) {
-        await loadPosts(sourcePosts[0]?.id || selectedPostId);
+        refreshDetail();
+        loadPosts();
       }
     } catch (error) {
       setPublish((current) =>
@@ -220,12 +193,7 @@ export default function ReviewPage() {
           : null,
       );
     }
-  }, [draft, loadPosts, selectedPostId, selectedPosts]);
-
-  useEffect(() => {
-    if (!selectedPostHydrated || !sourceBatchHydrated) return;
-    void loadPosts();
-  }, [loadPosts, selectedPostHydrated, sourceBatchHydrated]);
+  }, [draft, loadPosts, refreshDetail, selectedPosts]);
 
   useEffect(() => {
     async function restoreActivePublishJob() {
@@ -283,60 +251,30 @@ export default function ReviewPage() {
     return () => window.removeEventListener("keydown", onKeyDown);
   }, [preview]);
 
-  function selectPost(post: GeneratedPost) {
-    setSelectedPostId(post.id);
-    setDraft(post);
+  const selectReviewPost = review.selectPost;
+  const selectPost = useCallback((post: ReviewListItem) => {
+    selectReviewPost(post);
     setImageBusyKey("");
     setImageUploadPanelOpen(false);
     setMessage("");
-  }
+  }, [selectReviewPost]);
 
-  function toggleSelection(postId: string) {
-    setSelectedPostIds((current) => (current.includes(postId) ? current.filter((id) => id !== postId) : [...current, postId]));
-  }
-
-  function selectVisible() {
-    setSelectedPostIds(filteredPosts.slice(0, 200).map((post) => post.id));
-  }
-
-  function mergeSavedPost(savedPost: GeneratedPost, preferredPostId?: string) {
-    const nextPosts = upsertReviewPost(posts, savedPost);
-    const nextSelectedId =
-      preferredPostId && nextPosts.some((post) => post.id === preferredPostId)
-        ? preferredPostId
-        : nextPosts.some((post) => post.id === savedPost.id)
-          ? savedPost.id
-          : nextPosts[0]?.id || "";
-    setPosts(nextPosts);
-    setSelectedPostId(nextSelectedId);
-    setSelectedPostIds((current) => current.filter((id) => nextPosts.some((post) => post.id === id)));
-    setDraft(nextPosts.find((post) => post.id === nextSelectedId) || null);
-  }
+  const mergeSavedPost = review.mergeSavedPost;
 
   async function saveDraft(patch?: Partial<GeneratedPost>, instruction?: string, options?: { busyState?: BusyState }) {
     if (!draft) return;
     setBusy(options?.busyState || (instruction ? "review" : "save"));
     setMessage("");
     try {
-      const manualPatch = {
-        title: draft.title,
-        body: draft.body,
-        imagePrompt: draft.imagePrompt,
-        imageUrls: draft.imageUrls,
-        videoUrls: draft.videoUrls,
-        imageTasks: draft.imageTasks,
-        feishuVehicle: draft.feishuVehicle,
-        xhsSeries: draft.xhsSeries,
-        ...patch,
-      };
+      const manualPatch = { ...changedReviewFields(draft, persistedPost(draft.id) || draft), ...patch };
       const res = await fetch("/api/review", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ post: draft, manualPatch, instruction }),
+        body: JSON.stringify({ postId: draft.id, manualPatch, instruction }),
       });
-      const data = (await res.json()) as { post?: GeneratedPost; error?: string };
+      const data = (await res.json()) as { post?: GeneratedPost; item?: ReviewListItem; error?: string };
       if (!res.ok || !data.post) throw new Error(data.error || "保存审查修改失败");
-      mergeSavedPost(data.post, data.post.id);
+      mergeSavedPost(data.post, draft, data.item);
       setMessage(data.post.status === "approved" ? "已通过审查" : "已保存修改");
     } catch (error) {
       setMessage(error instanceof Error ? error.message : "保存审查修改失败");
@@ -444,9 +382,9 @@ export default function ReviewPage() {
             headers: { "Content-Type": "application/json" },
             body: JSON.stringify({ prompt, count: 1 }),
           });
-      const data = (await res.json()) as ImageGenerationResponse & { post?: GeneratedPost; pending?: boolean };
+      const data = (await res.json()) as ImageGenerationResponse & { post?: GeneratedPost; item?: ReviewListItem; pending?: boolean };
       if (seriesCard && data.post) {
-        mergeSavedPost(data.post, data.post.id);
+        mergeSavedPost(data.post, draft, data.item);
         setMessage(data.pending ? `第 ${index + 1} 张卡片已受理，后台继续生成` : `第 ${index + 1} 张卡片已重新生成并完成 QA`);
         return;
       }
@@ -470,9 +408,9 @@ export default function ReviewPage() {
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ postId: draft.id, cardId: card.id, prompt: card.prompt }),
       });
-      const data = (await res.json()) as { post?: GeneratedPost; error?: string; pending?: boolean };
+      const data = (await res.json()) as { post?: GeneratedPost; item?: ReviewListItem; error?: string; pending?: boolean };
       if (!res.ok || !data.post) throw new Error(data.error || "卡片重新生成失败");
-      mergeSavedPost(data.post, data.post.id);
+      mergeSavedPost(data.post, draft, data.item);
       setMessage(data.pending ? `第 ${card.index + 1} 张卡片已受理，后台继续生成` : `第 ${card.index + 1} 张卡片已重新生成`);
     } catch (error) {
       setMessage(error instanceof Error ? error.message : "卡片重新生成失败");
@@ -489,7 +427,7 @@ export default function ReviewPage() {
 
   async function uploadDraftImageAddition(file: File) {
     if (!draft) return;
-    const uploadImageIndex = getPersistedPostImageCount(posts, draft.id, draft.imageUrls.length);
+    const uploadImageIndex = (persistedPost(draft.id)?.imageUrls.length ?? draft.imageUrls.length);
     const displayImageIndex = draft.imageUrls.length;
     setImageBusyKey("upload:add");
     setMessage("");
@@ -587,10 +525,11 @@ export default function ReviewPage() {
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ action: "set_status", ids: selectedPostIds, status }),
       });
-      const data = (await res.json()) as { updatedCount?: number; error?: string };
+      const data = (await res.json()) as { updatedCount?: number; posts?: GeneratedPost[]; notFoundIds?: string[]; error?: string };
       if (!res.ok) throw new Error(data.error || "批量更新失败");
-      await loadPosts(selectedPostId);
-      setMessage(`已更新 ${data.updatedCount || 0} 条生成稿`);
+      for (const post of data.posts || []) mergeSavedPost(post);
+      loadPosts();
+      setMessage(`已更新 ${data.updatedCount || 0} 条生成稿${data.notFoundIds?.length ? `，${data.notFoundIds.length} 条已不存在或无权访问` : ""}`);
     } catch (error) {
       setMessage(error instanceof Error ? error.message : "批量更新失败");
     } finally {
@@ -610,8 +549,9 @@ export default function ReviewPage() {
       });
       const data = (await res.json()) as { deletedCount?: number; error?: string };
       if (!res.ok) throw new Error(data.error || "批量删除失败");
+      review.removePosts(selectedPostIds);
       setSelectedPostIds([]);
-      await loadPosts();
+      loadPosts();
       setMessage(`已删除 ${data.deletedCount || 0} 条生成稿`);
     } catch (error) {
       setMessage(error instanceof Error ? error.message : "批量删除失败");
@@ -621,7 +561,7 @@ export default function ReviewPage() {
   }
 
   async function publishSelected() {
-    let postsToPublish = selectedPosts.length ? selectedPosts : draft ? [draft] : [];
+    let postsToPublish: Array<GeneratedPost | ReviewListItem> = selectedPosts.length ? selectedPosts : draft ? [draft] : [];
     if (!postsToPublish.length) return;
     setBusy("publish");
     setMessage("");
@@ -648,7 +588,7 @@ export default function ReviewPage() {
       const data = (await res.json()) as FeishuPublishResponse;
       if (!res.ok) throw new Error(data.error || "写入飞书失败");
       setPublish(buildPublishSnapshot(data.job?.posts?.length ? data.job.posts : payloadPosts, data));
-      await loadPosts(payloadPosts[0]?.id);
+      loadPosts();
       setMessage(buildPublishMessage(data));
     } catch (error) {
       const detail = error instanceof Error ? error.message : "写入飞书失败";
@@ -671,25 +611,38 @@ export default function ReviewPage() {
       method: "POST",
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify({
-        post: value,
-        manualPatch: {
-          title: value.title,
-          body: value.body,
-          imagePrompt: value.imagePrompt,
-          imageUrls: value.imageUrls,
-          videoUrls: value.videoUrls,
-          imageTasks: value.imageTasks,
-          feishuVehicle: value.feishuVehicle,
-          status: "approved",
-        },
+        postId: value.id,
+        manualPatch: { ...changedReviewFields(value, persistedPost(value.id) || value), status: "approved" },
       }),
     });
-    const data = (await res.json()) as { post?: GeneratedPost; error?: string };
+    const data = (await res.json()) as { post?: GeneratedPost; item?: ReviewListItem; error?: string };
     if (!res.ok || !data.post) throw new Error(data.error || "Failed to save Feishu vehicle before publish");
-    setDraft(data.post);
-    setSelectedPostId(data.post.id);
+    mergeSavedPost(data.post, value, data.item);
     return data.post;
   }
+
+  const latestGalleryActions = { handleDraftImagePaste, moveDraftImage, removeDraftImage, regenerateDraftImage, handleDraftImageFileChange, selectSeriesCandidate, regenerateMissingSeriesCard, removeDraftVideo,
+    openPreview: (index: number, kind: "image" | "video") => { if (draft) setPreview({ post: draft, index, kind }); } };
+  const galleryActionsRef = useRef(latestGalleryActions);
+  useLayoutEffect(() => { galleryActionsRef.current = latestGalleryActions; });
+  const galleryActions = useMemo(() => ({
+    handleDraftImagePaste: (...args: Parameters<GalleryActions["handleDraftImagePaste"]>) => galleryActionsRef.current.handleDraftImagePaste(...args),
+    moveDraftImage: (...args: Parameters<GalleryActions["moveDraftImage"]>) => galleryActionsRef.current.moveDraftImage(...args),
+    removeDraftImage: (...args: Parameters<GalleryActions["removeDraftImage"]>) => galleryActionsRef.current.removeDraftImage(...args),
+    regenerateDraftImage: (...args: Parameters<GalleryActions["regenerateDraftImage"]>) => galleryActionsRef.current.regenerateDraftImage(...args),
+    handleDraftImageFileChange: (...args: Parameters<GalleryActions["handleDraftImageFileChange"]>) => galleryActionsRef.current.handleDraftImageFileChange(...args),
+    selectSeriesCandidate: (...args: Parameters<GalleryActions["selectSeriesCandidate"]>) => galleryActionsRef.current.selectSeriesCandidate(...args),
+    regenerateMissingSeriesCard: (...args: Parameters<GalleryActions["regenerateMissingSeriesCard"]>) => galleryActionsRef.current.regenerateMissingSeriesCard(...args),
+    removeDraftVideo: (...args: Parameters<GalleryActions["removeDraftVideo"]>) => galleryActionsRef.current.removeDraftVideo(...args),
+    openPreview: (...args: Parameters<GalleryActions["openPreview"]>) => galleryActionsRef.current.openPreview(...args),
+  }), []);
+  const galleryDraft = useMemo(() => draft ? { ...draft } : null,
+    // Text edits deliberately do not change the media view; actions use latest committed state.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+    [draft?.id, draft?.imageUrls, draft?.videoUrls, draft?.imagePrompt, draft?.imageTasks, draft?.xhsSeries]);
+  const changeText = useCallback((field: "title" | "body" | "feishuVehicle", value: string) => {
+    setDraft((current) => current ? { ...current, [field]: value } : current);
+  }, [setDraft]);
 
   return (
     <main className="app-shell review-shell overflow-x-hidden">
@@ -724,7 +677,7 @@ export default function ReviewPage() {
               <ExternalLink className="h-4 w-4" />
               返回工作台
             </Link>
-            <button className="soft-button inline-flex h-10 items-center justify-center gap-2 px-3 text-xs font-black" type="button" onClick={() => loadPosts(selectedPostId)} disabled={Boolean(busy)}>
+            <button className="soft-button inline-flex h-10 items-center justify-center gap-2 px-3 text-xs font-black" type="button" onClick={() => { loadPosts(); review.refreshDetail(); }} disabled={Boolean(busy)}>
               {busy === "load" ? <Loader2 className="h-4 w-4 animate-spin" /> : <RefreshCw className="h-4 w-4" />}
               刷新
             </button>
@@ -793,45 +746,22 @@ export default function ReviewPage() {
             <div className="batch-action-bar mt-3">
               <div className="min-w-0">
                 <p className="truncate text-xs font-black">批量审查</p>
-                <p className="mt-1 text-[11px] text-[var(--text-muted)]">已选 {selectedPostIds.length} / 当前 {filteredPosts.length}</p>
+                <p className="mt-1 text-[11px] text-[var(--text-muted)]">已选 {selectedPostIds.length} / 200 · 本页 {filteredPosts.length}</p>
               </div>
               <div className="flex flex-wrap gap-1.5">
-                <button className="soft-button h-9 px-3 text-xs" type="button" onClick={selectVisible} disabled={Boolean(busy) || !filteredPosts.length}>
-                  全选当前
+                <button className="soft-button h-9 px-3 text-xs" type="button" onClick={selectVisible} disabled={Boolean(busy) || review.loading || !filteredPosts.length}>
+                  全选本页
                 </button>
                 <button className="soft-button h-9 px-3 text-xs" type="button" onClick={() => setSelectedPostIds([])} disabled={Boolean(busy) || !selectedPostIds.length}>
                   清空
                 </button>
               </div>
             </div>
-            <div className="review-list thin-scrollbar">
-              {filteredPosts.length ? (
-                filteredPosts.map((post) => (
-                  <article key={post.id} className={`review-list-card ${selectedPostId === post.id ? "review-list-card-active" : ""}`}>
-                    <label className={`selection-toggle ${selectedPostIds.includes(post.id) ? "selection-toggle-active" : ""}`} aria-label="选择生成稿">
-                      <input className="sr-only" type="checkbox" checked={selectedPostIds.includes(post.id)} onChange={() => toggleSelection(post.id)} />
-                      <Check className={`h-3.5 w-3.5 ${selectedPostIds.includes(post.id) ? "text-[var(--mint)]" : "text-[var(--text-muted)]"}`} />
-                      <span>{selectedPostIds.includes(post.id) ? "已选" : "选择"}</span>
-                    </label>
-                    <button className="w-full text-left" type="button" onClick={() => selectPost(post)}>
-                      <div className="flex gap-3 pr-16">
-                        <PostThumb post={post} />
-                        <div className="min-w-0 flex-1">
-                          <p className="line-clamp-2 text-sm font-black">{post.title || "未命名生成稿"}</p>
-                          <p className="mt-1 line-clamp-2 text-xs leading-5 text-[var(--text-muted)]">{post.body || post.imagePrompt}</p>
-                          <div className="mt-2 flex flex-wrap gap-1.5">
-                            <StatusBadge status={post.status} />
-                            <span className="status-badge text-[10px] text-[var(--text-muted)]">{platformLabels[post.platform] || post.platform}</span>
-                            <span className="status-badge text-[10px] text-[var(--text-muted)]">{countPostMedia([post])} 素材</span>
-                          </div>
-                        </div>
-                      </div>
-                    </button>
-                  </article>
-                ))
-              ) : (
-                <div className="empty-state min-h-0 p-4 text-xs text-[var(--text-muted)]">当前筛选没有生成稿</div>
-              )}
+            <ReviewPostList posts={filteredPosts} selectedPostId={selectedPostId} selectedPostIds={selectedPostIds} selectPost={selectPost} toggleSelection={toggleSelection} loading={review.loading} />
+            <div className="flex shrink-0 items-center justify-between gap-2 pt-2">
+              <button className="soft-button px-3 py-2 text-xs" onClick={review.previousPage} disabled={review.loading || review.pageNumber === 1}>上一页</button>
+              <span className="text-xs" aria-live="polite">第 {review.pageNumber} 页{review.loading ? " · 加载中" : ""}</span>
+              <button className="soft-button px-3 py-2 text-xs" onClick={review.nextPage} disabled={review.loading || !review.hasNext}>下一页</button>
             </div>
           </aside>
 
@@ -851,131 +781,9 @@ export default function ReviewPage() {
                 </div>
 
                 <div className="review-editor-grid">
-                  <div className="review-gallery">
-                    {draft.imageUrls.length ? (
-                      <>
-                        {draft.imageUrls.map((url, index) => (
-                        <div
-                          key={`${url}-${index}`}
-                          className={`review-gallery-tile ${index === 0 ? "review-gallery-tile-primary" : ""}`}
-                          tabIndex={0}
-                          onPaste={(event) => handleDraftImagePaste(event, index)}
-                        >
-                          <button className="review-gallery-preview" type="button" onClick={() => setPreview({ post: draft, index, kind: "image" })}>
-                            {/* eslint-disable-next-line @next/next/no-img-element */}
-                            <img alt={`最终配图 ${index + 1}`} src={toDisplayImageSrc(url)} referrerPolicy="no-referrer" />
-                            <span className="review-gallery-index">{index + 1}</span>
-                          </button>
-                          <div className="review-gallery-tools" aria-label={`配图 ${index + 1} 操作`}>
-                            {!draft.xhsSeries ? <>
-                            <button className="review-gallery-tool" type="button" onClick={() => moveDraftImage(index, -1)} disabled={index === 0 || Boolean(busy)} aria-label="上移配图">
-                              <ArrowUp className="h-3.5 w-3.5" />
-                            </button>
-                            <button className="review-gallery-tool" type="button" onClick={() => moveDraftImage(index, 1)} disabled={index === draft.imageUrls.length - 1 || Boolean(busy)} aria-label="下移配图">
-                              <ArrowDown className="h-3.5 w-3.5" />
-                            </button>
-                            </> : null}
-                            <button className="review-gallery-tool review-gallery-tool-danger" type="button" onClick={() => removeDraftImage(index)} disabled={Boolean(busy)} aria-label="删除配图">
-                              <Trash2 className="h-3.5 w-3.5" />
-                            </button>
-                          </div>
-                          <div className="review-image-editor">
-                            <textarea
-                              className="field review-image-prompt"
-                              value={resolveDraftImagePrompt(draft, imagePromptByIndex, index)}
-                              onChange={(event) =>
-                                setImagePromptByIndex((current) => ({
-                                  ...current,
-                                  [imagePromptKey(draft.id, index)]: event.target.value,
-                                }))
-                              }
-                              onPaste={(event) => handleDraftImagePaste(event, index)}
-                              placeholder={`第 ${index + 1} 张图片 Prompt`}
-                            />
-                            <div className="review-image-actions">
-                              <button
-                                className="review-gallery-tool"
-                                type="button"
-                                onClick={() => regenerateDraftImage(index)}
-                                disabled={Boolean(busy) || Boolean(imageBusyKey)}
-                                aria-label={`重新生成第 ${index + 1} 张配图`}
-                                title="重新生成"
-                              >
-                                {imageBusyKey === `regenerate:${index}` ? <Loader2 className="h-3.5 w-3.5 animate-spin" /> : <Wand2 className="h-3.5 w-3.5" />}
-                              </button>
-                              <label
-                                className={`review-gallery-tool ${Boolean(busy) || Boolean(imageBusyKey) ? "review-gallery-tool-disabled" : ""}`}
-                                aria-label={`上传替换第 ${index + 1} 张配图`}
-                                title="上传替换"
-                              >
-                                {imageBusyKey === `upload:${index}` ? <Loader2 className="h-3.5 w-3.5 animate-spin" /> : <Upload className="h-3.5 w-3.5" />}
-                                <input
-                                  className="review-file-input"
-                                  type="file"
-                                  accept="image/png,image/jpeg,image/webp,image/gif,image/avif"
-                                  disabled={Boolean(busy) || Boolean(imageBusyKey)}
-                                  onChange={(event) => handleDraftImageFileChange(event, index)}
-                                />
-                              </label>
-                            </div>
-                          </div>
-                          {seriesCardAtImageIndex(draft, index) ? <SeriesCardMeta card={seriesCardAtImageIndex(draft, index)!} onSelect={(url) => selectSeriesCandidate(index, url)} /> : null}
-                        </div>
-                        ))}
-                        {draft.xhsSeries?.cards.filter((card) => !card.imageUrl).map((card) => <div className="review-gallery-tile review-series-missing" key={card.id}>
-                          <div><ImagePlus className="h-5 w-5" /><strong>第 {card.index + 1} 张待补图</strong><span>{card.error || card.qa.issues.join("；") || card.status}</span></div>
-                          <textarea className="field review-image-prompt" value={card.prompt} readOnly aria-label={`第 ${card.index + 1} 张图片 Prompt`} />
-                          <button className="soft-button" type="button" onClick={() => regenerateMissingSeriesCard(card)} disabled={Boolean(busy) || Boolean(imageBusyKey)}>{imageBusyKey === `series:${card.id}` ? <Loader2 className="h-3.5 w-3.5 animate-spin" /> : <Wand2 className="h-3.5 w-3.5" />}重新生成</button>
-                        </div>)}
-                        <ReviewImageAddTile busy={Boolean(busy) || Boolean(imageBusyKey)} isUploading={imageBusyKey === "upload:add"} onOpen={() => setImageUploadPanelOpen(true)} />
-                      </>
-                    ) : (
-                      <ReviewImageAddTile empty busy={Boolean(busy) || Boolean(imageBusyKey)} isUploading={imageBusyKey === "upload:add"} onOpen={() => setImageUploadPanelOpen(true)} />
-                    )}
-                    {postVideoUrls(draft).map((url, index) => (
-                      <div key={`${url}-${index}`} className="review-gallery-tile review-video-tile" tabIndex={0}>
-                        <button className="review-gallery-preview" type="button" onClick={() => setPreview({ post: draft, index, kind: "video" })}>
-                          <video src={url} controls preload="metadata" />
-                          <span className="review-gallery-index">V{index + 1}</span>
-                        </button>
-                        <div className="review-gallery-tools" aria-label={`瑙嗛 ${index + 1} 鎿嶄綔`}>
-                          <button className="review-gallery-tool review-gallery-tool-danger" type="button" onClick={() => removeDraftVideo(index)} disabled={Boolean(busy)} aria-label="鍒犻櫎瑙嗛">
-                            <Trash2 className="h-3.5 w-3.5" />
-                          </button>
-                        </div>
-                      </div>
-                    ))}
-                  </div>
+                  <ReviewGallery draft={galleryDraft!} persistedImages={persistedPost(draft.id)?.imageUrls} busy={busy} imageBusyKey={imageBusyKey} imagePromptByIndex={imagePromptByIndex} setImagePromptByIndex={setImagePromptByIndex} setImageUploadPanelOpen={setImageUploadPanelOpen} actions={galleryActions} />
 
-                  <div className="review-editor-fields">
-                    <label>
-                      <FieldLabel label="标题" />
-                      <input className="field mt-2 text-base font-black" value={draft.title} onChange={(event) => setDraft({ ...draft, title: event.target.value })} />
-                    </label>
-                    <label>
-                      <span className="flex items-center justify-between gap-3">
-                        <FieldLabel label="正文" />
-                        <span className="text-[11px] text-[var(--text-muted)]">{countFinishedBodyChars(draft.body)}/{FINISHED_BODY_MAX_CHARS}</span>
-                      </span>
-                      <textarea className="field review-body-editor mt-2" value={draft.body} onChange={(event) => setDraft({ ...draft, body: clampFinishedBodyInput(event.target.value) })} />
-                    </label>
-                    <label>
-                      <FieldLabel label={`写入飞书${feishuVehicleFieldName}`} />
-                      <select
-                        className="field mt-2 h-10"
-                        value={draft.feishuVehicle ?? draft.taskKeyword ?? ""}
-                        onChange={(event) => setDraft({ ...draft, feishuVehicle: event.target.value })}
-                      >
-                        <option value="">未选择</option>
-                        {feishuVehicleOptions.map((option) => (
-                          <option key={option} value={option}>
-                            {option}
-                          </option>
-                        ))}
-                      </select>
-                      {feishuVehicleOptionsMessage ? <p className="mt-1 text-[11px] text-[var(--text-muted)]">{feishuVehicleOptionsMessage}</p> : null}
-                    </label>
-                  </div>
+                  <ReviewTextFields draft={draft} onChange={changeText} feishuVehicleOptions={feishuVehicleOptions} feishuVehicleFieldName={feishuVehicleFieldName} feishuVehicleOptionsMessage={feishuVehicleOptionsMessage} />
                 </div>
 
                 <div className="review-action-strip">
@@ -1017,7 +825,7 @@ export default function ReviewPage() {
             ) : (
               <div className="empty-state">
                 <Sparkles className="h-6 w-6" />
-                <span>选择一条生成稿开始审查</span>
+                <span>{review.detailLoading ? "正在加载稿件…" : "选择一条生成稿开始审查"}</span>
               </div>
             )}
           </section>
@@ -1057,7 +865,7 @@ export default function ReviewPage() {
                   <div key={post.id} className="review-selected-row">
                     <span className="truncate">{post.title || "未命名生成稿"}</span>
                     <span className="status-badge max-w-[8rem] truncate text-[11px] text-[var(--text-muted)]">
-                      {post.feishuVehicle || post.taskKeyword || "未选择"}
+                      {("author" in post ? post.author : post.feishuVehicle || post.taskKeyword) || "未选择"}
                     </span>
                     <StatusBadge status={post.status} />
                   </div>
@@ -1201,19 +1009,16 @@ function ReviewImageUploadPanel({
   );
 }
 
-function PostThumb({ post }: { post: GeneratedPost }) {
-  const image = post.imageUrls[0];
-  return (
-    <div className="review-post-thumb">
-      {image ? (
-        // eslint-disable-next-line @next/next/no-img-element
-        <img alt="" src={toDisplayImageSrc(image)} referrerPolicy="no-referrer" />
-      ) : (
-        <ImageIcon className="h-5 w-5" />
-      )}
-    </div>
-  );
+function PostThumb({ post }: { post: ReviewListItem }) {
+  return <span className="review-post-thumb">{post.thumbnailVersion ? <ReviewPreviewImage alt="" src={reviewThumbnailUrl(post.id, 0, post.thumbnailVersion)} /> : <ImageIcon className="h-4 w-4" />}</span>;
 }
+
+const ReviewPreviewImage = memo(function ReviewPreviewImage({ src, alt }: { src: string; alt: string }) {
+  const [failedSrc, setFailedSrc] = useState("");
+  if (failedSrc === src) return <span role="status" className="text-xs text-[var(--text-muted)]">图片加载失败</span>;
+  // eslint-disable-next-line @next/next/no-img-element
+  return <img alt={alt} src={src} loading="lazy" decoding="async" referrerPolicy="no-referrer" onError={() => setFailedSrc(src)} />;
+});
 
 function StatusBadge({ status }: { status: GeneratedPost["status"] }) {
   const tone =
@@ -1333,73 +1138,7 @@ function PreviewDialog({
   );
 }
 
-function filterPosts(
-  posts: GeneratedPost[],
-  filters: {
-    statusFilter: ReviewFilter;
-    timeFilter: ReviewTimeFilter;
-    keywordFilter: string;
-    authorFilter: string;
-    platformFilter: Platform | "all";
-  },
-) {
-  const trimmed = filters.keywordFilter.trim().toLowerCase();
-  const author = filters.authorFilter.trim();
-  return posts.filter((post) => {
-    const matchesFilter =
-      filters.statusFilter === "all" ||
-      (filters.statusFilter === "ready" ? post.status === "approved" || post.status === "editing" || post.status === "draft" : post.status === filters.statusFilter);
-    if (!matchesFilter) return false;
-    if (!matchesTimeFilter(post, filters.timeFilter)) return false;
-    if (filters.platformFilter !== "all" && post.platform !== filters.platformFilter) return false;
-    if (author && getPostAuthor(post) !== author) return false;
-    if (!trimmed) return true;
-    return `${post.title}\n${post.body}\n${post.imagePrompt}\n${post.taskKeyword || ""}\n${post.feishuVehicle || ""}`.toLowerCase().includes(trimmed);
-  });
-}
-
-function matchesTimeFilter(post: GeneratedPost, filter: ReviewTimeFilter) {
-  if (filter === "all") return true;
-  const value = Date.parse(post.updatedAt || post.createdAt || "");
-  if (!Number.isFinite(value)) return false;
-  const now = Date.now();
-  if (filter === "today") return new Date(value).toDateString() === new Date(now).toDateString();
-  const days = filter === "7d" ? 7 : 30;
-  return now - value <= days * 24 * 60 * 60 * 1000;
-}
-
-function getPostAuthor(post: GeneratedPost) {
-  return post.ownerDisplayName?.trim() || post.ownerUserId?.trim() || "未标记作者";
-}
-
-function buildAuthorOptions(posts: GeneratedPost[]) {
-  return Array.from(new Set(posts.map(getPostAuthor))).sort((a, b) => a.localeCompare(b, "zh-CN"));
-}
-
-function buildPlatformOptions(posts: GeneratedPost[]) {
-  return Array.from(new Set(posts.map((post) => post.platform))).sort((a, b) => (platformLabels[a] || a).localeCompare(platformLabels[b] || b, "zh-CN"));
-}
-
-function upsertReviewPost(posts: GeneratedPost[], savedPost: GeneratedPost) {
-  const found = posts.some((post) => post.id === savedPost.id);
-  const nextPosts = found ? posts.map((post) => (post.id === savedPost.id ? savedPost : post)) : [savedPost, ...posts];
-  return nextPosts.sort((a, b) => b.updatedAt.localeCompare(a.updatedAt));
-}
-
-function getPersistedPostImageCount(posts: GeneratedPost[], postId: string, fallbackCount: number) {
-  return posts.find((post) => post.id === postId)?.imageUrls.length ?? fallbackCount;
-}
-
-function buildSummary(posts: GeneratedPost[]) {
-  return {
-    total: posts.length,
-    ready: posts.filter((post) => post.status !== "published").length,
-    approved: posts.filter((post) => post.status === "approved").length,
-    published: posts.filter((post) => post.status === "published").length,
-  };
-}
-
-function buildPublishSnapshot(posts: GeneratedPost[], data: FeishuPublishResponse): PublishSnapshot {
+function buildPublishSnapshot(posts: Array<GeneratedPost | ReviewListItem>, data: FeishuPublishResponse): PublishSnapshot {
   const job = data.job;
   const jobId = data.jobId || job?.id;
   const queueStatus = data.queueStatus || job?.status;
@@ -1481,7 +1220,7 @@ function buildPublishSnapshot(posts: GeneratedPost[], data: FeishuPublishRespons
   };
 }
 
-function describePublishSubmission(posts: GeneratedPost[], publishMode: FeishuPublishMode) {
+function describePublishSubmission(posts: Array<GeneratedPost | ReviewListItem>, publishMode: FeishuPublishMode) {
   const base = `准备以“${formatFeishuPublishMode(publishMode)}”写入 ${posts.length} 条内容`;
   return feishuPublishModeIncludesMedia(publishMode) ? `${base}，素材共 ${countPostMedia(posts)} 个。` : `${base}。`;
 }
@@ -1505,8 +1244,8 @@ function isFeishuPublishQueueLive(status?: FeishuPublishJob["status"]) {
   return status === "queued" || status === "running";
 }
 
-function countPostMedia(posts: GeneratedPost[]) {
-  return posts.reduce((sum, post) => sum + post.imageUrls.length + postVideoUrls(post).length, 0);
+function countPostMedia(posts: Array<GeneratedPost | ReviewListItem>) {
+  return posts.reduce((sum, post) => sum + ("mediaCount" in post ? post.mediaCount : post.imageUrls.length + postVideoUrls(post).length), 0);
 }
 
 function postVideoUrls(post: GeneratedPost) {
@@ -1654,3 +1393,177 @@ function appendQueryParam(url: string, key: string, value: string) {
   const separator = url.includes("?") ? "&" : "?";
   return `${url}${separator}${encodeURIComponent(key)}=${encodeURIComponent(value)}`;
 }
+
+const ReviewPostList = memo(function ReviewPostList({ posts, selectedPostId, selectedPostIds, selectPost, toggleSelection, loading }: {
+  posts: ReviewListItem[]; selectedPostId: string; selectedPostIds: string[]; selectPost: (post: ReviewListItem) => void; toggleSelection: (id: string) => void; loading: boolean;
+}) { return (            <div className="review-list thin-scrollbar" aria-busy={loading}>
+              {posts.length ? (
+                posts.map((post) => (
+                  <article key={post.id} className={`review-list-card ${selectedPostId === post.id ? "review-list-card-active" : ""}`}>
+                    <label className={`selection-toggle ${selectedPostIds.includes(post.id) ? "selection-toggle-active" : ""}`} aria-label="选择生成稿">
+                      <input className="sr-only" type="checkbox" checked={selectedPostIds.includes(post.id)} onChange={() => toggleSelection(post.id)} />
+                      <Check className={`h-3.5 w-3.5 ${selectedPostIds.includes(post.id) ? "text-[var(--mint)]" : "text-[var(--text-muted)]"}`} />
+                      <span>{selectedPostIds.includes(post.id) ? "已选" : "选择"}</span>
+                    </label>
+                    <button className="w-full text-left" type="button" onClick={() => selectPost(post)}>
+                      <div className="flex gap-3 pr-16">
+                        <PostThumb post={post} />
+                        <div className="min-w-0 flex-1">
+                          <p className="line-clamp-2 text-sm font-black">{post.title || "未命名生成稿"}</p>
+                          <p className="mt-1 line-clamp-2 text-xs leading-5 text-[var(--text-muted)]">{post.excerpt}</p>
+                          <div className="mt-2 flex flex-wrap gap-1.5">
+                            <StatusBadge status={post.status} />
+                            <span className="status-badge text-[10px] text-[var(--text-muted)]">{platformLabels[post.platform] || post.platform}</span>
+                            <span className="status-badge text-[10px] text-[var(--text-muted)]">{post.mediaCount} 素材</span>
+                          </div>
+                        </div>
+                      </div>
+                    </button>
+                  </article>
+                ))
+              ) : (
+                <div className="empty-state min-h-0 p-4 text-xs text-[var(--text-muted)]">当前筛选没有生成稿</div>
+              )}
+            </div>); });
+
+type GalleryActions = {
+  handleDraftImagePaste: (event: ClipboardEvent<HTMLElement>, index: number) => void;
+  moveDraftImage: (index: number, delta: -1 | 1) => void;
+  removeDraftImage: (index: number) => void;
+  regenerateDraftImage: (index: number) => Promise<void>;
+  handleDraftImageFileChange: (event: ChangeEvent<HTMLInputElement>, index: number) => void;
+  selectSeriesCandidate: (index: number, url: string) => void;
+  regenerateMissingSeriesCard: (card: XhsCard) => Promise<void>;
+  removeDraftVideo: (index: number) => void;
+  openPreview: (index: number, kind: "image" | "video") => void;
+};
+const ReviewGallery = memo(function ReviewGallery({ draft, persistedImages, busy, imageBusyKey, imagePromptByIndex, setImagePromptByIndex, setImageUploadPanelOpen, actions }: {
+  draft: GeneratedPost; persistedImages?: string[]; busy: BusyState; imageBusyKey: string; imagePromptByIndex: Record<string,string>;
+  setImagePromptByIndex: Dispatch<SetStateAction<Record<string,string>>>; setImageUploadPanelOpen: Dispatch<SetStateAction<boolean>>; actions: GalleryActions;
+}) { return (                  <div className="review-gallery">
+                    {draft.imageUrls.length ? (
+                      <>
+                        {draft.imageUrls.map((url, index) => (
+                        <div
+                          key={`${url}-${index}`}
+                          className={`review-gallery-tile ${index === 0 ? "review-gallery-tile-primary" : ""}`}
+                          tabIndex={0}
+                          onPaste={(event) => actions.handleDraftImagePaste(event, index)}
+                        >
+                          <button className="review-gallery-preview" type="button" onClick={() => actions.openPreview(index, "image")}>
+                            <ReviewPreviewImage alt={`最终配图 ${index + 1}`} src={persistedImages?.[index] === url ? reviewThumbnailUrl(draft.id, index, url, 960) : toDisplayImageSrc(url)} />
+                            <span className="review-gallery-index">{index + 1}</span>
+                          </button>
+                          <div className="review-gallery-tools" aria-label={`配图 ${index + 1} 操作`}>
+                            {!draft.xhsSeries ? <>
+                            <button className="review-gallery-tool" type="button" onClick={() => actions.moveDraftImage(index, -1)} disabled={index === 0 || Boolean(busy)} aria-label="上移配图">
+                              <ArrowUp className="h-3.5 w-3.5" />
+                            </button>
+                            <button className="review-gallery-tool" type="button" onClick={() => actions.moveDraftImage(index, 1)} disabled={index === draft.imageUrls.length - 1 || Boolean(busy)} aria-label="下移配图">
+                              <ArrowDown className="h-3.5 w-3.5" />
+                            </button>
+                            </> : null}
+                            <button className="review-gallery-tool review-gallery-tool-danger" type="button" onClick={() => actions.removeDraftImage(index)} disabled={Boolean(busy)} aria-label="删除配图">
+                              <Trash2 className="h-3.5 w-3.5" />
+                            </button>
+                          </div>
+                          <div className="review-image-editor">
+                            <textarea
+                              className="field review-image-prompt"
+                              value={resolveDraftImagePrompt(draft, imagePromptByIndex, index)}
+                              onChange={(event) =>
+                                setImagePromptByIndex((current) => ({
+                                  ...current,
+                                  [imagePromptKey(draft.id, index)]: event.target.value,
+                                }))
+                              }
+                              onPaste={(event) => actions.handleDraftImagePaste(event, index)}
+                              placeholder={`第 ${index + 1} 张图片 Prompt`}
+                            />
+                            <div className="review-image-actions">
+                              <button
+                                className="review-gallery-tool"
+                                type="button"
+                                onClick={() => actions.regenerateDraftImage(index)}
+                                disabled={Boolean(busy) || Boolean(imageBusyKey)}
+                                aria-label={`重新生成第 ${index + 1} 张配图`}
+                                title="重新生成"
+                              >
+                                {imageBusyKey === `regenerate:${index}` ? <Loader2 className="h-3.5 w-3.5 animate-spin" /> : <Wand2 className="h-3.5 w-3.5" />}
+                              </button>
+                              <label
+                                className={`review-gallery-tool ${Boolean(busy) || Boolean(imageBusyKey) ? "review-gallery-tool-disabled" : ""}`}
+                                aria-label={`上传替换第 ${index + 1} 张配图`}
+                                title="上传替换"
+                              >
+                                {imageBusyKey === `upload:${index}` ? <Loader2 className="h-3.5 w-3.5 animate-spin" /> : <Upload className="h-3.5 w-3.5" />}
+                                <input
+                                  className="review-file-input"
+                                  type="file"
+                                  accept="image/png,image/jpeg,image/webp,image/gif,image/avif"
+                                  disabled={Boolean(busy) || Boolean(imageBusyKey)}
+                                  onChange={(event) => actions.handleDraftImageFileChange(event, index)}
+                                />
+                              </label>
+                            </div>
+                          </div>
+                          {seriesCardAtImageIndex(draft, index) ? <SeriesCardMeta card={seriesCardAtImageIndex(draft, index)!} onSelect={(url) => actions.selectSeriesCandidate(index, url)} /> : null}
+                        </div>
+                        ))}
+                        {draft.xhsSeries?.cards.filter((card) => !card.imageUrl).map((card) => <div className="review-gallery-tile review-series-missing" key={card.id}>
+                          <div><ImagePlus className="h-5 w-5" /><strong>第 {card.index + 1} 张待补图</strong><span>{card.error || card.qa.issues.join("；") || card.status}</span></div>
+                          <textarea className="field review-image-prompt" value={card.prompt} readOnly aria-label={`第 ${card.index + 1} 张图片 Prompt`} />
+                          <button className="soft-button" type="button" onClick={() => actions.regenerateMissingSeriesCard(card)} disabled={Boolean(busy) || Boolean(imageBusyKey)}>{imageBusyKey === `series:${card.id}` ? <Loader2 className="h-3.5 w-3.5 animate-spin" /> : <Wand2 className="h-3.5 w-3.5" />}重新生成</button>
+                        </div>)}
+                        <ReviewImageAddTile busy={Boolean(busy) || Boolean(imageBusyKey)} isUploading={imageBusyKey === "upload:add"} onOpen={() => setImageUploadPanelOpen(true)} />
+                      </>
+                    ) : (
+                      <ReviewImageAddTile empty busy={Boolean(busy) || Boolean(imageBusyKey)} isUploading={imageBusyKey === "upload:add"} onOpen={() => setImageUploadPanelOpen(true)} />
+                    )}
+                    {postVideoUrls(draft).map((url, index) => (
+                      <div key={`${url}-${index}`} className="review-gallery-tile review-video-tile" tabIndex={0}>
+                        <button className="review-gallery-preview" type="button" onClick={() => actions.openPreview(index, "video")}>
+                          <video src={url} controls preload="metadata" />
+                          <span className="review-gallery-index">V{index + 1}</span>
+                        </button>
+                        <div className="review-gallery-tools" aria-label={`瑙嗛 ${index + 1} 鎿嶄綔`}>
+                          <button className="review-gallery-tool review-gallery-tool-danger" type="button" onClick={() => actions.removeDraftVideo(index)} disabled={Boolean(busy)} aria-label="鍒犻櫎瑙嗛">
+                            <Trash2 className="h-3.5 w-3.5" />
+                          </button>
+                        </div>
+                      </div>
+                    ))}
+                  </div>); });
+
+const ReviewTextFields = memo(function ReviewTextFields({ draft, onChange, feishuVehicleOptions, feishuVehicleFieldName, feishuVehicleOptionsMessage }: {
+  draft: GeneratedPost; onChange: (field: "title" | "body" | "feishuVehicle", value: string) => void;
+  feishuVehicleOptions: string[]; feishuVehicleFieldName: string; feishuVehicleOptionsMessage: string;
+}) { return (                  <div className="review-editor-fields">
+                    <label>
+                      <FieldLabel label="标题" />
+                      <input className="field mt-2 text-base font-black" value={draft.title} onChange={(event) => onChange("title", event.target.value)} />
+                    </label>
+                    <label>
+                      <span className="flex items-center justify-between gap-3">
+                        <FieldLabel label="正文" />
+                        <span className="text-[11px] text-[var(--text-muted)]">{countFinishedBodyChars(draft.body)}/{FINISHED_BODY_MAX_CHARS}</span>
+                      </span>
+                      <textarea className="field review-body-editor mt-2" value={draft.body} onChange={(event) => onChange("body", clampFinishedBodyInput(event.target.value))} />
+                    </label>
+                    <label>
+                      <FieldLabel label={`写入飞书${feishuVehicleFieldName}`} />
+                      <select
+                        className="field mt-2 h-10"
+                        value={draft.feishuVehicle ?? draft.taskKeyword ?? ""}
+                        onChange={(event) => onChange("feishuVehicle", event.target.value)}
+                      >
+                        <option value="">未选择</option>
+                        {feishuVehicleOptions.map((option) => (
+                          <option key={option} value={option}>
+                            {option}
+                          </option>
+                        ))}
+                      </select>
+                      {feishuVehicleOptionsMessage ? <p className="mt-1 text-[11px] text-[var(--text-muted)]">{feishuVehicleOptionsMessage}</p> : null}
+                    </label>
+                  </div>); });

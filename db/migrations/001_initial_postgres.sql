@@ -53,6 +53,12 @@ CREATE TABLE IF NOT EXISTS generated_posts (
 );
 CREATE INDEX IF NOT EXISTS idx_generated_posts_updated_at ON generated_posts(updated_at DESC);
 CREATE INDEX IF NOT EXISTS idx_generated_posts_source_item_id ON generated_posts(source_item_id);
+    CREATE INDEX IF NOT EXISTS idx_review_owner_updated ON generated_posts((data_json->>'ownerUserId'), updated_at DESC, id DESC);
+    CREATE INDEX IF NOT EXISTS idx_review_owner_status_updated ON generated_posts((data_json->>'ownerUserId'), status, updated_at DESC, id DESC);
+    CREATE INDEX IF NOT EXISTS idx_review_batch_updated ON generated_posts((data_json->>'sourceBatchId'), updated_at DESC, id DESC);
+    CREATE INDEX IF NOT EXISTS idx_review_updated_id ON generated_posts(updated_at DESC, id DESC);
+    CREATE INDEX IF NOT EXISTS idx_review_source_items ON content_projects USING GIN(data_json jsonb_path_ops);
+
 
 CREATE TABLE IF NOT EXISTS batch_jobs (
   id TEXT PRIMARY KEY,

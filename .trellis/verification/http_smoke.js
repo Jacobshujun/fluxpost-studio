@@ -33,6 +33,10 @@ async function main() {
     assertType(data.hasAccounts, "boolean", "accounts.hasAccounts");
   });
   await expectStatus("/api/content-pool", undefined, 401);
+  await expectStatus("/api/review/posts", undefined, 401);
+  await expectStatus("/api/review/posts/metadata", undefined, 401);
+  await expectStatus("/api/review/posts/fixture", undefined, 401);
+  await expectStatus("/api/review/posts/fixture/thumbnail?index=0&v=fixture", undefined, 401);
   await expectStatus("/api/activity?limit=1", undefined, 401);
   await expectStatus("/api/generate", undefined, 404);
   await expectStatus("/api/production/batches", undefined, 404);

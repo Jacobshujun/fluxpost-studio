@@ -1,5 +1,5 @@
 import { filterAlignedDownloadedImages, isLikelyNonContentImageUrl, normalizeContentImageUrls } from "./media-url-filter";
-import { readContentProjectsFromDb, writeContentProjectsToDb } from "./database";
+import { readContentProjectsFromDb, writeContentProjectsToDb, mutateSourceProjectsInDb } from "./database";
 import { buildMediaCacheStatus } from "./media-cache-status";
 import { applyContentPoolCustomTagChanges, ContentPoolTagValidationError, contentPoolCustomTagKey, normalizeContentPoolCustomTags } from "./content-pool-tags";
 import { updateSourceContentTags, updateSourceVisualTags } from "./source-tagging";
@@ -448,32 +448,26 @@ export async function markSourceRewritten(sourceItemId: string, post: GeneratedP
 }
 
 async function markSourceRewrittenOnce(sourceItemId: string, post: GeneratedPost, account?: WorkspaceAccessActor) {
-  const pool = await readPool();
   const access = account || accessActorFromOwner(post.ownerUserId, post.ownerDisplayName);
-  let changed = false;
-  const nextStatus: SourceUsageStatus =
-    post.status === "published" ? "published" : post.status === "approved" ? "approved" : "rewritten";
-  const now = new Date().toISOString();
-
-  pool.projects = pool.projects.map((project) => {
-    let projectChanged = false;
+  const nextStatus: SourceUsageStatus = post.status === "published" ? "published" : post.status === "approved" ? "approved" : "rewritten";
+  await mutateSourceProjectsInDb(sourceItemId, (project) => {
+    let changed = false;
     const items = project.items.map((item) => {
       if (item.id !== sourceItemId || !canMutateWorkspaceContent(access, item)) return item;
       const currentStatus = item.poolStatus || "new";
-      const shouldCountUsage = rankStatus(currentStatus) < rankStatus("rewritten") && rankStatus(nextStatus) >= rankStatus("rewritten");
+      const shouldCountUsage = rankStatus(currentStatus) < rankStatus("rewritten");
+      if (rankStatus(currentStatus) >= rankStatus(nextStatus) && item.analysis) return item;
       changed = true;
-      projectChanged = true;
-      return {
-        ...item,
-        poolStatus: rankStatus(nextStatus) > rankStatus(currentStatus) ? nextStatus : currentStatus,
+      return { ...item, poolStatus: rankStatus(nextStatus) > rankStatus(currentStatus) ? nextStatus : currentStatus,
         usedCount: shouldCountUsage ? (item.usedCount || 0) + 1 : item.usedCount || 0,
-        analysis: item.analysis || analyzeSourceItem(item),
-      };
+        analysis: item.analysis || analyzeSourceItem(item) };
     });
-    return refreshProjectStats({ ...project, items, updatedAt: projectChanged ? now : project.updatedAt });
+    if (!changed) return undefined;
+    const count = (status: SourceUsageStatus) => items.filter((item) => item.poolStatus === status).length;
+    return { ...project, items, updatedAt: new Date().toISOString(),
+      newItems: count("new"), rewrittenItems: count("rewritten"), approvedItems: count("approved"), publishedItems: count("published"),
+      analyzedItems: items.filter((item) => item.analysis).length };
   });
-
-  if (changed) await writePool(pool);
 }
 
 function isSourceRewriteRetryableError(error: unknown) {

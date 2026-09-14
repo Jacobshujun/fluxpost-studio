@@ -16,6 +16,7 @@ function assertNotContains(source, pattern, message) {
 }
 
 const reviewPage = read("src/app/review/page.tsx");
+const reviewData = read("src/app/review/use-review-data.ts");
 const reviewRoute = read("src/app/api/review/route.ts");
 const reviewImageRoute = read("src/app/api/review/images/route.ts");
 const reviewImageUpload = read("src/lib/review-image-upload.ts");
@@ -152,13 +153,13 @@ assertNotContains(
 
 assertContains(
   reviewPage,
-  /function mergeSavedPost\(savedPost: GeneratedPost,\s*preferredPostId\?: string\)[\s\S]*upsertReviewPost\(posts,\s*savedPost\)[\s\S]*setDraft\(nextPosts\.find\(\(post\) => post\.id === nextSelectedId\) \|\| null\)/,
+  /const mergeSavedPost = review\.mergeSavedPost/,
   "Review save should merge the returned post locally instead of waiting for a full generated-post reload.",
 );
 
 assertContains(
   reviewPage,
-  /mergeSavedPost\(data\.post,\s*data\.post\.id\)/,
+  /mergeSavedPost\(data\.post,\s*draft,\s*data\.item\)/,
   "Review save should keep the saved post selected after approval instead of jumping to another post.",
 );
 
@@ -169,9 +170,9 @@ assertNotContains(
 );
 
 assertContains(
-  reviewPage,
-  /function upsertReviewPost\(posts: GeneratedPost\[\],\s*savedPost: GeneratedPost\)[\s\S]*posts\.map\(\(post\) => \(post\.id === savedPost\.id \? savedPost : post\)\)[\s\S]*updatedAt\.localeCompare\(a\.updatedAt\)/,
-  "Review save should keep the local post list updated and sorted from the API response.",
+  reviewData,
+  /setPosts\(\(current\) => current\.map[\s\S]*refresh\(\)/,
+  "Review save updates the local row and asynchronously refreshes the bounded sorted page.",
 );
 
 assertContains(
@@ -218,13 +219,13 @@ assertContains(
 
 assertContains(
   reviewPage,
-  /onClick=\{\(\) => moveDraftImage\(index,\s*-1\)\}/,
+  /onClick=\{\(\) => (?:actions\.)?moveDraftImage\(index,\s*-1\)\}/,
   "Generated images should support moving earlier in the order.",
 );
 
 assertContains(
   reviewPage,
-  /onClick=\{\(\) => removeDraftImage\(index\)\}/,
+  /onClick=\{\(\) => (?:actions\.)?removeDraftImage\(index\)\}/,
   "Generated images should support deletion before review approval.",
 );
 
@@ -248,7 +249,7 @@ assertContains(
 
 assertContains(
   reviewPage,
-  /onPaste=\{\(event\) => handleDraftImagePaste\(event,\s*index\)\}/,
+  /onPaste=\{\(event\) => (?:actions\.)?handleDraftImagePaste\(event,\s*index\)\}/,
   "Each generated image should accept pasted clipboard images for manual replacement.",
 );
 
@@ -272,7 +273,7 @@ assertContains(
 
 assertContains(
   uploadAdditionSource,
-  /getPersistedPostImageCount\(posts,\s*draft\.id,\s*draft\.imageUrls\.length\)/,
+  /persistedPost\(draft\.id\)\?\.imageUrls\.length \?\? draft\.imageUrls\.length/,
   "Manual image addition should validate append uploads against the last persisted post image count, not unsaved draft additions.",
 );
 

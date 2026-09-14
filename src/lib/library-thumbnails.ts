@@ -91,7 +91,7 @@ async function generateOrReadThumbnail(
   return { bytes, cacheStatus: "generated", etag: thumbnailEtag(asset.sha256, variant) };
 }
 
-async function readValidThumbnail(filePath: string, width: number, height: number) {
+export async function readValidThumbnail(filePath: string, width: number, height: number) {
   const fileStat = await stat(filePath).catch(() => undefined);
   if (!fileStat?.isFile() || fileStat.size <= 0) return undefined;
   const bytes = await readFile(filePath);
@@ -105,7 +105,7 @@ async function readValidThumbnail(filePath: string, width: number, height: numbe
   return undefined;
 }
 
-async function downloadThumbnailSource(url: string, fetchSource: typeof fetch) {
+export async function downloadThumbnailSource(url: string, fetchSource: typeof fetch) {
   let response: Response;
   try {
     response = await fetchSource(url, { signal: AbortSignal.timeout(20_000), redirect: "error" });
@@ -140,7 +140,7 @@ async function downloadThumbnailSource(url: string, fetchSource: typeof fetch) {
   return Buffer.concat(chunks.map((chunk) => Buffer.from(chunk)), size);
 }
 
-async function writeThumbnailAtomically(filePath: string, bytes: Buffer, width: number, height: number) {
+export async function writeThumbnailAtomically(filePath: string, bytes: Buffer, width: number, height: number) {
   await mkdir(path.dirname(filePath), { recursive: true });
   const temporaryPath = `${filePath}.${process.pid}.${randomUUID()}.tmp`;
   try {

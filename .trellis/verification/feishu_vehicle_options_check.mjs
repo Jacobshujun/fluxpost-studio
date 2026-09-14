@@ -88,7 +88,7 @@ assertContains(publishQueue, /validatePostsForFeishuPublish/, "Feishu queue work
 assertContains(publishQueue, /const vehicleOptions = await listFeishuVehicleOptions\(\)/, "Feishu queue worker must load Base vehicle options once per job.");
 assertContains(publishQueue, /normalizeFeishuVehicleValue\(rawVehicle,\s*vehicleOptions\.options\)/, "Feishu queue worker must normalize vehicle values against real Base options.");
 assertContains(publishQueue, /Feishu \$\{vehicleOptions\.fieldName\} option not found/, "Unknown vehicle options must become actionable per-post validation failures.");
-assertContains(reviewRoute, /manualPatch\?: Partial<Pick<GeneratedPost,[\s\S]*"feishuVehicle"/, "Review API manualPatch must allow feishuVehicle.");
+assertContains(read("src/lib/review-contract.ts"), /export type ReviewPatch = Partial<Pick<GeneratedPost,[\s\S]*"feishuVehicle"/, "Shared review manualPatch must allow feishuVehicle.");
 assertContains(reviewRoute, /if \("feishuVehicle" in body\.manualPatch\) allowedPatch\.feishuVehicle = body\.manualPatch\.feishuVehicle/, "Review API must preserve feishuVehicle in manual patches.");
 assertContains(reviewPage, /\/api\/publish\/feishu\/vehicle-options/, "Standalone review page must load Feishu vehicle options.");
 assertContains(reviewPage, /feishuVehicle/, "Standalone review page must render or persist feishuVehicle.");

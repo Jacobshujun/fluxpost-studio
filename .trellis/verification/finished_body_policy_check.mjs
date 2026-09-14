@@ -170,7 +170,7 @@ assert.match(reviewPage, /countFinishedBodyChars/);
 assert.match(copyPage, /clampFinishedBodyInput/);
 assert.match(copyPage, /countFinishedBodyChars/);
 assert.match(feishuQueue, /isFinishedBodyPolicyCompliant/);
-assert.match(reviewRoute, /const savedPost = await saveGeneratedPost\(post, account\)[\s\S]*syncReviewSideEffects\(savedPost, account\)[\s\S]*\{ post: savedPost \}/);
+assert.match(reviewRoute, /const savedPost = await saveGeneratedPost\(post, account\)[\s\S]*syncReviewSideEffects\(savedPost, account\)[\s\S]*\{ post: savedPost, item: reviewListItem\(savedPost\) \}/);
 assert.match(reviewRoute, /previousPost\.body !== savedPost\.body[\s\S]*savePost\(post, account, post\)/);
 
 console.log("Finished body policy check passed.");

@@ -5,6 +5,8 @@ import { getGeneratedPost, saveGeneratedPost } from "@/lib/generated-posts";
 import { editPostWithPrompt } from "@/lib/openai";
 import { savePost } from "@/lib/store";
 import { isWorkspaceSignInError, requireWorkspaceAccount } from "@/lib/workspace-accounts";
+import type { ReviewSaveRequest } from "@/lib/review-contract";
+import { reviewListItem } from "@/lib/review-posts";
 import type { GeneratedPost } from "@/lib/types";
 import type { WorkspaceAccessActor } from "@/lib/workspace-ownership";
 
@@ -14,13 +16,10 @@ export async function POST(request: Request) {
   const startedAt = Date.now();
   try {
     const account = await requireWorkspaceAccount(request);
-    const body = (await request.json()) as {
-      post?: GeneratedPost;
-      instruction?: string;
-      manualPatch?: Partial<Pick<GeneratedPost, "title" | "body" | "imagePrompt" | "status" | "imageUrls" | "videoUrls" | "imageTasks" | "feishuVehicle" | "xhsSeries">>;
-    };
+    const body = (await request.json()) as ReviewSaveRequest;
+    const postId = body.postId || body.post?.id;
 
-    if (!body.post) {
+    if (typeof postId !== "string" || !postId.trim()) {
       await recordExecutionLog({
         scope: "review",
         action: "审查请求校验失败",
@@ -36,15 +35,17 @@ export async function POST(request: Request) {
       status: "running",
       message: body.instruction?.trim() ? "准备调用文本模型按 Prompt 修改草稿" : "准备保存人工编辑字段",
       details: {
-        postId: body.post.id,
-        sourceItemId: body.post.sourceItemId,
+        postId,
+        sourceItemId: body.post?.sourceItemId || null,
         patchKeys: Object.keys(body.manualPatch || {}).join(",") || null,
         promptLength: body.instruction?.trim().length || 0,
       },
     });
 
-    const currentPost = await getGeneratedPost(body.post.id, account);
+    const readStarted = performance.now();
+    const currentPost = await getGeneratedPost(postId, account);
     if (!currentPost) return NextResponse.json({ error: "Post not found" }, { status: 404 });
+    const readMs = performance.now() - readStarted;
     let post = currentPost;
     if (body.manualPatch) {
       const allowedPatch: Partial<Pick<GeneratedPost, "title" | "body" | "imagePrompt" | "status" | "imageUrls" | "videoUrls" | "imageTasks" | "feishuVehicle" | "xhsSeries">> = {};
@@ -71,10 +72,14 @@ export async function POST(request: Request) {
       post = await editPostWithPrompt({ post, instruction: body.instruction.trim() });
     }
 
+    const saveStarted = performance.now();
     const savedPost = await saveGeneratedPost(post, account);
+    const saveMs = performance.now() - saveStarted;
+    const syncStarted = performance.now();
     const sideEffectMode = resolveReviewSideEffectMode(currentPost, savedPost, Boolean(body.instruction?.trim()));
     if (sideEffectMode === "await") await syncReviewSideEffects(savedPost, account);
     if (sideEffectMode === "background") queueReviewSideEffects(savedPost, account);
+    const syncMs = performance.now() - syncStarted;
     await recordExecutionLog({
       scope: "review",
       action: "审查更新完成",
@@ -86,9 +91,10 @@ export async function POST(request: Request) {
         status: savedPost.status,
         titleLength: savedPost.title.length,
         bodyLength: savedPost.body.length,
+        readMs, saveMs, syncMs,
       },
     });
-    return NextResponse.json({ post: savedPost });
+    return NextResponse.json({ post: savedPost, item: reviewListItem(savedPost) }, { headers: { "Server-Timing": `read;dur=${readMs.toFixed(1)}, save;dur=${saveMs.toFixed(1)}, sync;dur=${syncMs.toFixed(1)}` } });
   } catch (error) {
     const message = error instanceof Error ? error.message : "Failed to update review";
     await recordExecutionLog({

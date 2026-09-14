@@ -2,6 +2,8 @@ import {
   deleteGeneratedPostFromDb,
   deleteGeneratedPostsFromDb,
   readGeneratedPostsFromDb,
+  getGeneratedPostFromDb,
+  getGeneratedPostsByIdsFromDb,
   saveGeneratedPostToDb,
 } from "./database";
 import {
@@ -26,15 +28,15 @@ export async function listGeneratedPosts(account?: WorkspaceAccessActor) {
 }
 
 export async function getGeneratedPost(postId: string, account?: WorkspaceAccessActor) {
-  const store = await readGeneratedPosts();
-  return store.posts.find((post) => post.id === postId && canReadGeneratedPost(account, post));
+  const post = await getGeneratedPostFromDb(postId);
+  return post && canReadGeneratedPost(account, post) ? post : undefined;
 }
 
 export async function getGeneratedPostsByIds(postIds: string[], account?: WorkspaceAccessActor) {
   const ids = makeUniqueIds(postIds);
   if (!ids.length) return [];
   const selectedIds = new Set(ids);
-  const store = await readGeneratedPosts();
+  const store = { posts: await getGeneratedPostsByIdsFromDb(ids) };
   const postsById = new Map(
     store.posts
       .filter((post) => selectedIds.has(post.id) && canReadGeneratedPost(account, post))
@@ -44,8 +46,7 @@ export async function getGeneratedPostsByIds(postIds: string[], account?: Worksp
 }
 
 export async function saveGeneratedPost(post: GeneratedPost, account?: WorkspaceAccessActor) {
-  const store = await readGeneratedPosts();
-  const previous = store.posts.find((item) => item.id === post.id);
+  const previous = await getGeneratedPostFromDb(post.id);
   const access = account || accessActorFromOwner(post.ownerUserId, post.ownerDisplayName);
   if (previous && access) assertCanAccessWorkspaceRecord(access, previous, "Generated post not found");
   const ownerAccount = previous ? undefined : account;
@@ -63,8 +64,7 @@ export async function saveGeneratedPost(post: GeneratedPost, account?: Workspace
 }
 
 export async function updateGeneratedPost(postId: string, patch: Partial<GeneratedPost>, account?: WorkspaceAccessActor) {
-  const store = await readGeneratedPosts();
-  const post = store.posts.find((item) => item.id === postId && canReadGeneratedPost(account, item));
+  const post = await getGeneratedPost(postId, account);
   if (!post) throw new Error("Generated post not found");
   const nextPost: GeneratedPost = {
     ...post,
@@ -83,8 +83,7 @@ export async function updateGeneratedPost(postId: string, patch: Partial<Generat
 }
 
 export async function deleteGeneratedPost(postId: string, account?: WorkspaceAccessActor) {
-  const store = await readGeneratedPosts();
-  if (!store.posts.some((post) => post.id === postId && canReadGeneratedPost(account, post))) throw new Error("Generated post not found");
+  if (!(await getGeneratedPost(postId, account))) throw new Error("Generated post not found");
   await deleteGeneratedPostFromDb(postId);
 }
 
@@ -93,7 +92,7 @@ export async function batchUpdateGeneratedPostStatus(postIds: string[], status: 
   const selectedIds = new Set(ids);
   const foundIds = new Set<string>();
   const updatedPosts = new Map<string, GeneratedPost>();
-  const store = await readGeneratedPosts();
+  const store = { posts: await getGeneratedPostsByIdsFromDb(ids) };
   const now = new Date().toISOString();
 
   store.posts.forEach((post) => {
@@ -120,7 +119,7 @@ export async function batchUpdateGeneratedPostStatus(postIds: string[], status: 
 export async function batchDeleteGeneratedPosts(postIds: string[], account?: WorkspaceAccessActor) {
   const ids = makeUniqueIds(postIds);
   const selectedIds = new Set(ids);
-  const store = await readGeneratedPosts();
+  const store = { posts: await getGeneratedPostsByIdsFromDb(ids) };
   const foundIds = new Set(store.posts.filter((post) => selectedIds.has(post.id) && canReadGeneratedPost(account, post)).map((post) => post.id));
 
   if (foundIds.size) {
