@@ -8,7 +8,8 @@ from urllib.parse import parse_qs, urlparse
 from playwright.sync_api import sync_playwright
 
 
-BASE_URL = os.environ.get("FLUXPOST_BROWSER_BASE_URL", "http://127.0.0.1:3001")
+BASE_URL = os.environ.get("FLUXPOST_BROWSER_BASE_URL", "http://127.0.0.1:45678")
+assert urlparse(BASE_URL).hostname in ("127.0.0.1", "localhost") and urlparse(BASE_URL).port != 3001
 CHROME = os.environ.get("FLUXPOST_BROWSER_EXECUTABLE")
 PREVIEW_PIXEL = "data:image/gif;base64,R0lGODlhAQABAIAAAAAAAP///ywAAAAAAQABAAACAUwAOw=="
 THUMBNAIL_PIXEL = base64.b64decode("R0lGODlhAQABAIAAAAAAAP///ywAAAAAAQABAAACAUwAOw==")
@@ -96,8 +97,9 @@ def run_viewport(browser, viewport):
     patch_calls = []
     smart_folder_calls = []
     browser_errors = []
+    fail_collection = [False]
     page = browser.new_page(viewport={"width": width, "height": height})
-    page.on("console", lambda message: browser_errors.append(message.text) if message.type == "error" else None)
+    page.on("console", lambda message: browser_errors.append(message.text) if message.type == "error" and not ("400 (Bad Request)" in message.text and fail_collection[0] is False) else None)
     page.on("pageerror", lambda error: browser_errors.append(str(error)))
 
     def navigation_handler(route):
@@ -125,7 +127,15 @@ def run_viewport(browser, viewport):
         }))
 
     def batch_handler(route):
-        batch_calls.append(route.request.post_data_json)
+        body = route.request.post_data_json
+        batch_calls.append(body)
+        if body["action"] in ("add_to_collections", "move_to_collection"):
+            if fail_collection[0]:
+                fail_collection[0] = False
+                route.fulfill(status=400, content_type="application/json", body=json.dumps({"error": "Target unavailable"}))
+                return
+            route.fulfill(status=200, content_type="application/json", body=json.dumps({"action": body["action"], "assets": [assets[0]], "unchangedAssetIds": [], "failures": []}))
+            return
         route.fulfill(status=200, content_type="application/json", body=json.dumps({"matched": 65, "succeeded": 65, "failed": 0, "failures": []}))
 
     def patch_handler(route):
@@ -201,6 +211,48 @@ def run_viewport(browser, viewport):
     page.get_by_text("已收藏 65 张", exact=True).wait_for()
     selection = batch_calls[-1].get("selection", {})
     assert selection.get("mode") == "query" and "limit" not in selection.get("filters", {}) and "role" not in selection.get("filters", {}), f"{name}: all-matching query snapshot is incorrect"
+
+    page.locator("article > button").first.click()
+    page.get_by_role("button", name="加入图集", exact=True).click()
+    picker = page.get_by_role("dialog", name="加入图集", exact=True)
+    assert picker.get_by_role("button", name="加入图集", exact=True).is_disabled()
+    assert picker.get_by_role("radio").count() == 2, "Read-only collections must not be selectable"
+    picker.get_by_placeholder("搜索图集名称或路径").fill("no-such-collection")
+    picker.get_by_text("没有匹配的图集", exact=True).wait_for()
+    picker.get_by_placeholder("搜索图集名称或路径").fill("Campaign/Detail")
+    picker.get_by_role("radio").check()
+    fail_collection[0] = True
+    picker.get_by_role("button", name="加入图集", exact=True).click()
+    picker.get_by_role("alert").get_by_text("Target unavailable").wait_for()
+    assert picker.get_by_role("radio").is_checked(), "Failure lost chosen target"
+    picker.get_by_role("button", name="加入图集", exact=True).click()
+    picker.wait_for(state="hidden")
+    assert batch_calls[-1]["collectionIds"] == ["detail"]
+
+    page.goto(f"{BASE_URL}/library?view=collection%3Acampaign&descendants=0", wait_until="networkidle")
+    page.locator("article > button").first.click()
+    page.get_by_role("button", name="移动到图集", exact=True).click()
+    picker = page.get_by_role("dialog", name="移动到图集", exact=True)
+    assert picker.get_by_role("radio").count() == 1, "Source/read-only collection leaked into move targets"
+    picker.get_by_role("radio").check()
+    screenshot = os.path.join(tempfile.gettempdir(), f"fluxpost-library-move-{name}.png")
+    page.screenshot(path=screenshot)
+    bounds = picker.bounding_box()
+    assert bounds and bounds["x"] >= 0 and bounds["x"] + bounds["width"] <= width and bounds["y"] >= 0 and bounds["y"] + bounds["height"] <= height, "Picker overflows viewport"
+    assert picker.evaluate("el => el.scrollWidth <= el.clientWidth"), "Picker content overflows horizontally"
+    picker.get_by_role("button", name="移动到图集", exact=True).click()
+    picker.wait_for(state="hidden")
+    assert batch_calls[-1]["action"] == "move_to_collection" and batch_calls[-1]["sourceCollectionId"] == "campaign" and batch_calls[-1]["targetCollectionId"] == "detail"
+    page.locator("article > button").first.click()
+    page.get_by_role("button", name="移动到图集", exact=True).click()
+    previous_calls = len(batch_calls)
+    page.keyboard.press("Escape")
+    picker.wait_for(state="hidden")
+    assert len(batch_calls) == previous_calls, "Cancel submitted a mutation"
+    page.goto(f"{BASE_URL}/library?view=collection%3Aarchive", wait_until="networkidle")
+    page.locator("article > button").first.click()
+    assert page.get_by_role("button", name="移动到图集", exact=True).count() == 0, "Read-only source exposes move"
+    page.goto(f"{BASE_URL}/library", wait_until="networkidle")
 
     if name == "desktop":
         page.get_by_role("button", name="Campaign", exact=True).click()

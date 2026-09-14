@@ -2,7 +2,7 @@
 
 import Link from "next/link";
 import {
-  ArrowLeft, Check, ChevronLeft, ChevronRight, Eye, Folder, FolderPlus, Heart, Image as ImageIcon,
+  ArrowLeft, Check, ChevronLeft, ChevronRight, Eye, Folder, FolderInput, FolderPlus, Heart, Image as ImageIcon,
   Images, LoaderCircle, MoreHorizontal, Pencil, Plus, RefreshCw, Search, Share2, Sparkles, Tag,
   Trash2, Upload, UserRound, UsersRound, WandSparkles, X,
 } from "lucide-react";
@@ -11,7 +11,7 @@ import { getLibraryUnifiedTagsForAsset } from "@/lib/library-tags";
 import { getStoredTheme, subscribeTheme, type ThemeMode } from "@/lib/theme";
 import { enumCodec, listCodec, optionalStringCodec, useUrlQueryState } from "@/lib/use-url-query-state";
 import type {
-  LibraryAsset, LibraryAssetFilters, LibraryAssetPage, LibraryCollection, LibraryListSort, LibraryNavigation,
+  LibraryAsset, LibraryAssetFilters, LibraryAssetPage, LibraryCollection, LibraryCollectionBatchRequest, LibraryCollectionBatchResult, LibraryListSort, LibraryNavigation,
   LibrarySelection, LibrarySmartFolder, LibrarySmartFolderCondition, LibraryTagSuggestion, LibraryVisibility,
 } from "@/lib/types";
 import styles from "./library.module.css";
@@ -19,6 +19,7 @@ import styles from "./library.module.css";
 type View = { kind: "all" } | { kind: "uncategorized" } | { kind: "favorites" } | { kind: "collection"; id: string } | { kind: "smart"; id: string };
 type ImportRow = { id: string; name: string; state: "loading" | "done" | "duplicate" | "error"; message?: string };
 type SmartDraft = Pick<LibrarySmartFolder, "name" | "visibility" | "match" | "conditions"> & { id?: string };
+type CollectionPickerDraft = { selection: LibrarySelection; count: number; source?: LibraryCollection };
 const emptyNavigation: LibraryNavigation = { collections: [], smartFolders: [], counts: { all: 0, uncategorized: 0, favorites: 0 } };
 const emptyPage: LibraryAssetPage = { assets: [], total: 0 };
 const libraryViewCodec = {
@@ -68,6 +69,7 @@ export default function LibraryPage() {
   const [imports, setImports] = useState<ImportRow[]>([]);
   const [dragging, setDragging] = useState(false);
   const [smartDraft, setSmartDraft] = useState<SmartDraft>();
+  const [collectionPicker, setCollectionPicker] = useState<CollectionPickerDraft>();
   const fileInputRef = useRef<HTMLInputElement>(null);
   const requestRef = useRef(0);
   const searchInitializedRef = useRef(false);
@@ -86,6 +88,7 @@ export default function LibraryPage() {
   }), [includeDescendants, search, sort, taggingStatus, tags, view, visibility]);
   const queryString = useMemo(() => filtersToQuery(filters), [filters]);
   const detail = data.assets.find((asset) => asset.id === detailId);
+  const sourceCollection = view.kind === "collection" ? navigation.collections.find((item) => item.id === view.id && item.canEdit) : undefined;
   const selectedCount = allMatching ? Math.max(0, (data.total ?? 0) - excluded.size) : selected.size;
   const selection = useMemo<LibrarySelection>(() => allMatching
     ? { mode: "query", filters: { ...filters, limit: undefined }, excludedAssetIds: [...excluded] }
@@ -153,6 +156,23 @@ export default function LibraryPage() {
       const result = await api<{ assets: LibraryAsset[]; failures: unknown[] }>("/api/library/tags", { method: "POST", headers: jsonHeaders, body: JSON.stringify({ selection, add, remove }) });
       setMessage(`已更新 ${result.assets.length} 张${result.failures.length ? `，失败 ${result.failures.length}` : ""}`); clearSelection(); await reloadAssets();
     } catch (error) { setMessage(errorMessage(error)); } finally { setBusy(false); }
+  }
+
+  async function submitCollectionPicker(targetCollectionId: string) {
+    if (!collectionPicker || busy) return;
+    const draft = collectionPicker;
+    const body: LibraryCollectionBatchRequest = draft.source
+      ? { action: "move_to_collection", selection: draft.selection, sourceCollectionId: draft.source.id, targetCollectionId }
+      : { action: "add_to_collections", selection: draft.selection, collectionIds: [targetCollectionId] };
+    setBusy(true);
+    try {
+      const result = await api<LibraryCollectionBatchResult>("/api/library/assets/batch", { method: "POST", headers: jsonHeaders, body: JSON.stringify(body) });
+      setCollectionPicker(undefined);
+      clearSelection();
+      setSelected(new Set(result.failures.map((item) => item.assetId)));
+      setMessage(`${draft.source ? "已移动" : "已加入图集"} ${result.assets.length} 张${result.unchangedAssetIds.length ? `，未变更 ${result.unchangedAssetIds.length} 张` : ""}${result.failures.length ? `，失败 ${result.failures.length} 张：${result.failures[0].error}` : ""}`);
+      await Promise.all([reloadAssets(), loadNavigation()]).catch((error) => setMessage(`图集操作已完成，刷新失败：${errorMessage(error)}`));
+    } finally { setBusy(false); }
   }
 
   async function patchAsset(assetId: string, patch: Record<string, unknown>) {
@@ -229,13 +249,14 @@ export default function LibraryPage() {
       </aside>
       <section className={styles.content}>
         <LibraryToolbar search={searchDraft} tags={tags} tagDraft={tagDraft} suggestions={suggestions} visibility={visibility} taggingStatus={taggingStatus} sort={sort} includeDescendants={includeDescendants} showDescendants={view.kind === "collection"} onSearch={setSearchDraft} onTagDraft={setTagDraft} onAddTag={(tag) => { setTags((current) => current.includes(tag) ? current : [...current, tag]); setTagDraft(""); }} onRemoveTag={(tag) => setTags((current) => current.filter((item) => item !== tag))} onVisibility={setVisibility} onTaggingStatus={(value) => setTaggingStatus(value as typeof taggingStatus)} onSort={setSort} onDescendants={setIncludeDescendants} />
-        {selectedCount ? <BatchBar count={selectedCount} allMatching={allMatching} canSelectAll={!allMatching && selected.size === data.assets.length && (data.total ?? 0) > data.assets.length} busy={busy} onSelectAll={() => { setAllMatching(true); setSelected(new Set()); }} onAddTag={() => { const value = window.prompt("添加标签"); if (value?.trim()) void updateTags(splitComma(value)); }} onRemoveTag={() => { const value = window.prompt("移除标签"); if (value?.trim()) void updateTags([], splitComma(value)); }} onFavorite={() => void runBatch({ action: "set_favorite", favorite: true }, "已收藏")} onTeam={() => void runBatch({ action: "set_visibility", visibility: "team" }, "已共享")} onPrivate={() => void runBatch({ action: "set_visibility", visibility: "private" }, "已设为个人")} onCollection={() => { const id = window.prompt(`图集 ID\n${navigation.collections.map((item) => `${item.name}: ${item.id}`).join("\n")}`); if (id) void runBatch({ action: "add_to_collections", collectionIds: [id] }, "已加入图集"); }} onTagging={() => void api("/api/library/tagging", { method: "POST", headers: jsonHeaders, body: JSON.stringify({ selection, mode: "all" }) }).then(() => { setMessage("已提交打标"); clearSelection(); }).catch((error) => setMessage(errorMessage(error)))} onDelete={() => { if (window.confirm(`永久删除 ${selectedCount} 张图片？此操作不可撤销。`)) void runBatch({ action: "delete", confirm: true }, "已删除"); }} onClear={clearSelection} /> : null}
+        {selectedCount ? <BatchBar count={selectedCount} allMatching={allMatching} canSelectAll={!allMatching && selected.size === data.assets.length && (data.total ?? 0) > data.assets.length} busy={busy} onSelectAll={() => { setAllMatching(true); setSelected(new Set()); }} onAddTag={() => { const value = window.prompt("添加标签"); if (value?.trim()) void updateTags(splitComma(value)); }} onRemoveTag={() => { const value = window.prompt("移除标签"); if (value?.trim()) void updateTags([], splitComma(value)); }} onFavorite={() => void runBatch({ action: "set_favorite", favorite: true }, "已收藏")} onTeam={() => void runBatch({ action: "set_visibility", visibility: "team" }, "已共享")} onPrivate={() => void runBatch({ action: "set_visibility", visibility: "private" }, "已设为个人")} onCollection={() => setCollectionPicker({ selection, count: selectedCount })} onMove={sourceCollection ? () => setCollectionPicker({ selection, count: selectedCount, source: sourceCollection }) : undefined} onTagging={() => void api("/api/library/tagging", { method: "POST", headers: jsonHeaders, body: JSON.stringify({ selection, mode: "all" }) }).then(() => { setMessage("已提交打标"); clearSelection(); }).catch((error) => setMessage(errorMessage(error)))} onDelete={() => { if (window.confirm(`永久删除 ${selectedCount} 张图片？此操作不可撤销。`)) void runBatch({ action: "delete", confirm: true }, "已删除"); }} onClear={clearSelection} /> : null}
         {message ? <div className={styles.message}>{message}<button onClick={() => setMessage("")}><X /></button></div> : null}
         <div className={styles.grid} aria-busy={loading}>{loading ? <div className={styles.state}><LoaderCircle className={styles.spin} />加载中</div> : null}{!loading && !data.assets.length ? <div className={styles.state}><ImageIcon />暂无图片</div> : null}{data.assets.map((asset, index) => <AssetCard key={asset.id} asset={asset} selected={isSelected(asset.id)} onSelect={() => toggleAsset(asset.id)} onDetail={() => setDetailId(asset.id)} onPreview={() => setPreviewIndex(index)} onFavorite={() => void toggleFavorite(asset)} />)}</div>
         {data.nextCursor ? <button className={styles.loadMore} disabled={loadingMore} onClick={() => void loadMore()}>{loadingMore ? <LoaderCircle className={styles.spin} /> : <MoreHorizontal />}{loadingMore ? "加载中" : "加载更多"}</button> : null}
       </section>
       {detail ? <DetailPanel key={detail.id} asset={detail} collections={navigation.collections} busy={busy} onClose={() => setDetailId("")} onSave={(patch) => patchAsset(detail.id, patch)} onFavorite={() => void toggleFavorite(detail)} onPreview={() => setPreviewIndex(data.assets.findIndex((item) => item.id === detail.id))} /> : null}
     </div>
+    {collectionPicker ? <CollectionPicker draft={collectionPicker} collections={navigation.collections} busy={busy} onClose={() => setCollectionPicker(undefined)} onSubmit={submitCollectionPicker} /> : null}
     {previewIndex !== undefined && data.assets[previewIndex] ? <Preview assets={data.assets} index={previewIndex} onIndex={setPreviewIndex} onClose={() => setPreviewIndex(undefined)} /> : null}
     {smartDraft ? <SmartFolderDialog draft={smartDraft} collections={navigation.collections} busy={busy} onChange={setSmartDraft} onClose={() => setSmartDraft(undefined)} onSave={() => void saveSmartFolder()} /> : null}
     {imports.length ? <div className={styles.imports}><strong>导入队列</strong>{imports.map((row) => <div key={row.id}><span>{row.name}</span><small data-state={row.state}>{row.state === "loading" ? "上传中" : row.state === "done" ? "已导入" : row.state === "duplicate" ? "已存在" : row.message || "失败"}</small></div>)}</div> : null}
@@ -263,9 +284,34 @@ function LibraryToolbar(props: {
 function BatchBar(props: {
   count: number; allMatching: boolean; canSelectAll: boolean; busy: boolean; onSelectAll: () => void; onAddTag: () => void;
   onRemoveTag: () => void; onFavorite: () => void; onTeam: () => void; onPrivate: () => void; onCollection: () => void;
-  onTagging: () => void; onDelete: () => void; onClear: () => void;
+  onTagging: () => void; onDelete: () => void; onClear: () => void; onMove?: () => void;
 }) {
-  return <div className={styles.batchBar}><strong>{props.allMatching ? `已选择全部匹配 ${props.count} 张` : `已选择 ${props.count} 张`}</strong>{props.canSelectAll ? <button onClick={props.onSelectAll}>选择全部匹配</button> : null}<button disabled={props.busy} onClick={props.onAddTag}><Tag />加标签</button><button disabled={props.busy} onClick={props.onRemoveTag}><X />移除标签</button><button disabled={props.busy} onClick={props.onFavorite}><Heart />收藏</button><button disabled={props.busy} onClick={props.onTeam}><Share2 />团队</button><button disabled={props.busy} onClick={props.onPrivate}><UserRound />个人</button><button disabled={props.busy} onClick={props.onCollection}><FolderPlus />加入图集</button><button disabled={props.busy} onClick={props.onTagging}><Sparkles />AI 打标</button><button disabled={props.busy} className={styles.danger} onClick={props.onDelete}><Trash2 />删除</button><button disabled={props.busy} onClick={props.onClear}><X />取消</button></div>;
+  return <div className={styles.batchBar}><strong>{props.allMatching ? `已选择全部匹配 ${props.count} 张` : `已选择 ${props.count} 张`}</strong>{props.canSelectAll ? <button onClick={props.onSelectAll}>选择全部匹配</button> : null}<button disabled={props.busy} onClick={props.onAddTag}><Tag />加标签</button><button disabled={props.busy} onClick={props.onRemoveTag}><X />移除标签</button><button disabled={props.busy} onClick={props.onFavorite}><Heart />收藏</button><button disabled={props.busy} onClick={props.onTeam}><Share2 />团队</button><button disabled={props.busy} onClick={props.onPrivate}><UserRound />个人</button><button disabled={props.busy} onClick={props.onCollection}><FolderPlus />加入图集</button>{props.onMove ? <button disabled={props.busy} onClick={props.onMove}><FolderInput />移动到图集</button> : null}<button disabled={props.busy} onClick={props.onTagging}><Sparkles />AI 打标</button><button disabled={props.busy} className={styles.danger} onClick={props.onDelete}><Trash2 />删除</button><button disabled={props.busy} onClick={props.onClear}><X />取消</button></div>;
+}
+
+function CollectionPicker({ draft, collections, busy, onClose, onSubmit }: { draft: CollectionPickerDraft; collections: LibraryCollection[]; busy: boolean; onClose: () => void; onSubmit: (targetId: string) => Promise<void> }) {
+  const dialogRef = useRef<HTMLDialogElement>(null);
+  const [search, setSearch] = useState("");
+  const [targetId, setTargetId] = useState("");
+  const [error, setError] = useState("");
+  const title = draft.source ? "移动到图集" : "加入图集";
+  const targets = collections.filter((item) => item.canEdit && item.id !== draft.source?.id);
+  const visible = targets.filter((item) => `${item.relativePath || item.name} ${item.ownerDisplayName}`.toLocaleLowerCase().includes(search.trim().toLocaleLowerCase()));
+  const target = targets.find((item) => item.id === targetId);
+  useEffect(() => {
+    const dialog = dialogRef.current;
+    const previous = document.activeElement;
+    dialog?.showModal();
+    return () => { dialog?.close(); if (previous instanceof HTMLElement) previous.focus(); };
+  }, []);
+  return <dialog ref={dialogRef} className={`${styles.modal} ${styles.collectionPicker}`} aria-labelledby="collection-picker-title" onCancel={(event) => { event.preventDefault(); if (!busy) onClose(); }}>
+    <header><strong id="collection-picker-title">{title}</strong><button disabled={busy} title="关闭" onClick={onClose}><X /></button></header>
+    <div className={styles.collectionSummary}><span>已选图片</span><strong>{draft.count} 张</strong>{draft.source ? <><span>来源图集</span><strong>{draft.source.relativePath || draft.source.name}</strong></> : null}<span>目标图集</span><strong>{target ? target.relativePath || target.name : "未选择"}</strong></div>
+    <label><span>搜索图集</span><input autoFocus type="search" value={search} disabled={busy} placeholder="搜索图集名称或路径" onChange={(event) => setSearch(event.target.value)} /></label>
+    <fieldset className={styles.collectionOptions} disabled={busy}><legend>目标图集</legend>{visible.length ? visible.map((item) => <label key={item.id}><input type="radio" name="target-collection" checked={targetId === item.id} onChange={() => { setTargetId(item.id); setError(""); }} /><span><strong>{item.relativePath || item.name}</strong><small>{item.ownerDisplayName}</small></span></label>) : <p>{targets.length ? "没有匹配的图集" : "暂无可选图集"}</p>}</fieldset>
+    {error ? <p role="alert" className={styles.pickerError}>{error}</p> : null}
+    <footer><button disabled={busy} onClick={onClose}>取消</button><button className={styles.primary} disabled={busy || !target} onClick={() => { setError(""); void onSubmit(targetId).catch((failure) => setError(errorMessage(failure))); }}>{busy ? <LoaderCircle className={styles.spin} /> : draft.source ? <FolderInput /> : <FolderPlus />}{title}</button></footer>
+  </dialog>;
 }
 
 function AssetCard({ asset, selected, onSelect, onDetail, onPreview, onFavorite }: { asset: LibraryAsset; selected: boolean; onSelect: () => void; onDetail: () => void; onPreview: () => void; onFavorite: () => void }) {

@@ -265,6 +265,14 @@ export async function deleteLibraryCollection(account: WorkspaceAccessActor, col
 export async function updateLibraryAssetCollections(account: WorkspaceAccessActor, input: LibraryCollectionBatchRequest): Promise<LibraryCollectionBatchResult> {
   const assetIds = await resolveLibrarySelectionIds(account, input.selection);
   if (!assetIds.length) throw new Error("Select at least one library asset.");
+  if (input.action === "move_to_collection") {
+    const sourceId = input.sourceCollectionId.trim();
+    const targetId = input.targetCollectionId.trim();
+    if (!sourceId || !targetId) throw new Error("请选择来源和目标图集。");
+    if (sourceId === targetId) throw new Error("目标图集不能与来源图集相同。");
+    await requireManageableCollections(account, [sourceId, targetId]);
+    return updateCollectionMemberships(account, input.action, assetIds, [targetId], sourceId);
+  }
   if (input.action === "add_to_collections") {
     const collectionIds = normalizeIdArray(input.collectionIds, "collection");
     await requireManageableCollections(account, collectionIds);
@@ -527,13 +535,19 @@ export function compareAssets(left: LibraryAsset, right: LibraryAsset, sort: Lib
   return direction * value || direction * left.id.localeCompare(right.id);
 }
 
-async function updateCollectionMemberships(account: WorkspaceAccessActor, action: LibraryCollectionBatchRequest["action"], assetIds: string[], collectionIds: string[]): Promise<LibraryCollectionBatchResult> {
+async function updateCollectionMemberships(account: WorkspaceAccessActor, action: LibraryCollectionBatchRequest["action"], assetIds: string[], collectionIds: string[], sourceCollectionId?: string): Promise<LibraryCollectionBatchResult> {
   const result: LibraryCollectionBatchResult = { action, assets: [], unchangedAssetIds: [], failures: [] };
   for (const assetId of assetIds) {
     try {
       const asset = await getLibraryAssetFromDb(assetId);
       if (!asset || !canReadAsset(account, asset)) throw new Error("Library asset not found.");
-      const nextIds = action === "remove_from_collection" ? asset.collectionIds.filter((id) => id !== collectionIds[0]) : stableCollectionUnion(asset.collectionIds, collectionIds);
+      if (action === "move_to_collection" && !asset.collectionIds.includes(sourceCollectionId!)) {
+        result.unchangedAssetIds.push(assetId);
+        continue;
+      }
+      const nextIds = action === "move_to_collection"
+        ? stableCollectionUnion(asset.collectionIds.filter((id) => id !== sourceCollectionId), collectionIds)
+        : action === "remove_from_collection" ? asset.collectionIds.filter((id) => id !== collectionIds[0]) : stableCollectionUnion(asset.collectionIds, collectionIds);
       if (sameStringList(asset.collectionIds, nextIds)) { result.unchangedAssetIds.push(assetId); continue; }
       await replaceLibraryAssetCollectionsFromDb(assetId, nextIds);
       result.assets.push(libraryAssetView(account, { ...asset, collectionIds: nextIds }));

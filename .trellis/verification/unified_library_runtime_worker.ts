@@ -129,6 +129,36 @@ assert(!("role" in source) && source.filter.collectionId === vehicleRoot.id && s
 assert(!(migrated.prepare("SELECT 1 FROM sqlite_master WHERE type='table' AND name='library_asset_roles'").get()), "Legacy role table still exists.");
 assert((migrated.prepare("SELECT value FROM app_meta WHERE key=?").get(`unified_library_root:${actor.id}:vehicle`) as { value: string }).value === vehicleRoot.id, "Migration root metadata is missing.");
 migrated.close();
+const moveSource = await library.createLibraryCollection(actor, { name: "Move source" });
+const moveTarget = await library.createLibraryCollection(actor, { name: "Move target" });
+const forbiddenTarget = await library.createLibraryCollection(otherActor, { name: "Read only", visibility: "team" });
+await library.updateLibraryAssetCollections(actor, { action: "add_to_collections", selection: { mode: "ids", assetIds: ["a-1", "a-2"] }, collectionIds: [moveSource.id] });
+const beforeMove = await database.getLibraryAssetFromDb("a-1");
+assert(beforeMove, "Move fixture missing.");
+for (const [sourceId, targetId] of [[moveSource.id, forbiddenTarget.id], [forbiddenTarget.id, moveTarget.id], [moveSource.id, moveSource.id], [moveSource.id, "missing"]]) {
+  let denied = false;
+  try { await library.updateLibraryAssetCollections(actor, { action: "move_to_collection", selection: { mode: "ids", assetIds: ["a-1"] }, sourceCollectionId: sourceId, targetCollectionId: targetId }); } catch { denied = true; }
+  assert(denied, "Invalid move must fail before membership changes.");
+  assert(JSON.stringify((await database.getLibraryAssetFromDb("a-1"))?.collectionIds) === JSON.stringify(beforeMove.collectionIds), "Rejected move changed source memberships.");
+}
+const moved = await library.updateLibraryAssetCollections(actor, { action: "move_to_collection", selection: { mode: "query", filters: { collectionId: moveSource.id }, excludedAssetIds: ["a-2"] }, sourceCollectionId: moveSource.id, targetCollectionId: moveTarget.id });
+assert(moved.assets.length === 1 && moved.assets[0].id === "a-1" && !moved.failures.length, "Query move must honor exclusions.");
+const afterMove = await database.getLibraryAssetFromDb("a-1");
+assert(afterMove && !afterMove.collectionIds.includes(moveSource.id) && afterMove.collectionIds.includes(moveTarget.id), "Move did not replace direct source membership.");
+assert(beforeMove.collectionIds.filter((id) => id !== moveSource.id).every((id) => afterMove.collectionIds.includes(id)), "Move lost another collection membership.");
+assert(afterMove.publicUrl === beforeMove.publicUrl && afterMove.sha256 === beforeMove.sha256, "Move altered media.");
+assert((await database.getLibraryAssetFromDb("a-2"))?.collectionIds.includes(moveSource.id), "Move changed excluded asset.");
+const repeated = await library.updateLibraryAssetCollections(actor, { action: "move_to_collection", selection: { mode: "ids", assetIds: ["a-1"] }, sourceCollectionId: moveSource.id, targetCollectionId: moveTarget.id });
+assert(repeated.unchangedAssetIds.includes("a-1") && repeated.assets.length === 0 && repeated.failures.length === 0, "Repeated move result is incorrect.");
+let missingRejected = false;
+try { await library.updateLibraryAssetCollections(actor, { action: "move_to_collection", selection: { mode: "ids", assetIds: ["a-2", "missing"] }, sourceCollectionId: moveSource.id, targetCollectionId: moveTarget.id }); } catch { missingRejected = true; }
+assert(missingRejected && (await database.getLibraryAssetFromDb("a-2"))?.collectionIds.includes(moveSource.id), "Inaccessible selection must be rejected before writes.");
+const descendantOnly = await library.updateLibraryAssetCollections(actor, { action: "move_to_collection", selection: { mode: "ids", assetIds: ["a-2"] }, sourceCollectionId: moveTarget.id, targetCollectionId: moveSource.id });
+assert(descendantOnly.unchangedAssetIds.includes("a-2"), "Assets without direct source membership must remain unchanged.");
+await library.updateLibraryAssetCollections(actor, { action: "add_to_collections", selection: { mode: "ids", assetIds: ["a-2"] }, collectionIds: [moveTarget.id] });
+await library.updateLibraryAssetCollections(actor, { action: "move_to_collection", selection: { mode: "ids", assetIds: ["a-2"] }, sourceCollectionId: moveSource.id, targetCollectionId: moveTarget.id });
+const alreadyTarget = await database.getLibraryAssetFromDb("a-2");
+assert(alreadyTarget && !alreadyTarget.collectionIds.includes(moveSource.id) && alreadyTarget.collectionIds.filter((id) => id === moveTarget.id).length === 1, "Existing target membership must not prevent removing the source.");
 console.log("Unified library SQLite migration and query runtime check passed.");
 }
 

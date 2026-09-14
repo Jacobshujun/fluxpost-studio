@@ -35,6 +35,10 @@ export async function POST(request: Request) {
 }
 
 function parseLibraryCollectionBatchRequest(body: Record<string, unknown>, selection: LibraryCollectionBatchRequest["selection"]): LibraryCollectionBatchRequest {
+  if (body.action === "move_to_collection") {
+    if (typeof body.sourceCollectionId !== "string" || typeof body.targetCollectionId !== "string") throw new Error("Source and target collection IDs are required.");
+    return { action: body.action, selection, sourceCollectionId: body.sourceCollectionId, targetCollectionId: body.targetCollectionId };
+  }
   if (body.action === "add_to_collections") {
     return {
       action: body.action,

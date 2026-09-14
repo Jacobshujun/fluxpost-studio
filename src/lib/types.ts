@@ -1397,10 +1397,17 @@ export type LibraryTagBatchResult = {
 
 export type LibraryCollectionBatchAction =
   | "add_to_collections"
+  | "move_to_collection"
   | "create_collection_and_add"
   | "remove_from_collection";
 
 export type LibraryCollectionBatchRequest =
+  | {
+      action: "move_to_collection";
+      selection: LibrarySelection;
+      sourceCollectionId: string;
+      targetCollectionId: string;
+    }
   | {
       action: "add_to_collections";
       selection: LibrarySelection;

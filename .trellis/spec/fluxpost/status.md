@@ -4,7 +4,7 @@ Last updated: 2026-09-14
 
 ## One-Line Status
 
-Review performance verified; candidate unchanged. Config sync: pitfalls.md.
+Library picker/move verified. Task: 09-14-library-collection-move.
 
 ## Current Focus
 

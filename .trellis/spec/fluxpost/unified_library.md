@@ -30,6 +30,8 @@ type LibrarySelection =
 - Assets have no role. One asset may belong to zero or more collections; a parent collection includes descendants unless `includeDescendants=false` is explicitly serialized.
 - Legacy owner/role pairs migrate to deterministic private roots named `参考图库` and `车型库`. Their IDs are stored as `unified_library_root:<ownerId>:<legacyRole>` in `app_meta`.
 - Deleting a collection removes its memberships and reparents direct children; it never deletes asset objects.
+- Batch add/move use a searchable name/path picker, never a typed collection ID. `move_to_collection` accepts `sourceCollectionId`, `targetCollectionId`, and `LibrarySelection`; both organizers must be manageable and different before any writes.
+- Move replaces only direct source membership in one existing per-asset transaction, preserves other collections/media, and reports assets without direct source membership as unchanged. The UI exposes move only from an editable collection, snapshots selection on open, and retains failed items for retry.
 - A member may organize any readable team asset in collections they manage. Only the asset owner or an administrator may edit asset metadata. Favorites are per user.
 - Smart folders contain one non-nested `all | any` condition list. Team folders are readable but editable only by their owner or an administrator.
 - New imports remain `taggingStatus: "idle"`; only explicit single/batch/retry commands enqueue AI tagging.
