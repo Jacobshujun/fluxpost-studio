@@ -2760,9 +2760,7 @@ function CanvasNodeFields({ node, onChange, onPatch, onPreviewImage }: {
       if (field.key === "count" && node.type === "utility.video-frames" && node.config.mode !== "even") return null;
       if (field.key === "timestamps" && node.config.mode !== "timestamps") return null;
       const value = node.config[field.key];
-      const options = field.key === "ratio" && node.config.resolution === "4k"
-        ? field.options?.filter((option) => ["16:9", "9:16", "2:1", "1:2", "21:9", "9:21"].includes(option.value))
-        : field.options;
+      const options = field.options;
       if (field.kind === "content-pool-picker") return <ContentPoolSnapshotPicker key={field.key} node={node} onPatch={onPatch} onPreviewImage={onPreviewImage} />;
       if (field.kind === "library-image-picker") return <LibraryImageSnapshotPicker key={field.key} node={node} onPatch={onPatch} onPreviewImage={onPreviewImage} />;
       if (field.kind === "copy-library-picker") return <CopyLibrarySnapshotPicker key={field.key} node={node} onPatch={onPatch} />;
@@ -2770,11 +2768,6 @@ function CanvasNodeFields({ node, onChange, onPatch, onPreviewImage }: {
         {field.kind === "textarea" || field.kind === "url-list" ? <textarea value={field.kind === "url-list" && Array.isArray(value) ? value.join("\n") : String(value || "")} placeholder={field.placeholder} onChange={(event) => onChange(field.key, field.kind === "url-list" ? event.target.value.split(/\r?\n/).map((item) => item.trim()).filter(Boolean) : event.target.value)} />
           : field.kind === "select" ? <select value={String(value || "")} onChange={(event) => {
             const next = event.target.value;
-            if (field.key === "resolution" && next === "4k" && !["16:9", "9:16", "2:1", "1:2", "21:9", "9:21"].includes(String(node.config.ratio))) {
-              const [width, height] = String(node.config.ratio || "1:1").split(":").map(Number);
-              onPatch({ ratio: width < height ? "9:16" : "16:9", resolution: next });
-              return;
-            }
             onChange(field.key, next);
           }}>{options?.map((option) => <option key={option.value} value={option.value}>{option.label}</option>)}</select>
           : field.kind === "boolean" ? <input type="checkbox" checked={value === true} onChange={(event) => onChange(field.key, event.target.checked)} />

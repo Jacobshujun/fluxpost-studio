@@ -1,6 +1,6 @@
 import { defaultCanvasMediaMaskConfig, validateCanvasMediaMaskConfig } from "./types";
 import type { CanvasBatchBindableField, CanvasGraph, CanvasNode, CanvasNodeConfig, CanvasNodeDefinition, CanvasNodeExecutionMode, CanvasNodeType } from "./types";
-import { toApis4kImageRatios, toApisImageRatios, toApisImageResolutions } from "../toapis-image-api";
+import { toApisImageRatios, toApisImageResolutions } from "../toapis-image-api";
 import { validateCanvasImageFilenamePrefix } from "./save-images";
 import { canvasPromptPresets, canvasVisionPresets, parseCanvasImageSelection, parseCanvasVideoTimestamps, resolveCanvasImageDimensions } from "./node-utils";
 import { defaultCanvasSourceVideoProjectName, isCanvasSourceVideoSnapshotCurrent } from "./source-video-contract";
@@ -1038,9 +1038,6 @@ export function validateCanvasNodeConfig(type: CanvasNodeType, config: CanvasNod
   if (type === "model.gpt-image" && definition.version === 2) {
     const referenceUrls = normalizeUrlList(config.referenceUrls);
     if (referenceUrls.length > 16) errors.push("GPT-Image-2 direct reference images cannot exceed 16.");
-    if (config.resolution === "4k" && !toApis4kImageRatios.includes(String(config.ratio) as (typeof toApis4kImageRatios)[number])) {
-      errors.push(`GPT-Image-2 4K does not support ratio ${String(config.ratio)}.`);
-    }
     if (config.outputFormat === "jpeg") {
       const compression = Number(config.outputCompression);
       if (!Number.isInteger(compression) || compression < 0 || compression > 100) errors.push("GPT-Image-2 JPEG compression must be an integer from 0 to 100.");
@@ -1054,9 +1051,6 @@ export function validateCanvasNodeConfig(type: CanvasNodeType, config: CanvasNod
     const concurrency = Number(config.concurrency);
     if (!Number.isInteger(concurrency) || concurrency < 1 || concurrency > 20) {
       errors.push("逐图 GPT 重构并发数必须是 1 到 20 的整数。");
-    }
-    if (config.resolution === "4k" && !toApis4kImageRatios.includes(String(config.ratio) as (typeof toApis4kImageRatios)[number])) {
-      errors.push(`逐图 GPT 重构 4K 不支持比例 ${String(config.ratio)}。`);
     }
     if (config.outputFormat === "jpeg") {
       const compression = Number(config.outputCompression);

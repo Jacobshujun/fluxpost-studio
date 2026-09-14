@@ -30,28 +30,37 @@ assert.equal(writes, 0, "Reading legacy settings must not migrate runtime data")
 
 for (const resolution of toApis.toApisImageResolutions) {
   for (const ratio of toApis.toApisImageRatios) {
-    const allowed = resolution !== "4k" || toApis.toApis4kImageRatios.includes(ratio);
-    if (!allowed) {
-      const previous = stored;
-      await assert.rejects(workspace.saveWorkspacePromptSettings({ imageRatio: ratio, imageResolution: resolution }), /4K does not support/);
-      assert.equal(stored, previous);
-      continue;
-    }
     const selection = dimensions.resolveGptImageDimensionSettings({ imageRatio: ratio, imageResolution: resolution });
     const saved = await workspace.saveWorkspacePromptSettings(selection);
     const restored = await workspace.getWorkspacePromptSettings();
     assert.equal(restored.imageRatio, ratio);
     assert.equal(restored.imageResolution, resolution);
     assert.equal(restored.imageSize, saved.imageSize);
-    const body = toApis.buildToApisGenerationBody({ model: "fixture", prompt: "fixture", requestedSize: restored.imageSize, ratio: restored.imageRatio, resolution: restored.imageResolution });
+    const body = toApis.buildToApisGenerationBody({ model: "gpt-image-2.5-sunburst", prompt: "fixture", requestedSize: restored.imageSize, ratio: restored.imageRatio, resolution: restored.imageResolution });
     assert.equal(body.size, ratio);
     assert.equal(body.resolution, resolution);
+    const [width, height] = restored.imageSize.split("x").map(Number);
+    assert.equal(width % 16, 0);
+    assert.equal(height % 16, 0);
+    assert.ok(Math.max(width, height) <= 3840);
+    assert.ok(width * height >= 655360 && width * height <= 8294400);
   }
 }
 await assert.rejects(workspace.saveWorkspacePromptSettings({ imageRatio: "custom", imageResolution: "2k" }), /ratio is invalid/);
 await assert.rejects(workspace.saveWorkspacePromptSettings({ imageRatio: "3:4", imageResolution: "8k" }), /resolution is invalid/);
 assert.throws(() => dimensions.resolveGptImageDimensionSettings({ imageRatio: "3:4" }), /请选择/);
 assert.equal(dimensions.pixelSizeForRatio("3:4", "2k"), "1536x2048");
+for (const [ratio, pixels] of Object.entries({
+  "1:1": ["1024x1024", "2048x2048", "2880x2880"],
+  "3:2": ["1536x1024", "2048x1360", "3520x2336"],
+  "2:3": ["1024x1536", "1360x2048", "2336x3520"],
+  "16:9": ["1536x864", "2048x1152", "3840x2160"],
+  "9:16": ["864x1536", "1152x2048", "2160x3840"],
+})) {
+  for (const [index, resolution] of ["1k", "2k", "4k"].entries()) {
+    assert.equal(dimensions.pixelSizeForRatio(ratio, resolution), pixels[index], `${ratio}/${resolution} must match the supplied 2.5 documentation`);
+  }
+}
 
 const simple = readFileSync("src/lib/simple-runs.ts", "utf8");
 const ast = ts.createSourceFile("simple-runs.ts", simple, ts.ScriptTarget.Latest, true);
@@ -121,12 +130,16 @@ assert.match(page, /<select[^\r\n]*aria-label="图片质量"[^\r\n]*disabled=\{d
 assert.match(page, /<select[^\r\n]*aria-label="图片背景"[^\r\n]*disabled=\{disabled\}/);
 assert.match(page, /toApisImageRatios\.map/);
 assert.match(page, /toApisImageResolutions\.map/);
-assert.match(page, /disabled=\{resolution === "4k" && !allows4k\}/);
+assert.doesNotMatch(page, /toApis4kImageRatios|allows4k/);
 assert.match(page, /resolveGptImageDimensionSettings\(workspaceSettings\)/);
 assert.match(page, /\.\.\.selectedDimensions,/);
 assert.doesNotMatch(page, /ImageSizeInput|compact-image-size-presets|normalizeImageSizeInput/);
 const registry = readFileSync("src/lib/canvas/registry.ts", "utf8");
 assert.match(registry, /options: toApisImageResolutions\.map/);
+assert.doesNotMatch(registry, /toApis4kImageRatios/);
+const canvasPage = readFileSync("src/app/canvas/page.tsx", "utf8");
+const nodeFields = canvasPage.slice(canvasPage.indexOf("function CanvasNodeFields("), canvasPage.indexOf("function CanvasMediaMaskEditor("));
+assert.doesNotMatch(nodeFields, /options\?\.filter|next === "4k"/, "4K selection must neither hide ratios nor substitute a different ratio");
 assert.match(readFileSync("src/lib/canvas/executors.ts", "utf8"), /import \{ pixelSizeForRatio \} from "\.\.\/gpt-image-dimensions"/);
 console.log("Simple image selects, settings persistence, frozen resume and API dimension checks passed.");
 

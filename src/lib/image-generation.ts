@@ -1383,9 +1383,13 @@ async function requestSingleToApisImagesApiForRoute(
     count,
     outputFormat: options.outputFormat,
     outputCompression: options.outputCompression,
+    background: options.background,
   });
   const referenceUrls = await prepareToApisReferenceUrls(route, referenceImages, deadline);
-  if (referenceUrls.length) requestBody.image_urls = referenceUrls;
+  if (referenceUrls.length) {
+    if ("reference_images" in requestBody) requestBody.reference_images = referenceUrls;
+    else requestBody.image_urls = referenceUrls;
+  }
   let task: ToApisImageTask | undefined;
   let lastError = "";
   let lastProviderError: ImageProviderError | undefined;
@@ -2306,6 +2310,7 @@ function normalizeImageOptions(options?: Partial<ImageGenerationOptions>): Image
   return {
     size: normalizeImageGenerationSize(options?.size),
     quality: normalizeImageQuality(options?.quality),
+    background: options?.background,
     taskConcurrency: normalizeTaskConcurrency(options?.taskConcurrency),
     allowSourceFallback: options?.allowSourceFallback !== false,
     ratio: options?.ratio,

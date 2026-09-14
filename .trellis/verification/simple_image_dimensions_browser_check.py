@@ -89,7 +89,7 @@ async def check(browser, width):
     assert not submissions
 
     await ratio.select_option("3:4")
-    await expect(resolution.locator('option[value="4k"]')).to_have_js_property("disabled", True)
+    await expect(resolution.locator('option[value="4k"]')).to_have_js_property("disabled", False)
     await resolution.select_option("2k")
     await page.get_by_role("button", name="保存当前策略", exact=True).click()
     await asyncio.wait_for(save_started.wait(), timeout=10)
@@ -118,7 +118,11 @@ async def check(browser, width):
 
     await ratio.select_option("16:9")
     await resolution.select_option("4k")
-    await expect(ratio.locator('option[value="3:4"]')).to_have_js_property("disabled", True)
+    await expect(ratio.locator('option[value="3:4"]')).to_have_js_property("disabled", False)
+    for value in ["1:1", "4:3", "3:4"]:
+        await ratio.select_option(value)
+        await expect(ratio).to_have_value(value)
+        await expect(resolution).to_have_value("4k")
     await resolution.select_option("1k")
     await expect(ratio.locator('option[value="3:4"]')).to_have_js_property("disabled", False)
     await ratio.select_option("3:4")
@@ -134,6 +138,69 @@ async def check(browser, width):
     print(f"Simple image strategy passed at {width}px: dimensions, quality, background, disabled save state, save/reload, launch and layout")
 
 
+async def check_canvas(browser, width):
+    page = await browser.new_page(viewport={"width": width, "height": 960})
+    errors = []
+    page.on("pageerror", lambda error: errors.append(str(error)))
+    workflow = {
+        "id": "image-dimensions", "name": "图片比例测试", "revision": 1,
+        "isTemplate": False, "createdAt": NOW, "updatedAt": NOW,
+        "graph": {"viewport": {"x": 0, "y": 0, "zoom": 1}, "edges": [], "nodes": [
+            {"id": "image", "type": "model.gpt-image", "version": 2,
+             "position": {"x": 40, "y": 40}, "executionMode": "enabled",
+             "config": {"ratio": "3:4", "resolution": "2k", "quality": "medium", "count": 1,
+                        "outputFormat": "png", "outputCompression": 100, "referenceUrls": []}},
+        ]},
+    }
+
+    async def route_handler(route):
+        nonlocal workflow
+        request = route.request
+        path = urlparse(request.url).path
+        payload = {}
+        if path == "/api/canvas/workflows":
+            payload = {"workflows": [workflow]}
+        elif path == "/api/canvas/workflows/image-dimensions":
+            if request.method == "PATCH":
+                workflow = {**workflow, **request.post_data_json, "revision": workflow["revision"] + 1}
+            payload = {"workflow": workflow}
+        elif path == "/api/canvas/runs":
+            assert request.method == "GET", "Dimension editing must not start image generation"
+            payload = {"runs": [], "latestNodeAttempts": [], "latestSuccessfulNodeRuns": []}
+        elif path == "/api/canvas/schedules":
+            payload = {"schedules": []}
+        else:
+            assert request.method == "GET", f"Unexpected mutation: {path}"
+        await route.fulfill(status=200, json=payload)
+
+    await page.route("**/api/**", route_handler)
+    await page.goto(f"{BASE_URL}/canvas", wait_until="networkidle")
+    node = page.locator('.react-flow__node[data-id="image"]')
+    await node.wait_for()
+    await node.evaluate("element => element.dispatchEvent(new MouseEvent('click', {bubbles: true}))")
+    ratio = page.locator(".canvas-inspector label").filter(has=page.get_by_text("比例", exact=True)).locator("select")
+    resolution = page.locator(".canvas-inspector label").filter(has=page.get_by_text("分辨率", exact=True)).locator("select")
+    await resolution.select_option("4k")
+    await expect(ratio).to_have_value("3:4")
+    for value in ["1:1", "4:3", "3:4"]:
+        await ratio.select_option(value)
+        await expect(ratio).to_have_value(value)
+        await expect(resolution).to_have_value("4k")
+    await page.wait_for_function("!document.querySelector('.canvas-message .is-dirty')")
+    await page.reload(wait_until="networkidle")
+    await node.evaluate("element => element.dispatchEvent(new MouseEvent('click', {bubbles: true}))")
+    await expect(ratio).to_have_value("3:4")
+    await expect(resolution).to_have_value("4k")
+    await ratio.scroll_into_view_if_needed()
+    await expect(ratio).to_be_in_viewport(ratio=1)
+    await expect(page.locator(".canvas-message")).not_to_contain_text("Cannot read")
+    assert not errors, errors
+    assert await page.evaluate("document.documentElement.scrollWidth <= innerWidth + 1")
+    await page.screenshot(path=f"test-artifacts/canvas-image-dimensions-{width}.png", full_page=True)
+    await page.close()
+    print(f"Canvas 4K ratio preservation and reload passed at {width}px")
+
+
 async def main():
     parsed = urlparse(BASE_URL)
     assert parsed.hostname in ["127.0.0.1", "localhost"] and parsed.port != 3001, "Use an isolated loopback smoke server, not the candidate"
@@ -142,6 +209,7 @@ async def main():
         try:
             for width in [1440, 390]:
                 await check(browser, width)
+                await check_canvas(browser, width)
         finally:
             await browser.close()
 

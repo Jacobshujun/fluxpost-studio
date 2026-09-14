@@ -1,5 +1,5 @@
 import type { ImageGenerationOptions } from "./types";
-import { ImageProviderError } from "./image-providers/contracts";
+import { ImageProviderError, validateImageBackground } from "./image-providers/contracts";
 
 export type ToApisImageSize = {
   size: string;
@@ -49,6 +49,7 @@ export function buildToApisGenerationBody(input: {
   count?: number;
   outputFormat?: string;
   outputCompression?: number;
+  background?: ImageGenerationOptions["background"];
   referenceImages?: string[];
 }) {
   const dimensions = input.ratio || input.resolution
@@ -57,6 +58,28 @@ export function buildToApisGenerationBody(input: {
   const referenceImages = (input.referenceImages || []).filter(Boolean);
   if (referenceImages.length > maxToApisReferenceImages) {
     throw new Error(`ToAPIs accepts at most ${maxToApisReferenceImages} reference images; received ${referenceImages.length}.`);
+  }
+  if (input.model === "gpt-image-2.5-flare" || input.model === "gpt-image-2.5-sunburst") {
+    const background = validateImageBackground(input.background, input.outputFormat);
+    if ((input.count ?? 1) !== 1) {
+      throw new ImageProviderError("ToAPIs GPT Image 2.5 普通版每次请求只能生成 1 张图片，请将输出数量设为 1。", {
+        category: "input", retryable: false, failoverAllowed: false,
+      });
+    }
+    return {
+      model: input.model,
+      prompt: input.prompt,
+      n: 1,
+      size: dimensions.size,
+      resolution: dimensions.resolution,
+      quality: "high",
+      ...(background === "transparent" ? { background: "transparent" } : {}),
+      reference_images: referenceImages,
+    };
+  }
+  // The older-model adapter retains its historical contract; never apply it to 2.5 or generic controls.
+  if (dimensions.resolution === "4k" && !toApis4kImageRatios.includes(dimensions.size as (typeof toApis4kImageRatios)[number])) {
+    throw new Error(`ToAPIs legacy image adapter does not support 4K ratio ${dimensions.size}.`);
   }
   const count = validateIntegerRange(input.count ?? 1, 1, maxToApisImageOutputs, "ToAPIs image count");
   const quality = validateChoice(input.quality || "medium", ["low", "medium", "high"], "ToAPIs image quality");
@@ -80,9 +103,6 @@ export function validateToApisDimensions(ratio?: string, resolution?: string): T
   if (!toApisImageRatios.includes(ratio as ToApisImageRatio)) throw new Error(`ToAPIs image ratio is invalid: ${ratio || "(empty)"}.`);
   if (resolution !== "1k" && resolution !== "2k" && resolution !== "4k") {
     throw new Error(`ToAPIs image resolution is invalid: ${resolution || "(empty)"}.`);
-  }
-  if (resolution === "4k" && !toApis4kImageRatios.includes(ratio as (typeof toApis4kImageRatios)[number])) {
-    throw new Error(`ToAPIs 4K does not support image ratio ${ratio}.`);
   }
   return { size: ratio as ToApisImageRatio, resolution };
 }

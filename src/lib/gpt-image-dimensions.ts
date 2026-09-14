@@ -3,9 +3,14 @@ import { validateToApisDimensions } from "./toapis-image-api";
 export function pixelSizeForRatio(ratio: string, resolution: string) {
   const dimensions = validateToApisDimensions(ratio, resolution);
   const [widthRatio, heightRatio] = dimensions.size.split(":").map(Number);
-  const longestSide = dimensions.resolution === "4k" ? 4096 : dimensions.resolution === "2k" ? 2048 : 1024;
-  const scale = longestSide / Math.max(widthRatio, heightRatio);
-  return `${Math.max(64, Math.round(widthRatio * scale))}x${Math.max(64, Math.round(heightRatio * scale))}`;
+  // Match the documented 2.5 tier examples; 4K is an area budget, not a 4096px edge.
+  const longestSide = dimensions.resolution === "4k" ? 3840 : dimensions.resolution === "2k" ? 2048 : widthRatio === heightRatio ? 1024 : 1536;
+  const scale = Math.min(
+    longestSide / Math.max(widthRatio, heightRatio),
+    Math.sqrt(8_294_400 / (widthRatio * heightRatio)),
+  );
+  const align = (value: number) => Math.floor(value / 16) * 16;
+  return `${align(widthRatio * scale)}x${align(heightRatio * scale)}`;
 }
 
 export function resolveGptImageDimensionSettings(input: { imageRatio?: string; imageResolution?: string }) {

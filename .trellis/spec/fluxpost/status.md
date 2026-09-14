@@ -1,12 +1,14 @@
 # FluxPost Current Status
 
-Last updated: 2026-09-11
+Last updated: 2026-09-14
 
 ## One-Line Status
 
 Config sync fixed and verified; see pitfalls.md.
 
 ## Current Focus
+
+- 2.5 verified: .trellis/tasks/09-14-toapis-image-25-contract/.
 
 - VIP: Flare completed; edits failed. Stop paid retries; billing unknown. See pitfalls.md.
 

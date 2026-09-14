@@ -151,9 +151,10 @@ for (const hostname of ["toapis.com", "api.toapis.com", "toapis.cn", "api.toapis
         assert.equal(body.n, 1);
         assert.equal(body.size, "3:4");
         assert.equal(body.resolution, "2k");
-        assert.equal(body.quality, "medium");
-        assert.equal(body.response_format, "url");
-        assert.deepEqual(body.image_urls || [], urls);
+        assert.equal(body.quality, "high");
+        assert.equal("response_format" in body, false);
+        assert.equal("output_format" in body, false);
+        assert.deepEqual(body.reference_images, urls);
         assert.equal("stream" in body, false);
         assert.equal("input_fidelity" in body, false);
       }

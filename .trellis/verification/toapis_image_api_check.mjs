@@ -51,7 +51,31 @@ for (const resolution of ["1k", "2k"]) {
 for (const ratio of contract.toApis4kImageRatios) {
   assertDeepEqual(contract.validateToApisDimensions(ratio, "4k"), { size: ratio, resolution: "4k" }, `4K must support ${ratio}.`);
 }
-assertThrows(() => contract.validateToApisDimensions("1:1", "4k"), /4K does not support/, "4K must reject unsupported square output.");
+for (const ratio of ["1:1", "4:3", "3:4"]) {
+  assertDeepEqual(contract.validateToApisDimensions(ratio, "4k"), { size: ratio, resolution: "4k" }, "Generic dimensions must permit 4K square and 4:3 ratios.");
+}
+assertThrows(() => contract.buildToApisGenerationBody({ model: "gpt-image-2", prompt: "legacy", ratio: "1:1", resolution: "4k" }), /legacy image adapter/, "Historical restrictions belong only to older ToAPIs requests.");
+
+for (const model of ["gpt-image-2.5-flare", "gpt-image-2.5-sunburst"]) {
+  for (const ratio of ["1:1", "4:3", "3:4"]) {
+    assertDeepEqual(contract.buildToApisGenerationBody({ model, prompt: "square", ratio, resolution: "4k", quality: "low", count: 1, outputFormat: "jpeg", outputCompression: 70 }), {
+      model, prompt: "square", n: 1, size: ratio, resolution: "4k", quality: "high", reference_images: [],
+    }, "Ordinary 2.5 must send only its documented fields, always high quality, and permit 4K ratios.");
+  }
+  assertDeepEqual(contract.buildToApisGenerationBody({ model, prompt: "edit", ratio: "1:1", resolution: "1k", background: "transparent", referenceImages: ["https://fixture.invalid/a.png"] }), {
+    model, prompt: "edit", n: 1, size: "1:1", resolution: "1k", quality: "high", background: "transparent", reference_images: ["https://fixture.invalid/a.png"],
+  }, "Transparent reference generation must use reference_images.");
+  for (const count of [0, 2, 10, 1.5]) {
+    try {
+      contract.buildToApisGenerationBody({ model, prompt: "invalid count", ratio: "1:1", resolution: "1k", count });
+      throw new Error("Ordinary 2.5 multi-output request unexpectedly passed");
+    } catch (error) {
+      assertEqual(error.category, "input", "Count must fail before any provider work.");
+      assertEqual(error.retryable, false, "Invalid count must not retry.");
+      assertEqual(error.failoverAllowed, false, "Invalid count must not fail over.");
+    }
+  }
+}
 
 const sixteenReferences = Array.from({ length: 16 }, (_, index) => `https://bucket.example/${index + 1}.jpg`);
 const fullBody = contract.buildToApisGenerationBody({
@@ -117,7 +141,7 @@ assertContains(imageGeneration, /resumed && \["pending", "queued", "in_progress"
 assertContains(imageGeneration, /if \(resumed\) return throwOrPreservePendingToApisTask\(taskId, route, task\.status, asyncTask, isImageNetworkUnavailableError\(error\)\)/, "A resumed task network failure must remain attached to the accepted task and expose network wait state.");
 assertContains(imageGeneration, /if \(!resumed\) await sleepWithinDeadline\(getToApisPollDelayMs/, "A resumed task must query immediately after the durable queue delay instead of holding an image slot for another polling interval.");
 assertContains(imageGeneration, /form\.append\("image\[\]"[\s\S]*for \(const referenceImage of referenceImages\)/, "Standard multipart edits must repeat image[] without truncation.");
-assertNotContains(imageGeneration, /referenceImages\.slice\(0, 4\)|reference_images/, "Active image code must not retain the old field or four-image truncation.");
+assertNotContains(imageGeneration, /referenceImages\.slice\(0, 4\)/, "Active image code must not truncate references to four images.");
 
 console.log("ToAPIs GPT-Image-2 adapter check passed.");
 

@@ -45,7 +45,7 @@ import { defaultDistributionCheckPrompt } from "@/lib/distribution-check-prompt"
 import { feishuPublishModeOptions, formatFeishuPublishMode, normalizeFeishuPublishMode } from "@/lib/feishu-publish-mode";
 import { defaultImageGenerationSize } from "@/lib/image-size-options";
 import { resolveGptImageDimensionSettings } from "@/lib/gpt-image-dimensions";
-import { toApis4kImageRatios, toApisImageRatios, toApisImageResolutions } from "@/lib/toapis-image-api";
+import { toApisImageRatios, toApisImageResolutions } from "@/lib/toapis-image-api";
 import { toRemoteImagePreviewSrc } from "@/lib/media-preview";
 import { getStoredTheme, setStoredTheme, subscribeTheme, type ThemeMode } from "@/lib/theme";
 import {
@@ -939,7 +939,6 @@ function ImageStrategyPromptEditor({ settings, disabled, onChange }: { settings:
 }
 
 function ImageDimensionSelects({ settings, onChange, disabled }: { settings: WorkspacePromptSettings; onChange: (patch: Partial<WorkspacePromptSettings>) => void; disabled?: boolean }) {
-  const allows4k = toApis4kImageRatios.some((ratio) => ratio === settings.imageRatio);
   function updateSelection(imageRatio: string | undefined, imageResolution: WorkspacePromptSettings["imageResolution"]) {
     const selection = { imageRatio, imageResolution };
     onChange(imageRatio && imageResolution ? resolveGptImageDimensionSettings(selection) : selection);
@@ -948,11 +947,11 @@ function ImageDimensionSelects({ settings, onChange, disabled }: { settings: Wor
     <div className="grid grid-cols-2 gap-3">
       <label className="min-w-0"><FieldLabel label="图片比例" /><select className="field" aria-label="图片比例" value={settings.imageRatio || ""} onChange={(event) => updateSelection(event.target.value, settings.imageResolution)} disabled={disabled}>
         <option value="" disabled>请选择比例</option>
-        {toApisImageRatios.map((ratio) => <option key={ratio} value={ratio} disabled={settings.imageResolution === "4k" && !toApis4kImageRatios.some((supported) => supported === ratio)}>{ratio}</option>)}
+        {toApisImageRatios.map((ratio) => <option key={ratio} value={ratio}>{ratio}</option>)}
       </select></label>
       <label className="min-w-0"><FieldLabel label="图片分辨率" /><select className="field" aria-label="图片分辨率" value={settings.imageResolution || ""} onChange={(event) => updateSelection(settings.imageRatio, event.target.value as WorkspacePromptSettings["imageResolution"])} disabled={disabled}>
         <option value="" disabled>请选择分辨率</option>
-        {toApisImageResolutions.map((resolution) => <option key={resolution} value={resolution} disabled={resolution === "4k" && !allows4k}>{resolution.toUpperCase()}</option>)}
+        {toApisImageResolutions.map((resolution) => <option key={resolution} value={resolution}>{resolution.toUpperCase()}</option>)}
       </select></label>
       <label className="min-w-0"><FieldLabel label="图片质量" /><select className="field" aria-label="图片质量" value={settings.imageQuality} onChange={(event) => onChange({ imageQuality: event.target.value as WorkspacePromptSettings["imageQuality"] })} disabled={disabled}>
         <option value="low">低</option>

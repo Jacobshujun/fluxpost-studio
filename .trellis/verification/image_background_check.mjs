@@ -20,12 +20,13 @@ const declarations = names.map((name) => {
 const code = ts.transpileModule(declarations, { compilerOptions: { target: ts.ScriptTarget.ES2022 } }).outputText;
 const captured = [];
 const boundary = new Error("Stop after capturing the outgoing request");
+let routeModel = "fixture-model";
 const dependencies = {
   validateImageBackground: contracts.validateImageBackground,
   normalizeImageGenerationSize: sizes.normalizeImageGenerationSize,
   defaultImageOptions: { size: "1024x1024", quality: "medium" },
   concurrencyConfig: { image: 1 },
-  openaiImageRouteConfig: () => ({ model: "fixture-model" }),
+  openaiImageRouteConfig: () => ({ model: routeModel }),
   openaiImageHeaders: () => ({}),
   readFile: async () => Buffer.from("fixture"),
   buildOpenAiJsonGenerationBody: contracts.buildOpenAiJsonGenerationBody,
@@ -47,7 +48,7 @@ const reference = { filePath: "fixture.png", fileName: "fixture.png", mimeType: 
 for (const background of ["auto", "transparent", "opaque"]) {
   for (const quality of ["low", "medium", "high"]) {
     const normalized = runtime.normalizeImageOptions({ size: "1024x1024", quality, background });
-    assert.equal(normalized.background, undefined);
+    assert.equal(normalized.background, background);
     assert.equal(normalized.quality, quality);
     const options = { ...normalized, background };
     for (const references of [[], [reference]]) {
@@ -106,15 +107,32 @@ for (const outputFormat of ["png", "jpeg"]) {
     quality: "medium", background: "auto", count: 1, outputFormat, outputCompression: 100,
     referenceImages: ["https://fixture.invalid/reference.png"],
   }), {
-    model: "gpt-image-2.5-sunburst", prompt: "fixture", n: 1, size: "3:4", resolution: "2k", quality: "medium",
-    output_format: outputFormat, ...(outputFormat === "jpeg" ? { output_compression: 100 } : {}),
-    response_format: "url", image_urls: ["https://fixture.invalid/reference.png"],
+    model: "gpt-image-2.5-sunburst", prompt: "fixture", n: 1, size: "3:4", resolution: "2k", quality: "high",
+    reference_images: ["https://fixture.invalid/reference.png"],
   });
 }
 assert.deepEqual(contracts.buildOpenAiJsonGenerationBody({
   model: "fixture", prompt: "fixture", size: "1024x1024", quality: "high", background: "auto",
 }), { model: "fixture", prompt: "fixture", n: 1, size: "1024x1024", quality: "high" });
-console.log("September 9 image request rollback checks passed: JSON/SSE generation+edit, ToAPIs PNG/JPEG golden bodies, Responses, background omission and saved-setting validation.");
+for (const model of ["gpt-image-2.5-flare", "gpt-image-2.5-sunburst"]) {
+  routeModel = model;
+  for (const background of [undefined, "auto", "opaque", "transparent"]) {
+    for (const values of [[], ["https://fixture.invalid/reference.png"]]) {
+      const options = runtime.normalizeImageOptions({ size: "2880x2880", ratio: "1:1", resolution: "4k", quality: "low", background });
+      await assert.rejects(runtime.requestSingleToApisImagesApiForRoute("primary", "fixture", 1, Date.now(), options, { values }), (error) => error === boundary);
+      assert.deepEqual(captured.at(-1), {
+        url: "https://fixture.invalid/images/generations",
+        body: { model, prompt: "fixture", n: 1, size: "1:1", resolution: "4k", quality: "high",
+          ...(background === "transparent" ? { background } : {}), reference_images: values },
+      });
+    }
+  }
+  const before = captured.length;
+  await assert.rejects(runtime.requestSingleToApisImagesApiForRoute("primary", "fixture", 2, Date.now(), { size: "auto", ratio: "1:1", resolution: "1k" }, { values: [] }), explicitInputError);
+  assert.equal(captured.length, before, "Invalid output count must fail before submission");
+  assert.throws(() => toApis.buildToApisGenerationBody({ model, prompt: "fixture", ratio: "1:1", resolution: "1k", background: "transparent", outputFormat: "jpeg" }), explicitInputError);
+}
+console.log("Image background checks passed: existing JSON/SSE/Responses bodies and corrected ordinary ToAPIs 2.5 bodies.");
 
 function load(file, dependencies = {}) {
   const output = ts.transpileModule(readFileSync(file, "utf8"), {
