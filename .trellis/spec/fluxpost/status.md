@@ -4,7 +4,7 @@ Last updated: 2026-09-15
 
 ## One-Line Status
 
-GitHub sync targets main/local: 41 code/history commits summarized in CHANGELOG.md. Full offline baseline passes; production unchanged.
+September deployment authorized; preparation in .trellis/tasks/09-15-deploy-september-update/.
 
 ## Current Focus
 
