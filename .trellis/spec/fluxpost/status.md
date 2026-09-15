@@ -4,7 +4,7 @@ Last updated: 2026-09-15
 
 ## One-Line Status
 
-Library preview deletion verified; restart pending (active jobs). Task: 09-15-library-preview-delete.
+Library preview keys verified; restart pending (active jobs). Task: 09-15-library-preview-shortcuts.
 
 ## Current Focus
 

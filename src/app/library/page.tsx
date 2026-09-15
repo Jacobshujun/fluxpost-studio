@@ -8,6 +8,7 @@ import {
 } from "lucide-react";
 import { useCallback, useEffect, useMemo, useRef, useState, useSyncExternalStore, type DragEvent, type ReactNode } from "react";
 import { getLibraryUnifiedTagsForAsset } from "@/lib/library-tags";
+import { isEditableSelectionTarget } from "@/lib/list-selection";
 import { getStoredTheme, subscribeTheme, type ThemeMode } from "@/lib/theme";
 import { enumCodec, listCodec, optionalStringCodec, useUrlQueryState } from "@/lib/use-url-query-state";
 import type {
@@ -355,14 +356,45 @@ function DetailPanel({ asset, collections, busy, onClose, onSave, onFavorite, on
 
 function Preview({ assets, index, busy, deleteError, onIndex, onClose, onDelete }: { assets: LibraryAsset[]; index: number; busy: boolean; deleteError: string; onIndex: (index: number) => void; onClose: () => void; onDelete: () => void }) {
   const asset = assets[index];
-  return <div className={styles.preview} role="dialog" aria-modal="true" aria-label="图片预览">
+  const previewRef = useRef<HTMLDivElement>(null);
+  useEffect(() => {
+    const opener = document.activeElement;
+    previewRef.current?.focus({ preventScroll: true });
+    return () => { if (opener instanceof HTMLElement && opener.isConnected) opener.focus({ preventScroll: true }); };
+  }, []);
+  useEffect(() => {
+    const preview = previewRef.current;
+    if (preview && !preview.contains(document.activeElement)) preview.focus({ preventScroll: true });
+  }, [asset.id, busy]);
+
+  return <div ref={previewRef} tabIndex={-1} className={styles.preview} role="dialog" aria-modal="true" aria-label="图片预览" onKeyDown={(event) => {
+    if (event.defaultPrevented || event.nativeEvent.isComposing || event.ctrlKey || event.metaKey || event.altKey) return;
+    if (event.key === "Tab") {
+      const buttons = Array.from(event.currentTarget.querySelectorAll<HTMLButtonElement>("button:not(:disabled)"));
+      const first = buttons[0];
+      const last = buttons[buttons.length - 1];
+      if (!first) { event.preventDefault(); return; }
+      if (event.shiftKey && (event.target === first || event.target === event.currentTarget)) { event.preventDefault(); last.focus(); }
+      else if (!event.shiftKey && event.target === last) { event.preventDefault(); first.focus(); }
+      return;
+    }
+    if (event.shiftKey || isEditableSelectionTarget(event.target)) return;
+    if (!["ArrowLeft", "ArrowRight", "Delete", "Escape"].includes(event.key)) return;
+    event.preventDefault();
+    event.stopPropagation();
+    if (busy) return;
+    if (event.key === "ArrowLeft") onIndex((index - 1 + assets.length) % assets.length);
+    else if (event.key === "ArrowRight") onIndex((index + 1) % assets.length);
+    else if (event.key === "Escape") onClose();
+    else if (asset.canEdit && !event.repeat) onDelete();
+  }}>
     <header><strong>{asset.name}</strong><div className={styles.previewActions}>
-      {asset.canEdit ? <button className={styles.danger} disabled={busy} onClick={onDelete}>{busy ? <LoaderCircle className={styles.spin} /> : <Trash2 />}删除图片</button> : null}
-      <button aria-label="关闭预览" disabled={busy} onClick={onClose}><X /></button>
+      {asset.canEdit ? <button className={styles.danger} aria-keyshortcuts="Delete" disabled={busy} onClick={onDelete}>{busy ? <LoaderCircle className={styles.spin} /> : <Trash2 />}删除图片</button> : null}
+      <button aria-label="关闭预览" aria-keyshortcuts="Escape" disabled={busy} onClick={onClose}><X /></button>
     </div>{deleteError ? <p className={styles.previewError} role="alert">{deleteError}</p> : null}</header>
-    <button className={styles.previewArrow} aria-label="上一张" disabled={busy} onClick={() => onIndex((index - 1 + assets.length) % assets.length)}><ChevronLeft /></button>
+    <button className={styles.previewArrow} aria-label="上一张" aria-keyshortcuts="ArrowLeft" disabled={busy} onClick={() => onIndex((index - 1 + assets.length) % assets.length)}><ChevronLeft /></button>
     <img src={asset.publicUrl} alt={asset.name} />
-    <button className={styles.previewArrow} aria-label="下一张" disabled={busy} onClick={() => onIndex((index + 1) % assets.length)}><ChevronRight /></button>
+    <button className={styles.previewArrow} aria-label="下一张" aria-keyshortcuts="ArrowRight" disabled={busy} onClick={() => onIndex((index + 1) % assets.length)}><ChevronRight /></button>
     <div className={styles.previewRail}>{assets.slice(Math.max(0, index - 5), index + 6).map((item) => <button key={item.id} disabled={busy} className={item.id === asset.id ? styles.previewCurrent : ""} onClick={() => onIndex(assets.indexOf(item))}><img src={item.thumbnailUrl} alt="" /></button>)}</div>
   </div>;
 }

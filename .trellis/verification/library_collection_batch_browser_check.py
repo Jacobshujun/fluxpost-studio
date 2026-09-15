@@ -298,15 +298,59 @@ def run_viewport(browser, viewport):
     expect(delete_button).to_be_visible()
     box = delete_button.bounding_box()
     assert box and 0 <= box["x"] and box["x"] + box["width"] <= width
+    expect(preview).to_be_focused()
+    page.keyboard.press("ArrowRight")
+    expect(preview.locator("header strong")).to_have_text("Asset 2")
+    page.keyboard.press("ArrowLeft")
+    expect(preview.locator("header strong")).to_have_text("Front view")
+    # Wrap at both ends, including removal of the focused editable-only button.
+    delete_button.focus()
+    page.keyboard.press("ArrowLeft")
+    expect(preview.locator("header strong")).to_have_text("Asset 7")
+    expect(preview).to_be_focused()
+    page.keyboard.press("ArrowRight")
+    expect(preview.locator("header strong")).to_have_text("Front view")
+    page.keyboard.press("Tab")
+    expect(delete_button).to_be_focused()
+    page.keyboard.press("Shift+Tab")
+    expect(preview.locator("button").last).to_be_focused()
+    page.keyboard.press("Tab")
+    expect(delete_button).to_be_focused()
+    page.keyboard.press("Escape")
+    expect(preview).to_have_count(0)
+    expect(page.locator("article").first.get_by_title("预览", exact=True)).to_be_focused()
+    page.keyboard.press("ArrowRight")
+    page.keyboard.press("Delete")
+    expect(preview).to_have_count(0)
+    page.locator("article").first.get_by_title("预览", exact=True).click()
+    # Modified shortcuts, held Delete and composition cannot open confirmation.
+    ignored_dialogs = []
+    def dismiss_unexpected(dialog):
+        ignored_dialogs.append(dialog.message)
+        dialog.dismiss()
+    page.on("dialog", dismiss_unexpected)
+    for key in ("Control+Delete", "Shift+Delete", "Alt+ArrowLeft", "Control+ArrowRight"):
+        page.keyboard.press(key)
+    preview.dispatch_event("keydown", {"key": "Delete", "repeat": True})
+    preview.dispatch_event("keydown", {"key": "Delete", "isComposing": True})
+    # Future editable content inside the preview must retain native editing keys.
+    preview.evaluate("element => { const input = document.createElement('input'); input.id = 'keyboard-probe'; element.append(input); input.focus(); }")
+    page.keyboard.press("Delete")
+    page.keyboard.press("ArrowRight")
+    page.keyboard.press("Escape")
+    expect(preview.locator("header strong")).to_have_text("Front view")
+    preview.evaluate("element => { element.querySelector('#keyboard-probe').remove(); element.focus(); }")
+    page.remove_listener("dialog", dismiss_unexpected)
+    assert not ignored_dialogs
     count_before = len(batch_calls)
     page.once("dialog", lambda dialog: dialog.dismiss())
-    delete_button.click()
+    page.keyboard.press("Delete")
     assert len(batch_calls) == count_before
     expect(preview).to_be_visible()
 
     fail_delete[0] = True
     page.once("dialog", lambda dialog: dialog.accept())
-    delete_button.click()
+    page.keyboard.press("Delete")
     expect(preview.get_by_role("alert")).to_have_text("Object cleanup failed")
     expect(page.locator("article")).to_have_count(3)
     expect(delete_button).to_be_enabled()
@@ -314,10 +358,17 @@ def run_viewport(browser, viewport):
 
     hold_delete[0] = True
     page.once("dialog", lambda dialog: dialog.accept())
-    delete_button.click()
+    page.keyboard.press("Delete")
     expect(delete_button).to_be_disabled()
     expect(preview.get_by_role("button", name="下一张")).to_be_disabled()
     expect(preview.get_by_role("button", name="关闭预览")).to_be_disabled()
+    pending_calls = len(batch_calls)
+    page.keyboard.press("ArrowRight")
+    page.keyboard.press("ArrowLeft")
+    page.keyboard.press("Escape")
+    page.keyboard.press("Delete")
+    expect(preview.locator("header strong")).to_have_text("Front view")
+    assert len(batch_calls) == pending_calls
     assert len(held_delete) == 1
     assets[:] = [asset for asset in assets if asset["id"] != "asset-1"]
     held_delete.pop().fulfill(json={"matched": 1, "succeeded": 1, "failed": 0, "failures": []})
@@ -332,7 +383,11 @@ def run_viewport(browser, viewport):
     readonly = page.locator("article").filter(has_text="Asset 7")
     readonly.get_by_title("预览", exact=True).click()
     expect(preview.get_by_role("button", name="删除图片", exact=True)).to_have_count(0)
-    preview.get_by_role("button", name="关闭预览").click()
+    page.on("dialog", dismiss_unexpected)
+    page.keyboard.press("Delete")
+    assert not ignored_dialogs
+    page.remove_listener("dialog", dismiss_unexpected)
+    page.keyboard.press("Escape")
     readonly.get_by_role("button").nth(1).click()
     detail = page.locator("aside").filter(has=page.get_by_text("图片详情", exact=True))
     expect(detail.get_by_role("button", name="删除", exact=True)).to_have_count(0)
