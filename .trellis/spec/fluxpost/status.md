@@ -4,7 +4,7 @@ Last updated: 2026-09-15
 
 ## One-Line Status
 
-Canvas multiline lists verified; manual restart pending. Task: 09-15-canvas-prompt-separators.
+Library preview deletion verified; restart pending (active jobs). Task: 09-15-library-preview-delete.
 
 ## Current Focus
 

@@ -6,6 +6,7 @@ import tempfile
 from urllib.parse import parse_qs, urlparse
 
 from playwright.sync_api import sync_playwright
+from playwright.sync_api import expect
 
 
 BASE_URL = os.environ.get("FLUXPOST_BROWSER_BASE_URL", "http://127.0.0.1:45678")
@@ -98,6 +99,9 @@ def run_viewport(browser, viewport):
     smart_folder_calls = []
     browser_errors = []
     fail_collection = [False]
+    fail_delete = [False]
+    held_delete = []
+    hold_delete = [False]
     page = browser.new_page(viewport={"width": width, "height": height})
     page.on("console", lambda message: browser_errors.append(message.text) if message.type == "error" and not ("400 (Bad Request)" in message.text and fail_collection[0] is False) else None)
     page.on("pageerror", lambda error: browser_errors.append(str(error)))
@@ -129,6 +133,21 @@ def run_viewport(browser, viewport):
     def batch_handler(route):
         body = route.request.post_data_json
         batch_calls.append(body)
+        if body["action"] == "delete":
+            assert body["confirm"] is True
+            assert body["selection"]["mode"] == "ids"
+            assert len(body["selection"]["assetIds"]) == 1
+            asset_id = body["selection"]["assetIds"][0]
+            if fail_delete[0]:
+                fail_delete[0] = False
+                route.fulfill(json={"matched": 1, "succeeded": 0, "failed": 1, "failures": [{"assetId": asset_id, "error": "Object cleanup failed"}]})
+                return
+            if hold_delete[0]:
+                held_delete.append(route)
+                return
+            assets[:] = [asset for asset in assets if asset["id"] != asset_id]
+            route.fulfill(json={"matched": 1, "succeeded": 1, "failed": 0, "failures": []})
+            return
         if body["action"] in ("add_to_collections", "move_to_collection"):
             if fail_collection[0]:
                 fail_collection[0] = False
@@ -198,7 +217,7 @@ def run_viewport(browser, viewport):
     preview.wait_for()
     assert (preview.locator(":scope > img").get_attribute("src") or "").startswith("data:image/gif"), f"{name}: preview did not use the original URL"
     assert "/thumbnail" in (preview.locator("div img").first.get_attribute("src") or ""), f"{name}: preview rail did not use thumbnails"
-    preview.locator("header button").click()
+    preview.get_by_role("button", name="关闭预览").click()
 
     page.get_by_role("button", name="加载更多").click()
     page.wait_for_function("document.querySelectorAll('article').length === 65")
@@ -267,6 +286,81 @@ def run_viewport(browser, viewport):
         dialog.get_by_role("button", name="保存").click()
         page.get_by_text("新建智能文件夹", exact=True).wait_for(state="hidden")
         assert smart_folder_calls[-1].get("name") == "Recent favorites" and smart_folder_calls[-1]["conditions"][0].get("value") == "red", "desktop: smart-folder payload is incorrect"
+
+    # Deleting an opened asset must ignore unrelated batch selection.
+    assets[:] = [make_asset(index) for index in (1, 2, 7)]
+    page.goto(f"{BASE_URL}/library", wait_until="networkidle")
+    expect(page.locator("article")).to_have_count(3)
+    page.locator("article > button").nth(1).click()
+    page.locator("article").first.get_by_title("预览", exact=True).click()
+    preview = page.get_by_role("dialog", name="图片预览")
+    delete_button = preview.get_by_role("button", name="删除图片", exact=True)
+    expect(delete_button).to_be_visible()
+    box = delete_button.bounding_box()
+    assert box and 0 <= box["x"] and box["x"] + box["width"] <= width
+    count_before = len(batch_calls)
+    page.once("dialog", lambda dialog: dialog.dismiss())
+    delete_button.click()
+    assert len(batch_calls) == count_before
+    expect(preview).to_be_visible()
+
+    fail_delete[0] = True
+    page.once("dialog", lambda dialog: dialog.accept())
+    delete_button.click()
+    expect(preview.get_by_role("alert")).to_have_text("Object cleanup failed")
+    expect(page.locator("article")).to_have_count(3)
+    expect(delete_button).to_be_enabled()
+    assert batch_calls[-1]["selection"]["assetIds"] == ["asset-1"]
+
+    hold_delete[0] = True
+    page.once("dialog", lambda dialog: dialog.accept())
+    delete_button.click()
+    expect(delete_button).to_be_disabled()
+    expect(preview.get_by_role("button", name="下一张")).to_be_disabled()
+    expect(preview.get_by_role("button", name="关闭预览")).to_be_disabled()
+    assert len(held_delete) == 1
+    assets[:] = [asset for asset in assets if asset["id"] != "asset-1"]
+    held_delete.pop().fulfill(json={"matched": 1, "succeeded": 1, "failed": 0, "failures": []})
+    hold_delete[0] = False
+    expect(preview).to_have_count(0)
+    expect(page.locator("article")).to_have_count(2)
+    expect(page.get_by_text("全部图片 · 2 张", exact=True)).to_be_visible()
+    expect(page.get_by_text("已选择 1 张", exact=True)).to_have_count(0)
+    expect(page.locator("article").filter(has_text="Asset 2")).to_have_count(1)
+
+    # Shared read-only images expose no destructive action in either panel.
+    readonly = page.locator("article").filter(has_text="Asset 7")
+    readonly.get_by_title("预览", exact=True).click()
+    expect(preview.get_by_role("button", name="删除图片", exact=True)).to_have_count(0)
+    preview.get_by_role("button", name="关闭预览").click()
+    readonly.get_by_role("button").nth(1).click()
+    detail = page.locator("aside").filter(has=page.get_by_text("图片详情", exact=True))
+    expect(detail.get_by_role("button", name="删除", exact=True)).to_have_count(0)
+    detail.locator("header button").click()
+
+    # Removing the final image from its detail closes both detail and preview.
+    assets[:] = [make_asset(2)]
+    page.goto(f"{BASE_URL}/library", wait_until="networkidle")
+    expect(page.locator("article")).to_have_count(1)
+    page.locator("article").first.get_by_role("button").nth(1).click()
+    expect(detail.get_by_role("button", name="删除", exact=True)).to_be_visible()
+    detail.locator("button:has(img)").click()
+    page.once("dialog", lambda dialog: dialog.accept())
+    preview.get_by_role("button", name="删除图片", exact=True).click()
+    expect(preview).to_have_count(0)
+    expect(detail).to_have_count(0)
+    expect(page.get_by_text("暂无图片", exact=True)).to_be_visible()
+    assert "asset=" not in page.url
+
+    # The detail's own delete entry uses the same confirmed operation.
+    assets[:] = [make_asset(2)]
+    page.goto(f"{BASE_URL}/library", wait_until="networkidle")
+    expect(page.locator("article")).to_have_count(1)
+    page.locator("article").first.get_by_role("button").nth(1).click()
+    page.once("dialog", lambda dialog: dialog.accept())
+    detail.get_by_role("button", name="删除", exact=True).click()
+    expect(detail).to_have_count(0)
+    expect(page.get_by_text("暂无图片", exact=True)).to_be_visible()
 
     metrics = page.evaluate("() => ({ viewportWidth: innerWidth, documentWidth: document.documentElement.scrollWidth, bodyWidth: document.body.scrollWidth })")
     assert metrics["documentWidth"] <= metrics["viewportWidth"] + 1 and metrics["bodyWidth"] <= metrics["viewportWidth"] + 1, f"{name}: horizontal overflow {metrics}"
