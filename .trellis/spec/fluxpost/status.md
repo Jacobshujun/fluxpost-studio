@@ -4,7 +4,7 @@ Last updated: 2026-09-15
 
 ## One-Line Status
 
-Delete-next preview verified; restart pending. Task: 09-15-library-delete-next-preview.
+Image deletion skips confirmation; delete-next retained. Baseline and desktop/mobile checks pass.
 
 ## Current Focus
 

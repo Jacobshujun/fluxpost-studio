@@ -146,8 +146,9 @@ def run_viewport(browser, viewport):
         if body["action"] == "delete":
             assert body["confirm"] is True
             assert body["selection"]["mode"] == "ids"
-            assert len(body["selection"]["assetIds"]) == 1
-            asset_id = body["selection"]["assetIds"][0]
+            asset_ids = body["selection"]["assetIds"]
+            assert asset_ids
+            asset_id = asset_ids[0]
             if fail_delete[0]:
                 fail_delete[0] = False
                 route.fulfill(json={"matched": 1, "succeeded": 0, "failed": 1, "failures": [{"assetId": asset_id, "error": "Object cleanup failed"}]})
@@ -155,8 +156,8 @@ def run_viewport(browser, viewport):
             if hold_delete[0]:
                 held_delete.append(route)
                 return
-            assets[:] = [asset for asset in assets if asset["id"] != asset_id]
-            route.fulfill(json={"matched": 1, "succeeded": 1, "failed": 0, "failures": []})
+            assets[:] = [asset for asset in assets if asset["id"] not in asset_ids]
+            route.fulfill(json={"matched": len(asset_ids), "succeeded": len(asset_ids), "failed": 0, "failures": []})
             return
         if body["action"] in ("add_to_collections", "move_to_collection"):
             if fail_collection[0]:
@@ -333,7 +334,8 @@ def run_viewport(browser, viewport):
     page.keyboard.press("Delete")
     expect(preview).to_have_count(0)
     page.locator("article").first.get_by_title("预览", exact=True).click()
-    # Modified shortcuts, held Delete and composition cannot open confirmation.
+    # Modified shortcuts, held Delete and composition cannot delete.
+    count_before = len(batch_calls)
     ignored_dialogs = []
     def dismiss_unexpected(dialog):
         ignored_dialogs.append(dialog.message)
@@ -350,16 +352,10 @@ def run_viewport(browser, viewport):
     page.keyboard.press("Escape")
     expect(preview.locator("header strong")).to_have_text("Front view")
     preview.evaluate("element => { element.querySelector('#keyboard-probe').remove(); element.focus(); }")
-    page.remove_listener("dialog", dismiss_unexpected)
     assert not ignored_dialogs
-    count_before = len(batch_calls)
-    page.once("dialog", lambda dialog: dialog.dismiss())
-    page.keyboard.press("Delete")
     assert len(batch_calls) == count_before
-    expect(preview).to_be_visible()
 
     fail_delete[0] = True
-    page.once("dialog", lambda dialog: dialog.accept())
     page.keyboard.press("Delete")
     expect(preview.get_by_role("alert")).to_have_text("Object cleanup failed")
     expect(page.locator("article")).to_have_count(3)
@@ -367,7 +363,6 @@ def run_viewport(browser, viewport):
     assert batch_calls[-1]["selection"]["assetIds"] == ["asset-1"]
 
     hold_delete[0] = True
-    page.once("dialog", lambda dialog: dialog.accept())
     page.keyboard.press("Delete")
     expect(delete_button).to_be_disabled()
     expect(preview.get_by_role("button", name="下一张")).to_be_disabled()
@@ -390,7 +385,6 @@ def run_viewport(browser, viewport):
     expect(page.get_by_text("已选择 1 张", exact=True)).to_have_count(0)
     expect(page.locator("article").filter(has_text="Asset 2")).to_have_count(1)
     # Continue deleting by keyboard without reopening the preview.
-    page.once("dialog", lambda dialog: dialog.accept())
     page.keyboard.press("Delete")
     expect(preview.locator("header strong")).to_have_text("Asset 7")
     assert batch_calls[-1]["selection"]["assetIds"] == ["asset-2"]
@@ -399,10 +393,8 @@ def run_viewport(browser, viewport):
     # Shared read-only images expose no destructive action in either panel.
     readonly = page.locator("article").filter(has_text="Asset 7")
     expect(preview.get_by_role("button", name="删除图片", exact=True)).to_have_count(0)
-    page.on("dialog", dismiss_unexpected)
     page.keyboard.press("Delete")
     assert not ignored_dialogs
-    page.remove_listener("dialog", dismiss_unexpected)
     page.keyboard.press("Escape")
     readonly.get_by_role("button").nth(1).click()
     detail = page.locator("aside").filter(has=page.get_by_text("图片详情", exact=True))
@@ -416,19 +408,17 @@ def run_viewport(browser, viewport):
     page.locator("article").first.get_by_role("button").nth(1).click()
     expect(detail.get_by_role("button", name="删除", exact=True)).to_be_visible()
     detail.locator("button:has(img)").click()
-    page.once("dialog", lambda dialog: dialog.accept())
     preview.get_by_role("button", name="删除图片", exact=True).click()
     expect(preview).to_have_count(0)
     expect(detail).to_have_count(0)
     expect(page.get_by_text("暂无图片", exact=True)).to_be_visible()
     assert "asset=" not in page.url
 
-    # The detail's own delete entry uses the same confirmed operation.
+    # The detail's own delete entry also deletes immediately.
     assets[:] = [make_asset(2)]
     page.goto(f"{BASE_URL}/library", wait_until="networkidle")
     expect(page.locator("article")).to_have_count(1)
     page.locator("article").first.get_by_role("button").nth(1).click()
-    page.once("dialog", lambda dialog: dialog.accept())
     detail.get_by_role("button", name="删除", exact=True).click()
     expect(detail).to_have_count(0)
     expect(page.get_by_text("暂无图片", exact=True)).to_be_visible()
@@ -441,13 +431,11 @@ def run_viewport(browser, viewport):
     expect(page.locator("article")).to_have_count(65)
     page.locator("article").filter(has_text="Asset 64").get_by_title("预览", exact=True).click()
     queries_before = len(asset_queries)
-    page.once("dialog", lambda dialog: dialog.accept())
     preview.get_by_role("button", name="删除图片", exact=True).click()
     expect(preview.locator("header strong")).to_have_text("Asset 65")
     expect(preview.get_by_role("button", name="删除图片", exact=True)).to_be_enabled()
     expect(page.locator("article")).to_have_count(64)
     assert len(asset_queries) == queries_before
-    page.once("dialog", lambda dialog: dialog.accept())
     page.keyboard.press("Delete")
     expect(preview.locator("header strong")).to_have_text("Asset 63")
     expect(preview.get_by_role("button", name="下一张")).to_be_enabled()
@@ -461,7 +449,6 @@ def run_viewport(browser, viewport):
     page.goto(f"{BASE_URL}/library", wait_until="networkidle")
     expect(page.locator("article")).to_have_count(60)
     page.locator("article").filter(has_text="Asset 60").get_by_title("预览", exact=True).click()
-    page.once("dialog", lambda dialog: dialog.accept())
     page.keyboard.press("Delete")
     expect(preview.locator("header strong")).to_have_text("Asset 61")
     expect(preview.get_by_role("button", name="删除图片", exact=True)).to_be_enabled()
@@ -474,7 +461,6 @@ def run_viewport(browser, viewport):
     expect(page.locator("article")).to_have_count(60)
     page.locator("article").filter(has_text="Asset 60").get_by_title("预览", exact=True).click()
     fail_cursor_page[0] = True
-    page.once("dialog", lambda dialog: dialog.accept())
     page.keyboard.press("Delete")
     expect(preview.locator("header strong")).to_have_text("Asset 59")
     expect(preview.get_by_role("alert")).to_contain_text("Cursor page unavailable")
@@ -483,6 +469,18 @@ def run_viewport(browser, viewport):
     page.keyboard.press("Escape")
     page.get_by_role("button", name="加载更多").click()
     expect(page.locator("article")).to_have_count(64)
+
+    # Batch deletion submits immediately and clears the selection.
+    assets[:] = [make_asset(index) for index in (1, 2)]
+    page.goto(f"{BASE_URL}/library", wait_until="networkidle")
+    expect(page.locator("article")).to_have_count(2)
+    page.locator("article > button").nth(0).click()
+    page.locator("article > button").nth(1).click()
+    page.get_by_role("button", name="删除", exact=True).click()
+    expect(page.get_by_text("暂无图片", exact=True)).to_be_visible()
+    assert set(batch_calls[-1]["selection"]["assetIds"]) == {"asset-1", "asset-2"}
+    assert not ignored_dialogs
+    page.remove_listener("dialog", dismiss_unexpected)
 
     metrics = page.evaluate("() => ({ viewportWidth: innerWidth, documentWidth: document.documentElement.scrollWidth, bodyWidth: document.body.scrollWidth })")
     assert metrics["documentWidth"] <= metrics["viewportWidth"] + 1 and metrics["bodyWidth"] <= metrics["viewportWidth"] + 1, f"{name}: horizontal overflow {metrics}"
