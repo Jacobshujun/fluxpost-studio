@@ -102,6 +102,8 @@ def run_viewport(browser, viewport):
     fail_delete = [False]
     held_delete = []
     hold_delete = [False]
+    page_cursor_after = [None]
+    fail_cursor_page = [False]
     page = browser.new_page(viewport={"width": width, "height": height})
     page.on("console", lambda message: browser_errors.append(message.text) if message.type == "error" and not ("400 (Bad Request)" in message.text and fail_collection[0] is False) else None)
     page.on("pageerror", lambda error: browser_errors.append(str(error)))
@@ -121,9 +123,17 @@ def run_viewport(browser, viewport):
         params = query_params(route.request.url)
         assert "role" not in params, f"{name}: legacy role query leaked into the unified API"
         asset_queries.append(params)
+        if params.get("cursor") and fail_cursor_page[0]:
+            fail_cursor_page[0] = False
+            route.fulfill(status=400, json={"error": "Cursor page unavailable"})
+            return
         visible = filter_assets(route.request.url, assets)
-        offset = 60 if params.get("cursor", [None])[0] == "next-page" else 0
+        offset = 0
+        if params.get("cursor", [None])[0] == "next-page":
+            offset = next((index for index, asset in enumerate(visible) if int(asset["id"].split("-")[-1]) > page_cursor_after[0]), len(visible))
         page_assets = visible[offset:offset + 60]
+        if offset + len(page_assets) < len(visible):
+            page_cursor_after[0] = int(page_assets[-1]["id"].split("-")[-1])
         route.fulfill(status=200, content_type="application/json", body=json.dumps({
             "assets": page_assets,
             "total": len(visible),
@@ -373,15 +383,21 @@ def run_viewport(browser, viewport):
     assets[:] = [asset for asset in assets if asset["id"] != "asset-1"]
     held_delete.pop().fulfill(json={"matched": 1, "succeeded": 1, "failed": 0, "failures": []})
     hold_delete[0] = False
-    expect(preview).to_have_count(0)
+    expect(preview.locator("header strong")).to_have_text("Asset 2")
+    expect(delete_button).to_be_enabled()
     expect(page.locator("article")).to_have_count(2)
     expect(page.get_by_text("全部图片 · 2 张", exact=True)).to_be_visible()
     expect(page.get_by_text("已选择 1 张", exact=True)).to_have_count(0)
     expect(page.locator("article").filter(has_text="Asset 2")).to_have_count(1)
+    # Continue deleting by keyboard without reopening the preview.
+    page.once("dialog", lambda dialog: dialog.accept())
+    page.keyboard.press("Delete")
+    expect(preview.locator("header strong")).to_have_text("Asset 7")
+    assert batch_calls[-1]["selection"]["assetIds"] == ["asset-2"]
+    expect(page.locator("article")).to_have_count(1)
 
     # Shared read-only images expose no destructive action in either panel.
     readonly = page.locator("article").filter(has_text="Asset 7")
-    readonly.get_by_title("预览", exact=True).click()
     expect(preview.get_by_role("button", name="删除图片", exact=True)).to_have_count(0)
     page.on("dialog", dismiss_unexpected)
     page.keyboard.press("Delete")
@@ -416,6 +432,57 @@ def run_viewport(browser, viewport):
     detail.get_by_role("button", name="删除", exact=True).click()
     expect(detail).to_have_count(0)
     expect(page.get_by_text("暂无图片", exact=True)).to_be_visible()
+
+    # Preserve the second page and choose the next item, then the previous one
+    # when deleting the final loaded item. Do not reset to the first 60 assets.
+    assets[:] = [make_asset(index) for index in range(1, 66)]
+    page.goto(f"{BASE_URL}/library", wait_until="networkidle")
+    page.get_by_role("button", name="加载更多").click()
+    expect(page.locator("article")).to_have_count(65)
+    page.locator("article").filter(has_text="Asset 64").get_by_title("预览", exact=True).click()
+    queries_before = len(asset_queries)
+    page.once("dialog", lambda dialog: dialog.accept())
+    preview.get_by_role("button", name="删除图片", exact=True).click()
+    expect(preview.locator("header strong")).to_have_text("Asset 65")
+    expect(preview.get_by_role("button", name="删除图片", exact=True)).to_be_enabled()
+    expect(page.locator("article")).to_have_count(64)
+    assert len(asset_queries) == queries_before
+    page.once("dialog", lambda dialog: dialog.accept())
+    page.keyboard.press("Delete")
+    expect(preview.locator("header strong")).to_have_text("Asset 63")
+    expect(preview.get_by_role("button", name="下一张")).to_be_enabled()
+    assert batch_calls[-1]["selection"]["assetIds"] == ["asset-65"]
+    expect(page.locator("article")).to_have_count(63)
+    page.keyboard.press("Escape")
+    expect(preview).to_have_count(0)
+
+    # Deleting the page boundary loads the following cursor page automatically.
+    assets[:] = [make_asset(index) for index in range(1, 66)]
+    page.goto(f"{BASE_URL}/library", wait_until="networkidle")
+    expect(page.locator("article")).to_have_count(60)
+    page.locator("article").filter(has_text="Asset 60").get_by_title("预览", exact=True).click()
+    page.once("dialog", lambda dialog: dialog.accept())
+    page.keyboard.press("Delete")
+    expect(preview.locator("header strong")).to_have_text("Asset 61")
+    expect(preview.get_by_role("button", name="删除图片", exact=True)).to_be_enabled()
+    expect(page.locator("article")).to_have_count(64)
+    assert asset_queries[-1].get("cursor") == ["next-page"]
+    page.keyboard.press("Escape")
+
+    assets[:] = [make_asset(index) for index in range(1, 66)]
+    page.goto(f"{BASE_URL}/library", wait_until="networkidle")
+    expect(page.locator("article")).to_have_count(60)
+    page.locator("article").filter(has_text="Asset 60").get_by_title("预览", exact=True).click()
+    fail_cursor_page[0] = True
+    page.once("dialog", lambda dialog: dialog.accept())
+    page.keyboard.press("Delete")
+    expect(preview.locator("header strong")).to_have_text("Asset 59")
+    expect(preview.get_by_role("alert")).to_contain_text("Cursor page unavailable")
+    expect(page.locator("article")).to_have_count(59)
+    expect(preview.get_by_role("button", name="删除图片", exact=True)).to_be_enabled()
+    page.keyboard.press("Escape")
+    page.get_by_role("button", name="加载更多").click()
+    expect(page.locator("article")).to_have_count(64)
 
     metrics = page.evaluate("() => ({ viewportWidth: innerWidth, documentWidth: document.documentElement.scrollWidth, bodyWidth: document.body.scrollWidth })")
     assert metrics["documentWidth"] <= metrics["viewportWidth"] + 1 and metrics["bodyWidth"] <= metrics["viewportWidth"] + 1, f"{name}: horizontal overflow {metrics}"

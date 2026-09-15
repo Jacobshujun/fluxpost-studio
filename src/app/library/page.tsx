@@ -66,7 +66,7 @@ export default function LibraryPage() {
   const [allMatching, setAllMatching] = useState(false);
   const [excluded, setExcluded] = useState(new Set<string>());
   const [detailId, setDetailId] = useUrlQueryState("asset", "", optionalStringCodec());
-  const [previewIndex, setPreviewIndex] = useState<number>();
+  const [previewId, setPreviewId] = useState<string>();
   const [deleteError, setDeleteError] = useState("");
   const [imports, setImports] = useState<ImportRow[]>([]);
   const [dragging, setDragging] = useState(false);
@@ -90,6 +90,7 @@ export default function LibraryPage() {
   }), [includeDescendants, search, sort, taggingStatus, tags, view, visibility]);
   const queryString = useMemo(() => filtersToQuery(filters), [filters]);
   const detail = data.assets.find((asset) => asset.id === detailId);
+  const previewIndex = data.assets.findIndex((asset) => asset.id === previewId);
   const sourceCollection = view.kind === "collection" ? navigation.collections.find((item) => item.id === view.id && item.canEdit) : undefined;
   const selectedCount = allMatching ? Math.max(0, (data.total ?? 0) - excluded.size) : selected.size;
   const selection = useMemo<LibrarySelection>(() => allMatching
@@ -154,7 +155,7 @@ export default function LibraryPage() {
 
   function openPreview(index: number) {
     setDeleteError("");
-    setPreviewIndex(index);
+    setPreviewId(data.assets[index]?.id);
   }
 
   async function deleteAsset(asset: LibraryAsset) {
@@ -169,12 +170,28 @@ export default function LibraryPage() {
         body: JSON.stringify({ action: "delete", confirm: true, selection: { mode: "ids", assetIds: [asset.id] } }),
       });
       if (result.succeeded !== 1) throw new Error(result.failures[0]?.error || "图片未删除，请刷新后重试。");
-      setPreviewIndex(undefined);
+      const deletedIndex = data.assets.findIndex((item) => item.id === asset.id);
+      let nextPage: LibraryAssetPage | undefined;
+      let continuationError = "";
+      if (previewId === asset.id && deletedIndex === data.assets.length - 1 && data.nextCursor) {
+        try {
+          nextPage = await api<LibraryAssetPage>(`/api/library/assets?${queryString}&cursor=${encodeURIComponent(data.nextCursor)}`);
+        } catch (error) { continuationError = errorMessage(error); }
+      }
+      const nextPreviewId = data.assets[deletedIndex + 1]?.id ?? nextPage?.assets[0]?.id ?? data.assets[deletedIndex - 1]?.id;
+      setPreviewId((current) => current === asset.id ? nextPreviewId : current);
       if (detailId === asset.id) setDetailId("");
       clearSelection();
-      setData((current) => ({ ...current, assets: current.assets.filter((item) => item.id !== asset.id), total: current.total === undefined ? undefined : Math.max(0, current.total - 1) }));
-      setMessage("已删除 1 张图片");
-      await Promise.all([reloadAssets(), loadNavigation()]).catch((error) => setMessage(`图片已删除，刷新失败：${errorMessage(error)}`));
+      setData((current) => ({
+        ...current,
+        nextCursor: nextPage ? nextPage.nextCursor : current.nextCursor,
+        assets: [...current.assets.filter((item) => item.id !== asset.id), ...(nextPage?.assets ?? []).filter((item) => item.id !== asset.id && !current.assets.some((existing) => existing.id === item.id))],
+        total: current.total === undefined ? undefined : Math.max(0, current.total - 1),
+      }));
+      const continuationMessage = continuationError ? `图片已删除，下一页加载失败：${continuationError}` : "";
+      setDeleteError(continuationMessage);
+      setMessage(continuationMessage || "已删除 1 张图片");
+      await loadNavigation().catch((error) => setMessage(`图片已删除，统计刷新失败：${errorMessage(error)}`));
     } catch (error) {
       setDeleteError(errorMessage(error));
     } finally { setBusy(false); }
@@ -287,7 +304,7 @@ export default function LibraryPage() {
       {detail ? <DetailPanel key={detail.id} asset={detail} collections={navigation.collections} busy={busy} onClose={() => setDetailId("")} onSave={(patch) => patchAsset(detail.id, patch)} onFavorite={() => void toggleFavorite(detail)} onDelete={() => void deleteAsset(detail)} deleteError={deleteError} onPreview={() => openPreview(data.assets.findIndex((item) => item.id === detail.id))} /> : null}
     </div>
     {collectionPicker ? <CollectionPicker draft={collectionPicker} collections={navigation.collections} busy={busy} onClose={() => setCollectionPicker(undefined)} onSubmit={submitCollectionPicker} /> : null}
-    {previewIndex !== undefined && data.assets[previewIndex] ? <Preview assets={data.assets} index={previewIndex} busy={busy} deleteError={deleteError} onDelete={() => void deleteAsset(data.assets[previewIndex])} onIndex={openPreview} onClose={() => setPreviewIndex(undefined)} /> : null}
+    {previewIndex >= 0 ? <Preview assets={data.assets} index={previewIndex} busy={busy} deleteError={deleteError} onDelete={() => void deleteAsset(data.assets[previewIndex])} onIndex={openPreview} onClose={() => setPreviewId(undefined)} /> : null}
     {smartDraft ? <SmartFolderDialog draft={smartDraft} collections={navigation.collections} busy={busy} onChange={setSmartDraft} onClose={() => setSmartDraft(undefined)} onSave={() => void saveSmartFolder()} /> : null}
     {imports.length ? <div className={styles.imports}><strong>导入队列</strong>{imports.map((row) => <div key={row.id}><span>{row.name}</span><small data-state={row.state}>{row.state === "loading" ? "上传中" : row.state === "done" ? "已导入" : row.state === "duplicate" ? "已存在" : row.message || "失败"}</small></div>)}</div> : null}
     {dragging ? <div className={styles.dropZone} onDragLeave={() => setDragging(false)}><Upload /><strong>松开以导入图片</strong></div> : null}
