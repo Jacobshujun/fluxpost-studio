@@ -4647,12 +4647,30 @@ function CanvasScheduleParameterSourceEditor({ parameter, graph, onChange, onPre
     return <ScheduleCopyFilterEditor filter={source.filter} singleSelection={parameter.expansion === "fixed"} filterMatchLabel onChange={(filter) => onChange({ ...parameter, source: { mode: "copy-filter", filter } })} />;
   }
   const source = parameter.source.mode === "fixed" || parameter.source.mode === "manual-list" ? parameter.source : defaultCanvasScheduleParameterSource(parameter.valueType) as Extract<CanvasScheduleParameterSource, { mode: "fixed" | "manual-list" }>;
-  const values = source.values.map((value) => String(value)).join("\n");
   return <div className="canvas-schedule-parameter-source canvas-schedule-parameter-values"><label><span>值来源</span><select value={source.mode} onChange={(event) => {
     const mode = event.target.value as "fixed" | "manual-list";
     const nextValues = mode === "fixed" ? source.values.slice(0, 1) : source.values;
     onChange({ ...parameter, expansion: mode === "manual-list" ? "each" : "fixed", sampleCount: undefined, randomCount: undefined, source: { mode, values: nextValues.length ? nextValues : [defaultCanvasScheduleScalarValue(parameter.valueType)] } });
-  }}><option value="fixed">固定值</option><option value="manual-list">手工列表</option></select></label><label><span>{source.mode === "fixed" ? "参数值" : "每行一个值"}</span><textarea value={values} onChange={(event) => onChange({ ...parameter, source: { mode: source.mode, values: parseCanvasScheduleScalarValues(parameter.valueType, event.target.value, source.mode) } })} /></label></div>;
+  }}><option value="fixed">固定值</option><option value="manual-list">手工列表</option></select></label><label><span>{source.mode === "fixed" ? "参数值" : "每行一个值"}</span><CanvasScheduleScalarValuesEditor key={`${parameter.id}:${parameter.valueType}:${source.mode}`} valueType={parameter.valueType} source={source} onChange={(values) => onChange({ ...parameter, source: { mode: source.mode, values } })} /></label></div>;
+}
+
+function CanvasScheduleScalarValuesEditor({ valueType, source, onChange }: {
+  valueType: CanvasScheduleParameterType;
+  source: Extract<CanvasScheduleParameterSource, { mode: "fixed" | "manual-list" }>;
+  onChange: (values: CanvasScheduleParameterValue[]) => void;
+}) {
+  const serializedValues = JSON.stringify(source.values);
+  const [draft, setDraft] = useState({ source: serializedValues, value: source.values.map(String).join("\n") });
+  if (draft.source !== serializedValues) {
+    setDraft({ source: serializedValues, value: source.values.map(String).join("\n") });
+  }
+  return <textarea value={draft.value} onChange={(event) => {
+    const value = event.target.value;
+    const values = parseCanvasScheduleScalarValues(valueType, value, source.mode);
+    // Keep editing whitespace while publishing normalized values to the schedule.
+    setDraft({ source: JSON.stringify(values), value });
+    onChange(values);
+  }} />;
 }
 
 function ScheduleV2Preview({ schedule, onPreview }: {

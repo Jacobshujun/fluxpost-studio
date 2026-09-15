@@ -15,6 +15,14 @@ Examples:
 
 ## Server State
 
+Canvas scalar schedule inputs keep raw textarea drafts separate from parsed
+`source.values`. Trimming/filtering each keystroke back into the textarea removes
+trailing Enter and spaces. Publish parsed values immediately for save/preflight,
+but preserve the raw draft while its serialized parsed values match the props.
+Reset on external value changes and key by parameter id, value type and mode.
+The content-collection browser check covers keyboard editing and blank-free
+preflight at desktop/mobile widths.
+
 Runtime state belongs to backend stores and queues, not browser-only memory:
 
 - Content projects and source items: `src/lib/content-pool.ts`.
