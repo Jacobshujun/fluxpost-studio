@@ -90,7 +90,7 @@ Older evidence is preserved in `.trellis/spec/fluxpost/archive/verification-hist
 - No authenticated production Canvas create/save/run walkthrough or multi-user PostgreSQL concurrency test was run during this release.
 - No default check changes DNS, firewall, Nginx routing, Docker volumes, or external production services.
 - No production image cleanup or systemd timer change is performed by the default baseline; the 2026-08-06 live maintenance evidence was an explicitly authorized operator action.
-- Current production lacks `/api/version`; final parity awaits an approved identity-enabled deployment.
+- Production identity is verified; local parity is pending while active local tasks prevent restart.
 - The package audit reports nine high-severity transitive advisories; do not run automatic `npm audit fix --force` as part of release verification.
 
 ## Future Check Rules
