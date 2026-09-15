@@ -16,3 +16,14 @@
 - Screenshots: test-artifacts/canvas-content-collection-{1440,390}.png (ignored).
 - Spec review: captured the raw draft/normalized parameter boundary in frontend
   state-management.md. Feature acceptance state is unchanged.
+
+## Local Activation Pending
+
+- Fix commit: 90d0ad6; implementation task archived in 8125fe1.
+- At 2026-09-15 01:38 UTC, read-only PostgreSQL queue checks found one running
+  simple task and 40 running Canvas tasks with fresh updates/unexpired leases,
+  plus 15 queued Canvas tasks. Port 3001 remains unchanged to avoid interruption.
+- User was asked whether to wait for tasks or accept an immediate restart.
+- After tasks finish or interruption is authorized, run `npm run local:lan`
+  from the clean primary worktree, preserving the existing 0.0.0.0 binding.
+  Verify HEAD, /api/version, candidate state and slot manifest SHA agree.

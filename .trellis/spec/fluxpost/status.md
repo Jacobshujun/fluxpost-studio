@@ -4,7 +4,7 @@ Last updated: 2026-09-15
 
 ## One-Line Status
 
-Canvas list Enter verified. Task: 09-15-canvas-manual-list-newlines.
+Canvas Enter fixed; activation waits for active jobs. See archived 09-15-canvas-manual-list-newlines.
 
 ## Current Focus
 
