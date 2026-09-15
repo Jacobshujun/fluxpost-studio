@@ -4,7 +4,7 @@ Last updated: 2026-09-15
 
 ## One-Line Status
 
-Image deletion skips confirmation; delete-next retained. Baseline and desktop/mobile checks pass.
+GitHub sync targets main/local: 41 code/history commits summarized in CHANGELOG.md. Full offline baseline passes; production unchanged.
 
 ## Current Focus
 
