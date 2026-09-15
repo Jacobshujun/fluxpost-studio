@@ -382,6 +382,9 @@ function validateCanvasScheduleParameterSource(parameter: CanvasScheduleParamete
   if (parameter.valueType === "content-pool" && parameter.scope !== "main") throw new Error(`${parameter.name}: content-pool parameters must use main-task scope.`);
   if (!source || !['fixed', 'manual-list', 'library-filter', 'copy-filter', 'content-pool-filter', 'video-loader-queue', 'source-video-links', 'competitor-workbook'].includes(source.mode)) throw new Error(`${parameter.name}: parameter source is invalid.`);
   if (source.mode === "fixed" || source.mode === "manual-list") {
+    if (source.listSeparator !== undefined && (parameter.valueType !== "text" || !["line", "delimiter"].includes(source.listSeparator))) {
+      throw new Error(`${parameter.name}: list separator must be line or delimiter and requires a text parameter.`);
+    }
     if (!Array.isArray(source.values)) throw new Error(`${parameter.name}: parameter values must be a list.`);
     if (source.mode === "fixed" && source.values.length !== 1) throw new Error(`${parameter.name}: fixed source requires exactly one value.`);
     if (!source.values.length) throw new Error(`${parameter.name}: parameter values cannot be empty.`);

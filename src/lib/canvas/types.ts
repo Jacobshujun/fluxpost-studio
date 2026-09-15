@@ -751,7 +751,7 @@ export type CanvasScheduleParameterValue =
   | CanvasDirectoryGroup;
 
 export type CanvasScheduleParameterSource =
-  | { mode: "fixed" | "manual-list"; values: CanvasScheduleParameterValue[] }
+  | { mode: "fixed" | "manual-list"; values: CanvasScheduleParameterValue[]; listSeparator?: "line" | "delimiter" }
   | { mode: "library-filter"; filter: CanvasScheduleAssetFilter }
   | { mode: "copy-filter"; filter: CanvasScheduleCopyFilter }
   | { mode: "content-pool-filter"; filter: CanvasScheduleContentPoolFilter }

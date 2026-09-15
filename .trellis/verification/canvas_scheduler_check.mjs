@@ -353,6 +353,28 @@ try {
     aggregationPolicy: "at-least-one",
   };
   schedulerV2.validateCanvasScheduleV2Definition(graph, v2Definition);
+  const multilinePrompts = ["Top: A\n  Caption: A\n\nBottom: B --- caption", "Top: C\n\nBottom: D"];
+  const promptParameter = {
+    id: "multiline-prompt", name: "Multiline prompt", scope: "main", valueType: "text", expansion: "each",
+    binding: { nodeId: "prompt-scene", fieldKey: "text" },
+    source: { mode: "manual-list", listSeparator: "delimiter", values: multilinePrompts },
+  };
+  const promptDefinition = { ...v2Definition, parameters: [promptParameter] };
+  schedulerV2.validateCanvasScheduleV2Definition(graph, promptDefinition);
+  const promptExpansion = schedulerV2.expandCanvasScheduleV2([promptParameter], promptDefinition);
+  assert.equal(promptExpansion.mainTasks.length, 2);
+  for (const [index, task] of promptExpansion.mainTasks.entries()) {
+    const applied = schedulerV2.applyCanvasScheduleV2Parameters(graph, [promptParameter], task.parameterValues);
+    assert.equal(applied.nodes.find((node) => node.id === "prompt-scene").config.text, multilinePrompts[index], "injected prompts must preserve newlines and inline markers");
+  }
+  for (const listSeparator of ["blank", "", null]) {
+    assert.throws(() => schedulerV2.validateCanvasScheduleV2Definition(graph, {
+      ...promptDefinition, parameters: [{ ...promptParameter, source: { ...promptParameter.source, listSeparator } }],
+    }), /list separator/);
+  }
+  assert.throws(() => schedulerV2.validateCanvasScheduleV2Definition(graph, {
+    ...v2Definition, parameters: [{ ...v2Definition.parameters[0], source: { ...v2Definition.parameters[0].source, listSeparator: "delimiter" } }],
+  }), /requires a text parameter/);
   let v2Id = 0;
   const v2Expansion = schedulerV2.expandCanvasScheduleV2(v2Definition.parameters, v2Definition, createdAtForV2(), (level) => `${level}-${++v2Id}`);
   assert.equal(v2Expansion.totalMainTasks, 1, "fixed main parameters must create one main task");
@@ -766,6 +788,15 @@ try {
   const account = { id: "owner", displayName: "Owner", role: "operator" };
   const launcher = { id: "launcher", displayName: "Launcher", role: "admin" };
   const createdAt = "2026-07-29T00:00:00.000Z";
+  storedSchedule = {
+    id: "separator-save", revision: 1, schemaVersion: 2, status: "draft", ownerUserId: account.id,
+    workflowId: "workflow-1", name: "Separator save", definition: promptDefinition, batches: [],
+  };
+  const savedPromptSchedule = await scheduler.updateCanvasScheduleDraft(storedSchedule.id, account, {
+    revision: storedSchedule.revision, definition: promptDefinition,
+  });
+  assert.deepEqual(savedPromptSchedule.definition.parameters[0].source, promptParameter.source, "save normalization must preserve separator and full prompt strings");
+  assert.deepEqual(storedSchedule.definition.parameters[0].source, promptParameter.source, "storage must receive separator metadata");
   const sourceVideoGraph = {
     nodes: [
       { ...node("source-video", "input.source-video"), executionMode: "disabled" },

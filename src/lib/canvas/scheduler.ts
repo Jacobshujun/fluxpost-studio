@@ -2452,7 +2452,11 @@ function normalizeCanvasScheduleSampleCount(parameter: CanvasScheduleParameter):
 
 function normalizeCanvasScheduleV2ParameterSource(parameter: CanvasScheduleParameter): CanvasScheduleParameter["source"] {
   const source = parameter.source;
-  if (source.mode === "fixed" || source.mode === "manual-list") return { mode: source.mode, values: structuredClone(source.values || []) };
+  if (source.mode === "fixed" || source.mode === "manual-list") return {
+    mode: source.mode,
+    values: structuredClone(source.values || []),
+    ...(source.listSeparator === undefined ? {} : { listSeparator: source.listSeparator }),
+  };
   if (source.mode === "copy-filter") return { mode: "copy-filter", filter: normalizeCopyFilter(source.filter) };
   if (source.mode === "content-pool-filter") return { mode: "content-pool-filter", filter: normalizeCanvasScheduleContentPoolFilter(source.filter) };
   if (source.mode === "library-filter") return { mode: "library-filter", filter: normalizeAssetFilter(source.filter) };

@@ -88,7 +88,7 @@ import {
   ZoomIn,
   ZoomOut,
 } from "lucide-react";
-import { createContext, memo, useCallback, useContext, useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
+import { createContext, memo, useCallback, useContext, useEffect, useId, useLayoutEffect, useMemo, useRef, useState } from "react";
 import { ContentPoolCustomTagPicker } from "@/components/content-pool-custom-tag-picker";
 import { contentPoolCustomTagKey } from "@/lib/content-pool-tags";
 import {
@@ -102,6 +102,7 @@ import { canvasNodeDefinitions, createCanvasNode, getCanvasBatchBindableFields, 
 import { canvasCollectionLinks } from "@/lib/canvas/content-collection";
 import { canvasIterationAllowedNodeTypes, getCanvasIterationOutputPorts } from "@/lib/canvas/iteration";
 import { canvasCollectionScheduleDefinition } from "@/lib/canvas/content-collection-schedule";
+import { formatCanvasScheduleScalarValues, parseCanvasScheduleScalarValues } from "@/lib/canvas/scalar-values";
 import { CANVAS_SAVE_IMAGE_MAX_ITEMS } from "@/lib/canvas/save-images";
 import { canvasSubtitleStyleConfig, canvasSubtitleStyleFromConfig, normalizeCanvasSubtitlePresetName } from "@/lib/canvas/subtitle-style";
 import { createCanvasSchedulerSkeleton } from "@/lib/canvas/scheduler-skeleton";
@@ -4558,8 +4559,10 @@ function CanvasScheduleParameterEditor({ parameter, graph, onChange, onRemove, o
         sampleCount: expansion === "random" ? sampleCount : undefined,
         randomCount: undefined,
         source: {
+          ...source,
           mode: expansion === "fixed" ? "fixed" : "manual-list",
           values: values.length ? values : [defaultCanvasScheduleScalarValue(parameter.valueType)],
+          listSeparator: parameter.valueType === "text" && values.some((value) => /[\r\n]/.test(String(value))) ? "delimiter" : source.listSeparator,
         },
       });
       return;
@@ -4650,27 +4653,34 @@ function CanvasScheduleParameterSourceEditor({ parameter, graph, onChange, onPre
   return <div className="canvas-schedule-parameter-source canvas-schedule-parameter-values"><label><span>值来源</span><select value={source.mode} onChange={(event) => {
     const mode = event.target.value as "fixed" | "manual-list";
     const nextValues = mode === "fixed" ? source.values.slice(0, 1) : source.values;
-    onChange({ ...parameter, expansion: mode === "manual-list" ? "each" : "fixed", sampleCount: undefined, randomCount: undefined, source: { mode, values: nextValues.length ? nextValues : [defaultCanvasScheduleScalarValue(parameter.valueType)] } });
-  }}><option value="fixed">固定值</option><option value="manual-list">手工列表</option></select></label><label><span>{source.mode === "fixed" ? "参数值" : "每行一个值"}</span><CanvasScheduleScalarValuesEditor key={`${parameter.id}:${parameter.valueType}:${source.mode}`} valueType={parameter.valueType} source={source} onChange={(values) => onChange({ ...parameter, source: { mode: source.mode, values } })} /></label></div>;
+    onChange({ ...parameter, expansion: mode === "manual-list" ? "each" : "fixed", sampleCount: undefined, randomCount: undefined, source: { ...source, mode, values: nextValues.length ? nextValues : [defaultCanvasScheduleScalarValue(parameter.valueType)], listSeparator: parameter.valueType === "text" && nextValues.some((value) => /[\r\n]/.test(String(value))) ? "delimiter" : source.listSeparator } });
+  }}><option value="fixed">固定值</option><option value="manual-list">手工列表</option></select></label><CanvasScheduleScalarValuesEditor key={`${parameter.id}:${parameter.valueType}:${source.mode}`} valueType={parameter.valueType} source={source} onChange={(source) => onChange({ ...parameter, source })} /></div>;
 }
 
 function CanvasScheduleScalarValuesEditor({ valueType, source, onChange }: {
   valueType: CanvasScheduleParameterType;
   source: Extract<CanvasScheduleParameterSource, { mode: "fixed" | "manual-list" }>;
-  onChange: (values: CanvasScheduleParameterValue[]) => void;
+  onChange: (source: Extract<CanvasScheduleParameterSource, { mode: "fixed" | "manual-list" }>) => void;
 }) {
-  const serializedValues = JSON.stringify(source.values);
-  const [draft, setDraft] = useState({ source: serializedValues, value: source.values.map(String).join("\n") });
+  const noteId = useId();
+  const serializedValues = JSON.stringify([source.values, source.listSeparator]);
+  const [draft, setDraft] = useState({ source: serializedValues, value: formatCanvasScheduleScalarValues(source) });
   if (draft.source !== serializedValues) {
-    setDraft({ source: serializedValues, value: source.values.map(String).join("\n") });
+    setDraft({ source: serializedValues, value: formatCanvasScheduleScalarValues(source) });
   }
-  return <textarea value={draft.value} onChange={(event) => {
-    const value = event.target.value;
-    const values = parseCanvasScheduleScalarValues(valueType, value, source.mode);
+  const updateDraft = (value: string, listSeparator = source.listSeparator) => {
+    const values = parseCanvasScheduleScalarValues(valueType, value, source.mode, listSeparator);
     // Keep editing whitespace while publishing normalized values to the schedule.
-    setDraft({ source: JSON.stringify(values), value });
-    onChange(values);
-  }} />;
+    setDraft({ source: JSON.stringify([values, listSeparator]), value });
+    onChange({ ...source, values, ...(listSeparator === undefined ? {} : { listSeparator }) });
+  };
+  const isTextList = valueType === "text" && source.mode === "manual-list";
+  const delimiterMode = isTextList && source.listSeparator === "delimiter";
+  return <div className="canvas-schedule-scalar-editor">
+    {isTextList ? <label><span>分隔方式</span><select aria-label="分隔方式" value={source.listSeparator ?? "line"} onChange={(event) => updateDraft(draft.value, event.target.value as "line" | "delimiter")}><option value="line">按行</option><option value="delimiter">按分隔符（---）</option></select></label> : null}
+    <label><span>{source.mode === "fixed" ? "参数值" : delimiterMode ? "多行任务文本" : "每行一个值"}</span><textarea aria-label={source.mode === "fixed" ? "参数值" : delimiterMode ? "多行任务文本" : "每行一个值"} aria-describedby={isTextList ? noteId : undefined} rows={delimiterMode ? 10 : 3} value={draft.value} onChange={(event) => updateDraft(event.target.value)} /></label>
+    {isTextList ? <small id={noteId}>{delimiterMode ? "单独一行 --- 分隔任务；段内换行和空行保留，分隔符不会传入任务。" : "每行一个任务；多段提示词请选择“按分隔符（---）”。"}</small> : null}
+  </div>;
 }
 
 function ScheduleV2Preview({ schedule, onPreview }: {
@@ -6238,16 +6248,6 @@ function defaultCanvasScheduleScalarValue(valueType: CanvasScheduleParameterType
   if (valueType === "number") return 1;
   if (valueType === "boolean") return false;
   return "";
-}
-
-function parseCanvasScheduleScalarValues(valueType: CanvasScheduleParameterType, value: string, mode: "fixed" | "manual-list") {
-  const lines = value.split(/\r?\n/).map((item) => item.trim()).filter((item, index) => item || (mode === "fixed" && index === 0));
-  const selected = mode === "fixed" ? lines.slice(0, 1) : lines;
-  return (selected.length ? selected : [""]).map((item): CanvasScheduleParameterValue => {
-    if (valueType === "number") return Number(item || 0);
-    if (valueType === "boolean") return ["true", "1", "是", "yes"].includes(item.toLowerCase());
-    return item;
-  });
 }
 
 function canvasScheduleParameterTypeLabel(value: CanvasScheduleParameterType) {

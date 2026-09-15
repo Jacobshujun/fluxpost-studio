@@ -23,6 +23,10 @@ Reset on external value changes and key by parameter id, value type and mode.
 The content-collection browser check covers keyboard editing and blank-free
 preflight at desktop/mobile widths.
 
+Text manual lists also persist a separator preference. See
+[Canvas Scalar Values](../fluxpost/canvas-scalar-values.md) for parsing, save and
+preflight contracts; draft identity includes both values and separator metadata.
+
 Runtime state belongs to backend stores and queues, not browser-only memory:
 
 - Content projects and source items: `src/lib/content-pool.ts`.

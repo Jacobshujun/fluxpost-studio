@@ -137,7 +137,7 @@ async def check(browser, width):
     await expect(values_input).to_have_value("前半\n后半")
     await page.keyboard.insert_text("中间")
     await expect(values_input).to_have_value("前半\n中间后半")
-    source_mode = scalar_editor.locator("select")
+    source_mode = scalar_editor.locator(":scope > label select")
     await source_mode.select_option("fixed")
     await expect(values_input).to_have_value("前半")
     await source_mode.select_option("manual-list")
