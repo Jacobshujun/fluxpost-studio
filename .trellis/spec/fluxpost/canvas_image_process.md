@@ -16,6 +16,8 @@ Outputs rebuild name, MIME, dimensions and SHA; never retain source localPath or
 
 Static JPEG/PNG/WebP only; 1–20 items, 30 MiB per input, 40M decoded/output pixels, output edge <=8192. Animated/corrupt/oversized media and impossible targets fail the entire node with the item ordinal; no partial downstream artifact. Original media is never overwritten.
 
+Sharp/libvips exposes animated WebP pages but not APNG animation in metadata. Check PNG chunks for `acTL` explicitly rather than silently processing its first frame; the real-byte contract check includes both formats.
+
 Directory URLs resolve through the owner-scoped snapshot, never trust an arbitrary item.localPath. Local and downloaded files both have actual size checks. Source content SHA + effective config + Sharp/libvips renderer version key an atomic local cache. Cached bytes are SHA/size verified and republished through runtime storage. Cache artifacts belong under ignored data/cache; outputs follow existing local/TOS settings.
 
 ## Examples and verification

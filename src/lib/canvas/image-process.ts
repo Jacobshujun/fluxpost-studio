@@ -15,12 +15,23 @@ const cacheRoot = path.join(/*turbopackIgnore: true*/ process.cwd(), "data", "ca
 const outputRoot = path.join(/*turbopackIgnore: true*/ process.cwd(), "public", "generated", "canvas-tools");
 const digest = (buffer: Buffer | string) => createHash("sha256").update(buffer).digest("hex");
 
+// libvips exposes animated WebP pages, but its PNG loader only exposes APNG's first frame.
+function isAnimatedPng(buffer: Buffer) {
+  for (let offset = 8; offset + 12 <= buffer.length;) {
+    const length = buffer.readUInt32BE(offset);
+    if (offset + length + 12 > buffer.length) throw new Error("PNG 数据块不完整。");
+    if (buffer.toString("ascii", offset + 4, offset + 8) === "acTL") return true;
+    offset += length + 12;
+  }
+  return false;
+}
+
 export async function encodeCanvasImage(buffer: Buffer, config: ImageProcessConfig) {
   if (!buffer.length || buffer.length > IMAGE_PROCESS_LIMITS.bytes) throw new Error("图片为空或超过 30 MB。");
   const options = { limitInputPixels: IMAGE_PROCESS_LIMITS.pixels, failOn: "warning" as const };
   const metadata = await sharp(buffer, options).metadata();
   if (!["jpeg", "png", "webp"].includes(metadata.format || "")) throw new Error("仅支持静态 JPEG、PNG、WebP 图片。");
-  if ((metadata.pages ?? 1) > 1) throw new Error("不支持动画或多页图片。");
+  if ((metadata.pages ?? 1) > 1 || (metadata.format === "png" && isAnimatedPng(buffer))) throw new Error("不支持动画或多页图片。");
   const swapped = (metadata.orientation ?? 1) >= 5;
   const sourceWidth = swapped ? metadata.height! : metadata.width!;
   const sourceHeight = swapped ? metadata.width! : metadata.height!;

@@ -90,6 +90,17 @@ try {
   await assert.rejects(processor.encodeCanvasImage(Buffer.from("corrupt"), config()));
   const animated = await sharp(Buffer.concat([Buffer.alloc(16 * 16 * 3, 0), Buffer.alloc(16 * 16 * 3, 255)]), { raw: { width: 16, height: 32, channels: 3, pageHeight: 16 } }).webp({ loop: 0, delay: [100, 100] }).toBuffer();
   await assert.rejects(processor.encodeCanvasImage(animated, config()), /动画/);
+  // APNG animation metadata is not surfaced by Sharp's PNG decoder; a valid acTL chunk must still be rejected.
+  const animationControl = Buffer.alloc(20);
+  animationControl.writeUInt32BE(8, 0); animationControl.write("acTL", 4); animationControl.writeUInt32BE(2, 8);
+  let crc = 0xffffffff;
+  for (const byte of animationControl.subarray(4, 16)) {
+    crc ^= byte;
+    for (let bit = 0; bit < 8; bit++) crc = (crc >>> 1) ^ ((crc & 1) ? 0xedb88320 : 0);
+  }
+  animationControl.writeUInt32BE((crc ^ 0xffffffff) >>> 0, 16);
+  const apng = Buffer.concat([transparent.subarray(0, 33), animationControl, transparent.subarray(33)]);
+  await assert.rejects(processor.encodeCanvasImage(apng, config()), /动画/);
   await assert.rejects(processor.encodeCanvasImage(Buffer.alloc(contract.IMAGE_PROCESS_LIMITS.bytes + 1), config()), /30 MB/);
   await assert.rejects(processor.encodeCanvasImage(transparent, config({ resizeMode: "custom", width: 8192, height: 8192, fit: "cover" })), /4000 万/);
   const oversized = await sharp({ create: { width: 6400, height: 6400, channels: 3, background: "white" } }).png().toBuffer();
