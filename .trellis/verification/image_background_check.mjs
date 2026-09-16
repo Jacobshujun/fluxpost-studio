@@ -132,7 +132,20 @@ for (const model of ["gpt-image-2.5-flare", "gpt-image-2.5-sunburst"]) {
   assert.equal(captured.length, before, "Invalid output count must fail before submission");
   assert.throws(() => toApis.buildToApisGenerationBody({ model, prompt: "fixture", ratio: "1:1", resolution: "1k", background: "transparent", outputFormat: "jpeg" }), explicitInputError);
 }
-console.log("Image background checks passed: existing JSON/SSE/Responses bodies and corrected ordinary ToAPIs 2.5 bodies.");
+for (const model of ["gpt-image-2.5-flare-official", "gpt-image-2.5-sunburst-official"]) {
+  routeModel = model;
+  for (const background of [undefined, "auto", "transparent"]) {
+    for (const values of [[], ["https://fixture.invalid/reference.png"]]) {
+      const options = runtime.normalizeImageOptions({ size: "2480x3312", ratio: "3:4", resolution: "4k", quality: "medium", background });
+      await assert.rejects(runtime.requestSingleToApisImagesApiForRoute("backup", "fixture", 1, Date.now(), options, { values }), (error) => error === boundary);
+      assert.deepEqual(captured.at(-1).body, {
+        model, prompt: "fixture", n: 1, size: "2480x3312", quality: "medium",
+        ...(background === "transparent" ? { background } : {}), image_urls: values,
+      });
+    }
+  }
+}
+console.log("Image background checks passed: ordinary and Official ToAPIs requests, including references and 3:4/4K.");
 
 function load(file, dependencies = {}) {
   const output = ts.transpileModule(readFileSync(file, "utf8"), {

@@ -5,6 +5,7 @@ import { normalizeFeishuPublishMode } from "../feishu-publish-mode";
 import { FINISHED_BODY_POLICY_VERSION, truncateFinishedBody } from "../finished-body-policy";
 import { getGeneratedPost, saveGeneratedPost, updateGeneratedPost } from "../generated-posts";
 import { generateCanvasGptImages, generateImagesFromPrompt } from "../image-generation";
+import { validateImageBackground } from "../image-providers/contracts";
 import { IMAGE_NETWORK_WAIT_REASON, isImageNetworkUnavailableError } from "../image-transport";
 import { callOpenAIForText, callOpenAIForVisionText } from "../openai";
 import type { GeneratedPost, SourceImageTask } from "../types";
@@ -405,6 +406,7 @@ async function executeGptImage(context: CanvasNodeExecutionContext): Promise<Can
     ratio,
     resolution,
     quality: String(node.config.quality || "medium") as "low" | "medium" | "high",
+    background: node.config.background === undefined ? undefined : validateImageBackground(node.config.background, String(node.config.outputFormat || "png")),
     outputFormat: node.config.outputFormat === "jpeg" ? "jpeg" : "png",
     outputCompression: Number(node.config.outputCompression ?? 100),
   }, {
@@ -501,6 +503,7 @@ async function executeGptImageEach(context: CanvasNodeExecutionContext): Promise
         ratio,
         resolution,
         quality: String(node.config.quality || "medium") as "low" | "medium" | "high",
+        background: node.config.background === undefined ? undefined : validateImageBackground(node.config.background, String(node.config.outputFormat || "png")),
         outputFormat: node.config.outputFormat === "jpeg" ? "jpeg" : "png",
         outputCompression: Number(node.config.outputCompression ?? 100),
       }, {
@@ -641,6 +644,7 @@ function hashCanvasImageEachInput(node: CanvasNode, prompt: string, sources: Can
       ratio: node.config.ratio,
       resolution: node.config.resolution,
       quality: node.config.quality,
+      ...(node.config.background && node.config.background !== "auto" ? { background: node.config.background } : {}),
       outputFormat: node.config.outputFormat,
       outputCompression: node.config.outputCompression,
     },

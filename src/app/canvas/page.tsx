@@ -2760,7 +2760,7 @@ function CanvasNodeFields({ node, onChange, onPatch, onPreviewImage }: {
       if (field.key === "coverSeconds" && node.config.mode !== "cover") return null;
       if (field.key === "count" && node.type === "utility.video-frames" && node.config.mode !== "even") return null;
       if (field.key === "timestamps" && node.config.mode !== "timestamps") return null;
-      const value = node.config[field.key];
+      const value = field.key === "background" ? node.config.background ?? "auto" : node.config[field.key];
       const options = field.options;
       if (field.kind === "content-pool-picker") return <ContentPoolSnapshotPicker key={field.key} node={node} onPatch={onPatch} onPreviewImage={onPreviewImage} />;
       if (field.kind === "library-image-picker") return <LibraryImageSnapshotPicker key={field.key} node={node} onPatch={onPatch} onPreviewImage={onPreviewImage} />;
@@ -2769,8 +2769,12 @@ function CanvasNodeFields({ node, onChange, onPatch, onPreviewImage }: {
         {field.kind === "textarea" || field.kind === "url-list" ? <textarea value={field.kind === "url-list" && Array.isArray(value) ? value.join("\n") : String(value || "")} placeholder={field.placeholder} onChange={(event) => onChange(field.key, field.kind === "url-list" ? event.target.value.split(/\r?\n/).map((item) => item.trim()).filter(Boolean) : event.target.value)} />
           : field.kind === "select" ? <select value={String(value || "")} onChange={(event) => {
             const next = event.target.value;
+            if (field.key === "background" && next === "transparent") {
+              onPatch({ background: next, outputFormat: "png" });
+              return;
+            }
             onChange(field.key, next);
-          }}>{options?.map((option) => <option key={option.value} value={option.value}>{option.label}</option>)}</select>
+          }}>{options?.map((option) => <option key={option.value} value={option.value} disabled={field.key === "outputFormat" && option.value === "jpeg" && node.config.background === "transparent"}>{option.label}</option>)}</select>
           : field.kind === "boolean" ? <input type="checkbox" checked={value === true} onChange={(event) => onChange(field.key, event.target.checked)} />
           : <input type={field.kind === "number" ? "number" : "text"} min={field.min} max={field.max} value={value === undefined ? "" : String(value)} placeholder={field.placeholder} onChange={(event) => onChange(field.key, field.kind === "number" ? Number(event.target.value) : event.target.value)} />}
       </label>;

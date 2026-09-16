@@ -711,6 +711,7 @@ const gptImageV2Definition: CanvasNodeDefinition = {
     { key: "resolution", label: "分辨率", kind: "select", options: toApisImageResolutions.map((value) => ({ value, label: value.toUpperCase() })) },
     { key: "quality", label: "质量", kind: "select", options: ["low", "medium", "high"].map((value) => ({ value, label: value })) },
     { key: "count", label: "输出数量", kind: "number", min: 1, max: 10 },
+    { key: "background", label: "背景", kind: "select", options: [{ value: "auto", label: "默认" }, { value: "transparent", label: "透明" }] },
     { key: "outputFormat", label: "格式", kind: "select", options: [{ value: "png", label: "PNG" }, { value: "jpeg", label: "JPEG" }] },
     { key: "outputCompression", label: "JPEG 压缩", kind: "number", min: 0, max: 100 },
   ],
@@ -720,6 +721,7 @@ const gptImageV2Definition: CanvasNodeDefinition = {
     resolution: "1k",
     quality: "medium",
     count: 1,
+    background: "auto",
     outputFormat: "png",
     outputCompression: 100,
   },
@@ -790,6 +792,7 @@ const gptImageEachV1Definition: CanvasNodeDefinition = {
   ],
   fields: [
     { key: "concurrency", label: "并发数", kind: "number", min: 1, max: 20 },
+    { key: "background", label: "背景", kind: "select", options: [{ value: "auto", label: "默认" }, { value: "transparent", label: "透明" }] },
     { key: "ratio", label: "比例", kind: "select", options: toApisImageRatios.map((value) => ({ value, label: value })) },
     { key: "resolution", label: "分辨率", kind: "select", options: toApisImageResolutions.map((value) => ({ value, label: value.toUpperCase() })) },
     { key: "quality", label: "质量", kind: "select", options: ["low", "medium", "high"].map((value) => ({ value, label: value })) },
@@ -798,6 +801,7 @@ const gptImageEachV1Definition: CanvasNodeDefinition = {
   ],
   defaultConfig: {
     concurrency: 8,
+    background: "auto",
     ratio: "1:1",
     resolution: "1k",
     quality: "medium",
@@ -1034,6 +1038,9 @@ export function validateCanvasNodeConfig(type: CanvasNodeType, config: CanvasNod
   }
   if (type === "publish.feishu" && version !== 1) {
     try { normalizeFeishuPublishMode(config.publishMode); } catch (error) { errors.push(error instanceof Error ? error.message : "Feishu publish mode is invalid."); }
+  }
+  if ((type === "model.gpt-image" || type === "model.gpt-image-each") && config.background === "transparent" && config.outputFormat === "jpeg") {
+    errors.push("透明背景不支持 JPEG，请使用 PNG。");
   }
   if (type === "model.gpt-image" && definition.version === 2) {
     const referenceUrls = normalizeUrlList(config.referenceUrls);

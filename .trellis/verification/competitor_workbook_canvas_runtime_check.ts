@@ -107,7 +107,7 @@ async function main() {
   const gptV2 = getCanvasNodeDefinition("model.gpt-image", 2);
   assert.ok(gptV2);
   assert.equal(gptV2.label, "GPT-Image-2");
-  assert.deepEqual(gptV2.fields.map((field) => field.key), ["ratio", "resolution", "quality", "count", "outputFormat", "outputCompression"]);
+  assert.deepEqual(gptV2.fields.map((field) => field.key), ["ratio", "resolution", "quality", "count", "background", "outputFormat", "outputCompression"]);
   assert.equal(validateCanvasNodeConfig("model.gpt-image", { ...gptV2.defaultConfig, referenceUrls: references.map((item) => item.url) }, 2).length, 0);
   assert.match(validateCanvasNodeConfig("model.gpt-image", { ...gptV2.defaultConfig, referenceUrls: [...references.map((item) => item.url), "/vehicle-17.jpg"] }, 2)[0], /cannot exceed 16/);
 

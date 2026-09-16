@@ -12,6 +12,10 @@ const registrySource = read("src/lib/canvas/registry.ts");
 const runsSource = read("src/lib/canvas/runs.ts");
 const queueSource = read("src/lib/feishu-publish-queue.ts");
 const nativeRequire = createRequire(import.meta.url);
+const contractModule = { exports: {} };
+new Function("module", "exports", ts.transpileModule(read("src/lib/image-providers/contracts.ts"), {
+  compilerOptions: { module: ts.ModuleKind.CommonJS, target: ts.ScriptTarget.ES2022 },
+}).outputText)(contractModule, contractModule.exports);
 
 for (const snippet of [
   'type: "model.gpt-image-each"',
@@ -54,7 +58,14 @@ vm.runInNewContext(transpiledRegistry, {
   require: (name) => name.startsWith("node:") ? nativeRequire(name) : registryStubs[name] || {},
   structuredClone,
 }, { filename: "registry.ts" });
-const { getCanvasNodeDefinition, upgradeCanvasGraph } = registryModule.exports;
+const { getCanvasNodeDefinition, upgradeCanvasGraph, validateCanvasNodeConfig } = registryModule.exports;
+for (const type of ["model.gpt-image", "model.gpt-image-each"]) {
+  const definition = getCanvasNodeDefinition(type);
+  assert.ok(definition.fields.find((field) => field.key === "background").options.some((option) => option.value === "transparent"));
+  const transparent = { ...definition.defaultConfig, background: "transparent" };
+  assert.deepEqual(Array.from(validateCanvasNodeConfig(type, transparent)), []);
+  assert.ok(validateCanvasNodeConfig(type, { ...transparent, outputFormat: "jpeg" }).some((error) => error.includes("PNG")));
+}
 const currentDefinition = getCanvasNodeDefinition("model.gpt-image-each");
 assert.equal(currentDefinition.version, 2);
 assert.deepEqual(Array.from(currentDefinition.inputs, (input) => input.id), ["images", "references", "prompt"]);
@@ -82,7 +93,7 @@ async function mockGenerate(prompt, count, references, _options, asyncTask) {
   assert.equal(count, 1, "Every provider request must ask for one output.");
   assert.ok(references.length >= 1 && references.length <= 16, "Every provider request must contain 1 to 16 reference images.");
   const source = references[0];
-  providerCalls.push({ source, prompt, references: [...references], resumeTaskId: asyncTask?.resumeTaskId });
+  providerCalls.push({ source, prompt, references: [...references], options: { ..._options }, resumeTaskId: asyncTask?.resumeTaskId });
   active += 1;
   maxActive = Math.max(maxActive, active);
   try {
@@ -120,6 +131,7 @@ const transpiled = ts.transpileModule(executorSource, {
 const cjsModule = { exports: {} };
 const noopAsync = async () => undefined;
 const stubs = {
+  "../image-providers/contracts": contractModule.exports,
   "../gpt-image-dimensions": { pixelSizeForRatio: () => "1024x1024" },
   "../concurrency": { mapWithConcurrency },
   "../feishu-publish-queue": { enqueueFeishuPublishJob: noopAsync, ensureFeishuPublishQueueWorker: () => undefined },
@@ -309,4 +321,27 @@ providerCalls = [];
 await assert.rejects(() => executeCanvasNode(context(Array.from({ length: 19 }, (_, index) => `img-${index + 1}`))), /1 到 18 张图片/);
 assert.equal(providerCalls.length, 0, "Over-limit groups must fail before provider submission.");
 
-console.log("Canvas per-image GPT reconstruction check passed.");
+providerCalls = [];
+const backgroundContext = context(["img-1", "img-2"]);
+backgroundContext.node = { ...backgroundContext.node, config: { ...node.config, background: "transparent" } };
+const transparent = await executeCanvasNode(backgroundContext);
+assert.ok(providerCalls.every((call) => call.options.background === "transparent"));
+providerCalls = [];
+await executeCanvasNode({ ...backgroundContext, previousNodeRun: { status: "completed", internalMetadata: transparent.internalMetadata } });
+assert.equal(providerCalls.length, 0, "Unchanged background must reuse completed children.");
+providerCalls = [];
+await executeCanvasNode(context(["img-1", "img-2"], { status: "completed", internalMetadata: transparent.internalMetadata }));
+assert.equal(providerCalls.length, 2, "Changing background must invalidate completed children.");
+providerCalls = [];
+const defaultContext = context(["img-1", "img-2"], { status: "completed", internalMetadata: ordered.internalMetadata });
+const historical = await executeCanvasNode(context(["img-1", "img-2"]));
+providerCalls = [];
+defaultContext.previousNodeRun.internalMetadata = historical.internalMetadata;
+defaultContext.node = { ...defaultContext.node, config: { ...node.config, background: "auto" } };
+await executeCanvasNode(defaultContext);
+assert.equal(providerCalls.length, 0, "Explicit default must preserve historical fingerprints.");
+providerCalls = [];
+await executeCanvasNode({ ...backgroundContext, node: { ...backgroundContext.node, type: "model.gpt-image", config: { ...backgroundContext.node.config, count: 1, referenceUrls: ["img-1"] } } });
+assert.equal(providerCalls[0].options.background, "transparent", "Ordinary Canvas generation must forward background too.");
+
+console.log("Canvas per-image GPT reconstruction and background checks passed.");

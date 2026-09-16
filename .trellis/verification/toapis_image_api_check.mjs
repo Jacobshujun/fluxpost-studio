@@ -77,6 +77,22 @@ for (const model of ["gpt-image-2.5-flare", "gpt-image-2.5-sunburst"]) {
   }
 }
 
+for (const model of ["gpt-image-2.5-flare-official", "gpt-image-2.5-sunburst-official"]) {
+  for (const quality of ["low", "medium", "high", "xhigh", "max"]) {
+    for (const background of [undefined, "auto", "transparent"]) {
+      assertDeepEqual(contract.buildToApisGenerationBody({ model, prompt: "official", ratio: "3:4", resolution: "4k", requestedSize: "2480x3312", quality, background, referenceImages: ["https://fixture.invalid/ref.png"] }), {
+        model, prompt: "official", n: 1, size: "2480x3312", quality,
+        ...(background === "transparent" ? { background } : {}), image_urls: ["https://fixture.invalid/ref.png"],
+      }, "Official requests must use pixels, selected quality and image_urls without legacy fields.");
+    }
+  }
+  assertEqual(contract.buildToApisGenerationBody({ model, prompt: "exact", requestedSize: "1200x1600" }).size, "1200x1600", "Official exact pixels must survive unchanged.");
+  assertThrows(() => contract.buildToApisGenerationBody({ model, prompt: "invalid", count: 2 }), /只能生成 1 张/, "Official multi-output must fail before submission.");
+  assertThrows(() => contract.buildToApisGenerationBody({ model, prompt: "invalid", ratio: "3:4", resolution: "4k" }), /像素尺寸/, "Official ratio selections need the calculated pixel size, never a silent square fallback.");
+  assertThrows(() => contract.buildToApisGenerationBody({ model, prompt: "invalid", requestedSize: "3:4" }), /像素尺寸/, "Official must not send ratio strings as pixels.");
+  assertThrows(() => contract.buildToApisGenerationBody({ model, prompt: "invalid", background: "transparent", outputFormat: "jpeg" }), /PNG/, "Transparent JPEG must fail.");
+}
+
 const sixteenReferences = Array.from({ length: 16 }, (_, index) => `https://bucket.example/${index + 1}.jpg`);
 const fullBody = contract.buildToApisGenerationBody({
   model: "gpt-image-2",

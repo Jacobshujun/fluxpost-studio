@@ -138,7 +138,7 @@ async def check(browser, width):
     print(f"Simple image strategy passed at {width}px: dimensions, quality, background, disabled save state, save/reload, launch and layout")
 
 
-async def check_canvas(browser, width):
+async def check_canvas(browser, width, node_type="model.gpt-image"):
     page = await browser.new_page(viewport={"width": width, "height": 960})
     errors = []
     page.on("pageerror", lambda error: errors.append(str(error)))
@@ -146,10 +146,10 @@ async def check_canvas(browser, width):
         "id": "image-dimensions", "name": "图片比例测试", "revision": 1,
         "isTemplate": False, "createdAt": NOW, "updatedAt": NOW,
         "graph": {"viewport": {"x": 0, "y": 0, "zoom": 1}, "edges": [], "nodes": [
-            {"id": "image", "type": "model.gpt-image", "version": 2,
+            {"id": "image", "type": node_type, "version": 2,
              "position": {"x": 40, "y": 40}, "executionMode": "enabled",
              "config": {"ratio": "3:4", "resolution": "2k", "quality": "medium", "count": 1,
-                        "outputFormat": "png", "outputCompression": 100, "referenceUrls": []}},
+                        "outputFormat": "jpeg", "outputCompression": 100, "referenceUrls": [], "concurrency": 2}},
         ]},
     }
 
@@ -176,10 +176,22 @@ async def check_canvas(browser, width):
     await page.route("**/api/**", route_handler)
     await page.goto(f"{BASE_URL}/canvas", wait_until="networkidle")
     node = page.locator('.react-flow__node[data-id="image"]')
-    await node.wait_for()
+    try:
+        await node.wait_for()
+    except Exception:
+        print({"node_type": node_type, "width": width, "errors": errors})
+        await page.screenshot(path=f"test-artifacts/canvas-background-failure-{width}.png", full_page=True)
+        raise
     await node.evaluate("element => element.dispatchEvent(new MouseEvent('click', {bubbles: true}))")
     ratio = page.locator(".canvas-inspector label").filter(has=page.get_by_text("比例", exact=True)).locator("select")
     resolution = page.locator(".canvas-inspector label").filter(has=page.get_by_text("分辨率", exact=True)).locator("select")
+    background = page.locator(".canvas-inspector label").filter(has=page.get_by_text("背景", exact=True)).locator("select")
+    output_format = page.locator(".canvas-inspector label").filter(has=page.get_by_text("格式", exact=True)).locator("select")
+    await expect(background).to_have_value("auto")
+    await expect(output_format).to_have_value("jpeg")
+    await background.select_option("transparent")
+    await expect(output_format).to_have_value("png")
+    await expect(output_format.locator('option[value="jpeg"]')).to_have_js_property("disabled", True)
     await resolution.select_option("4k")
     await expect(ratio).to_have_value("3:4")
     for value in ["1:1", "4:3", "3:4"]:
@@ -191,14 +203,19 @@ async def check_canvas(browser, width):
     await node.evaluate("element => element.dispatchEvent(new MouseEvent('click', {bubbles: true}))")
     await expect(ratio).to_have_value("3:4")
     await expect(resolution).to_have_value("4k")
-    await ratio.scroll_into_view_if_needed()
+    await expect(background).to_have_value("transparent")
+    await expect(output_format).to_have_value("png")
+    assert workflow["graph"]["nodes"][0]["config"]["background"] == "transparent"
+    await ratio.evaluate("element => element.scrollIntoView({block: 'center'})")
     await expect(ratio).to_be_in_viewport(ratio=1)
     await expect(page.locator(".canvas-message")).not_to_contain_text("Cannot read")
     assert not errors, errors
     assert await page.evaluate("document.documentElement.scrollWidth <= innerWidth + 1")
-    await page.screenshot(path=f"test-artifacts/canvas-image-dimensions-{width}.png", full_page=True)
+    await background.evaluate("element => element.scrollIntoView({block: 'center'})")
+    await expect(background).to_be_in_viewport(ratio=1)
+    await page.screenshot(path=f"test-artifacts/canvas-image-dimensions-{node_type}-{width}.png", full_page=True)
     await page.close()
-    print(f"Canvas 4K ratio preservation and reload passed at {width}px")
+    print(f"Canvas {node_type} 4K ratio, transparent PNG and reload passed at {width}px")
 
 
 async def main():
@@ -210,6 +227,7 @@ async def main():
             for width in [1440, 390]:
                 await check(browser, width)
                 await check_canvas(browser, width)
+                await check_canvas(browser, width, "model.gpt-image-each")
         finally:
             await browser.close()
 

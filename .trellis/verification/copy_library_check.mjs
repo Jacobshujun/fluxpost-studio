@@ -214,6 +214,7 @@ try {
     "../finished-body-policy": finishedBodyPolicy,
     "../generated-posts": {},
     "../image-generation": {},
+    "../image-providers/contracts": {},
     "../gpt-image-dimensions": {},
     "../image-transport": { IMAGE_NETWORK_WAIT_REASON: "等待图片网络恢复", isImageNetworkUnavailableError: () => false },
     "../openai": {},

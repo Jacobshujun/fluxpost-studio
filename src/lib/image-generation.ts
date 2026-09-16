@@ -28,7 +28,6 @@ import {
   getToApisCompletedImageUrls,
   parseRetryAfterMs,
   requireToApisTaskId,
-  resolveToApisImageSize,
   shouldReturnPendingAfterToApisAcceptance,
   type ToApisImageTask,
 } from "./toapis-image-api";
@@ -940,7 +939,7 @@ async function callImagesApiInPool(
     throw toAcceptedImageProviderError(`Accepted image task ${asyncTask.resumeTaskId} cannot resume because route ${initialRoute} is no longer configured for ToAPIs.`);
   }
   if (initialProfile === "toapis_async" && !asyncTask?.resumeTaskId && !options.ratio && !options.resolution) {
-    resolveToApisImageSize(options.size);
+    buildToApisGenerationBody({ model: openaiImageRouteConfig(initialRoute).model, prompt, count, requestedSize: options.size, background: options.background, outputFormat: options.outputFormat });
   }
   const preparedReferences = asyncTask?.resumeTaskId
     ? makeResumedTaskReferences(referenceImages)
@@ -1444,7 +1443,7 @@ async function requestSingleToApisImagesApiForRoute(
         route,
         attempt,
         size: requestBody.size,
-        resolution: requestBody.resolution,
+        ...("resolution" in requestBody ? { resolution: requestBody.resolution } : {}),
         referenceImageCount: referenceUrls.length,
       },
     });
@@ -1482,7 +1481,7 @@ async function requestSingleToApisImagesApiForRoute(
       route,
       model: routeConfig.model,
       size: requestBody.size,
-      resolution: requestBody.resolution,
+      ...("resolution" in requestBody ? { resolution: requestBody.resolution } : {}),
       referenceImageCount: referenceUrls.length,
     },
   });

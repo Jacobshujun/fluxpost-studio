@@ -1,12 +1,14 @@
 # FluxPost Current Status
 
-Last updated: 2026-09-15
+Last updated: 2026-09-16
 
 ## One-Line Status
 
 Production 1298237 is healthy; local activation waits for active tasks.
 
 ## Current Focus
+
+- 2026-09-16: Official/Canvas transparency passed baseline/browser checks: .trellis/tasks/09-16-toapis-canvas-background/. Active tasks block activation.
 
 - 2.5: .trellis/tasks/archive/2026-09/09-14-toapis-image-25-contract/.
 
@@ -59,7 +61,7 @@ Continue authenticated operator review of the unified library and run the one-ti
 
 ## Risks And Unknowns
 
-- ToAPIs currently uses explicit ratio/tier selection, not custom pixels. Native exact-pixel support is unconfirmed. Existing images and the port-3001 candidate remain unchanged.
+- ToAPIs: ordinary uses ratio/tier; Official uses pixels. Live pixel/alpha acceptance is unconfirmed. Port 3001 unchanged.
 - The real 621-asset runtime database has not been migrated in this dirty-tree verification; the migration was exercised only against isolated fixtures and will run when an approved clean candidate is activated.
 - The PostgreSQL collection-subtree benchmark measured P95 `252.6ms` against the `300ms` target and is the closest performance margin as data grows.
 - No paid model, TOS write, TikHub, Feishu, Lark, or publishing acceptance was exercised.

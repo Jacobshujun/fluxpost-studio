@@ -964,7 +964,6 @@ function ImageDimensionSelects({ settings, onChange, disabled }: { settings: Wor
         <option value="opaque">不透明</option>
       </select></label>
     </div>
-    <p className="text-xs text-white/52">比例和分辨率与画布 GPT 图片节点一致；4K 仅支持部分宽屏或长图比例。</p>
     <p className="text-xs text-white/52">质量和背景用于 GPT 图片生成；直接引用原图或本地 Klein 不使用这两个参数。透明背景需要图片接口和模型支持。</p>
     {!settings.imageRatio && !settings.imageResolution ? <p className="text-xs text-[var(--amber)]">原设置为 {settings.imageSize}，请重新选择比例和分辨率。</p> : null}
   </div>;

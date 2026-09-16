@@ -24,10 +24,11 @@ const code = ts.transpileModule(declarations, { compilerOptions: { target: ts.Sc
 const exact = { size: "1200x1600", quality: "medium" };
 const matchingPng = await fixture(1200, 1600, "png");
 const matchingJpeg = await fixture(1200, 1600, "jpeg");
+const transparentPng = await sharp({ create: { width: 1200, height: 1600, channels: 4, background: { r: 40, g: 80, b: 120, alpha: 0.5 } } }).png().toBuffer();
 const undersized = await fixture(768, 1024, "png");
 const swapped = await fixture(1600, 1200, "png");
 
-for (const buffer of [matchingPng, matchingJpeg]) {
+for (const buffer of [matchingPng, matchingJpeg, transparentPng]) {
   const runtime = harness(buffer);
   await runtime.api.assertGeneratedImageSize(buffer, exact);
   await runtime.api.saveBase64Images([buffer.toString("base64")], exact);
@@ -85,6 +86,13 @@ for (const resume of [undefined, { resumeTaskId: "already-accepted", resumeTaskR
 }
 
 const responses = harness(undersized);
+const official = harness(matchingPng, "toapis_async", "gpt-image-2.5-sunburst-official");
+await official.api.callImagesApiInPool("fixture", 1, exact);
+assert.equal(official.state.preparations, 1, "Official exact pixels must pass preflight.");
+assert.deepEqual(official.state.writes[0], matchingPng);
+const officialMismatch = harness(undersized, "toapis_async", "gpt-image-2.5-flare-official");
+await assert.rejects(officialMismatch.api.callImagesApiInPool("fixture", 1, exact), /实际返回 768x1024/);
+assert.equal(officialMismatch.state.uploads, 0);
 await assert.rejects(responses.api.callResponsesImageToolInPool("fixture", 1, exact), /实际返回 768x1024/);
 assert.equal(responses.state.requestBodies[0].tools[0].size, "1200x1600");
 assert.equal(responses.state.uploads, 0);
@@ -104,7 +112,7 @@ async function fixture(width, height, format) {
   return sharp({ create: { width, height, channels: 3, background: "#334455" } }).toFormat(format).toBuffer();
 }
 
-function harness(buffer, profile = "openai_sse") {
+function harness(buffer, profile = "openai_sse", model = "fixture") {
   const state = { writes: [], uploads: 0, logs: [], requests: 0, generationRequests: 0, preparations: 0, referenceUploads: 0, requestBodies: [] };
   const dependencies = {
     sharp, path, Buffer, process, FormData, Blob,
@@ -129,7 +137,7 @@ function harness(buffer, profile = "openai_sse") {
     extensionFromMimeType: () => "png",
     maxGeneratedImageUrlBytes: 10_000_000,
     imageRequestTimeoutMs: 10000,
-    openaiImageRouteConfig: () => ({ profile, model: "fixture" }),
+    openaiImageRouteConfig: () => ({ profile, model }),
     resolveActiveStandardImagesApiRoute: () => "primary",
     activeStandardImagesApiRoute: "primary",
     prepareReferenceImages: async () => {

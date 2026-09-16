@@ -52,13 +52,38 @@ export function buildToApisGenerationBody(input: {
   background?: ImageGenerationOptions["background"];
   referenceImages?: string[];
 }) {
-  const dimensions = input.ratio || input.resolution
-    ? validateToApisDimensions(input.ratio, input.resolution)
-    : resolveToApisImageSize(input.requestedSize || "auto");
   const referenceImages = (input.referenceImages || []).filter(Boolean);
   if (referenceImages.length > maxToApisReferenceImages) {
     throw new Error(`ToAPIs accepts at most ${maxToApisReferenceImages} reference images; received ${referenceImages.length}.`);
   }
+  if (input.model === "gpt-image-2.5-flare-official" || input.model === "gpt-image-2.5-sunburst-official") {
+    const background = validateImageBackground(input.background, input.outputFormat);
+    if ((input.count ?? 1) !== 1) {
+      throw new ImageProviderError("ToAPIs GPT Image 2.5 Official 每次请求只能生成 1 张图片，请将输出数量设为 1。", {
+        category: "input", retryable: false, failoverAllowed: false,
+      });
+    }
+    if (input.ratio || input.resolution) validateToApisDimensions(input.ratio, input.resolution);
+    const size = input.requestedSize && input.requestedSize !== "auto" ? input.requestedSize : "1024x1024";
+    if (!/^\d{2,5}x\d{2,5}$/.test(size) || size.split("x").some((value) => Number(value) < 64 || Number(value) > 8192)
+      || ((input.ratio || input.resolution) && (!input.requestedSize || input.requestedSize === "auto"))) {
+      throw new ImageProviderError("ToAPIs Official 需要明确的像素尺寸，请重新选择图片比例和分辨率。", {
+        category: "input", retryable: false, failoverAllowed: false,
+      });
+    }
+    return {
+      model: input.model,
+      prompt: input.prompt,
+      n: 1,
+      size,
+      quality: validateChoice(input.quality || "high", ["low", "medium", "high", "xhigh", "max"], "ToAPIs Official image quality"),
+      ...(background === "transparent" ? { background: "transparent" } : {}),
+      image_urls: referenceImages,
+    };
+  }
+  const dimensions = input.ratio || input.resolution
+    ? validateToApisDimensions(input.ratio, input.resolution)
+    : resolveToApisImageSize(input.requestedSize || "auto");
   if (input.model === "gpt-image-2.5-flare" || input.model === "gpt-image-2.5-sunburst") {
     const background = validateImageBackground(input.background, input.outputFormat);
     if ((input.count ?? 1) !== 1) {
