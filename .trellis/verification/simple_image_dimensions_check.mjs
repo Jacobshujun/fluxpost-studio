@@ -7,6 +7,7 @@ const toApis = load("src/lib/toapis-image-api.ts", { "./image-providers/contract
 const dimensions = load("src/lib/gpt-image-dimensions.ts", { "./toapis-image-api": toApis });
 const imageSizes = load("src/lib/image-size-options.ts");
 const types = load("src/lib/types.ts");
+const models = load("src/lib/image-model-options.ts");
 let stored = JSON.stringify({ imageSize: "1200x1600" });
 let writes = 0;
 const prompts = { carExterior: "car", textImage: "text", peopleWithCar: "people" };
@@ -16,6 +17,7 @@ const workspace = load("src/lib/workspace-settings.ts", {
   "./distribution-check-prompt": { defaultDistributionCheckPrompt: "distribution" },
   "./image-size-options": imageSizes,
   "./gpt-image-dimensions": dimensions,
+  "./image-model-options": models,
   "./types": types,
 });
 
@@ -85,7 +87,7 @@ for (const imageBackground of ["invalid", "", null, 1]) {
   await assert.rejects(workspace.saveWorkspacePromptSettings({ imageBackground }), /图片背景无效/);
   assert.equal(stored, previous, "Invalid background must not overwrite saved settings");
 }
-const chosen = await workspace.saveWorkspacePromptSettings({ imageRatio: "3:4", imageResolution: "2k", imageQuality: "high", imageBackground: "transparent" });
+const chosen = await workspace.saveWorkspacePromptSettings({ imageRatio: "3:4", imageResolution: "2k", imageQuality: "high", imageBackground: "transparent", imageModel: "gpt-image-2.5-flare-vip", imageToApisRequestFormat: "pixels", imageOutputFormat: "png", imageOutputCompression: 80 });
 const run = JSON.parse(JSON.stringify(snapshots.makeInitialRun({ sourceMode: "links" }, chosen, {})));
 await workspace.saveWorkspacePromptSettings({ imageRatio: "16:9", imageResolution: "4k", imageQuality: "low", imageBackground: "opaque" });
 const resumed = snapshots.settingsFromRun(run);
@@ -114,13 +116,17 @@ assert.equal(accepted.status, 200);
 const submitted = (await accepted.json()).run;
 assert.equal(submitted.imageQuality, "high");
 assert.equal(submitted.imageBackground, "transparent");
+assert.equal(submitted.imageModel, "gpt-image-2.5-flare-vip");
+assert.equal(submitted.imageToApisRequestFormat, "pixels");
+assert.equal(submitted.imageOutputFormat, "png");
+assert.equal(submitted.imageOutputCompression, 80);
 const previous = stored;
 const rejected = await route.POST(request({ imageBackground: "invalid" }));
 assert.equal(rejected.status, 400);
 assert.match((await rejected.json()).error, /图片背景无效/);
 assert.equal(stored, previous);
 
-const forwarded = simple.match(/size: settings\.imageSize,\s*ratio: settings\.imageRatio,\s*resolution: settings\.imageResolution,/g) || [];
+const forwarded = simple.match(/ratio: settings\.imageRatio,\s*resolution: settings\.imageResolution,/g) || [];
 assert.equal(forwarded.length, 3, "Reference, viral and original image calls must all forward the selection");
 assert.equal((simple.match(/quality: settings\.imageQuality,\s*background: settings\.imageBackground,/g) || []).length, 3);
 const page = readFileSync("src/app/page.tsx", "utf8");
@@ -142,6 +148,38 @@ const nodeFields = canvasPage.slice(canvasPage.indexOf("function CanvasNodeField
 assert.doesNotMatch(nodeFields, /options\?\.filter|next === "4k"/, "4K selection must neither hide ratios nor substitute a different ratio");
 assert.match(readFileSync("src/lib/canvas/executors.ts", "utf8"), /import \{ pixelSizeForRatio \} from "\.\.\/gpt-image-dimensions"/);
 console.log("Simple image selects, settings persistence, frozen resume and API dimension checks passed.");
+
+for (const { model, format } of [...models.imageModelPresets, { model: "Custom/Future:V3", format: "pixels" }]) {
+  const selected = await workspace.saveWorkspacePromptSettings({ imageModel: ` ${model} `, imageToApisRequestFormat: format, imageBackground: "auto", imageOutputFormat: "jpeg", imageOutputCompression: 0 });
+  assert.deepEqual(await workspace.getWorkspacePromptSettings(), selected);
+  const frozen = JSON.parse(JSON.stringify(snapshots.makeInitialRun({ sourceMode: "links" }, selected, {})));
+  await workspace.saveWorkspacePromptSettings({ imageModel: null, imageToApisRequestFormat: null, imageOutputFormat: "png", imageOutputCompression: 100 });
+  const restored = snapshots.settingsFromRun(frozen);
+  assert.equal(restored.imageModel, model);
+  assert.equal(restored.imageToApisRequestFormat, format);
+  assert.equal(restored.imageOutputFormat, "jpeg");
+  assert.equal(restored.imageOutputCompression, 0);
+  const defaults = await workspace.getWorkspacePromptSettings();
+  assert.equal(defaults.imageModel, null, "JSON null must clear the saved override");
+  assert.equal(defaults.imageToApisRequestFormat, null);
+}
+for (const invalid of [
+  { imageModel: " " }, { imageToApisRequestFormat: "guess" }, { imageOutputFormat: "webp" },
+  { imageOutputCompression: -1 }, { imageOutputCompression: 101 }, { imageOutputCompression: 1.5 }, { imageOutputCompression: null },
+  { imageBackground: "transparent", imageOutputFormat: "jpeg" },
+]) {
+  const before = stored;
+  await assert.rejects(workspace.saveWorkspacePromptSettings(invalid));
+  assert.equal(stored, before);
+}
+for (const [setting, option] of [["imageModel", "model"], ["imageToApisRequestFormat", "toApisRequestFormat"], ["imageOutputFormat", "outputFormat"], ["imageOutputCompression", "outputCompression"]]) {
+  assert.equal((simple.match(new RegExp(`${option}: settings\\.${setting}(?: \\?\\? undefined)?,`, "g")) || []).length, 3, `${setting} must reach all three image execution paths`);
+}
+const selector = readFileSync("src/components/image-model-selector.tsx", "utf8");
+assert.match(selector, /imageModelPresets\.map/);
+assert.match(page, /<ImageModelSelector/);
+assert.match(canvasPage, /<ImageModelSelector/);
+console.log("Simple model/format overrides, compression, reset and frozen resume checks passed.");
 
 function load(file, dependencies = {}) {
   const output = ts.transpileModule(readFileSync(file, "utf8"), {

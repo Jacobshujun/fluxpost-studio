@@ -3,6 +3,7 @@ import { readAppMetaValue, writeAppMetaValue } from "./database";
 import { defaultDistributionCheckPrompt } from "./distribution-check-prompt";
 import { defaultImageGenerationSize, normalizeImageGenerationSize } from "./image-size-options";
 import { resolveGptImageDimensionSettings } from "./gpt-image-dimensions";
+import { normalizeImageModel, normalizeToApisRequestFormat } from "./image-model-options";
 import { defaultSimpleRunMediaSettings, type CrawlPlatform, type PlatformCrawlSetting, type PlatformCrawlSettings, type SimpleRunMediaSettings, type WorkspacePromptSettings } from "./types";
 
 const settingsMetaKey = "workspace_prompt_settings_v1";
@@ -23,6 +24,10 @@ export const defaultWorkspacePromptSettings: WorkspacePromptSettings = {
   imageSize: defaultImageGenerationSize,
   imageQuality: "medium",
   imageBackground: "auto",
+  imageModel: null,
+  imageToApisRequestFormat: null,
+  imageOutputFormat: "png",
+  imageOutputCompression: 100,
   platformCrawlSettings: defaultPlatformCrawlSettings,
   simpleRunMediaSettings: defaultSimpleRunMediaSettings,
   updatedAt: new Date(0).toISOString(),
@@ -59,7 +64,16 @@ function normalizeWorkspacePromptSettings(input: Partial<WorkspacePromptSettings
     ...input.imageStrategyPrompts,
     textImage: input.imageStrategyPrompts?.textImage || input.imageWashPrompt,
   });
+  const imageOutputFormat = input.imageOutputFormat === undefined ? "png" : input.imageOutputFormat;
+  if (imageOutputFormat !== "png" && imageOutputFormat !== "jpeg") throw new Error("图片格式无效，请选择 PNG 或 JPEG。");
+  const imageOutputCompression = input.imageOutputCompression === undefined ? 100 : input.imageOutputCompression;
+  if (!Number.isInteger(imageOutputCompression) || imageOutputCompression < 0 || imageOutputCompression > 100) throw new Error("JPEG 压缩必须是 0 到 100 的整数。");
+  if (input.imageBackground === "transparent" && imageOutputFormat === "jpeg") throw new Error("透明背景需要 PNG 格式。");
   return {
+    imageModel: normalizeImageModel(input.imageModel ?? undefined) ?? null,
+    imageToApisRequestFormat: normalizeToApisRequestFormat(input.imageToApisRequestFormat ?? undefined) ?? null,
+    imageOutputFormat,
+    imageOutputCompression,
     textInstruction: stringOrDefault(input.textInstruction, defaultWorkspacePromptSettings.textInstruction),
     imageWashPrompt: imageStrategyPrompts.textImage,
     imageStrategyPrompts,

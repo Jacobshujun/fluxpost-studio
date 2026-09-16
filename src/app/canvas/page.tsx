@@ -103,7 +103,8 @@ import {
 import { canvasNodeDefinitions, createCanvasNode, getCanvasBatchBindableFields, getCanvasNodeDefinition, getCanvasNodeExecutionMode, getCanvasVisibleInputPorts } from "@/lib/canvas/registry";
 import { pixelSizeForRatio } from "@/lib/gpt-image-dimensions";
 import { toApisImageRatios, toApisImageResolutions } from "@/lib/toapis-image-api";
-import { imageModelPresets } from "@/lib/image-model-options";
+import { ImageModelSelector } from "@/components/image-model-selector";
+import type { ToApisRequestFormat } from "@/lib/image-model-options";
 import { canvasCollectionLinks } from "@/lib/canvas/content-collection";
 import { canvasIterationAllowedNodeTypes, getCanvasIterationOutputPorts } from "@/lib/canvas/iteration";
 import { canvasCollectionScheduleDefinition } from "@/lib/canvas/content-collection-schedule";
@@ -2774,29 +2775,10 @@ function CanvasGptImageDimensions({ node }: { node: CanvasNode }) {
 }
 
 function CanvasImageModelSelector({ node, onPatch }: { node: CanvasNode; onPatch: (patch: CanvasNode["config"]) => void }) {
-  const model = node.config.model;
-  const inputRef = useRef<HTMLInputElement>(null);
-  const [customEditing, setCustomEditing] = useState(false);
-  useEffect(() => { if (document.activeElement !== inputRef.current) setCustomEditing(false); }, [model]);
-  const selected = model === undefined ? "default" : !customEditing && imageModelPresets.some((preset) => preset.model === model) ? String(model) : "custom";
-  return <>
-    <label className="canvas-image-model-field"><span>图片模型</span><select aria-label="图片模型" value={selected} onChange={(event) => {
-      const value = event.target.value;
-      setCustomEditing(value === "custom");
-      const preset = imageModelPresets.find((item) => item.model === value);
-      onPatch(value === "default" ? { model: undefined, toApisRequestFormat: undefined }
-        : value === "custom" ? { model: "" }
-          : { model: value, toApisRequestFormat: preset?.format });
-    }}>
-      <option value="default">默认模型</option>
-      {imageModelPresets.map((preset) => <option key={preset.model} value={preset.model}>{preset.model}</option>)}
-      <option value="custom">自定义</option>
-    </select></label>
-    {selected === "custom" ? <label className="canvas-image-model-field"><span>自定义模型 ID</span><input ref={inputRef} aria-label="自定义模型 ID" value={String(model ?? "")} onChange={(event) => { setCustomEditing(true); onPatch({ model: event.target.value }); }} onBlur={(event) => onPatch({ model: event.target.value.trim() })} aria-invalid={!String(model ?? "").trim()} /></label> : null}
-    {model !== undefined ? <label className="canvas-image-model-field"><span>ToAPIs 请求格式</span><select aria-label="ToAPIs 请求格式" value={String(node.config.toApisRequestFormat ?? "")} onChange={(event) => onPatch({ toApisRequestFormat: event.target.value || undefined })}>
-      <option value="">沿用通道配置</option><option value="ratio">比例 + 分辨率</option><option value="pixels">像素尺寸</option><option value="legacy">旧版图像接口</option>
-    </select></label> : null}
-  </>;
+  return <ImageModelSelector model={node.config.model as string | undefined} requestFormat={node.config.toApisRequestFormat as ToApisRequestFormat | undefined} labelClassName="canvas-image-model-field" onChange={(patch) => onPatch({
+    ...("model" in patch ? { model: patch.model } : {}),
+    ...("requestFormat" in patch ? { toApisRequestFormat: patch.requestFormat } : {}),
+  })} />;
 }
 
 function CanvasNodeFields({ node, onChange, onPatch, onPreviewImage }: {

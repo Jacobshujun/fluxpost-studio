@@ -353,6 +353,10 @@ function settingsFromRun(run: SimpleRun): WorkspacePromptSettings {
     imageWashPrompt: run.imageWashPrompt,
     imageStrategyPrompts: run.imageStrategyPrompts || defaultWorkspacePromptSettings.imageStrategyPrompts,
     imageSize: run.imageSize,
+    imageModel: run.imageModel,
+    imageToApisRequestFormat: run.imageToApisRequestFormat,
+    imageOutputFormat: run.imageOutputFormat,
+    imageOutputCompression: run.imageOutputCompression,
     imageRatio: run.imageRatio,
     imageResolution: run.imageResolution,
     imageQuality: run.imageQuality,
@@ -1003,6 +1007,10 @@ async function produceSimpleSourceDraft(
   const imageResult = canRunImageTasks
     ? await generateImagesFromPrompt(imagePrompt, 1, draft.imageTasks, {
         size: settings.imageSize,
+        model: settings.imageModel ?? undefined,
+        toApisRequestFormat: settings.imageToApisRequestFormat ?? undefined,
+        outputFormat: settings.imageOutputFormat,
+        outputCompression: settings.imageOutputCompression,
         ratio: settings.imageRatio,
         resolution: settings.imageResolution,
         quality: settings.imageQuality,
@@ -1244,6 +1252,10 @@ async function runSimpleViralWorkflow(
     const imageResult = canRunImageTasks
       ? await generateImagesFromPrompt(imagePrompt, 1, draft.imageTasks, {
           size: settings.imageSize,
+          model: settings.imageModel ?? undefined,
+          toApisRequestFormat: settings.imageToApisRequestFormat ?? undefined,
+          outputFormat: settings.imageOutputFormat,
+          outputCompression: settings.imageOutputCompression,
           ratio: settings.imageRatio,
           resolution: settings.imageResolution,
           quality: settings.imageQuality,
@@ -1488,6 +1500,10 @@ async function runSimpleOriginalWorkflow(
     const imageResult = generateImages
       ? await generateImagesFromPromptList(draft.imagePrompts, {
           size: settings.imageSize,
+          model: settings.imageModel ?? undefined,
+          toApisRequestFormat: settings.imageToApisRequestFormat ?? undefined,
+          outputFormat: settings.imageOutputFormat,
+          outputCompression: settings.imageOutputCompression,
           ratio: settings.imageRatio,
           resolution: settings.imageResolution,
           quality: settings.imageQuality,
@@ -2557,6 +2573,10 @@ function makeInitialRun(
     imageWashPrompt: settings.imageWashPrompt,
     imageStrategyPrompts: settings.imageStrategyPrompts,
     imageSize: settings.imageSize,
+    imageModel: settings.imageModel,
+    imageToApisRequestFormat: settings.imageToApisRequestFormat,
+    imageOutputFormat: settings.imageOutputFormat,
+    imageOutputCompression: settings.imageOutputCompression,
     imageRatio: settings.imageRatio,
     imageResolution: settings.imageResolution,
     imageQuality: settings.imageQuality,

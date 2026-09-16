@@ -2,6 +2,7 @@
 
 import Link from "next/link";
 import Image from "next/image";
+import { ImageModelSelector } from "@/components/image-model-selector";
 import { useEffect, useMemo, useState, useSyncExternalStore, type FormEvent, type ReactNode } from "react";
 import {
   Check,
@@ -44,7 +45,7 @@ import {
 import { defaultDistributionCheckPrompt } from "@/lib/distribution-check-prompt";
 import { feishuPublishModeOptions, formatFeishuPublishMode, normalizeFeishuPublishMode } from "@/lib/feishu-publish-mode";
 import { defaultImageGenerationSize } from "@/lib/image-size-options";
-import { resolveGptImageDimensionSettings } from "@/lib/gpt-image-dimensions";
+import { pixelSizeForRatio, resolveGptImageDimensionSettings } from "@/lib/gpt-image-dimensions";
 import { toApisImageRatios, toApisImageResolutions } from "@/lib/toapis-image-api";
 import { toRemoteImagePreviewSrc } from "@/lib/media-preview";
 import { getStoredTheme, setStoredTheme, subscribeTheme, type ThemeMode } from "@/lib/theme";
@@ -944,6 +945,10 @@ function ImageDimensionSelects({ settings, onChange, disabled }: { settings: Wor
     onChange(imageRatio && imageResolution ? resolveGptImageDimensionSettings(selection) : selection);
   }
   return <div className="grid gap-2">
+    <ImageModelSelector model={settings.imageModel ?? undefined} requestFormat={settings.imageToApisRequestFormat ?? undefined} disabled={disabled} labelClassName="grid min-w-0 gap-1 text-xs" inputClassName="field" onChange={(patch) => onChange({
+      ...("model" in patch ? { imageModel: patch.model ?? null } : {}),
+      ...("requestFormat" in patch ? { imageToApisRequestFormat: patch.requestFormat ?? null } : {}),
+    })} />
     <div className="grid grid-cols-2 gap-3">
       <label className="min-w-0"><FieldLabel label="图片比例" /><select className="field" aria-label="图片比例" value={settings.imageRatio || ""} onChange={(event) => updateSelection(event.target.value, settings.imageResolution)} disabled={disabled}>
         <option value="" disabled>请选择比例</option>
@@ -958,13 +963,17 @@ function ImageDimensionSelects({ settings, onChange, disabled }: { settings: Wor
         <option value="medium">中</option>
         <option value="high">高</option>
       </select></label>
-      <label className="min-w-0"><FieldLabel label="图片背景" /><select className="field" aria-label="图片背景" value={settings.imageBackground ?? "auto"} onChange={(event) => onChange({ imageBackground: event.target.value as WorkspacePromptSettings["imageBackground"] })} disabled={disabled}>
+      <label className="min-w-0"><FieldLabel label="图片背景" /><select className="field" aria-label="图片背景" value={settings.imageBackground ?? "auto"} onChange={(event) => onChange({ imageBackground: event.target.value as WorkspacePromptSettings["imageBackground"], ...(event.target.value === "transparent" ? { imageOutputFormat: "png" } : {}) })} disabled={disabled}>
         <option value="auto">自动</option>
         <option value="transparent">透明</option>
         <option value="opaque">不透明</option>
       </select></label>
+      <label className="min-w-0"><FieldLabel label="图片格式" /><select className="field" aria-label="图片格式" value={settings.imageOutputFormat ?? "png"} onChange={(event) => onChange({ imageOutputFormat: event.target.value as WorkspacePromptSettings["imageOutputFormat"] })} disabled={disabled}>
+        <option value="png">PNG</option><option value="jpeg" disabled={settings.imageBackground === "transparent"}>JPEG</option>
+      </select></label>
+      {(settings.imageOutputFormat ?? "png") === "jpeg" ? <label className="min-w-0"><FieldLabel label="JPEG 压缩" /><input className="field" aria-label="JPEG 压缩" type="number" min={0} max={100} step={1} value={settings.imageOutputCompression ?? 100} onChange={(event) => onChange({ imageOutputCompression: event.target.valueAsNumber })} disabled={disabled} /></label> : null}
     </div>
-    <p className="text-xs text-white/52">质量和背景用于 GPT 图片生成；直接引用原图或本地 Klein 不使用这两个参数。透明背景需要图片接口和模型支持。</p>
+    {settings.imageRatio && settings.imageResolution ? <output className="text-xs text-white/52" aria-label="像素尺寸">{pixelSizeForRatio(settings.imageRatio, settings.imageResolution)} px</output> : null}
     {!settings.imageRatio && !settings.imageResolution ? <p className="text-xs text-[var(--amber)]">原设置为 {settings.imageSize}，请重新选择比例和分辨率。</p> : null}
   </div>;
 }

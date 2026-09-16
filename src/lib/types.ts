@@ -401,6 +401,10 @@ export type FeishuPostPublishState = {
 };
 
 export type WorkspacePromptSettings = {
+  imageModel?: string | null;
+  imageToApisRequestFormat?: import("./image-model-options").ToApisRequestFormat | null;
+  imageOutputFormat?: "png" | "jpeg";
+  imageOutputCompression?: number;
   textInstruction: string;
   imageWashPrompt: string;
   imageStrategyPrompts: ImageStrategyPrompts;
@@ -969,6 +973,10 @@ export type SimpleRun = {
   textInstruction: string;
   imageWashPrompt: string;
   imageStrategyPrompts?: ImageStrategyPrompts;
+  imageModel?: string | null;
+  imageToApisRequestFormat?: import("./image-model-options").ToApisRequestFormat | null;
+  imageOutputFormat?: "png" | "jpeg";
+  imageOutputCompression?: number;
   imageSize: string;
   imageRatio?: string;
   imageResolution?: "1k" | "2k" | "4k";

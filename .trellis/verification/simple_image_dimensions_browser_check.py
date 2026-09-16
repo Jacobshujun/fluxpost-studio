@@ -72,6 +72,21 @@ async def check(browser, width):
     await expect(background).to_be_visible()
     await expect(quality).to_have_value("medium")
     await expect(background).to_have_value("auto")
+    model = page.get_by_role("combobox", name="图片模型", exact=True)
+    request_format = page.get_by_role("combobox", name="ToAPIs 请求格式", exact=True)
+    output_format = page.get_by_role("combobox", name="图片格式", exact=True)
+    compression = page.get_by_role("spinbutton", name="JPEG 压缩", exact=True)
+    await expect(model).to_have_value("default")
+    for value, format_value in [("gpt-image-2", "legacy"), ("gpt-image-2.5-flare", "ratio"), ("gpt-image-2.5-flare-vip", "pixels"), ("gpt-image-2.5-official", "pixels")]:
+        await model.select_option(value)
+        await expect(request_format).to_have_value(format_value)
+    await model.select_option("custom")
+    custom = page.get_by_role("textbox", name="自定义模型 ID", exact=True)
+    await custom.press_sequentially("gpt-image-2-future/Exact:V3", delay=10)
+    await expect(custom).to_have_value("gpt-image-2-future/Exact:V3")
+    await request_format.select_option("ratio")
+    await output_format.select_option("jpeg")
+    await compression.fill("75")
     for value in ["low", "medium", "high"]:
         await quality.select_option(value)
         await expect(quality).to_have_value(value)
@@ -80,6 +95,9 @@ async def check(browser, width):
         await expect(background).to_have_value(value)
     await expect(page.get_by_text("原设置为 1200x1600，请重新选择比例和分辨率。")).to_be_visible()
     await expect(ratio).to_have_value("")
+    await expect(output_format).to_have_value("png")
+    await expect(output_format.locator('option[value="jpeg"]')).to_have_js_property("disabled", True)
+    await expect(compression).to_have_count(0)
     await expect(resolution).to_have_value("")
     await expect(page.locator("datalist#compact-image-size-presets")).to_have_count(0)
     await page.get_by_label("关键词 / 内容池项目", exact=True).fill("测试关键词")
@@ -93,7 +111,7 @@ async def check(browser, width):
     await resolution.select_option("2k")
     await page.get_by_role("button", name="保存当前策略", exact=True).click()
     await asyncio.wait_for(save_started.wait(), timeout=10)
-    for control in [ratio, resolution, quality, background]:
+    for control in [ratio, resolution, quality, background, model, custom, request_format, output_format]:
         await expect(control).to_be_disabled()
     release_save.set()
     await expect(page.get_by_text("精简版默认生产策略已保存", exact=True)).to_be_visible()
@@ -102,11 +120,18 @@ async def check(browser, width):
     assert settings["imageSize"] == "1536x2048"
     assert settings["imageQuality"] == "high"
     assert settings["imageBackground"] == "transparent"
+    assert settings["imageModel"] == "gpt-image-2-future/Exact:V3"
+    assert settings["imageToApisRequestFormat"] == "ratio"
+    assert settings["imageOutputFormat"] == "png"
+    assert settings["imageOutputCompression"] == 75
     await page.reload(wait_until="networkidle")
     await expect(ratio).to_have_value("3:4")
     await expect(resolution).to_have_value("2k")
     await expect(quality).to_have_value("high")
     await expect(background).to_have_value("transparent")
+    await expect(custom).to_have_value("gpt-image-2-future/Exact:V3")
+    await expect(request_format).to_have_value("ratio")
+    await expect(page.get_by_label("像素尺寸", exact=True)).to_have_text("1536x2048 px")
     await page.get_by_label("关键词 / 内容池项目", exact=True).fill("测试关键词")
     await start.click()
     await expect(page.get_by_text("测试已捕获提交，未启动任务", exact=True)).to_be_visible()
@@ -115,6 +140,22 @@ async def check(browser, width):
     assert submissions[0]["settings"]["imageResolution"] == "2k"
     assert submissions[0]["settings"]["imageQuality"] == "high"
     assert submissions[0]["settings"]["imageBackground"] == "transparent"
+    assert submissions[0]["settings"]["imageModel"] == "gpt-image-2-future/Exact:V3"
+    assert submissions[0]["settings"]["imageToApisRequestFormat"] == "ratio"
+    assert submissions[0]["settings"]["imageOutputFormat"] == "png"
+    await background.select_option("auto")
+    await output_format.select_option("jpeg")
+    await expect(compression).to_have_value("75")
+    await model.select_option("default")
+    await page.get_by_role("button", name="保存当前策略", exact=True).click()
+    await expect(page.get_by_text("精简版默认生产策略已保存", exact=True)).to_be_visible()
+    assert settings["imageModel"] is None
+    assert settings["imageToApisRequestFormat"] is None
+    await page.reload(wait_until="networkidle")
+    await expect(model).to_have_value("default")
+    await expect(output_format).to_have_value("jpeg")
+    await expect(compression).to_have_value("75")
+    await expect(request_format).to_have_count(0)
 
     await ratio.select_option("16:9")
     await resolution.select_option("4k")

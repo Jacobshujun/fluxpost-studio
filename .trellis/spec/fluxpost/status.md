@@ -4,11 +4,11 @@ Last updated: 2026-09-16
 
 ## One-Line Status
 
-Canvas library fixes verified. Production unchanged.
+Simple image strategy synced with Canvas. Production unchanged.
 
 ## Current Focus
 
-- 2026-09-16: Smart-folder picker and scheduler fixes pass baseline/browser. Evidence: .trellis/tasks/archive/2026-09/09-16-canvas-smart-folders/verification.md.
+- 2026-09-16: Simple image strategy passes baseline/browser. Evidence: .trellis/tasks/archive/2026-09/09-16-simple-gpt-image-strategy/verification.md.
 
 - 2026-09-16: Node model presets/custom IDs and explicit ToAPIs formats pass baseline/browser. Task: .trellis/tasks/archive/2026-09/09-16-canvas-image-model-routing/.
 
@@ -25,7 +25,7 @@ Canvas library fixes verified. Production unchanged.
 - 2026-09-10 iteration repair: Handles and nested deletion pass offline/browser checks. Evidence: .trellis/tasks/archive/2026-09/09-10-canvas-iteration-interactions/verification.md. Commit authorized; no activation/push/live calls.
 
 - 2026-09-09 image sizing: Shared Canvas ratio/tier choices, frozen resume and legacy reselection pass offline/browser checks. Task: .trellis/tasks/archive/2026-09/09-09-exact-image-pixels. Commit authorized; no activation/live call.
-- Production/GitHub main: 1298237. Local 3001: verified node-model update; parity is pending. Deployment evidence: .trellis/tasks/archive/2026-09/09-15-deploy-september-update/verification.md.
+- Production/GitHub main: 1298237; parity pending. Local candidate identity: `/api/version`.
 
 - Collection, simple image-discard and September 8 copy-library verification/release evidence: see archive/status-2026-09-09.md. Their feature states are unchanged.
 

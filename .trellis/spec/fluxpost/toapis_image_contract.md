@@ -10,11 +10,15 @@ Applies to `buildToApisGenerationBody` in `src/lib/toapis-image-api.ts` and Canv
 
 ## Signatures
 
+Simple strategy persistence (`PATCH /api/workspace/settings`, `POST /api/simple/runs` settings) adds nullable `imageModel` / `imageToApisRequestFormat` and optional `imageOutputFormat` / `imageOutputCompression`.
+
 `buildToApisGenerationBody({ model, requestFormat, prompt, requestedSize, ratio, resolution, quality, count, background, referenceImages })` supplies JSON for `POST /v1/images/generations`. Accepted task IDs resume through `GET /v1/images/generations/{id}` before any new uploads or submissions.
 
 Canvas registry helpers: `getCanvasVisibleInputPorts(node, connectedPortIds)`, `orderedCanvasGptImageInputs(inputs)` and `getCanvasRequiredInputPorts(node, availablePortIds)` share UI, executor, planner and bypass behavior.
 
 ## Contracts
+
+Simple and Canvas share `ImageModelSelector` and preset metadata. Simple settings use JSON null to reset model/format overrides; omission preserves saved values during PATCH. Old settings default to route model/format, PNG and compression 100. Settings and run snapshots forward model/format/output fields through all three source, viral and original image paths; resume uses the saved run. Existing image-task counts remain unchanged (one output per task). Transparent background selects PNG atomically.
 
 | Explicit requestFormat | Size | Quality | References |
 | --- | --- | --- | --- |
@@ -40,6 +44,7 @@ Canvas GPT image V2 supports optional `image_1` through `image_16`, one edge per
 | VIP 4:3 + 4k, format=pixels | Submit size=3312x2480 without resolution; preserve upstream refusal |
 | Custom ID with explicit format | Submit trimmed ID unchanged; never infer legacy |
 | Blank explicit ID | Reject save and execution; missing field alone means default |
+| Simple invalid output format, non-integer/out-of-range compression, transparent JPEG | Reject before settings write |
 | Upstream unsupported size/model | Preserve bounded code/message with upstream label; no downgrade/failover |
 | Official 3:4 + 4k with calculated pixels | Submit pixel size, omit resolution |
 | Official exact size | Preserve pixels; check exact returned dimensions before persistence |
@@ -50,6 +55,8 @@ Canvas GPT image V2 supports optional `image_1` through `image_16`, one edge per
 | Disconnect image_1 while image_2 remains | Keep image_1, image_2 and empty image_3; retain image_2 edge identity |
 
 ## Cases
+
+Simple: good = custom ID survives JSON save/reload and frozen resume; base = old settings use defaults; bad = switching to default omits the override from PATCH and leaves the old model saved.
 
 Good: transparent PNG with URL references. Base: legacy Canvas background omitted, preserving provider defaults and old per-image fingerprints. Bad: changing background while reusing completed per-image results; include non-default background in the fingerprint.
 
@@ -68,6 +75,8 @@ HTTP and accepted-task failures redact configured primary/backup keys, bearer to
 - `canvas_gpt_inputs_browser_check.py`: mocked 1440px/390px controls, pixel output, persistence and nested connections; desktop pointer connection and source deletion.
 
 ## Wrong Versus Correct
+
+Simple reset: wrong = serialize `{ imageModel: undefined }`; correct = send `{ imageModel: null, imageToApisRequestFormat: null }`. `simple_image_dimensions_check.mjs` covers validation, persistence, reset, API snapshots and resume; its browser companion covers both viewport widths, format controls and launch capture.
 
 Wrong: send Official `size: "3:4", resolution: "4k"` through the legacy adapter. Correct: send its already calculated `size: "2480x3312"` without resolution. This is the application's mapping, not a guarantee of upstream custom-size acceptance. Never claim live generation or alpha-channel acceptance from mocked checks.
 
