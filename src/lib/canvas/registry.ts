@@ -1,5 +1,5 @@
 import { defaultCanvasMediaMaskConfig, validateCanvasMediaMaskConfig } from "./types";
-import type { CanvasBatchBindableField, CanvasGraph, CanvasNode, CanvasNodeConfig, CanvasNodeDefinition, CanvasNodeExecutionMode, CanvasNodeType } from "./types";
+import type { CanvasArtifact, CanvasBatchBindableField, CanvasGraph, CanvasNode, CanvasNodeConfig, CanvasNodeDefinition, CanvasNodeExecutionMode, CanvasNodeType, CanvasPortDefinition } from "./types";
 import { toApisImageRatios, toApisImageResolutions } from "../toapis-image-api";
 import { validateCanvasImageFilenamePrefix } from "./save-images";
 import { canvasPromptPresets, canvasVisionPresets, parseCanvasImageSelection, parseCanvasVideoTimestamps, resolveCanvasImageDimensions } from "./node-utils";
@@ -693,6 +693,30 @@ const canvasNodeDefinitionVersions: CanvasNodeDefinition[] = [
   },
 ];
 
+export const canvasGptImageReferencePortIds = Array.from({ length: 16 }, (_, index) => `image_${index + 1}`);
+
+export function orderedCanvasGptImageInputs(inputs: Record<string, CanvasArtifact[]>) {
+  return ["references", ...canvasGptImageReferencePortIds].flatMap((id) => inputs[id] || []);
+}
+
+export function getCanvasVisibleInputPorts(node: CanvasNode, connectedPortIds: Iterable<string> = []): CanvasPortDefinition[] {
+  const inputs = getCanvasNodeDefinition(node.type, node.version)?.inputs || [];
+  if (node.type !== "model.gpt-image" || node.version < 2) return inputs;
+  const connected = new Set(connectedPortIds);
+  const lastConnected = canvasGptImageReferencePortIds.findLastIndex((id) => connected.has(id));
+  const visible = new Set(canvasGptImageReferencePortIds.slice(0, Math.min(lastConnected + 2, 16)));
+  return inputs.filter((port) => port.id === "prompt" || visible.has(port.id) || (port.id === "references" && connected.has(port.id)));
+}
+
+export function getCanvasRequiredInputPorts(node: CanvasNode, availablePortIds: Iterable<string>): CanvasPortDefinition[] {
+  const definition = getCanvasNodeDefinition(node.type, node.version);
+  if (getCanvasNodeExecutionMode(node) !== "bypass") return definition?.inputs.filter((input) => input.required) || [];
+  // Numbered GPT image inputs are alternatives for bypass, not individually required.
+  if (node.type === "model.gpt-image" && node.version >= 2
+    && Array.from(availablePortIds).some((id) => id === "references" || canvasGptImageReferencePortIds.includes(id))) return [];
+  return definition?.inputs.filter((input) => input.id === definition.bypass?.inputPort) || [];
+}
+
 const gptImageV2Definition: CanvasNodeDefinition = {
   type: "model.gpt-image",
   version: 2,
@@ -703,7 +727,8 @@ const gptImageV2Definition: CanvasNodeDefinition = {
   color: "#d9467c",
   inputs: [
     { id: "prompt", label: "提示词", kind: "text", required: true, multiple: true },
-    { id: "references", label: "参考图片", kind: "images", multiple: true },
+    { id: "references", label: "旧版参考图", kind: "images", multiple: true },
+    ...canvasGptImageReferencePortIds.map((id): CanvasPortDefinition => ({ id, label: id, kind: "images" })),
   ],
   outputs: [{ id: "images", label: "图片", kind: "images" }],
   fields: [

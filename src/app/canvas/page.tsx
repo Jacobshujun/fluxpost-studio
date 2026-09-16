@@ -17,6 +17,7 @@ import {
   applyNodeChanges,
   getBezierPath,
   useUpdateNodeInternals,
+  useNodeConnections,
   type Connection,
   type Edge,
   type EdgeChange,
@@ -98,7 +99,9 @@ import {
   prepareCanvasClipboardPaste,
   type CanvasClipboardPayload,
 } from "@/lib/canvas/clipboard";
-import { canvasNodeDefinitions, createCanvasNode, getCanvasBatchBindableFields, getCanvasNodeDefinition, getCanvasNodeExecutionMode } from "@/lib/canvas/registry";
+import { canvasNodeDefinitions, createCanvasNode, getCanvasBatchBindableFields, getCanvasNodeDefinition, getCanvasNodeExecutionMode, getCanvasVisibleInputPorts } from "@/lib/canvas/registry";
+import { pixelSizeForRatio } from "@/lib/gpt-image-dimensions";
+import { toApisImageRatios, toApisImageResolutions } from "@/lib/toapis-image-api";
 import { canvasCollectionLinks } from "@/lib/canvas/content-collection";
 import { canvasIterationAllowedNodeTypes, getCanvasIterationOutputPorts } from "@/lib/canvas/iteration";
 import { canvasCollectionScheduleDefinition } from "@/lib/canvas/content-collection-schedule";
@@ -230,6 +233,7 @@ type CanvasNodeInteraction = {
   canResize: boolean;
   workflowRevision?: number;
   onConfigChange: (nodeId: string, key: string, value: CanvasEditableConfigValue) => void;
+  onConfigPatch: (nodeId: string, patch: CanvasNode["config"]) => void;
   onExecutionModeChange: (nodeId: string, mode: CanvasNodeExecutionMode) => void;
   onNodeFocus: (nodeId: string) => void;
   onPreview: (preview: NonNullable<PreviewState>) => void;
@@ -465,12 +469,13 @@ export default function CanvasPage() {
     canResize: !isMobile,
     workflowRevision: activeWorkflow?.revision,
     onConfigChange: updateNodeConfig,
+    onConfigPatch: updateNodeConfigPatch,
     onExecutionModeChange: updateNodeExecutionMode,
     onNodeFocus: focusCanvasNode,
     onPreview: setPreview,
     onSubtitleEdit: (node, nodeRun) => setSubtitleEditor({ nodeId: node.id, nodeRunId: nodeRun.id }),
     onIterationEdit: setIterationEditorId,
-  }), [activeRun, activeWorkflow?.revision, displayingExplicitRun, focusCanvasNode, isMobile, latestNodeRuns, latestSuccessfulNodeRuns, updateNodeConfig, updateNodeExecutionMode]);
+  }), [activeRun, activeWorkflow?.revision, displayingExplicitRun, focusCanvasNode, isMobile, latestNodeRuns, latestSuccessfulNodeRuns, updateNodeConfig, updateNodeConfigPatch, updateNodeExecutionMode]);
 
   useEffect(() => {
     const query = window.matchMedia("(max-width: 820px)");
@@ -1793,10 +1798,13 @@ const CanvasFlowNode = memo(function CanvasFlowNode({ data, selected }: NodeProp
   const definition = getCanvasNodeDefinition(node.type, node.version);
   const interaction = useContext(CanvasNodeInteractionContext);
   const updateNodeInternals = useUpdateNodeInternals();
+  const connections = useNodeConnections({ handleType: "target" });
+  const inputPorts = getCanvasVisibleInputPorts(node, connections.flatMap((connection) => connection.targetHandle ? [connection.targetHandle] : []));
+  const inputPortIds = inputPorts.map((port) => port.id).join(",");
   const outputPortIds = getCanvasIterationOutputPorts(node).map((port) => port.id).join(",");
   useEffect(() => {
     updateNodeInternals(node.id);
-  }, [node.id, outputPortIds, updateNodeInternals]);
+  }, [node.id, inputPortIds, outputPortIds, updateNodeInternals]);
   if (!definition) return null;
   const imageUrls = node.type === "input.images" || node.type === "input.library-images"
     ? normalizeConfigUrls(node.config.urls)
@@ -1835,8 +1843,8 @@ const CanvasFlowNode = memo(function CanvasFlowNode({ data, selected }: NodeProp
   const isSelected = selected;
   const hasEditableSize = Boolean(node.size && interaction?.canResize);
   const outputPorts = getCanvasIterationOutputPorts(node);
-  const portRows = Array.from({ length: Math.max(definition.inputs.length, outputPorts.length, 1) }, (_, index) => ({
-    input: definition.inputs[index],
+  const portRows = Array.from({ length: Math.max(inputPorts.length, outputPorts.length, 1) }, (_, index) => ({
+    input: inputPorts[index],
     output: outputPorts[index],
   }));
   return <div className={`canvas-node ${hasEditableSize ? "canvas-node-resized" : ""} ${isSelected ? "canvas-node-selected" : ""} ${executionMode === "bypass" ? "canvas-node-bypassed" : ""} ${executionMode === "disabled" ? "canvas-node-disabled" : ""}`} style={{ "--node-color": definition.color } as React.CSSProperties}>
@@ -1867,6 +1875,11 @@ const CanvasFlowNode = memo(function CanvasFlowNode({ data, selected }: NodeProp
       </details> : null}
     </div>
     <div className="canvas-node-content">
+    {node.type === "model.gpt-image" && node.version >= 2 ? <div className="canvas-gpt-image-controls nodrag nopan nowheel" onPointerDown={(event) => event.stopPropagation()} onClick={(event) => event.stopPropagation()}>
+      <CanvasNodeFields node={node} onChange={(key, value) => interaction?.onConfigChange(node.id, key, value)} onPatch={(patch) => interaction?.onConfigPatch(node.id, patch)} onPreviewImage={(url, index) => interaction?.onPreview({ kind: "image", url, index })} />
+      <CanvasGptImageDimensions node={node} />
+      {imageUrls.length ? <small className="canvas-gpt-legacy-count">已上传参考图：{imageUrls.length}</small> : null}
+    </div> : null}
     {node.type === "input.text" ? <CanvasNodeTextEditor
       nodeId={node.id}
       value={String(node.config.text || "")}
@@ -1975,7 +1988,7 @@ function CanvasIterationEditor({ node, colorMode, onChange, onClose }: {
   const selected = innerNodes.find((entry) => entry.id === selectedId)?.data.canvasNode;
   const allowed = canvasNodeDefinitions.filter((definition) => definition.type !== "input.iteration-item" && canvasIterationAllowedNodeTypes.includes(definition.type));
   const sourcePorts = innerNodes.flatMap((entry) => getCanvasIterationOutputPorts(entry.data.canvasNode).map((port) => ({ node: entry, port, value: JSON.stringify([entry.id, port.id]) })));
-  const targetPorts = innerNodes.flatMap((entry) => (getCanvasNodeDefinition(entry.data.canvasNode.type, entry.data.canvasNode.version)?.inputs || []).map((port) => ({ node: entry, port, value: JSON.stringify([entry.id, port.id]) })));
+  const targetPorts = innerNodes.flatMap((entry) => getCanvasVisibleInputPorts(entry.data.canvasNode, innerEdges.filter((edge) => edge.target === entry.id).map((edge) => edge.targetHandle || "")).map((port) => ({ node: entry, port, value: JSON.stringify([entry.id, port.id]) })));
 
   function commit(nextNodes: FlowNode[], nextEdges: FlowEdge[], nextViewport = iteration.graph.viewport) {
     setInnerNodes(nextNodes);
@@ -2014,6 +2027,7 @@ function CanvasIterationEditor({ node, colorMode, onChange, onClose }: {
     latestSuccessfulNodeRuns: new Map(),
     canResize: true,
     onConfigChange: (nodeId, key, value) => patchConfig(nodeId, { [key]: value }),
+    onConfigPatch: patchConfig,
     onExecutionModeChange: (nodeId, mode) => patchNode(nodeId, { executionMode: mode }),
     onNodeFocus: setSelectedId,
     onPreview,
@@ -2739,9 +2753,17 @@ function NodeInspector({
       </div>
       <CanvasSubtitleStyleEditor node={node} media={subtitlePreviewMedia} onPatch={onPatch} />
     </> : <CanvasNodeFields node={node} onChange={onChange} onPatch={onPatch} onPreviewImage={onPreviewImage} />}
-    <div className="canvas-port-list"><span>输入</span>{definition.inputs.length ? definition.inputs.map((port) => <small key={port.id}>{port.label} · {portKindLabel(port.kind)}{port.required ? " · 必填" : ""}</small>) : <small>无</small>}</div>
+    {isGptImageV2 ? <CanvasGptImageDimensions node={node} /> : null}
+    <div className="canvas-port-list"><span>输入</span>{definition.inputs.length ? getCanvasVisibleInputPorts(node, graph.edges.filter((edge) => edge.target === node.id).map((edge) => edge.targetPort)).map((port) => <small key={port.id}>{port.label} · {portKindLabel(port.kind)}{port.required ? " · 必填" : ""}</small>) : <small>无</small>}</div>
     <div className="canvas-port-list"><span>输出</span>{definition.outputs.length ? definition.outputs.map((port) => <small key={port.id}>{port.label} · {portKindLabel(port.kind)}</small>) : <small>无</small>}</div>
   </div>;
+}
+
+function CanvasGptImageDimensions({ node }: { node: CanvasNode }) {
+  const ratio = String(node.config.ratio || "1:1");
+  const resolution = String(node.config.resolution || "1k");
+  const valid = toApisImageRatios.some((value) => value === ratio) && toApisImageResolutions.some((value) => value === resolution);
+  return <output className="canvas-gpt-image-dimensions" aria-label="Official 像素尺寸">{valid ? `Official: ${pixelSizeForRatio(ratio, resolution)} px` : "请选择有效比例和分辨率"}</output>;
 }
 
 function CanvasNodeFields({ node, onChange, onPatch, onPreviewImage }: {
@@ -5868,7 +5890,9 @@ function quickAddChoices(connection: QuickAddConnection | undefined, edges: Flow
   return canvasNodeDefinitions.flatMap((definition) => {
     if (definition.type === "input.iteration-item") return [];
     if (!connection) return [{ definition }];
-    const ports = connection.handleType === "source" ? definition.inputs : definition.type === "utility.image-iterate" ? getCanvasIterationOutputPorts(createCanvasNode(definition.type, "iteration-preview", { x: 0, y: 0 })) : definition.outputs;
+    const ports = connection.handleType === "source"
+      ? definition.type === "model.gpt-image" ? getCanvasVisibleInputPorts(createCanvasNode(definition.type, "input-preview", { x: 0, y: 0 })) : definition.inputs
+      : definition.type === "utility.image-iterate" ? getCanvasIterationOutputPorts(createCanvasNode(definition.type, "iteration-preview", { x: 0, y: 0 })) : definition.outputs;
     return ports.filter((port) => isQuickAddPortCompatible(connection, port)).map((port) => ({ definition, port }));
   });
 }

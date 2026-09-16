@@ -145,7 +145,7 @@ const stubs = {
   "./seedance-references": { resolveSeedanceInput: () => ({ prompt: "", images: [] }) },
   "./media-tools": { CanvasMediaNeedsConfigError: class extends Error {}, extractCanvasVideoFrames: noopAsync, reconstructCanvasVideo: noopAsync, transformCanvasImages: noopAsync },
   "./node-utils": { canvasVisionPresets: {}, concatenateCanvasText: () => "", parseCanvasImageSelection: () => [], renderCanvasPromptTemplate: () => "", splitCanvasText: () => ({ tail: "" }) },
-  "./registry": { normalizeUrlList: (value) => Array.isArray(value) ? value : [] },
+  "./registry": registryModule.exports,
   "./save-images": { CANVAS_SAVE_IMAGE_MAX_ITEMS: 30 },
   "./source-video-contract": { canvasSourceVideoSnapshotFromConfig: () => undefined, isCanvasSourceVideoSnapshotCurrent: () => false },
   "./subtitle-style": { canvasSubtitleStyleFromConfig: () => ({}) },
@@ -344,4 +344,45 @@ providerCalls = [];
 await executeCanvasNode({ ...backgroundContext, node: { ...backgroundContext.node, type: "model.gpt-image", config: { ...backgroundContext.node.config, count: 1, referenceUrls: ["img-1"] } } });
 assert.equal(providerCalls[0].options.background, "transparent", "Ordinary Canvas generation must forward background too.");
 
-console.log("Canvas per-image GPT reconstruction and background checks passed.");
+const numberedContext = {
+  ...backgroundContext,
+  node: { ...backgroundContext.node, type: "model.gpt-image", config: { ...backgroundContext.node.config, count: 1, referenceUrls: ["direct"] } },
+  inputs: {
+    prompt: [{ kind: "text", value: "ordered images" }],
+    image_10: [{ kind: "images", items: [{ url: "ten" }] }],
+    image_2: [{ kind: "images", items: [{ url: "two-a" }, { url: "two-b" }] }],
+    references: [{ kind: "images", items: [{ url: "legacy" }] }],
+    image_1: [{ kind: "images", items: [{ url: "one" }, { url: "direct" }] }],
+  },
+};
+providerCalls = [];
+providerMode = "pending";
+const pendingNumbered = await executeCanvasNode(numberedContext);
+const expectedReferences = ["direct", "legacy", "one", "two-a", "two-b", "ten"];
+assert.deepEqual(providerCalls[0].references, expectedReferences, "Numeric ports, not insertion order, determine references; legacy inputs stay first.");
+assert.deepEqual(pendingNumbered.resolvedInputs, numberedContext.inputs, "Frozen inputs must preserve port identity.");
+providerCalls = [];
+await executeCanvasNode({ ...numberedContext, inputs: pendingNumbered.resolvedInputs,
+  previousNodeRun: { providerTaskId: pendingNumbered.providerTaskId, providerTaskRoute: "primary", providerStatus: "processing" } });
+assert.deepEqual(providerCalls[0].references, expectedReferences, "Async resume must retain reference order.");
+assert.equal(providerCalls[0].resumeTaskId, pendingNumbered.providerTaskId);
+providerMode = "success";
+providerCalls = [];
+await assert.rejects(executeCanvasNode({ ...numberedContext, inputs: { ...numberedContext.inputs,
+  image_16: [{ kind: "images", items: Array.from({ length: 16 }, (_, index) => ({ url: `extra-${index}` })) }],
+} }), /at most 16/);
+assert.equal(providerCalls.length, 0, "Too many references must fail before a paid call.");
+
+const runFunctions = ts.createSourceFile("runs.ts", runsSource, ts.ScriptTarget.Latest, true).statements
+  .filter((statement) => ts.isFunctionDeclaration(statement) && ["resolveBypassOutputs", "mergeArtifacts", "missingRequiredInput"].includes(statement.name?.text))
+  .map((statement) => statement.getText()).join("\n");
+const bypassScope = { ...registryModule.exports, structuredClone, mergeCanvasImageBatchSummaries: () => undefined };
+vm.createContext(bypassScope);
+vm.runInContext(ts.transpileModule(runFunctions, { compilerOptions: { target: ts.ScriptTarget.ES2022 } }).outputText, bypassScope);
+const bypassNode = { ...numberedContext.node, executionMode: "bypass" };
+assert.equal(bypassScope.missingRequiredInput(bypassNode, { image_2: numberedContext.inputs.image_2 }), undefined);
+assert.ok(bypassScope.missingRequiredInput(bypassNode, {}));
+assert.deepEqual(Array.from(bypassScope.resolveBypassOutputs(bypassNode, numberedContext.inputs).images.items, (item) => item.url),
+  ["legacy", "one", "direct", "two-a", "two-b", "ten"], "Bypass must merge all wired images in port order without model calls.");
+
+console.log("Canvas per-image, ordered reference ports, resume, limits, bypass and background checks passed.");

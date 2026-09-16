@@ -83,7 +83,7 @@ try {
     writeFileSync(path.join(temp, `${name}.js`), output, "utf8");
   }
   const require = createRequire(import.meta.url);
-  const { getCanvasNodeDefinition, getCanvasNodeExecutionMode, upgradeCanvasGraph, upgradeCanvasNode, validateCanvasNodeConfig, normalizeUrlList } = require(path.join(temp, "registry.js"));
+  const { getCanvasNodeDefinition, getCanvasNodeExecutionMode, getCanvasVisibleInputPorts, upgradeCanvasGraph, upgradeCanvasNode, validateCanvasNodeConfig, normalizeUrlList } = require(path.join(temp, "registry.js"));
   const { validateCanvasGraph, validateCanvasGraphForPersistence, buildCanvasRunPlan } = require(path.join(temp, "graph.js"));
   const { createCanvasClipboardPayload, instantiateCanvasClipboardPayload, parseCanvasClipboardPayload, prepareCanvasClipboardPaste } = require(path.join(temp, "clipboard.js"));
   const { createCanvasWorkflowFile, parseCanvasWorkflowFile, canvasWorkflowFileName, CANVAS_WORKFLOW_FILE_MAX_BYTES } = require(path.join(temp, "workflow-file.js"));
@@ -93,6 +93,35 @@ try {
   assert.equal(getCanvasNodeDefinition("input.images")?.label, "图片", "image input node should use the concise label");
   assert.equal(getCanvasNodeDefinition("model.gpt-image")?.version, 2, "new GPT image nodes must use v2");
   assert.equal(getCanvasNodeDefinition("model.gpt-image", 1)?.version, 1, "legacy GPT image snapshots must remain resolvable");
+  const orderedImageNode = { id: "ordered", type: "model.gpt-image", version: 2, position: { x: 400, y: 0 }, config: { ...getCanvasNodeDefinition("model.gpt-image").defaultConfig } };
+  const visibleIds = (connected) => getCanvasVisibleInputPorts(orderedImageNode, connected).map((port) => port.id);
+  assert.deepEqual(visibleIds([]), ["prompt", "image_1"]);
+  assert.deepEqual(visibleIds(["image_1"]), ["prompt", "image_1", "image_2"]);
+  assert.deepEqual(visibleIds(["image_2"]), ["prompt", "image_1", "image_2", "image_3"], "Deleting the first edge must not rename remaining ports.");
+  assert.deepEqual(visibleIds(["references"]), ["prompt", "references", "image_1"]);
+  assert.equal(visibleIds(["image_16"]).length, 17, "Port expansion stops at 16.");
+  const orderedImageGraph = { nodes: [
+    { id: "source", type: "input.images", version: 1, position: { x: 0, y: 0 }, config: { urls: ["https://example.test/image.png"] } },
+    { id: "prompt", type: "input.text", version: 1, position: { x: 0, y: 100 }, config: { text: "Generate" } },
+    orderedImageNode,
+  ], edges: [
+    { id: "second", source: "source", sourcePort: "images", target: "ordered", targetPort: "image_2" },
+    { id: "first", source: "source", sourcePort: "images", target: "ordered", targetPort: "image_1" },
+    { id: "prompt-edge", source: "prompt", sourcePort: "text", target: "ordered", targetPort: "prompt" },
+  ], viewport: { x: 0, y: 0, zoom: 1 } };
+  assert.equal(validateCanvasGraph(orderedImageGraph).valid, true);
+  const roundTripImages = parseCanvasWorkflowFile(JSON.stringify(createCanvasWorkflowFile("Ordered", orderedImageGraph))).graph;
+  assert.deepEqual(roundTripImages.edges.map((edge) => edge.targetPort), ["image_2", "image_1", "prompt"]);
+  const duplicateImageGraph = structuredClone(orderedImageGraph);
+  duplicateImageGraph.edges.push({ ...duplicateImageGraph.edges[0], id: "duplicate" });
+  assert.match(validateCanvasGraphForPersistence(duplicateImageGraph).errors.join(" "), /accepts one connection/);
+  const imageBypassGraph = structuredClone(orderedImageGraph);
+  imageBypassGraph.nodes[2].executionMode = "bypass";
+  imageBypassGraph.edges = imageBypassGraph.edges.filter((edge) => edge.targetPort !== "prompt");
+  assert.equal(validateCanvasGraph(imageBypassGraph).valid, true);
+  assert.equal(buildCanvasRunPlan(imageBypassGraph).steps.find((step) => step.nodeId === "ordered").action, "bypass");
+  imageBypassGraph.nodes[0].executionMode = "disabled";
+  assert.equal(buildCanvasRunPlan(imageBypassGraph).steps.find((step) => step.nodeId === "ordered").action, "blocked");
   assert.equal(getCanvasNodeDefinition("model.gpt-vision")?.inputs.find((port) => port.id === "instruction")?.label, "用户提示词", "vision prompt input must be presented as authoritative user text");
   assert.equal(getCanvasNodeDefinition("model.seedance")?.version, 1, "Seedance 2.5 must preserve the saved Canvas node version");
   assert.equal(getCanvasNodeDefinition("model.seedance")?.label, "Seedance 2.5");

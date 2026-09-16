@@ -30,7 +30,7 @@ import { IMAGE_NETWORK_WAIT_REASON, isImageNetworkUnavailableError } from "../im
 import { CanvasNeedsConfigError, executeCanvasNode, resolveCanvasLiteralOutputs, type CanvasNodeExecutionResult } from "./executors";
 import { ArkSeedanceNeedsConfigError, getArkSeedanceReadiness } from "./seedance";
 import { buildCanvasRunPlan, collectDescendants } from "./graph";
-import { getCanvasNodeDefinition, getCanvasNodeExecutionMode, normalizeUrlList } from "./registry";
+import { getCanvasNodeDefinition, getCanvasNodeExecutionMode, getCanvasRequiredInputPorts, normalizeUrlList, orderedCanvasGptImageInputs } from "./registry";
 import type {
   CanvasArtifact,
   CanvasEdge,
@@ -986,17 +986,16 @@ function collectInputs(edges: CanvasEdge[], targetNodeId: string, outputs: Map<s
 }
 
 function missingRequiredInput(node: CanvasNode, inputs: Record<string, CanvasArtifact[]>) {
-  const definition = getCanvasNodeDefinition(node.type, node.version);
-  const requiredInputs = getCanvasNodeExecutionMode(node) === "bypass"
-    ? definition?.inputs.filter((input) => input.id === definition.bypass?.inputPort)
-    : definition?.inputs.filter((input) => input.required);
+  const requiredInputs = getCanvasRequiredInputPorts(node, Object.keys(inputs).filter((id) => inputs[id].length));
   return requiredInputs?.find((input) => !(inputs[input.id] || []).length)?.label;
 }
 
 function resolveBypassOutputs(node: CanvasNode, inputs: Record<string, CanvasArtifact[]>): Record<string, CanvasArtifact> | undefined {
   const bypass = getCanvasNodeDefinition(node.type, node.version)?.bypass;
   if (!bypass) return undefined;
-  const artifact = mergeArtifacts(inputs[bypass.inputPort] || []);
+  const artifact = mergeArtifacts(node.type === "model.gpt-image" && node.version >= 2
+    ? orderedCanvasGptImageInputs(inputs)
+    : inputs[bypass.inputPort] || []);
   return artifact ? { [bypass.outputPort]: artifact } : undefined;
 }
 

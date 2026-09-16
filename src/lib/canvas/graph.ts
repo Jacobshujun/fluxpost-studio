@@ -1,4 +1,4 @@
-import { getCanvasNodeDefinition, getCanvasNodeExecutionMode, validateCanvasNodeConfig } from "./registry";
+import { getCanvasNodeDefinition, getCanvasNodeExecutionMode, getCanvasRequiredInputPorts, validateCanvasNodeConfig } from "./registry";
 import { areCanvasPortKindsCompatible, CANVAS_GRAPH_LIMITS, CANVAS_NODE_SIZE_LIMITS, CANVAS_SCHEDULER_ROLES, isCanvasNodeSize } from "./types";
 import type { CanvasEdge, CanvasGraph, CanvasGraphValidation, CanvasNodeCapability, CanvasRunPlan, CanvasSchedulerRole } from "./types";
 import { validateSeedanceGraphNode } from "./seedance-references";
@@ -92,9 +92,7 @@ function validateCanvasGraphWithMode(graph: CanvasGraph, validateExecution: bool
     const executionMode = getCanvasNodeExecutionMode(node);
     const requiredInputs = !validateExecution || executionMode === "disabled" || node.frozenOutputs
       ? []
-      : executionMode === "bypass"
-        ? (definition?.inputs || []).filter((input) => input.id === definition?.bypass?.inputPort)
-        : (definition?.inputs || []).filter((input) => input.required);
+      : getCanvasRequiredInputPorts(node, graph.edges.filter((edge) => edge.target === node.id).map((edge) => edge.targetPort));
     for (const input of requiredInputs) {
       if (!(incoming.get(`${node.id}:${input.id}`) || []).length) {
         errors.push(`${definition?.label || node.id} requires input ${input.label}.`);
@@ -128,9 +126,9 @@ export function buildCanvasRunPlan(graph: CanvasGraph, targetNodeIds?: string[])
     const executionMode = getCanvasNodeExecutionMode(node);
     if (executionMode === "disabled") return { nodeId, action: "disabled" as const };
 
-    const requiredInputs = node.frozenOutputs ? [] : executionMode === "bypass"
-      ? definition.inputs.filter((input) => input.id === definition.bypass?.inputPort)
-      : definition.inputs.filter((input) => input.required);
+    const requiredInputs = node.frozenOutputs ? [] : getCanvasRequiredInputPorts(node, graph.edges.filter((edge) =>
+      edge.target === nodeId && availableOutputs.has(`${edge.source}:${edge.sourcePort}`),
+    ).map((edge) => edge.targetPort));
     const missingInput = requiredInputs.find((input) => !graph.edges.some((edge) =>
       edge.target === nodeId
       && edge.targetPort === input.id

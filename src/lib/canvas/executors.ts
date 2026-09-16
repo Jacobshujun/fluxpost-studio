@@ -16,7 +16,7 @@ import { CanvasMediaNeedsConfigError, extractCanvasVideoFrames, reconstructCanva
 import { revalidateCanvasDirectoryGroup } from "./directory-snapshots";
 import { canvasVisionPresets, concatenateCanvasText, parseCanvasImageSelection, renderCanvasPromptTemplate, splitCanvasText } from "./node-utils";
 import { pixelSizeForRatio } from "../gpt-image-dimensions";
-import { normalizeUrlList } from "./registry";
+import { canvasGptImageReferencePortIds, normalizeUrlList, orderedCanvasGptImageInputs } from "./registry";
 import { CANVAS_SAVE_IMAGE_MAX_ITEMS } from "./save-images";
 import { canvasSourceVideoSnapshotFromConfig, isCanvasSourceVideoSnapshotCurrent } from "./source-video-contract";
 import { canvasSubtitleStyleFromConfig } from "./subtitle-style";
@@ -395,7 +395,12 @@ async function executeGptImage(context: CanvasNodeExecutionContext): Promise<Can
   const { node, inputs, previousNodeRun, onProviderTaskUpdate } = context;
   const prompt = textValues(inputs.prompt).join("\n\n").trim();
   const directReferences = normalizeUrlList(node.config.referenceUrls);
-  const references = resolveCanvasGptImageReferences(directReferences, inputs.references || []);
+  const references = resolveCanvasGptImageReferences(directReferences, orderedCanvasGptImageInputs(inputs));
+  // Numbered inputs must retain their port identities during async resume and reuse.
+  const resolvedInputs = canvasGptImageReferencePortIds.some((id) => inputs[id]?.length) ? inputs : {
+    ...inputs,
+    references: [{ kind: "images" as const, items: references.map((url, index) => ({ url, name: `reference ${index + 1}` })) }],
+  };
   const resumableTask = previousNodeRun?.providerTaskId && previousNodeRun.providerStatus !== "failed"
     ? previousNodeRun
     : undefined;
@@ -418,10 +423,7 @@ async function executeGptImage(context: CanvasNodeExecutionContext): Promise<Can
   if (result.status === "needs_config") throw new CanvasNeedsConfigError(result.message || "GPT-Image-2 is not configured.");
   if (result.status === "pending") {
     return {
-      resolvedInputs: {
-        ...inputs,
-        references: [{ kind: "images" as const, items: references.map((url, index) => ({ url, name: `reference ${index + 1}` })) }],
-      },
+      resolvedInputs,
       outputs: {},
       providerTaskId: result.providerTaskId,
       providerTaskRoute: result.providerTaskRoute,
@@ -431,10 +433,7 @@ async function executeGptImage(context: CanvasNodeExecutionContext): Promise<Can
     };
   }
   return {
-    resolvedInputs: {
-      ...inputs,
-      references: [{ kind: "images" as const, items: references.map((url, index) => ({ url, name: `图片${index + 1}` })) }],
-    },
+    resolvedInputs,
     outputs: { images: { kind: "images" as const, items: result.imageUrls.map((url) => ({ url })) } },
   };
 }

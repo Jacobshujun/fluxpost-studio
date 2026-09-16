@@ -45,6 +45,7 @@ const iteration = {
 const registry = {
   getCanvasNodeDefinition: (type) => ({ type, label: type, inputs: type === "utility.image-iterate" ? [{ id: "images", required: true }] : type === "sink" ? [{ id: "text", required: true }] : [], outputs: [], capability: type === "publish.feishu" ? "external_write" : undefined }),
   getCanvasNodeExecutionMode: () => "enabled", normalizeUrlList: () => [],
+  getCanvasRequiredInputPorts: (node) => registry.getCanvasNodeDefinition(node.type).inputs.filter((port) => port.required),
 };
 const runtime = load("src/lib/canvas/runs.ts", {
   "../database": database, "../activity-log": {},
