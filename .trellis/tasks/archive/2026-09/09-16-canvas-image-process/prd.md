@@ -14,9 +14,9 @@ Implement the user-approved 图片处理 node plan (2026-09-16), including task 
 
 ## Acceptance Criteria
 
-- [ ] Real offline encoding, impossible targets, order/source preservation/cache/error contracts.
-- [ ] Graph persistence, bypass, iteration/scheduler compatibility and desktop/mobile browser checks.
-- [ ] Full offline baseline, committed clean candidate activated on primary-worktree port 3001.
+- [x] Real offline encoding, impossible targets, order/source preservation/cache/error contracts.
+- [x] Graph persistence, bypass, iteration/scheduler compatibility and desktop/mobile browser checks.
+- [x] Full offline baseline, committed clean candidate activated on primary-worktree port 3001 (final APNG correction reactivation follows archive).
 
 ## Notes
 

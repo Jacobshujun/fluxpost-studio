@@ -6,4 +6,5 @@
 - Existing isolated module-tree tests were updated to load the new registry dependency; copy-library executor stubs include the new processor. No old assertions weakened.
 - No paid provider, TOS write, Feishu/Lark or publishing call was made. Runtime media fixtures/cache were isolated in OS temp and removed.
 - Code review used trellis-check; cross-layer contracts recorded in canvas_image_process.md using trellis-update-spec.
-- Commit and primary-worktree `npm run local` activation authorized by user; runtime identity verification follows activation.
+- Initial candidate 1283867 activated via `npm run local`; port 3001 HTTP smoke passed, `/api/version` matched the full commit in candidate mode, and the served Canvas JS contains utility.image-process. A subsequent APNG rejection correction passed its regression and complete baseline; final clean-HEAD activation follows the archive commit. User authorized activation; production unchanged.
+- APNG: Sharp metadata omits its animation pages. Explicit acTL detection rejects it instead of taking the first frame; WebP and APNG rejection both pass real-byte tests.
