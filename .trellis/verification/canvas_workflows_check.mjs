@@ -96,6 +96,28 @@ try {
   assert.equal(getCanvasNodeDefinition("model.gpt-image", 1)?.version, 1, "legacy GPT image snapshots must remain resolvable");
   const orderedImageNode = { id: "ordered", type: "model.gpt-image", version: 2, position: { x: 400, y: 0 }, config: { ...getCanvasNodeDefinition("model.gpt-image").defaultConfig } };
   const { decodeCanvasGraph } = require(path.join(temp, "serialization.js"));
+  const maskTemplate = { id: "template", shape: "rectangle", mode: "image", imageSource: "input", x: 0, y: 0, width: 1, height: 1, opacity: 1, color: "#000000" };
+  const maskGraph = {
+    viewport: { x: 0, y: 0, zoom: 1 },
+    nodes: [
+      { id: "video", type: "input.videos", version: 1, position: { x: 0, y: 0 }, config: { urls: ["https://fixture.invalid/source.mp4"] } },
+      { id: "template", type: "input.images", version: 1, position: { x: 0, y: 200 }, config: { urls: ["https://fixture.invalid/template.png"] } },
+      { id: "mask", type: "utility.media-mask", version: 1, position: { x: 400, y: 0 }, config: { mask: { protocolVersion: 1, regions: [maskTemplate] } } },
+    ],
+    edges: [
+      { id: "base", source: "video", sourcePort: "videos", target: "mask", targetPort: "videos" },
+      { id: "overlay", source: "template", sourcePort: "images", target: "mask", targetPort: "overlayImages" },
+    ],
+  };
+  assert.equal(validateCanvasGraph(maskGraph).valid, true, "base video and template image are separate inputs");
+  const maskRoundTrip = parseCanvasWorkflowFile(JSON.stringify(createCanvasWorkflowFile("Alpha template", maskGraph))).graph;
+  assert.equal(maskRoundTrip.nodes[2].config.mask.regions[0].imageSource, "input");
+  assert.equal(maskRoundTrip.edges[1].targetPort, "overlayImages");
+  assert.equal(decodeCanvasGraph(JSON.parse(JSON.stringify(maskGraph))).nodes[2].config.mask.regions[0].imageSource, "input");
+  const missingTemplateGraph = { ...maskGraph, edges: maskGraph.edges.slice(0, 1) };
+  assert.equal(validateCanvasGraphForPersistence(missingTemplateGraph).valid, true, "incomplete template drafts remain saveable");
+  assert.match(validateCanvasGraph(missingTemplateGraph).errors.join(" "), /requires input/);
+  assert.match(validateCanvasGraph({ ...maskGraph, edges: [...maskGraph.edges, { ...maskGraph.edges[1], id: "duplicate-template" }] }).errors.join(" "), /accepts one connection/);
   const { imageModelPresets } = require(path.join(temp, "image-model-options.js"));
   for (const model of [...imageModelPresets.map((preset) => preset.model), "custom/Future-Model:Exact-ID"]) {
     const graph = { nodes: [{ ...orderedImageNode, config: { ...orderedImageNode.config, model: `  ${model}  `, toApisRequestFormat: "pixels" } }, { ...orderedImageNode, id: "unchanged" }], edges: [], viewport: { x: 0, y: 0, zoom: 1 } };

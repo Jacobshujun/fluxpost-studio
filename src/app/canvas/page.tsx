@@ -2822,10 +2822,19 @@ function CanvasNodeFields({ node, onChange, onPatch, onPreviewImage }: {
 function CanvasMediaMaskEditor({ node, onPatch }: { node: CanvasNode; onPatch: (patch: CanvasNode["config"]) => void }) {
   const config = normalizeCanvasMediaMaskConfig(node.config.mask);
   const update = (regions: CanvasMaskRegion[]) => onPatch({ mask: { ...config, regions } });
-  const add = () => update([...config.regions, { id: `mask-${config.regions.length + 1}`, shape: "rectangle", mode: "solid", x: 0.72, y: 0.04, width: 0.22, height: 0.08, opacity: 1, color: "#000000" }]);
+  const add = (imageTemplate = false) => {
+    let sequence = config.regions.length + 1;
+    while (config.regions.some((region) => region.id === `mask-${sequence}`)) sequence += 1;
+    update([...config.regions, {
+      id: `mask-${sequence}`, shape: "rectangle", opacity: 1, color: "#000000",
+      ...(imageTemplate
+        ? { mode: "image" as const, imageSource: "input" as const, x: 0, y: 0, width: 1, height: 1 }
+        : { mode: "solid" as const, x: 0.72, y: 0.04, width: 0.22, height: 0.08 }),
+    }]);
+  };
   const patchRegion = (index: number, patch: Partial<CanvasMaskRegion>) => update(config.regions.map((region, current) => current === index ? { ...region, ...patch } : region));
   return <div className="canvas-media-mask-editor">
-    <div className="canvas-mask-editor-heading"><strong>遮罩区域</strong><button type="button" onClick={add}><Plus />添加区域</button></div>
+    <div className="canvas-mask-editor-heading"><strong>遮罩区域</strong><div className="canvas-mask-editor-actions"><button type="button" onClick={() => add()}><Plus />添加区域</button><button type="button" onClick={() => add(true)}><ImageIcon />添加图片模板</button></div></div>
     {!config.regions.length ? <small>尚未配置遮罩区域。添加区域后，运行节点才会生成处理后的媒体。</small> : config.regions.map((region, index) => <div className="canvas-mask-region" key={region.id}>
       <div className="canvas-mask-region-heading"><strong>区域 {index + 1}</strong><button type="button" onClick={() => update(config.regions.filter((_, current) => current !== index))} aria-label="删除遮罩区域" title="删除遮罩区域"><Trash2 /></button></div>
       <div className="canvas-mask-grid">
@@ -2834,7 +2843,10 @@ function CanvasMediaMaskEditor({ node, onPatch }: { node: CanvasNode; onPatch: (
       <label><span>形状</span><select value={region.shape} onChange={(event) => patchRegion(index, { shape: event.target.value as CanvasMaskRegion["shape"] })}><option value="rectangle">矩形</option><option value="rounded-rectangle">圆角矩形</option></select></label>
       <label><span>模式</span><select value={region.mode} onChange={(event) => patchRegion(index, { mode: event.target.value as CanvasMaskRegion["mode"] })}><option value="solid">纯色</option><option value="blur">模糊</option><option value="mosaic">马赛克</option><option value="image">图片覆盖</option></select></label>
       {region.mode === "solid" ? <label><span>颜色</span><input value={region.color} onChange={(event) => patchRegion(index, { color: event.target.value })} placeholder="#000000" /></label> : null}
-      {region.mode === "image" ? <label><span>覆盖图片 URL</span><input value={region.imageUrl || ""} onChange={(event) => patchRegion(index, { imageUrl: event.target.value })} placeholder="https://..." /></label> : null}
+      {region.mode === "image" ? <>
+        <label><span>图片来源</span><select value={region.imageSource || "url"} onChange={(event) => patchRegion(index, { imageSource: event.target.value as CanvasMaskRegion["imageSource"] })}><option value="input">遮罩图片输入</option><option value="url">图片 URL</option></select></label>
+        {region.imageSource !== "input" ? <label><span>覆盖图片 URL</span><input value={region.imageUrl || ""} onChange={(event) => patchRegion(index, { imageUrl: event.target.value })} placeholder="https://..." /></label> : null}
+      </> : null}
       <div className="canvas-mask-grid"><label><span>开始毫秒</span><input type="number" min={0} value={region.startMs ?? ""} onChange={(event) => patchRegion(index, { startMs: event.target.value ? Number(event.target.value) : undefined })} /></label><label><span>结束毫秒</span><input type="number" min={0} value={region.endMs ?? ""} onChange={(event) => patchRegion(index, { endMs: event.target.value ? Number(event.target.value) : undefined })} /></label></div>
     </div>)}
   </div>;

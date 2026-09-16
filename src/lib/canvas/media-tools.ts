@@ -6,7 +6,7 @@ import { runWithConcurrencyPool } from "../concurrency";
 import { materializeRuntimeMedia } from "../runtime-media-materializer";
 import { findExistingRuntimeMedia, persistRuntimeMedia } from "../runtime-media-storage";
 import { parseCanvasVideoTimestamps, resolveCanvasImageDimensions } from "./node-utils";
-import { normalizeCanvasMediaMaskConfig, validateCanvasMediaMaskConfig } from "./types";
+import { canvasMediaMaskUsesImageInput, normalizeCanvasMediaMaskConfig, validateCanvasMediaMaskConfig } from "./types";
 import type { CanvasMediaMaskConfig, CanvasMaskRegion, CanvasMediaReference, CanvasNodeConfig, CanvasSlideshowTextStyle } from "./types";
 
 const maxImageBytes = 30 * 1024 * 1024;
@@ -321,16 +321,28 @@ export async function transformCanvasImages(items: CanvasMediaReference[], confi
   return outputs;
 }
 
-export async function maskCanvasMedia(input: { kind: "image" | "video"; items: CanvasMediaReference[]; config: CanvasMediaMaskConfig }) {
+export async function maskCanvasMedia(input: { kind: "image" | "video"; items: CanvasMediaReference[]; config: CanvasMediaMaskConfig; overlayImage?: CanvasMediaReference }) {
   const configErrors = validateCanvasMediaMaskConfig(input.config);
   if (configErrors.length) throw new CanvasMediaNeedsConfigError(configErrors.join(" "));
   const normalized = normalizeCanvasMediaMaskConfig(input.config);
   const limit = input.kind === "image" ? maxImages : maxVideos;
   if (!input.items.length || input.items.length > limit) throw new Error(`Media mask accepts 1-${limit} ${input.kind === "image" ? "images" : "videos"}.`);
+  if (!canvasMediaMaskUsesImageInput(normalized)) return renderMaskedMedia(input, normalized);
+  if (!input.overlayImage) throw new CanvasMediaNeedsConfigError("请向遮罩图片输入口连接一张图片模板。");
+  const overlay = await materializeCanvasMediaReference(input.overlayImage, "image", maxImageBytes);
+  try {
+    const sha256 = createHash("sha256").update(await readFile(overlay.filePath)).digest("hex");
+    return await renderMaskedMedia(input, normalized, { filePath: overlay.filePath, sha256 });
+  } finally {
+    await overlay.cleanup();
+  }
+}
+
+async function renderMaskedMedia(input: { kind: "image" | "video"; items: CanvasMediaReference[] }, normalized: CanvasMediaMaskConfig, inputOverlay?: { filePath: string; sha256: string }) {
   const outputs: CanvasMediaReference[] = [];
   for (const item of input.items) {
     const regions = normalized.itemOverrides?.[item.url] || normalized.itemOverrides?.[item.sha256 || ""] || normalized.regions;
-    const fingerprint = mediaFingerprint("media-mask-v2", item.url, { kind: input.kind, config: JSON.stringify({ ...normalized, regions }) } as unknown as Record<string, string | number>);
+    const fingerprint = mediaFingerprint("media-mask-v3", item.url, { kind: input.kind, config: JSON.stringify({ ...normalized, regions }), overlaySha256: inputOverlay?.sha256 || "" });
     const extension = input.kind === "image" ? "png" : "mp4";
     const mimeType = input.kind === "image" ? "image/png" : "video/mp4";
     const publicPath = `/generated/canvas-tools/${fingerprint}.${extension}`;
@@ -347,7 +359,7 @@ export async function maskCanvasMedia(input: { kind: "image" | "video"; items: C
       const outputPath = path.join(outputRoot, `${fingerprint}.${extension}`);
       stagingPath = path.join(outputRoot, `.${fingerprint}-${randomUUID()}.tmp.${extension}`);
       await mkdir(outputRoot, { recursive: true });
-      const built = await buildMaskFilter(regions, input.kind, metadata?.width || item.width || 1, metadata?.height || item.height || 1, metadata?.durationSeconds || 0, overlays);
+      const built = await buildMaskFilter(regions, input.kind, metadata?.width || item.width || 1, metadata?.height || item.height || 1, metadata?.durationSeconds || 0, overlays, inputOverlay?.filePath);
       const args = ["-hide_banner", "-loglevel", "error", "-y", "-i", source.filePath, ...built.inputs.flatMap((filePath) => ["-i", filePath]), "-filter_complex", built.filter, "-map", "[masked]", ...(input.kind === "video" && metadata?.hasAudio ? ["-map", "0:a:0?", "-c:a", "aac", "-b:a", "160k"] : []), "-c:v", input.kind === "video" ? "libx264" : "png", ...(input.kind === "video" ? ["-pix_fmt", "yuv420p", "-movflags", "+faststart", "-t", formatSeconds(metadata?.durationSeconds || 0)] : ["-frames:v", "1"]), stagingPath];
       const run = () => runMediaCommand("ffmpeg", args, input.kind === "video" ? videoEncodeTimeoutMs : mediaTimeoutMs);
       if (input.kind === "video") await runWithConcurrencyPool("localVideo", run); else await run();
@@ -365,7 +377,7 @@ export async function maskCanvasMedia(input: { kind: "image" | "video"; items: C
   return outputs;
 }
 
-async function buildMaskFilter(regions: CanvasMaskRegion[], kind: "image" | "video", width: number, height: number, duration: number, overlays: Array<{ filePath: string; cleanup: () => Promise<void> }>) {
+async function buildMaskFilter(regions: CanvasMaskRegion[], kind: "image" | "video", width: number, height: number, duration: number, overlays: Array<{ filePath: string; cleanup: () => Promise<void> }>, inputOverlayPath?: string) {
   let current = "0:v";
   const filters: string[] = [];
   const inputs: string[] = [];
@@ -384,11 +396,16 @@ async function buildMaskFilter(regions: CanvasMaskRegion[], kind: "image" | "vid
     } else if (region.mode === "solid") {
       filters.push(`[${current}]drawbox=x=${x}:y=${y}:w=${w}:h=${h}:color=${region.color}@${Math.max(0, Math.min(1, region.opacity))}:t=fill${enable}[${out}]`);
     } else if (region.mode === "image") {
-      if (!region.imageUrl) throw new CanvasMediaNeedsConfigError(`Mask region ${region.id} image overlay is missing.`);
-      const overlay = await materializeRuntimeMedia(region.imageUrl, { maxBytes: maxImageBytes, kind: "image" });
-      overlays.push(overlay);
+      let overlayPath = inputOverlayPath;
+      if (region.imageSource !== "input") {
+        if (!region.imageUrl) throw new CanvasMediaNeedsConfigError(`Mask region ${region.id} image overlay is missing.`);
+        const overlay = await materializeRuntimeMedia(region.imageUrl, { maxBytes: maxImageBytes, kind: "image" });
+        overlays.push(overlay);
+        overlayPath = overlay.filePath;
+      }
+      if (!overlayPath) throw new CanvasMediaNeedsConfigError("请向遮罩图片输入口连接一张图片模板。");
       const overlayIndex = inputs.length + 1;
-      inputs.push(overlay.filePath);
+      inputs.push(overlayPath);
       filters.push(`[${overlayIndex}:v]format=rgba,scale=${w}:${h},colorchannelmixer=aa=${Math.max(0, Math.min(1, region.opacity))}[${out}src];[${current}][${out}src]overlay=${x}:${y}:format=auto${enable}[${out}]`);
     } else {
       const splitA = `m${index}a`; const splitB = `m${index}b`; const effect = region.mode === "blur" ? `boxblur=10` : `scale=${Math.max(1, Math.floor(staticWidth / 12))}:${Math.max(1, Math.floor(staticHeight / 12))}:flags=area,scale=${staticWidth}:${staticHeight}:flags=neighbor`;

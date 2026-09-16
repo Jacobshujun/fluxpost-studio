@@ -21,6 +21,8 @@ node --env-file=.env.local .trellis/verification/unified_library_postgres_benchm
 
 ## Current Automated Checks
 
+- Alpha masks: baseline FFmpeg/graph checks and separate 1440/390 browser command in canvas_media_mask.md.
+
 - Image processing: baseline check `canvas_image_process_check.mjs`; browser check `canvas_image_process_browser_check.py`. Contracts and commands: canvas_image_process.md.
 
 - Review performance: commands and measured limits in `.trellis/tasks/archive/2026-09/09-14-review-desk-performance/verification.md`.

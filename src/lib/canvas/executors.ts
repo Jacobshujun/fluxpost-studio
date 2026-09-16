@@ -367,11 +367,14 @@ async function executeMediaMask({ node, inputs }: CanvasNodeExecutionContext): P
   if (imageArtifacts.length && videoArtifacts.length) throw new CanvasNeedsConfigError("遮罩节点只能连接图片或视频中的一种输入。");
   const images = imageArtifacts.flatMap((artifact) => artifact.kind === "images" ? artifact.items : []);
   const videos = videoArtifacts.flatMap((artifact) => artifact.kind === "videos" ? artifact.items : []);
+  const overlayImages = imageItems(inputs.overlayImages);
+  if (overlayImages.length > 1) throw new CanvasNeedsConfigError("遮罩图片输入只接受一张图片，请先选择一张模板。");
+  const overlayImage = overlayImages[0];
   if (!images.length && !videos.length) throw new CanvasNeedsConfigError("遮罩节点需要连接图片或视频输入。");
   try {
     const config = (node.config.mask && typeof node.config.mask === "object" && !Array.isArray(node.config.mask) ? node.config.mask : undefined) as CanvasMediaMaskConfig | undefined;
-    if (images.length) return { outputs: { images: { kind: "images" as const, items: await maskCanvasMedia({ kind: "image", items: images, config: config || { protocolVersion: 1, regions: [] } }) } } };
-    return { outputs: { videos: { kind: "videos" as const, items: await maskCanvasMedia({ kind: "video", items: videos, config: config || { protocolVersion: 1, regions: [] } }) } } };
+    if (images.length) return { outputs: { images: { kind: "images" as const, items: await maskCanvasMedia({ kind: "image", items: images, overlayImage, config: config || { protocolVersion: 1, regions: [] } }) } } };
+    return { outputs: { videos: { kind: "videos" as const, items: await maskCanvasMedia({ kind: "video", items: videos, overlayImage, config: config || { protocolVersion: 1, regions: [] } }) } } };
   } catch (error) {
     if (error instanceof CanvasMediaNeedsConfigError) throw new CanvasNeedsConfigError(error.message);
     throw error;

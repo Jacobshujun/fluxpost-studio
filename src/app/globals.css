@@ -352,6 +352,8 @@ button {
 .canvas-inspector-content input, .canvas-inspector-content select { font-size: 12px; }
 .canvas-media-mask-editor { display: grid; gap: 9px; margin-bottom: 14px; padding: 10px; border: 1px solid var(--line); border-radius: 6px; background: var(--canvas-panel-soft); }
 .canvas-mask-editor-heading, .canvas-mask-region-heading { display: flex; align-items: center; justify-content: space-between; gap: 8px; }
+.canvas-mask-editor-heading { flex-wrap: wrap; }
+.canvas-mask-editor-actions { display: flex; flex-wrap: wrap; gap: 6px; }
 .canvas-mask-editor-heading strong, .canvas-mask-region-heading strong { font-size: 11px; }
 .canvas-mask-editor-heading button { display: inline-flex; align-items: center; gap: 5px; min-height: 28px; border: 1px solid var(--accent); border-radius: 5px; color: var(--ink); background: var(--accent); padding: 4px 8px; font-size: 10px; font-weight: 800; }
 .canvas-mask-editor-heading button svg { width: 13px; height: 13px; }

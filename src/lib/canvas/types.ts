@@ -56,6 +56,7 @@ export type CanvasMaskRegion = {
   opacity: number;
   color: string;
   imageUrl?: string;
+  imageSource?: "url" | "input";
   startMs?: number;
   endMs?: number;
   radius?: number;
@@ -86,6 +87,7 @@ export function normalizeCanvasMediaMaskConfig(value: unknown): CanvasMediaMaskC
       x: Number(item.x ?? 0.72), y: Number(item.y ?? 0.04), width: Number(item.width ?? 0.22), height: Number(item.height ?? 0.08),
       opacity: Number(item.opacity ?? 1), color: String(item.color || "#000000"),
       ...(item.imageUrl ? { imageUrl: String(item.imageUrl) } : {}),
+      ...(item.imageSource !== undefined ? { imageSource: item.imageSource } : {}),
       ...(item.startMs !== undefined ? { startMs: Number(item.startMs) } : {}),
       ...(item.endMs !== undefined ? { endMs: Number(item.endMs) } : {}),
       ...(item.radius !== undefined ? { radius: Number(item.radius) } : {}),
@@ -120,7 +122,8 @@ export function validateCanvasMediaMaskConfig(value: unknown): string[] {
       if (region.x < 0 || region.y < 0 || region.width <= 0 || region.height <= 0 || region.x + region.width > 1 || region.y + region.height > 1) errors.push(`${label} must fit inside normalized 0..1 bounds.`);
       if (region.opacity < 0 || region.opacity > 1) errors.push(`${label} opacity must be between 0 and 1.`);
       if (!/^#[0-9a-f]{6}(?:[0-9a-f]{2})?$/i.test(region.color)) errors.push(`${label} color must be a hex color.`);
-      if (region.mode === "image" && !region.imageUrl?.trim()) errors.push(`${label} image mode requires imageUrl.`);
+      if (region.imageSource !== undefined && region.imageSource !== "url" && region.imageSource !== "input") errors.push(`${label} imageSource is invalid.`);
+      if (region.mode === "image" && region.imageSource !== "input" && !region.imageUrl?.trim()) errors.push(`${label} image mode requires imageUrl.`);
       if (region.startMs !== undefined && (!Number.isFinite(region.startMs) || region.startMs < 0)) errors.push(`${label} startMs is invalid.`);
       if (region.endMs !== undefined && (!Number.isFinite(region.endMs) || region.endMs < 0)) errors.push(`${label} endMs is invalid.`);
       if (region.startMs !== undefined && region.endMs !== undefined && region.endMs <= region.startMs) errors.push(`${label} endMs must be greater than startMs.`);
@@ -138,6 +141,12 @@ export function validateCanvasMediaMaskConfig(value: unknown): string[] {
   validateRegions(config.regions, "Media mask config");
   for (const [key, regions] of Object.entries(config.itemOverrides || {})) validateRegions(regions, `Media mask override ${key}`);
   return errors;
+}
+
+export function canvasMediaMaskUsesImageInput(value: unknown): boolean {
+  const config = normalizeCanvasMediaMaskConfig(value);
+  return [...config.regions, ...Object.values(config.itemOverrides || {}).flat()]
+    .some((region) => region.mode === "image" && region.imageSource === "input");
 }
 
 export type CanvasDirectoryMediaKind = "image" | "audio" | "video";

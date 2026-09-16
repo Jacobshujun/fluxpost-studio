@@ -1,4 +1,4 @@
-import { defaultCanvasMediaMaskConfig, validateCanvasMediaMaskConfig } from "./types";
+import { canvasMediaMaskUsesImageInput, defaultCanvasMediaMaskConfig, validateCanvasMediaMaskConfig } from "./types";
 import type { CanvasArtifact, CanvasBatchBindableField, CanvasGraph, CanvasNode, CanvasNodeConfig, CanvasNodeDefinition, CanvasNodeExecutionMode, CanvasNodeType, CanvasPortDefinition } from "./types";
 import { toApisImageRatios, toApisImageResolutions } from "../toapis-image-api";
 import { normalizeImageModel, normalizeToApisRequestFormat } from "../image-model-options";
@@ -611,6 +611,7 @@ const canvasNodeDefinitionVersions: CanvasNodeDefinition[] = [
     inputs: [
       { id: "images", label: "图片", kind: "images", multiple: true },
       { id: "videos", label: "视频", kind: "videos", multiple: true },
+      { id: "overlayImages", label: "遮罩图片", kind: "images" },
     ],
     outputs: [
       { id: "images", label: "遮罩图片", kind: "images" },
@@ -726,6 +727,9 @@ export function getCanvasVisibleInputPorts(node: CanvasNode, connectedPortIds: I
 
 export function getCanvasRequiredInputPorts(node: CanvasNode, availablePortIds: Iterable<string>): CanvasPortDefinition[] {
   const definition = getCanvasNodeDefinition(node.type, node.version);
+  if (node.type === "utility.media-mask" && canvasMediaMaskUsesImageInput(node.config.mask)) {
+    return definition?.inputs.filter((input) => input.required || input.id === "overlayImages") || [];
+  }
   if (getCanvasNodeExecutionMode(node) !== "bypass") return definition?.inputs.filter((input) => input.required) || [];
   // Numbered GPT image inputs are alternatives for bypass, not individually required.
   if (node.type === "model.gpt-image" && node.version >= 2
