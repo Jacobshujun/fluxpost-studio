@@ -8,7 +8,7 @@ Production 1298237 is healthy; local activation waits for active tasks.
 
 ## Current Focus
 
-- 2026-09-16: Official/Canvas transparency passed baseline/browser checks: .trellis/tasks/09-16-toapis-canvas-background/. Active tasks block activation.
+- 2026-09-16: a0e77fc Official/Canvas transparency passed baseline/browser: .trellis/tasks/archive/2026-09/09-16-toapis-canvas-background/. Active tasks block activation.
 
 - 2.5: .trellis/tasks/archive/2026-09/09-14-toapis-image-25-contract/.
 
