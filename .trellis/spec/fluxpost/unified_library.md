@@ -37,6 +37,7 @@ type LibrarySelection =
 - New imports remain `taggingStatus: "idle"`; only explicit single/batch/retry commands enqueue AI tagging.
 - List filtering, permission checks, ordering, totals, and keyset pagination execute in PostgreSQL/SQLite. Cards receive compact data and `thumbnailUrl`; original URLs are reserved for preview.
 - Canvas and simple mode resolve accessible collection/smart-folder filters before launch and persist frozen asset snapshots.
+- Scheduler draft normalization must retain `smartFolderId` and explicit `includeDescendants=false` through V1/V2 save, storage, reload and preflight; dropping either silently broadens the asset pool. `canvas_scheduler_check.mjs` covers the draft round trip.
 
 ### 4. Validation & Error Matrix
 
@@ -91,13 +92,13 @@ INSERT INTO app_meta (key, value, updated_at) VALUES ($1, $2, $3);
 
 ### 2. Signatures
 
-- Canvas list requests use `GET /api/library/assets?limit=24&count=0` plus optional `search`, `tag`, `collectionId`, and signed `cursor`.
+- Canvas list requests use `GET /api/library/assets?limit=24&count=0` plus optional `search`, `tag`, `collectionId` or `smartFolderId`, and signed `cursor`.
 - `LibraryAssetPage.total` is optional; count-free pages return `assets` and `nextCursor` without running `COUNT(*)`.
 - Thumbnail requests use `/api/library/assets/{id}/thumbnail?variant=square&version=2` and support `If-None-Match`/`304`.
 
 ### 3. Contracts
 
-- Opening the inspector with no search/tag/collection is idle: no asset or navigation request is made. Navigation loads once on first picker focus.
+- Opening the inspector with no search/tag/collection/smart folder is idle: no asset or navigation request is made. Navigation loads once on first picker focus. The selector groups collections and smart folders, clears the other scope on switch, and carries the selected scope into every cursor page.
 - Search/filter changes are debounced, abort prior requests, and apply only the newest generation. First pages render at most 24 cards; subsequent pages append by asset ID.
 - Cards and selected previews use lazy, fixed-size thumbnails. Original URLs remain in the frozen `assetIds`/`assetNames`/`urls` snapshot and are read only for explicit preview (legacy URL-only entries may display their fallback URL).
 - Canvas Flow nodes are memoized and selection comes from React Flow's `selected` prop, not a global selected-node context value.
@@ -122,6 +123,7 @@ INSERT INTO app_meta (key, value, updated_at) VALUES ($1, $2, $3);
 ### 6. Tests Required
 
 - `.trellis/verification/canvas_library_performance_check.mjs` asserts idle startup, `limit=24`/`count=0`, lazy thumbnail usage, selected-preview fallback, memoized nodes, count-free DB parsing, and conditional 304 support.
+- `python .trellis/verification/canvas_smart_folders_browser_check.py` checks smart-folder paging, collection switching, snapshot retention and scheduler autosave/reload at 1440px/390px with intercepted APIs. Set `BROWSER_BASE_URL` to a worker-disabled loopback smoke server; port 3001 is rejected.
 - Browser/performance coverage should assert no initial asset/navigation calls, stale-request cancellation, 24-card first render, cross-page dedupe, original-on-preview only, 30-item snapshot retention, and 1440px/390px containment.
 - TypeScript, lint, build, isolated HTTP/SQLite smoke, and the complete offline baseline remain required.
 

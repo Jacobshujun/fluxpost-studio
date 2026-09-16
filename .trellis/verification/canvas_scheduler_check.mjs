@@ -798,6 +798,20 @@ try {
   });
   assert.deepEqual(savedPromptSchedule.definition.parameters[0].source, promptParameter.source, "save normalization must preserve separator and full prompt strings");
   assert.deepEqual(storedSchedule.definition.parameters[0].source, promptParameter.source, "storage must receive separator metadata");
+  for (const scope of [{ smartFolderId: "smart-favorites" }, { collectionId: "collection-1", includeDescendants: false }]) {
+    const filter = { mode: "random", assetIds: [], search: "car", tags: ["exterior"], ...scope };
+    const definition = { ...v2Definition, parameters: [{
+      ...v2Definition.parameters[0], source: { mode: "library-filter", filter },
+    }] };
+    const saved = await scheduler.updateCanvasScheduleDraft(storedSchedule.id, account, {
+      revision: storedSchedule.revision, definition,
+    });
+    const reloaded = await scheduler.getCanvasSchedule(storedSchedule.id, account);
+    for (const result of [saved, storedSchedule, reloaded]) {
+      assert.deepEqual(JSON.parse(JSON.stringify(result.definition.parameters[0].source.filter)), filter,
+        "scheduler save, storage and reload must retain smart-folder IDs and explicit descendant scope");
+    }
+  }
   const sourceVideoGraph = {
     nodes: [
       { ...node("source-video", "input.source-video"), executionMode: "disabled" },

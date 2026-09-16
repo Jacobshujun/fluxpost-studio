@@ -1998,6 +1998,8 @@ function normalizeAssetFilter(value: CanvasScheduleAssetFilter | undefined): Can
     assetIds: uniqueStrings(value?.assetIds || []).slice(0, maxImageTasks),
     search: String(value?.search || "").trim().slice(0, 120),
     collectionId: String(value?.collectionId || "").trim() || undefined,
+    includeDescendants: value?.includeDescendants,
+    smartFolderId: String(value?.smartFolderId || "").trim() || undefined,
     tags: uniqueStrings(value?.tags || []).slice(0, 20),
   };
 }

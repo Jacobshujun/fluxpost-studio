@@ -4,11 +4,11 @@ Last updated: 2026-09-16
 
 ## One-Line Status
 
-Image processing verified locally. Production unchanged.
+Canvas library fixes verified. Production unchanged.
 
 ## Current Focus
 
-- 2026-09-16: Image processing baseline/browser/local pass. Evidence: .trellis/tasks/archive/2026-09/09-16-canvas-image-process/verification.md.
+- 2026-09-16: Smart-folder picker and scheduler fixes pass baseline/browser. Evidence: .trellis/tasks/archive/2026-09/09-16-canvas-smart-folders/verification.md.
 
 - 2026-09-16: Node model presets/custom IDs and explicit ToAPIs formats pass baseline/browser. Task: .trellis/tasks/archive/2026-09/09-16-canvas-image-model-routing/.
 

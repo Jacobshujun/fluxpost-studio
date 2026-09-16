@@ -3829,6 +3829,7 @@ function LibraryImageSnapshotPicker({ node, onPatch, onPreviewImage }: {
   const [search, setSearch] = useState("");
   const [tag, setTag] = useState("");
   const [collectionId, setCollectionId] = useState("");
+  const [smartFolderId, setSmartFolderId] = useState("");
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState("");
   const [loadingMore, setLoadingMore] = useState(false);
@@ -3839,7 +3840,7 @@ function LibraryImageSnapshotPicker({ node, onPatch, onPreviewImage }: {
   const ids = configStringList(node.config.assetIds);
   const names = configStringList(node.config.assetNames);
   const urls = configStringList(node.config.urls);
-  const hasQuery = Boolean(search.trim() || tag.trim() || collectionId);
+  const hasQuery = Boolean(search.trim() || tag.trim() || collectionId || smartFolderId);
   const ensureNavigation = useCallback(() => {
     if (navigationLoaded) return Promise.resolve();
     if (!navigationRequestRef.current) {
@@ -3866,6 +3867,7 @@ function LibraryImageSnapshotPicker({ node, onPatch, onPreviewImage }: {
     if (search.trim()) params.set("search", search.trim());
     if (tag.trim()) params.set("tag", tag.trim());
     if (collectionId) params.set("collectionId", collectionId);
+    if (smartFolderId) params.set("smartFolderId", smartFolderId);
     try {
       const result = await api<LibraryAssetPage>(`/api/library/assets?${params}`, { signal: controller.signal });
       if (generation === requestGenerationRef.current) setData(result);
@@ -3874,7 +3876,7 @@ function LibraryImageSnapshotPicker({ node, onPatch, onPreviewImage }: {
     } finally {
       if (generation === requestGenerationRef.current) setBusy(false);
     }
-  }, [collectionId, hasQuery, search, tag]);
+  }, [collectionId, hasQuery, search, smartFolderId, tag]);
   const loadMore = useCallback(async () => {
     if (!hasQuery || !data.nextCursor || loadingMore) return;
     setLoadingMore(true);
@@ -3883,6 +3885,7 @@ function LibraryImageSnapshotPicker({ node, onPatch, onPreviewImage }: {
       if (search.trim()) params.set("search", search.trim());
       if (tag.trim()) params.set("tag", tag.trim());
       if (collectionId) params.set("collectionId", collectionId);
+      if (smartFolderId) params.set("smartFolderId", smartFolderId);
       const result = await api<LibraryAssetPage>(`/api/library/assets?${params}`);
       setData((current) => ({ ...result, assets: [...current.assets, ...result.assets.filter((asset) => !current.assets.some((item) => item.id === asset.id))] }));
     } catch (loadError) {
@@ -3890,7 +3893,7 @@ function LibraryImageSnapshotPicker({ node, onPatch, onPreviewImage }: {
     } finally {
       setLoadingMore(false);
     }
-  }, [collectionId, data.nextCursor, hasQuery, loadingMore, search, tag]);
+  }, [collectionId, data.nextCursor, hasQuery, loadingMore, search, smartFolderId, tag]);
   useEffect(() => {
     const timer = setTimeout(() => void load(), 250);
     return () => clearTimeout(timer);
@@ -3925,7 +3928,11 @@ function LibraryImageSnapshotPicker({ node, onPatch, onPreviewImage }: {
   return <div className="canvas-snapshot-picker" onFocusCapture={() => void ensureNavigation()}>
     <div className="canvas-picker-heading"><span>素材库图片</span><small>{ids.length}/30</small><button type="button" onClick={() => void refresh()} disabled={busy || !ids.length} title="刷新所选素材"><RotateCcw className={busy ? "animate-spin" : ""} /></button></div>
     <label className="canvas-picker-search"><Search /><input value={search} onChange={(event) => setSearch(event.target.value)} placeholder="搜索图片" /></label>
-    <div className="canvas-picker-filters"><input value={tag} onChange={(event) => setTag(event.target.value)} placeholder="标签" /><select value={collectionId} onChange={(event) => setCollectionId(event.target.value)}><option value="">全部图集</option>{navigation.collections.map((collection) => <option key={collection.id} value={collection.id}>{collection.relativePath || collection.name}</option>)}</select></div>
+    <div className="canvas-picker-filters"><input value={tag} onChange={(event) => setTag(event.target.value)} placeholder="标签" /><select aria-label="图集或智能文件夹" value={smartFolderId ? `smart:${smartFolderId}` : collectionId ? `collection:${collectionId}` : ""} onChange={(event) => {
+      const [kind, id] = event.target.value.split(":");
+      setCollectionId(kind === "collection" ? id : "");
+      setSmartFolderId(kind === "smart" ? id : "");
+    }}><option value="">全部图集</option><optgroup label="图集">{navigation.collections.map((collection) => <option key={collection.id} value={`collection:${collection.id}`}>{collection.relativePath || collection.name}</option>)}</optgroup><optgroup label="智能文件夹">{navigation.smartFolders.map((folder) => <option key={folder.id} value={`smart:${folder.id}`}>{folder.name}</option>)}</optgroup></select></div>
     {ids.length ? <div className="canvas-picker-selected">{urls.map((url, index) => <div key={`${ids[index]}-${index}`}>
       <button type="button" className="canvas-picker-thumb" onClick={() => onPreviewImage(url, index)} aria-label={`预览素材 ${index + 1}`}>
         <Image src={ids[index] ? `/api/library/assets/${encodeURIComponent(ids[index])}/thumbnail?variant=square&version=2` : url} alt="" width={72} height={72} unoptimized loading="lazy" decoding="async" referrerPolicy="no-referrer" />
