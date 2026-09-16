@@ -31,6 +31,9 @@
 
 ## Local Activation
 
-Authorized by the accepted plan; run after verified commits from the clean primary
-worktree using npm run local. Final runtime identity is recorded by the ignored
-.fluxpost-local-candidate.json and GET /api/version.
+Implementation commit a617c61dab90dbfc9b3f032200a12bf1286ceed6 passed npm run local
+from the clean primary worktree. Port 3001 HTTP smoke passed and GET /api/version
+reported the matching candidate SHA. Log: .tmp-mask-alpha-local.log.
+
+The documentation/archive commit is reactivated after this record. Final runtime
+identity is recorded by ignored .fluxpost-local-candidate.json and GET /api/version.

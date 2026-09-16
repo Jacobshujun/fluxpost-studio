@@ -4,11 +4,11 @@ Last updated: 2026-09-16
 
 ## One-Line Status
 
-Canvas alpha templates pass baseline/browser; local activation pending. Production unchanged.
+Canvas alpha templates pass baseline/browser and local activation. Production unchanged.
 
 ## Current Focus
 
-- 2026-09-16: Single-PNG mask input preserves alpha. Evidence: .trellis/tasks/09-16-canvas-alpha-overlay/verification.md.
+- 2026-09-16: Single-PNG mask input preserves alpha. Evidence: .trellis/tasks/archive/2026-09/09-16-canvas-alpha-overlay/verification.md.
 
 - 2026-09-16: Simple image strategy passes baseline/browser. Evidence: .trellis/tasks/archive/2026-09/09-16-simple-gpt-image-strategy/verification.md.
 
