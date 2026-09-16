@@ -14,8 +14,8 @@ Each GPT image node can persist its own preset or arbitrary custom model ID with
 
 ## Acceptance Criteria
 
-- [ ] Isolated request/persistence/browser checks and complete baseline pass.
-- [ ] Commit verified changes, then activate port 3001 using npm run local.
+- [x] Isolated request/persistence/browser checks and complete baseline pass.
+- [x] Commit verified changes, then activate port 3001 using npm run local.
 
 ## Notes
 

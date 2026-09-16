@@ -4,7 +4,7 @@ Last updated: 2026-09-16
 
 ## One-Line Status
 
-Node model routing verified; local activation authorized. Production unchanged.
+Node model routing verified and activated locally. Production unchanged.
 
 ## Current Focus
 
@@ -23,7 +23,7 @@ Node model routing verified; local activation authorized. Production unchanged.
 - 2026-09-10 iteration repair: Handles and nested deletion pass offline/browser checks. Evidence: .trellis/tasks/archive/2026-09/09-10-canvas-iteration-interactions/verification.md. Commit authorized; no activation/push/live calls.
 
 - 2026-09-09 image sizing: Shared Canvas ratio/tier choices, frozen resume and legacy reselection pass offline/browser checks. Task: .trellis/tasks/archive/2026-09/09-09-exact-image-pixels. Commit authorized; no activation/live call.
-- 2026-09-15: Production and GitHub main use 12982377aaa8a5dcbb2c31d711c24672af7e7e43. Local 3001 remains 9dba663 because tasks are active; parity is pending. Deployment evidence: .trellis/tasks/archive/2026-09/09-15-deploy-september-update/verification.md. Completion-only records go to local; main stays on the deployed SHA.
+- Production/GitHub main: 1298237. Local 3001: verified node-model update; parity is pending. Deployment evidence: .trellis/tasks/archive/2026-09/09-15-deploy-september-update/verification.md.
 
 - Collection, simple image-discard and September 8 copy-library verification/release evidence: see archive/status-2026-09-09.md. Their feature states are unchanged.
 
@@ -61,7 +61,7 @@ Continue authenticated operator review of the unified library and run the one-ti
 
 ## Risks And Unknowns
 
-- ToAPIs: ordinary uses ratio/tier; Official uses pixels. Live pixel/alpha acceptance is unconfirmed. Port 3001 unchanged.
+- ToAPIs: ordinary uses ratio/tier; VIP/Official use pixels. Live acceptance is unconfirmed.
 - The real 621-asset runtime database has not been migrated in this dirty-tree verification; the migration was exercised only against isolated fixtures and will run when an approved clean candidate is activated.
 - The PostgreSQL collection-subtree benchmark measured P95 `252.6ms` against the `300ms` target and is the closest performance margin as data grows.
 - No paid model, TOS write, TikHub, Feishu, Lark, or publishing acceptance was exercised.

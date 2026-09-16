@@ -16,4 +16,4 @@ No paid generation, upload, provider probe, TOS write or publishing was called. 
 
 ## Local Release
 
-After verification, commit and task archive, activate the primary worktree with npm run local. The ignored .fluxpost-local-candidate.json and GET /api/version are the authoritative runtime/SHA evidence. No remote push or production deployment is included.
+Implementation commit 027bec0e62b4b072d6973cfc3ec03dd51cf04157 activated successfully with npm run local from a clean primary worktree; port 3001 HTTP smoke and /api/version agree. Final documentation/archive HEAD is reactivated after this record so runtime remains equal to clean HEAD. The ignored .fluxpost-local-candidate.json and GET /api/version retain authoritative final full-SHA evidence. No remote push or production deployment is included.
