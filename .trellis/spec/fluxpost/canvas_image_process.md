@@ -1,0 +1,27 @@
+# Canvas image processing contract
+
+## Scope and signatures
+
+`utility.image-process@1` accepts/outputs standard `images` artifacts and permits bypass and iteration membership. `processCanvasImages(items, config, ownerUserId)` runs under the existing localImage pool. No additional endpoint or database schema. The old image-transform node is unchanged.
+
+## Configuration and outputs
+
+`image-process-contract.ts` owns defaults and effective-field validation/identity. Fixed quality defaults to 90; percent/size ceilings search quality 75–90 by default. Percentage means maximum output bytes / source bytes, and KB uses 1024 bytes. PNG is lossless without palette conversion. Impossible targets fail, never silently resize or drop below the quality floor.
+
+Resolution original/percent/longest/custom uses auto-oriented dimensions, Lanczos3, sRGB, metadata removal. Custom inside does not pad; cover is centered; contain pads. JPEG flattens transparency into the selected opaque background.
+
+Outputs rebuild name, MIME, dimensions and SHA; never retain source localPath or SHA. Optional `CanvasMediaReference.imageProcessing` contains source URL/dimensions/bytes, output dimensions/bytes, actual quality, target bytes, savings and effective config identity. This survives existing JSON run persistence and supports stale-parameter UI feedback. ImageBatch and source order are retained.
+
+## Validation and failure
+
+Static JPEG/PNG/WebP only; 1–20 items, 30 MiB per input, 40M decoded/output pixels, output edge <=8192. Animated/corrupt/oversized media and impossible targets fail the entire node with the item ordinal; no partial downstream artifact. Original media is never overwritten.
+
+Directory URLs resolve through the owner-scoped snapshot, never trust an arbitrary item.localPath. Local and downloaded files both have actual size checks. Source content SHA + effective config + Sharp/libvips renderer version key an atomic local cache. Cached bytes are SHA/size verified and republished through runtime storage. Cache artifacts belong under ignored data/cache; outputs follow existing local/TOS settings.
+
+## Examples and verification
+
+- Base: JPEG quality 90 and original resolution.
+- Good: 50% source-size ceiling encodes within quality limits and reports exact savings.
+- Bad: 1 KB target below minimum-quality output fails explicitly; do not silently shrink dimensions or return the source as success.
+- `canvas_image_process_check.mjs`: real encoders, orientation, alpha, dimensions, budgets, targets, ordered batches/cache/ownership, download byte sniffing, graph round-trip/bypass/iteration/scheduler and executor batch identity.
+- `canvas_image_process_browser_check.py`: intercepted APIs at 1440px/390px, conditional inline/inspector controls, keyboard isolation, save/reload, stale results, desktop pointer connection and image preview. Requires worker-disabled loopback smoke server; rejects 3001.

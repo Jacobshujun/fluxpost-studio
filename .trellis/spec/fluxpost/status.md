@@ -4,9 +4,11 @@ Last updated: 2026-09-16
 
 ## One-Line Status
 
-Node model routing verified and activated locally. Production unchanged.
+Image processing verified; local activation pending. Production unchanged.
 
 ## Current Focus
+
+- 2026-09-16: Image processing baseline/browser pass. Evidence: .trellis/tasks/09-16-canvas-image-process/verification.md.
 
 - 2026-09-16: Node model presets/custom IDs and explicit ToAPIs formats pass baseline/browser. Task: .trellis/tasks/archive/2026-09/09-16-canvas-image-model-routing/.
 
@@ -27,10 +29,10 @@ Node model routing verified and activated locally. Production unchanged.
 
 - Collection, simple image-discard and September 8 copy-library verification/release evidence: see archive/status-2026-09-09.md. Their feature states are unchanged.
 
-- 2026-09-07: Canvas `compose.social-post` now exposes `是否需要审查`, defaults it on for new and legacy workflows, saves review-required posts as drafts, and marks review-skipped posts approved while preserving published posts on rerun. Focused Canvas contracts, TypeScript, lint, build, HTTP/SQLite smoke, and the complete offline baseline passed.
-- 2026-09-07: Canvas media-mask geometry now preserves exact zero-pixel `x`/`y` coordinates while keeping positive width/height, preventing full-width top/bottom masks from exposing the source along the left or top edge. The mask renderer cache version was advanced so prior edge-offset outputs are regenerated. Focused geometry/cache contracts, TypeScript, lint, build, HTTP/SQLite smoke, and the complete offline baseline passed.
-- 2026-09-07: Canvas model-style result projection now checks every declared previewable output, so video-only `utility.media-mask` runs display their produced video instead of the empty-result state. Video/image/empty/undeclared-kind regression checks and the complete offline baseline passed.
-- 2026-09-07: Canvas node-library rows now use a fixed icon grid column so labels align across short and long node descriptions. The focused interaction contract, desktop/mobile browser geometry checks, and full offline baseline passed.
+- 2026-09-07: Composition review defaults on; skipped review approves drafts, reruns preserve published posts. Full baseline passed.
+- 2026-09-07: Mask geometry preserves zero x/y with positive dimensions; cache version invalidates old edge-offset outputs. Geometry/cache and full baseline passed.
+- 2026-09-07: Results inspect all declared previewable outputs, fixing video-only mask previews. Video/image/empty/undeclared and full baseline checks pass.
+- 2026-09-07: Node-library labels align via a fixed icon column; desktop/mobile browser and full baseline pass.
 - 2026-09-07: Canvas `input.library-images` now stays idle until filtered, loads 24-item count-free pages with lazy thumbnails, memoizes Flow nodes, and supports conditional thumbnail 304 responses. Full offline baseline passed.
 - 2026-09-04: The verified local candidate `75d35adb5dd699862d2ecfc90459da0d1a678e1a` is synchronized to GitHub `origin/main`; production remains unchanged.
 
@@ -53,7 +55,7 @@ Node model routing verified and activated locally. Production unchanged.
 - 2026-09-02 Canvas batch retry regression fix: V2 child reconciliation now persists safe retryability from Canvas node attempts; failed children remain directly retryable for historical schedules. A targeted read of terminal schedules now recomputes retryability, and partial children with legacy failed `model.gpt-image` nodes are retryable as well as per-image failed-index runs. The schedule center loads that detail before rendering actions. Canvas scheduler check, TypeScript, lint (0 errors, 20 warnings), build, isolated HTTP/SQLite smoke, and the full offline baseline passed.
 - 2026-09-02 Canvas batch result model: V1/V2 implementation differences are hidden behind one result-item projection. Leaf results now expose only queued/running/completed/failed/cancelled; failed image batches retain produced/failed counts and retryability. Task groups and top-level batches retain partial aggregation, with per-item, group, and batch-level retry actions. Historical records are corrected lazily while raw CanvasRun diagnostics remain unchanged. Canvas scheduler check, TypeScript, lint (0 errors, 20 warnings), build, isolated HTTP/SQLite smoke, and the full offline baseline passed.
 - 2026-09-03 Canvas media mask node: added typed image/video `utility.media-mask` execution with normalized rectangle/rounded-rectangle regions, solid/blur/mosaic/image modes, video intervals/keyframe geometry, source-preserving deterministic derived-media caching, inspector controls, and an isolated contract check. TypeScript, lint (0 errors, existing warnings), build, HTTP/SQLite smoke, and the complete offline baseline passed.
-- 2026-09-03 Canvas rerun projection fix: after changing a mask and running the full workflow again, the newest run is now selected ahead of a stale URL run id so 展示任何 renders the latest media. Focused mask contracts, TypeScript, lint, build, HTTP smoke, and the complete offline baseline passed.
+- 2026-09-03: Full reruns select the latest result ahead of stale URL run IDs. Mask and full baseline checks pass.
 
 ## Next Entry
 

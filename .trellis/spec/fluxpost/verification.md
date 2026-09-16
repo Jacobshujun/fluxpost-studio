@@ -21,6 +21,8 @@ node --env-file=.env.local .trellis/verification/unified_library_postgres_benchm
 
 ## Current Automated Checks
 
+- Image processing: baseline check `canvas_image_process_check.mjs`; browser check `canvas_image_process_browser_check.py`. Contracts and commands: canvas_image_process.md.
+
 - Review performance: commands and measured limits in `.trellis/tasks/archive/2026-09/09-14-review-desk-performance/verification.md`.
 
 - `canvas_iteration_contract_check.mjs`, `canvas_iteration_runtime_check.mjs`, `canvas_iteration_runs_check.mjs`, `canvas_iteration_actions_check.mjs`, and `canvas_iteration_queue_check.mjs` cover nested graph validation, multi-port snapshots, identity/order, bounded admission, repair versus delivery, owner/published guards, durable wake/park races, cancellation and SQLite recovery. PostgreSQL queue SQL is checked structurally, not against a live server. All are part of the offline baseline.

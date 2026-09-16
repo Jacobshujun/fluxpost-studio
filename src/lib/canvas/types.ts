@@ -1,5 +1,6 @@
 import type { ContentPoolSelectionFilter, ContentTag, GeneratedPost, Platform, SourceMediaType, SourceUsageStatus } from "../types";
 import type { CompetitorWorkbookCardSnapshot, CompetitorWorkbookRowSnapshot, CompetitorWorkbookSnapshot } from "../competitor-workbook";
+import type { ImageProcessingReport } from "./image-process-contract";
 
 export type CanvasArtifactKind = "text" | "images" | "audios" | "videos" | "socialPost" | "publishJobRef";
 export type CanvasPortKind = CanvasArtifactKind | "any" | "visual";
@@ -25,6 +26,7 @@ export type CanvasSourceVideoSnapshot = {
 };
 
 export type CanvasMediaReference = {
+  imageProcessing?: ImageProcessingReport;
   url: string;
   name?: string;
   mimeType?: string;
@@ -318,6 +320,7 @@ export type CanvasNodeType =
   | "utility.text-split"
   | "utility.image-select"
   | "utility.image-transform"
+  | "utility.image-process"
   | "utility.video-frames"
   | "utility.media-mask"
   | "compose.social-post"

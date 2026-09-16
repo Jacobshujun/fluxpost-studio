@@ -3,6 +3,7 @@ import type { CanvasArtifact, CanvasBatchBindableField, CanvasGraph, CanvasNode,
 import { toApisImageRatios, toApisImageResolutions } from "../toapis-image-api";
 import { normalizeImageModel, normalizeToApisRequestFormat } from "../image-model-options";
 import { validateCanvasImageFilenamePrefix } from "./save-images";
+import { defaultImageProcessConfig, validateImageProcessConfig } from "./image-process-contract";
 import { canvasPromptPresets, canvasVisionPresets, parseCanvasImageSelection, parseCanvasVideoTimestamps, resolveCanvasImageDimensions } from "./node-utils";
 import { defaultCanvasSourceVideoProjectName, isCanvasSourceVideoSnapshotCurrent } from "./source-video-contract";
 import { feishuPublishModeOptions, normalizeFeishuPublishMode } from "../feishu-publish-mode";
@@ -586,6 +587,20 @@ const canvasNodeDefinitionVersions: CanvasNodeDefinition[] = [
     bypass: { inputPort: "images", outputPort: "images" },
   },
   {
+    type: "utility.image-process",
+    version: 1,
+    label: "图片处理",
+    description: "高质量压缩、目标体积、等比缩放与格式转换，支持整组图片。",
+    category: "utility",
+    icon: "Maximize2",
+    color: "#0369a1",
+    inputs: [{ id: "images", label: "原始图片", kind: "images", required: true, multiple: true }],
+    outputs: [{ id: "images", label: "处理后图片", kind: "images" }],
+    fields: [],
+    defaultConfig: { ...defaultImageProcessConfig },
+    bypass: { inputPort: "images", outputPort: "images" },
+  },
+  {
     type: "utility.media-mask",
     version: 1,
     label: "遮罩",
@@ -1056,6 +1071,7 @@ export function validateCanvasNodeConfig(type: CanvasNodeType, config: CanvasNod
     try { parseCanvasVideoTimestamps(config); } catch (error) { errors.push(error instanceof Error ? error.message : "Video frame settings are invalid."); }
   }
   if (type === "utility.media-mask") errors.push(...validateCanvasMediaMaskConfig(config.mask));
+  if (type === "utility.image-process") errors.push(...validateImageProcessConfig(config));
   if (type === "input.competitor-workbook") {
     const snapshot = config.snapshot;
     const hasSnapshot = Boolean(snapshot && typeof snapshot === "object" && !Array.isArray(snapshot) && "rows" in snapshot);

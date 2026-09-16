@@ -2,6 +2,7 @@
 
 import Link from "next/link";
 import Image from "next/image";
+import { CanvasImageProcessControls, CanvasImageProcessResult } from "./CanvasImageProcess";
 import {
   BaseEdge,
   Background,
@@ -1830,6 +1831,7 @@ const CanvasFlowNode = memo(function CanvasFlowNode({ data, selected }: NodeProp
     "utility.text-concatenate",
     "utility.image-select",
     "utility.image-transform",
+    "utility.image-process",
     "utility.media-mask",
     "utility.video-frames",
     "utility.video-reconstruct",
@@ -1876,6 +1878,10 @@ const CanvasFlowNode = memo(function CanvasFlowNode({ data, selected }: NodeProp
       </details> : null}
     </div>
     <div className="canvas-node-content">
+    {node.type === "utility.image-process" ? <>
+      <CanvasImageProcessControls node={node} onPatch={(patch) => interaction?.onConfigPatch(node.id, patch)} />
+      <CanvasImageProcessResult node={node} nodeRun={nodeRun} latestSuccessful={latestSuccessful?.nodeRun} onPreview={(url, index) => interaction?.onPreview({ kind: "image", url, index })} />
+    </> : null}
     {node.type === "model.gpt-image" && node.version >= 2 ? <div className="canvas-gpt-image-controls nodrag nopan nowheel" onPointerDown={(event) => event.stopPropagation()} onClick={(event) => event.stopPropagation()}>
       <CanvasNodeFields node={node} onChange={(key, value) => interaction?.onConfigChange(node.id, key, value)} onPatch={(patch) => interaction?.onConfigPatch(node.id, patch)} onPreviewImage={(url, index) => interaction?.onPreview({ kind: "image", url, index })} />
       <CanvasGptImageDimensions node={node} />
@@ -2801,6 +2807,7 @@ function CanvasNodeFields({ node, onChange, onPatch, onPreviewImage }: {
 }) {
   const definition = getCanvasNodeDefinition(node.type, node.version);
   if (!definition) return null;
+  if (node.type === "utility.image-process") return <CanvasImageProcessControls node={node} onPatch={onPatch} />;
   return <>{node.type === "model.gpt-image" || node.type === "model.gpt-image-each" ? <CanvasImageModelSelector key={node.id} node={node} onPatch={onPatch} /> : null}{definition.fields.map((field) => {
       if (field.key === "outputCompression" && node.config.outputFormat !== "jpeg") return null;
       if (field.key === "template" && node.config.preset !== "custom") return null;
@@ -6543,6 +6550,7 @@ function iconForNode(type: CanvasNodeType) {
   if (type === "utility.text-split") return <Scissors {...props} />;
   if (type === "utility.image-select") return <ImageIcon {...props} />;
   if (type === "utility.image-transform") return <Maximize2 {...props} />;
+  if (type === "utility.image-process") return <Maximize2 {...props} />;
   if (type === "utility.media-mask") return <Square {...props} />;
   if (type === "utility.video-frames") return <Clapperboard {...props} />;
   if (type === "utility.video-subtitles") return <Captions {...props} />;

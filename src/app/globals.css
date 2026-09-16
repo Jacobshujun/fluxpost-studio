@@ -240,6 +240,19 @@ button {
 .react-flow__edge.selected .canvas-flow-edge-base { stroke: var(--canvas-edge-color, var(--accent)); stroke-width: 2.3; opacity: .86; }
 @keyframes canvas-edge-beam { 0%, 5% { stroke-dashoffset: var(--canvas-edge-layer-start, 100); opacity: 0; } 14%, 86% { opacity: var(--canvas-edge-peak-opacity); } 95%, 100% { stroke-dashoffset: var(--canvas-edge-layer-end, 0); opacity: 0; } }
 .canvas-node { width: 220px; border: 1px solid var(--line-strong); border-top: 3px solid var(--node-color); border-radius: 8px; background: var(--canvas-panel); color: var(--foreground); box-shadow: var(--shadow-soft); overflow: visible; }
+.canvas-image-process-controls { display: grid; gap: 6px; padding: 8px; min-width: 0; font-size: 11px; }
+.canvas-image-process-controls label { display: grid; grid-template-columns: minmax(0, 0.8fr) minmax(0, 1.2fr); align-items: center; gap: 6px; min-width: 0; }
+.canvas-image-process-controls input:not([type=checkbox]), .canvas-image-process-controls select { width: 100%; min-width: 0; height: 28px; border: 1px solid var(--line-strong); border-radius: 5px; background: var(--canvas-panel); color: var(--foreground); padding: 2px 4px; font: inherit; }
+.canvas-image-process-controls input[type=range] { padding: 0; accent-color: var(--node-color); }
+.canvas-image-process-quality > div { display: grid; grid-template-columns: minmax(0, 1fr) 42px; gap: 3px; }
+.canvas-image-process-controls small, .canvas-image-process-result small { color: var(--text-muted); overflow-wrap: anywhere; }
+.canvas-image-process-controls [role=alert], .canvas-image-process-result [role=alert] { color: var(--foreground); }
+.canvas-image-process-result { display: grid; gap: 7px; padding: 8px; font-size: 11px; min-width: 0; max-height: 360px; overflow: auto; }
+.canvas-image-process-result strong { font-size: 11px; overflow-wrap: anywhere; }
+.canvas-image-process-result summary { cursor: pointer; padding: 4px 0; }
+.canvas-image-process-pair { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 6px; }
+.canvas-image-process-pair button { width: 100%; padding: 0; border: 1px solid var(--line-strong); background: var(--canvas-panel); border-radius: 4px; overflow: hidden; }
+.canvas-image-process-pair img { display: block; width: 100%; height: 85px; object-fit: contain; }
 .canvas-node-resized { display: flex; flex-direction: column; width: 100%; height: 100%; box-sizing: border-box; }
 .canvas-node-resized .canvas-node-head, .canvas-node-resized .canvas-node-ports { flex: 0 0 auto; }
 .canvas-node-resized .canvas-node-content { display: flex; flex: 1 1 auto; flex-direction: column; min-height: 0; overflow: auto; overscroll-behavior: contain; scrollbar-width: thin; }

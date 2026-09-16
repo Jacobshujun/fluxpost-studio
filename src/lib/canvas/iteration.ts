@@ -6,7 +6,7 @@ import type { CanvasArtifact, CanvasGraph, CanvasIterationDefinition, CanvasNode
 export const canvasIterationAllowedNodeTypes: readonly CanvasNodeType[] = [
   "input.iteration-item", "input.text", "input.images", "model.gpt-text", "model.gpt-image", "model.gpt-vision",
   "utility.prompt-template", "utility.text-concatenate", "utility.prompt-switch", "utility.text-split",
-  "utility.image-select", "utility.image-transform", "utility.media-mask", "utility.image-preview", "utility.display-any",
+  "utility.image-select", "utility.image-transform", "utility.image-process", "utility.media-mask", "utility.image-preview", "utility.display-any",
 ];
 
 export function createCanvasIterationDefinition(): CanvasIterationDefinition {

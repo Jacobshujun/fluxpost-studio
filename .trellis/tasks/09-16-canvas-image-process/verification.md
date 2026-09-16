@@ -1,0 +1,9 @@
+# Verification — 2026-09-16
+
+- `node .trellis/verification/canvas_image_process_check.mjs`: passed real JPEG/PNG/WebP encoding, alpha/padding/orientation, all dimension modes, actual target byte ceilings and impossible-target failures, animation/corrupt/30MiB/40M/output-size rejection, source immutability, order/cache invalidation, owner-scoped directory input, download MIME/size/extension, graph JSON roundtrip, bypass, iteration, V2 schedule and executor batch identity.
+- Full baseline: `TRELLIS_SMOKE_PORT=45678 powershell -ExecutionPolicy Bypass -File .trellis/verification/check.ps1` passed. Includes lint (0 errors, 17 existing warnings), TypeScript, production build (existing build warnings), HTTP smoke and SQLite check. Local ignored log: test-artifacts/image-process-baseline.log.
+- `canvas_image_process_browser_check.py` passed Chromium 1440x960 and 390x960. Real pointer editing, conditional quality/size/alpha controls, inline/inspector sync, keyboard isolation, save/reload, stale config, desktop image connection, image preview and no document horizontal overflow. APIs intercepted; worker-disabled loopback 45678. Screenshots/logs: ignored test-artifacts/canvas-image-process-* and image-process-browser.log.
+- Existing isolated module-tree tests were updated to load the new registry dependency; copy-library executor stubs include the new processor. No old assertions weakened.
+- No paid provider, TOS write, Feishu/Lark or publishing call was made. Runtime media fixtures/cache were isolated in OS temp and removed.
+- Code review used trellis-check; cross-layer contracts recorded in canvas_image_process.md using trellis-update-spec.
+- Commit and primary-worktree `npm run local` activation authorized by user; runtime identity verification follows activation.

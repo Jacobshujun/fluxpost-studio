@@ -23,6 +23,7 @@ This layer is the project-specific operating memory migrated from the previous H
 | [unified_library.md](./unified_library.md) | Unified image asset, collection, smart-folder, query, migration, and performance contracts. |
 | [image_transport.md](./image_transport.md) | Image-only Xray routing, health, Canvas recovery, and ToAPIs resume contracts. |
 | [toapis_image_contract.md](./toapis_image_contract.md) | Ordinary/Official image request fields, pixels, transparency and Canvas propagation. |
+| [canvas_image_process.md](./canvas_image_process.md) | Local image processing, size ceilings, geometry, cache and result contracts. |
 | [decisions.md](./decisions.md) | Stable product, architecture, and deployment decisions. |
 | [handoff.md](./handoff.md) | On-demand handoff history; read only latest marker by default. |
 | [progress.md](./progress.md) | On-demand progress history; read only latest marker by default. |

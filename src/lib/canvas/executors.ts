@@ -19,6 +19,7 @@ import { canvasVisionPresets, concatenateCanvasText, parseCanvasImageSelection, 
 import { pixelSizeForRatio } from "../gpt-image-dimensions";
 import { canvasGptImageReferencePortIds, normalizeUrlList, orderedCanvasGptImageInputs } from "./registry";
 import { CANVAS_SAVE_IMAGE_MAX_ITEMS } from "./save-images";
+import { processCanvasImages } from "./image-process";
 import { canvasSourceVideoSnapshotFromConfig, isCanvasSourceVideoSnapshotCurrent } from "./source-video-contract";
 import { canvasSubtitleStyleFromConfig } from "./subtitle-style";
 import { decodeCanvasSubtitleRevisionSnapshot } from "./subtitle-editor";
@@ -110,6 +111,7 @@ const executors: Record<CanvasNode["type"], CanvasNodeExecutor> = {
   "utility.text-split": executeTextSplit,
   "utility.image-select": executeImageSelect,
   "utility.image-transform": executeImageTransform,
+  "utility.image-process": executeImageProcess,
   "utility.video-frames": executeVideoFrames,
   "utility.media-mask": executeMediaMask,
   "compose.social-post": executeComposition,
@@ -351,6 +353,12 @@ async function executeGptText({ node, inputs }: CanvasNodeExecutionContext) {
   const prompt = source ? `${instruction}\n\n输入：\n${source}` : instruction;
   const value = await callOpenAIForText(prompt, { logLabel: `Canvas GPT text node ${node.id}` });
   return { outputs: { text: { kind: "text" as const, value } } };
+}
+
+async function executeImageProcess({ node, inputs, account }: CanvasNodeExecutionContext): Promise<CanvasNodeExecutionResult> {
+  const items = await processCanvasImages(imageItems(inputs.images), node.config, account.id);
+  const imageBatch = inputs.images?.flatMap((artifact) => artifact.kind === "images" && artifact.imageBatch ? [artifact.imageBatch] : [])[0];
+  return { outputs: { images: { kind: "images", items, ...(imageBatch ? { imageBatch } : {}) } } };
 }
 
 async function executeMediaMask({ node, inputs }: CanvasNodeExecutionContext): Promise<CanvasNodeExecutionResult> {

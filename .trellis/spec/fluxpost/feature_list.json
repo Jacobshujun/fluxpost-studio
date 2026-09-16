@@ -9,6 +9,18 @@
   ],
   "features": [
     {
+      "id": "canvas-image-process",
+      "title": "Canvas image processing",
+      "status": "ready_for_review",
+      "definition_of_done": [
+        "Batch compression, geometry, formats and results pass offline/browser checks"
+      ],
+      "evidence": [
+        "2026-09-16 baseline and 1440px/390px browser passed; see canvas-image-process task."
+      ],
+      "notes": "Operator review pending."
+    },
+    {
       "id": "canvas-image-iteration",
       "title": "Explicit Canvas per-image iteration regions",
       "status": "ready_for_review",
