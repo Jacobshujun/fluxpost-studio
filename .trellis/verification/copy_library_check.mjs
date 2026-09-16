@@ -196,7 +196,8 @@ try {
   writeFileSync(path.join(temp, "toapis-image-api.js"), "exports.toApisImageResolutions=['1k','2k','4k'];exports.toApisImageRatios=['1:1'];exports.toApis4kImageRatios=['16:9'];", "utf8");
   writeFileSync(path.join(temp, "feishu-publish-mode.js"), "exports.feishuPublishModeOptions=[{value:'full',label:'full'},{value:'text',label:'text'},{value:'media',label:'media'}];exports.normalizeFeishuPublishMode=(value)=>value===undefined?'full':['full','text','media'].includes(value)?value:(()=>{throw new Error('invalid mode')})();", "utf8");
   for (const name of ["types", "node-utils", "source-video-contract", "save-images", "seedance-references", "subtitle-style", "subtitle-editor", "video-loader", "content-collection", "registry", "graph", "iteration"]) {
-    const source = read(`src/lib/canvas/${name}.ts`).replace('"../toapis-image-api"', '"./toapis-image-api"').replace('"../feishu-publish-mode"', '"./feishu-publish-mode"');
+    writeFileSync(path.join(temp, "image-model-options.js"), ts.transpileModule(read("src/lib/image-model-options.ts"), { compilerOptions: { module: ts.ModuleKind.CommonJS, target: ts.ScriptTarget.ES2022 } }).outputText);
+    const source = read(`src/lib/canvas/${name}.ts`).replace('"../toapis-image-api"', '"./toapis-image-api"').replace('"../feishu-publish-mode"', '"./feishu-publish-mode"').replace('"../image-model-options"', '"./image-model-options"');
     writeFileSync(path.join(temp, `${name}.js`), transpile(source, `${name}.ts`), "utf8");
   }
   const require = createRequire(import.meta.url);
@@ -278,6 +279,7 @@ function loadTypeScriptModule(source, fileName, stubs) {
       if (name === "node:crypto") return require("node:crypto");
       if (name === "./directory-snapshots") return {};
       if (Object.hasOwn(stubs, name)) return stubs[name];
+      if (name === "../image-model-options") return loadTypeScriptModule(read("src/lib/image-model-options.ts"), "image-model-options.ts", {});
       throw new Error(`Unexpected ${fileName} import: ${name}`);
     },
     loadedModule,

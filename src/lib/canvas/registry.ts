@@ -1,6 +1,7 @@
 import { defaultCanvasMediaMaskConfig, validateCanvasMediaMaskConfig } from "./types";
 import type { CanvasArtifact, CanvasBatchBindableField, CanvasGraph, CanvasNode, CanvasNodeConfig, CanvasNodeDefinition, CanvasNodeExecutionMode, CanvasNodeType, CanvasPortDefinition } from "./types";
 import { toApisImageRatios, toApisImageResolutions } from "../toapis-image-api";
+import { normalizeImageModel, normalizeToApisRequestFormat } from "../image-model-options";
 import { validateCanvasImageFilenamePrefix } from "./save-images";
 import { canvasPromptPresets, canvasVisionPresets, parseCanvasImageSelection, parseCanvasVideoTimestamps, resolveCanvasImageDimensions } from "./node-utils";
 import { defaultCanvasSourceVideoProjectName, isCanvasSourceVideoSnapshotCurrent } from "./source-video-contract";
@@ -957,6 +958,14 @@ export function validateCanvasNodeConfig(type: CanvasNodeType, config: CanvasNod
   const definition = getCanvasNodeDefinition(type, version);
   if (!definition) return [`Unknown canvas node type: ${type}`];
   const errors: string[] = [];
+  if (type === "model.gpt-image" || type === "model.gpt-image-each") {
+    try {
+      if (config.model !== undefined) normalizeImageModel(config.model);
+      if (config.toApisRequestFormat !== undefined) normalizeToApisRequestFormat(config.toApisRequestFormat);
+    } catch (error) {
+      errors.push(error instanceof Error ? error.message : "Invalid image configuration");
+    }
+  }
   if (type === "utility.image-iterate") {
     if (!Number.isInteger(config.concurrency) || Number(config.concurrency) < 1 || Number(config.concurrency) > 20) errors.push("Image iteration concurrency must be an integer from 1 to 20.");
     if (config.failurePolicy !== "all" && config.failurePolicy !== "at-least-one") errors.push("Image iteration failure policy must be all or at-least-one.");
@@ -1151,6 +1160,8 @@ export function upgradeCanvasNode(node: CanvasNode): CanvasNode {
     executionMode: getCanvasNodeExecutionMode(node),
     config: {
       ...gptImageV2Definition.defaultConfig,
+      ...(node.config.model !== undefined ? { model: node.config.model } : {}),
+      ...(node.config.toApisRequestFormat !== undefined ? { toApisRequestFormat: node.config.toApisRequestFormat } : {}),
       count: Math.min(10, Math.max(1, Number(node.config.count || 1))),
       quality: node.config.quality === "low" || node.config.quality === "high" ? node.config.quality : "medium",
       ratio: dimensions.ratio,

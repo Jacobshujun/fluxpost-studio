@@ -1,6 +1,7 @@
 import asyncio
 import copy
 import os
+import re
 from pathlib import Path
 from urllib.parse import urlparse
 
@@ -85,11 +86,33 @@ async def check(browser, width):
         await page.wait_for_function("!document.querySelector('.canvas-message .is-dirty')")
         assert [edge["targetPort"] for edge in workflow["graph"]["edges"]] == ["image_2"]
     controls = node.locator(".canvas-gpt-image-controls")
-    await controls.get_by_label("背景").select_option("transparent", force=True)
-    await expect(controls.get_by_label("格式")).to_have_value("png")
-    await expect(controls.get_by_label("格式").locator('option[value="jpeg"]')).to_have_js_property("disabled", True)
+    for model, request_format in [("gpt-image-2.5-flare", "ratio"), ("gpt-image-2.5-official", "pixels"), ("gpt-image-2.5-flare-vip", "pixels")]:
+        await controls.get_by_label("图片模型", exact=True).select_option(model, force=True)
+        await expect(controls.get_by_label("ToAPIs 请求格式")).to_have_value(request_format)
+        await page.wait_for_function("!document.querySelector('.canvas-message .is-dirty')")
+        await page.reload(wait_until="networkidle")
+        await expect(controls.get_by_label("图片模型", exact=True)).to_have_value(model)
+    await controls.get_by_label("图片模型", exact=True).select_option("custom", force=True)
+    custom = controls.get_by_label("自定义模型 ID")
+    await custom.focus()
+    await custom.press_sequentially("gpt-image-2-future/Exact:V3", delay=20)
+    await expect(custom).to_have_value("gpt-image-2-future/Exact:V3")
+    await custom.blur()
+    await page.wait_for_function("!document.querySelector('.canvas-message .is-dirty')")
+    await page.reload(wait_until="networkidle")
+    await expect(custom).to_have_value("gpt-image-2-future/Exact:V3")
+    saved_region = next(item for item in workflow["graph"]["nodes"] if item["id"] == "region")
+    assert "model" not in next(item for item in saved_region["iteration"]["graph"]["nodes"] if item["id"] == "inner")["config"]
+    await controls.get_by_label("图片模型", exact=True).select_option("gpt-image-2.5-flare-vip", force=True)
+    await controls.get_by_label("比例").select_option("4:3", force=True)
     await controls.get_by_label("分辨率").select_option("4k", force=True)
-    await expect(controls.get_by_label("Official 像素尺寸")).to_have_text("Official: 2480x3312 px")
+    await expect(controls.get_by_label("像素尺寸")).to_have_text("3312x2480 px")
+    await controls.get_by_label("比例").select_option("3:4", force=True)
+    await controls.get_by_label("背景").select_option("transparent", force=True)
+    await expect(controls.get_by_label(re.compile("^格式"))).to_have_value("png")
+    await expect(controls.get_by_label(re.compile("^格式")).locator('option[value="jpeg"]')).to_have_js_property("disabled", True)
+    await controls.get_by_label("分辨率").select_option("4k", force=True)
+    await expect(controls.get_by_label("像素尺寸")).to_have_text("2480x3312 px")
     await page.wait_for_function("!document.querySelector('.canvas-message .is-dirty')")
     await page.reload(wait_until="networkidle")
     await expect(controls.get_by_label("背景")).to_have_value("transparent")

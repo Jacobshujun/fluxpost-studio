@@ -17,7 +17,7 @@ for (const input of ["1024x1024", "1024x1536", "1536x1024", "2048x2048", "2048x1
 }
 
 assertDeepEqual(
-  contract.buildToApisGenerationBody({ model: "gpt-image-2", prompt: "city", ratio: "2:3", resolution: "1k" }),
+  contract.buildToApisGenerationBody({ model: "gpt-image-2", requestFormat: "legacy", prompt: "city", ratio: "2:3", resolution: "1k" }),
   { model: "gpt-image-2", prompt: "city", n: 1, size: "2:3", resolution: "1k", quality: "medium", output_format: "png", response_format: "url" },
   "Text-to-image body must follow the documented asynchronous ToAPIs contract.",
 );
@@ -25,6 +25,7 @@ assertDeepEqual(
   contract.buildToApisGenerationBody({
     model: "gpt-image-2",
     prompt: "edit",
+    requestFormat: "legacy",
     ratio: "16:9",
     resolution: "2k",
     referenceImages: ["https://bucket.example/source.jpg"],
@@ -54,7 +55,7 @@ for (const ratio of contract.toApis4kImageRatios) {
 for (const ratio of ["1:1", "4:3", "3:4"]) {
   assertDeepEqual(contract.validateToApisDimensions(ratio, "4k"), { size: ratio, resolution: "4k" }, "Generic dimensions must permit 4K square and 4:3 ratios.");
 }
-assertThrows(() => contract.buildToApisGenerationBody({ model: "gpt-image-2", prompt: "legacy", ratio: "1:1", resolution: "4k" }), /legacy image adapter/, "Historical restrictions belong only to older ToAPIs requests.");
+assertThrows(() => contract.buildToApisGenerationBody({ model: "gpt-image-2", requestFormat: "legacy", prompt: "legacy", ratio: "1:1", resolution: "4k" }), /legacy image adapter/, "Historical restrictions belong only to explicit legacy requests.");
 
 for (const model of ["gpt-image-2.5-flare", "gpt-image-2.5-sunburst"]) {
   for (const ratio of ["1:1", "4:3", "3:4"]) {
@@ -80,21 +81,22 @@ for (const model of ["gpt-image-2.5-flare", "gpt-image-2.5-sunburst"]) {
 for (const model of ["gpt-image-2.5-flare-official", "gpt-image-2.5-sunburst-official"]) {
   for (const quality of ["low", "medium", "high", "xhigh", "max"]) {
     for (const background of [undefined, "auto", "transparent"]) {
-      assertDeepEqual(contract.buildToApisGenerationBody({ model, prompt: "official", ratio: "3:4", resolution: "4k", requestedSize: "2480x3312", quality, background, referenceImages: ["https://fixture.invalid/ref.png"] }), {
+      assertDeepEqual(contract.buildToApisGenerationBody({ model, requestFormat: "pixels", prompt: "official", ratio: "3:4", resolution: "4k", requestedSize: "2480x3312", quality, background, referenceImages: ["https://fixture.invalid/ref.png"] }), {
         model, prompt: "official", n: 1, size: "2480x3312", quality,
         ...(background === "transparent" ? { background } : {}), image_urls: ["https://fixture.invalid/ref.png"],
       }, "Official requests must use pixels, selected quality and image_urls without legacy fields.");
     }
   }
-  assertEqual(contract.buildToApisGenerationBody({ model, prompt: "exact", requestedSize: "1200x1600" }).size, "1200x1600", "Official exact pixels must survive unchanged.");
-  assertThrows(() => contract.buildToApisGenerationBody({ model, prompt: "invalid", count: 2 }), /只能生成 1 张/, "Official multi-output must fail before submission.");
-  assertThrows(() => contract.buildToApisGenerationBody({ model, prompt: "invalid", ratio: "3:4", resolution: "4k" }), /像素尺寸/, "Official ratio selections need the calculated pixel size, never a silent square fallback.");
-  assertThrows(() => contract.buildToApisGenerationBody({ model, prompt: "invalid", requestedSize: "3:4" }), /像素尺寸/, "Official must not send ratio strings as pixels.");
-  assertThrows(() => contract.buildToApisGenerationBody({ model, prompt: "invalid", background: "transparent", outputFormat: "jpeg" }), /PNG/, "Transparent JPEG must fail.");
+  assertEqual(contract.buildToApisGenerationBody({ model, requestFormat: "pixels", prompt: "exact", requestedSize: "1200x1600" }).size, "1200x1600", "Official exact pixels must survive unchanged.");
+  assertThrows(() => contract.buildToApisGenerationBody({ model, requestFormat: "pixels", prompt: "invalid", count: 2 }), /只能生成 1 张/, "Official multi-output must fail before submission.");
+  assertThrows(() => contract.buildToApisGenerationBody({ model, requestFormat: "pixels", prompt: "invalid", ratio: "3:4", resolution: "4k" }), /像素尺寸/, "Official ratio selections need the calculated pixel size, never a silent square fallback.");
+  assertThrows(() => contract.buildToApisGenerationBody({ model, requestFormat: "pixels", prompt: "invalid", requestedSize: "3:4" }), /像素尺寸/, "Official must not send ratio strings as pixels.");
+  assertThrows(() => contract.buildToApisGenerationBody({ model, requestFormat: "pixels", prompt: "invalid", background: "transparent", outputFormat: "jpeg" }), /PNG/, "Transparent JPEG must fail.");
 }
 
 const sixteenReferences = Array.from({ length: 16 }, (_, index) => `https://bucket.example/${index + 1}.jpg`);
 const fullBody = contract.buildToApisGenerationBody({
+  requestFormat: "legacy",
   model: "gpt-image-2",
   prompt: "edit all",
   ratio: "21:9",
@@ -110,7 +112,7 @@ assertEqual(fullBody.image_urls.length, 16, "All 16 ordered references must be r
 assertEqual(fullBody.output_format, "jpeg", "JPEG output must be forwarded.");
 assertEqual(fullBody.output_compression, 72, "JPEG compression must be forwarded.");
 assertThrows(() => contract.buildToApisGenerationBody({ model: "gpt-image-2", prompt: "too many", ratio: "1:1", resolution: "1k", referenceImages: [...sixteenReferences, "https://bucket.example/17.jpg"] }), /at most 16/, "The seventeenth reference must fail before submission.");
-assertThrows(() => contract.buildToApisGenerationBody({ model: "gpt-image-2", prompt: "too many outputs", ratio: "1:1", resolution: "1k", count: 11 }), /integer from 1 to 10/, "n=11 must fail.");
+assertThrows(() => contract.buildToApisGenerationBody({ model: "gpt-image-2", requestFormat: "legacy", prompt: "too many outputs", ratio: "1:1", resolution: "1k", count: 11 }), /integer from 1 to 10/, "n=11 must fail.");
 
 assertEqual(contract.requireToApisTaskId({ id: "task-1" }), "task-1", "Submission id must be accepted.");
 assertEqual(contract.requireToApisTaskId({ task_id: "task-2" }), "task-2", "Documented compatibility task_id must be accepted.");

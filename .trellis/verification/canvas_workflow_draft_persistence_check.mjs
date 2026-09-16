@@ -36,10 +36,24 @@ const childSource = `
     assert.equal(reloaded?.revision, 2);
     assert.equal(reloaded?.graph.nodes[0].label, "Unfinished text");
     assert.equal(reloaded?.graph.nodes[0].config.text, "");
+    let revision = updated.revision;
+    for (const model of ["gpt-image-2.5-flare", "gpt-image-2.5-flare-vip", "gpt-image-2.5-official", "Custom/Future:V3"]) {
+      const withModels = structuredClone(nextGraph);
+      withModels.nodes.push(
+        { id: "selected-image", type: "model.gpt-image", version: 2, position: { x: 0, y: 300 }, config: { model: "  " + model + "  ", toApisRequestFormat: "pixels" } },
+        { id: "default-image", type: "model.gpt-image", version: 2, position: { x: 300, y: 300 }, config: {} },
+      );
+      const saved = await updateCanvasWorkflow(created.id, account, { revision, graph: withModels });
+      revision = saved.revision;
+      const opened = await getCanvasWorkflow(created.id, account);
+      assert.equal(opened.graph.nodes[2].config.model, model);
+      assert.equal(opened.graph.nodes[2].config.toApisRequestFormat, "pixels");
+      assert.equal(opened.graph.nodes[3].config.model, undefined);
+    }
     const malformedGraph = structuredClone(graph);
     malformedGraph.nodes[0].config.text = { nested: true };
     await assert.rejects(
-      () => updateCanvasWorkflow(created.id, account, { revision: updated.revision, graph: malformedGraph }),
+      () => updateCanvasWorkflow(created.id, account, { revision, graph: malformedGraph }),
       /invalid config/i,
     );
   } finally {

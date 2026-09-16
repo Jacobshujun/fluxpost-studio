@@ -12,6 +12,7 @@ export type ImageProviderRouteConfig = {
   apiKey: string;
   model: string;
   profile: ImageProviderProfile;
+  toApisRequestFormat?: import("../image-model-options").ToApisRequestFormat;
 };
 
 export type ImageProviderCapabilities = {

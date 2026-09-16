@@ -1,5 +1,6 @@
 import { existsSync, readFileSync, writeFileSync } from "node:fs";
 import path from "node:path";
+import { legacyRouteRequestFormat, normalizeToApisRequestFormat } from "./image-model-options";
 import { normalizeFeishuTableId } from "./feishu-table-id";
 import type { ConfigStatus } from "./types";
 import { getDatabaseRuntimeStatus } from "./database";
@@ -68,6 +69,8 @@ function readAppConfig() {
   openaiImageApiDialect: normalizeImageApiDialect(process.env.OPENAI_IMAGE_API_DIALECT || "auto"),
   openaiImageApiProfile: parseOptionalImageProviderProfile("OPENAI_IMAGE_API_PROFILE", process.env.OPENAI_IMAGE_API_PROFILE),
   openaiImageBackupApiProfile: parseOptionalImageProviderProfile("OPENAI_IMAGE_BACKUP_API_PROFILE", process.env.OPENAI_IMAGE_BACKUP_API_PROFILE),
+  openaiImageToApisFormat: normalizeToApisRequestFormat(process.env.OPENAI_IMAGE_TOAPIS_FORMAT),
+  openaiImageBackupToApisFormat: normalizeToApisRequestFormat(process.env.OPENAI_IMAGE_BACKUP_TOAPIS_FORMAT),
   openaiImageModel: process.env.OPENAI_IMAGE_MODEL || "gpt-image-2",
   openaiImageBackupModel: process.env.OPENAI_IMAGE_BACKUP_MODEL || process.env.OPENAI_IMAGE_MODEL || "gpt-image-2",
   ...imageProxy,
@@ -296,6 +299,8 @@ export function openaiImageRouteConfig(route: OpenaiImageApiRoute = "primary"): 
     baseUrl,
     apiKey: route === "backup" ? appConfig.openaiImageBackupApiKey : appConfig.openaiImageApiKey,
     model: route === "backup" ? appConfig.openaiImageBackupModel : appConfig.openaiImageModel,
+    toApisRequestFormat: (route === "backup" ? appConfig.openaiImageBackupToApisFormat : appConfig.openaiImageToApisFormat)
+      ?? legacyRouteRequestFormat(route === "backup" ? appConfig.openaiImageBackupModel : appConfig.openaiImageModel),
     profile: resolveImageProviderProfile({
       explicitProfile,
       legacyDialect: appConfig.openaiImageApiDialect,
@@ -540,6 +545,12 @@ const advancedConfigGroups: ConfigDefinitionGroup[] = [
       }),
       configField("OPENAI_IMAGE_MODEL", "图片模型", "默认 gpt-image-2。", "text", "openai-image", {
         read: () => appConfig.openaiImageModel,
+      }),
+      configField("OPENAI_IMAGE_TOAPIS_FORMAT", "主通道 ToAPIs 请求格式", "ratio 为比例档位，pixels 为像素，legacy 为旧版。", "select", "openai-image", {
+        options: ["ratio", "pixels", "legacy"], read: () => openaiImageRouteConfig("primary").toApisRequestFormat,
+      }),
+      configField("OPENAI_IMAGE_BACKUP_TOAPIS_FORMAT", "备用通道 ToAPIs 请求格式", "按服务商接口约定选择请求参数。", "select", "openai-image", {
+        options: ["ratio", "pixels", "legacy"], read: () => openaiImageRouteConfig("backup").toApisRequestFormat,
       }),
       configField("OPENAI_IMAGE_BACKUP_MODEL", "备用图片模型", "留空时使用主通道图片模型。", "text", "openai-image", {
         read: () => appConfig.openaiImageBackupModel,

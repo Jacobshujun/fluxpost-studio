@@ -4,13 +4,13 @@ Last updated: 2026-09-16
 
 ## One-Line Status
 
-Production 1298237 is healthy; local activation waits for active tasks.
+Node model routing verified; local activation authorized. Production unchanged.
 
 ## Current Focus
 
-- 2026-09-16: GPT ordered ports/inline controls pass baseline/browser: .trellis/tasks/archive/2026-09/09-16-canvas-gpt-image-inputs/. 3001 unchanged.
+- 2026-09-16: Node model presets/custom IDs and explicit ToAPIs formats pass baseline/browser. Task: .trellis/tasks/archive/2026-09/09-16-canvas-image-model-routing/.
 
-- 2.5: .trellis/tasks/archive/2026-09/09-14-toapis-image-25-contract/.
+- Image contracts: toapis_image_contract.md.
 
 - VIP: Flare completed; edits failed. Stop paid retries; billing unknown. See pitfalls.md.
 

@@ -277,6 +277,7 @@ button {
 .canvas-text-split-controls input:focus, .canvas-text-split-controls select:focus { border-color: var(--node-color); box-shadow: 0 0 0 2px color-mix(in srgb, var(--node-color) 16%, transparent); }
 .canvas-gpt-image-controls { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 6px 8px; padding: 8px; flex: 0 0 auto; }
 .canvas-gpt-image-controls label { display: grid; gap: 3px; min-width: 0; font-size: 10px; color: var(--text-muted); }
+.canvas-gpt-image-controls .canvas-image-model-field { grid-column: 1 / -1; }
 .canvas-gpt-image-controls input, .canvas-gpt-image-controls select { width: 100%; min-width: 0; height: 28px; padding: 3px 5px; border: 1px solid var(--line-strong); border-radius: 4px; color: var(--foreground); background: var(--canvas-panel); font-size: 11px; }
 .canvas-gpt-image-controls input:focus-visible, .canvas-gpt-image-controls select:focus-visible { outline: 2px solid var(--node-color); outline-offset: 1px; }
 .canvas-gpt-image-dimensions, .canvas-gpt-legacy-count { grid-column: 1 / -1; display: block; font-size: 10px; overflow-wrap: anywhere; color: var(--text-muted); }

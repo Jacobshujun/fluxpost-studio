@@ -371,6 +371,8 @@ export type PlatformCrawlSetting = {
 export type PlatformCrawlSettings = Partial<Record<CrawlPlatform, PlatformCrawlSetting>>;
 
 export type ImageGenerationOptions = {
+  model?: string;
+  toApisRequestFormat?: import("./image-model-options").ToApisRequestFormat;
   size: string;
   quality: ImageGenerationQuality;
   background?: ImageGenerationBackground;

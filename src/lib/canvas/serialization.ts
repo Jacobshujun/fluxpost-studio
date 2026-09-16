@@ -1,4 +1,5 @@
 import { getCanvasNodeDefinition } from "./registry";
+import { normalizeImageModel, normalizeToApisRequestFormat } from "../image-model-options";
 import { getCanvasGraphBudget, getCanvasIterationOutputPorts, stripCanvasConfigSecrets, validateCanvasIteration } from "./iteration";
 import { decodeCanvasSubtitleRevisionSnapshot } from "./subtitle-editor";
 import { MAX_CANVAS_VIDEO_LOADER_ITEMS, normalizeCanvasVideoSnapshot } from "./video-loader";
@@ -63,6 +64,14 @@ function decodeGraphFragment(nodesValue: unknown, edgesValue: unknown, allowEmpt
     if (definition.type !== "utility.image-iterate" && (valueNode.iteration !== undefined || valueNode.frozenOutputs !== undefined)) throw new CanvasSerializationError("Only image iteration regions may contain iteration graphs or frozen outputs.");
     const config = isRecord(valueNode.config) ? stripCanvasConfigSecrets(valueNode.config as CanvasNode["config"]) : valueNode.config;
     if (!isCanvasNodeConfig(config, definition.type)) throw new CanvasSerializationError(`Node ${valueNode.id} has an invalid config.`);
+    if (definition.type === "model.gpt-image" || definition.type === "model.gpt-image-each") {
+      try {
+        if (config.model !== undefined) config.model = normalizeImageModel(config.model);
+        if (config.toApisRequestFormat !== undefined) config.toApisRequestFormat = normalizeToApisRequestFormat(config.toApisRequestFormat);
+      } catch (error) {
+        throw new CanvasSerializationError(`Node ${valueNode.id}: ${error instanceof Error ? error.message : "Invalid image configuration"}`);
+      }
+    }
     if (valueNode.label !== undefined && (typeof valueNode.label !== "string" || valueNode.label.length > maxNodeLabelLength)) {
       throw new CanvasSerializationError(`Node ${valueNode.id} has an invalid label.`);
     }

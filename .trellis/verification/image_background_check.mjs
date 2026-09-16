@@ -3,6 +3,7 @@ import { readFileSync } from "node:fs";
 import ts from "typescript";
 
 const contracts = load("src/lib/image-providers/contracts.ts");
+const models = load("src/lib/image-model-options.ts");
 const toApis = load("src/lib/toapis-image-api.ts", { "./image-providers/contracts": contracts });
 const sizes = load("src/lib/image-size-options.ts");
 const source = readFileSync("src/lib/image-generation.ts", "utf8");
@@ -22,11 +23,12 @@ const captured = [];
 const boundary = new Error("Stop after capturing the outgoing request");
 let routeModel = "fixture-model";
 const dependencies = {
+  ...models,
   validateImageBackground: contracts.validateImageBackground,
   normalizeImageGenerationSize: sizes.normalizeImageGenerationSize,
   defaultImageOptions: { size: "1024x1024", quality: "medium" },
   concurrencyConfig: { image: 1 },
-  openaiImageRouteConfig: () => ({ model: routeModel }),
+  openaiImageRouteConfig: () => ({ model: routeModel, toApisRequestFormat: routeModel === "fixture-model" ? "legacy" : models.legacyRouteRequestFormat(routeModel) }),
   openaiImageHeaders: () => ({}),
   readFile: async () => Buffer.from("fixture"),
   buildOpenAiJsonGenerationBody: contracts.buildOpenAiJsonGenerationBody,
@@ -93,6 +95,18 @@ for (const background of ["invalid", "", null, 1]) {
 assert.throws(() => contracts.validateImageBackground("transparent", "jpeg"), explicitInputError);
 
 const legacy = runtime.normalizeImageOptions();
+for (const model of ["gpt-image-2.5-flare-vip", "Custom/Future:V3"]) {
+  const selected = runtime.normalizeImageOptions({ model: `  ${model}  ` });
+  assert.equal(selected.model, model);
+  await assert.rejects(runtime.callResponsesImageToolInPool("fixture", 1, selected), (error) => error === boundary);
+  assert.equal(captured.at(-1).body.tools[0].model, model);
+  for (const references of [[], [reference]]) {
+    for (const builder of [runtime.buildStandardImagesApiRequest, runtime.buildOpenAiJsonRequest]) {
+      const request = await builder("primary", "fixture", 1, selected, references, true, false);
+      assert.equal(references.length ? request.body.get("model") : JSON.parse(request.body).model, model);
+    }
+  }
+}
 assert.equal(legacy.background, undefined, "Unrelated callers retain their existing provider defaults");
 for (const references of [[], [reference]]) {
   for (const builder of [runtime.buildStandardImagesApiRequest, runtime.buildOpenAiJsonRequest]) {
@@ -100,7 +114,7 @@ for (const references of [[], [reference]]) {
     assert.equal(references.length ? request.body.has("background") : "background" in JSON.parse(request.body), false);
   }
 }
-assert.equal("background" in toApis.buildToApisGenerationBody({ model: "fixture", prompt: "fixture", ratio: "1:1", resolution: "1k" }), false);
+assert.equal("background" in toApis.buildToApisGenerationBody({ model: "fixture", requestFormat: "legacy", prompt: "fixture", ratio: "1:1", resolution: "1k" }), false);
 for (const outputFormat of ["png", "jpeg"]) {
   assert.deepEqual(toApis.buildToApisGenerationBody({
     model: "gpt-image-2.5-sunburst", prompt: "fixture", ratio: "3:4", resolution: "2k",

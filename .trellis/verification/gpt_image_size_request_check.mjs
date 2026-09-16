@@ -40,7 +40,7 @@ assertContains(
 
 assertContains(
   imageGeneration,
-  /type:\s*"image_generation",\s*model:\s*appConfig\.openaiImageModel,\s*size:\s*options\.size/,
+  /type:\s*"image_generation",\s*model:\s*options\.model\s*\?\?\s*appConfig\.openaiImageModel,\s*size:\s*options\.size/,
   "Responses image_generation tool requests must pass the user-requested size as a structured tool option.",
 );
 

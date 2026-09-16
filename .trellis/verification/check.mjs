@@ -10,6 +10,7 @@ const npmCommand = process.platform === "win32" ? "npm.cmd" : "npm";
 const npxCommand = process.platform === "win32" ? "npx.cmd" : "npx";
 
 const nodeChecks = [
+  ["Canvas image model routing check", "canvas_image_models_check.mjs"],
   ["Image background request check", "image_background_check.mjs"],
   ["Canvas iteration contracts", "canvas_iteration_contract_check.mjs"],
   ["Canvas iteration runtime", "canvas_iteration_runtime_check.mjs"],

@@ -5,6 +5,7 @@ import { normalizeFeishuPublishMode } from "../feishu-publish-mode";
 import { FINISHED_BODY_POLICY_VERSION, truncateFinishedBody } from "../finished-body-policy";
 import { getGeneratedPost, saveGeneratedPost, updateGeneratedPost } from "../generated-posts";
 import { generateCanvasGptImages, generateImagesFromPrompt } from "../image-generation";
+import { normalizeImageModel, normalizeToApisRequestFormat } from "../image-model-options";
 import { validateImageBackground } from "../image-providers/contracts";
 import { IMAGE_NETWORK_WAIT_REASON, isImageNetworkUnavailableError } from "../image-transport";
 import { callOpenAIForText, callOpenAIForVisionText } from "../openai";
@@ -407,6 +408,8 @@ async function executeGptImage(context: CanvasNodeExecutionContext): Promise<Can
   const ratio = String(node.config.ratio || "1:1");
   const resolution = String(node.config.resolution || "1k") as "1k" | "2k" | "4k";
   const result = await generateCanvasGptImages(prompt, Number(node.config.count || 1), references, {
+    model: node.config.model === undefined ? undefined : normalizeImageModel(node.config.model),
+    toApisRequestFormat: node.config.toApisRequestFormat === undefined ? undefined : normalizeToApisRequestFormat(node.config.toApisRequestFormat),
     size: pixelSizeForRatio(ratio, resolution),
     ratio,
     resolution,
@@ -498,6 +501,8 @@ async function executeGptImageEach(context: CanvasNodeExecutionContext): Promise
       const ratio = String(node.config.ratio || "1:1");
       const resolution = String(node.config.resolution || "1k") as "1k" | "2k" | "4k";
       const result = await generateCanvasGptImages(prompt, 1, canvasImageEachRequestReferences(child.source.url, sharedReferences), {
+        model: node.config.model === undefined ? undefined : normalizeImageModel(node.config.model),
+        toApisRequestFormat: node.config.toApisRequestFormat === undefined ? undefined : normalizeToApisRequestFormat(node.config.toApisRequestFormat),
         size: pixelSizeForRatio(ratio, resolution),
         ratio,
         resolution,
@@ -640,6 +645,8 @@ function hashCanvasImageEachInput(node: CanvasNode, prompt: string, sources: Can
     prompt,
     sources: sources.map((source, index) => ({ index, url: source.url })),
     config: {
+      ...(node.config.model !== undefined ? { model: normalizeImageModel(node.config.model) } : {}),
+      ...(node.config.toApisRequestFormat ? { toApisRequestFormat: node.config.toApisRequestFormat } : {}),
       ratio: node.config.ratio,
       resolution: node.config.resolution,
       quality: node.config.quality,
@@ -682,6 +689,9 @@ async function executeLegacyGptImage({ node, inputs }: CanvasNodeExecutionContex
     prompt,
   }));
   const result = await generateImagesFromPrompt(prompt, Number(node.config.count || 1), tasks, {
+    allowSourceFallback: node.config.model === undefined ? undefined : false,
+    model: node.config.model === undefined ? undefined : normalizeImageModel(node.config.model),
+    toApisRequestFormat: node.config.toApisRequestFormat === undefined ? undefined : normalizeToApisRequestFormat(node.config.toApisRequestFormat),
     size: String(node.config.size || "1024x1024"),
     quality: String(node.config.quality || "medium") as "low" | "medium" | "high",
     taskConcurrency: 1,

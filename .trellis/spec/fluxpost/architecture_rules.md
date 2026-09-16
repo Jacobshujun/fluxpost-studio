@@ -518,7 +518,7 @@ return url;
 ### 4. Validation & Error Matrix
 
 - Missing task id, unknown status, completed task without URL, unsupported size, or invalid upload envelope -> hard error.
-- `model_not_found` or `no available channel` -> may fail over before task acceptance, but must never return a source image as completed generation.
+- `model_not_found` or `no available channel` -> surface the upstream refusal without trying another interface or returning a source image as completed generation.
 - Accepted task status `pending`/`queued`/`in_progress` is non-terminal; query `429`/`500`-`504`/network error retries the same task. Do not create a duplicate paid task on the backup route.
 - Terminal `completed`/`failed` acceptance responses remain terminal and are never converted to pending. Canvas non-terminal acceptance or resumed non-terminal status -> running node/run plus delayed requeue; non-Canvas overall timeout -> provider timeout without resubmission.
 
@@ -562,7 +562,7 @@ await fetch("/images/generations", {
 ### 2. Signatures
 
 - Profiles: `openai_json | openai_sse | toapis_async`.
-- Route config: `{ route, baseUrl, apiKey, model, profile }` for `primary | backup`.
+- Route config: `{ route, baseUrl, apiKey, model, profile, toApisRequestFormat }` for `primary | backup`; see `toapis_image_contract.md` for node overrides and historical defaults.
 - Admin probe: `POST /api/config/image-provider-check` with `{ route: "primary" | "backup" }`.
 - Output gate: `assertGeneratedImageSize(buffer: Buffer, options: ImageGenerationOptions): Promise<void>` runs before generated-file writes or runtime-media upload; it decodes metadata without resizing or re-encoding.
 
@@ -577,7 +577,7 @@ await fetch("/images/generations", {
 
 - Unknown profile or route -> explicit config/API error before provider submission.
 - Content safety, invalid image/input, or unsupported official JSON size -> hard error without route failover.
-- Auth, route, network, gateway, or capability failure before task acceptance -> route failover allowed.
+- Auth/network/gateway failure before acceptance may fail over for default callers. Explicit node model/format overrides never fail over; HTTP capability refusals are hard errors.
 - Asynchronous task id accepted -> polling retries the same id; terminal/timeout/protocol failure must not fail over or resubmit.
 - Missing sign-in/admin role on probe -> `401`/`403`; saving config never runs a probe.
 - Exact-pixel mismatch -> non-retryable provider error with expected/actual dimensions and `taskAccepted: true`; no persistence, fallback or re-submission. Ratio/tier-only ToAPIs exact-pixel input -> non-retryable input error before reference preparation/upload.

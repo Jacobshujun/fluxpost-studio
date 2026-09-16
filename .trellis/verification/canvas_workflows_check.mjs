@@ -72,10 +72,11 @@ const areCanvasPortKindsCompatibleForUi = compileFunction(canvasTypes, "areCanva
 
 const temp = mkdtempSync(path.join(tmpdir(), "fluxpost-canvas-check-"));
 try {
+  writeFileSync(path.join(temp, "image-model-options.js"), ts.transpileModule(read("src/lib/image-model-options.ts"), { compilerOptions: { module: ts.ModuleKind.CommonJS, target: ts.ScriptTarget.ES2022 } }).outputText);
   writeFileSync(path.join(temp, "toapis-image-api.js"), `exports.toApisImageResolutions=['1k','2k','4k']; exports.toApisImageRatios = ${JSON.stringify(["1:1", "3:2", "2:3", "4:3", "3:4", "5:4", "4:5", "16:9", "9:16", "2:1", "1:2", "21:9", "9:21"])}; exports.toApis4kImageRatios = ${JSON.stringify(["16:9", "9:16", "2:1", "1:2", "21:9", "9:21"])};`, "utf8");
   writeFileSync(path.join(temp, "feishu-publish-mode.js"), "exports.feishuPublishModeOptions=[{value:'full',label:'完整写入'},{value:'text',label:'仅标题与正文'},{value:'media',label:'仅图片与视频'}];exports.normalizeFeishuPublishMode=(value)=>value===undefined?'full':['full','text','media'].includes(value)?value:(()=>{throw new Error('invalid mode')})();", "utf8");
   for (const name of ["types", "node-utils", "source-video-contract", "video-loader", "content-collection", "save-images", "seedance-references", "subtitle-style", "subtitle-editor", "registry", "graph", "iteration", "serialization", "clipboard", "workflow-file"]) {
-    const source = read(`src/lib/canvas/${name}.ts`).replace('"../toapis-image-api"', '"./toapis-image-api"').replace('"../feishu-publish-mode"', '"./feishu-publish-mode"');
+    const source = read(`src/lib/canvas/${name}.ts`).replace('"../toapis-image-api"', '"./toapis-image-api"').replace('"../feishu-publish-mode"', '"./feishu-publish-mode"').replace('"../image-model-options"', '"./image-model-options"');
     const output = ts.transpileModule(source, {
       compilerOptions: { module: ts.ModuleKind.CommonJS, target: ts.ScriptTarget.ES2022 },
       fileName: `${name}.ts`,
@@ -94,6 +95,22 @@ try {
   assert.equal(getCanvasNodeDefinition("model.gpt-image")?.version, 2, "new GPT image nodes must use v2");
   assert.equal(getCanvasNodeDefinition("model.gpt-image", 1)?.version, 1, "legacy GPT image snapshots must remain resolvable");
   const orderedImageNode = { id: "ordered", type: "model.gpt-image", version: 2, position: { x: 400, y: 0 }, config: { ...getCanvasNodeDefinition("model.gpt-image").defaultConfig } };
+  const { decodeCanvasGraph } = require(path.join(temp, "serialization.js"));
+  const { imageModelPresets } = require(path.join(temp, "image-model-options.js"));
+  for (const model of [...imageModelPresets.map((preset) => preset.model), "custom/Future-Model:Exact-ID"]) {
+    const graph = { nodes: [{ ...orderedImageNode, config: { ...orderedImageNode.config, model: `  ${model}  `, toApisRequestFormat: "pixels" } }, { ...orderedImageNode, id: "unchanged" }], edges: [], viewport: { x: 0, y: 0, zoom: 1 } };
+    const restored = decodeCanvasGraph(JSON.parse(JSON.stringify(graph)));
+    assert.equal(restored.nodes[0].config.model, model);
+    assert.equal(restored.nodes[0].config.toApisRequestFormat, "pixels");
+    assert.equal(restored.nodes[1].config.model, undefined);
+    const payload = parseCanvasClipboardPayload(JSON.stringify(createCanvasClipboardPayload(restored.nodes, [], ["ordered"])));
+    const copied = instantiateCanvasClipboardPayload(payload, { x: 0, y: 0 }, (_kind, index) => `copy-${index}`);
+    assert.equal(copied.nodes[0].config.model, model);
+    copied.nodes[0].config.model = "changed-copy";
+    assert.equal(restored.nodes[0].config.model, model);
+    assert.equal(upgradeCanvasNode({ ...restored.nodes[0], version: 1 }).config.model, model);
+    assert.throws(() => decodeCanvasGraph({ ...graph, nodes: [{ ...orderedImageNode, config: { model: "  " } }] }), /不能为空/);
+  }
   const visibleIds = (connected) => getCanvasVisibleInputPorts(orderedImageNode, connected).map((port) => port.id);
   assert.deepEqual(visibleIds([]), ["prompt", "image_1"]);
   assert.deepEqual(visibleIds(["image_1"]), ["prompt", "image_1", "image_2"]);

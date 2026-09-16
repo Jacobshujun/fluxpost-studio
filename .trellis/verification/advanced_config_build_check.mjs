@@ -50,6 +50,8 @@ api.saveAdvancedConfigPatch({ values: {
   OPENAI_IMAGE_API_KEY: "fixture-new-key",
   OPENAI_IMAGE_MODEL: "fixture-model",
   OPENAI_IMAGE_API_PROFILE: "openai_json",
+  OPENAI_IMAGE_TOAPIS_FORMAT: "pixels",
+  OPENAI_IMAGE_BACKUP_TOAPIS_FORMAT: "ratio",
   OPENAI_IMAGE_BACKUP_BASE_URL: "https://backup.example/v1",
   OPENAI_IMAGE_BACKUP_API_KEY: "fixture-backup-key",
   OPENAI_IMAGE_PROXY_URL: "http://127.0.0.1:10809",
@@ -59,6 +61,8 @@ assert.equal(worker.openaiImageUrl("images/generations"), "https://new.example/v
 assert.equal(worker.openaiImageApiKey(), "fixture-new-key");
 assert.equal(worker.openaiImageRouteConfig().model, "fixture-model");
 assert.equal(worker.openaiImageRouteConfig().profile, "openai_json");
+assert.equal(worker.openaiImageRouteConfig().toApisRequestFormat, "pixels");
+assert.equal(worker.openaiImageRouteConfig("backup").toApisRequestFormat, "ratio");
 assert.equal(worker.openaiImageUrl("images/edits", "backup"), "https://backup.example/v1/images/edits");
 assert.equal(worker.appConfig.openaiImageProxyEnabled, true);
 assert.equal(worker.appConfig.openaiImageProxyUrl, "http://127.0.0.1:10809");
@@ -83,7 +87,7 @@ function evaluate(source) {
       if (dependency.includes('"node:fs"')) return fakeFs;
       if (dependency.includes('"node:path"')) return { default: path };
       if (dependency.includes('"getDatabaseRuntimeStatus"')) return { getDatabaseRuntimeStatus: () => ({}) };
-      if (dependency.includes('"normalizeFeishuTableId"') || dependency.includes('"resolveImageProviderProfile"')) {
+      if (dependency.includes('"normalizeFeishuTableId"') || dependency.includes('"resolveImageProviderProfile"') || dependency.includes('"normalizeToApisRequestFormat"')) {
         return evaluate(dependency).exports;
       }
       throw new Error(`Unexpected config dependency ${id}; extend the isolated adapter explicitly.`);

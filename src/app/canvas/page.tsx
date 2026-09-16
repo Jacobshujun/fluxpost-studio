@@ -102,6 +102,7 @@ import {
 import { canvasNodeDefinitions, createCanvasNode, getCanvasBatchBindableFields, getCanvasNodeDefinition, getCanvasNodeExecutionMode, getCanvasVisibleInputPorts } from "@/lib/canvas/registry";
 import { pixelSizeForRatio } from "@/lib/gpt-image-dimensions";
 import { toApisImageRatios, toApisImageResolutions } from "@/lib/toapis-image-api";
+import { imageModelPresets } from "@/lib/image-model-options";
 import { canvasCollectionLinks } from "@/lib/canvas/content-collection";
 import { canvasIterationAllowedNodeTypes, getCanvasIterationOutputPorts } from "@/lib/canvas/iteration";
 import { canvasCollectionScheduleDefinition } from "@/lib/canvas/content-collection-schedule";
@@ -2763,7 +2764,33 @@ function CanvasGptImageDimensions({ node }: { node: CanvasNode }) {
   const ratio = String(node.config.ratio || "1:1");
   const resolution = String(node.config.resolution || "1k");
   const valid = toApisImageRatios.some((value) => value === ratio) && toApisImageResolutions.some((value) => value === resolution);
-  return <output className="canvas-gpt-image-dimensions" aria-label="Official 像素尺寸">{valid ? `Official: ${pixelSizeForRatio(ratio, resolution)} px` : "请选择有效比例和分辨率"}</output>;
+  return <output className="canvas-gpt-image-dimensions" aria-label="像素尺寸">{valid ? `${pixelSizeForRatio(ratio, resolution)} px` : "请选择有效比例和分辨率"}</output>;
+}
+
+function CanvasImageModelSelector({ node, onPatch }: { node: CanvasNode; onPatch: (patch: CanvasNode["config"]) => void }) {
+  const model = node.config.model;
+  const inputRef = useRef<HTMLInputElement>(null);
+  const [customEditing, setCustomEditing] = useState(false);
+  useEffect(() => { if (document.activeElement !== inputRef.current) setCustomEditing(false); }, [model]);
+  const selected = model === undefined ? "default" : !customEditing && imageModelPresets.some((preset) => preset.model === model) ? String(model) : "custom";
+  return <>
+    <label className="canvas-image-model-field"><span>图片模型</span><select aria-label="图片模型" value={selected} onChange={(event) => {
+      const value = event.target.value;
+      setCustomEditing(value === "custom");
+      const preset = imageModelPresets.find((item) => item.model === value);
+      onPatch(value === "default" ? { model: undefined, toApisRequestFormat: undefined }
+        : value === "custom" ? { model: "" }
+          : { model: value, toApisRequestFormat: preset?.format });
+    }}>
+      <option value="default">默认模型</option>
+      {imageModelPresets.map((preset) => <option key={preset.model} value={preset.model}>{preset.model}</option>)}
+      <option value="custom">自定义</option>
+    </select></label>
+    {selected === "custom" ? <label className="canvas-image-model-field"><span>自定义模型 ID</span><input ref={inputRef} aria-label="自定义模型 ID" value={String(model ?? "")} onChange={(event) => { setCustomEditing(true); onPatch({ model: event.target.value }); }} onBlur={(event) => onPatch({ model: event.target.value.trim() })} aria-invalid={!String(model ?? "").trim()} /></label> : null}
+    {model !== undefined ? <label className="canvas-image-model-field"><span>ToAPIs 请求格式</span><select aria-label="ToAPIs 请求格式" value={String(node.config.toApisRequestFormat ?? "")} onChange={(event) => onPatch({ toApisRequestFormat: event.target.value || undefined })}>
+      <option value="">沿用通道配置</option><option value="ratio">比例 + 分辨率</option><option value="pixels">像素尺寸</option><option value="legacy">旧版图像接口</option>
+    </select></label> : null}
+  </>;
 }
 
 function CanvasNodeFields({ node, onChange, onPatch, onPreviewImage }: {
@@ -2774,7 +2801,7 @@ function CanvasNodeFields({ node, onChange, onPatch, onPreviewImage }: {
 }) {
   const definition = getCanvasNodeDefinition(node.type, node.version);
   if (!definition) return null;
-  return <>{definition.fields.map((field) => {
+  return <>{node.type === "model.gpt-image" || node.type === "model.gpt-image-each" ? <CanvasImageModelSelector key={node.id} node={node} onPatch={onPatch} /> : null}{definition.fields.map((field) => {
       if (field.key === "outputCompression" && node.config.outputFormat !== "jpeg") return null;
       if (field.key === "template" && node.config.preset !== "custom") return null;
       if (node.type === "utility.text-split" && (field.key === "delimiter" || field.key === "delimiterIndex") && node.config.mode !== "delimiter") return null;

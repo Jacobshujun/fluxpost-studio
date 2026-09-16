@@ -41,6 +41,7 @@ export function resolveToApisImageSize(requestedSize: ImageGenerationOptions["si
 
 export function buildToApisGenerationBody(input: {
   model: string;
+  requestFormat?: import("./image-model-options").ToApisRequestFormat;
   prompt: string;
   requestedSize?: ImageGenerationOptions["size"];
   ratio?: string;
@@ -56,10 +57,13 @@ export function buildToApisGenerationBody(input: {
   if (referenceImages.length > maxToApisReferenceImages) {
     throw new Error(`ToAPIs accepts at most ${maxToApisReferenceImages} reference images; received ${referenceImages.length}.`);
   }
-  if (input.model === "gpt-image-2.5-flare-official" || input.model === "gpt-image-2.5-sunburst-official") {
+  if (input.requestFormat !== undefined && !["ratio", "pixels", "legacy"].includes(input.requestFormat)) {
+    throw new ImageProviderError(`应用参数校验：模型 ${input.model} 的 ToAPIs 请求格式无效。`, { category: "input", retryable: false, failoverAllowed: false });
+  }
+  if (input.requestFormat === "pixels") {
     const background = validateImageBackground(input.background, input.outputFormat);
     if ((input.count ?? 1) !== 1) {
-      throw new ImageProviderError("ToAPIs GPT Image 2.5 Official 每次请求只能生成 1 张图片，请将输出数量设为 1。", {
+      throw new ImageProviderError(`应用参数校验：模型 ${input.model} 的 ToAPIs 像素接口每次请求只能生成 1 张图片。`, {
         category: "input", retryable: false, failoverAllowed: false,
       });
     }
@@ -67,7 +71,7 @@ export function buildToApisGenerationBody(input: {
     const size = input.requestedSize && input.requestedSize !== "auto" ? input.requestedSize : "1024x1024";
     if (!/^\d{2,5}x\d{2,5}$/.test(size) || size.split("x").some((value) => Number(value) < 64 || Number(value) > 8192)
       || ((input.ratio || input.resolution) && (!input.requestedSize || input.requestedSize === "auto"))) {
-      throw new ImageProviderError("ToAPIs Official 需要明确的像素尺寸，请重新选择图片比例和分辨率。", {
+      throw new ImageProviderError(`应用参数校验：模型 ${input.model}，${input.resolution || "pixels"} ${input.ratio || size}，需要明确且在 64–8192 范围内的像素尺寸。`, {
         category: "input", retryable: false, failoverAllowed: false,
       });
     }
@@ -84,10 +88,10 @@ export function buildToApisGenerationBody(input: {
   const dimensions = input.ratio || input.resolution
     ? validateToApisDimensions(input.ratio, input.resolution)
     : resolveToApisImageSize(input.requestedSize || "auto");
-  if (input.model === "gpt-image-2.5-flare" || input.model === "gpt-image-2.5-sunburst") {
+  if (input.requestFormat !== "legacy") {
     const background = validateImageBackground(input.background, input.outputFormat);
     if ((input.count ?? 1) !== 1) {
-      throw new ImageProviderError("ToAPIs GPT Image 2.5 普通版每次请求只能生成 1 张图片，请将输出数量设为 1。", {
+      throw new ImageProviderError(`应用参数校验：模型 ${input.model} 的 ToAPIs 比例接口每次请求只能生成 1 张图片。`, {
         category: "input", retryable: false, failoverAllowed: false,
       });
     }
@@ -104,7 +108,7 @@ export function buildToApisGenerationBody(input: {
   }
   // The older-model adapter retains its historical contract; never apply it to 2.5 or generic controls.
   if (dimensions.resolution === "4k" && !toApis4kImageRatios.includes(dimensions.size as (typeof toApis4kImageRatios)[number])) {
-    throw new Error(`ToAPIs legacy image adapter does not support 4K ratio ${dimensions.size}.`);
+    throw new ImageProviderError(`应用参数校验：模型 ${input.model}，4K ${dimensions.size}：ToAPIs legacy image adapter 不支持该比例；请确认服务商请求格式。`, { category: "input", retryable: false, failoverAllowed: false });
   }
   const count = validateIntegerRange(input.count ?? 1, 1, maxToApisImageOutputs, "ToAPIs image count");
   const quality = validateChoice(input.quality || "medium", ["low", "medium", "high"], "ToAPIs image quality");

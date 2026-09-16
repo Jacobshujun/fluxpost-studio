@@ -13,6 +13,10 @@ const runsSource = read("src/lib/canvas/runs.ts");
 const queueSource = read("src/lib/feishu-publish-queue.ts");
 const nativeRequire = createRequire(import.meta.url);
 const contractModule = { exports: {} };
+const modelModule = { exports: {} };
+new Function("module", "exports", ts.transpileModule(read("src/lib/image-model-options.ts"), {
+  compilerOptions: { module: ts.ModuleKind.CommonJS, target: ts.ScriptTarget.ES2022 },
+}).outputText)(modelModule, modelModule.exports);
 new Function("module", "exports", ts.transpileModule(read("src/lib/image-providers/contracts.ts"), {
   compilerOptions: { module: ts.ModuleKind.CommonJS, target: ts.ScriptTarget.ES2022 },
 }).outputText)(contractModule, contractModule.exports);
@@ -41,6 +45,7 @@ const transpiledRegistry = ts.transpileModule(registrySource, {
 }).outputText;
 const registryModule = { exports: {} };
 const registryStubs = {
+  "../image-model-options": modelModule.exports,
   "../gpt-image-dimensions": { pixelSizeForRatio: () => "1024x1024" },
   "../toapis-image-api": { toApisImageResolutions: ["1k", "2k", "4k"], toApis4kImageRatios: ["1:1"], toApisImageRatios: ["1:1", "16:9"] },
   "./save-images": { validateCanvasImageFilenamePrefix: () => undefined },
@@ -131,6 +136,7 @@ const transpiled = ts.transpileModule(executorSource, {
 const cjsModule = { exports: {} };
 const noopAsync = async () => undefined;
 const stubs = {
+  "../image-model-options": modelModule.exports,
   "../image-providers/contracts": contractModule.exports,
   "../gpt-image-dimensions": { pixelSizeForRatio: () => "1024x1024" },
   "../concurrency": { mapWithConcurrency },
@@ -199,6 +205,20 @@ assert.ok(providerCalls.every((call) => call.references.length === 1), "V2 witho
 assert.equal(ordered.internalMetadata.imageEach.schemaVersion, 2);
 assert.equal(ordered.internalMetadata.imageEach.sharedReferenceCount, 0);
 assert.deepEqual(Array.from(ordered.internalMetadata.imageEach.referencesPerRequest), [1, 1, 1, 1]);
+
+for (const model of ["gpt-image-2.5-flare-vip", "Custom/Future:V3"]) {
+  providerCalls = [];
+  const input = context(["img-model"]);
+  input.node = { ...input.node, config: { ...input.node.config, model, toApisRequestFormat: "pixels" } };
+  const result = await executeCanvasNode(input);
+  assert.equal(providerCalls[0].options.model, model);
+  assert.equal(providerCalls[0].options.toApisRequestFormat, "pixels");
+  input.previousNodeRun = { status: "completed", internalMetadata: result.internalMetadata };
+  input.node.config.model = `${model}-changed`;
+  providerCalls = [];
+  await executeCanvasNode(input);
+  assert.equal(providerCalls.length, 1, "Changing a model must invalidate completed per-image results");
+}
 
 providerCalls = [];
 const shared = await executeCanvasNode(context(["img-1", "img-2"], undefined, [["ref-a", "ref-b"], ["ref-a"]]));
@@ -346,7 +366,7 @@ assert.equal(providerCalls[0].options.background, "transparent", "Ordinary Canva
 
 const numberedContext = {
   ...backgroundContext,
-  node: { ...backgroundContext.node, type: "model.gpt-image", config: { ...backgroundContext.node.config, count: 1, referenceUrls: ["direct"] } },
+  node: { ...backgroundContext.node, type: "model.gpt-image", config: { ...backgroundContext.node.config, model: "gpt-image-2.5-flare-vip", toApisRequestFormat: "pixels", count: 1, referenceUrls: ["direct"] } },
   inputs: {
     prompt: [{ kind: "text", value: "ordered images" }],
     image_10: [{ kind: "images", items: [{ url: "ten" }] }],
@@ -358,6 +378,8 @@ const numberedContext = {
 providerCalls = [];
 providerMode = "pending";
 const pendingNumbered = await executeCanvasNode(numberedContext);
+assert.equal(providerCalls[0].options.model, "gpt-image-2.5-flare-vip");
+assert.equal(providerCalls[0].options.toApisRequestFormat, "pixels");
 const expectedReferences = ["direct", "legacy", "one", "two-a", "two-b", "ten"];
 assert.deepEqual(providerCalls[0].references, expectedReferences, "Numeric ports, not insertion order, determine references; legacy inputs stay first.");
 assert.deepEqual(pendingNumbered.resolvedInputs, numberedContext.inputs, "Frozen inputs must preserve port identity.");
@@ -366,6 +388,7 @@ await executeCanvasNode({ ...numberedContext, inputs: pendingNumbered.resolvedIn
   previousNodeRun: { providerTaskId: pendingNumbered.providerTaskId, providerTaskRoute: "primary", providerStatus: "processing" } });
 assert.deepEqual(providerCalls[0].references, expectedReferences, "Async resume must retain reference order.");
 assert.equal(providerCalls[0].resumeTaskId, pendingNumbered.providerTaskId);
+assert.equal(providerCalls[0].options.model, "gpt-image-2.5-flare-vip");
 providerMode = "success";
 providerCalls = [];
 await assert.rejects(executeCanvasNode({ ...numberedContext, inputs: { ...numberedContext.inputs,

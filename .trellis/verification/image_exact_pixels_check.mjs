@@ -137,7 +137,7 @@ function harness(buffer, profile = "openai_sse", model = "fixture") {
     extensionFromMimeType: () => "png",
     maxGeneratedImageUrlBytes: 10_000_000,
     imageRequestTimeoutMs: 10000,
-    openaiImageRouteConfig: () => ({ profile, model }),
+    openaiImageRouteConfig: () => ({ profile, model, toApisRequestFormat: model.endsWith("-official") ? "pixels" : "ratio" }),
     resolveActiveStandardImagesApiRoute: () => "primary",
     activeStandardImagesApiRoute: "primary",
     prepareReferenceImages: async () => {

@@ -215,6 +215,7 @@ function loadConfig(platform, values = {}, persisted = "") {
       globalThis: sharedGlobal,
       URL,
       require: (name) => {
+        if (name === "./image-model-options") return load("src/lib/image-model-options.ts");
         if (name === "node:fs") return fakeFs;
         if (name === "./database") return { getDatabaseRuntimeStatus: () => ({}) };
         if (name === "./feishu-table-id") return load("src/lib/feishu-table-id.ts");

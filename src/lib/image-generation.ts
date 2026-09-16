@@ -12,6 +12,7 @@ import { sniffImageFormat } from "./image-format";
 import { fetchImageTransport, isImageNetworkUnavailableError, toImageTransportUnavailableError } from "./image-transport";
 import { convertHeicBufferToJpeg, normalizeHeicFileToJpeg } from "./image-normalization";
 import { defaultImageGenerationSize, normalizeImageGenerationSize } from "./image-size-options";
+import { normalizeImageModel, normalizeToApisRequestFormat } from "./image-model-options";
 import { buildMediaRequestHeaders } from "./media-request";
 import { fetchOpenAiImageSse } from "./openai-image-sse";
 import { deleteRuntimeMediaObject, isTosRuntimeMediaConfigured, persistRuntimeMedia, persistTosProbeObject } from "./runtime-media-storage";
@@ -851,7 +852,7 @@ async function callResponsesImageToolInPool(prompt: string, count: number, optio
     status: "running",
     message: "Preparing to generate images through the image_generation tool",
     details: {
-      model: appConfig.openaiImageModel,
+      model: options.model ?? appConfig.openaiImageModel,
       count,
       promptLength: sizeConstrainedPrompt.length,
       size: options.size,
@@ -867,7 +868,7 @@ async function callResponsesImageToolInPool(prompt: string, count: number, optio
       tools: [
         {
           type: "image_generation",
-          model: appConfig.openaiImageModel,
+          model: options.model ?? appConfig.openaiImageModel,
           size: options.size,
         },
       ],
@@ -877,18 +878,19 @@ async function callResponsesImageToolInPool(prompt: string, count: number, optio
 
   if (!response.ok) {
     const body = await response.text();
+    const providerError = toImageProviderHttpError("Responses image tool", response.status, body);
     await recordExecutionLog({
       scope: "openai/image",
       action: "Responses image tool failed",
       status: "error",
-      message: compactError(`OpenAI image request failed: ${response.status} ${body.slice(0, 260)}`),
+      message: compactError(providerError.message),
       durationMs: Date.now() - startedAt,
       details: {
         status: response.status,
-        model: appConfig.openaiImageModel,
+        model: options.model ?? appConfig.openaiImageModel,
       },
     });
-    throw new Error(`OpenAI image request failed: ${response.status} ${body.slice(0, 260)}`);
+    throw providerError;
   }
 
   const data = await readJsonResponse<ResponsesImageResponse>(response, "Responses image tool");
@@ -906,7 +908,7 @@ async function callResponsesImageToolInPool(prompt: string, count: number, optio
     durationMs: Date.now() - startedAt,
     details: {
       imageCount: imageUrls.length,
-      model: appConfig.openaiImageModel,
+      model: options.model ?? appConfig.openaiImageModel,
     },
   });
   return imageUrls;
@@ -933,13 +935,13 @@ async function callImagesApiInPool(
 ) {
   if (referenceImages.length > 16) throw new Error(`Images API accepts at most 16 reference images; received ${referenceImages.length}.`);
   const startedAt = Date.now();
-  const initialRoute = asyncTask?.resumeTaskRoute || resolveActiveStandardImagesApiRoute();
+  const initialRoute = asyncTask?.resumeTaskRoute || (options.model !== undefined || options.toApisRequestFormat !== undefined ? "primary" : resolveActiveStandardImagesApiRoute());
   const initialProfile = openaiImageRouteConfig(initialRoute).profile;
   if (asyncTask?.resumeTaskId && initialProfile !== "toapis_async") {
     throw toAcceptedImageProviderError(`Accepted image task ${asyncTask.resumeTaskId} cannot resume because route ${initialRoute} is no longer configured for ToAPIs.`);
   }
   if (initialProfile === "toapis_async" && !asyncTask?.resumeTaskId && !options.ratio && !options.resolution) {
-    buildToApisGenerationBody({ model: openaiImageRouteConfig(initialRoute).model, prompt, count, requestedSize: options.size, background: options.background, outputFormat: options.outputFormat });
+    buildToApisGenerationBody({ model: options.model ?? openaiImageRouteConfig(initialRoute).model, requestFormat: options.toApisRequestFormat ?? openaiImageRouteConfig(initialRoute).toApisRequestFormat, prompt, count, requestedSize: options.size, background: options.background, outputFormat: options.outputFormat });
   }
   const preparedReferences = asyncTask?.resumeTaskId
     ? makeResumedTaskReferences(referenceImages)
@@ -965,7 +967,7 @@ async function callImagesApiInPool(
     status: "running",
     message: `Preparing to generate images through ${endpointPath}`,
     details: {
-      model: openaiImageRouteConfig(initialRoute).model,
+      model: options.model ?? openaiImageRouteConfig(initialRoute).model,
       count,
       promptLength: prompt.length,
       endpointPath,
@@ -998,7 +1000,7 @@ async function callImagesApiInPool(
     durationMs: Date.now() - startedAt,
     details: {
       imageCount: imageUrls.length,
-      model: openaiImageRouteConfig(activeStandardImagesApiRoute).model,
+      model: options.model ?? openaiImageRouteConfig(activeStandardImagesApiRoute).model,
       size: options.size,
       quality: options.quality,
     },
@@ -1032,15 +1034,16 @@ async function requestSingleStandardImagesApiWithRetry(
   asyncTask?: AsyncImageTaskControl,
 ): Promise<ImagesApiResponse> {
   const triedRoutes = new Set<OpenaiImageApiRoute>();
-  let route = asyncTask?.resumeTaskRoute || resolveActiveStandardImagesApiRoute();
+  let route = asyncTask?.resumeTaskRoute || (options.model !== undefined || options.toApisRequestFormat !== undefined ? "primary" : resolveActiveStandardImagesApiRoute());
 
   while (true) {
     try {
       const response = await requestSingleStandardImagesApiWithRetryForRoute(route, prompt, count, Date.now(), options, referenceImages, endpointPath, asyncTask);
-      activeStandardImagesApiRoute = route;
+      if (options.model === undefined && options.toApisRequestFormat === undefined) activeStandardImagesApiRoute = route;
       return response;
     } catch (error) {
       triedRoutes.add(route);
+      if (options.model !== undefined || options.toApisRequestFormat !== undefined) throw error;
       const nextRoute = resolveNextStandardImagesApiRoute(route, triedRoutes, error);
       if (!nextRoute) {
         restorePrimaryStandardImagesApiRouteAfterBackupFailure(route, error);
@@ -1316,7 +1319,7 @@ async function buildOpenAiJsonRequest(
 ): Promise<RequestInit> {
   const routeConfig = openaiImageRouteConfig(route);
   const fields = buildOpenAiJsonGenerationBody({
-    model: routeConfig.model,
+    model: options.model ?? routeConfig.model,
     prompt,
     size: options.size,
     quality: sendQuality ? options.quality : undefined,
@@ -1373,7 +1376,8 @@ async function requestSingleToApisImagesApiForRoute(
     return pollToApisImageTask(route, taskId, { id: taskId, status }, startedAt, asyncTask, true);
   }
   const requestBody = buildToApisGenerationBody({
-    model: routeConfig.model,
+    model: options.model ?? routeConfig.model,
+    requestFormat: options.toApisRequestFormat ?? routeConfig.toApisRequestFormat,
     prompt,
     requestedSize: options.size,
     ratio: options.ratio,
@@ -1428,7 +1432,7 @@ async function requestSingleToApisImagesApiForRoute(
       break;
     }
 
-    lastProviderError = toImageProviderHttpError("ToAPIs image submission", response.status, body);
+    lastProviderError = toImageProviderHttpError(`ToAPIs image submission (${requestBody.model}, ${options.resolution || "pixels"} ${options.ratio || requestBody.size}, size=${requestBody.size})`, response.status, body);
     lastError = lastProviderError.message;
     const shouldRetry = lastProviderError.retryable && attempt < maxImageAttempts && hasRetryWindow(deadline);
     await recordExecutionLog({
@@ -1439,7 +1443,7 @@ async function requestSingleToApisImagesApiForRoute(
       durationMs: Date.now() - startedAt,
       details: {
         status: response.status,
-        model: routeConfig.model,
+        model: requestBody.model,
         route,
         attempt,
         size: requestBody.size,
@@ -1479,7 +1483,7 @@ async function requestSingleToApisImagesApiForRoute(
     details: {
       taskId,
       route,
-      model: routeConfig.model,
+      model: requestBody.model,
       size: requestBody.size,
       ...("resolution" in requestBody ? { resolution: requestBody.resolution } : {}),
       referenceImageCount: referenceUrls.length,
@@ -1509,7 +1513,7 @@ async function pollToApisImageTask(
       if (!urls.length) throw toAcceptedImageProviderError("ToAPIs image task completed without a result URL.");
       return { data: urls.map((url) => ({ url })) };
     }
-    if (task.status === "failed") throw toAcceptedImageProviderError(`ToAPIs image task failed: ${formatToApisTaskError(task)}`);
+    if (task.status === "failed") throw toAcceptedImageProviderError(`上游 ToAPIs image task failed: ${redactImageProviderMessage(formatToApisTaskError(task))}`);
     if (task.status && !["pending", "queued", "in_progress"].includes(task.status)) {
       throw toAcceptedImageProviderError(`ToAPIs image task returned unsupported status: ${task.status}`);
     }
@@ -1556,7 +1560,7 @@ async function pollToApisImageTask(
       await sleepWithinDeadline(retryDelayMs, deadline);
       continue;
     }
-    if (!response.ok) throw toAcceptedImageProviderError(`ToAPIs image status failed with HTTP ${response.status}.`);
+    if (!response.ok) throw toAcceptedImageProviderError(toImageProviderHttpError("ToAPIs image status", response.status, body).message);
     try {
       task = parseJsonResponse<ToApisImageTask>(body, response, "ToAPIs image status");
     } catch (error) {
@@ -1637,7 +1641,7 @@ async function uploadToApisReferenceImage(route: OpenaiImageApiRoute, image: Pre
   if (payload.success !== true || !payload.data?.url) {
     const message = payload.message || "response did not include a public URL";
     const inputRejected = /image upload failed|check the image|invalid image|unsupported image|file (?:type|format|size)/i.test(message);
-    throw new ImageProviderError(`ToAPIs image upload failed: ${message}`, {
+    throw new ImageProviderError(`上游 ToAPIs image upload failed: ${redactImageProviderMessage(message)}`, {
       category: inputRejected ? "input" : "capability",
       retryable: false,
       failoverAllowed: !inputRejected,
@@ -1672,12 +1676,12 @@ async function buildStandardImagesApiRequest(
     return {
       method: "POST",
       headers: openaiImageHeaders(true, route, true),
-      body: JSON.stringify(buildStandardImagesGenerationBody(openaiImageRouteConfig(route).model, prompt, count, options, sendQuality)),
+      body: JSON.stringify(buildStandardImagesGenerationBody(options.model ?? openaiImageRouteConfig(route).model, prompt, count, options, sendQuality)),
     };
   }
 
   const form = new FormData();
-  form.append("model", openaiImageRouteConfig(route).model);
+  form.append("model", options.model ?? openaiImageRouteConfig(route).model);
   form.append("prompt", prompt);
   form.append("n", String(count));
   form.append("size", options.size);
@@ -1733,13 +1737,13 @@ async function readJsonResponse<T>(response: Response, label: string): Promise<T
 
 function parseJsonResponse<T>(body: string, response: Response, label: string, contentType = response.headers.get("content-type") || ""): T {
   if (!contentType.toLowerCase().includes("application/json")) {
-    throw new Error(`${label} returned non-JSON response: ${response.status} ${contentType} ${body.slice(0, 180)}`);
+    throw new Error(`${label} returned non-JSON response: ${response.status} ${contentType}`);
   }
 
   try {
     return JSON.parse(body) as T;
   } catch (error) {
-    throw new Error(`${label} returned invalid JSON: ${error instanceof Error ? error.message : "parse failed"}`);
+    throw new Error(`${label} returned invalid JSON.`, { cause: error });
   }
 }
 
@@ -1771,9 +1775,30 @@ function toImageProviderTransportError(error: unknown) {
   });
 }
 
+function redactImageProviderMessage(message: string) {
+  let safe = message;
+  for (const secret of [appConfig.openaiApiKey, appConfig.openaiImageApiKey, appConfig.openaiImageBackupApiKey]) {
+    if (secret) safe = safe.split(secret).join("[redacted]");
+  }
+  return safe.replace(/Bearer\s+[^\s,;"'<>]+/gi, "Bearer [redacted]")
+    .replace(/\bsk-[A-Za-z0-9_-]+/g, "[redacted]")
+    .replace(/((?:api[_-]?key|token|authorization)\s*[=:]\s*)[^\s,;"'<>]+/gi, "$1[redacted]")
+    .replace(/https?:\/\/\S+/g, "[provider-url]").slice(0, 1200);
+}
+
+function imageProviderErrorDetail(body: string) {
+  let payload: unknown;
+  try { payload = JSON.parse(body); } catch { return /^\s*</.test(body) ? "" : redactImageProviderMessage(body); }
+  if (!payload || typeof payload !== "object") return "";
+  const record = payload as Record<string, unknown>;
+  const error = record.error && typeof record.error === "object" ? record.error as Record<string, unknown> : record;
+  return redactImageProviderMessage([error.code, error.message, typeof record.error === "string" ? record.error : undefined]
+    .filter((value) => typeof value === "string" || typeof value === "number").join(": "));
+}
+
 function toImageProviderHttpError(label: string, status: number, body: string) {
   const contentRejected = /cannot fulfill this request|content policy|safety|moderation/i.test(body);
-  const inputRejected = /image upload failed|check the image|invalid image|failed to download|download image/i.test(body);
+  const inputRejected = /image upload failed|check the image|invalid image|failed to download|download image|(?:unsupported|invalid)[_ -](?:size|resolution)|(?:size|resolution).{0,30}(?:not supported|unsupported)/i.test(body);
   const capabilityRejected = status === 404 || isImageProviderCapabilityError(body);
   const authRejected = status === 401 || status === 403;
   const retryable = !contentRejected && !inputRejected && !capabilityRejected && retryableImageStatuses.has(status);
@@ -1790,10 +1815,11 @@ function toImageProviderHttpError(label: string, status: number, body: string) {
           : status === 408
             ? "timeout"
             : "provider";
-  return new ImageProviderError(`${label} failed with HTTP ${status}.`, {
+  const detail = imageProviderErrorDetail(body);
+  return new ImageProviderError(`上游 ${redactImageProviderMessage(label)} failed with HTTP ${status}.${detail ? ` ${detail}` : ""}`, {
     category,
     retryable,
-    failoverAllowed: !contentRejected && !inputRejected && category !== "input" && (authRejected || capabilityRejected || retryableImageStatuses.has(status)),
+    failoverAllowed: !contentRejected && !inputRejected && !capabilityRejected && category !== "input" && (authRejected || retryableImageStatuses.has(status)),
   });
 }
 
@@ -2307,6 +2333,8 @@ function resolveReferenceMode(encodedCount: number, urlCount: number): PreparedR
 
 function normalizeImageOptions(options?: Partial<ImageGenerationOptions>): ImageGenerationOptions {
   return {
+    model: options?.model === undefined ? undefined : normalizeImageModel(options.model),
+    toApisRequestFormat: options?.toApisRequestFormat === undefined ? undefined : normalizeToApisRequestFormat(options.toApisRequestFormat),
     size: normalizeImageGenerationSize(options?.size),
     quality: normalizeImageQuality(options?.quality),
     background: options?.background,
