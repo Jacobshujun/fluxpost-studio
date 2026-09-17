@@ -209,3 +209,36 @@ Fixed Canvas model-style result projection to preview the actual non-empty decla
 ### Next Steps
 
 - None - task complete
+
+
+## Session 65: Layer editor loading batch one
+
+**Date**: 2026-09-17
+**Task**: Layer editor loading batch one
+**Branch**: `local`
+
+### Summary
+
+Reused upstream media metadata and added bounded, deduplicated inspection with per-source retry. Full baseline and eight mocked browser scenarios passed. PowerShell merged stderr can report NativeCommandError for Node warnings; external subprocess log capture confirmed baseline exit 0. No remote release.
+
+### Main Changes
+
+(Add details)
+
+### Git Commits
+
+| Hash | Message |
+|------|---------|
+| `a864929` | (see git log) |
+
+### Testing
+
+- [OK] (Add test results)
+
+### Status
+
+[OK] **Completed**
+
+### Next Steps
+
+- None - task complete
