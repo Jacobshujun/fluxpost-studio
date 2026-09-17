@@ -4,9 +4,14 @@ Last updated: 2026-09-17
 
 ## One-Line Status
 
-Canvas layer composition passes baseline and desktop/mobile browser checks. Production unchanged.
+Layer composition upload-cleanup failure fixed; PNG/MP4 regressions and full baseline pass. Production unchanged.
 
 ## Current Focus
+
+- 2026-09-17: Latest local composition failed after successful MP4 persistence:
+  TOS removed the local file before output hashing. Hashing now precedes storage;
+  consuming-storage PNG/MP4 regressions and full baseline pass.
+  Evidence: .trellis/tasks/archive/2026-09/09-17-layer-compose-persistence/verification.md.
 
 - 2026-09-17: Layer composition reruns now bind single-item upstream outputs by
   node/port; old layers need one explicit replacement, retaining crop/layout.

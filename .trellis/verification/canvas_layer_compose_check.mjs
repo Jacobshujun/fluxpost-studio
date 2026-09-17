@@ -1,6 +1,7 @@
 import assert from "node:assert/strict";
+import { createHash } from "node:crypto";
 import { createRequire } from "node:module";
-import { createReadStream, mkdtempSync, readFileSync, readdirSync, rmSync, writeFileSync, utimesSync } from "node:fs";
+import { createReadStream, existsSync, mkdtempSync, readFileSync, readdirSync, rmSync, writeFileSync, utimesSync } from "node:fs";
 import { tmpdir } from "node:os";
 import path from "node:path";
 import { execFileSync } from "node:child_process";
@@ -235,5 +236,30 @@ try {
   assert.equal(uploadedSource.hasAudio, false); assert.equal(loading.hasComposeMetadata(uploadedSource), true);
   const draft = structuredClone(graph); delete draft.nodes[0].config.composition.layers[0].source;
   assert.equal(graphLib.validateCanvasGraphForPersistence(draft).valid, true); assert.equal(graphLib.validateCanvasGraph(draft).valid, false);
+  // TOS persistence consumes the local output after verifying the uploaded bytes.
+  // Exercise both newly rendered and cached outputs without contacting storage.
+  for (const kind of ["image", "video"]) {
+    const persistenceConfig = config([kind === "image" ? red : boundVideo], { background: "#123456" });
+    const persistenceSources = kind === "image" ? [source("image", "red")] : freshVideo;
+    const localPersist = storage.persistRuntimeMedia;
+    const local = await renderer.renderLayerComposition(persistenceConfig, persistenceSources, "owner");
+    for (const cached of [true, false]) {
+      const localPath = outputPath(local);
+      assert.equal(existsSync(localPath), cached);
+      let uploadedDigest;
+      storage.persistRuntimeMedia = async (input) => {
+        uploadedDigest = createHash("sha256").update(readFileSync(input.filePath)).digest("hex");
+        rmSync(input.filePath);
+        return `https://storage.invalid${input.publicPath}`;
+      };
+      try {
+        const persisted = await renderer.renderLayerComposition(persistenceConfig, persistenceSources, "owner");
+        assert.equal(persisted.item.url, `https://storage.invalid${local.item.url}`);
+        assert.equal(persisted.item.sha256, uploadedDigest, "metadata retains the uploaded byte digest");
+        assert.equal(persisted.kind, kind === "image" ? "images" : "videos");
+        assert.equal(existsSync(localPath), false, "persistence cleanup remains intact");
+      } finally { storage.persistRuntimeMedia = localPersist; }
+    }
+  }
   console.log("Layer composition: PNG/MP4 rendering, metadata reuse/cache/expiry/ownership, no-preview-hash, loading concurrency/retry/cancellation, graph and workflow round trips passed.");
 } finally { rmSync(temp, { recursive: true, force: true }); }

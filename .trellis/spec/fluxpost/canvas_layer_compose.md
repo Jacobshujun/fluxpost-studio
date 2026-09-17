@@ -32,6 +32,10 @@ is `composition: LayerComposeConfig` protocol 1 in the existing workflow JSON.
   content, so preview metadata never substitutes for export hash/size/probe checks.
 - Rendering uses actual-byte digests, versioned config keys, staged output and
   dimension/duration/audio checks. Existing localImage/localVideo pools apply.
+- Compute the output SHA-256 before `persistRuntimeMedia`: verified TOS persistence
+  consumes the local file. Return the captured digest with the canonical URL;
+  never read/probe/stat the output after persistence. Offline producer tests must
+  cover consuming storage for fresh and cached PNG/MP4 outputs.
 - Incomplete sources remain saveable; execution rejects them. Dialog drafts are
   applied atomically, with local bounded undo/redo. No database migration.
 - The editor portal mounts under body, outside .canvas-shell. Surfaces and controls

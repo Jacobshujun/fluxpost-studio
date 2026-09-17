@@ -201,9 +201,11 @@ export async function renderLayerComposition(rawConfig: unknown, sources: Compos
         await validateOutput(staging, config, isVideo, duration, hasAudio);
         await rename(staging, output); staging = "";
       } else await validateOutput(output, config, isVideo, duration, hasAudio);
+      // Verified object-storage persistence removes the local output file.
+      const sha256 = await digestFile(output);
       const url = await persistRuntimeMedia({ filePath: output, publicPath, contentType: isVideo ? "video/mp4" : "image/png", overwrite: false });
       return { kind: isVideo ? "videos" : "images", item: { url, name: `合成.${extension}`, mimeType: isVideo ? "video/mp4" : "image/png", width: config.width, height: config.height,
-        ...(isVideo ? { durationSeconds: duration } : {}), sha256: await digestFile(output), layerComposition: { configKey, hasAudio } } };
+        ...(isVideo ? { durationSeconds: duration } : {}), sha256, layerComposition: { configKey, hasAudio } } };
     } finally {
       if (staging) await rm(staging, { force: true });
       await rm(temporary, { recursive: true, force: true });
