@@ -20,6 +20,9 @@ is `composition: LayerComposeConfig` protocol 1 in the existing workflow JSON.
   dimension/duration/audio checks. Existing localImage/localVideo pools apply.
 - Incomplete sources remain saveable; execution rejects them. Dialog drafts are
   applied atomically, with local bounded undo/redo. No database migration.
+- The editor portal mounts under body, outside .canvas-shell. Surfaces and controls
+  use global panel-solid with text-strong; canvas-scoped CSS tokens are unavailable.
+  UI theme changes must not recolor the output canvas or its layers.
 
 Verification: `node .trellis/verification/canvas_layer_compose_check.mjs` (baseline)
 and `python .trellis/verification/canvas_layer_compose_browser_check.py` with

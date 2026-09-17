@@ -25,8 +25,31 @@ def layer():
                 x=0, y=0, width=1080, height=1920, color="#ffffff", fit="contain",
                 crop=dict(x=0, y=0, width=1, height=1), endBehavior="hold")
 
-async def check(browser, width, video_bytes):
+async def assert_theme_contrast(dialog):
+    checks = await dialog.evaluate("""root => {
+        const rgba = value => value.match(/[\\d.]+/g).map(Number);
+        const luminance = rgb => rgb.slice(0, 3).map(v => {
+            const s = v / 255; return s <= .04045 ? s / 12.92 : ((s + .055) / 1.055) ** 2.4;
+        }).reduce((sum, v, i) => sum + v * [.2126, .7152, .0722][i], 0);
+        return ['header strong', '.layer-assets h3', '.layer-name', 'input[aria-label="画布宽度"]', 'select', 'button[aria-label="关闭图层编辑器"]', 'footer'].map(selector => {
+            const el = root.querySelector(selector), style = getComputedStyle(el);
+            let bg = rgba(getComputedStyle(root).backgroundColor);
+            const ancestors = []; for (let p = el; p && p !== root; p = p.parentElement) ancestors.unshift(p);
+            for (const p of ancestors) {
+                const c = rgba(getComputedStyle(p).backgroundColor), a = c[3] ?? 1;
+                bg = bg.slice(0, 3).map((v, i) => c[i] * a + v * (1 - a));
+            }
+            const c = rgba(style.color), a = c[3] ?? 1;
+            const fg = c.slice(0, 3).map((v, i) => v * a + bg[i] * (1 - a));
+            const l = [luminance(fg), luminance(bg)].sort((a, b) => b - a);
+            return {selector, ratio: (l[0] + .05) / (l[1] + .05), background: bg};
+        });
+    }""")
+    assert all(item["ratio"] >= 4.5 for item in checks), checks
+
+async def check(browser, width, video_bytes, theme):
     page = await browser.new_page(viewport=dict(width=width, height=960))
+    await page.add_init_script(f"localStorage.setItem('fluxpost-theme', {json.dumps(theme)})")
     errors = []
     page.on("pageerror", lambda error: errors.append(str(error)))
     config = dict(protocolVersion=1, width=1080, height=1920, background="#ffffff", durationMode="longest", durationSeconds=10, audioLayerId=None, layers=[layer()])
@@ -69,6 +92,13 @@ async def check(browser, width, video_bytes):
     await node.get_by_role("button", name="编辑图层", exact=True).click()
     dialog = page.get_by_role("dialog", name="图层合成编辑器")
     await expect(dialog).to_be_visible()
+    await assert_theme_contrast(dialog)
+    # Portals must follow changes while already open, not only at first mount.
+    for active_theme in ["professional", "editorial", "creator", theme]:
+        await page.evaluate("theme => { localStorage.setItem('fluxpost-theme', theme); document.documentElement.dataset.theme = theme; window.dispatchEvent(new Event('fluxpost-theme-change')); }", active_theme)
+        await assert_theme_contrast(dialog)
+    assert await dialog.locator(".layer-board").evaluate("el => getComputedStyle(el).backgroundColor") == "rgb(255, 255, 255)"
+    await page.screenshot(path=f"test-artifacts/canvas-layer-compose-theme-{theme}-{width}.png", full_page=True)
     await dialog.get_by_label("画布宽度", exact=True).fill("400")
     await dialog.get_by_label("画布高度", exact=True).fill("600")
     await dialog.get_by_label("添加素材 1", exact=True).click()
@@ -112,7 +142,7 @@ async def check(browser, width, video_bytes):
     await dialog.get_by_label("暂停合成预览", exact=True).click()
     assert not await dialog.evaluate("el => el.scrollWidth > el.clientWidth + 1")
     Path("test-artifacts").mkdir(exist_ok=True)
-    await page.screenshot(path=f"test-artifacts/canvas-layer-compose-{width}.png", full_page=True)
+    await page.screenshot(path=f"test-artifacts/canvas-layer-compose-{theme}-{width}.png", full_page=True)
     await dialog.get_by_role("button", name="应用", exact=True).click()
     await expect(dialog).to_have_count(0)
     await page.wait_for_function("!document.querySelector('.canvas-message .is-dirty')")
@@ -134,7 +164,7 @@ async def check(browser, width, video_bytes):
     assert not errors, errors
     assert saves
     await page.close()
-    print(json.dumps(dict(width=width, saves=len(saves), result="passed")), flush=True)
+    print(json.dumps(dict(width=width, theme=theme, saves=len(saves), result="passed")), flush=True)
 
 async def main():
     with tempfile.TemporaryDirectory(prefix="fluxpost-layer-browser-") as temp:
@@ -143,7 +173,9 @@ async def main():
         async with async_playwright() as playwright:
             browser = await playwright.chromium.launch(channel="chrome", headless=True)
             try:
-                for width in [1440, 390]: await check(browser, width, video.read_bytes())
+                Path("test-artifacts").mkdir(exist_ok=True)
+                for theme in ["creator", "professional", "editorial"]:
+                    for width in [1440, 390]: await check(browser, width, video.read_bytes(), theme)
             except Exception:
                 Path("test-artifacts").mkdir(exist_ok=True)
                 for context in browser.contexts:
