@@ -135,8 +135,10 @@ export async function renderLayerComposition(rawConfig: unknown, sources: Compos
     try {
       for (const layer of visible.filter((entry) => entry.kind !== "solid")) {
         const source = findComposeSource(layer, sources);
-        if (!source) throw new CanvasMediaNeedsConfigError(`「${layer.name}」素材已失效，请重新选择。`);
-        if (!prepared.some((entry) => entry.kind === source.kind && entry.key === source.key)) prepared.push(await prepareSource(source, owner));
+        if (!source) throw new CanvasMediaNeedsConfigError(layer.source?.binding
+          ? `「${layer.name}」绑定的上游输出不可用或包含多个素材，请检查连线并重新选择。`
+          : `「${layer.name}」素材已失效，请重新选择。`);
+        if (!findComposeSource(layer, prepared)) prepared.push(await prepareSource(source, owner));
       }
       const duration = isVideo ? composeDuration(config, prepared) : 0;
       if (isVideo && (!duration || duration > 600)) throw new CanvasMediaNeedsConfigError("输出时长必须大于 0 且不超过 600 秒。");

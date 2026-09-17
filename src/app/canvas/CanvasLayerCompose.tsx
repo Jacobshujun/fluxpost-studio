@@ -5,7 +5,7 @@ import { createPortal } from "react-dom";
 import { useEffect, useRef, useState } from "react";
 import type { CSSProperties, PointerEvent as ReactPointerEvent } from "react";
 import { Layers3, Plus, Undo2, Redo2, X, Play, Pause, Copy, Trash2, ArrowUp, ArrowDown, Eye, EyeOff, LockKeyhole, LockKeyholeOpen, Crop } from "lucide-react";
-import { composeConfigKey, composeDuration, composeLayerGeometry, defaultLayerComposeConfig, findComposeSource, fullLayerCrop, isLayerComposeConfig, newComposeLayer, validateLayerComposeConfig } from "@/lib/canvas/layer-compose-contract";
+import { composeConfigKey, composeDuration, composeLayerGeometry, composeLayerSource, defaultLayerComposeConfig, findComposeSource, fullLayerCrop, isLayerComposeConfig, newComposeLayer, validateLayerComposeConfig } from "@/lib/canvas/layer-compose-contract";
 import type { ComposeLayer, ComposeSource, LayerComposeConfig } from "@/lib/canvas/layer-compose-contract";
 import { composeMetadataId, createComposeMetadataLoader, hasComposeMetadata } from "@/lib/canvas/layer-compose-metadata";
 import type { ComposeMetadataState } from "@/lib/canvas/layer-compose-metadata";
@@ -89,7 +89,7 @@ function LayerComposeEditor({ initial, initialSources, onApply, onClose }: { ini
   }, []);
   useEffect(() => {
     for (const source of initialSources) {
-      if (draft.layers.some((layer) => layer.visible && layer.source?.key === source.key && layer.kind === source.kind)) loader.current?.ensure(source);
+      if (draft.layers.some((layer) => layer.visible && findComposeSource(layer, initialSources) === source)) loader.current?.ensure(source);
     }
   }, [draft.layers, initialSources]);
   useEffect(() => {
@@ -108,9 +108,9 @@ function LayerComposeEditor({ initial, initialSources, onApply, onClose }: { ini
     if ((!replace && draft.layers.length >= 24) || (!replace && source.kind === "video" && draft.layers.filter((layer) => layer.kind === "video").length >= 4)) { setMessage("最多 24 个图层，其中最多 4 个视频。"); return; }
     setMessage(""); setPlaying(false);
     if (replace && selected && !selected.locked) {
-      commit({ ...draft, layers: draft.layers.map((layer) => layer.id === selected.id ? { ...layer, source: { kind: source.kind, key: source.key }, crop: { ...fullLayerCrop } } : layer) });
+      commit({ ...draft, layers: draft.layers.map((layer) => layer.id === selected.id ? { ...layer, source: composeLayerSource(source) } : layer) });
     } else {
-      const layer = { ...newComposeLayer(nextId(), source.kind, draft.width, draft.height), name: source.media.name || `${source.kind === "image" ? "图片" : "视频"} ${draft.layers.length}`, source: { kind: source.kind, key: source.key } };
+      const layer = { ...newComposeLayer(nextId(), source.kind, draft.width, draft.height), name: source.media.name || `${source.kind === "image" ? "图片" : "视频"} ${draft.layers.length}`, source: composeLayerSource(source) };
       commit({ ...draft, layers: [...draft.layers, layer], audioLayerId: source.kind === "video" && !draft.layers.some((item) => item.kind === "video") ? layer.id : draft.audioLayerId });
       setSelectedId(layer.id);
     }
@@ -167,6 +167,7 @@ function LayerComposeEditor({ initial, initialSources, onApply, onClose }: { ini
           {sources.map((source, index) => {
             const state = metadata[composeMetadataId(source)];
             return <div className="layer-asset" key={composeMetadataId(source)}><span>{source.kind === "image" ? "图片" : "视频"} · {source.media.name || index + 1}</span><button type="button" aria-label={`添加素材 ${index + 1}`} onClick={() => addMedia(source)}><Plus /></button>{selected?.kind === source.kind && !selected.locked ? <button type="button" onClick={() => addMedia(source, true)}>替换</button> : null}
+              <small>{source.binding ? "跟随上游最新输出" : "固定当前素材"}</small>
               {state?.status === "loading" ? <small role="status">正在读取素材…</small> : state?.status === "error" ? <small role="alert">{state.message}<button type="button" aria-label={`重试素材 ${index + 1}`} onClick={() => loader.current?.retry(source)}>重试</button></small> : hasComposeMetadata(source) ? <small>{source.width} × {source.height}{source.kind === "video" ? ` · ${source.durationSeconds?.toFixed(1)} 秒${source.hasAudio ? "" : " · 无音轨"}` : ""}</small> : null}
             </div>;
           })}

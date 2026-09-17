@@ -56,10 +56,11 @@ async def check(browser, width, video_bytes, theme):
     workflow = dict(id="layers", name="图层合成测试", revision=1, ownerUserId="owner", ownerDisplayName="Fixture", isTemplate=False, createdAt=NOW, updatedAt=NOW,
         graph=dict(viewport=dict(x=0, y=0, zoom=1), nodes=[
             dict(id="compose", type="utility.layer-compose", version=1, config=dict(composition=config), position=dict(x=40, y=40)),
-            dict(id="image", type="input.images", version=1, config=dict(urls=["/generated/layer-fixture.png"]), position=dict(x=-300, y=40)),
+            dict(id="image", type="utility.image-transform", version=1, config={}, position=dict(x=-300, y=40)),
             dict(id="video", type="input.videos", version=1, config=dict(urls=["/generated/layer-fixture.mp4"]), position=dict(x=-300, y=280)),
         ], edges=[dict(id="e1", source="image", sourcePort="images", target="compose", targetPort="images"), dict(id="e2", source="video", sourcePort="videos", target="compose", targetPort="videos")]))
     saves = []
+    output_url = "/generated/layer-fixture.png"
     async def handler(route):
         nonlocal workflow
         request = route.request
@@ -72,18 +73,19 @@ async def check(browser, width, video_bytes, theme):
             payload = dict(workflow=workflow)
         elif endpoint == "/api/canvas/runs":
             assert request.method == "GET", "No real Canvas execution allowed"
-            payload = dict(runs=[], latestNodeAttempts=[], latestSuccessfulNodeRuns=[])
+            attempt = dict(workflowRevision=workflow["revision"], runId="fixture-run", runStatus="completed", nodeRun=dict(id="fixture-image", runId="fixture-run", nodeId="image", nodeType="utility.image-transform", attempt=1, status="completed", inputs={}, outputs=dict(images=dict(kind="images", items=[dict(url=output_url)])), createdAt=NOW, updatedAt=NOW))
+            payload = dict(runs=[], latestNodeAttempts=[], latestSuccessfulNodeRuns=[attempt])
         elif endpoint == "/api/canvas/schedules": payload = dict(schedules=[])
         elif endpoint == "/api/canvas/layer-compose/inspect":
             body = request.post_data_json
-            assert body["url"] in ["/generated/layer-fixture.png", "/generated/layer-fixture.mp4"]
+            assert body["url"] in ["/generated/layer-fixture.png", "/generated/layer-fixture-next.png", "/generated/layer-fixture.mp4"]
             payload = dict(width=200, height=100, hasAudio=body["kind"] == "video", durationSeconds=2 if body["kind"] == "video" else None)
         else:
             assert request.method == "GET", endpoint
             payload = {}
         await route.fulfill(status=200, json=payload)
     await page.route("**/api/**", handler)
-    await page.route("**/generated/layer-fixture.png", lambda route: route.fulfill(status=200, body=png(), content_type="image/png"))
+    await page.route("**/generated/layer-fixture*.png", lambda route: route.fulfill(status=200, body=png(), content_type="image/png"))
     await page.route("**/generated/layer-fixture.mp4", lambda route: route.fulfill(status=200, body=video_bytes, content_type="video/mp4"))
     await page.goto(f"{BASE_URL}/canvas?workflowId=layers", wait_until="networkidle")
     node = page.locator('.react-flow__node[data-id="compose"]')
@@ -150,15 +152,36 @@ async def check(browser, width, video_bytes, theme):
     assert saved["width"] == 400 and len(saved["layers"]) == 3
     assert saved["layers"][1]["crop"]["width"] == .5
     assert saved["layers"][2]["endBehavior"] == "loop"
+    assert saved["layers"][1]["source"]["binding"] == dict(nodeId="image", port="images")
+    assert saved["layers"][2]["source"]["binding"] == dict(nodeId="video", port="videos")
     assert workflow["graph"]["nodes"][0]["position"] == dict(x=40, y=40)
     await node.get_by_role("button", name="编辑图层", exact=True).click()
     await expect(dialog.get_by_label("画布宽度", exact=True)).to_be_enabled()
     await dialog.get_by_label("画布宽度", exact=True).fill("800")
     await dialog.get_by_role("button", name="取消", exact=True).click()
+    # Simulate a new successful upstream render without changing the layer config.
+    output_url = "/generated/layer-fixture-next.png"
     await page.reload(wait_until="networkidle")
     await node.get_by_role("button", name="编辑图层", exact=True).click()
     await expect(dialog.get_by_label("画布宽度", exact=True)).to_have_value("400")
     await expect(dialog.get_by_label("画布宽度", exact=True)).to_be_enabled()
+    await expect(dialog.locator('.layer-board img[alt="前景"]')).to_have_attribute("src", output_url)
+    await expect(dialog.get_by_role("button", name="应用", exact=True)).to_be_enabled()
+    assert workflow["graph"]["nodes"][0]["config"]["composition"] == saved
+    # Explicit replacement upgrades an old URL-only layer and preserves its crop.
+    await dialog.get_by_role("button", name="取消", exact=True).click()
+    del workflow["graph"]["nodes"][0]["config"]["composition"]["layers"][1]["source"]["binding"]
+    await page.reload(wait_until="networkidle")
+    await node.get_by_role("button", name="编辑图层", exact=True).click()
+    await expect(dialog.get_by_role("button", name="应用", exact=True)).to_be_disabled()
+    await dialog.get_by_role("button", name="前景", exact=True).click()
+    await dialog.locator(".layer-asset").first.get_by_role("button", name="替换", exact=True).click()
+    await expect(dialog.get_by_role("button", name="应用", exact=True)).to_be_enabled()
+    await dialog.get_by_role("button", name="应用", exact=True).click()
+    await page.wait_for_function("!document.querySelector('.canvas-message .is-dirty')")
+    rebound = workflow["graph"]["nodes"][0]["config"]["composition"]["layers"][1]
+    assert rebound["source"]["binding"] == dict(nodeId="image", port="images")
+    assert rebound["crop"]["width"] == .5
     await page.keyboard.press("Escape")
     assert not await page.evaluate("document.documentElement.scrollWidth > innerWidth + 1")
     assert not errors, errors

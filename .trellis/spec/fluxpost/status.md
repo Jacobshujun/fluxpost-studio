@@ -8,6 +8,12 @@ Canvas layer composition passes baseline and desktop/mobile browser checks. Prod
 
 ## Current Focus
 
+- 2026-09-17: Layer composition reruns now bind single-item upstream outputs by
+  node/port; old layers need one explicit replacement, retaining crop/layout.
+  Full baseline and three-theme 1440/390 browser checks pass. Local activation is
+  pending a clean worktree (concurrent canvas-feishu-compression task).
+  Evidence: .trellis/tasks/archive/2026-09/09-17-layer-compose-rerun/verification.md.
+
 - 2026-09-17: Layer editor loading batch one reuses uploaded metadata, removes preview
   hashing, caches/deduplicates probes and keeps editing available during source loading.
   Offline and desktop/390 browser evidence: .trellis/tasks/archive/2026-09/09-17-layer-compose-loading/verification.md.

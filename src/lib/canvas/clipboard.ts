@@ -1,5 +1,6 @@
 import { decodeCanvasGraphFragment } from "./serialization";
 import { getCanvasGraphBudget, stripPortableCanvasNode } from "./iteration";
+import { isLayerComposeConfig } from "./layer-compose-contract";
 import { CANVAS_GRAPH_LIMITS } from "./types";
 import type { CanvasEdge, CanvasGraph, CanvasNode, CanvasPosition, CanvasSchedulerRole } from "./types";
 
@@ -51,18 +52,25 @@ export function instantiateCanvasClipboardPayload(
   const idMap = new Map(payload.nodes.map((node, index) => [node.id, createId("node", index)]));
   let nodeIndex = payload.nodes.length;
   let edgeIndex = payload.edges.length;
-  const cloneNode = (source: CanvasNode): CanvasNode => {
+  const cloneNode = (source: CanvasNode, copiedIds: Map<string, string>): CanvasNode => {
     const cloned = stripPortableCanvasNode(source);
+    if (isLayerComposeConfig(cloned.config.composition)) {
+      for (const layer of cloned.config.composition.layers) {
+        if (layer.source?.binding && copiedIds.has(layer.source.binding.nodeId)) {
+          layer.source.binding.nodeId = copiedIds.get(layer.source.binding.nodeId)!;
+        }
+      }
+    }
     if (!cloned.iteration) return cloned;
     const graph = cloned.iteration.graph;
     const innerIds = new Map(graph.nodes.map((node) => [node.id, createId("node", nodeIndex++)]));
-    graph.nodes = graph.nodes.map((node) => ({ ...cloneNode(node), id: innerIds.get(node.id)! }));
+    graph.nodes = graph.nodes.map((node) => ({ ...cloneNode(node, innerIds), id: innerIds.get(node.id)! }));
     graph.edges = graph.edges.map((edge) => ({ ...edge, id: createId("edge", edgeIndex++), source: innerIds.get(edge.source)!, target: innerIds.get(edge.target)! }));
     for (const selector of Object.values(cloned.iteration.outputs)) selector.nodeId = innerIds.get(selector.nodeId)!;
     return cloned;
   };
   const nodes = payload.nodes.map((node) => ({
-    ...cloneNode(node),
+    ...cloneNode(node, idMap),
     id: idMap.get(node.id) as string,
     position: { x: anchor.x + node.position.x - minX, y: anchor.y + node.position.y - minY },
   }));

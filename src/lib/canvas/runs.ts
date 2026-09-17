@@ -28,6 +28,7 @@ import {
 import { concurrencyConfig } from "../concurrency";
 import { IMAGE_NETWORK_WAIT_REASON, isImageNetworkUnavailableError } from "../image-transport";
 import { CanvasNeedsConfigError, executeCanvasNode, resolveCanvasLiteralOutputs, type CanvasNodeExecutionResult } from "./executors";
+import { bindComposeInput } from "./layer-compose-contract";
 import { ArkSeedanceNeedsConfigError, getArkSeedanceReadiness } from "./seedance";
 import { buildCanvasRunPlan, collectDescendants } from "./graph";
 import { getCanvasNodeDefinition, getCanvasNodeExecutionMode, getCanvasRequiredInputPorts, normalizeUrlList, orderedCanvasGptImageInputs } from "./registry";
@@ -146,7 +147,7 @@ async function resolveCanvasRunPlan(
     const node = findNode(graph.nodes, nodeId);
     const definition = getCanvasNodeDefinition(node.type, node.version);
     if (!definition) continue;
-    const inputs = collectInputs(graph.edges, node.id, outputs);
+    const inputs = collectInputs(graph.edges, node.id, outputs, node.type === "utility.layer-compose");
     const mode = getCanvasNodeExecutionMode(node);
 
     if (mode === "disabled") {
@@ -712,7 +713,7 @@ async function runPlannedNode(
   latest: Map<string, CanvasNodeRun>,
   outputs: Map<string, Record<string, CanvasArtifact>>,
 ) {
-  const inputs = collectInputs(run.graphSnapshot.edges, node.id, outputs);
+  const inputs = collectInputs(run.graphSnapshot.edges, node.id, outputs, node.type === "utility.layer-compose");
   if (run.iterationRepairing && !run.iterationRefreshRegionIds?.length && !run.retryNodeIds?.includes(node.id)) {
     const existing = latest.get(node.id);
     if (existing) return { nodeId: node.id, nodeRun: existing };
@@ -976,11 +977,11 @@ async function saveTerminalNodeRun(
   });
 }
 
-function collectInputs(edges: CanvasEdge[], targetNodeId: string, outputs: Map<string, Record<string, CanvasArtifact>>) {
+function collectInputs(edges: CanvasEdge[], targetNodeId: string, outputs: Map<string, Record<string, CanvasArtifact>>, compose = false) {
   const result: Record<string, CanvasArtifact[]> = {};
   for (const edge of edges.filter((item) => item.target === targetNodeId)) {
     const artifact = outputs.get(edge.source)?.[edge.sourcePort];
-    if (artifact) (result[edge.targetPort] ||= []).push(artifact);
+    if (artifact) (result[edge.targetPort] ||= []).push(compose ? bindComposeInput(artifact, edge.source, edge.sourcePort) : artifact);
   }
   return result;
 }

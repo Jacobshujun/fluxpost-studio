@@ -1,5 +1,5 @@
 import type { CanvasArtifact, CanvasGraph, CanvasMediaReference, CanvasNodeRun } from "./types";
-import { composeSources } from "./layer-compose-contract";
+import { bindComposeInput, composeSources } from "./layer-compose-contract";
 import { selectedCanvasVideo } from "./video-loader";
 import { canvasSourceVideoSnapshotFromConfig, isCanvasSourceVideoSnapshotCurrent } from "./source-video-contract";
 
@@ -23,6 +23,7 @@ export function resolveComposeEditorSources(graph: CanvasGraph, nodeId: string, 
       if (edge.sourcePort === "images") artifact = { kind: "images", items: urlList(node.config.snapshotImageUrls) };
       if (edge.sourcePort === "videos") artifact = { kind: "videos", items: urlList(node.config.snapshotVideoUrls) };
     } else artifact = node.frozenOutputs?.[edge.sourcePort as "images" | "text"] || runs.get(node.id)?.outputs[edge.sourcePort];
+    if (artifact) artifact = bindComposeInput(artifact, edge.source, edge.sourcePort);
     if (artifact?.kind === "images" && edge.targetPort === "images") images.push(...artifact.items);
     if (artifact?.kind === "videos" && edge.targetPort === "videos") videos.push(...artifact.items);
   }

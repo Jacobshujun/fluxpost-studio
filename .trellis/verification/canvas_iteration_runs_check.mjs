@@ -48,6 +48,7 @@ const registry = {
   getCanvasRequiredInputPorts: (node) => registry.getCanvasNodeDefinition(node.type).inputs.filter((port) => port.required),
 };
 const runtime = load("src/lib/canvas/runs.ts", {
+  "./layer-compose-contract": load("src/lib/canvas/layer-compose-contract.ts", {}),
   "../database": database, "../activity-log": {},
   "../workspace-ownership": { canAccessWorkspaceOwner: (account, owner) => account.id === owner },
   "../concurrency": { concurrencyConfig: { canvasRun: 0 } },
@@ -101,5 +102,14 @@ await runtime.cancelForTest({ ...run, id: "cancel-region" }, new Set(["region"])
 const cancelledAttempt = latest("cancel-region")[0];
 assert.deepEqual(cancelledAttempt.internalMetadata.iteration, cancelMetadata, "cancellation preserves region item identities for details and retry");
 assert.equal(cancelledAttempt.attempt, 4);
+
+// Exercise the real run dispatcher, not just the source annotation helper.
+const composeRun = { ...run, id: "compose-binding", graphSnapshot: { nodes: [
+  { id: "generated", type: "input.images", config: {} },
+  { id: "compose", type: "utility.layer-compose", config: {} },
+], edges: [{ source: "generated", sourcePort: "images", target: "compose", targetPort: "images" }] } };
+records.set(composeRun.id, clone(composeRun));
+assert.equal((await runtime.executeForTest(composeRun)).status, "completed");
+assert.deepEqual(calls.at(-1).inputs.images[0].items[0].composeBinding, { nodeId: "generated", port: "images" });
 
 console.log("Canvas iteration runs: durable yield/resume, isolated entry, repair boundary and owner/cancel checks passed.");

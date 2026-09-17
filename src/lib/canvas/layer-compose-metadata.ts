@@ -1,7 +1,8 @@
 import type { ComposeSource } from "./layer-compose-contract";
+import { composeSourceId } from "./layer-compose-contract";
 
 export type ComposeMetadataState = { status: "loading" } | { status: "ready"; source: ComposeSource } | { status: "error"; message: string };
-export const composeMetadataId = (source: ComposeSource) => `${source.kind}:${source.key}`;
+export const composeMetadataId = (source: ComposeSource) => source.binding ? composeSourceId(source) : `${source.kind}:${source.key}`;
 
 export function hasComposeMetadata(source: ComposeSource) {
   return Number.isFinite(source.width) && source.width! > 0 && Number.isFinite(source.height) && source.height! > 0

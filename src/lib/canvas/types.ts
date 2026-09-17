@@ -1,7 +1,7 @@
 import type { ContentPoolSelectionFilter, ContentTag, GeneratedPost, Platform, SourceMediaType, SourceUsageStatus } from "../types";
 import type { CompetitorWorkbookCardSnapshot, CompetitorWorkbookRowSnapshot, CompetitorWorkbookSnapshot } from "../competitor-workbook";
 import type { ImageProcessingReport } from "./image-process-contract";
-import type { LayerComposeConfig } from "./layer-compose-contract";
+import type { ComposeInputBinding, LayerComposeConfig } from "./layer-compose-contract";
 
 export type CanvasArtifactKind = "text" | "images" | "audios" | "videos" | "socialPost" | "publishJobRef";
 export type CanvasPortKind = CanvasArtifactKind | "any" | "visual";
@@ -27,6 +27,7 @@ export type CanvasSourceVideoSnapshot = {
 };
 
 export type CanvasMediaReference = {
+  composeBinding?: ComposeInputBinding;
   hasAudio?: boolean;
   layerComposition?: { configKey: string; hasAudio: boolean };
   imageProcessing?: ImageProcessingReport;

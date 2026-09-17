@@ -1,6 +1,7 @@
-import type { CanvasMediaReference } from "./types";
+import type { CanvasArtifact, CanvasMediaReference } from "./types";
 
-export type LayerSource = { kind: "image" | "video"; key: string };
+export type ComposeInputBinding = { nodeId: string; port: string };
+export type LayerSource = { kind: "image" | "video"; key: string; binding?: ComposeInputBinding };
 export type ComposeSource = LayerSource & { media: CanvasMediaReference; width?: number; height?: number; durationSeconds?: number; hasAudio?: boolean };
 export type ComposeLayer = {
   id: string; name: string; kind: "solid" | "image" | "video";
@@ -45,6 +46,11 @@ export function isLayerComposeConfig(value: unknown): value is LayerComposeConfi
       || !finite(layer.crop.width, 0.00001, 1) || !finite(layer.crop.height, 0.00001, 1)
       || layer.crop.x + layer.crop.width > 1.000001 || layer.crop.y + layer.crop.height > 1.000001) return false;
     if (layer.source !== undefined && (layer.kind === "solid" || !record(layer.source) || layer.source.kind !== layer.kind || typeof layer.source.key !== "string" || !layer.source.key || layer.source.key.length > 8192)) return false;
+    if (record(layer.source) && layer.source.binding !== undefined) {
+      const binding = layer.source.binding;
+      if (!record(binding) || typeof binding.nodeId !== "string" || !binding.nodeId.trim() || binding.nodeId.length > 160
+        || typeof binding.port !== "string" || !binding.port.trim() || binding.port.length > 160) return false;
+    }
     ids.add(layer.id); return true;
   }) && value.layers.filter((layer) => layer.kind === "video").length <= 4;
 }
@@ -62,16 +68,36 @@ export function validateLayerComposeConfig(value: unknown): string[] {
   return errors;
 }
 export function composeSourceKey(media: CanvasMediaReference) { return media.sha256 ? `sha256:${media.sha256}` : `url:${media.url}`; }
+export function composeSourceId(source: LayerSource) {
+  return JSON.stringify([source.kind, source.key, source.binding?.nodeId, source.binding?.port]);
+}
+export function composeLayerSource(source: ComposeSource): LayerSource {
+  return { kind: source.kind, key: source.key, ...(source.binding ? { binding: { ...source.binding } } : {}) };
+}
+// Bind a whole single-item output, never a position in an input array. Do not carry
+// provenance inherited from another composition through the immediate graph edge.
+export function bindComposeInput(artifact: CanvasArtifact, nodeId: string, port: string): CanvasArtifact {
+  if (artifact.kind !== "images" && artifact.kind !== "videos") return artifact;
+  return { ...artifact, items: artifact.items.map((media) => ({ ...media,
+    composeBinding: artifact.items.length === 1 ? { nodeId, port } : undefined,
+  })) };
+}
 export function composeSources(images: CanvasMediaReference[], videos: CanvasMediaReference[]): ComposeSource[] {
   const sources = new Map<string, ComposeSource>();
   for (const [kind, items] of [["image", images], ["video", videos]] as const) for (const media of items) {
     const key = composeSourceKey(media);
-    sources.set(`${kind}:${key}`, { kind, key, media, width: media.width, height: media.height, durationSeconds: media.durationSeconds, hasAudio: media.hasAudio ?? media.layerComposition?.hasAudio });
+    const source = { kind, key, binding: media.composeBinding, media, width: media.width, height: media.height, durationSeconds: media.durationSeconds, hasAudio: media.hasAudio ?? media.layerComposition?.hasAudio };
+    sources.set(composeSourceId(source), source);
   }
   return [...sources.values()];
 }
 export function findComposeSource(layer: ComposeLayer, sources: ComposeSource[]) {
-  return sources.find((source) => source.kind === layer.source?.kind && source.key === layer.source.key);
+  const reference = layer.source;
+  if (!reference) return undefined;
+  if (!reference.binding) return sources.find((source) => source.kind === reference.kind && source.key === reference.key);
+  const matches = sources.filter((source) => source.kind === reference.kind
+    && source.binding?.nodeId === reference.binding!.nodeId && source.binding?.port === reference.binding!.port);
+  return matches.length === 1 ? matches[0] : undefined;
 }
 export function composeDuration(config: LayerComposeConfig, sources: ComposeSource[]) {
   const longest = Math.max(0, ...config.layers.filter((layer) => layer.visible && layer.kind === "video").map((layer) => findComposeSource(layer, sources)?.durationSeconds || 0));

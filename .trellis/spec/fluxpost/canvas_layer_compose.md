@@ -6,8 +6,9 @@ is `composition: LayerComposeConfig` protocol 1 in the existing workflow JSON.
 
 - Canvas: integer 64–4096 px per edge; MP4 requires even dimensions and opaque base.
 - At most 24 layers including 4 videos. Visibility controls output; locks only editing.
-- Layers use source hash or URL identity, never input indices. Missing identities
-  require reselection. The execution checks any supplied hash against actual bytes.
+- Single-item upstream outputs use node/port bindings across reruns. Multi-item
+  and legacy selections use source hash or URL identity, never input indices.
+  Missing/ambiguous bindings require reselection. Rendering checks supplied hashes.
 - Non-destructive normalized crop plus contain/cover geometry is shared between DOM,
   Sharp and FFmpeg. Positions and clipping use rounded output pixels.
 - Visible videos start together. Longest/custom duration is capped at 600 seconds;
@@ -41,3 +42,45 @@ Verification: `node .trellis/verification/canvas_layer_compose_check.mjs` (basel
 and `python .trellis/verification/canvas_layer_compose_browser_check.py` with
 `BROWSER_BASE_URL` pointing to a worker-disabled loopback smoke, never port 3001.
 All fixtures are isolated and browser APIs intercepted. No provider or publishing calls.
+
+## Rerun binding contract
+
+### Scope / Trigger
+Generated outputs can change URL/hash on every run. Single-item selections follow
+the immediate upstream node output while preserving geometry, crop and audio choice.
+
+### Signatures
+`bindComposeInput(artifact, nodeId, port)` annotates media at the editor/runtime
+input boundary. `composeLayerSource(source)` persists the selection;
+`findComposeSource(layer, sources)` resolves it before preview or rendering.
+
+### Contracts
+`LayerSource = {kind, key, binding?: {nodeId, port}}`. `key` remains the selected
+content identity. Bindings are emitted only for exactly one item in an output.
+Runtime annotations overwrite inherited provenance; other node inputs are untouched.
+Clipboard remaps copied upstream IDs. Export/import preserves the binding.
+Legacy layers require one explicit replacement to adopt a new binding; replacement
+preserves crop and geometry. No automatic user-data migration or index inference.
+
+### Validation and errors
+Binding identifiers must be nonempty strings of at most 160 characters. A bound
+layer requires exactly one matching kind/node/port; it never falls back to its old
+URL. Disconnected, empty or newly multi-item outputs require reselection. URL/hash
+selections retain exact content matching. Actual-byte hash checks still apply.
+
+### Cases
+Good: new generated URL from the same single output replaces the rendered media.
+Base: legacy URL still present renders unchanged. Bad: a bound single output becomes
+two items; execution reports unavailable/ambiguous upstream instead of using item 0.
+
+### Tests
+Layer checks exercise real PNG/MP4 rerenders, unchanged crop, cache changes, wrong
+origin, multi-item rejection, duplicate content across nodes and clipboard remapping.
+Run-dispatch checks assert runtime provenance reaches the executor. Browser checks
+change a computed output, reload, verify new preview and explicitly replace a legacy
+selection at 1440/390 while retaining crop.
+
+### Wrong / Correct
+Wrong: persist only a generated URL or silently choose the first replacement item.
+Correct: save the explicit upstream binding for a single-item output and fail on
+ambiguity; retain content identity for a selection within a multi-item output.
