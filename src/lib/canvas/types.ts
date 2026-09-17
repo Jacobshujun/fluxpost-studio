@@ -27,6 +27,7 @@ export type CanvasSourceVideoSnapshot = {
 };
 
 export type CanvasMediaReference = {
+  hasAudio?: boolean;
   layerComposition?: { configKey: string; hasAudio: boolean };
   imageProcessing?: ImageProcessingReport;
   url: string;

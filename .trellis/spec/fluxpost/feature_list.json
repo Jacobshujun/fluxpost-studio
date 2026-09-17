@@ -17,7 +17,8 @@
       ],
       "evidence": [
         "2026-09-17 real Sharp/FFmpeg checks, full offline baseline and 1440/390 mocked browser passed; see archived canvas-layer-compose task.",
-        "2026-09-17 portal theme repair: three-theme contrast/live-switching and 1440/390 browser plus full baseline pass; see layer-compose-theme task."
+        "2026-09-17 portal theme repair: three-theme contrast/live-switching and 1440/390 browser plus full baseline pass; see layer-compose-theme task.",
+        "2026-09-17 loading batch one: metadata reuse/cache/invalidation, request dedup/concurrency/retry/cancellation and 1440/390 browser pass; see layer-compose-loading task."
       ],
       "notes": "Operator acceptance pending. Local candidate delivery authorized; no remote release."
     },

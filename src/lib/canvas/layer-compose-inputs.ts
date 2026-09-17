@@ -15,7 +15,7 @@ export function resolveComposeEditorSources(graph: CanvasGraph, nodeId: string, 
     else if (node.type === "input.videos") artifact = { kind: "videos", items: urlList(node.config.urls) };
     else if (node.type === "input.video-loader") {
       const item = selectedCanvasVideo(node.config);
-      if (item) artifact = { kind: "videos", items: [{ url: item.url, name: item.filename, width: item.width, height: item.height, durationSeconds: item.durationSeconds }] };
+      if (item) artifact = { kind: "videos", items: [{ url: item.url, name: item.filename, width: item.width, height: item.height, durationSeconds: item.durationSeconds, hasAudio: item.hasAudio }] };
     } else if (node.type === "input.source-video") {
       const item = canvasSourceVideoSnapshotFromConfig(node.config);
       if (item && isCanvasSourceVideoSnapshotCurrent(node.config)) artifact = { kind: "videos", items: [item] };

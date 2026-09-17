@@ -66,7 +66,7 @@ export function composeSources(images: CanvasMediaReference[], videos: CanvasMed
   const sources = new Map<string, ComposeSource>();
   for (const [kind, items] of [["image", images], ["video", videos]] as const) for (const media of items) {
     const key = composeSourceKey(media);
-    sources.set(`${kind}:${key}`, { kind, key, media, width: media.width, height: media.height, durationSeconds: media.durationSeconds });
+    sources.set(`${kind}:${key}`, { kind, key, media, width: media.width, height: media.height, durationSeconds: media.durationSeconds, hasAudio: media.hasAudio ?? media.layerComposition?.hasAudio });
   }
   return [...sources.values()];
 }

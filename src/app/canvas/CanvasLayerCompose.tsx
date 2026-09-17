@@ -7,6 +7,8 @@ import type { CSSProperties, PointerEvent as ReactPointerEvent } from "react";
 import { Layers3, Plus, Undo2, Redo2, X, Play, Pause, Copy, Trash2, ArrowUp, ArrowDown, Eye, EyeOff, LockKeyhole, LockKeyholeOpen, Crop } from "lucide-react";
 import { composeConfigKey, composeDuration, composeLayerGeometry, defaultLayerComposeConfig, findComposeSource, fullLayerCrop, isLayerComposeConfig, newComposeLayer, validateLayerComposeConfig } from "@/lib/canvas/layer-compose-contract";
 import type { ComposeLayer, ComposeSource, LayerComposeConfig } from "@/lib/canvas/layer-compose-contract";
+import { composeMetadataId, createComposeMetadataLoader, hasComposeMetadata } from "@/lib/canvas/layer-compose-metadata";
+import type { ComposeMetadataState } from "@/lib/canvas/layer-compose-metadata";
 import type { CanvasNode, CanvasNodeConfig, CanvasNodeRun } from "@/lib/canvas/types";
 import { toRemoteImagePreviewSrc } from "@/lib/media-preview";
 import "./layer-compose.css";
@@ -35,10 +37,15 @@ export function CanvasLayerComposeControls({ node, getSources, onPatch, nodeRun,
 
 function LayerComposeEditor({ initial, initialSources, onApply, onClose }: { initial: LayerComposeConfig; initialSources: ComposeSource[]; onApply: (config: LayerComposeConfig) => void; onClose: () => void }) {
   const [draft, setDraft] = useState(initial);
-  const [sources, setSources] = useState(initialSources);
+  const [metadata, setMetadata] = useState<Record<string, ComposeMetadataState>>({});
+  const loader = useRef<ReturnType<typeof createComposeMetadataLoader> | null>(null);
+  const sources = initialSources.map((source) => {
+    const state = metadata[composeMetadataId(source)];
+    return state?.status === "ready" ? state.source : source;
+  });
   const [selectedId, setSelectedId] = useState(initial.layers.at(-1)?.id);
   const [undo, setUndo] = useState<LayerComposeConfig[]>([]), [redo, setRedo] = useState<LayerComposeConfig[]>([]);
-  const [busy, setBusy] = useState(false), [message, setMessage] = useState("");
+  const [message, setMessage] = useState("");
   const [cropMode, setCropMode] = useState(false), [playing, setPlaying] = useState(false), [time, setTime] = useState(0);
   const timeRef = useRef(0);
   useEffect(() => { timeRef.current = time; }, [time]);
@@ -76,21 +83,15 @@ function LayerComposeEditor({ initial, initialSources, onApply, onClose }: { ini
     return () => { observer.disconnect(); previous?.focus(); };
   }, []);
   useEffect(() => {
-    const controller = new AbortController();
-    const used = initialSources.filter((source) => initial.layers.some((layer) => layer.source?.key === source.key && layer.kind === source.kind));
-    if (!used.length) return () => controller.abort();
-    void (async () => {
-      setBusy(true);
-      try {
-        for (const source of used) {
-          const result = await inspectSource(source, controller.signal);
-          setSources((items) => items.map((item) => item.key === source.key && item.kind === source.kind ? result : item));
-        }
-      } catch (error) { if (!controller.signal.aborted) setMessage(error instanceof Error ? error.message : "读取素材失败。"); }
-      finally { if (!controller.signal.aborted) setBusy(false); }
-    })();
-    return () => controller.abort();
-  }, [initial, initialSources]);
+    const session = createComposeMetadataLoader((id, state) => setMetadata((items) => ({ ...items, [id]: state })));
+    loader.current = session;
+    return () => { session.dispose(); loader.current = null; };
+  }, []);
+  useEffect(() => {
+    for (const source of initialSources) {
+      if (draft.layers.some((layer) => layer.visible && layer.source?.key === source.key && layer.kind === source.kind)) loader.current?.ensure(source);
+    }
+  }, [draft.layers, initialSources]);
   useEffect(() => {
     if (!playing || !duration) return;
     const start = performance.now() - timeRef.current * 1000;
@@ -103,22 +104,16 @@ function LayerComposeEditor({ initial, initialSources, onApply, onClose }: { ini
     frame = requestAnimationFrame(tick);
     return () => cancelAnimationFrame(frame);
   }, [playing, duration]);
-  async function addMedia(source: ComposeSource, replace = false) {
+  function addMedia(source: ComposeSource, replace = false) {
     if ((!replace && draft.layers.length >= 24) || (!replace && source.kind === "video" && draft.layers.filter((layer) => layer.kind === "video").length >= 4)) { setMessage("最多 24 个图层，其中最多 4 个视频。"); return; }
-    setBusy(true); setMessage(""); setPlaying(false);
-    try {
-      const result = await inspectSource(source);
-      setSources((items) => items.map((item) => item.key === result.key && item.kind === result.kind ? result : item));
-      const current = draft;
-      if (replace && selected && !selected.locked) {
-        commit({ ...current, layers: current.layers.map((layer) => layer.id === selected.id ? { ...layer, source: { kind: source.kind, key: source.key }, crop: { ...fullLayerCrop } } : layer) });
-      } else {
-        const layer = { ...newComposeLayer(nextId(), source.kind, current.width, current.height), name: source.media.name || `${source.kind === "image" ? "图片" : "视频"} ${current.layers.length}`, source: { kind: source.kind, key: source.key } };
-        commit({ ...current, layers: [...current.layers, layer], audioLayerId: source.kind === "video" && !current.layers.some((item) => item.kind === "video") ? layer.id : current.audioLayerId });
-        setSelectedId(layer.id);
-      }
-    } catch (error) { setMessage(error instanceof Error ? error.message : "读取素材失败。"); }
-    finally { setBusy(false); }
+    setMessage(""); setPlaying(false);
+    if (replace && selected && !selected.locked) {
+      commit({ ...draft, layers: draft.layers.map((layer) => layer.id === selected.id ? { ...layer, source: { kind: source.kind, key: source.key }, crop: { ...fullLayerCrop } } : layer) });
+    } else {
+      const layer = { ...newComposeLayer(nextId(), source.kind, draft.width, draft.height), name: source.media.name || `${source.kind === "image" ? "图片" : "视频"} ${draft.layers.length}`, source: { kind: source.kind, key: source.key } };
+      commit({ ...draft, layers: [...draft.layers, layer], audioLayerId: source.kind === "video" && !draft.layers.some((item) => item.kind === "video") ? layer.id : draft.audioLayerId });
+      setSelectedId(layer.id);
+    }
   }
   function beginDrag(event: ReactPointerEvent<HTMLDivElement | HTMLButtonElement>, layer: ComposeLayer, mode: "move" | "scale" | "crop", displayScale = scale) {
     if (layer.locked || playing) return;
@@ -166,10 +161,15 @@ function LayerComposeEditor({ initial, initialSources, onApply, onClose }: { ini
         else if (!event.shiftKey && document.activeElement === focusable.at(-1)) { event.preventDefault(); focusable[0]?.focus(); }
       }
     }}>
-      <header><strong><Layers3 />图层合成</strong><div><button type="button" aria-label="撤销图层编辑" disabled={!undo.length || busy} onClick={() => step(-1)}><Undo2 /></button><button type="button" aria-label="重做图层编辑" disabled={!redo.length || busy} onClick={() => step(1)}><Redo2 /></button><button type="button" onClick={onClose}>取消</button><button type="button" className="layer-primary" disabled={busy || Boolean(errors.length) || Boolean(missing.length)} onClick={() => onApply(draft)}>应用</button><button type="button" aria-label="关闭图层编辑器" onClick={onClose}><X /></button></div></header>
-      <div className="layer-editor-layout" inert={busy}>
+      <header><strong><Layers3 />图层合成</strong><div><button type="button" aria-label="撤销图层编辑" disabled={!undo.length} onClick={() => step(-1)}><Undo2 /></button><button type="button" aria-label="重做图层编辑" disabled={!redo.length} onClick={() => step(1)}><Redo2 /></button><button type="button" onClick={onClose}>取消</button><button type="button" className="layer-primary" disabled={Boolean(errors.length) || Boolean(missing.length)} onClick={() => onApply(draft)}>应用</button><button type="button" aria-label="关闭图层编辑器" onClick={onClose}><X /></button></div></header>
+      <div className="layer-editor-layout">
         <aside className="layer-assets"><h3>输入素材</h3>{!sources.length ? <p>连接图片或视频输入；计算节点尚无结果时，请先运行上游。</p> : null}
-          {sources.map((source, index) => <div className="layer-asset" key={`${source.kind}:${source.key}`}><span>{source.kind === "image" ? "图片" : "视频"} · {source.media.name || index + 1}</span><button type="button" aria-label={`添加素材 ${index + 1}`} disabled={busy} onClick={() => void addMedia(source)}><Plus /></button>{selected?.kind === source.kind && !selected.locked ? <button type="button" disabled={busy} onClick={() => void addMedia(source, true)}>替换</button> : null}</div>)}
+          {sources.map((source, index) => {
+            const state = metadata[composeMetadataId(source)];
+            return <div className="layer-asset" key={composeMetadataId(source)}><span>{source.kind === "image" ? "图片" : "视频"} · {source.media.name || index + 1}</span><button type="button" aria-label={`添加素材 ${index + 1}`} onClick={() => addMedia(source)}><Plus /></button>{selected?.kind === source.kind && !selected.locked ? <button type="button" onClick={() => addMedia(source, true)}>替换</button> : null}
+              {state?.status === "loading" ? <small role="status">正在读取素材…</small> : state?.status === "error" ? <small role="alert">{state.message}<button type="button" aria-label={`重试素材 ${index + 1}`} onClick={() => loader.current?.retry(source)}>重试</button></small> : hasComposeMetadata(source) ? <small>{source.width} × {source.height}{source.kind === "video" ? ` · ${source.durationSeconds?.toFixed(1)} 秒${source.hasAudio ? "" : " · 无音轨"}` : ""}</small> : null}
+            </div>;
+          })}
           <button type="button" disabled={draft.layers.length >= 24} onClick={() => { const layer = newComposeLayer(nextId(), "solid", draft.width, draft.height); patch({ layers: [...draft.layers, layer] }); setSelectedId(layer.id); }}><Plus />新建纯色层</button>
           <h3>图层 · 上方优先显示</h3>
           <div className="layer-list">{[...draft.layers].reverse().map((layer) => <div key={layer.id} className={selectedId === layer.id ? "is-selected" : ""}>
@@ -188,12 +188,12 @@ function LayerComposeEditor({ initial, initialSources, onApply, onClose }: { ini
               const hidden = layer.kind === "video" && layer.endBehavior === "hide" && time >= (source?.durationSeconds || Infinity);
               if (hidden) return null;
               return <div key={layer.id} className={`layer-object ${selectedId === layer.id ? "is-selected" : ""}`} style={{ left: layer.x * scale, top: layer.y * scale, width: layer.width * scale, height: layer.height * scale, pointerEvents: layer.locked ? "none" : "auto" }} onPointerDown={(event) => beginDrag(event, layer, "move")} {...pointerHandlers}>
-                <LayerVisual layer={layer} source={source} scale={scale} time={time} playing={playing} audible={draft.audioLayerId === layer.id} onError={setMessage} />
+                <LayerVisual metadataState={source ? metadata[composeMetadataId(source)] : undefined} layer={layer} source={source} scale={scale} time={time} playing={playing} audible={draft.audioLayerId === layer.id} onError={setMessage} />
                 {selectedId === layer.id && !layer.locked ? <button className="layer-scale-handle" type="button" aria-label="等比缩放图层" onPointerDown={(event) => beginDrag(event, layer, "scale")} {...pointerHandlers} /> : null}
               </div>;
             })}
           </div>}
-        </div><div className="layer-playback"><span>{draft.width} × {draft.height} · {hasVideo ? "MP4" : "PNG"}</span>{hasVideo ? <><button type="button" aria-label={playing ? "暂停合成预览" : "播放合成预览"} disabled={!duration || busy || cropMode} onClick={() => { if (time >= duration) setTime(0); setPlaying(!playing); }}>{playing ? <Pause /> : <Play />}</button><input aria-label="合成预览进度" type="range" min={0} max={duration || 1} step={1 / 30} value={Math.min(time, duration)} onChange={(event) => { setPlaying(false); setTime(Number(event.target.value)); }} /><small>{time.toFixed(1)} / {duration.toFixed(1)} 秒</small></> : null}</div></main>
+        </div><div className="layer-playback"><span>{draft.width} × {draft.height} · {hasVideo ? "MP4" : "PNG"}</span>{hasVideo ? <><button type="button" aria-label={playing ? "暂停合成预览" : "播放合成预览"} disabled={!duration || cropMode || videos.some((layer) => { const source = findComposeSource(layer, sources); return !source || !hasComposeMetadata(source); })} onClick={() => { if (time >= duration) setTime(0); setPlaying(!playing); }}>{playing ? <Pause /> : <Play />}</button><input aria-label="合成预览进度" type="range" min={0} max={duration || 1} step={1 / 30} value={Math.min(time, duration)} onChange={(event) => { setPlaying(false); setTime(Number(event.target.value)); }} /><small>{time.toFixed(1)} / {duration.toFixed(1)} 秒</small></> : null}</div></main>
         <aside className="layer-properties"><h3>成品画布</h3><label><span>尺寸预设</span><select aria-label="合成尺寸预设" value="" onChange={(event) => { const [width, height] = event.target.value.split("x").map(Number); patch({ width, height }); }}><option value="" disabled>选择尺寸</option>{["1080x1920", "1080x1440", "1080x1080", "1920x1080"].map((value) => <option key={value} value={value}>{value.replace("x", " × ")}</option>)}</select></label>
           <div className="layer-fields">{numeric("画布宽度", draft.width, (width) => patch({ width }), 64, 4096)}{numeric("画布高度", draft.height, (height) => patch({ height }), 64, 4096)}</div>
           <label><span>透明底色</span><input type="checkbox" checked={draft.background === "transparent"} onChange={(event) => patch({ background: event.target.checked ? "transparent" : "#ffffff" })} /></label>{draft.background !== "transparent" ? <label><span>底色</span><input aria-label="画布底色" type="color" value={draft.background} onChange={(event) => patch({ background: event.target.value })} /></label> : <small>删除或隐藏背景图层后可见透明区域。</small>}
@@ -209,20 +209,14 @@ function LayerComposeEditor({ initial, initialSources, onApply, onClose }: { ini
               {selected.kind === "video" ? <label><span>视频结束后</span><select aria-label="视频结束后" value={selected.endBehavior} onChange={(event) => patchLayer({ endBehavior: event.target.value as ComposeLayer["endBehavior"] })}><option value="hold">停留末帧</option><option value="loop">循环播放</option><option value="hide">隐藏</option></select></label> : null}
             </>}</fieldset></> : <p>选择图层以调整位置、大小和裁剪。</p>}
         </aside>
-      </div><footer role={message || errors.length || missing.length ? "alert" : "status"}>{busy ? "正在读取素材…" : message || errors.join(" ") || (missing.length ? `素材已失效：${missing.map((layer) => layer.name).join("、")}。请在输入素材中重新选择。` : "图片与视频保持原比例；超出画布的部分不会输出。")}</footer>
+      </div><footer role={message || errors.length || missing.length ? "alert" : "status"}>{message || errors.join(" ") || (missing.length ? `素材已失效：${missing.map((layer) => layer.name).join("、")}。请在输入素材中重新选择。` : "图片与视频保持原比例；超出画布的部分不会输出。")}</footer>
     </div>
   </div>;
 }
 
-async function inspectSource(source: ComposeSource, signal?: AbortSignal): Promise<ComposeSource> {
-  const response = await fetch("/api/canvas/layer-compose/inspect", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ url: source.media.url, kind: source.kind }), signal });
-  const result = await response.json() as { width?: number; height?: number; durationSeconds?: number; hasAudio?: boolean; error?: string };
-  if (!response.ok || !result.width || !result.height) throw new Error(result.error || "无法读取素材尺寸。");
-  return { ...source, ...result };
-}
-function LayerVisual({ layer, source, scale, time, playing, audible, onError }: { layer: ComposeLayer; source?: ComposeSource; scale: number; time: number; playing: boolean; audible: boolean; onError: (message: string) => void }) {
+function LayerVisual({ metadataState, layer, source, scale, time, playing, audible, onError }: { metadataState?: ComposeMetadataState; layer: ComposeLayer; source?: ComposeSource; scale: number; time: number; playing: boolean; audible: boolean; onError: (message: string) => void }) {
   if (layer.kind === "solid") return <div className="layer-visual" style={{ inset: 0, background: layer.color, opacity: layer.opacity }} />;
-  if (!source?.width || !source.height) return <div className="layer-missing">{source ? "正在读取素材" : "素材已失效"}</div>;
+  if (!source?.width || !source.height) return <div className="layer-missing">{metadataState?.status === "error" ? "读取失败，请在素材列表重试" : source ? "正在读取素材" : "素材已失效"}</div>;
   const geometry = composeLayerGeometry(layer, source.width, source.height);
   const style: CSSProperties = { position: "absolute", maxWidth: "none", width: source.width * geometry.width / geometry.crop.width * scale, height: source.height * geometry.height / geometry.crop.height * scale,
     left: -geometry.crop.left * geometry.width / geometry.crop.width * scale, top: -geometry.crop.top * geometry.height / geometry.crop.height * scale, pointerEvents: "none" };
@@ -233,6 +227,7 @@ function LayerVisual({ layer, source, scale, time, playing, audible, onError }: 
 function SynchronizedVideo({ source, time, playing, behavior, audible, style, onError }: { source: ComposeSource; time: number; playing: boolean; behavior: ComposeLayer["endBehavior"]; audible: boolean; style: CSSProperties; onError: (message: string) => void }) {
   const ref = useRef<HTMLVideoElement>(null);
   const failed = useRef(false);
+  const [readyUrl, setReadyUrl] = useState("");
   useEffect(() => {
     const video = ref.current;
     if (!video || !video.readyState) return;
@@ -243,6 +238,6 @@ function SynchronizedVideo({ source, time, playing, behavior, audible, style, on
     if (playing && (behavior === "loop" || time < duration) && !failed.current) {
       if (video.paused) void video.play().catch(() => { failed.current = true; onError("浏览器无法播放该视频预览，请检查素材格式。"); });
     } else video.pause();
-  }, [time, playing, behavior, audible, source.durationSeconds, onError]);
-  return <video ref={ref} src={source.media.url} style={style} playsInline preload="auto" muted={!audible} onError={() => onError("视频预览载入失败，请检查素材地址或格式。")} />;
+  }, [time, playing, behavior, audible, source.durationSeconds, source.media.url, readyUrl, onError]);
+  return <video ref={ref} src={source.media.url} style={style} playsInline preload="metadata" onLoadedMetadata={() => { failed.current = false; setReadyUrl(source.media.url); }} muted={!audible} onError={() => onError("视频预览载入失败，请检查素材地址或格式。")} />;
 }

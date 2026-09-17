@@ -147,7 +147,7 @@ export function resolveCanvasLiteralOutputs(node: CanvasNode): Record<string, Ca
   if (node.type === "input.video-loader") {
     const video = selectedCanvasVideo(node.config);
     if (!video) throw new Error("视频加载节点没有有效的当前视频。");
-    return { videos: { kind: "videos", items: [{ url: video.url, name: video.filename, mimeType: video.mimeType, width: video.width, height: video.height, durationSeconds: video.durationSeconds }] } };
+    return { videos: { kind: "videos", items: [{ url: video.url, name: video.filename, mimeType: video.mimeType, width: video.width, height: video.height, durationSeconds: video.durationSeconds, hasAudio: video.hasAudio }] } };
   }
   if (node.type === "input.source-video") {
     const source = canvasSourceVideoSnapshotFromConfig(node.config);

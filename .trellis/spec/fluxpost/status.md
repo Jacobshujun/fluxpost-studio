@@ -8,6 +8,10 @@ Canvas layer composition passes baseline and desktop/mobile browser checks. Prod
 
 ## Current Focus
 
+- 2026-09-17: Layer editor loading batch one reuses uploaded metadata, removes preview
+  hashing, caches/deduplicates probes and keeps editing available during source loading.
+  Offline and desktop/390 browser evidence: .trellis/tasks/archive/2026-09/09-17-layer-compose-loading/verification.md.
+
 - 2026-09-17: Layer editor white-on-white portal fixed. Three themes pass contrast,
   live switching and 1440/390 browser checks plus full baseline. Evidence:
   .trellis/tasks/archive/2026-09/09-17-layer-compose-theme/verification.md.

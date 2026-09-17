@@ -16,6 +16,19 @@ is `composition: LayerComposeConfig` protocol 1 in the existing workflow JSON.
 - Authenticated `POST /api/canvas/layer-compose/inspect` accepts `{kind,url}` and
   returns dimensions, optional duration and audio availability. Directory snapshots
   resolve through the signed-in owner. Arbitrary client localPath values are unused.
+- Editor metadata reuses upstream dimensions, duration and optional hasAudio (including
+  false). Missing visible sources use a session-local deduplicated queue of two, with
+  per-source status/retry. Adding a layer is synchronous; metadata completion never
+  writes draft/history. Closing aborts client requests and discards queued work.
+- Inspection skips full-file digests. Its owner/kind/location cache holds at most 128
+  results; local keys include size/mtime/ctime and expire after 5 minutes; remote URLs
+  expire after 60 seconds. Private snapshots are authorized before cache lookup.
+  Failures are not cached. Probes use mediaMetadata (default 2, hard cap 4) separately
+  from rendering. Unknown remote cold reads still download the full source; cancelling
+  the client does not cancel an already running server materialization.
+- Preview videos use metadata preload; playback/seeking loads needed data. These are
+  browser hints, not a guarantee of zero media transfer. Rendering always revalidates
+  content, so preview metadata never substitutes for export hash/size/probe checks.
 - Rendering uses actual-byte digests, versioned config keys, staged output and
   dimension/duration/audio checks. Existing localImage/localVideo pools apply.
 - Incomplete sources remain saveable; execution rejects them. Dialog drafts are

@@ -4,7 +4,7 @@ import { mkdir, mkdtemp, readFile, rename, rm, stat, writeFile } from "node:fs/p
 import { tmpdir } from "node:os";
 import path from "node:path";
 import sharp from "sharp";
-import { materializeRuntimeMedia } from "../runtime-media-materializer";
+import { materializeRuntimeMedia, resolveRuntimeMediaReference } from "../runtime-media-materializer";
 import { persistRuntimeMedia } from "../runtime-media-storage";
 import { runWithConcurrencyPool } from "../concurrency";
 import { getCanvasDirectorySnapshot } from "./directory-snapshots";
@@ -20,7 +20,7 @@ async function digestFile(filePath: string) {
   for await (const chunk of createReadStream(filePath)) hash.update(chunk);
   return hash.digest("hex");
 }
-async function prepareSource(source: ComposeSource, owner: string): Promise<PreparedSource> {
+async function prepareSource(source: ComposeSource, owner: string, verifyContent = true): Promise<PreparedSource> {
   const maxBytes = source.kind === "image" ? LAYER_COMPOSE_LIMITS.imageBytes : LAYER_COMPOSE_LIMITS.videoBytes;
   let filePath: string;
   let cleanup = async () => {};
@@ -37,8 +37,8 @@ async function prepareSource(source: ComposeSource, owner: string): Promise<Prep
   try {
     const info = await stat(filePath);
     if (!info.isFile() || !info.size || info.size > maxBytes) throw new Error(`素材为空或超过 ${maxBytes / 1024 / 1024} MB。`);
-    const digest = await digestFile(filePath);
-    if (source.media.sha256 && source.media.sha256 !== digest) throw new CanvasMediaNeedsConfigError("素材内容已改变，请重新选择素材。");
+    const digest = verifyContent ? await digestFile(filePath) : "";
+    if (verifyContent && source.media.sha256 && source.media.sha256 !== digest) throw new CanvasMediaNeedsConfigError("素材内容已改变，请重新选择素材。");
     if (source.kind === "video") {
       const metadata = await probeCanvasMediaFile(filePath);
       if (!metadata.durationSeconds || metadata.durationSeconds > 600 || /\bhls\b/i.test(metadata.formatName || "")) throw new Error("视频必须是最长 600 秒的完整视频文件。");
@@ -60,10 +60,44 @@ async function prepareSource(source: ComposeSource, owner: string): Promise<Prep
   } catch (error) { await cleanup(); throw error; }
 }
 
-export async function inspectComposeSource(source: ComposeSource, owner: string) {
-  const prepared = await prepareSource(source, owner);
-  try { return { width: prepared.width, height: prepared.height, durationSeconds: prepared.durationSeconds, hasAudio: prepared.hasAudio }; }
-  finally { await prepared.cleanup(); }
+type SourceMetadata = Pick<PreparedSource, "width" | "height" | "durationSeconds" | "hasAudio">;
+const metadataCache = new Map<string, { value: SourceMetadata; expires: number }>();
+const metadataRequests = new Map<string, Promise<SourceMetadata>>();
+
+export async function inspectComposeSource(source: ComposeSource, owner: string): Promise<SourceMetadata> {
+  // Resolve private snapshots on every access, before consulting the owner-scoped cache.
+  let localPath: string | undefined;
+  let url = source.media.url;
+  if (source.kind === "image" && url.startsWith("/api/canvas/local-directory/media?")) {
+    const params = new URL(url, "http://localhost").searchParams;
+    const snapshot = await getCanvasDirectorySnapshot(params.get("snapshot") || "", owner);
+    const item = snapshot.groups.flatMap((group) => group.images).find((entry) => entry.id === params.get("media"));
+    if (!item) throw new Error("本地目录快照中找不到图片。");
+    localPath = item.absolutePath;
+  } else {
+    const resolved = await resolveRuntimeMediaReference(url);
+    localPath = resolved.localPath; url = resolved.url;
+  }
+  const info = localPath ? await stat(localPath) : undefined;
+  const key = JSON.stringify([owner, source.kind, localPath || url, info && [info.size, info.mtimeMs, info.ctimeMs]]);
+  const cached = metadataCache.get(key);
+  if (cached && cached.expires > Date.now()) return cached.value;
+  const pending = metadataRequests.get(key);
+  if (pending) return pending;
+  const request = runWithConcurrencyPool("mediaMetadata", async () => {
+    // Preview only: no full-file SHA. Actual composition always verifies content.
+    const prepared = await prepareSource(source, owner, false);
+    try {
+      const value = { width: prepared.width, height: prepared.height, durationSeconds: prepared.durationSeconds, hasAudio: prepared.hasAudio };
+      metadataCache.delete(key);
+      metadataCache.set(key, { value, expires: Date.now() + (localPath ? 300_000 : 60_000) });
+      while (metadataCache.size > 128) metadataCache.delete(metadataCache.keys().next().value!);
+      return value;
+    } finally { await prepared.cleanup(); }
+  });
+  metadataRequests.set(key, request);
+  try { return await request; }
+  finally { if (metadataRequests.get(key) === request) metadataRequests.delete(key); }
 }
 
 async function layerImage(layer: ComposeLayer, source: PreparedSource | undefined, config: LayerComposeConfig) {

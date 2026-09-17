@@ -85,7 +85,7 @@ assert.deepEqual(JSON.parse(JSON.stringify(resolveCanvasLiteralOutputs({
   type: "input.video-loader",
   config: { videos: [first, second], selectedVideoId: second.id },
 }))), {
-  videos: { kind: "videos", items: [{ url: second.url, name: second.filename, mimeType: second.mimeType, width: second.width, height: second.height, durationSeconds: second.durationSeconds }] },
+  videos: { kind: "videos", items: [{ url: second.url, name: second.filename, mimeType: second.mimeType, width: second.width, height: second.height, durationSeconds: second.durationSeconds, hasAudio: second.hasAudio }] },
 }, "literal execution must emit only the selected video");
 
 const types = read("src/lib/canvas/types.ts");

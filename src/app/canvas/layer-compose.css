@@ -14,8 +14,10 @@
 .layer-properties { border-left: 1px solid var(--line); }
 .layer-dialog h3 { margin: 5px 0 12px; font-size: 12px; }
 .layer-dialog h3:not(:first-child) { margin-top: 24px; }
-.layer-asset { display: flex; align-items: center; gap: 5px; margin-bottom: 8px; }
+.layer-asset { display: flex; flex-wrap: wrap; align-items: center; gap: 5px; margin-bottom: 8px; }
 .layer-asset span { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.layer-asset small { flex-basis: 100%; overflow-wrap: anywhere; }
+.layer-asset small button { display: inline-flex; margin-left: 6px; }
 .layer-list { display: grid; gap: 5px; }
 .layer-list > div { display: flex; align-items: center; border: 1px solid transparent; border-radius: 7px; }
 .layer-list > div.is-selected { border-color: #0f9f8f; background: #0f9f8f18; }

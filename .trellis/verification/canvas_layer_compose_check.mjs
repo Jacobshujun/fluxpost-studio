@@ -1,6 +1,6 @@
 import assert from "node:assert/strict";
 import { createRequire } from "node:module";
-import { mkdtempSync, readFileSync, readdirSync, rmSync, writeFileSync } from "node:fs";
+import { createReadStream, mkdtempSync, readFileSync, readdirSync, rmSync, writeFileSync, utimesSync } from "node:fs";
 import { tmpdir } from "node:os";
 import path from "node:path";
 import { execFileSync } from "node:child_process";
@@ -21,18 +21,21 @@ function load(file, modules = {}) {
   return loaded.exports;
 }
 const sources = new Map();
-let cleanups = 0;
-const materializer = { materializeRuntimeMedia: async (url) => {
+let cleanups = 0, digestReads = 0, probes = 0, failProbe = false;
+const materializer = { resolveRuntimeMediaReference: async (url) => {
+  assert.ok(sources.has(url), `No external media allowed: ${url}`);
+  return { url, localPath: url.startsWith("https:") ? undefined : sources.get(url) };
+}, materializeRuntimeMedia: async (url) => {
   assert.ok(sources.has(url), `No external media allowed: ${url}`);
   return { filePath: sources.get(url), cleanup: async () => { cleanups++; } };
 } };
 const storage = { persistRuntimeMedia: async (input) => { assert.ok(readFileSync(input.filePath).length); return input.publicPath; } };
-const concurrency = { runWithConcurrencyPool: async (name, task) => { assert.ok(["localImage", "localVideo"].includes(name)); return task(); } };
+const concurrency = { runWithConcurrencyPool: async (name, task) => { assert.ok(["localImage", "localVideo", "mediaMetadata"].includes(name)); return task(); } };
 const ffmpeg = (args) => execFileSync("ffmpeg", ["-hide_banner", "-loglevel", "error", "-y", ...args], { stdio: "pipe" });
 try {
   const contract = load("src/lib/canvas/layer-compose-contract.ts");
   const media = load("src/lib/canvas/media-tools.ts", { "../concurrency": concurrency, "../runtime-media-materializer": materializer, "../runtime-media-storage": storage, "./node-utils": {}, "./types": {} });
-  const renderer = load("src/lib/canvas/layer-compose.ts", { "./layer-compose-contract": contract, "./media-tools": media, "../concurrency": concurrency, "../runtime-media-materializer": materializer, "../runtime-media-storage": storage, "./directory-snapshots": { getCanvasDirectorySnapshot: async (_id, owner) => { assert.equal(owner, "owner"); return { groups: [{ images: [{ id: "image", absolutePath: sources.get("red") }] }] }; } } });
+  const renderer = load("src/lib/canvas/layer-compose.ts", { "node:fs": { createReadStream: (...args) => { digestReads++; return createReadStream(...args); } }, "./layer-compose-contract": contract, "./media-tools": { ...media, probeCanvasMediaFile: async (...args) => { probes++; if (failProbe) throw new Error("fixture probe failure"); return media.probeCanvasMediaFile(...args); } }, "../concurrency": concurrency, "../runtime-media-materializer": materializer, "../runtime-media-storage": storage, "./directory-snapshots": { getCanvasDirectorySnapshot: async (_id, owner) => { assert.equal(owner, "owner"); return { groups: [{ images: [{ id: "image", absolutePath: sources.get("red") }] }] }; } } });
   const make = (id, kind, patch = {}) => ({ ...contract.newComposeLayer(id, kind, 100, 100), ...patch });
   const config = (layers, patch = {}) => ({ ...contract.defaultLayerComposeConfig(), width: 100, height: 100, layers, ...patch });
   const source = (kind, url) => ({ kind, key: `url:${url}`, media: { url } });
@@ -73,6 +76,60 @@ try {
   ffmpeg(["-f", "lavfi", "-i", "color=green:s=100x100:r=30:d=2", "-c:v", "libx264", "-pix_fmt", "yuv420p", longFile]);
   sources.set("short", shortFile); sources.set("long", longFile);
   const videoSources = [source("video", "short"), source("video", "long")];
+  const readsBefore = digestReads, probesBefore = probes;
+  const inspected = await Promise.all(Array.from({ length: 5 }, () => renderer.inspectComposeSource(videoSources[0], "owner")));
+  assert.equal(inspected[0].hasAudio, true); assert.equal(inspected[0].durationSeconds, 1);
+  await renderer.inspectComposeSource(videoSources[0], "owner");
+  assert.equal(probes, probesBefore + 1, "concurrent and repeated local inspections share one probe");
+  await renderer.inspectComposeSource(videoSources[0], "another-owner");
+  assert.equal(probes, probesBefore + 2, "metadata cache is owner scoped");
+  utimesSync(shortFile, new Date(), new Date(Date.now() + 2000));
+  await renderer.inspectComposeSource(videoSources[0], "owner");
+  assert.equal(probes, probesBefore + 3, "same URL with changed local stat must re-probe");
+  failProbe = true;
+  await assert.rejects(renderer.inspectComposeSource(videoSources[1], "owner"), /fixture probe failure/);
+  failProbe = false;
+  assert.equal((await renderer.inspectComposeSource(videoSources[1], "owner")).hasAudio, false, "failed request can retry");
+  sources.set("https://fixture.invalid/short.mp4", shortFile);
+  await renderer.inspectComposeSource(source("video", "https://fixture.invalid/short.mp4"), "owner");
+  const remoteProbes = probes;
+  await renderer.inspectComposeSource(source("video", "https://fixture.invalid/short.mp4"), "owner");
+  assert.equal(probes, remoteProbes, "remote warm inspection uses metadata cache without another download");
+  const realNow = Date.now;
+  Date.now = () => realNow() + 61_000;
+  try { await renderer.inspectComposeSource(source("video", "https://fixture.invalid/short.mp4"), "owner"); }
+  finally { Date.now = realNow; }
+  assert.equal(probes, remoteProbes + 1, "mutable remote URL is inspected again after the short TTL");
+  const privateImage = source("image", "/api/canvas/local-directory/media?snapshot=fixture&media=image");
+  await renderer.inspectComposeSource(privateImage, "owner");
+  await assert.rejects(renderer.inspectComposeSource(privateImage, "another-owner"), /owner/);
+  assert.equal(digestReads, readsBefore, "preview inspection never hashes the full file");
+  await assert.rejects(renderer.renderLayerComposition(config([make("v", "video", { source: bind("video", "short") })]), [{ ...videoSources[0], media: { url: "short", sha256: "wrong" } }], "owner"), /改变/);
+  assert.ok(digestReads > readsBefore, "render still hashes and rejects changed content after inspection");
+
+  const loading = load("src/lib/canvas/layer-compose-metadata.ts");
+  const changes = [], deferred = [];
+  const loader = loading.createComposeMetadataLoader((id, state) => changes.push({ id, state }), (item, signal) => new Promise((resolve, reject) => deferred.push({ item, signal, resolve, reject })));
+  const complete = { ...videoSources[0], width: 100, height: 100, durationSeconds: 1, hasAudio: false };
+  loader.ensure(complete); assert.equal(deferred.length, 0, "upstream metadata avoids inspection, including no-audio video");
+  for (const item of [...videoSources, source("image", "red"), ...videoSources]) loader.ensure(item);
+  assert.equal(deferred.length, 2, "two active inspections, duplicates deduplicated");
+  deferred[0].reject(new Error("fixture error"));
+  await new Promise(setImmediate);
+  assert.equal(deferred.length, 3, "failure releases a slot for another source");
+  assert.equal(changes.find((entry) => entry.state.status === "error").id, "video:url:short");
+  loader.retry(videoSources[0]); assert.equal(deferred.length, 3);
+  deferred[1].resolve({ ...complete, ...videoSources[1] }); await new Promise(setImmediate);
+  assert.equal(deferred.length, 4, "manual retry queued and started");
+  deferred[3].resolve(complete); await new Promise(setImmediate);
+  assert.equal(changes.at(-1).state.status, "ready");
+  loader.ensure(source("image", "alpha")); loader.ensure(source("image", "never-start"));
+  const requestsBeforeClose = deferred.length, updatesBeforeClose = changes.length;
+  loader.dispose();
+  for (const request of deferred) { assert.equal(request.signal.aborted, true); request.resolve(complete); }
+  await new Promise(setImmediate);
+  assert.equal(changes.length, updatesBeforeClose, "late completion does not update a closed editor");
+  assert.equal(deferred.length, requestsBeforeClose, "queued work does not start after close");
   const framePixel = async (file, seconds) => {
     const frame = ffmpeg(["-ss", String(seconds), "-i", file, "-frames:v", "1", "-f", "image2pipe", "-vcodec", "png", "pipe:1"]);
     return [...await sharp(frame).extract({ left: 50, top: 50, width: 1, height: 1 }).raw().toBuffer()];
@@ -125,7 +182,12 @@ try {
   const pasted = clipboard.instantiateCanvasClipboardPayload(payload, { x: 40, y: 60 }, (kind, index) => `${kind}-${index}`);
   assert.deepEqual(pasted.nodes.find((entry) => entry.type === "utility.layer-compose").config.composition, cropConfig);
   const inputs = require(path.join(temp, "layer-compose-inputs.js")).resolveComposeEditorSources(graph, "compose", new Map()); assert.equal(inputs.length, 2);
+  const uploadGraph = structuredClone(graph);
+  uploadGraph.nodes[2].type = "input.video-loader";
+  uploadGraph.nodes[2].config = { selectedVideoId: "upload", videos: [{ id: "upload", filename: "short.mp4", url: "short", width: 100, height: 100, durationSeconds: 1, hasAudio: false, bytes: 100, mimeType: "video/mp4", uploadedAt: "2026-09-17T00:00:00Z" }] };
+  const uploadedSource = require(path.join(temp, "layer-compose-inputs.js")).resolveComposeEditorSources(uploadGraph, "compose", new Map())[1];
+  assert.equal(uploadedSource.hasAudio, false); assert.equal(loading.hasComposeMetadata(uploadedSource), true);
   const draft = structuredClone(graph); delete draft.nodes[0].config.composition.layers[0].source;
   assert.equal(graphLib.validateCanvasGraphForPersistence(draft).valid, true); assert.equal(graphLib.validateCanvasGraph(draft).valid, false);
-  console.log("Layer composition: real PNG pixels/crop/alpha/cache, MP4 endings/audio/duration, failure cleanup, identity, graph and workflow round trips passed.");
+  console.log("Layer composition: PNG/MP4 rendering, metadata reuse/cache/expiry/ownership, no-preview-hash, loading concurrency/retry/cancellation, graph and workflow round trips passed.");
 } finally { rmSync(temp, { recursive: true, force: true }); }

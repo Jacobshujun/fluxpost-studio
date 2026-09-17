@@ -166,6 +166,111 @@ async def check(browser, width, video_bytes, theme):
     await page.close()
     print(json.dumps(dict(width=width, theme=theme, saves=len(saves), result="passed")), flush=True)
 
+async def check_loading(browser, width, video_bytes):
+    page = await browser.new_page(viewport=dict(width=width, height=960))
+    errors, requests, pending = [], [], []
+    arrived = [asyncio.Event() for _ in range(3)]
+    page.on("pageerror", lambda error: errors.append(str(error)))
+    slow_url, bad_url, uploaded_url = [f"/generated/loading-{name}.mp4" for name in ["slow", "bad", "uploaded"]]
+    config = dict(protocolVersion=1, width=1080, height=1920, background="#ffffff", durationMode="longest", durationSeconds=10, audioLayerId=None, layers=[layer()])
+    workflow = dict(id="loading", name="Loading fixture", revision=1, ownerUserId="owner", ownerDisplayName="Fixture", isTemplate=False, createdAt=NOW, updatedAt=NOW,
+        graph=dict(viewport=dict(x=0, y=0, zoom=1), nodes=[
+            dict(id="compose", type="utility.layer-compose", version=1, config=dict(composition=config), position=dict(x=40, y=40)),
+            dict(id="videos", type="input.videos", version=1, config=dict(urls=[slow_url, bad_url]), position=dict(x=-300, y=40)),
+            dict(id="upload", type="input.video-loader", version=1, config=dict(selectedVideoId="uploaded", videos=[dict(id="uploaded", filename="uploaded.mp4", url=uploaded_url, mimeType="video/mp4", bytes=len(video_bytes), width=200, height=100, durationSeconds=2, hasAudio=False, uploadedAt=NOW)]), position=dict(x=-300, y=300))
+        ], edges=[dict(id="e1", source="videos", sourcePort="videos", target="compose", targetPort="videos"), dict(id="e2", source="upload", sourcePort="videos", target="compose", targetPort="videos")]))
+    async def handler(route):
+        nonlocal workflow
+        endpoint = urlparse(route.request.url).path
+        if endpoint == "/api/canvas/workflows": payload = dict(workflows=[workflow])
+        elif endpoint == "/api/canvas/workflows/loading":
+            if route.request.method == "PATCH": workflow = {**workflow, **route.request.post_data_json, "revision": workflow["revision"] + 1}
+            payload = dict(workflow=workflow)
+        elif endpoint == "/api/canvas/runs":
+            assert route.request.method == "GET"
+            payload = dict(runs=[], latestNodeAttempts=[], latestSuccessfulNodeRuns=[])
+        elif endpoint == "/api/canvas/schedules": payload = dict(schedules=[])
+        elif endpoint == "/api/canvas/layer-compose/inspect":
+            url = route.request.post_data_json["url"]
+            requests.append(url)
+            assert url != uploaded_url, "complete uploaded metadata must not be inspected"
+            if url == slow_url:
+                event = asyncio.Event()
+                pending.append(event)
+                arrived[len(pending) - 1].set()
+                await event.wait()
+            if url == bad_url and requests.count(bad_url) == 1:
+                await route.fulfill(status=400, json=dict(error="Fixture unreadable"))
+                return
+            payload = dict(width=200, height=100, durationSeconds=2, hasAudio=True)
+        else:
+            assert route.request.method == "GET", endpoint
+            payload = {}
+        await route.fulfill(status=200, json=payload)
+    await page.route("**/api/**", handler)
+    await page.route("**/generated/loading-*.mp4", lambda route: route.fulfill(status=200, body=video_bytes, content_type="video/mp4"))
+    await page.goto(f"{BASE_URL}/canvas?workflowId=loading", wait_until="networkidle")
+    node = page.locator('.react-flow__node[data-id="compose"]')
+    await page.locator(".react-flow__controls-fitview").click()
+    await node.get_by_role("button", name="编辑图层", exact=True).click()
+    dialog = page.get_by_role("dialog", name="图层合成编辑器")
+    await dialog.get_by_label("添加素材 3", exact=True).click()
+    await expect(dialog.locator(".layer-board video")).to_have_attribute("preload", "metadata")
+    await expect(dialog.get_by_label("声音来源").locator("option").last).to_contain_text("无音轨")
+    assert not requests
+    await dialog.get_by_role("button", name="应用", exact=True).click()
+    await page.wait_for_function("!document.querySelector('.canvas-message .is-dirty')")
+    await node.get_by_role("button", name="编辑图层", exact=True).click()
+    await expect(dialog.locator(".layer-board video")).to_be_visible()
+    assert not requests, "reopening reuses upload snapshot"
+
+    await dialog.get_by_label("添加素材 1", exact=True).click()
+    await expect(dialog.locator(".layer-asset").nth(0).get_by_role("status")).to_be_visible()
+    await asyncio.wait_for(arrived[0].wait(), timeout=5)
+    await dialog.get_by_label("图层名称", exact=True).fill("加载中编辑")
+    await dialog.get_by_label("图层 X", exact=True).fill("123")
+    await dialog.get_by_label("复制图层", exact=True).click()
+    await dialog.get_by_label("删除图层", exact=True).click()
+    assert requests.count(slow_url) == 1, "duplicate layer must not duplicate inspection"
+    await dialog.get_by_label("添加素材 2", exact=True).click()
+    await expect(dialog.get_by_label("重试素材 2", exact=True)).to_be_visible()
+    await dialog.get_by_label("重试素材 2", exact=True).click()
+    await expect(dialog.get_by_label("重试素材 2", exact=True)).to_have_count(0)
+    await expect(dialog.locator(".layer-board video")).to_have_count(2)
+    assert requests.count(bad_url) == 2
+    await dialog.get_by_role("button", name="加载中编辑", exact=True).click()
+    await expect(dialog.get_by_label("图层 X", exact=True)).to_have_value("123")
+    pending[0].set()
+    await expect(dialog.locator(".layer-board video")).to_have_count(3)
+    await expect(dialog.get_by_label("图层 X", exact=True)).to_have_value("123")
+    await dialog.get_by_label("撤销图层编辑", exact=True).click()
+    await expect(dialog.locator(".layer-list > div")).to_have_count(3)
+    await dialog.get_by_label("重做图层编辑", exact=True).click()
+    await expect(dialog.locator(".layer-list > div")).to_have_count(4)
+    await page.screenshot(path=f"test-artifacts/canvas-layer-loading-{width}.png", full_page=True)
+    await dialog.get_by_role("button", name="取消", exact=True).click()
+
+    # Close with work in flight, then open a fresh draft; the old response must not populate it.
+    await node.get_by_role("button", name="编辑图层", exact=True).click()
+    await dialog.get_by_label("添加素材 1", exact=True).click()
+    await expect(dialog.locator(".layer-asset").nth(0).get_by_role("status")).to_be_visible()
+    await asyncio.wait_for(arrived[1].wait(), timeout=5)
+    await dialog.get_by_role("button", name="取消", exact=True).click()
+    await node.get_by_role("button", name="编辑图层", exact=True).click()
+    await dialog.get_by_label("添加素材 1", exact=True).click()
+    await asyncio.wait_for(arrived[2].wait(), timeout=5)
+    pending[1].set()
+    await dialog.get_by_label("图层 X", exact=True).fill("321")
+    await expect(dialog.locator(".layer-asset").nth(0).get_by_role("status")).to_be_visible()
+    pending[2].set()
+    await expect(dialog.locator(".layer-board video")).to_have_count(2)
+    await expect(dialog.get_by_label("图层 X", exact=True)).to_have_value("321")
+    assert not await dialog.evaluate("el => el.scrollWidth > el.clientWidth + 1")
+    await dialog.get_by_role("button", name="取消", exact=True).click()
+    assert not errors, errors
+    await page.close()
+    print(json.dumps(dict(width=width, loading="passed", inspections=len(requests))), flush=True)
+
 async def main():
     with tempfile.TemporaryDirectory(prefix="fluxpost-layer-browser-") as temp:
         video = Path(temp) / "video.mp4"
@@ -176,6 +281,7 @@ async def main():
                 Path("test-artifacts").mkdir(exist_ok=True)
                 for theme in ["creator", "professional", "editorial"]:
                     for width in [1440, 390]: await check(browser, width, video.read_bytes(), theme)
+                for width in [1440, 390]: await check_loading(browser, width, video.read_bytes())
             except Exception:
                 Path("test-artifacts").mkdir(exist_ok=True)
                 for context in browser.contexts:
