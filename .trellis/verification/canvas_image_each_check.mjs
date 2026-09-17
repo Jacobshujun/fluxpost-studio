@@ -44,7 +44,12 @@ const transpiledRegistry = ts.transpileModule(registrySource, {
   fileName: "registry.ts",
 }).outputText;
 const registryModule = { exports: {} };
+const layerContractModule = { exports: {} };
+new Function("module", "exports", ts.transpileModule(read("src/lib/canvas/layer-compose-contract.ts"), {
+  compilerOptions: { module: ts.ModuleKind.CommonJS, target: ts.ScriptTarget.ES2022 },
+}).outputText)(layerContractModule, layerContractModule.exports);
 const registryStubs = {
+  "./layer-compose-contract": layerContractModule.exports,
   "../image-model-options": modelModule.exports,
   "../gpt-image-dimensions": { pixelSizeForRatio: () => "1024x1024" },
   "../toapis-image-api": { toApisImageResolutions: ["1k", "2k", "4k"], toApis4kImageRatios: ["1:1"], toApisImageRatios: ["1:1", "16:9"] },

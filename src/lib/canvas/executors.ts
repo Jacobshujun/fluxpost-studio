@@ -20,6 +20,8 @@ import { pixelSizeForRatio } from "../gpt-image-dimensions";
 import { canvasGptImageReferencePortIds, normalizeUrlList, orderedCanvasGptImageInputs } from "./registry";
 import { CANVAS_SAVE_IMAGE_MAX_ITEMS } from "./save-images";
 import { processCanvasImages } from "./image-process";
+import { renderLayerComposition } from "./layer-compose";
+import { composeSources } from "./layer-compose-contract";
 import { canvasSourceVideoSnapshotFromConfig, isCanvasSourceVideoSnapshotCurrent } from "./source-video-contract";
 import { canvasSubtitleStyleFromConfig } from "./subtitle-style";
 import { decodeCanvasSubtitleRevisionSnapshot } from "./subtitle-editor";
@@ -112,6 +114,15 @@ const executors: Record<CanvasNode["type"], CanvasNodeExecutor> = {
   "utility.image-select": executeImageSelect,
   "utility.image-transform": executeImageTransform,
   "utility.image-process": executeImageProcess,
+  "utility.layer-compose": async ({ node, inputs, account }) => {
+    try {
+      const result = await renderLayerComposition(node.config.composition, composeSources(imageItems(inputs.images), videoItems(inputs.videos)), account.id);
+      return { outputs: { [result.kind]: { kind: result.kind, items: [result.item] } } };
+    } catch (error) {
+      if (error instanceof CanvasMediaNeedsConfigError) throw new CanvasNeedsConfigError(error.message);
+      throw error;
+    }
+  },
   "utility.video-frames": executeVideoFrames,
   "utility.media-mask": executeMediaMask,
   "compose.social-post": executeComposition,

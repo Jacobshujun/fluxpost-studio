@@ -42,6 +42,9 @@ async function main() {
   await expectStatus("/api/production/batches", undefined, 404);
   await expectStatus("/api/production/posts/regenerate", undefined, 404);
   await expectStatus("/api/crawl/jobs", undefined, 401);
+  await expectStatus("/api/canvas/layer-compose/inspect", {
+    method: "POST", headers: { "content-type": "application/json" }, body: "{}",
+  }, 401);
   await expectStatus("/api/production/posts", {
     method: "POST",
     headers: { "content-type": "application/json" },

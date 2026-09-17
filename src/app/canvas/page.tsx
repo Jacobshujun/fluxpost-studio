@@ -3,6 +3,9 @@
 import Link from "next/link";
 import Image from "next/image";
 import { CanvasImageProcessControls, CanvasImageProcessResult } from "./CanvasImageProcess";
+import { CanvasLayerComposeControls } from "./CanvasLayerCompose";
+import { resolveComposeEditorSources } from "@/lib/canvas/layer-compose-inputs";
+import type { ComposeSource } from "@/lib/canvas/layer-compose-contract";
 import {
   BaseEdge,
   Background,
@@ -229,6 +232,7 @@ type PreviewState =
   | { kind: "video"; url: string; index: number }
   | null;
 type CanvasNodeInteraction = {
+  getComposeSources?: (nodeId: string) => ComposeSource[];
   activeRun?: CanvasRunWithNodes;
   displayingExplicitRun: boolean;
   latestNodeRuns: Map<string, CanvasNodeRun>;
@@ -465,6 +469,7 @@ export default function CanvasPage() {
     if (target) void reactFlowRef.current?.fitView({ nodes: [target], padding: 0.8, duration: 260 });
   }, []);
   const nodeInteraction = useMemo<CanvasNodeInteraction>(() => ({
+    getComposeSources: (nodeId) => resolveComposeEditorSources(currentGraph(nodesRef.current, edgesRef.current, viewportRef.current), nodeId, new Map([...latestSuccessfulNodeRuns].map(([id, entry]) => [id, entry.nodeRun]))),
     activeRun,
     displayingExplicitRun,
     latestNodeRuns,
@@ -1833,6 +1838,7 @@ const CanvasFlowNode = memo(function CanvasFlowNode({ data, selected }: NodeProp
     "utility.image-select",
     "utility.image-transform",
     "utility.image-process",
+    "utility.layer-compose",
     "utility.media-mask",
     "utility.video-frames",
     "utility.video-reconstruct",
@@ -1879,6 +1885,7 @@ const CanvasFlowNode = memo(function CanvasFlowNode({ data, selected }: NodeProp
       </details> : null}
     </div>
     <div className="canvas-node-content">
+    {node.type === "utility.layer-compose" ? <CanvasLayerComposeControls node={node} getSources={() => interaction?.getComposeSources?.(node.id) || []} onPatch={(patch) => interaction?.onConfigPatch(node.id, patch)} nodeRun={nodeRun} latestSuccessful={latestSuccessful?.nodeRun} /> : null}
     {node.type === "utility.image-process" ? <>
       <CanvasImageProcessControls node={node} onPatch={(patch) => interaction?.onConfigPatch(node.id, patch)} />
       <CanvasImageProcessResult node={node} nodeRun={nodeRun} latestSuccessful={latestSuccessful?.nodeRun} onPreview={(url, index) => interaction?.onPreview({ kind: "image", url, index })} />
@@ -6552,6 +6559,7 @@ function iconForNode(type: CanvasNodeType) {
   if (type === "utility.image-select") return <ImageIcon {...props} />;
   if (type === "utility.image-transform") return <Maximize2 {...props} />;
   if (type === "utility.image-process") return <Maximize2 {...props} />;
+  if (type === "utility.layer-compose") return <Layers3 {...props} />;
   if (type === "utility.media-mask") return <Square {...props} />;
   if (type === "utility.video-frames") return <Clapperboard {...props} />;
   if (type === "utility.video-subtitles") return <Captions {...props} />;

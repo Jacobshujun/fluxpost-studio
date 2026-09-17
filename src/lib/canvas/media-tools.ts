@@ -633,7 +633,7 @@ function formatSeconds(value: number) {
   return String(Math.round(value * 1000) / 1000);
 }
 
-function runMediaCommand(command: "ffmpeg" | "ffprobe", args: string[], timeout = mediaTimeoutMs) {
+export function runMediaCommand(command: "ffmpeg" | "ffprobe", args: string[], timeout = mediaTimeoutMs) {
   return new Promise<string>((resolve, reject) => {
     const child = execFile(command, args, { timeout, maxBuffer: 1024 * 1024 }, (error, stdout, stderr) => {
       if (error) {

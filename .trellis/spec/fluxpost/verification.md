@@ -21,6 +21,9 @@ node --env-file=.env.local .trellis/verification/unified_library_postgres_benchm
 
 ## Current Automated Checks
 
+- Layer composition: baseline `canvas_layer_compose_check.mjs`; separate 1440/390
+  browser check `canvas_layer_compose_browser_check.py`. Contract: canvas_layer_compose.md.
+
 - Alpha masks: baseline FFmpeg/graph checks and separate 1440/390 browser command in canvas_media_mask.md.
 
 - Image processing: baseline check `canvas_image_process_check.mjs`; browser check `canvas_image_process_browser_check.py`. Contracts and commands: canvas_image_process.md.

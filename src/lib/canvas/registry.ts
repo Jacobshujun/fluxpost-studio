@@ -4,6 +4,7 @@ import { toApisImageRatios, toApisImageResolutions } from "../toapis-image-api";
 import { normalizeImageModel, normalizeToApisRequestFormat } from "../image-model-options";
 import { validateCanvasImageFilenamePrefix } from "./save-images";
 import { defaultImageProcessConfig, validateImageProcessConfig } from "./image-process-contract";
+import { defaultLayerComposeConfig, validateLayerComposeConfig } from "./layer-compose-contract";
 import { canvasPromptPresets, canvasVisionPresets, parseCanvasImageSelection, parseCanvasVideoTimestamps, resolveCanvasImageDimensions } from "./node-utils";
 import { defaultCanvasSourceVideoProjectName, isCanvasSourceVideoSnapshotCurrent } from "./source-video-contract";
 import { feishuPublishModeOptions, normalizeFeishuPublishMode } from "../feishu-publish-mode";
@@ -601,6 +602,16 @@ const canvasNodeDefinitionVersions: CanvasNodeDefinition[] = [
     bypass: { inputPort: "images", outputPort: "images" },
   },
   {
+    type: "utility.layer-compose",
+    version: 1,
+    label: "图层合成",
+    description: "设置成品分辨率，自由叠放、等比缩放和裁剪图片与视频图层。",
+    category: "utility", icon: "Layers3", color: "#0f766e",
+    inputs: [{ id: "images", label: "图片素材", kind: "images", multiple: true }, { id: "videos", label: "视频素材", kind: "videos", multiple: true }],
+    outputs: [{ id: "images", label: "合成图片", kind: "images" }, { id: "videos", label: "合成视频", kind: "videos" }],
+    fields: [], defaultConfig: { composition: defaultLayerComposeConfig() },
+  },
+  {
     type: "utility.media-mask",
     version: 1,
     label: "遮罩",
@@ -1076,6 +1087,7 @@ export function validateCanvasNodeConfig(type: CanvasNodeType, config: CanvasNod
   }
   if (type === "utility.media-mask") errors.push(...validateCanvasMediaMaskConfig(config.mask));
   if (type === "utility.image-process") errors.push(...validateImageProcessConfig(config));
+  if (type === "utility.layer-compose") errors.push(...validateLayerComposeConfig(config.composition));
   if (type === "input.competitor-workbook") {
     const snapshot = config.snapshot;
     const hasSnapshot = Boolean(snapshot && typeof snapshot === "object" && !Array.isArray(snapshot) && "rows" in snapshot);

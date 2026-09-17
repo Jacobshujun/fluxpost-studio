@@ -9,6 +9,18 @@
   ],
   "features": [
     {
+      "id": "canvas-layer-compose",
+      "title": "Canvas image and video layer composition",
+      "status": "ready_for_review",
+      "definition_of_done": [
+        "Exact-size PNG/MP4 composition, non-destructive geometry, mixed layers and selected audio pass offline and browser checks"
+      ],
+      "evidence": [
+        "2026-09-17 real Sharp/FFmpeg checks, full offline baseline and 1440/390 mocked browser passed; see archived canvas-layer-compose task."
+      ],
+      "notes": "Operator acceptance pending. Local candidate delivery authorized; no remote release."
+    },
+    {
       "id": "canvas-image-process",
       "title": "Canvas image processing",
       "status": "ready_for_review",

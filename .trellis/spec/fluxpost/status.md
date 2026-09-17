@@ -1,12 +1,17 @@
 # FluxPost Current Status
 
-Last updated: 2026-09-16
+Last updated: 2026-09-17
 
 ## One-Line Status
 
-Canvas alpha templates pass baseline/browser and local activation. Production unchanged.
+Canvas layer composition passes baseline and desktop/mobile browser checks. Production unchanged.
 
 ## Current Focus
+
+- 2026-09-17: Layer composition adds exact-size PNG/MP4, mixed image/video layers,
+  visual crop/scale, hold/loop/hide and selected audio. Contract: canvas_layer_compose.md.
+  Evidence: .trellis/tasks/archive/2026-09/09-17-canvas-layer-compose/verification.md.
+  Operator acceptance pending; local delivery uses the clean-HEAD candidate wrapper.
 
 - 2026-09-16: Single-PNG mask input preserves alpha. Evidence: .trellis/tasks/archive/2026-09/09-16-canvas-alpha-overlay/verification.md.
 

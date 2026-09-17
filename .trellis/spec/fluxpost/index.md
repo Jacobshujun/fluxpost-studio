@@ -25,6 +25,7 @@ This layer is the project-specific operating memory migrated from the previous H
 | [toapis_image_contract.md](./toapis_image_contract.md) | Ordinary/Official image request fields, pixels, transparency and Canvas propagation. |
 | [canvas_image_process.md](./canvas_image_process.md) | Local image processing, size ceilings, geometry, cache and result contracts. |
 | [canvas_media_mask.md](./canvas_media_mask.md) | Transparent template input, compositing, cache and verification contracts. |
+| [canvas_layer_compose.md](./canvas_layer_compose.md) | Layer editor, exact canvas geometry, mixed media and video/audio composition. |
 | [decisions.md](./decisions.md) | Stable product, architecture, and deployment decisions. |
 | [handoff.md](./handoff.md) | On-demand handoff history; read only latest marker by default. |
 | [progress.md](./progress.md) | On-demand progress history; read only latest marker by default. |

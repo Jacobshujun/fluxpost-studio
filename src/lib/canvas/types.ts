@@ -1,6 +1,7 @@
 import type { ContentPoolSelectionFilter, ContentTag, GeneratedPost, Platform, SourceMediaType, SourceUsageStatus } from "../types";
 import type { CompetitorWorkbookCardSnapshot, CompetitorWorkbookRowSnapshot, CompetitorWorkbookSnapshot } from "../competitor-workbook";
 import type { ImageProcessingReport } from "./image-process-contract";
+import type { LayerComposeConfig } from "./layer-compose-contract";
 
 export type CanvasArtifactKind = "text" | "images" | "audios" | "videos" | "socialPost" | "publishJobRef";
 export type CanvasPortKind = CanvasArtifactKind | "any" | "visual";
@@ -26,6 +27,7 @@ export type CanvasSourceVideoSnapshot = {
 };
 
 export type CanvasMediaReference = {
+  layerComposition?: { configKey: string; hasAudio: boolean };
   imageProcessing?: ImageProcessingReport;
   url: string;
   name?: string;
@@ -330,6 +332,7 @@ export type CanvasNodeType =
   | "utility.image-select"
   | "utility.image-transform"
   | "utility.image-process"
+  | "utility.layer-compose"
   | "utility.video-frames"
   | "utility.media-mask"
   | "compose.social-post"
@@ -353,7 +356,7 @@ export const CANVAS_SCHEDULER_ROLE_LABELS: Record<CanvasSchedulerRole, string> =
   "copy-input": "文案库输入",
 };
 
-export type CanvasConfigValue = string | number | boolean | string[] | CanvasVideoSnapshot[] | CanvasSubtitleRevisionSnapshot | CanvasImageBatchSummary | CompetitorWorkbookSnapshot | CompetitorWorkbookRowSnapshot | CompetitorWorkbookCardSnapshot | CanvasMediaMaskConfig | CanvasMaskRegion[] | Record<string, CanvasMaskRegion[]> | null | undefined;
+export type CanvasConfigValue = string | number | boolean | string[] | CanvasVideoSnapshot[] | CanvasSubtitleRevisionSnapshot | CanvasImageBatchSummary | CompetitorWorkbookSnapshot | CompetitorWorkbookRowSnapshot | CompetitorWorkbookCardSnapshot | CanvasMediaMaskConfig | CanvasMaskRegion[] | Record<string, CanvasMaskRegion[]> | LayerComposeConfig | null | undefined;
 export type CanvasNodeConfig = Record<string, CanvasConfigValue>;
 
 export type CanvasPosition = { x: number; y: number };

@@ -1,4 +1,5 @@
 import { getCanvasNodeDefinition } from "./registry";
+import { isLayerComposeConfig } from "./layer-compose-contract";
 import { normalizeImageModel, normalizeToApisRequestFormat } from "../image-model-options";
 import { getCanvasGraphBudget, getCanvasIterationOutputPorts, stripCanvasConfigSecrets, validateCanvasIteration } from "./iteration";
 import { decodeCanvasSubtitleRevisionSnapshot } from "./subtitle-editor";
@@ -177,6 +178,7 @@ function isCanvasIdentifier(value: unknown): value is string {
 function isCanvasNodeConfig(value: unknown, nodeType: CanvasNode["type"]): value is CanvasNode["config"] {
   if (!isRecord(value)) return false;
   return Object.entries(value).every(([key, item]) => {
+    if (nodeType === "utility.layer-compose" && key === "composition") return isLayerComposeConfig(item);
     if (nodeType === "utility.media-mask" && key === "mask") {
       if (!isRecord(item) || item.protocolVersion !== 1 || !Array.isArray(item.regions)) return false;
       return item.regions.every((region) => isRecord(region));
