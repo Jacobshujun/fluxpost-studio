@@ -8,6 +8,11 @@ Layer composition upload-cleanup failure fixed; PNG/MP4 regressions and full bas
 
 ## Current Focus
 
+- 2026-09-17: Review delivery diagnosis confirms the latest full run's composed
+  video reaches the saved post, with captions visible in actual frames. A separate
+  isolated render has different captions and no downstream post step. The exact
+  operator-view mismatch is pending confirmation; task: layer-compose-review-trace.
+
 - 2026-09-17: Latest local composition failed after successful MP4 persistence:
   TOS removed the local file before output hashing. Hashing now precedes storage;
   consuming-storage PNG/MP4 regressions and full baseline pass.
