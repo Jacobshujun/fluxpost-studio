@@ -9,4 +9,7 @@
 - Legacy complete iteration browser script additionally reaches an unrelated ambiguous `get_by_label("比例")` selector (both node and inspector expose it). Its default test remains intact; only an explicit interaction-only option was added. New groups suite has no such ambiguity.
 
 ## Delivery
-Final baseline, clean commit, primary-worktree LAN candidate activation and read-only /api/version + /canvas checks pending. No live providers, publishing, runtime-row migration or remote deployment requested/exercised.
+- Implementation commit: `126a3af689d6a71692f00d946a6c5c8944e4e9db`.
+- `npm run local:lan` from the clean primary worktree passed (exit 0), including build and port-3001 HTTP smoke. Read-only `/api/version` returned the same full commit with `mode=candidate, versioned=true`; `/canvas` returned HTTP 200; listener stayed `0.0.0.0:3001`.
+- Final documentation/archive commit changes no application code and is activated through the same wrapper. Current receipt is the ignored `.fluxpost-local-candidate.json` plus `/api/version`; detailed activation logs are ignored `.tmp-canvas-groups-local*.log`.
+- No live providers, publishing, runtime-row migration or remote deployment requested/exercised. Operator acceptance remains pending.

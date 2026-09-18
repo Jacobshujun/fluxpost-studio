@@ -17,7 +17,7 @@ Implement the user-approved plan on both main and iteration canvases (2026-09-18
 
 - [x] Deterministic and intercepted browser checks cover both canvases, selection, spatial groups, modes, clipboard, persistence, undo, modal/input guards, three themes and mobile.
 - [x] Full offline baseline passes.
-- [ ] Commit clean primary worktree, activate port 3001 and verify version/page without external calls.
+- [x] Commit clean primary worktree, activate port 3001 and verify version/page without external calls.
 
 ## Notes
 
