@@ -24,3 +24,16 @@ Date: 2026-09-18
 - Restore both original files after stopping only the exact client executable, then launch the desktop shortcut to return to the old relay. Old VPS service and DNS remain unchanged.
 - Server rollback: stop/disable `frps.service`, then remove only UFW `5443/tcp` and `8008/tcp` rules added by this task. Existing SSH and HTTP/HTTPS rules remain.
 - The PC must stay on and the desktop client must run. This task enables VPS service boot startup; it does not add Windows boot startup.
+
+## HTTPS follow-up (2026-09-18)
+
+- User requested a certificate and automatic renewal for ximage.lightmoment.net, whose DNS A record resolves directly to VPS 38.
+- New isolated Nginx site `/etc/nginx/sites-available/ximage-frp` proxies HTTPS port 443 to `127.0.0.1:8008`. HTTP port 80 redirects to HTTPS except the dedicated ACME webroot `/var/www/letsencrypt-ximage`. Existing ports and sites are unchanged.
+- Dedicated Let's Encrypt certificate issued under `/etc/letsencrypt/live/ximage.lightmoment.net`, expires 2026-12-17 05:34:45 UTC. `certbot renew --cert-name ximage.lightmoment.net --dry-run --no-random-sleep-on-renew --non-interactive` passed.
+- Existing certbot.timer is enabled/active. Existing executable deploy hook `20-reload-nginx-after-renewal` validates and reloads Nginx; separately exercised successfully. Renewal uses the VPS webroot, so the local computer is not needed for certificate renewal.
+- Proxy preserves Host and HTTPS scheme, existing 1 GiB upload limit and 3600-second upstream timeouts, supports WebSocket upgrades, and disables request/response buffering and proxy cache. No media cache or data migration was introduced.
+- Public TLS hostname verification, HTTP redirect with path/query, page and JS/CSS assets, byte-range 206 response, account-state endpoint and exact local candidate identity passed. No real user login/upload, paid provider call or publishing action was performed.
+- Desktop public launcher now opens `https://ximage.lightmoment.net/`; syntax and real `-NoBrowser -NoPause` execution passed, reusing the existing client. Prior launcher retained locally as `launcher.before-ximage-https.ps1` under the restricted deployment directory.
+- Original Nginx configuration hashes, all container identities/start timestamps, Nginx master and FRP PIDs remain unchanged. Production HTTPS identity and protected dashboard authentication remain healthy.
+- Full project baseline passed; ignored log: `test-artifacts/ximage-https-baseline.log`. Initial combined task-artifact creation command was policy-blocked; this bounded follow-up evidence stays with the original relay deployment.
+- Rollback: remove only the ximage-frp site link/config, validate and reload Nginx, and restore the local launcher backup. Original port-8008 HTTP access remains available. Retain the VPS/DNS reachability on port 80 for future automated HTTP-01 renewal.

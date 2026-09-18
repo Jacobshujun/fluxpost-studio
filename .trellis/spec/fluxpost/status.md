@@ -8,6 +8,11 @@ Layer composition upload-cleanup failure fixed; PNG/MP4 regressions and full bas
 
 ## Current Focus
 
+- 2026-09-18: Local FRP application now uses https://ximage.lightmoment.net/;
+  desktop public launcher updated. Dedicated Let's Encrypt certificate, scoped
+  renewal dry-run and existing timer/reload hook pass, as do TLS/redirect/assets/range
+  checks and full baseline. Evidence: frp-vps-38 task verification HTTPS follow-up.
+
 - 2026-09-18: FRP dashboard is publicly available at https://flux.lightmoment.net:6443/
   through a dedicated Nginx listener. TLS, auth, UI assets, online proxy and baseline pass;
   original configurations/services are unchanged. Credentials remain local.
