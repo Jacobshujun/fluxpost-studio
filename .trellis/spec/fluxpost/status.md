@@ -8,6 +8,11 @@ Layer composition upload-cleanup failure fixed; PNG/MP4 regressions and full bas
 
 ## Current Focus
 
+- 2026-09-18: Desktop public launcher installed under LOCALAPPDATA/FluxPostStudio.
+  Reuses the local candidate and existing renamed FRP client; public HTTP identity,
+  page access, duplicate-launch checks and full baseline pass. HTTPS remains unconfigured.
+  Evidence: archived desktop-frp-launcher task.
+
 - 2026-09-18: Desktop LAN shortcut and custom multi-size icon installed under
   LOCALAPPDATA/FluxPostStudio. Reuses the running candidate or calls local:lan.
   Launcher, local/LAN HTTP identity and full baseline pass; other-device access
