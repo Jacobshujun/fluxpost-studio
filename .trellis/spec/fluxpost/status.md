@@ -8,10 +8,10 @@ Layer composition upload-cleanup failure fixed; PNG/MP4 regressions and full bas
 
 ## Current Focus
 
-- 2026-09-18: FRP dashboard enabled on VPS loopback 6443; active local SSH tunnel
-  exposes it at 127.0.0.1:16443. Authenticated/unauthenticated checks and baseline pass.
-  Credentials remain local; desktop launcher creation was policy-blocked.
-  Evidence: archived frp-dashboard task.
+- 2026-09-18: FRP dashboard is publicly available at https://flux.lightmoment.net:6443/
+  through a dedicated Nginx listener. TLS, auth, UI assets, online proxy and baseline pass;
+  original configurations/services are unchanged. Credentials remain local.
+  Evidence: archived frp-dashboard-public task. Loopback/SSH access is retained.
 
 - 2026-09-18: FRP 0.71.0 relay deployed on VPS 38 with systemd startup and pinned
   client/server TLS. Desktop public launcher now uses http://38.76.210.136:8008.
