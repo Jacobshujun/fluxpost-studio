@@ -1,12 +1,17 @@
 # FluxPost Current Status
 
-Last updated: 2026-09-17
+Last updated: 2026-09-18
 
 ## One-Line Status
 
 Layer composition upload-cleanup failure fixed; PNG/MP4 regressions and full baseline pass. Production unchanged.
 
 ## Current Focus
+
+- 2026-09-18: Desktop LAN shortcut and custom multi-size icon installed under
+  LOCALAPPDATA/FluxPostStudio. Reuses the running candidate or calls local:lan.
+  Launcher, local/LAN HTTP identity and full baseline pass; other-device access
+  pending confirmation. Evidence: archived desktop-lan-launcher task.
 
 - 2026-09-17: Review delivery diagnosis confirms the latest full run's composed
   video reaches the saved post, with captions visible in actual frames. A separate
