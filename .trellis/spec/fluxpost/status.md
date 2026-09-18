@@ -8,6 +8,11 @@ Layer composition upload-cleanup failure fixed; PNG/MP4 regressions and full bas
 
 ## Current Focus
 
+- 2026-09-18: FRP 0.71.0 relay deployed on VPS 38 with systemd startup and pinned
+  client/server TLS. Desktop public launcher now uses http://38.76.210.136:8008.
+  Public/local identity, reconnect, unchanged production services and full baseline pass.
+  Browser HTTPS remains unconfigured. Evidence: archived frp-vps-38 task.
+
 - 2026-09-18: Desktop public launcher installed under LOCALAPPDATA/FluxPostStudio.
   Reuses the local candidate and existing renamed FRP client; public HTTP identity,
   page access, duplicate-launch checks and full baseline pass. HTTPS remains unconfigured.
