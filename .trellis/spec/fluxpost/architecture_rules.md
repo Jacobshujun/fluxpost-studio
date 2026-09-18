@@ -1603,6 +1603,14 @@ Start-CandidateServer -Slot $targetSlot -Commit $ReleaseSha
 - Region success policy and schedule aggregation policy are independent. Repair after accepted partial delivery never automatically updates downstream; explicit refresh excludes publishing and rejects published outputs. V2 explicit refresh produces a new aggregate draft while retaining the old draft. Shared outputs freeze all configured ports and cannot depend on child-scoped parameters.
 - Shared completion is immutable. Iteration refresh rejects paused/cancelled schedules and records delivered revisions for replay safety. Runtime item history is excluded from ordinary workflow history/reuse; region configuration participates in execution fingerprints.
 
+## Canvas Spatial Groups And Selection
+
+- Both editors use Shift additive/toggle selection, Alt marquee and ordinary pane panning. Inspector focus is separate from the selected node set; empty selection never falls back to inspector focus. New nodes are explicitly selected.
+- `CanvasGraph.groups?` stores flat `{ id, title, color, position, size }` frames. Fully contained measured node bounds determine membership at gesture start. Frames are viewport decorations, never executable nodes, parent relationships or ports. Group deletion preserves nodes; group cut includes movable members.
+- Version-1 workflow and clipboard formats accept optional groups, including iteration graphs. Cloning remaps frame ids and offsets outer frames with nodes. Validate frame ids, bounded finite geometry, title and hex color through serialization.
+- Ctrl/Cmd+G/B/M creates groups or toggles each selected eligible node. Fixed iteration roots cannot move/change mode; unsupported bypass reports a notice. Text targets and covering native/ARIA modal dialogs block commands. A group drag/resize or mode command is one undo step; iteration undo is local.
+- Strip only group metadata from iteration execution fingerprint projections; preserve historical no-group serialization bytes. Group names/colors/geometry must not invalidate existing run recovery or reuse.
+
 ## Trellis Rules
 
 - `.trellis/` is the only active persistent AI collaboration system. `.trellis/spec/fluxpost/` is the FluxPost project-memory layer inside that system.

@@ -166,6 +166,11 @@ button {
 .canvas-selection-actions button:last-child { color: var(--rose-bright); }
 .canvas-selection-actions svg { width: 15px; height: 15px; }
 .canvas-toolbar-actions { display: flex; gap: 6px; margin-left: auto; }
+.canvas-toolbar-actions button { white-space: nowrap; flex-shrink: 0; }
+@media (min-width: 1101px) and (max-width: 1550px) {
+  .canvas-toolbar-actions button span { display: none; }
+  .canvas-toolbar-actions button { width: 36px; padding: 7px; }
+}
 .canvas-toolbar-actions button, .canvas-run-actions button, .canvas-palette-group button {
   display: inline-flex; align-items: center; justify-content: center; gap: 6px; border: 1px solid var(--line-strong); background: var(--canvas-panel); color: var(--text-soft); border-radius: 6px; min-height: 36px; padding: 7px 10px; font-size: 12px; font-weight: 700;
 }

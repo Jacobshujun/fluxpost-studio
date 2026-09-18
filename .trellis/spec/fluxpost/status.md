@@ -4,9 +4,12 @@ Last updated: 2026-09-18
 
 ## One-Line Status
 
-Layer composition upload-cleanup failure fixed; PNG/MP4 regressions and full baseline pass. Production unchanged.
+Canvas groups/shortcuts pass full baseline/browser checks; local activation pending.
 
 ## Current Focus
+
+- 2026-09-18: Canvas groups/shortcuts: task canvas-groups-shortcuts.
+  Full baseline and three-theme 1440/390 browser pass; local activation pending.
 
 - 2026-09-18: Local FRP application now uses https://ximage.lightmoment.net/;
   desktop public launcher updated. Dedicated Let's Encrypt certificate, scoped

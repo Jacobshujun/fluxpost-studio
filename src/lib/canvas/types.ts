@@ -437,10 +437,19 @@ export type CanvasEdge = {
   targetPort: string;
 };
 
+export type CanvasGroup = {
+  id: string;
+  title: string;
+  color: string;
+  position: CanvasPosition;
+  size: CanvasNodeSize;
+};
+
 export type CanvasGraph = {
   nodes: CanvasNode[];
   edges: CanvasEdge[];
   viewport: CanvasViewport;
+  groups?: CanvasGroup[];
 };
 
 export type CanvasWorkflow = {

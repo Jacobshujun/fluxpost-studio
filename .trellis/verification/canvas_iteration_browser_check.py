@@ -208,6 +208,12 @@ async def check(browser, width):
     await page.goto(f"{BASE_URL}/canvas?workflowId=iteration-workflow&runId=iteration-run", wait_until="networkidle")
     original_workflow = copy.deepcopy(workflow)
     await check_editor_interactions(page, width, lambda: workflow)
+    if os.environ.get("CANVAS_ITERATION_INTERACTIONS_ONLY") == "1":
+        assert not errors, errors
+        assert not violations, violations
+        await page.close()
+        print(json.dumps({"width": width, "interactions": "passed"}), flush=True)
+        return
     workflow = original_workflow
     await page.reload(wait_until="networkidle")
     if width > 820:

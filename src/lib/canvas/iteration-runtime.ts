@@ -1,6 +1,7 @@
 import { createHash } from "node:crypto";
 import { enqueueCanvasRunQueueItem, getCanvasRunFromDb, holdCanvasIterationItemQueue, listCanvasNodeRunsFromDb, saveCanvasRunToDb, wakeCanvasIterationRun } from "../database";
 import { buildCanvasRunPlan, collectDescendants } from "./graph";
+import { canvasIterationExecutionDefinition } from "./iteration";
 import type { CanvasNodeExecutionResult } from "./executors";
 import type { CanvasArtifact, CanvasIterationItem, CanvasIterationRunMetadata, CanvasNode, CanvasNodeRun, CanvasRun } from "./types";
 
@@ -21,7 +22,7 @@ export async function executeCanvasIteration(context: RegionContext): Promise<Ca
   if (!sources.length || sources.length > 18) throw new Error("Iteration accepts 1 to 18 images.");
   const concurrency = Number(node.config.concurrency);
   if (!Number.isInteger(concurrency) || concurrency < 1 || concurrency > 20) throw new Error("Iteration concurrency must be between 1 and 20.");
-  const inputFingerprint = fingerprint({ definition, inputs, failurePolicy: node.config.failurePolicy });
+  const inputFingerprint = fingerprint({ definition: canvasIterationExecutionDefinition(definition), inputs, failurePolicy: node.config.failurePolicy });
   let metadata = context.previousNodeRun?.internalMetadata?.iteration;
   if (metadata && metadata.inputFingerprint !== inputFingerprint) throw new Error("Iteration inputs changed. Start a new run.");
   if (!metadata) {

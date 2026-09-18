@@ -11,7 +11,7 @@ assert.match(page, /const \[paletteVisible, setPaletteVisible\] = useState\(fals
 assert.match(page, /panOnDrag=\{true\}/, "Canvas pane must pan on blank-area drag");
 assert.match(page, /selectionOnDrag=\{!isMobile\}/, "Desktop selection drag must remain enabled");
 assert.match(page, /selectionKeyCode="Alt"/, "Alt must be the selection-box activation key");
-assert.match(page, /multiSelectionKeyCode=\{null\}/, "Ctrl/Meta click multi-select must be disabled");
+assert.equal((page.match(/multiSelectionKeyCode="Shift"/g) || []).length, 2, "Both canvases must use Shift multi-selection without reserving Ctrl/Meta clicks");
 assert.doesNotMatch(page, /panOnDrag=\{isMobile\}/, "Canvas must not keep the old desktop non-pan mode");
 assert.match(css, /\.canvas-stage \.react-flow__pane\.draggable \{[^}]*cursor: grab;/s, "Idle pan cursor must remain grab");
 assert.match(css, /\.canvas-stage \.react-flow__pane\.dragging \{[^}]*cursor: grabbing;/s, "Active pan cursor must remain grabbing");

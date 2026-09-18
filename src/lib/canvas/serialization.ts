@@ -10,7 +10,7 @@ import {
   CANVAS_SCHEDULER_ROLES,
   isCanvasNodeSize,
 } from "./types";
-import type { CanvasEdge, CanvasGraph, CanvasNode, CanvasPosition, CanvasViewport } from "./types";
+import type { CanvasEdge, CanvasGraph, CanvasGroup, CanvasNode, CanvasPosition, CanvasViewport } from "./types";
 
 const maxCoordinate = 10_000_000;
 const maxIdentifierLength = 160;
@@ -28,7 +28,24 @@ export class CanvasSerializationError extends Error {
 export function decodeCanvasGraph(value: unknown): CanvasGraph {
   if (!isRecord(value)) throw new CanvasSerializationError("Canvas graph must be an object.");
   const fragment = decodeCanvasGraphFragment(value.nodes, value.edges, true);
-  return { ...fragment, viewport: decodeCanvasViewport(value.viewport) };
+  return { ...fragment, viewport: decodeCanvasViewport(value.viewport), ...(value.groups === undefined ? {} : { groups: decodeCanvasGroups(value.groups) }) };
+}
+
+export function decodeCanvasGroups(value: unknown): CanvasGroup[] {
+  if (!Array.isArray(value) || value.length > CANVAS_GRAPH_LIMITS.maxNodes) throw new CanvasSerializationError("Invalid canvas groups.");
+  const ids = new Set<string>();
+  return value.map((group) => {
+    if (!isRecord(group) || !isCanvasIdentifier(group.id) || ids.has(group.id)
+      || typeof group.title !== "string" || group.title.length > 80
+      || typeof group.color !== "string" || !/^#[0-9a-f]{6}$/i.test(group.color)
+      || !isCanvasPosition(group.position) || !isRecord(group.size)
+      || typeof group.size.width !== "number" || !Number.isFinite(group.size.width) || group.size.width < 80 || group.size.width > maxCoordinate
+      || typeof group.size.height !== "number" || !Number.isFinite(group.size.height) || group.size.height < 60 || group.size.height > maxCoordinate) {
+      throw new CanvasSerializationError("Invalid canvas group id, title, color or bounds.");
+    }
+    ids.add(group.id);
+    return { id: group.id, title: group.title, color: group.color, position: { ...group.position }, size: { width: group.size.width, height: group.size.height } };
+  });
 }
 
 export function decodeCanvasGraphFragment(nodesValue: unknown, edgesValue: unknown, allowEmpty = false): { nodes: CanvasNode[]; edges: CanvasEdge[] } {
@@ -106,7 +123,7 @@ function decodeGraphFragment(nodesValue: unknown, edgesValue: unknown, allowEmpt
         if ((kind !== "text" && kind !== "images") || !isRecord(selector) || !isCanvasIdentifier(selector.nodeId) || !isCanvasIdentifier(selector.outputPort)) throw new CanvasSerializationError("Invalid image iteration output selector.");
         outputs[kind] = { nodeId: selector.nodeId, outputPort: selector.outputPort };
       }
-      node.iteration = { graph: { ...fragment, viewport: decodeCanvasViewport(iteration.graph.viewport) }, outputs };
+      node.iteration = { graph: { ...fragment, viewport: decodeCanvasViewport(iteration.graph.viewport), ...(iteration.graph.groups === undefined ? {} : { groups: decodeCanvasGroups(iteration.graph.groups) }) }, outputs };
       if (valueNode.frozenOutputs !== undefined) node.frozenOutputs = structuredClone(valueNode.frozenOutputs) as CanvasNode["frozenOutputs"];
       const errors = validateCanvasIteration(node, false);
       if (errors.length) throw new CanvasSerializationError(errors.join(" "));

@@ -29,6 +29,7 @@ import { concurrencyConfig } from "../concurrency";
 import { IMAGE_NETWORK_WAIT_REASON, isImageNetworkUnavailableError } from "../image-transport";
 import { CanvasNeedsConfigError, executeCanvasNode, resolveCanvasLiteralOutputs, type CanvasNodeExecutionResult } from "./executors";
 import { bindComposeInput } from "./layer-compose-contract";
+import { canvasIterationExecutionDefinition } from "./iteration";
 import { ArkSeedanceNeedsConfigError, getArkSeedanceReadiness } from "./seedance";
 import { buildCanvasRunPlan, collectDescendants } from "./graph";
 import { getCanvasNodeDefinition, getCanvasNodeExecutionMode, getCanvasRequiredInputPorts, normalizeUrlList, orderedCanvasGptImageInputs } from "./registry";
@@ -1023,7 +1024,7 @@ function mergeArtifacts(artifacts: CanvasArtifact[]): CanvasArtifact | undefined
 
 function fingerprintCanvasNodeExecution(node: CanvasNode, inputs: Record<string, CanvasArtifact[]>) {
   const value = {
-    node: { id: node.id, type: node.type, version: node.version, config: node.config, executionMode: getCanvasNodeExecutionMode(node), ...(node.iteration ? { iteration: node.iteration } : {}) },
+    node: { id: node.id, type: node.type, version: node.version, config: node.config, executionMode: getCanvasNodeExecutionMode(node), ...(node.iteration ? { iteration: canvasIterationExecutionDefinition(node.iteration) } : {}) },
     inputs: normalizeFingerprintInputs(node, inputs),
   };
   return createHash("sha256").update(stableSerialize(value)).digest("hex");

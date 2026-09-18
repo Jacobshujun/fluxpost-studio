@@ -75,7 +75,7 @@ try {
   writeFileSync(path.join(temp, "image-model-options.js"), ts.transpileModule(read("src/lib/image-model-options.ts"), { compilerOptions: { module: ts.ModuleKind.CommonJS, target: ts.ScriptTarget.ES2022 } }).outputText);
   writeFileSync(path.join(temp, "toapis-image-api.js"), `exports.toApisImageResolutions=['1k','2k','4k']; exports.toApisImageRatios = ${JSON.stringify(["1:1", "3:2", "2:3", "4:3", "3:4", "5:4", "4:5", "16:9", "9:16", "2:1", "1:2", "21:9", "9:21"])}; exports.toApis4kImageRatios = ${JSON.stringify(["16:9", "9:16", "2:1", "1:2", "21:9", "9:21"])};`, "utf8");
   writeFileSync(path.join(temp, "feishu-publish-mode.js"), "exports.feishuPublishModeOptions=[{value:'full',label:'完整写入'},{value:'text',label:'仅标题与正文'},{value:'media',label:'仅图片与视频'}];exports.normalizeFeishuPublishMode=(value)=>value===undefined?'full':['full','text','media'].includes(value)?value:(()=>{throw new Error('invalid mode')})();", "utf8");
-  for (const name of ["layer-compose-contract", "image-process-contract", "types", "node-utils", "source-video-contract", "video-loader", "content-collection", "save-images", "seedance-references", "subtitle-style", "subtitle-editor", "registry", "graph", "iteration", "serialization", "clipboard", "workflow-file"]) {
+  for (const name of ["layer-compose-contract", "image-process-contract", "types", "node-utils", "source-video-contract", "video-loader", "content-collection", "save-images", "seedance-references", "subtitle-style", "subtitle-editor", "registry", "graph", "iteration", "serialization", "clipboard", "workflow-file", "editor-commands"]) {
     const source = read(`src/lib/canvas/${name}.ts`).replace('"../toapis-image-api"', '"./toapis-image-api"').replace('"../feishu-publish-mode"', '"./feishu-publish-mode"').replace('"../image-model-options"', '"./image-model-options"');
     const output = ts.transpileModule(source, {
       compilerOptions: { module: ts.ModuleKind.CommonJS, target: ts.ScriptTarget.ES2022 },
@@ -96,6 +96,47 @@ try {
   assert.equal(getCanvasNodeDefinition("model.gpt-image", 1)?.version, 1, "legacy GPT image snapshots must remain resolvable");
   const orderedImageNode = { id: "ordered", type: "model.gpt-image", version: 2, position: { x: 400, y: 0 }, config: { ...getCanvasNodeDefinition("model.gpt-image").defaultConfig } };
   const { decodeCanvasGraph } = require(path.join(temp, "serialization.js"));
+
+  {
+  const { createCanvasGroup, canvasGroupMembers, toggleCanvasNodeModes } = require(path.join(temp, "editor-commands.js"));
+  const { createCanvasIterationDefinition, canvasIterationExecutionDefinition } = require(path.join(temp, "iteration.js"));
+  const rectangles = [{ id: "a", position: { x: 40, y: 70 }, width: 280, height: 180 }, { id: "b", position: { x: 400, y: 70 }, width: 280, height: 200 }];
+  const frame = createCanvasGroup("frame", rectangles);
+  assert.deepEqual(canvasGroupMembers(frame, rectangles), ["a", "b"]);
+  assert.deepEqual(canvasGroupMembers(frame, [...rectangles, { id: "partial", position: { x: frame.position.x - 1, y: 70 }, width: 30, height: 40 }]), ["a", "b"], "partial overlap must not join spatial group");
+  assert.deepEqual(canvasGroupMembers(frame, rectangles.map((entry) => ({ ...entry, position: { x: entry.position.x + 1000, y: entry.position.y } }))), [], "dragging nodes outside leaves group");
+  const previewNode = { id: "a", type: "utility.image-preview", version: 1, position: rectangles[0].position, config: {} };
+  const bypassNode = { ...previewNode, id: "b", position: rectangles[1].position, executionMode: "bypass" };
+  const protectedNode = { ...previewNode, id: "root", type: "input.iteration-item" };
+  const textNode = { ...previewNode, id: "text", type: "input.text", config: { text: "hello" } };
+  const toggled = toggleCanvasNodeModes([previewNode, bypassNode, protectedNode, textNode], ["a", "b", "root", "text"], "bypass");
+  assert.deepEqual(toggled.nodes.map((node) => node.executionMode), ["bypass", "enabled", undefined, undefined]);
+  assert.deepEqual(toggled.skipped, ["root", "text"]);
+  assert.deepEqual(toggleCanvasNodeModes([previewNode, { ...bypassNode, executionMode: "disabled" }, protectedNode], ["a", "b", "root"], "disabled").nodes.map((node) => node.executionMode), ["disabled", "enabled", undefined]);
+  const groupedGraph = { nodes: [previewNode, bypassNode], edges: [], viewport: { x: 0, y: 0, zoom: 1 }, groups: [frame] };
+  assert.deepEqual(decodeCanvasGraph(groupedGraph), groupedGraph);
+  assert.deepEqual(parseCanvasWorkflowFile(JSON.stringify(createCanvasWorkflowFile("groups", groupedGraph))).graph.groups, [frame]);
+  const copiedGroup = createCanvasClipboardPayload(groupedGraph.nodes, [], ["a", "b"], [frame]);
+  assert.deepEqual(parseCanvasClipboardPayload(JSON.stringify(copiedGroup)).groups, [frame]);
+  const pastedGroup = prepareCanvasClipboardPaste(groupedGraph, copiedGroup, { x: 900, y: 900 }, (kind, index) => `${kind}-copy-${index}`);
+  assert.equal(pastedGroup.groups[0].id, "group-copy-0");
+  assert.deepEqual(pastedGroup.groups[0].position, { x: 900, y: 900 });
+  assert.equal(pastedGroup.nodes[0].position.x - pastedGroup.groups[0].position.x, previewNode.position.x - frame.position.x);
+  assert.equal(createCanvasClipboardPayload(groupedGraph.nodes, [], ["a"]).groups, undefined);
+  for (const groups of [[{ ...frame, color: "red;bad" }], [{ ...frame, size: { width: -1, height: 100 } }], [frame, frame]]) assert.throws(() => decodeCanvasGraph({ ...groupedGraph, groups }));
+  assert.deepEqual(buildCanvasRunPlan({ ...groupedGraph, nodes: [textNode] }), buildCanvasRunPlan({ ...groupedGraph, nodes: [textNode], groups: [] }), "groups never participate in execution planning");
+  const definition = createCanvasIterationDefinition();
+  assert.equal(JSON.stringify(canvasIterationExecutionDefinition(definition)), JSON.stringify(definition), "old fingerprints must retain key order and bytes");
+  definition.graph.groups = [frame];
+  const regionNode = { id: "region-groups", type: "utility.image-iterate", version: 1, position: { x: 0, y: 0 }, config: { concurrency: 4, failurePolicy: "all" }, iteration: definition };
+  assert.deepEqual(decodeCanvasGraph({ ...groupedGraph, nodes: [regionNode] }).nodes[0].iteration.graph.groups, [frame]);
+  const nestedCopy = instantiateCanvasClipboardPayload(createCanvasClipboardPayload([regionNode], [], [regionNode.id]), { x: 0, y: 0 }, (kind, index) => `${kind}-inner-${index}`);
+  assert.notEqual(nestedCopy.nodes[0].iteration.graph.groups[0].id, frame.id);
+  const executionDefinition = canvasIterationExecutionDefinition(definition);
+  definition.graph.groups[0].title = "Renamed layout";
+  assert.deepEqual(canvasIterationExecutionDefinition(definition), executionDefinition);
+  }
+
   const maskTemplate = { id: "template", shape: "rectangle", mode: "image", imageSource: "input", x: 0, y: 0, width: 1, height: 1, opacity: 1, color: "#000000" };
   const maskGraph = {
     viewport: { x: 0, y: 0, zoom: 1 },

@@ -9,6 +9,18 @@
   ],
   "features": [
     {
+      "id": "canvas-groups-shortcuts",
+      "title": "Canvas selection, groups and shortcuts",
+      "status": "ready_for_review",
+      "definition_of_done": [
+        "Both editors pass selection/group/mode, persistence, undo and execution-isolation checks"
+      ],
+      "evidence": [
+        "2026-09-18 full baseline/browser pass; canvas-groups-shortcuts task."
+      ],
+      "notes": "Operator acceptance pending."
+    },
+    {
       "id": "canvas-layer-compose",
       "title": "Canvas image and video layer composition",
       "status": "ready_for_review",

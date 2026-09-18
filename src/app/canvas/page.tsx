@@ -146,6 +146,7 @@ import { createWorkflowSaveCoordinator } from "@/lib/canvas/workflow-save-coordi
 import {
   areCanvasPortKindsCompatible,
   CANVAS_NODE_SIZE_LIMITS,
+  CANVAS_GRAPH_LIMITS,
   CANVAS_REQUIRED_SCHEDULER_ROLES,
   CANVAS_SCHEDULER_ROLES,
   CANVAS_SCHEDULER_ROLE_LABELS,
@@ -156,6 +157,9 @@ import { enumCodec, optionalStringCodec, useUrlQueryState } from "@/lib/use-url-
 import { selectIdRange } from "@/lib/list-selection";
 import { SubtitleEditorDialog } from "./SubtitleEditorDialog";
 import { CanvasIterationResults } from "./CanvasIterationResults";
+import { CanvasGroups } from "./CanvasGroups";
+import { canvasGroupMembers, createCanvasGroup, toggleCanvasNodeModes, type CanvasNodeBounds } from "@/lib/canvas/editor-commands";
+import type { CanvasGroup, CanvasPosition } from "@/lib/canvas/types";
 import "./iteration.css";
 import { contentTagOptions } from "@/lib/types";
 import type { ContentPoolSelectionFilter, ContentPoolSelectionItem, ContentPoolSelectionPage, CopyLibraryEntryView, LibraryAsset, LibraryAssetPage, LibraryNavigation } from "@/lib/types";
@@ -269,6 +273,11 @@ export default function CanvasPage() {
   const [edges, setEdges] = useState<FlowEdge[]>([]);
   const [viewport, setViewport] = useState<Viewport>({ x: 0, y: 0, zoom: 1 });
   const [selectedNodeId, setSelectedNodeId] = useState<string>();
+  const [groups, setGroups] = useState<CanvasGroup[]>([]);
+  const [selectedGroupId, setSelectedGroupId] = useState<string>();
+  const groupsRef = useRef<CanvasGroup[]>([]);
+  const groupDragRef = useRef<FlowNode[]>([]);
+  const historyGestureRef = useRef(false);
   const [iterationEditorId, setIterationEditorId] = useState<string>();
   const [activeRun, setActiveRun] = useState<CanvasRunWithNodes>();
   const [latestNodeAttempts, setLatestNodeAttempts] = useState<Map<string, CanvasLatestNodeAttempt>>(new Map());
@@ -329,6 +338,7 @@ export default function CanvasPage() {
   nodesRef.current = nodes;
   edgesRef.current = edges;
   viewportRef.current = viewport;
+  groupsRef.current = groups;
   if (!saveCoordinatorRef.current) {
     saveCoordinatorRef.current = createWorkflowSaveCoordinator<CanvasGraph, CanvasWorkflow>({
       capture: () => {
@@ -339,7 +349,7 @@ export default function CanvasPage() {
           dirtyVersion: dirtyVersionRef.current,
           name: workflow.name,
           revision: workflow.revision,
-          graph: currentGraph(nodesRef.current, edgesRef.current, viewportRef.current),
+          graph: currentGraph(nodesRef.current, edgesRef.current, viewportRef.current, groupsRef.current),
         };
       },
       save: async (snapshot) => {
@@ -377,7 +387,7 @@ export default function CanvasPage() {
   const selectedFlowNode = nodes.find((node) => node.id === selectedNodeId);
   const selectedCanvasNode = selectedFlowNode?.data.canvasNode;
   const displayedNodes = useMemo(() => nodes.map((node) => applyFlowNodeSize(node, isMobile)), [isMobile, nodes]);
-  const editableGraph = useMemo(() => currentGraph(nodes, edges, viewport), [edges, nodes, viewport]);
+  const editableGraph = useMemo(() => currentGraph(nodes, edges, viewport, groups), [edges, nodes, viewport, groups]);
   const selectedSeedanceReferences = useMemo(() => selectedCanvasNode?.type === "model.seedance"
     ? resolveSeedanceFixedReferences(editableGraph, selectedCanvasNode.id)
     : [], [editableGraph, selectedCanvasNode?.id, selectedCanvasNode?.type]);
@@ -464,12 +474,14 @@ export default function CanvasPage() {
   }, [markDirty]);
   const focusCanvasNode = useCallback((nodeId: string) => {
     setSelectedNodeId(nodeId);
+    setSelectedGroupId(undefined);
+    setNodes((current) => current.map((entry) => ({ ...entry, selected: entry.id === nodeId })));
     setMobilePalette(false);
     const target = nodesRef.current.find((node) => node.id === nodeId);
     if (target) void reactFlowRef.current?.fitView({ nodes: [target], padding: 0.8, duration: 260 });
   }, []);
   const nodeInteraction = useMemo<CanvasNodeInteraction>(() => ({
-    getComposeSources: (nodeId) => resolveComposeEditorSources(currentGraph(nodesRef.current, edgesRef.current, viewportRef.current), nodeId, new Map([...latestSuccessfulNodeRuns].map(([id, entry]) => [id, entry.nodeRun]))),
+    getComposeSources: (nodeId) => resolveComposeEditorSources(currentGraph(nodesRef.current, edgesRef.current, viewportRef.current, groupsRef.current), nodeId, new Map([...latestSuccessfulNodeRuns].map(([id, entry]) => [id, entry.nodeRun]))),
     activeRun,
     displayingExplicitRun,
     latestNodeRuns,
@@ -531,7 +543,7 @@ export default function CanvasPage() {
     return () => {
       if (saveTimer.current) clearTimeout(saveTimer.current);
     };
-  }, [dirty, nodes, edges, viewport, activeWorkflow?.name, busy]);
+  }, [dirty, nodes, edges, viewport, groups, activeWorkflow?.name, busy]);
 
   useEffect(() => {
     if (!activeWorkflowIdRef.current) return;
@@ -540,7 +552,8 @@ export default function CanvasPage() {
       return;
     }
     if (canvasHistoryTimerRef.current) clearTimeout(canvasHistoryTimerRef.current);
-    const graph = currentGraph(nodes, edges, viewport);
+    if (historyGestureRef.current || iterationEditorId) return;
+    const graph = currentGraph(nodes, edges, viewport, groups);
     canvasHistoryTimerRef.current = setTimeout(() => {
       canvasHistoryRef.current = commitCanvasHistory(canvasHistoryRef.current, graph);
       canvasHistoryTimerRef.current = null;
@@ -548,7 +561,7 @@ export default function CanvasPage() {
     return () => {
       if (canvasHistoryTimerRef.current) clearTimeout(canvasHistoryTimerRef.current);
     };
-  }, [activeWorkflow?.id, edges, nodes, viewport]);
+  }, [activeWorkflow?.id, edges, nodes, viewport, groups, iterationEditorId]);
 
   useEffect(() => {
     if (!activeRun || terminalStatuses.has(activeRun.run.status)) return;
@@ -567,6 +580,8 @@ export default function CanvasPage() {
         loadRunsRequestRef.current += 1;
         setActiveWorkflow(null);
         setNodes([]);
+        setGroups([]);
+        setSelectedGroupId(undefined);
         setEdges([]);
         setQuickAdd(null);
         setMessage("新建一个画布开始编排");
@@ -589,6 +604,9 @@ export default function CanvasPage() {
     loadRunsRequestRef.current += 1;
     setActiveWorkflow(workflow);
     setNodes(toFlowNodes(workflow.graph.nodes, isMobile));
+    setGroups(workflow.graph.groups || []);
+    setSelectedGroupId(undefined);
+    historyGestureRef.current = false;
     setEdges(toFlowEdges(workflow.graph.edges, workflow.graph.nodes));
     setViewport(workflow.graph.viewport);
     setSelectedNodeId(undefined);
@@ -678,7 +696,7 @@ export default function CanvasPage() {
     saveTimer.current = null;
     const workflow = activeWorkflow;
     const roleByNodeId = new Map(Object.entries(bindings).map(([role, nodeId]) => [nodeId, role as CanvasSchedulerRole]));
-    const graph = currentGraph(nodes, edges, viewport);
+    const graph = currentGraph(nodes, edges, viewport, groups);
     graph.nodes = graph.nodes.map((node) => ({ ...node, schedulerRole: roleByNodeId.get(node.id) }));
     setBusy(true);
     try {
@@ -691,6 +709,7 @@ export default function CanvasPage() {
       setWorkflows((current) => current.map((item) => item.id === data.workflow.id ? data.workflow : item));
       setActiveWorkflow(data.workflow);
       setNodes(toFlowNodes(data.workflow.graph.nodes, isMobile));
+      setGroups(data.workflow.graph.groups || []);
       setEdges(toFlowEdges(data.workflow.graph.edges, data.workflow.graph.nodes));
       setViewport(data.workflow.graph.viewport);
       syncCanvasViewportDetail(stageRef.current, data.workflow.graph.viewport.zoom);
@@ -749,7 +768,8 @@ export default function CanvasPage() {
     }
     const id = `${type.replaceAll(".", "-")}-${Date.now()}`;
     const canvasNode = createCanvasNode(type, id, position || { x: 80 + nodes.length * 28, y: 80 + nodes.length * 24 });
-    setNodes((current) => [...current, toFlowNode(canvasNode, isMobile)]);
+    setNodes((current) => [...current.map((entry) => ({ ...entry, selected: false })), { ...toFlowNode(canvasNode, isMobile), selected: true }]);
+    setSelectedGroupId(undefined);
     if (connection && port) {
       const source = connection.handleType === "source" ? nodes.find((node) => node.id === connection.nodeId)?.data.canvasNode : canvasNode;
       const edgeConnection: Connection = connection.handleType === "source"
@@ -766,11 +786,12 @@ export default function CanvasPage() {
   function insertSchedulerSkeleton() {
     if (isMobile || !activeWorkflow) return;
     try {
-      const graph = currentGraph(nodes, edges, viewport);
+      const graph = currentGraph(nodes, edges, viewport, groups);
       const origin = getCanvasPastePosition();
       const stamp = Date.now();
       const next = createCanvasSchedulerSkeleton(graph, origin, (kind, key, index) => `scheduler-${kind}-${key}-${stamp}-${index}`);
-      setNodes(toFlowNodes(next.nodes, isMobile));
+      setNodes(toFlowNodes(next.nodes, isMobile).map((entry) => ({ ...entry, selected: entry.data.canvasNode.schedulerRole === "prompt-switch" })));
+      setSelectedGroupId(undefined);
       setEdges(toFlowEdges(next.edges, next.nodes));
       setSelectedNodeId(next.nodes.find((node) => node.schedulerRole === "prompt-switch")?.id);
       markDirty();
@@ -800,14 +821,74 @@ export default function CanvasPage() {
   }
 
   function getSelectedNodeIds() {
-    const selected = nodes.filter((node) => node.selected).map((node) => node.id);
-    if (!selected.length && selectedNodeId && nodes.some((node) => node.id === selectedNodeId)) selected.push(selectedNodeId);
-    return selected;
+    const group = groups.find((entry) => entry.id === selectedGroupId);
+    return group ? canvasGroupMembers(group, flowNodeBounds(nodes)) : nodes.filter((node) => node.selected).map((node) => node.id);
+  }
+
+  function selectGroup(id: string) {
+    setSelectedGroupId(id);
+    setSelectedNodeId(undefined);
+    setNodes((current) => current.map((node) => ({ ...node, selected: false })));
+    setEdges((current) => current.map((edge) => ({ ...edge, selected: false })));
+  }
+
+  function createGroup() {
+    if (isMobile || !activeWorkflow) return;
+    if (groups.length >= CANVAS_GRAPH_LIMITS.maxNodes) { setMessage("最多支持 200 个分组"); return; }
+    const selected = new Set(getSelectedNodeIds());
+    const group = createCanvasGroup(`group-${Date.now()}-${++pasteSequenceRef.current}`, flowNodeBounds(nodes).filter((node) => selected.has(node.id)));
+    if (!group) return;
+    scheduleCanvasHistoryCommit();
+    setGroups((current) => [...current, group]);
+    selectGroup(group.id);
+    markDirty();
+  }
+
+  function removeGroup(id: string) {
+    scheduleCanvasHistoryCommit();
+    setGroups((current) => current.filter((group) => group.id !== id));
+    setSelectedGroupId(undefined);
+    markDirty();
+  }
+
+  function toggleSelectedModes(mode: "bypass" | "disabled") {
+    const result = toggleCanvasNodeModes(nodes.map((node) => node.data.canvasNode), getSelectedNodeIds(), mode);
+    if (result.nodes.every((node, index) => node === nodes[index].data.canvasNode)) { setMessage("选中节点受保护或不支持此操作，保持原状态"); return; }
+    scheduleCanvasHistoryCommit();
+    setNodes((current) => current.map((node, index) => ({ ...node, data: { canvasNode: result.nodes[index] } })));
+    markDirty();
+    setMessage(result.skipped.length ? `已更新可操作节点；${result.skipped.length} 个节点不支持此操作，保持原状态` : "已更新选中节点状态");
+  }
+
+  function beginCanvasGesture(groupId?: string) {
+    scheduleCanvasHistoryCommit();
+    historyGestureRef.current = true;
+    const group = groups.find((entry) => entry.id === groupId);
+    const ids = new Set(group ? canvasGroupMembers(group, flowNodeBounds(nodes)) : []);
+    groupDragRef.current = nodes.filter((node) => ids.has(node.id));
+  }
+
+  function endCanvasGesture() {
+    historyGestureRef.current = false;
+    canvasHistoryRef.current = commitCanvasHistory(canvasHistoryRef.current, currentGraph(nodesRef.current, edgesRef.current, viewportRef.current, groupsRef.current));
+  }
+
+  function changeGroup(group: CanvasGroup, delta?: CanvasPosition) {
+    if (!historyGestureRef.current) scheduleCanvasHistoryCommit();
+    setGroups((current) => current.map((entry) => entry.id === group.id ? group : entry));
+    if (delta) {
+      const starts = new Map(groupDragRef.current.map((node) => [node.id, node.position]));
+      setNodes((current) => current.map((node) => {
+        const start = starts.get(node.id);
+        return start ? { ...node, position: { x: start.x + delta.x, y: start.y + delta.y } } : node;
+      }));
+    }
+    markDirty();
   }
 
   function getSelectionPayload() {
-    const graph = currentGraph(nodes, edges, viewport);
-    return createCanvasClipboardPayload(graph.nodes, graph.edges, getSelectedNodeIds());
+    const graph = currentGraph(nodes, edges, viewport, groups);
+    return createCanvasClipboardPayload(graph.nodes, graph.edges, getSelectedNodeIds(), groups.filter((group) => group.id === selectedGroupId));
   }
 
   function getCanvasPastePosition(offset = 0) {
@@ -824,7 +905,7 @@ export default function CanvasPage() {
     try {
       const sequence = ++pasteSequenceRef.current;
       const fragment = prepareCanvasClipboardPaste(
-        currentGraph(nodes, edges, viewport),
+        currentGraph(nodes, edges, viewport, groups),
         payload,
         position,
         (kind, index) => `${kind}-paste-${Date.now()}-${sequence}-${index}`,
@@ -832,6 +913,8 @@ export default function CanvasPage() {
       const pastedNodes = fragment.nodes.map((node) => ({ ...toFlowNode(node, isMobile), selected: true }));
       setNodes((current) => [...current.map((node) => ({ ...node, selected: false })), ...pastedNodes]);
       setEdges((current) => [...current, ...toFlowEdges(fragment.edges, fragment.nodes)]);
+      setGroups((current) => [...current, ...(fragment.groups || [])]);
+      setSelectedGroupId(fragment.groups?.[0]?.id);
       setSelectedNodeId(fragment.nodes[0]?.id);
       markDirty();
       const clearedRoles = fragment.clearedSchedulerRoles.map((role) => CANVAS_SCHEDULER_ROLE_LABELS[role]).join("、");
@@ -857,7 +940,7 @@ export default function CanvasPage() {
     } catch {
       copiedToSystem = false;
     }
-    if (removeAfterCopy) removeSelectedNodes();
+    if (removeAfterCopy) cutSelectedNodes();
     else setMessage(copiedToSystem
       ? `已复制 ${payload.nodes.length} 个节点`
       : `已复制 ${payload.nodes.length} 个节点到画布剪贴板`);
@@ -866,12 +949,22 @@ export default function CanvasPage() {
   function duplicateSelectedNodes() {
     const payload = getSelectionPayload();
     if (!payload) return;
-    const minX = Math.min(...payload.nodes.map((node) => node.position.x));
-    const minY = Math.min(...payload.nodes.map((node) => node.position.y));
+    const minX = Math.min(...[...payload.nodes, ...(payload.groups || [])].map((node) => node.position.x));
+    const minY = Math.min(...[...payload.nodes, ...(payload.groups || [])].map((node) => node.position.y));
     pasteCanvasPayload(payload, { x: minX + 32, y: minY + 32 });
   }
 
+  function cutSelectedNodes() {
+    const selected = new Set(getSelectedNodeIds());
+    scheduleCanvasHistoryCommit();
+    setNodes((current) => current.filter((node) => !selected.has(node.id)));
+    setEdges((current) => current.filter((edge) => !selected.has(edge.source) && !selected.has(edge.target)));
+    setGroups((current) => current.filter((group) => group.id !== selectedGroupId));
+    setSelectedNodeId(undefined); setSelectedGroupId(undefined); markDirty();
+  }
+
   function removeSelectedNodes() {
+    if (selectedGroupId) { removeGroup(selectedGroupId); return; }
     const selected = new Set(getSelectedNodeIds());
     if (!selected.size) return;
     setNodes((current) => current.filter((node) => !selected.has(node.id)));
@@ -922,6 +1015,7 @@ export default function CanvasPage() {
           return { ...node, data: { canvasNode: { ...node.data.canvasNode, config: { ...node.data.canvasNode.config, [configKey]: Array.from(new Set([...urls, ...imageUrls])) } } } };
         }));
         setSelectedNodeId(target.id);
+        setSelectedGroupId(undefined);
       } else {
         const id = `input-images-${Date.now()}-${++pasteSequenceRef.current}`;
         const canvasNode = createCanvasNode("input.images", id, position);
@@ -993,6 +1087,7 @@ export default function CanvasPage() {
       }));
       setVideoUploadTasks((current) => current.filter((item) => item.id !== task.id));
       setSelectedNodeId(task.nodeId);
+      setSelectedGroupId(undefined);
       markDirty();
       setMessage(`已加载视频：${video.filename}`);
     } catch (error) {
@@ -1064,7 +1159,7 @@ export default function CanvasPage() {
   function exportWorkflowFile() {
     if (!activeWorkflow) return;
     try {
-      const workflowFile = createCanvasWorkflowFile(activeWorkflow.name, currentGraph(nodes, edges, viewport));
+      const workflowFile = createCanvasWorkflowFile(activeWorkflow.name, currentGraph(nodes, edges, viewport, groups));
       const url = URL.createObjectURL(new Blob([`${JSON.stringify(workflowFile, null, 2)}\n`], { type: "application/json;charset=utf-8" }));
       const link = document.createElement("a");
       link.href = url;
@@ -1217,7 +1312,7 @@ export default function CanvasPage() {
     if (saveTimer.current) clearTimeout(saveTimer.current);
     saveTimer.current = null;
     const workflow = activeWorkflow;
-    const graph = currentGraph(nodes, edges, viewport);
+    const graph = currentGraph(nodes, edges, viewport, groups);
     if (!graph.nodes.some((node) => node.id === nodeId && node.type === "utility.video-subtitles")) throw new Error("字幕节点已不存在，无法应用修订。");
     graph.nodes = graph.nodes.map((node) => node.id === nodeId ? { ...node, config: { ...node.config, revisionSnapshot: snapshot } } : node);
     setBusy(true);
@@ -1230,6 +1325,7 @@ export default function CanvasPage() {
       setWorkflows((current) => current.map((item) => item.id === saved.workflow.id ? saved.workflow : item));
       setActiveWorkflow(saved.workflow);
       setNodes(toFlowNodes(saved.workflow.graph.nodes, isMobile));
+      setGroups(saved.workflow.graph.groups || []);
       setEdges(toFlowEdges(saved.workflow.graph.edges, saved.workflow.graph.nodes));
       setDirty(false);
       const planned = await api<{ plan: CanvasRunPlan }>("/api/canvas/runs", {
@@ -1425,14 +1521,14 @@ export default function CanvasPage() {
 
   function scheduleCanvasHistoryCommit() {
     if (canvasHistoryTimerRef.current) clearTimeout(canvasHistoryTimerRef.current);
-    canvasHistoryRef.current = commitCanvasHistory(canvasHistoryRef.current, currentGraph(nodes, edges, viewport));
+    canvasHistoryRef.current = commitCanvasHistory(canvasHistoryRef.current, currentGraph(nodes, edges, viewport, groups));
     canvasHistoryTimerRef.current = null;
   }
 
   function restoreCanvasHistory(direction: -1 | 1) {
     if (!activeWorkflow || busy) return;
     scheduleCanvasHistoryCommit();
-    const step = stepCanvasHistory(canvasHistoryRef.current, currentGraph(nodes, edges, viewport), direction);
+    const step = stepCanvasHistory(canvasHistoryRef.current, currentGraph(nodes, edges, viewport, groups), direction);
     canvasHistoryRef.current = step.history;
     if (!step.graph) {
       setMessage(direction < 0 ? "没有可撤销的操作" : "没有可重做的操作");
@@ -1440,6 +1536,8 @@ export default function CanvasPage() {
     }
     applyingCanvasHistoryRef.current = true;
     setNodes(toFlowNodes(step.graph.nodes, isMobile));
+    setGroups(step.graph.groups || []);
+    setSelectedGroupId(undefined);
     setEdges(toFlowEdges(step.graph.edges, step.graph.nodes));
     setViewport(step.graph.viewport);
     syncCanvasViewportDetail(stageRef.current, step.graph.viewport.zoom);
@@ -1452,7 +1550,7 @@ export default function CanvasPage() {
 
   useEffect(() => {
     const handleCopy = (event: ClipboardEvent) => {
-      if (iterationEditorId || isMobile || isEditableClipboardTarget(event.target)) return;
+      if (iterationEditorId || isMobile || preview || subtitleEditor || document.querySelector('dialog[open], [role="dialog"][aria-modal="true"]') || isEditableClipboardTarget(event.target)) return;
       const payload = getSelectionPayload();
       if (!payload) return;
       canvasClipboardRef.current = payload;
@@ -1463,7 +1561,7 @@ export default function CanvasPage() {
       setMessage(`已复制 ${payload.nodes.length} 个节点`);
     };
     const handleCut = (event: ClipboardEvent) => {
-      if (iterationEditorId || isMobile || isEditableClipboardTarget(event.target)) return;
+      if (iterationEditorId || isMobile || preview || subtitleEditor || document.querySelector('dialog[open], [role="dialog"][aria-modal="true"]') || isEditableClipboardTarget(event.target)) return;
       const payload = getSelectionPayload();
       if (!payload) return;
       canvasClipboardRef.current = payload;
@@ -1471,10 +1569,10 @@ export default function CanvasPage() {
       event.preventDefault();
       event.clipboardData?.setData(CANVAS_CLIPBOARD_MIME, serialized);
       event.clipboardData?.setData("text/plain", serialized);
-      removeSelectedNodes();
+      cutSelectedNodes();
     };
     const handlePaste = (event: ClipboardEvent) => {
-      if (iterationEditorId || isEditableClipboardTarget(event.target) || !event.clipboardData) return;
+      if (iterationEditorId || preview || subtitleEditor || document.querySelector('dialog[open], [role="dialog"][aria-modal="true"]') || isEditableClipboardTarget(event.target) || !event.clipboardData) return;
       const imageFiles = dataTransferImageFiles(event.clipboardData);
       if (imageFiles.length) {
         const targetImageNodeId = selectedCanvasNode && (selectedCanvasNode.type === "input.images" || (selectedCanvasNode.type === "model.gpt-image" && selectedCanvasNode.version >= 2))
@@ -1493,9 +1591,18 @@ export default function CanvasPage() {
       pasteCanvasPayload(payload);
     };
     const handleKeyDown = (event: KeyboardEvent) => {
-      if (iterationEditorId || isMobile || preview || subtitleEditor || event.defaultPrevented || isEditableClipboardTarget(event.target)) return;
+      if (iterationEditorId || isMobile || preview || subtitleEditor || event.defaultPrevented || isEditableClipboardTarget(event.target) || document.querySelector('dialog[open], [role="dialog"][aria-modal="true"]')) return;
       const commandKey = event.ctrlKey || event.metaKey;
       if (event.repeat) return;
+      if ((event.key === "Delete" || event.key === "Backspace") && selectedGroupId) {
+        event.preventDefault(); removeGroup(selectedGroupId); return;
+      }
+      if (commandKey && !event.altKey && !event.shiftKey && ["g", "b", "m"].includes(event.key.toLowerCase()) && getSelectedNodeIds().length) {
+        event.preventDefault();
+        if (event.key.toLowerCase() === "g") createGroup();
+        else toggleSelectedModes(event.key.toLowerCase() === "b" ? "bypass" : "disabled");
+        return;
+      }
       if (commandKey && event.altKey && !event.shiftKey && event.key === "Enter") {
         event.preventDefault();
         if (activeRun && !terminalStatuses.has(activeRun.run.status) && !canvasBusy) void runAction("cancel");
@@ -1525,6 +1632,7 @@ export default function CanvasPage() {
         event.preventDefault();
         if (!activeWorkflow || !nodes.length) return;
         setNodes((current) => current.map((node) => ({ ...node, selected: true })));
+        setSelectedGroupId(undefined);
         setSelectedNodeId(nodes.at(-1)?.id);
         return;
       }
@@ -1587,12 +1695,13 @@ export default function CanvasPage() {
           markDirty();
         }} />
         <div className="canvas-selection-actions" aria-label="节点操作">
+          <button type="button" onClick={createGroup} disabled={isMobile || !getSelectedNodeIds().length} aria-label="编组" aria-keyshortcuts="Control+G Meta+G" title="编组（Ctrl/Cmd+G）"><Layers3 /></button>
           <button type="button" onClick={insertSchedulerSkeleton} disabled={isMobile || !activeWorkflow} aria-label="插入调度骨架" title="插入调度骨架"><GitBranch /></button>
-          <button type="button" onClick={() => void copySelectedNodes()} disabled={isMobile || !getSelectedNodeIds().length} aria-label="复制节点" aria-keyshortcuts="Control+C Meta+C" title="复制节点"><Copy /></button>
-          <button type="button" onClick={() => void copySelectedNodes(true)} disabled={isMobile || !getSelectedNodeIds().length} aria-label="剪切节点" aria-keyshortcuts="Control+X Meta+X" title="剪切节点"><Scissors /></button>
+          <button type="button" onClick={() => void copySelectedNodes()} disabled={isMobile || (!getSelectedNodeIds().length && !selectedGroupId)} aria-label="复制节点" aria-keyshortcuts="Control+C Meta+C" title="复制节点"><Copy /></button>
+          <button type="button" onClick={() => void copySelectedNodes(true)} disabled={isMobile || (!getSelectedNodeIds().length && !selectedGroupId)} aria-label="剪切节点" aria-keyshortcuts="Control+X Meta+X" title="剪切节点"><Scissors /></button>
           <button type="button" onClick={() => void pasteFromSystemClipboard()} disabled={isMobile || !activeWorkflow || mediaBusy} aria-label="粘贴" aria-keyshortcuts="Control+V Meta+V" title="粘贴"><ClipboardPaste /></button>
-          <button type="button" onClick={duplicateSelectedNodes} disabled={isMobile || !getSelectedNodeIds().length} aria-label="创建节点副本" aria-keyshortcuts="Control+D Meta+D" title="创建节点副本"><CopyPlus /></button>
-          <button type="button" onClick={removeSelectedNodes} disabled={isMobile || !getSelectedNodeIds().length} aria-label="删除节点" aria-keyshortcuts="Delete Backspace" title="删除节点"><Trash2 /></button>
+          <button type="button" onClick={duplicateSelectedNodes} disabled={isMobile || (!getSelectedNodeIds().length && !selectedGroupId)} aria-label="创建节点副本" aria-keyshortcuts="Control+D Meta+D" title="创建节点副本"><CopyPlus /></button>
+          <button type="button" onClick={removeSelectedNodes} disabled={isMobile || (!getSelectedNodeIds().length && !selectedGroupId)} aria-label="删除节点" aria-keyshortcuts="Delete Backspace" title="删除节点"><Trash2 /></button>
         </div>
         <div className="canvas-toolbar-actions">
           <ToolbarButton label="新建" icon={<Plus />} onClick={createWorkflow} disabled={canvasBusy} />
@@ -1657,9 +1766,16 @@ export default function CanvasPage() {
             onConnectStart={(_, params) => startQuickConnection(params)}
             onConnectEnd={finishQuickConnection}
             onInit={(instance) => { reactFlowRef.current = instance; syncCanvasViewportDetail(stageRef.current, instance.getViewport().zoom); }}
-            onNodeClick={(_, node) => setSelectedNodeId(node.id)}
+            onNodeClick={(event, node) => {
+              setSelectedGroupId(undefined); setSelectedNodeId(node.id);
+              if (!event.shiftKey) setNodes((current) => current.map((entry) => ({ ...entry, selected: entry.id === node.id })));
+            }}
+            onNodeDragStart={() => beginCanvasGesture()}
+            onNodeDragStop={endCanvasGesture}
+            onSelectionDragStart={() => beginCanvasGesture()}
+            onSelectionDragStop={endCanvasGesture}
             onNodeDoubleClick={(_, node) => { if (node.data.canvasNode.type === "utility.image-iterate") setIterationEditorId(node.id); }}
-            onPaneClick={() => { setSelectedNodeId(undefined); setQuickAdd(null); }}
+            onPaneClick={() => { setSelectedNodeId(undefined); setSelectedGroupId(undefined); setQuickAdd(null); }}
             onSelectionChange={({ nodes: selectedNodes }) => {
               const selectedNode = selectedNodes.at(-1);
               if (selectedNode) setSelectedNodeId(selectedNode.id);
@@ -1673,15 +1789,16 @@ export default function CanvasPage() {
             panOnDrag={true}
             selectionOnDrag={!isMobile}
             selectionKeyCode="Alt"
-            multiSelectionKeyCode={null}
+            multiSelectionKeyCode="Shift"
             nodesDraggable={!isMobile}
             nodesConnectable={!isMobile}
             elementsSelectable
-            deleteKeyCode={isMobile || iterationEditorId ? null : ["Backspace", "Delete"]}
-            fitView={nodes.length > 0}
+            deleteKeyCode={isMobile || iterationEditorId || selectedGroupId ? null : ["Backspace", "Delete"]}
+            fitView={nodes.length > 0 && groups.length === 0}
             colorMode={flowColorMode}
           >
             <Background variant={BackgroundVariant.Dots} gap={22} size={1.2} color="var(--canvas-grid-dot)" />
+            <CanvasGroups groups={groups} selectedId={selectedGroupId} readOnly={isMobile} onSelect={selectGroup} onStart={beginCanvasGesture} onChange={changeGroup} onEnd={endCanvasGesture} onRemove={removeGroup} />
             <Controls showInteractive={false} />
             <MiniMap pannable zoomable nodeColor={(node) => {
               const canvasNode = (node.data as { canvasNode?: CanvasNode } | undefined)?.canvasNode;
@@ -1878,6 +1995,8 @@ const CanvasFlowNode = memo(function CanvasFlowNode({ data, selected }: NodeProp
             type="button"
             role="menuitemradio"
             aria-checked={executionMode === mode}
+            aria-keyshortcuts={mode === "bypass" ? "Control+B Meta+B" : mode === "disabled" ? "Control+M Meta+M" : undefined}
+            title={mode === "bypass" ? "跳过（Ctrl/Cmd+B）" : mode === "disabled" ? "禁用（Ctrl/Cmd+M）" : "启用"}
             disabled={mode === "bypass" && !definition.bypass}
             onClick={() => interaction?.onExecutionModeChange(node.id, mode)}
           >{mode === "enabled" ? "启用" : mode === "bypass" ? "跳过" : "禁用"}</button>)}
@@ -1984,6 +2103,14 @@ function CanvasIterationEditor({ node, colorMode, onChange, onClose }: {
   const iteration = node.iteration!;
   const [innerNodes, setInnerNodes] = useState(() => toFlowNodes(iteration.graph.nodes));
   const [innerEdges, setInnerEdges] = useState(() => toFlowEdges(iteration.graph.edges, iteration.graph.nodes));
+  const [innerGroups, setInnerGroups] = useState<CanvasGroup[]>(() => iteration.graph.groups || []);
+  const [selectedGroupId, setSelectedGroupId] = useState<string>();
+  const innerHistory = useRef({ entries: [structuredClone(iteration)], index: 0 });
+  const innerCurrent = useRef(iteration);
+  const gestureRef = useRef(false);
+  const groupDragRef = useRef<FlowNode[]>([]);
+  const clipboardRef = useRef<CanvasClipboardPayload | undefined>(undefined);
+  const editorElementRef = useRef<HTMLDialogElement | null>(null);
   const [selectedId, setSelectedId] = useState<string>();
   const [addType, setAddType] = useState<CanvasNodeType>("model.gpt-vision");
   const [connectionSource, setConnectionSource] = useState("");
@@ -1994,6 +2121,7 @@ function CanvasIterationEditor({ node, colorMode, onChange, onClose }: {
   const onPreview = setInnerPreview;
   const dialogRef = useCallback((dialog: HTMLDialogElement | null) => {
     if (!dialog) return;
+    editorElementRef.current = dialog;
     dialog.showModal();
     setDialogReady(true);
     return () => dialog.close();
@@ -2005,7 +2133,14 @@ function CanvasIterationEditor({ node, colorMode, onChange, onClose }: {
   const sourcePorts = innerNodes.flatMap((entry) => getCanvasIterationOutputPorts(entry.data.canvasNode).map((port) => ({ node: entry, port, value: JSON.stringify([entry.id, port.id]) })));
   const targetPorts = innerNodes.flatMap((entry) => getCanvasVisibleInputPorts(entry.data.canvasNode, innerEdges.filter((edge) => edge.target === entry.id).map((edge) => edge.targetHandle || "")).map((port) => ({ node: entry, port, value: JSON.stringify([entry.id, port.id]) })));
 
-  function commit(nextNodes: FlowNode[], nextEdges: FlowEdge[], nextViewport = iteration.graph.viewport) {
+  function recordInnerHistory(value: CanvasIterationDefinition) {
+    const history = innerHistory.current;
+    if (JSON.stringify(history.entries[history.index]) === JSON.stringify(value)) return;
+    const entries = [...history.entries.slice(0, history.index + 1), structuredClone(value)].slice(-canvasHistoryLimit);
+    innerHistory.current = { entries, index: entries.length - 1 };
+  }
+
+  function commit(nextNodes: FlowNode[], nextEdges: FlowEdge[], nextViewport = innerCurrent.current.graph.viewport, nextGroups = innerGroups) {
     setInnerNodes(nextNodes);
     setInnerEdges(nextEdges);
     const outputs = { ...iteration.outputs };
@@ -2013,8 +2148,139 @@ function CanvasIterationEditor({ node, colorMode, onChange, onClose }: {
       const selectedOutput = outputs[kind];
       if (selectedOutput && !nextNodes.some((entry) => entry.id === selectedOutput.nodeId)) delete outputs[kind];
     }
-    onChange({ ...iteration, outputs, graph: currentGraph(nextNodes, nextEdges, nextViewport) });
+    const next = { ...iteration, outputs, graph: currentGraph(nextNodes, nextEdges, nextViewport, nextGroups) };
+    innerCurrent.current = next;
+    if (!gestureRef.current) recordInnerHistory(next);
+    setInnerGroups(nextGroups);
+    onChange(next);
   }
+
+  function restoreInnerHistory(direction: -1 | 1) {
+    recordInnerHistory(innerCurrent.current);
+    const history = innerHistory.current;
+    const index = history.index + direction;
+    if (index < 0 || index >= history.entries.length) return;
+    history.index = index;
+    const next = structuredClone(history.entries[index]);
+    innerCurrent.current = next;
+    setInnerNodes(toFlowNodes(next.graph.nodes));
+    setInnerEdges(toFlowEdges(next.graph.edges, next.graph.nodes));
+    setInnerGroups(next.graph.groups || []);
+    setSelectedId(undefined); setSelectedGroupId(undefined);
+    void flowRef.current?.setViewport(next.graph.viewport);
+    onChange(next);
+  }
+
+  function selectedNodeIds() {
+    const group = innerGroups.find((entry) => entry.id === selectedGroupId);
+    return group ? canvasGroupMembers(group, flowNodeBounds(innerNodes)) : innerNodes.filter((entry) => entry.selected).map((entry) => entry.id);
+  }
+
+  function selectInnerGroup(id: string) {
+    setSelectedGroupId(id); setSelectedId(undefined);
+    setInnerNodes((current) => current.map((entry) => ({ ...entry, selected: false })));
+    setInnerEdges((current) => current.map((entry) => ({ ...entry, selected: false })));
+  }
+
+  function createInnerGroup() {
+    if (innerGroups.length >= CANVAS_GRAPH_LIMITS.maxNodes) { setNotice("最多支持 200 个分组"); return; }
+    const ids = new Set(selectedNodeIds());
+    const group = createCanvasGroup(`iteration-group-${Date.now()}-${++sequenceRef.current}`, flowNodeBounds(innerNodes).filter((entry) => ids.has(entry.id)));
+    if (!group) return;
+    commit(innerNodes, innerEdges, undefined, [...innerGroups, group]); selectInnerGroup(group.id);
+  }
+
+  function removeInnerGroup(id: string) {
+    commit(innerNodes, innerEdges, undefined, innerGroups.filter((entry) => entry.id !== id)); setSelectedGroupId(undefined);
+  }
+
+  function beginInnerGesture(groupId?: string) {
+    recordInnerHistory(innerCurrent.current); gestureRef.current = true;
+    const group = innerGroups.find((entry) => entry.id === groupId);
+    const ids = new Set(group ? canvasGroupMembers(group, flowNodeBounds(innerNodes)) : []);
+    groupDragRef.current = innerNodes.filter((entry) => ids.has(entry.id) && entry.data.canvasNode.type !== "input.iteration-item");
+  }
+
+  function endInnerGesture() { gestureRef.current = false; recordInnerHistory(innerCurrent.current); }
+
+  function changeInnerGroup(group: CanvasGroup, delta?: CanvasPosition) {
+    const starts = new Map(groupDragRef.current.map((entry) => [entry.id, entry.position]));
+    const next = delta ? innerNodes.map((entry) => {
+      const start = starts.get(entry.id);
+      return start ? { ...entry, position: { x: start.x + delta.x, y: start.y + delta.y } } : entry;
+    }) : innerNodes;
+    commit(next, innerEdges, undefined, innerGroups.map((entry) => entry.id === group.id ? group : entry));
+  }
+
+  function toggleInnerModes(mode: "bypass" | "disabled") {
+    const result = toggleCanvasNodeModes(innerNodes.map((entry) => entry.data.canvasNode), selectedNodeIds(), mode);
+    if (result.nodes.every((node, index) => node === innerNodes[index].data.canvasNode)) { setNotice("选中节点受保护或不支持此操作，保持原状态"); return; }
+    commit(innerNodes.map((entry, index) => ({ ...entry, data: { canvasNode: result.nodes[index] } })), innerEdges);
+    setNotice(result.skipped.length ? `${result.skipped.length} 个节点受保护或不支持此操作，保持原状态` : "已更新选中节点状态");
+  }
+
+  function innerPayload() {
+    const ids = new Set(selectedNodeIds());
+    const graph = currentGraph(innerNodes, innerEdges, innerCurrent.current.graph.viewport, innerGroups);
+    return createCanvasClipboardPayload(graph.nodes, graph.edges, graph.nodes.filter((entry) => ids.has(entry.id) && entry.type !== "input.iteration-item").map((entry) => entry.id), innerGroups.filter((entry) => entry.id === selectedGroupId));
+  }
+
+  function removeInnerSelection() {
+    const ids = new Set(selectedNodeIds().filter((id) => innerNodes.find((entry) => entry.id === id)?.data.canvasNode.type !== "input.iteration-item"));
+    commit(innerNodes.filter((entry) => !ids.has(entry.id)), innerEdges.filter((edge) => !ids.has(edge.source) && !ids.has(edge.target)), undefined,
+      innerGroups.filter((entry) => entry.id !== selectedGroupId));
+    setSelectedId(undefined); setSelectedGroupId(undefined);
+  }
+
+  function pasteInnerPayload(payload: CanvasClipboardPayload) {
+    if (payload.nodes.some((entry) => entry.type === "input.iteration-item" || !canvasIterationAllowedNodeTypes.includes(entry.type) || entry.schedulerRole)) {
+      setNotice("内层仅能粘贴允许的文字／图片节点，不能复制固定入口或调度角色"); return;
+    }
+    try {
+      const bounds = editorElementRef.current?.querySelector(".canvas-iteration-stage")?.getBoundingClientRect();
+      const anchor = flowRef.current?.screenToFlowPosition({ x: (bounds?.left || 0) + (bounds?.width || 600) / 2, y: (bounds?.top || 0) + (bounds?.height || 400) / 2 }) || { x: 80, y: 80 };
+      const sequence = ++sequenceRef.current;
+      const fragment = prepareCanvasClipboardPaste(innerCurrent.current.graph, payload, anchor, (kind, index) => `inner-${kind}-${Date.now()}-${sequence}-${index}`);
+      commit([...innerNodes.map((entry) => ({ ...entry, selected: false })), ...toFlowNodes(fragment.nodes).map((entry) => ({ ...entry, selected: true }))],
+        [...innerEdges, ...toFlowEdges(fragment.edges, fragment.nodes)], undefined, [...innerGroups, ...(fragment.groups || [])]);
+      setSelectedGroupId(fragment.groups?.[0]?.id); setSelectedId(fragment.nodes[0]?.id);
+    } catch (error) { setNotice(errorMessage(error)); }
+  }
+
+  useEffect(() => {
+    const active = (target: EventTarget | null) => !innerPreview && !isEditableClipboardTarget(target)
+      && Array.from(document.querySelectorAll('dialog[open], [role="dialog"][aria-modal="true"]')).at(-1) === editorElementRef.current;
+    const keydown = (event: KeyboardEvent) => {
+      if (!active(event.target) || event.defaultPrevented || event.repeat) return;
+      const command = event.ctrlKey || event.metaKey;
+      const key = event.key.toLowerCase();
+      if (command && !event.altKey && key === "z") { event.preventDefault(); restoreInnerHistory(event.shiftKey ? 1 : -1); return; }
+      if (command && !event.altKey && !event.shiftKey && key === "y") { event.preventDefault(); restoreInnerHistory(1); return; }
+      if (command && !event.altKey && !event.shiftKey && key === "a") {
+        event.preventDefault(); setSelectedGroupId(undefined); setInnerNodes((current) => current.map((entry) => ({ ...entry, selected: true }))); return;
+      }
+      if (command && !event.altKey && !event.shiftKey && ["g", "b", "m"].includes(key) && selectedNodeIds().length) {
+        event.preventDefault(); if (key === "g") createInnerGroup(); else toggleInnerModes(key === "b" ? "bypass" : "disabled"); return;
+      }
+      if ((key === "delete" || key === "backspace") && selectedGroupId) { event.preventDefault(); removeInnerGroup(selectedGroupId); }
+    };
+    const copy = (event: ClipboardEvent) => {
+      if (!active(event.target)) return;
+      const payload = innerPayload(); if (!payload || !event.clipboardData) return;
+      event.preventDefault(); clipboardRef.current = payload;
+      event.clipboardData.setData(CANVAS_CLIPBOARD_MIME, JSON.stringify(payload)); event.clipboardData.setData("text/plain", JSON.stringify(payload));
+      if (event.type === "cut") removeInnerSelection();
+    };
+    const paste = (event: ClipboardEvent) => {
+      if (!active(event.target) || !event.clipboardData) return;
+      const payload = parseCanvasClipboardPayload(event.clipboardData.getData(CANVAS_CLIPBOARD_MIME) || event.clipboardData.getData("text/plain"));
+      if (!payload) return;
+      event.preventDefault(); pasteInnerPayload(payload);
+    };
+    document.addEventListener("keydown", keydown);
+    document.addEventListener("copy", copy); document.addEventListener("cut", copy); document.addEventListener("paste", paste);
+    return () => { document.removeEventListener("keydown", keydown); document.removeEventListener("copy", copy); document.removeEventListener("cut", copy); document.removeEventListener("paste", paste); };
+  });
 
   function patchNode(nodeId: string, patch: Partial<CanvasNode>) {
     commit(innerNodes.map((entry) => entry.id === nodeId && entry.data.canvasNode.type !== "input.iteration-item"
@@ -2044,7 +2310,10 @@ function CanvasIterationEditor({ node, colorMode, onChange, onClose }: {
     onConfigChange: (nodeId, key, value) => patchConfig(nodeId, { [key]: value }),
     onConfigPatch: patchConfig,
     onExecutionModeChange: (nodeId, mode) => patchNode(nodeId, { executionMode: mode }),
-    onNodeFocus: setSelectedId,
+    onNodeFocus: (id) => {
+      setSelectedId(id); setSelectedGroupId(undefined);
+      setInnerNodes((current) => current.map((entry) => ({ ...entry, selected: entry.id === id })));
+    },
     onPreview,
     onSubtitleEdit: () => setNotice("逐图区域不支持视频或字幕节点"),
   };
@@ -2054,13 +2323,25 @@ function CanvasIterationEditor({ node, colorMode, onChange, onClose }: {
     <div className="canvas-iteration-layout">
       <div className="canvas-iteration-stage canvas-stage" data-testid="iteration-stage">
         <CanvasNodeInteractionContext.Provider value={interaction}>{dialogReady ? <ReactFlow<FlowNode, FlowEdge>
-          nodes={innerNodes.map((entry) => ({ ...entry, selected: entry.id === selectedId, draggable: entry.data.canvasNode.type !== "input.iteration-item", deletable: entry.data.canvasNode.type !== "input.iteration-item" }))}
+          nodes={innerNodes.map((entry) => ({ ...entry, draggable: entry.data.canvasNode.type !== "input.iteration-item", deletable: entry.data.canvasNode.type !== "input.iteration-item" }))}
           edges={innerEdges}
           nodeTypes={nodeTypes}
           edgeTypes={edgeTypes}
           onInit={(instance) => { flowRef.current = instance; }}
-          onNodeClick={(_, entry) => setSelectedId(entry.id)}
-          onPaneClick={() => setSelectedId(undefined)}
+          onNodeClick={(event, entry) => {
+            setSelectedGroupId(undefined); setSelectedId(entry.id);
+            if (!event.shiftKey) setInnerNodes((current) => current.map((node) => ({ ...node, selected: node.id === entry.id })));
+          }}
+          onPaneClick={() => { setSelectedId(undefined); setSelectedGroupId(undefined); }}
+          onSelectionChange={({ nodes: selectedNodes }) => { if (selectedNodes.length) setSelectedId(selectedNodes.at(-1)?.id); }}
+          onNodeDragStart={() => beginInnerGesture()}
+          onNodeDragStop={endInnerGesture}
+          onSelectionDragStart={() => beginInnerGesture()}
+          onSelectionDragStop={endInnerGesture}
+          panOnDrag
+          selectionOnDrag
+          selectionKeyCode="Alt"
+          multiSelectionKeyCode="Shift"
           onNodesChange={(changes) => {
             const permitted = changes.filter((change) => !((change.type === "remove" || change.type === "position") && innerNodes.find((entry) => entry.id === change.id)?.data.canvasNode.type === "input.iteration-item"));
             const next = applyCanvasNodeChanges(permitted, innerNodes);
@@ -2076,22 +2357,34 @@ function CanvasIterationEditor({ node, colorMode, onChange, onClose }: {
           onMoveEnd={(_, nextViewport) => commit(innerNodes, innerEdges, nextViewport)}
           defaultViewport={iteration.graph.viewport}
           minZoom={0.2}
-          fitView
+          fitView={innerGroups.length === 0}
           colorMode={colorMode}
-          deleteKeyCode={innerPreview ? null : ["Backspace", "Delete"]}
-        ><Background variant={BackgroundVariant.Dots} gap={22} /><Controls showInteractive={false} /></ReactFlow> : null}</CanvasNodeInteractionContext.Provider>
+          deleteKeyCode={innerPreview || selectedGroupId ? null : ["Backspace", "Delete"]}
+        ><CanvasGroups groups={innerGroups} selectedId={selectedGroupId} onSelect={selectInnerGroup} onStart={beginInnerGesture} onChange={changeInnerGroup} onEnd={endInnerGesture} onRemove={removeInnerGroup} /><Background variant={BackgroundVariant.Dots} gap={22} /><Controls showInteractive={false} /></ReactFlow> : null}</CanvasNodeInteractionContext.Provider>
       </div>
       <aside className="canvas-iteration-properties">
+        <div className="canvas-iteration-selection">
+          <button type="button" onClick={createInnerGroup} disabled={!selectedNodeIds().length} aria-keyshortcuts="Control+G Meta+G">编组</button>
+          <button type="button" onClick={() => restoreInnerHistory(-1)} aria-label="撤销内层操作">撤销</button>
+          <button type="button" onClick={() => restoreInnerHistory(1)} aria-label="重做内层操作">重做</button>
+          <button type="button" onClick={() => { const payload = innerPayload(); if (payload) { clipboardRef.current = payload; void navigator.clipboard?.writeText(JSON.stringify(payload)).catch(() => setNotice("已复制到内层画布剪贴板")); } }} disabled={!selectedNodeIds().length && !selectedGroupId}>复制</button>
+          <button type="button" onClick={() => void (async () => {
+            let text: string;
+            try { text = await navigator.clipboard.readText(); } catch { if (clipboardRef.current) pasteInnerPayload(clipboardRef.current); return; }
+            const payload = parseCanvasClipboardPayload(text); if (payload) pasteInnerPayload(payload);
+          })()}>粘贴</button>
+        </div>
         <div className="canvas-iteration-add"><label><span>内层节点库</span><select value={addType} onChange={(event) => setAddType(event.target.value as CanvasNodeType)}>{allowed.map((definition) => <option key={definition.type} value={definition.type}>{definition.label}</option>)}</select></label><button type="button" onClick={() => {
           const created = createCanvasNode(addType, `iteration-node-${Date.now()}-${++sequenceRef.current}`, { x: 420 + (innerNodes.length % 3) * 280, y: 120 + Math.floor(innerNodes.length / 3) * 260 });
-          const next = toFlowNode(created);
-          commit([...innerNodes, next], innerEdges);
+          const next = { ...toFlowNode(created), selected: true };
+          commit([...innerNodes.map((entry) => ({ ...entry, selected: false })), next], innerEdges);
+          setSelectedGroupId(undefined);
           setSelectedId(created.id);
           setNotice("已添加内层节点");
           void flowRef.current?.fitView({ nodes: [next], padding: 0.6 });
         }}><Plus />添加内层节点</button></div>
-        <CanvasIterationOutputSelectors node={node} onChange={onChange} />
-        <label><span>编辑内层节点</span><select value={selectedId || ""} onChange={(event) => setSelectedId(event.target.value || undefined)}><option value="">选择节点</option>{innerNodes.map((entry) => <option key={entry.id} value={entry.id}>{entry.data.canvasNode.label || getCanvasNodeDefinition(entry.data.canvasNode.type, entry.data.canvasNode.version)?.label}</option>)}</select></label>
+        <CanvasIterationOutputSelectors node={node} onChange={(next) => { innerCurrent.current = next; recordInnerHistory(next); onChange(next); }} />
+        <label><span>编辑内层节点</span><select value={selectedId || ""} onChange={(event) => { const id = event.target.value; setSelectedId(id || undefined); setSelectedGroupId(undefined); setInnerNodes((current) => current.map((entry) => ({ ...entry, selected: entry.id === id }))); }}><option value="">选择节点</option>{innerNodes.map((entry) => <option key={entry.id} value={entry.id}>{entry.data.canvasNode.label || getCanvasNodeDefinition(entry.data.canvasNode.type, entry.data.canvasNode.version)?.label}</option>)}</select></label>
         {selected?.type === "input.iteration-item" ? <p>固定入口：当前图片、原始索引、共享文字和参考图。不能删除或禁用。</p> : selected ? <div className="canvas-inspector-content">
           <label><span>内层节点名称</span><input value={selected.label || ""} maxLength={80} onChange={(event) => patchNode(selected.id, { label: event.target.value })} /></label>
           <CanvasNodeFields node={selected} onChange={(key, value) => patchConfig(selected.id, { [key]: value })} onPatch={(patch) => patchConfig(selected.id, patch)} onPreviewImage={(url, index) => onPreview({ kind: "image", url, index })} />
@@ -5696,12 +5989,19 @@ function toFlowEdges(edges: CanvasEdge[], nodes: CanvasNode[]): FlowEdge[] {
     };
   });
 }
-function currentGraph(nodes: FlowNode[], edges: FlowEdge[], viewport: Viewport): CanvasGraph {
+function currentGraph(nodes: FlowNode[], edges: FlowEdge[], viewport: Viewport, groups: CanvasGroup[] = []): CanvasGraph {
   return {
     nodes: nodes.map((node) => ({ ...node.data.canvasNode, position: node.position })),
     edges: edges.map((edge) => ({ id: edge.id, source: edge.source, target: edge.target, sourcePort: edge.sourceHandle || "", targetPort: edge.targetHandle || "" })),
     viewport,
+    ...(groups.length ? { groups } : {}),
   };
+}
+
+function flowNodeBounds(nodes: FlowNode[]): CanvasNodeBounds[] {
+  return nodes.map((node) => ({ id: node.id, position: node.position,
+    width: node.measured?.width ?? node.width ?? node.data.canvasNode.size?.width ?? 280,
+    height: node.measured?.height ?? node.height ?? node.data.canvasNode.size?.height ?? 180 }));
 }
 
 function canvasGraphsEqual(left: CanvasGraph, right: CanvasGraph) {

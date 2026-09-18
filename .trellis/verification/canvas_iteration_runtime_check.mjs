@@ -22,11 +22,19 @@ const graph = {
   collectDescendants: (_graph, ids) => new Set([...ids, "generate"]),
 };
 const source = readFileSync("src/lib/canvas/iteration-runtime.ts", "utf8");
+const iterationModule = { exports: {} };
+new Function("require", "module", "exports", ts.transpileModule(readFileSync("src/lib/canvas/iteration.ts", "utf8"), {
+  compilerOptions: { module: ts.ModuleKind.CommonJS, target: ts.ScriptTarget.ES2022 },
+}).outputText)((name) => {
+  if (["./registry", "./graph", "./types"].includes(name)) return {};
+  throw new Error(`Unexpected iteration import ${name}`);
+}, iterationModule, iterationModule.exports);
 const compiled = ts.transpileModule(source, { compilerOptions: { module: ts.ModuleKind.CommonJS, target: ts.ScriptTarget.ES2022 } }).outputText;
 const loaded = { exports: {} };
 new Function("require", "module", "exports", compiled)((name) => {
   if (name === "../database") return database;
   if (name === "./graph") return graph;
+  if (name === "./iteration") return iterationModule.exports;
   if (name.startsWith("node:")) return require(name);
   throw new Error(`Unexpected import ${name}`);
 }, loaded, loaded.exports);
@@ -73,6 +81,13 @@ assert.deepEqual(records.get(items[0].runId).iterationInputs, {
 });
 await advance(context);
 assert.equal(queued.size, 2, "repeated parent reconciliation cannot exceed concurrency");
+const originalFingerprint = context.metadata.inputFingerprint;
+context.node.iteration.graph.groups = [{ id: "layout", title: "Changed layout", color: "#3b82f6", position: { x: 10, y: 20 }, size: { width: 300, height: 200 } }];
+await advance(context);
+assert.equal(context.metadata.inputFingerprint, originalFingerprint, "adding layout groups must preserve in-flight iteration identity");
+context.node.iteration.graph.groups[0].title = "Renamed";
+await advance(context);
+assert.equal(context.metadata.inputFingerprint, originalFingerprint, "renaming groups must preserve in-flight iteration identity");
 finish(items[1]);
 await advance(context);
 assert.equal(queued.size, 2);

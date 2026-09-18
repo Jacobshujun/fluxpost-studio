@@ -25,6 +25,14 @@ export function createCanvasIterationDefinition(): CanvasIterationDefinition {
   };
 }
 
+/** Layout-only groups must not invalidate execution reuse or durable iteration recovery. */
+export function canvasIterationExecutionDefinition(definition: CanvasIterationDefinition): CanvasIterationDefinition {
+  const { groups: _groups, ...graph } = definition.graph;
+  void _groups;
+  return { ...definition, graph: { ...graph, nodes: graph.nodes.map((node) => node.iteration
+    ? { ...node, iteration: canvasIterationExecutionDefinition(node.iteration) } : node) } };
+}
+
 export function getCanvasIterationOutputPorts(node: CanvasNode): CanvasPortDefinition[] {
   const ports = getCanvasNodeDefinition(node.type, node.version)?.outputs || [];
   return node.type === "utility.image-iterate"

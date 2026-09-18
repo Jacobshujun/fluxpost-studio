@@ -48,6 +48,7 @@ const registry = {
   getCanvasRequiredInputPorts: (node) => registry.getCanvasNodeDefinition(node.type).inputs.filter((port) => port.required),
 };
 const runtime = load("src/lib/canvas/runs.ts", {
+  "./iteration": load("src/lib/canvas/iteration.ts", { "./registry": registry, "./graph": graphModule, "./types": {} }),
   "./layer-compose-contract": load("src/lib/canvas/layer-compose-contract.ts", {}),
   "../database": database, "../activity-log": {},
   "../workspace-ownership": { canAccessWorkspaceOwner: (account, owner) => account.id === owner },
