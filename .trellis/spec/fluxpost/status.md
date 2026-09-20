@@ -8,6 +8,10 @@ Canvas groups/shortcuts verified and active on local 3001; operator acceptance p
 
 ## Current Focus
 
+- 2026-09-20: Canvas inspector now opens only for a selected node; pane click/close
+  hides it and releases desktop space. Full baseline and three-theme 1440/1000/390
+  browser checks pass. Evidence: canvas-inspector-selection task.
+
 - 2026-09-20: gpt-image-quality: five levels; baseline/browser pass.
 
 - 2026-09-18: Canvas groups/shortcuts: archived canvas-groups-shortcuts task.

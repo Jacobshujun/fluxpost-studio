@@ -472,6 +472,10 @@ export default function CanvasPage() {
     })));
     markDirty();
   }, [markDirty]);
+  const handleNodeSelectionChange = useCallback(({ nodes: selectedNodes }: { nodes: FlowNode[] }) => {
+    const selectedNode = selectedNodes.at(-1);
+    if (selectedNode) setSelectedNodeId(selectedNode.id);
+  }, []);
   const focusCanvasNode = useCallback((nodeId: string) => {
     setSelectedNodeId(nodeId);
     setSelectedGroupId(undefined);
@@ -1733,7 +1737,7 @@ export default function CanvasPage() {
         <button className="canvas-icon-button canvas-mobile-menu" type="button" onClick={() => setMobilePalette(true)} aria-label="打开节点库"><Menu className="h-4 w-4" /></button>
       </header>
 
-      <section className={`canvas-workspace ${!paletteVisible ? "canvas-workspace-palette-hidden" : ""}`}>
+      <section className={`canvas-workspace ${!paletteVisible ? "canvas-workspace-palette-hidden" : ""} ${!selectedCanvasNode ? "canvas-workspace-inspector-hidden" : ""}`}>
         <aside className={`canvas-palette ${!paletteVisible ? "canvas-palette-collapsed" : ""} ${mobilePalette ? "canvas-palette-open" : ""}`}>
           <div className="canvas-pane-heading"><span>节点库</span><button className="canvas-palette-dismiss" type="button" onClick={() => isMobile ? setMobilePalette(false) : setPaletteVisible(false)} aria-label="关闭节点库" title="隐藏节点库"><PanelLeftClose /></button></div>
           {(["input", "model", "utility", "compose", "publish"] as const).map((category) => (
@@ -1775,11 +1779,8 @@ export default function CanvasPage() {
             onSelectionDragStart={() => beginCanvasGesture()}
             onSelectionDragStop={endCanvasGesture}
             onNodeDoubleClick={(_, node) => { if (node.data.canvasNode.type === "utility.image-iterate") setIterationEditorId(node.id); }}
-            onPaneClick={() => { setSelectedNodeId(undefined); setSelectedGroupId(undefined); setQuickAdd(null); }}
-            onSelectionChange={({ nodes: selectedNodes }) => {
-              const selectedNode = selectedNodes.at(-1);
-              if (selectedNode) setSelectedNodeId(selectedNode.id);
-            }}
+            onPaneClick={() => { setSelectedNodeId(undefined); setNodes((current) => current.map((node) => node.selected ? { ...node, selected: false } : node)); setSelectedGroupId(undefined); setQuickAdd(null); }}
+            onSelectionChange={handleNodeSelectionChange}
             onMoveStart={(_, nextViewport) => { stageRef.current?.classList.add("canvas-stage-viewport-moving"); syncCanvasViewportDetail(stageRef.current, nextViewport.zoom); }}
             onMove={(_, nextViewport) => { syncCanvasViewportDetail(stageRef.current, nextViewport.zoom); }}
             onMoveEnd={(_, nextViewport) => { stageRef.current?.classList.remove("canvas-stage-viewport-moving"); syncCanvasViewportDetail(stageRef.current, nextViewport.zoom); setViewport(nextViewport); markDirty(); }}
@@ -1813,15 +1814,15 @@ export default function CanvasPage() {
           /> : null}
         </div>
 
-        <aside className={`canvas-inspector ${selectedCanvasNode ? "canvas-inspector-active" : ""}`}>
-          <div className="canvas-pane-heading"><span><PanelRight />属性</span>{selectedCanvasNode ? <button type="button" onClick={() => setSelectedNodeId(undefined)} aria-label="关闭属性"><X /></button> : null}</div>
+        {selectedCanvasNode ? <aside className="canvas-inspector canvas-inspector-active">
+          <div className="canvas-pane-heading"><span><PanelRight />属性</span><button type="button" onClick={() => { setSelectedNodeId(undefined); setNodes((current) => current.map((node) => node.selected ? { ...node, selected: false } : node)); }} aria-label="关闭属性"><X /></button></div>
           {selectedCanvasNode?.type === "utility.image-iterate" ? <div className="canvas-iteration-inspector">
             <button type="button" onClick={() => setIterationEditorId(selectedCanvasNode.id)}><Maximize2 />编辑逐图区域</button>
             <p>每张图片运行同一内层流程，按原图顺序汇总文字和图片。</p>
             <CanvasIterationOutputSelectors node={selectedCanvasNode} onChange={(iteration) => updateNodeIteration(selectedCanvasNode.id, iteration)} />
             <CanvasIterationResults key={`${activeRun?.run.id}:${selectedCanvasNode.id}`} runId={activeRun?.run.id} nodeId={selectedCanvasNode.id} metadata={latestAttempts(activeRun?.nodeRuns || []).get(selectedCanvasNode.id)?.internalMetadata?.iteration} locked={activeRun?.run.batchContext?.phase === "shared" && activeRun.run.status === "completed"} onRefreshRun={() => { if (activeRun) void refreshRun(activeRun.run.id); }} />
           </div> : null}
-          {selectedCanvasNode ? <NodeInspector
+          <NodeInspector
             node={selectedCanvasNode}
             onChange={updateSelectedConfig}
             onPatch={updateSelectedConfigPatch}
@@ -1845,8 +1846,8 @@ export default function CanvasPage() {
             onSubtitleEdit={(nodeRun) => setSubtitleEditor({ nodeId: selectedCanvasNode.id, nodeRunId: nodeRun.id })}
             seedanceReferences={selectedSeedanceReferences}
             createSeedanceMentionId={createSeedanceMentionId}
-          /> : <div className="canvas-inspector-empty">选择节点查看参数与端口</div>}
-        </aside>
+          />
+        </aside> : null}
       </section>
 
       <section className="canvas-run-dock">

@@ -21,6 +21,12 @@ node --env-file=.env.local .trellis/verification/unified_library_postgres_benchm
 
 ## Current Automated Checks
 
+- `python .trellis/verification/canvas_inspector_browser_check.py` checks initial
+  hiding, node switching/editing, dismissal and desktop space recovery with the
+  node library open/closed, across three themes at 1440/1000/390px. Requires an
+  isolated worker-disabled loopback server via `BROWSER_BASE_URL`; rejects port
+  3001 and intercepts all APIs without real workflow writes.
+
 - Layer composition: baseline `canvas_layer_compose_check.mjs`; separate 1440/390
   browser check `canvas_layer_compose_browser_check.py`. Contract: canvas_layer_compose.md.
 

@@ -99,6 +99,13 @@ Controls rendered inside a React Flow node must isolate canvas gestures without 
 
 Canvas-level empty-selection notifications must not clear this route-owned inspector state; use an explicit pane click or close command to clear it. This keeps native text editing, mobile focus, node highlighting, and the inspector synchronized without persisting UI callbacks in graph data.
 
+The main Canvas inspector is mounted only for a selected node. Closing it or clicking
+the pane clears both the inspector id and controlled node selection. Keep its
+`onSelectionChange` callback stable with `useCallback`: React Flow includes that
+callback in its selection effect dependencies, so a new callback on every render can
+restore stale inspector selection during dismissal. Closed desktop inspectors release
+their grid column, including when the node library is hidden and below 1100px.
+
 Long-text editors inside React Flow nodes must keep a component-local draft while focused, update that draft before writing through to graph state, and accept external values only while unfocused. A textarea controlled directly by graph state can receive its value back through the React Flow store after the native input event and move the caret to the end.
 
 ```tsx
