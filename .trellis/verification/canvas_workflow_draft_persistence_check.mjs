@@ -9,10 +9,12 @@ import { pathToFileURL } from "node:url";
 const root = process.cwd();
 const temp = mkdtempSync(path.join(tmpdir(), "fluxpost-canvas-draft-persistence-"));
 const workflowsUrl = pathToFileURL(path.join(root, "src/lib/canvas/workflows.ts")).href;
+const registryUrl = pathToFileURL(path.join(root, "src/lib/canvas/registry.ts")).href;
 const tsxLoader = createRequire(import.meta.url).resolve("tsx");
 const childSource = `
   import assert from "node:assert/strict";
   import { createCanvasWorkflow, deleteCanvasWorkflow, getCanvasWorkflow, updateCanvasWorkflow } from ${JSON.stringify(workflowsUrl)};
+  import { upgradeCanvasGraph } from ${JSON.stringify(registryUrl)};
 
   const account = { id: "canvas-draft-fixture-owner", username: "fixture", displayName: "Fixture", role: "operator", status: "active", createdAt: new Date(0).toISOString(), updatedAt: new Date(0).toISOString(), passwordSet: true };
   const graph = {
@@ -49,6 +51,16 @@ const childSource = `
       assert.equal(opened.graph.nodes[2].config.model, model);
       assert.equal(opened.graph.nodes[2].config.toApisRequestFormat, "pixels");
       assert.equal(opened.graph.nodes[3].config.model, undefined);
+    }
+    for (const quality of ["low", "medium", "high", "xhigh", "max"]) {
+      const qualityGraph = structuredClone(nextGraph);
+      qualityGraph.nodes.push({ id: "quality-image", type: "model.gpt-image", version: 1, position: { x: 0, y: 300 }, config: { quality, size: "1024x1024" } });
+      const upgraded = upgradeCanvasGraph(qualityGraph);
+      assert.equal(upgraded.nodes[2].config.quality, quality, "Legacy upgrade must preserve selected quality");
+      const saved = await updateCanvasWorkflow(created.id, account, { revision, graph: upgraded });
+      revision = saved.revision;
+      const opened = await getCanvasWorkflow(created.id, account);
+      assert.equal(opened.graph.nodes[2].config.quality, quality, "Saved quality must survive reopening");
     }
     const malformedGraph = structuredClone(graph);
     malformedGraph.nodes[0].config.text = { nested: true };

@@ -18,6 +18,8 @@ Canvas registry helpers: `getCanvasVisibleInputPorts(node, connectedPortIds)`, `
 
 ## Contracts
 
+The user confirmed five GPT image quality levels on 2026-09-20: `low`, `medium`, `high`, `xhigh`, `max`. Canvas controls, legacy upgrades, shared settings and generation normalization preserve all five; the default remains `medium`. OpenAI JSON/multipart and ToAPIs legacy/pixels requests forward the selection. The ordinary ratio adapter retains its documented fixed `high` behavior. Verification is offline; paid upstream acceptance is not exercised.
+
 Simple and Canvas share `ImageModelSelector` and preset metadata. Simple settings use JSON null to reset model/format overrides; omission preserves saved values during PATCH. Old settings default to route model/format, PNG and compression 100. Settings and run snapshots forward model/format/output fields through all three source, viral and original image paths; resume uses the saved run. Existing image-task counts remain unchanged (one output per task). Transparent background selects PNG atomically.
 
 | Explicit requestFormat | Size | Quality | References |

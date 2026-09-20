@@ -1,12 +1,14 @@
 # FluxPost Current Status
 
-Last updated: 2026-09-18
+Last updated: 2026-09-20
 
 ## One-Line Status
 
 Canvas groups/shortcuts verified and active on local 3001; operator acceptance pending.
 
 ## Current Focus
+
+- 2026-09-20: gpt-image-quality: baseline/browser pass; activating.
 
 - 2026-09-18: Canvas groups/shortcuts: archived canvas-groups-shortcuts task.
   Full baseline, three-theme 1440/390 browser and LAN activation pass.

@@ -2368,7 +2368,7 @@ function buildImageSizeConstrainedPrompt(prompt: string, requestedSize: ImageGen
 }
 
 function normalizeImageQuality(value?: string): ImageGenerationOptions["quality"] {
-  return value === "low" || value === "medium" || value === "high" ? value : defaultImageOptions.quality;
+  return value === "low" || value === "medium" || value === "high" || value === "xhigh" || value === "max" ? value : defaultImageOptions.quality;
 }
 
 function normalizeTaskConcurrency(value?: number) {

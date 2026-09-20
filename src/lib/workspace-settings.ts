@@ -93,7 +93,7 @@ function stringOrDefault(value: unknown, fallback: string) {
 }
 
 function normalizeImageQuality(value: unknown): WorkspacePromptSettings["imageQuality"] {
-  return value === "low" || value === "medium" || value === "high" ? value : defaultWorkspacePromptSettings.imageQuality;
+  return value === "low" || value === "medium" || value === "high" || value === "xhigh" || value === "max" ? value : defaultWorkspacePromptSettings.imageQuality;
 }
 
 function normalizeImageBackground(value: unknown): WorkspacePromptSettings["imageBackground"] {

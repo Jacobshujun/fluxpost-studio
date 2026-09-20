@@ -333,7 +333,7 @@ export type SourceImageTask = {
   strategyKey?: keyof ImageStrategyPrompts;
 };
 
-export type ImageGenerationQuality = "low" | "medium" | "high";
+export type ImageGenerationQuality = "low" | "medium" | "high" | "xhigh" | "max";
 export type ImageGenerationBackground = "auto" | "transparent" | "opaque";
 
 export type ImageStrategyPrompts = {

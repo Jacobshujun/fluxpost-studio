@@ -111,7 +111,7 @@ export function buildToApisGenerationBody(input: {
     throw new ImageProviderError(`应用参数校验：模型 ${input.model}，4K ${dimensions.size}：ToAPIs legacy image adapter 不支持该比例；请确认服务商请求格式。`, { category: "input", retryable: false, failoverAllowed: false });
   }
   const count = validateIntegerRange(input.count ?? 1, 1, maxToApisImageOutputs, "ToAPIs image count");
-  const quality = validateChoice(input.quality || "medium", ["low", "medium", "high"], "ToAPIs image quality");
+  const quality = validateChoice(input.quality || "medium", ["low", "medium", "high", "xhigh", "max"], "ToAPIs image quality");
   const outputFormat = validateChoice(input.outputFormat || "png", ["png", "jpeg"], "ToAPIs output format") as ToApisImageOutputFormat;
   const outputCompression = validateIntegerRange(input.outputCompression ?? 100, 0, 100, "ToAPIs JPEG compression");
   return {

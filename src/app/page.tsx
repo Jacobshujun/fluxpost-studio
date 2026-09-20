@@ -962,6 +962,8 @@ function ImageDimensionSelects({ settings, onChange, disabled }: { settings: Wor
         <option value="low">低</option>
         <option value="medium">中</option>
         <option value="high">高</option>
+        <option value="xhigh">超高</option>
+        <option value="max">最高</option>
       </select></label>
       <label className="min-w-0"><FieldLabel label="图片背景" /><select className="field" aria-label="图片背景" value={settings.imageBackground ?? "auto"} onChange={(event) => onChange({ imageBackground: event.target.value as WorkspacePromptSettings["imageBackground"], ...(event.target.value === "transparent" ? { imageOutputFormat: "png" } : {}) })} disabled={disabled}>
         <option value="auto">自动</option>

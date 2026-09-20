@@ -48,7 +48,7 @@ const runtime = new Function(...Object.keys(dependencies), `${code}\nreturn { ${
 const reference = { filePath: "fixture.png", fileName: "fixture.png", mimeType: "image/png" };
 
 for (const background of ["auto", "transparent", "opaque"]) {
-  for (const quality of ["low", "medium", "high"]) {
+  for (const quality of ["low", "medium", "high", "xhigh", "max"]) {
     const normalized = runtime.normalizeImageOptions({ size: "1024x1024", quality, background });
     assert.equal(normalized.background, background);
     assert.equal(normalized.quality, quality);

@@ -86,6 +86,14 @@ async def check(browser, width):
         await page.wait_for_function("!document.querySelector('.canvas-message .is-dirty')")
         assert [edge["targetPort"] for edge in workflow["graph"]["edges"]] == ["image_2"]
     controls = node.locator(".canvas-gpt-image-controls")
+    quality_control = controls.get_by_label("质量")
+    await expect(quality_control.locator("option")).to_have_text(["low", "medium", "high", "xhigh", "max"])
+    for quality in ["low", "medium", "high", "xhigh", "max"]:
+        await quality_control.select_option(quality, force=True)
+        await page.wait_for_function("!document.querySelector('.canvas-message .is-dirty')")
+        await page.reload(wait_until="networkidle")
+        await expect(quality_control).to_have_value(quality)
+        assert next(item for item in workflow["graph"]["nodes"] if item["id"] == "image")["config"]["quality"] == quality
     for model, request_format in [("gpt-image-2.5-flare", "ratio"), ("gpt-image-2.5-official", "pixels"), ("gpt-image-2.5-flare-vip", "pixels")]:
         await controls.get_by_label("图片模型", exact=True).select_option(model, force=True)
         await expect(controls.get_by_label("ToAPIs 请求格式")).to_have_value(request_format)

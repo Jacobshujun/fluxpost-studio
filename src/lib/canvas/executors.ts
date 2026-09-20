@@ -9,7 +9,7 @@ import { normalizeImageModel, normalizeToApisRequestFormat } from "../image-mode
 import { validateImageBackground } from "../image-providers/contracts";
 import { IMAGE_NETWORK_WAIT_REASON, isImageNetworkUnavailableError } from "../image-transport";
 import { callOpenAIForText, callOpenAIForVisionText } from "../openai";
-import type { GeneratedPost, SourceImageTask } from "../types";
+import type { GeneratedPost, ImageGenerationQuality, SourceImageTask } from "../types";
 import type { WorkspaceAccessActor } from "../workspace-ownership";
 import { ArkSeedanceNeedsConfigError, queryArkSeedanceVideo, submitArkSeedanceVideo } from "./seedance";
 import { resolveSeedanceInput } from "./seedance-references";
@@ -435,7 +435,7 @@ async function executeGptImage(context: CanvasNodeExecutionContext): Promise<Can
     size: pixelSizeForRatio(ratio, resolution),
     ratio,
     resolution,
-    quality: String(node.config.quality || "medium") as "low" | "medium" | "high",
+    quality: String(node.config.quality || "medium") as ImageGenerationQuality,
     background: node.config.background === undefined ? undefined : validateImageBackground(node.config.background, String(node.config.outputFormat || "png")),
     outputFormat: node.config.outputFormat === "jpeg" ? "jpeg" : "png",
     outputCompression: Number(node.config.outputCompression ?? 100),
@@ -528,7 +528,7 @@ async function executeGptImageEach(context: CanvasNodeExecutionContext): Promise
         size: pixelSizeForRatio(ratio, resolution),
         ratio,
         resolution,
-        quality: String(node.config.quality || "medium") as "low" | "medium" | "high",
+        quality: String(node.config.quality || "medium") as ImageGenerationQuality,
         background: node.config.background === undefined ? undefined : validateImageBackground(node.config.background, String(node.config.outputFormat || "png")),
         outputFormat: node.config.outputFormat === "jpeg" ? "jpeg" : "png",
         outputCompression: Number(node.config.outputCompression ?? 100),
@@ -715,7 +715,7 @@ async function executeLegacyGptImage({ node, inputs }: CanvasNodeExecutionContex
     model: node.config.model === undefined ? undefined : normalizeImageModel(node.config.model),
     toApisRequestFormat: node.config.toApisRequestFormat === undefined ? undefined : normalizeToApisRequestFormat(node.config.toApisRequestFormat),
     size: String(node.config.size || "1024x1024"),
-    quality: String(node.config.quality || "medium") as "low" | "medium" | "high",
+    quality: String(node.config.quality || "medium") as ImageGenerationQuality,
     taskConcurrency: 1,
   });
   if (result.status === "needs_config") throw new CanvasNeedsConfigError(result.message || "GPT-Image-2 is not configured.");
