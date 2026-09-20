@@ -27,20 +27,11 @@ Canvas groups/shortcuts verified and active on local 3001; operator acceptance p
   original configurations/services are unchanged. Credentials remain local.
   Evidence: archived frp-dashboard-public task. Loopback/SSH access is retained.
 
-- 2026-09-18: FRP 0.71.0 relay deployed on VPS 38 with systemd startup and pinned
-  client/server TLS. Desktop public launcher now uses http://38.76.210.136:8008.
-  Public/local identity, reconnect, unchanged production services and full baseline pass.
-  Browser HTTPS remains unconfigured. Evidence: archived frp-vps-38 task.
+- FRP relay and public-launcher installation evidence: archived frp-vps-38 and
+  desktop-frp-launcher tasks. Current HTTPS entry is above.
 
-- 2026-09-18: Desktop public launcher installed under LOCALAPPDATA/FluxPostStudio.
-  Reuses the local candidate and existing renamed FRP client; public HTTP identity,
-  page access, duplicate-launch checks and full baseline pass. HTTPS remains unconfigured.
-  Evidence: archived desktop-frp-launcher task.
-
-- 2026-09-18: Desktop LAN shortcut and custom multi-size icon installed under
-  LOCALAPPDATA/FluxPostStudio. Reuses the running candidate or calls local:lan.
-  Launcher, local/LAN HTTP identity and full baseline pass; other-device access
-  pending confirmation. Evidence: archived desktop-lan-launcher task.
+- Desktop LAN launcher: baseline/identity pass; other-device access pending.
+  Evidence: archived desktop-lan-launcher task.
 
 - 2026-09-17: Review delivery diagnosis confirms the latest full run's composed
   video reaches the saved post, with captions visible in actual frames. A separate
