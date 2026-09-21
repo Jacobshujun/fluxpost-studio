@@ -36,7 +36,7 @@ export type ImageProcessingReport = {
 };
 
 // Validate only effective fields; hidden settings stay editable/persisted without changing output identity.
-export function resolveImageProcessConfig(config: CanvasNodeConfig): ImageProcessConfig {
+export function resolveImageProcessConfig(config: Record<string, unknown>): ImageProcessConfig {
   const merged = { ...defaultImageProcessConfig, ...config };
   const choice = <T extends string>(value: unknown, allowed: readonly T[], label: string): T => {
     if (typeof value !== "string" || !allowed.includes(value as T)) throw new Error(`${label}无效。`);

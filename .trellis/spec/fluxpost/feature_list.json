@@ -292,7 +292,7 @@
         "Durable runs preserve settings, progress, pause/resume/termination, review staging, and optional Feishu behavior"
       ],
       "evidence": [
-        "Simple-mode input, queue, persistence, configuration, media, Dongchedi, review, and responsive checks pass offline."
+        "Simple workflow and image compression baseline/browser checks pass; simple-image-compression task."
       ],
       "notes": "Live authorized providers and authenticated operator walkthrough remain."
     },

@@ -405,6 +405,7 @@ export type WorkspacePromptSettings = {
   imageToApisRequestFormat?: import("./image-model-options").ToApisRequestFormat | null;
   imageOutputFormat?: "png" | "jpeg";
   imageOutputCompression?: number;
+  imageProcessing?: import("./canvas/image-process-contract").ImageProcessConfig | null;
   textInstruction: string;
   imageWashPrompt: string;
   imageStrategyPrompts: ImageStrategyPrompts;
@@ -977,6 +978,7 @@ export type SimpleRun = {
   imageToApisRequestFormat?: import("./image-model-options").ToApisRequestFormat | null;
   imageOutputFormat?: "png" | "jpeg";
   imageOutputCompression?: number;
+  imageProcessing?: import("./canvas/image-process-contract").ImageProcessConfig | null;
   imageSize: string;
   imageRatio?: string;
   imageResolution?: "1k" | "2k" | "4k";

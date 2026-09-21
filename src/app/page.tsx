@@ -1,5 +1,8 @@
 "use client";
 
+import { ImageProcessControls } from "@/components/image-process-controls";
+import { defaultImageProcessConfig } from "@/lib/canvas/image-process-contract";
+
 import Link from "next/link";
 import Image from "next/image";
 import { ImageModelSelector } from "@/components/image-model-selector";
@@ -940,6 +943,8 @@ function ImageStrategyPromptEditor({ settings, disabled, onChange }: { settings:
 }
 
 function ImageDimensionSelects({ settings, onChange, disabled }: { settings: WorkspacePromptSettings; onChange: (patch: Partial<WorkspacePromptSettings>) => void; disabled?: boolean }) {
+  const processingDefaults = { ...defaultImageProcessConfig, ...(settings.imageBackground === "transparent" ? { format: "webp" as const } : {}) };
+  const processingConfig = settings.imageProcessing ?? processingDefaults;
   function updateSelection(imageRatio: string | undefined, imageResolution: WorkspacePromptSettings["imageResolution"]) {
     const selection = { imageRatio, imageResolution };
     onChange(imageRatio && imageResolution ? resolveGptImageDimensionSettings(selection) : selection);
@@ -977,6 +982,13 @@ function ImageDimensionSelects({ settings, onChange, disabled }: { settings: Wor
     </div>
     {settings.imageRatio && settings.imageResolution ? <output className="text-xs text-white/52" aria-label="像素尺寸">{pixelSizeForRatio(settings.imageRatio, settings.imageResolution)} px</output> : null}
     {!settings.imageRatio && !settings.imageResolution ? <p className="text-xs text-[var(--amber)]">原设置为 {settings.imageSize}，请重新选择比例和分辨率。</p> : null}
+    <fieldset className="min-w-0 border-0 p-0" disabled={disabled} aria-label="生成后图片压缩">
+      <label className="flex items-center gap-2 text-xs"><input type="checkbox" aria-label="启用图片压缩" checked={settings.imageProcessing !== null} onChange={(event) => onChange({ imageProcessing: event.target.checked ? processingDefaults : null })} />生成后图片压缩</label>
+      {settings.imageProcessing !== null ? <>
+        <ImageProcessControls value={processingConfig} disabled={disabled} onChange={(patch) => onChange({ imageProcessing: { ...processingConfig, ...patch } })} />
+        <p className="text-xs text-white/52">审核、下载和发布使用压缩后的图片。JPEG 会将透明区域填充为背景色；需保留透明请选择 WebP 或 PNG。</p>
+      </> : null}
+    </fieldset>
   </div>;
 }
 

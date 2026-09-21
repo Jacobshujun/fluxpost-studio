@@ -1,10 +1,10 @@
 # FluxPost Current Status
 
-Last updated: 2026-09-20
+Last updated: 2026-09-21
 
 ## One-Line Status
 
-Canvas groups/shortcuts verified and active on local 3001; operator acceptance pending.
+Simple compression verified; simple-image-compression task. Operator review pending.
 
 ## Current Focus
 

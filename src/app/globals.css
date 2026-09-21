@@ -250,8 +250,8 @@ button {
 .canvas-node { width: 220px; border: 1px solid var(--line-strong); border-top: 3px solid var(--node-color); border-radius: 8px; background: var(--canvas-panel); color: var(--foreground); box-shadow: var(--shadow-soft); overflow: visible; }
 .canvas-image-process-controls { display: grid; gap: 6px; padding: 8px; min-width: 0; font-size: 11px; }
 .canvas-image-process-controls label { display: grid; grid-template-columns: minmax(0, 0.8fr) minmax(0, 1.2fr); align-items: center; gap: 6px; min-width: 0; }
-.canvas-image-process-controls input:not([type=checkbox]), .canvas-image-process-controls select { width: 100%; min-width: 0; height: 28px; border: 1px solid var(--line-strong); border-radius: 5px; background: var(--canvas-panel); color: var(--foreground); padding: 2px 4px; font: inherit; }
-.canvas-image-process-controls input[type=range] { padding: 0; accent-color: var(--node-color); }
+.canvas-image-process-controls input:not([type=checkbox]), .canvas-image-process-controls select { width: 100%; min-width: 0; height: 28px; border: 1px solid var(--line-strong); border-radius: 5px; background: var(--panel-solid); color: var(--foreground); padding: 2px 4px; font: inherit; }
+.canvas-image-process-controls input[type=range] { padding: 0; accent-color: var(--accent); }
 .canvas-image-process-quality > div { display: grid; grid-template-columns: minmax(0, 1fr) 42px; gap: 3px; }
 .canvas-image-process-controls small, .canvas-image-process-result small { color: var(--text-muted); overflow-wrap: anywhere; }
 .canvas-image-process-controls [role=alert], .canvas-image-process-result [role=alert] { color: var(--foreground); }

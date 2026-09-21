@@ -111,6 +111,33 @@ try {
   assert.notEqual(contract.imageProcessConfigKey({}), contract.imageProcessConfigKey({ quality: 89 }));
 
   const sourceFile = path.join(temp, "source.png"); writeFileSync(sourceFile, photo); sources.set("source", sourceFile);
+  const simpleProcessor = load("src/lib/simple-image-processing.ts", {
+    "./canvas/image-process": processor,
+    "./canvas/image-process-contract": contract,
+  });
+  const beforeDisabled = materializations;
+  assert.deepEqual(await simpleProcessor.processSimpleImages(["source"], null, "owner"), ["source"]);
+  assert.deepEqual(await simpleProcessor.processSimpleImages([], config(), "owner"), []);
+  assert.equal(materializations, beforeDisabled);
+  const simpleOutputs = await simpleProcessor.processSimpleImages(["source"], config(), "owner");
+  const simpleBytes = readFileSync(path.join(temp, "public", simpleOutputs[0]));
+  const simpleMeta = await sharp(simpleBytes).metadata();
+  assert.equal(simpleMeta.format, "jpeg");
+  assert.deepEqual([simpleMeta.width, simpleMeta.height], [512, 320]);
+  assert.ok(simpleBytes.length < photo.length, "Generated PNG must become a smaller JPEG");
+  console.log(`Simple compression fixture: ${photo.length} -> ${simpleBytes.length} bytes`);
+  await assert.rejects(simpleProcessor.processSimpleImages(["source"], config({ compressionMode: "size", targetKB: 1 }), "owner"));
+  const batches = [];
+  const chunked = load("src/lib/simple-image-processing.ts", {
+    "./canvas/image-process": { processCanvasImages: async (items, options, owner) => {
+      assert.equal(owner, "owner"); assert.deepEqual(options, config()); batches.push(items.length);
+      return items.map((item) => ({ url: `${item.url}.jpg` }));
+    } },
+    "./canvas/image-process-contract": contract,
+  });
+  const manyUrls = Array.from({ length: 23 }, (_, index) => `image-${index}`);
+  assert.deepEqual(await chunked.processSimpleImages(manyUrls, config(), "owner"), manyUrls.map((url) => `${url}.jpg`));
+  assert.deepEqual(batches, [20, 3]);
   const items = [{ url: "source", name: "first.png", localPath: "must-not-be-used", sha256: "stale" }, { url: "source", name: "second.png" }];
   const output = await processor.processCanvasImages(items, {}, "owner");
   assert.deepEqual(output.map((item) => item.name), ["first.jpg", "second.jpg"]);

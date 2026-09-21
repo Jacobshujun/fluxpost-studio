@@ -19,6 +19,7 @@ const workspace = load("src/lib/workspace-settings.ts", {
   "./gpt-image-dimensions": dimensions,
   "./image-model-options": models,
   "./types": types,
+  "./canvas/image-process-contract": load("src/lib/canvas/image-process-contract.ts"),
 });
 
 const legacy = await workspace.getWorkspacePromptSettings();
@@ -29,6 +30,19 @@ assert.equal(legacy.imageQuality, "medium");
 assert.equal(legacy.imageBackground, "auto");
 assert.throws(() => dimensions.resolveGptImageDimensionSettings(legacy), /请选择/);
 assert.equal(writes, 0, "Reading legacy settings must not migrate runtime data");
+assert.equal(legacy.imageProcessing.format, "jpeg");
+assert.equal(legacy.imageProcessing.quality, 90);
+assert.equal(legacy.imageProcessing.resizeMode, "original");
+const processing = { ...legacy.imageProcessing, format: "webp", compressionMode: "size", targetKB: 500 };
+await workspace.saveWorkspacePromptSettings({ imageProcessing: processing });
+assert.deepEqual((await workspace.getWorkspacePromptSettings()).imageProcessing, processing);
+await workspace.saveWorkspacePromptSettings({ textInstruction: "changed" });
+assert.deepEqual((await workspace.getWorkspacePromptSettings()).imageProcessing, processing);
+for (const invalid of [false, [], "jpeg", { quality: 0 }, { compressionMode: "size", targetKB: 0 }, { format: "gif" }]) {
+  const previous = stored;
+  await assert.rejects(workspace.saveWorkspacePromptSettings({ imageProcessing: invalid }));
+  assert.equal(stored, previous);
+}
 
 for (const resolution of toApis.toApisImageResolutions) {
   for (const ratio of toApis.toApisImageRatios) {
@@ -89,6 +103,11 @@ for (const imageBackground of ["invalid", "", null, 1]) {
 }
 const chosen = await workspace.saveWorkspacePromptSettings({ imageRatio: "3:4", imageResolution: "2k", imageQuality: "high", imageBackground: "transparent", imageModel: "gpt-image-2.5-flare-vip", imageToApisRequestFormat: "pixels", imageOutputFormat: "png", imageOutputCompression: 80 });
 const run = JSON.parse(JSON.stringify(snapshots.makeInitialRun({ sourceMode: "links" }, chosen, {})));
+await workspace.saveWorkspacePromptSettings({ imageProcessing: null });
+assert.equal((await workspace.getWorkspacePromptSettings()).imageProcessing, null);
+assert.deepEqual(snapshots.settingsFromRun(run).imageProcessing, processing);
+assert.equal(snapshots.settingsFromRun({ ...run, imageProcessing: undefined }).imageProcessing, null);
+assert.equal(snapshots.settingsFromRun({ ...run, imageProcessing: null }).imageProcessing, null);
 await workspace.saveWorkspacePromptSettings({ imageRatio: "16:9", imageResolution: "4k", imageQuality: "low", imageBackground: "opaque" });
 const resumed = snapshots.settingsFromRun(run);
 assert.equal(resumed.imageRatio, "3:4");
@@ -180,6 +199,41 @@ assert.match(selector, /imageModelPresets\.map/);
 assert.match(page, /<ImageModelSelector/);
 assert.match(canvasPage, /<ImageModelSelector/);
 console.log("Simple model/format overrides, compression, reset and frozen resume checks passed.");
+
+const processors = ast.statements.filter((node) => ts.isFunctionDeclaration(node) && node.getText(ast).includes("await processSimpleImages("));
+assert.equal(processors.length, 3, "Source, viral and original workflows must process before saving");
+for (const node of processors) {
+  const body = node.getText(ast);
+  assert.ok(body.indexOf("await processSimpleImages(") < body.indexOf("await saveGeneratedPost("));
+  assert.match(body, /processSimpleImages\(imageResult.imageUrls, settings.imageProcessing, normalizedInput.ownerUserId/);
+}
+
+let compressionFails = false;
+let savedDraft;
+let saves = 0;
+const sourceDraft = processors.find((node) => node.name.text === "produceSimpleSourceDraft");
+const sourceDependencies = {
+  buildSimpleImageTasks: () => [], generatePost: async () => ({ id: "draft", aiNotes: [], imageTasks: [] }),
+  resolveSimpleImagePrompt: () => "fixture", hasSelectedImageTask: () => true,
+  generateImagesFromPrompt: async () => ({ imageUrls: ["uncompressed.png"], status: "completed" }),
+  isSimpleRunDongchediPageMode: () => false, concurrencyConfig: { image: 1 },
+  simpleRunAccessActor: () => ({ userId: "owner" }), applyWorkspaceOwner: (post) => post,
+  resolveSimplePostTaskKeyword: () => "fixture",
+  processSimpleImages: async (urls, options, owner) => {
+    assert.deepEqual(urls, ["uncompressed.png"]); assert.deepEqual(options, processing); assert.equal(owner, "owner");
+    if (compressionFails) throw new Error("Compression target cannot be reached");
+    return ["compressed.webp"];
+  },
+  saveGeneratedPost: async (post) => { saves++; savedDraft = post; return post; },
+  savePost: async (post) => { saves++; assert.deepEqual(post.imageUrls, ["compressed.webp"]); },
+};
+const sourceFunction = new Function(...Object.keys(sourceDependencies), ts.transpileModule(sourceDraft.getText(ast), { compilerOptions: { target: ts.ScriptTarget.ES2022 } }).outputText + "\nreturn produceSimpleSourceDraft;")(...Object.values(sourceDependencies));
+await sourceFunction({}, { ownerUserId: "owner" }, { ...chosen, imageProcessing: processing }, true);
+assert.deepEqual(savedDraft.imageUrls, ["compressed.webp"]);
+assert.equal(saves, 2);
+compressionFails = true;
+await assert.rejects(sourceFunction({}, { ownerUserId: "owner" }, { ...chosen, imageProcessing: processing }, true), /Compression target/);
+assert.equal(saves, 2, "Failed compression must not persist an uncompressed post for delivery");
 
 function load(file, dependencies = {}) {
   const output = ts.transpileModule(readFileSync(file, "utf8"), {

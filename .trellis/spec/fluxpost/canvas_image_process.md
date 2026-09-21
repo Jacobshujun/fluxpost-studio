@@ -22,6 +22,28 @@ Directory URLs resolve through the owner-scoped snapshot, never trust an arbitra
 
 ## Examples and verification
 
+### One-click production reuse
+
+`WorkspacePromptSettings.imageProcessing` and `SimpleRun.imageProcessing` accept
+`ImageProcessConfig | null`; omission preserves saved settings during PATCH,
+null disables processing. Settings without the field default to JPEG quality 90,
+original resolution (WebP when the saved generation background is transparent).
+Explicit JPEG flattens alpha into its selected background.
+
+New runs freeze the normalized config. Historical run snapshots without the field
+resume with null, never with newly enabled workspace defaults. Source, viral and
+original paths call `processSimpleImages(urls, config, ownerUserId)` before saving
+their posts. It preserves order, chunks at 20 and uses the existing local pool,
+cache and storage. Review/download/Feishu consume the resulting post URLs; no
+historical files are rewritten. Invalid settings fail before storage; impossible
+targets fail before post delivery rather than returning uncompressed images.
+
+Regression coverage: `simple_image_dimensions_check.mjs` covers settings, frozen
+resume, three-path wiring and source-post persistence/failure; the real encoder
+and batching checks are in `canvas_image_process_check.mjs`. The existing simple
+dimension browser check covers compression disable, save/reload, launch payload,
+and disabled controls at 1440/390px. Shared controls remain Canvas-compatible.
+
 - Base: JPEG quality 90 and original resolution.
 - Good: 50% source-size ceiling encodes within quality limits and reports exact savings.
 - Bad: 1 KB target below minimum-quality output fails explicitly; do not silently shrink dimensions or return the source as success.

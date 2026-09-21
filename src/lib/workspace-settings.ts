@@ -1,3 +1,4 @@
+import { defaultImageProcessConfig, resolveImageProcessConfig } from "./canvas/image-process-contract";
 import { defaultImageStrategyPrompts, defaultImageWashPrompt, resolveImageStrategyPrompts } from "./creation-controls";
 import { readAppMetaValue, writeAppMetaValue } from "./database";
 import { defaultDistributionCheckPrompt } from "./distribution-check-prompt";
@@ -28,6 +29,7 @@ export const defaultWorkspacePromptSettings: WorkspacePromptSettings = {
   imageToApisRequestFormat: null,
   imageOutputFormat: "png",
   imageOutputCompression: 100,
+  imageProcessing: defaultImageProcessConfig,
   platformCrawlSettings: defaultPlatformCrawlSettings,
   simpleRunMediaSettings: defaultSimpleRunMediaSettings,
   updatedAt: new Date(0).toISOString(),
@@ -74,6 +76,7 @@ function normalizeWorkspacePromptSettings(input: Partial<WorkspacePromptSettings
     imageToApisRequestFormat: normalizeToApisRequestFormat(input.imageToApisRequestFormat ?? undefined) ?? null,
     imageOutputFormat,
     imageOutputCompression,
+    imageProcessing: normalizeSimpleImageProcessing(input.imageProcessing, input.imageBackground),
     textInstruction: stringOrDefault(input.textInstruction, defaultWorkspacePromptSettings.textInstruction),
     imageWashPrompt: imageStrategyPrompts.textImage,
     imageStrategyPrompts,
@@ -155,4 +158,11 @@ function normalizeOptionalString(value: unknown, fallback: string | undefined) {
 
 function isRecord(value: unknown): value is Record<string, unknown> {
   return Boolean(value && typeof value === "object" && !Array.isArray(value));
+}
+
+function normalizeSimpleImageProcessing(value: unknown, background: WorkspacePromptSettings["imageBackground"]) {
+  if (value === null) return null;
+  if (value === undefined) return { ...defaultImageProcessConfig, ...(background === "transparent" ? { format: "webp" as const } : {}) };
+  if (!isRecord(value)) throw new Error("图片压缩参数无效。");
+  return resolveImageProcessConfig(value);
 }

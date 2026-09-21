@@ -72,6 +72,20 @@ async def check(browser, width):
     await expect(background).to_be_visible()
     await expect(quality).to_have_value("medium")
     await expect(background).to_have_value("auto")
+    processing_toggle = page.get_by_role("checkbox", name="启用图片压缩", exact=True)
+    processing_format = page.get_by_role("combobox", name="输出格式", exact=True)
+    processing_mode = page.get_by_role("combobox", name="压缩方式", exact=True)
+    await expect(processing_toggle).to_be_checked()
+    await expect(processing_format).to_have_value("jpeg")
+    await processing_toggle.uncheck()
+    await expect(processing_format).to_have_count(0)
+    await processing_toggle.check()
+    await processing_format.select_option("webp")
+    await processing_mode.select_option("size")
+    processing_size = page.get_by_role("spinbutton", name="单张上限 KB", exact=True)
+    await processing_size.fill("600")
+    await page.get_by_role("combobox", name="分辨率", exact=True).select_option("longest")
+    await page.get_by_role("spinbutton", name="最长边 px", exact=True).fill("1920")
     model = page.get_by_role("combobox", name="图片模型", exact=True)
     request_format = page.get_by_role("combobox", name="ToAPIs 请求格式", exact=True)
     output_format = page.get_by_role("combobox", name="图片格式", exact=True)
@@ -111,7 +125,7 @@ async def check(browser, width):
     await resolution.select_option("2k")
     await page.get_by_role("button", name="保存当前策略", exact=True).click()
     await asyncio.wait_for(save_started.wait(), timeout=10)
-    for control in [ratio, resolution, quality, background, model, custom, request_format, output_format]:
+    for control in [ratio, resolution, quality, background, model, custom, request_format, output_format, processing_toggle, processing_format, processing_mode, processing_size]:
         await expect(control).to_be_disabled()
     release_save.set()
     await expect(page.get_by_text("精简版默认生产策略已保存", exact=True)).to_be_visible()
@@ -124,6 +138,9 @@ async def check(browser, width):
     assert settings["imageToApisRequestFormat"] == "ratio"
     assert settings["imageOutputFormat"] == "png"
     assert settings["imageOutputCompression"] == 75
+    assert settings["imageProcessing"]["format"] == "webp"
+    assert settings["imageProcessing"]["targetKB"] == 600
+    assert settings["imageProcessing"]["longestEdge"] == 1920
     await page.reload(wait_until="networkidle")
     await expect(ratio).to_have_value("3:4")
     await expect(resolution).to_have_value("2k")
@@ -131,6 +148,9 @@ async def check(browser, width):
     await expect(background).to_have_value("transparent")
     await expect(custom).to_have_value("gpt-image-2-future/Exact:V3")
     await expect(request_format).to_have_value("ratio")
+    await expect(processing_format).to_have_value("webp")
+    await expect(processing_mode).to_have_value("size")
+    await expect(processing_size).to_have_value("600")
     await expect(page.get_by_label("像素尺寸", exact=True)).to_have_text("1536x2048 px")
     await page.get_by_label("关键词 / 内容池项目", exact=True).fill("测试关键词")
     await start.click()
@@ -143,6 +163,7 @@ async def check(browser, width):
     assert submissions[0]["settings"]["imageModel"] == "gpt-image-2-future/Exact:V3"
     assert submissions[0]["settings"]["imageToApisRequestFormat"] == "ratio"
     assert submissions[0]["settings"]["imageOutputFormat"] == "png"
+    assert submissions[0]["settings"]["imageProcessing"] == settings["imageProcessing"]
     await background.select_option("auto")
     await output_format.select_option("jpeg")
     await expect(compression).to_have_value("75")
@@ -172,6 +193,13 @@ async def check(browser, width):
         bounds = await control.bounding_box()
         assert bounds and bounds["x"] >= 0 and bounds["x"] + bounds["width"] <= width + 1
     assert not errors, errors
+    await processing_toggle.uncheck()
+    await page.get_by_role("button", name="保存当前策略", exact=True).click()
+    await expect(page.get_by_text("精简版默认生产策略已保存", exact=True)).to_be_visible()
+    assert settings["imageProcessing"] is None
+    await page.reload(wait_until="networkidle")
+    await expect(processing_toggle).not_to_be_checked()
+    await expect(processing_format).to_have_count(0)
     Path("test-artifacts").mkdir(exist_ok=True)
     await ratio.scroll_into_view_if_needed()
     await page.screenshot(path=f"test-artifacts/simple-image-dimensions-{width}.png")

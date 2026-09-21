@@ -1,3 +1,4 @@
+import { processSimpleImages } from "./simple-image-processing";
 import { compactError, recordExecutionLog, runWithExecutionLogOwner } from "./activity-log";
 import { appConfig } from "./config";
 import { buildDefaultImageTasks, hasSelectedImageTask } from "./creation-controls";
@@ -357,6 +358,7 @@ function settingsFromRun(run: SimpleRun): WorkspacePromptSettings {
     imageToApisRequestFormat: run.imageToApisRequestFormat,
     imageOutputFormat: run.imageOutputFormat,
     imageOutputCompression: run.imageOutputCompression,
+    imageProcessing: run.imageProcessing ?? null,
     imageRatio: run.imageRatio,
     imageResolution: run.imageResolution,
     imageQuality: run.imageQuality,
@@ -1025,7 +1027,7 @@ async function produceSimpleSourceDraft(
     sourceUrl: source.sourceUrl,
     sourceSafetyAssessment: source.safetyAssessment,
     imagePrompt,
-    imageUrls: imageResult.imageUrls,
+    imageUrls: await processSimpleImages(imageResult.imageUrls, settings.imageProcessing, normalizedInput.ownerUserId || "local"),
     taskKeyword: resolveSimplePostTaskKeyword(normalizedInput, source),
     contentTags: source.contentTagging?.tags || [],
     imageTasks,
@@ -1274,7 +1276,7 @@ async function runSimpleViralWorkflow(
       {
         ...draft,
         imagePrompt,
-        imageUrls: imageResult.imageUrls,
+        imageUrls: await processSimpleImages(imageResult.imageUrls, settings.imageProcessing, normalizedInput.ownerUserId || "local"),
         taskKeyword: normalizedInput.keyword,
         imageTasks: draft.imageTasks,
         aiNotes: [
@@ -1514,7 +1516,7 @@ async function runSimpleOriginalWorkflow(
     const post = applyWorkspaceOwner(
       {
         ...draft.post,
-        imageUrls: imageResult.imageUrls,
+        imageUrls: await processSimpleImages(imageResult.imageUrls, settings.imageProcessing, normalizedInput.ownerUserId || "local"),
         aiNotes: [
           ...draft.post.aiNotes,
           `Original mode planned ${draft.imagePrompts.length} image prompt(s).`,
@@ -2577,6 +2579,7 @@ function makeInitialRun(
     imageToApisRequestFormat: settings.imageToApisRequestFormat,
     imageOutputFormat: settings.imageOutputFormat,
     imageOutputCompression: settings.imageOutputCompression,
+    imageProcessing: settings.imageProcessing,
     imageRatio: settings.imageRatio,
     imageResolution: settings.imageResolution,
     imageQuality: settings.imageQuality,
