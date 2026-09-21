@@ -1,5 +1,5 @@
 import { load } from "cheerio";
-import { fetchDongchediHtml, isDongchediAccessChallenge } from "./dongchedi";
+import { dongchediAccessHelp, fetchDongchediHtml, isDongchediAccessChallenge } from "./dongchedi";
 
 const allowedHosts = new Set(["dongchedi.com", "www.dongchedi.com"]);
 const articleIdPattern = /^\d{8,24}$/;
@@ -70,7 +70,7 @@ export async function discoverDongchediCategory(value: string, options: { cookie
   const pageUrl = normalizeDongchediCategoryUrl(value);
   const html = await fetchDongchediHtml(pageUrl, { cookie: options.cookie, maxBytes: 8 * 1024 * 1024 });
   if (isDongchediAccessChallenge(html)) {
-    throw new Error("Dongchedi category page returned a login or anti-bot challenge; provide an authorized Cookie or use direct article links.");
+    throw new Error(`${dongchediAccessHelp} 栏目页也可以改用文章链接批量导入。`);
   }
   const articles = extractDongchediCategoryArticles(html, Math.min(Math.max(options.limit || 30, 1), 30));
   if (!articles.length) {

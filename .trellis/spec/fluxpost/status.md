@@ -4,7 +4,7 @@ Last updated: 2026-09-21
 
 ## One-Line Status
 
-Simple compression verified; simple-image-compression task. Operator review pending.
+懂车帝一键生成失败提示已修正；反爬/登录页会展示 Cookie 操作建议。专项契约通过，完整基线被已有数据目录 lint 错误阻断。
 
 ## Current Focus
 

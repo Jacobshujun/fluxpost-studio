@@ -32,6 +32,8 @@ export function isDongchediAccessChallenge(html: string) {
   return /byted_acrawler|__ac_signature|window\.location\.reload|login-required|<title[^>]*>\s*(?:登录|用户登录|安全验证)[^<]*<\/title>|<(?:form|main)[^>]+(?:id|class)=["'][^"']*(?:login-page|passport-login)/i.test(html);
 }
 
+export const dongchediAccessHelp = "懂车帝返回了登录或 anti-bot challenge（反爬验证）页。请在浏览器登录懂车帝后复制当前页面 Cookie，粘贴到 Cookie 输入框，再重试；也可以改用可公开访问的文章链接。";
+
 export async function fetchDongchediHtml(url: string, options: { cookie?: string; maxBytes?: number } = {}) {
   const parsed = validateDongchediRequestUrl(url);
   for (let attempt = 1; attempt <= 2; attempt += 1) {
@@ -97,7 +99,7 @@ export function normalizeDongchediArticle(sourceId: string, sourceUrl: string, h
   const article = findBestArticleRecord(jsonRoots, sourceId);
   if (!article) {
     if (isDongchediAntiBotChallenge(html)) {
-      throw new Error("Dongchedi anti-bot challenge page returned; article data was not available. Provide a valid Dongchedi Cookie in link import or one-click link mode, then retry.");
+      throw new Error(dongchediAccessHelp);
     }
     throw new Error("Dongchedi article data not found");
   }
