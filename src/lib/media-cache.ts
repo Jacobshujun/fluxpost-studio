@@ -145,7 +145,8 @@ export async function cacheCrawledMedia(items: NormalizedSourceItem[], options: 
       downloadedVideoUrl = await persistRuntimeMedia({
         filePath: videoPath,
         publicPath: downloadedVideoUrl,
-        overwrite: options.forceVideoRefresh === true,
+        // A fresh validated staging file must replace an invalid durable cache.
+        overwrite: true,
       });
     }
     if (videoFramesNeedPersistence && selectedVideoFrames.some((frame) => isManagedRuntimeMediaUrl(frame.url))) {
@@ -200,7 +201,7 @@ async function cacheRemoteVideoCandidates(
   for (const [index, url] of candidates.entries()) {
     try {
       return {
-        downloadedVideoUrl: await cacheRemoteMedia(url, itemDir, publicDir, "video-1", "video", { overwrite: options.overwrite === true }),
+        downloadedVideoUrl: await cacheRemoteMedia(url, itemDir, publicDir, "video-1", "video", { overwrite: options.overwrite === true || index > 0 }),
         errors: [],
       };
     } catch (error) {
@@ -219,11 +220,12 @@ export function shouldRefreshVideoCacheForItem(item: Pick<NormalizedSourceItem, 
 }
 
 export function buildVideoDownloadCandidates(item: NormalizedSourceItem) {
-  const primary = item.videoUrl && isDownloadableVideoUrl(item.videoUrl) ? item.videoUrl : "";
   const ranked = rankVideoUrlsByQuality([
     ...extractVideoCandidatesFromUnknown(item.raw),
+    { url: item.videoUrl },
     ...item.mediaUrls.map((url, index) => ({ url, sourcePriority: -index })),
-  ]).filter((url) => isDownloadableVideoUrl(url) && url !== primary);
+  ]).filter(isDownloadableVideoUrl);
+  const primary = item.videoUrl && ranked.includes(item.videoUrl) ? item.videoUrl : "";
   return dedupeStrings([
     primary,
     ...ranked.filter(isDirectVideoDownloadUrl),
@@ -281,20 +283,27 @@ async function cacheRemoteMedia(
 
   if (!options.overwrite) {
     const existingObjectUrl = await findExistingRuntimeMedia(publicUrl);
-    if (existingObjectUrl) return existingObjectUrl;
+    if (existingObjectUrl) {
+      if (kind === "image") return existingObjectUrl;
+      const materialized = await materializeRuntimeMedia(existingObjectUrl, { maxBytes: 150 * 1024 * 1024, kind: "video" });
+      try {
+        if (await hasVideoStream(materialized.filePath)) return existingObjectUrl;
+      } finally {
+        await materialized.cleanup();
+      }
+    }
   }
 
   if (!options.overwrite) {
-    try {
-      const existing = await stat(filePath);
-      if (existing.size > 0) {
-        if (kind === "image") {
-          return persistCachedSourceImage(filePath, publicUrl, options.sourceItem, false, false);
-        }
-        return publicUrl;
+    const existing = await stat(filePath).catch((error: NodeJS.ErrnoException) => {
+      if (error.code === "ENOENT") return undefined;
+      throw error;
+    });
+    if (existing && existing.size > 0) {
+      if (kind === "image") {
+        return persistCachedSourceImage(filePath, publicUrl, options.sourceItem, false, false);
       }
-    } catch {
-      // File is not cached yet.
+      if (await hasVideoStream(filePath)) return publicUrl;
     }
   }
 
@@ -303,7 +312,25 @@ async function cacheRemoteMedia(
   if (kind === "image") {
     return persistCachedSourceImage(filePath, publicUrl, options.sourceItem, true, options.overwrite === true);
   }
+  if (!(await hasVideoStream(filePath))) {
+    await rm(filePath, { force: true });
+    throw new Error("Downloaded media has no valid video stream (audio-only media is not a video).");
+  }
   return publicUrl;
+}
+
+async function hasVideoStream(filePath: string): Promise<boolean> {
+  const output = await new Promise<string>((resolve, reject) => {
+    execFile("ffprobe", ["-v", "error", "-show_entries", "stream=codec_type,width,height:stream_disposition=attached_pic", "-of", "json", filePath],
+      { timeout: 15_000, maxBuffer: 1024 * 1024, windowsHide: true }, (error, stdout) => {
+        if (error && typeof error.code === "number" && !error.killed) resolve("");
+        else if (error) reject(new Error("Video stream validation failed; FFprobe could not read the media.", { cause: error }));
+        else resolve(stdout);
+      });
+  });
+  if (!output) return false;
+  const metadata = JSON.parse(output) as { streams?: Array<{ codec_type?: string; width?: number; height?: number; disposition?: { attached_pic?: number } }> };
+  return Boolean(metadata.streams?.some((stream) => stream.codec_type === "video" && (stream.width || 0) > 0 && (stream.height || 0) > 0 && stream.disposition?.attached_pic !== 1));
 }
 
 async function persistCachedSourceImage(

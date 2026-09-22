@@ -1,31 +1,25 @@
 # FluxPost Current Status
 
-Last updated: 2026-09-21
+Last updated: 2026-09-22
 
 ## One-Line Status
 
-懂车帝一键生成失败提示已修正；反爬/登录页会展示 Cookie 操作建议。专项契约通过，完整基线被已有数据目录 lint 错误阻断。
+Collected-video audio-only fix passes contracts, source lint, types, build and smoke. Baseline lint remains blocked by existing data scripts. Activation waits for active Canvas jobs; task: collected-video-stream.
 
 ## Current Focus
 
-- 2026-09-20: Canvas inspector now opens only for a selected node; pane click/close
-  hides it and releases desktop space. Full baseline and three-theme 1440/1000/390
-  browser checks pass. Evidence: canvas-inspector-selection task.
+- 2026-09-21: Dongchedi failure guidance fixed; focused checks pass. Baseline blocked by existing data-directory lint errors.
+
+- 2026-09-20: Selection-only Canvas inspector; baseline and three-theme desktop/mobile checks pass. Evidence: canvas-inspector-selection task.
 
 - 2026-09-20: gpt-image-quality: five levels; baseline/browser pass.
 
 - 2026-09-18: Canvas groups/shortcuts: archived canvas-groups-shortcuts task.
   Full baseline, three-theme 1440/390 browser and LAN activation pass.
 
-- 2026-09-18: Local FRP application now uses https://ximage.lightmoment.net/;
-  desktop public launcher updated. Dedicated Let's Encrypt certificate, scoped
-  renewal dry-run and existing timer/reload hook pass, as do TLS/redirect/assets/range
-  checks and full baseline. Evidence: frp-vps-38 task verification HTTPS follow-up.
+- 2026-09-18: FRP application https://ximage.lightmoment.net/ and desktop launcher updated. TLS/renewal/assets/range and baseline pass; evidence: frp-vps-38 HTTPS follow-up.
 
-- 2026-09-18: FRP dashboard is publicly available at https://flux.lightmoment.net:6443/
-  through a dedicated Nginx listener. TLS, auth, UI assets, online proxy and baseline pass;
-  original configurations/services are unchanged. Credentials remain local.
-  Evidence: archived frp-dashboard-public task. Loopback/SSH access is retained.
+- 2026-09-18: FRP dashboard https://flux.lightmoment.net:6443/; TLS/auth/proxy and baseline pass. Credentials local, SSH retained. Evidence: archived frp-dashboard-public task.
 
 - FRP relay and public-launcher installation evidence: archived frp-vps-38 and
   desktop-frp-launcher tasks. Current HTTPS entry is above.

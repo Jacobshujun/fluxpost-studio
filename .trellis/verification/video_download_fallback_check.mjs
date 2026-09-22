@@ -1,5 +1,10 @@
 import { createRequire } from "node:module";
 import { readFileSync } from "node:fs";
+import { mkdtemp, mkdir, writeFile, rm } from "node:fs/promises";
+import { tmpdir } from "node:os";
+import { execFileSync } from "node:child_process";
+import { createServer } from "node:http";
+import assert from "node:assert/strict";
 import path from "node:path";
 import vm from "node:vm";
 import ts from "typescript";
@@ -7,7 +12,7 @@ import ts from "typescript";
 const projectRoot = process.cwd();
 const nodeRequire = createRequire(import.meta.url);
 
-function loadTsModule(relativePath, requireMap = {}) {
+function loadTsModule(relativePath, requireMap = {}, globals = {}) {
   const sourcePath = path.join(projectRoot, relativePath);
   const source = readFileSync(sourcePath, "utf8");
   const transpiled = ts.transpileModule(source, {
@@ -33,13 +38,14 @@ function loadTsModule(relativePath, requireMap = {}) {
       if (name.startsWith("node:")) return nodeRequire(name);
       throw new Error(`Unexpected import in ${relativePath}: ${name}`);
     },
+    ...globals,
   };
   vm.runInNewContext(transpiled.outputText, sandbox, { filename: sourcePath });
   return cjsModule.exports;
 }
 
 const videoQuality = loadTsModule("src/lib/video-quality.ts");
-const mediaCache = loadTsModule("src/lib/media-cache.ts", {
+const cacheDependencies = {
   "./activity-log": {
     compactError: (error) => (error instanceof Error ? error.message : String(error)),
     recordExecutionLog: async () => undefined,
@@ -88,7 +94,8 @@ const mediaCache = loadTsModule("src/lib/media-cache.ts", {
     mergeTranscriptIntoContentText: (contentText) => contentText,
     transcribeVideoContent: async () => ({ status: "skipped" }),
   },
-});
+};
+const mediaCache = loadTsModule("src/lib/media-cache.ts", cacheDependencies);
 
 const { buildVideoDownloadCandidates } = mediaCache;
 if (typeof buildVideoDownloadCandidates !== "function") {
@@ -173,3 +180,73 @@ if (shouldRefreshVideoCacheForItem({ ...cachedItem, downloadedVideoUrl: undefine
 }
 
 console.log("Video download fallback check passed.");
+
+const dash = "https://www.douyin.com/aweme/v1/play/dash/?video_id=fixture";
+const filtered = buildVideoDownloadCandidates({ ...cachedItem, videoUrl: dash, mediaUrls: [dash, bestCdnUrl] });
+assert.equal(filtered[0], bestCdnUrl, "An invalid primary must not bypass shared candidate filtering");
+assert.equal(filtered.includes(dash), false);
+
+const fixtureRoot = await mkdtemp(path.join(tmpdir(), "fluxpost-video-stream-"));
+const audioPath = path.join(fixtureRoot, "audio.mp4");
+const videoPath = path.join(fixtureRoot, "video.mp4");
+let server;
+try {
+  execFileSync("ffmpeg", ["-v", "error", "-f", "lavfi", "-i", "sine=frequency=440:duration=0.2", "-c:a", "aac", audioPath], { windowsHide: true });
+  execFileSync("ffmpeg", ["-v", "error", "-f", "lavfi", "-i", "color=c=blue:s=64x64:d=0.2", "-c:v", "libx264", "-pix_fmt", "yuv420p", videoPath], { windowsHide: true });
+  const audioBytes = readFileSync(audioPath);
+  const videoBytes = readFileSync(videoPath);
+  const requests = [];
+  server = createServer((req, res) => {
+    requests.push(req.url);
+    const body = req.url === "/audio.mp4" ? audioBytes : videoBytes;
+    res.writeHead(200, { "Content-Type": "video/mp4", "Content-Length": body.length });
+    res.end(body);
+  });
+  await new Promise((resolve) => server.listen(0, "127.0.0.1", resolve));
+  const origin = `http://127.0.0.1:${server.address().port}`;
+  let existingObject;
+  const writes = [];
+  const isolated = loadTsModule("src/lib/media-cache.ts", {
+    ...cacheDependencies,
+    "./runtime-media-storage": {
+      findExistingRuntimeMedia: async () => existingObject,
+      isManagedRuntimeMediaUrl: () => false,
+      persistRuntimeMedia: async (input) => {
+        const probe = JSON.parse(execFileSync("ffprobe", ["-v", "error", "-show_streams", "-of", "json", input.filePath], { encoding: "utf8", windowsHide: true }));
+        assert(probe.streams.some((stream) => stream.codec_type === "video"), "Never persist audio-only media");
+        writes.push(input);
+        return input.publicPath;
+      },
+    },
+    "./runtime-media-materializer": {
+      materializeRuntimeMedia: async () => ({ filePath: audioPath, cleanup: async () => {} }),
+    },
+  }, { process: { cwd: () => fixtureRoot } });
+  const fixture = (id, primary, extra = []) => ({
+    id, sourceId: id, platform: "douyin", title: "fixture", contentText: "", images: [], metrics: {}, raw: {},
+    videoUrl: `${origin}/${primary}.mp4`, mediaUrls: extra.map((name) => `${origin}/${name}.mp4`),
+    videoFrames: [{ url: "/frame.jpg" }],
+  });
+  const [rejected] = await isolated.cacheCrawledMedia([fixture("reject", "audio")]);
+  assert.equal(rejected.downloadedVideoUrl, undefined);
+  assert.match(rejected.downloadErrors[0], /no valid video stream/);
+  assert.equal(writes.length, 0);
+  const [recovered] = await isolated.cacheCrawledMedia([fixture("fallback", "audio", ["video"])]);
+  assert(recovered.downloadedVideoUrl);
+  assert.equal(recovered.downloadErrors, undefined);
+  assert.equal(writes.length, 1, "A real silent video remains valid");
+  const staleDir = path.join(fixtureRoot, "public/media/crawl/douyin/stale");
+  await mkdir(staleDir, { recursive: true });
+  await writeFile(path.join(staleDir, "video-1.mp4"), audioBytes);
+  await isolated.cacheCrawledMedia([fixture("stale", "video")]);
+  assert.equal(writes.length, 2, "Re-import replaces audio-only local cache");
+  existingObject = "https://storage.example.invalid/stale.mp4";
+  await isolated.cacheCrawledMedia([fixture("durable", "video")]);
+  assert.equal(writes.length, 3, "Re-import replaces audio-only durable cache");
+  assert.equal(writes[2].overwrite, true);
+  assert.deepEqual(requests, ["/audio.mp4", "/audio.mp4", "/video.mp4", "/video.mp4", "/video.mp4"]);
+  console.log("Real video stream validation and stale-cache repair checks passed.");
+} finally {
+  if (server) await new Promise((resolve) => server.close(resolve));
+  await rm(fixtureRoot, { recursive: true, force: true });
+}

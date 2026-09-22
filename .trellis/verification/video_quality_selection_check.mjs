@@ -98,6 +98,30 @@ if (orderedByUrlBitrate[0] !== "https://v3-dy-o.zjcdn.com/video/tos/cn/sample-be
 
 const { normalizeTikHubResponse } = tikhub;
 
+const fullVideo = "https://cdn.example.invalid/full-720p.mp4";
+const splitVideo = "https://cdn.example.invalid/video/tos/sample/media-video-avc1/?br=9000";
+const dashAudio = "https://www.douyin.com/aweme/v1/play/dash/?video_id=fixture&br=12000";
+const audioFile = "https://cdn.example.invalid/sound.mp4";
+const standalone = videoQuality.rankVideoUrlsByQuality([
+  { url: audioFile, keyHint: "fallback", width: 3840, height: 2160 },
+  { url: dashAudio, width: 3840, height: 2160 },
+  { url: splitVideo, width: 3840, height: 2160 },
+  { url: audioFile, keyHint: "video.bit_rate_audio.0.play_addr" },
+  { url: fullVideo, width: 1280, height: 720 },
+]);
+if (standalone.join() !== fullVideo) throw new Error("Separate audio/video tracks must not outrank or re-enter complete video candidates.");
+const splitItems = normalizeTikHubResponse({ data: { aweme_detail: {
+  aweme_id: "split-track-fixture", desc: "fixture", video: {
+    width: 3840, height: 2160,
+    play_addr: { url_list: [dashAudio, splitVideo] },
+    bit_rate: [{ bit_rate: 1000000, play_addr: { url_list: [fullVideo] } }],
+    audio: { play_addr: { url_list: [audioFile] } },
+  },
+} } }, "douyin");
+if (splitItems[0]?.videoUrl !== fullVideo) {
+  throw new Error("TikHub must select complete video and exclude audio from generic fallback scans.");
+}
+
 const douyinItems = normalizeTikHubResponse({
   data: {
     aweme_detail: {

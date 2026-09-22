@@ -21,12 +21,17 @@ type RankedVideoCandidate = {
 };
 
 export function rankVideoUrlsByQuality(candidates: VideoQualityCandidate[]) {
+  // Reject before deduplication: generic URL scans can rediscover audio URLs
+  // without the original field metadata.
+  const audioUrls = new Set(candidates.filter((candidate) =>
+    /(?:^|[._])(?:audio|music)(?:[._]|$)/i.test(candidate.keyHint || ""),
+  ).map((candidate) => normalizeCandidateUrl(candidate.url)));
   const seen = new Set<string>();
   const ranked: RankedVideoCandidate[] = [];
 
   candidates.forEach((candidate, index) => {
     const url = normalizeCandidateUrl(candidate.url);
-    if (!url || seen.has(url)) return;
+    if (!url || seen.has(url) || audioUrls.has(url) || isSeparateMediaTrackUrl(url)) return;
     seen.add(url);
 
     const width = positiveNumber(candidate.width) || extractVideoWidth(candidate.quality, candidate.keyHint, url);
@@ -60,6 +65,11 @@ export function rankVideoUrlsByQuality(candidates: VideoQualityCandidate[]) {
       a.index - b.index,
     )
     .map((candidate) => candidate.url);
+}
+
+function isSeparateMediaTrackUrl(url: string) {
+  // Douyin DASH play endpoints and CDN track files are not muxed videos.
+  return /\/aweme\/v1\/play\/dash(?:\/|\?|$)|\/media-(?:video|audio)-[^/?]+|[?&]mime_type=audio|\.(?:mp3|m4a|aac)(?:\?|$)/i.test(url);
 }
 
 function normalizeCandidateUrl(value?: string) {

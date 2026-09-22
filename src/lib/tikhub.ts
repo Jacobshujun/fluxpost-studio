@@ -1744,6 +1744,7 @@ function collectUrls(record: JsonRecord, kind: "image" | "video" | "link") {
     if (typeof node === "string") {
       if (kind === "image" && shouldExcludeImageUrl(node, keyHint)) return;
       if (kind === "video" && !isDownloadableVideoUrl(node)) return;
+      if (kind === "video" && !rankVideoUrlsByQuality([{ url: node, keyHint }]).length) return;
       if (/^https?:\/\//i.test(node) && (urlPattern.test(node) || keyPattern.test(keyHint))) {
         urls.add(node);
       }
