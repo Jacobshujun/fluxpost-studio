@@ -59,7 +59,7 @@ export function normalizeXiaopengBbsThread(sourceId: string, sourceUrl: string, 
   const content = extractThreadContent(thread, textRecords);
   const contentText = content.text;
   const images = dedupeStrings([...content.images, ...extractAttachmentImages(thread)]);
-  const videos = extractAttachmentVideos(thread);
+  const videos = extractAttachmentVideos(thread, content.videos);
   const publishedAt = unixSecondsToIso(firstNumber(thread, ["dateline", "createTime", "createdAt"]));
   const topicTitle = extractTopicTitle(thread);
   const resolvedTitle = cleanTitle(title) || topicTitle;
@@ -134,7 +134,7 @@ function extractThreadContent(thread: JsonRecord, textRecords: Map<string, strin
     content = content.slice(1);
   }
   if (!content.trim() || thread.dataStruct !== "Json") {
-    return { text: content.trim() ? stripHtml(content) : firstString(thread, ["summary", "description"]), images: [] as string[] };
+    return { text: content.trim() ? stripHtml(content) : firstString(thread, ["summary", "description"]), images: [] as string[], videos: [] as string[] };
   }
 
   let inserts: unknown;
@@ -146,6 +146,7 @@ function extractThreadContent(thread: JsonRecord, textRecords: Map<string, strin
   if (!Array.isArray(inserts)) throw new Error("Xiaopeng BBS invalid rich-text insert array");
   const text: string[] = [];
   const images: string[] = [];
+  const videos: string[] = [];
   for (const operation of inserts) {
     const insert: unknown = getRecord(operation)?.insert;
     if (typeof insert === "string") {
@@ -154,13 +155,17 @@ function extractThreadContent(thread: JsonRecord, textRecords: Map<string, strin
       const url = normalizeUrl(insert.image);
       if (!url || !isLikelyImageUrl(url)) throw new Error("Xiaopeng BBS invalid rich-text image URL");
       images.push(url);
+    } else if (isRecord(insert) && typeof insert.video === "string") {
+      const url = normalizeUrl(insert.video);
+      if (!url || !isLikelyVideoUrl(url)) throw new Error("Xiaopeng BBS invalid rich-text video URL");
+      videos.push(url);
     } else if (isRecord(insert) && isRecord(insert.mention) && typeof insert.mention.value === "string") {
       text.push(`${typeof insert.mention.denotationChar === "string" ? insert.mention.denotationChar : ""}${insert.mention.value}`);
     } else {
       throw new Error("Xiaopeng BBS unsupported rich-text insert");
     }
   }
-  return { text: text.join("").trim(), images };
+  return { text: text.join("").trim(), images, videos };
 }
 
 function extractPageDataObject(text: string): JsonRecord | undefined {
@@ -215,7 +220,7 @@ function extractAttachmentImages(record: JsonRecord) {
   );
 }
 
-function extractAttachmentVideos(record: JsonRecord) {
+function extractAttachmentVideos(record: JsonRecord, inlineVideos: string[]) {
   const videos = Array.isArray(record.videos) ? record.videos : [];
   const attachments = Array.isArray(record.attach) ? record.attach : [];
   const candidates: VideoQualityCandidate[] = [];
@@ -232,6 +237,8 @@ function extractAttachmentVideos(record: JsonRecord) {
       if (url && isLikelyVideoUrl(url)) candidates.push({ ...context, url, keyHint: `attachment.${index}.${key}` });
     });
   });
+  // Keep attachment quality metadata ahead of duplicate inline URLs.
+  candidates.push(...inlineVideos.map((url, index) => ({ url, keyHint: `inline.${index}` })));
   return rankVideoUrlsByQuality(candidates).filter(isLikelyVideoUrl);
 }
 

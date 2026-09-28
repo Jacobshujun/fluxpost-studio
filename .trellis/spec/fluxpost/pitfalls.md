@@ -4,7 +4,7 @@ Last updated: 2026-07-20
 
 ## Known Project Pitfalls
 
-- Xiaopeng BBS `dataStruct="Json"` bodies use rich-text insert arrays and may be React Flight `$hex` references to UTF-8 length-prefixed `T` records. Decode complete script chunks and resolve references before parsing inserts; merge inline images with attachments. A nonempty reference is not article text, and attachments alone can omit most images. Keep missing/truncated/malformed body failures explicit; offline coverage is in `xiaopeng_bbs_import_check.mjs`.
+- Xiaopeng BBS `dataStruct="Json"` bodies use rich-text insert arrays and may be React Flight `$hex` references to UTF-8 length-prefixed `T` records. Decode complete script chunks and resolve references before parsing inserts; merge inline images with attachments. Valid `{insert:{video:"https://...mp4"}}` nodes must join video quality ranking and media URLs; `attributes.cover` is not an article image. Cache/download uses one primary video. A nonempty reference is not article text. Keep malformed-node failures explicit and cover mixed text/image/video, deduplication and cover exclusion in `xiaopeng_bbs_import_check.mjs`.
 
 - 2026-09-16: GPT Image 2.5 Official is not the legacy or ordinary ratio/tier contract. It uses pixel size, selected quality, n=1, image_urls and optional background=transparent. Ordinary Sunburst/Flare keep ratio/resolution, fixed high and reference_images. See toapis_image_contract.md; the legacy 4K rejection must not govern either family. Custom-size and transparency acceptance remain untested against the live provider.
 

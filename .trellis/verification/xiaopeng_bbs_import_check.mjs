@@ -192,4 +192,38 @@ const incident = normalizeXiaopengBbsThread("3776077", "https://bbs.xiaopeng.com
 assert.equal(incident.images.length, 7);
 assert.equal(incident.contentText, `#用车记录${richBody}`);
 
-console.log("Xiaopeng BBS import check passed: plain text, Flight UTF-8 records, rich text, inline images and explicit parse failures.");
+const videoUrl = "https://example.com/clip-1920x1080.mp4";
+const portraitVideo = "https://example.com/clip-1080x1920.mp4";
+const mixedContent = JSON.stringify([
+  { insert: "视频前\n" },
+  { insert: { video: videoUrl }, attributes: { cover: "https://example.com/cover.jpg" } },
+  { insert: "视频后\n" },
+  { insert: { image: inlineUrls[0] } },
+  { insert: { video: portraitVideo } },
+  { insert: { video: videoUrl } },
+]);
+const mixed = normalizeFixture("$1f", `1f:T${Buffer.byteLength(mixedContent).toString(16)},${mixedContent}`);
+assert.equal(mixed.contentText, "视频前\n视频后");
+assert.equal(mixed.mediaType, "mixed");
+assert.ok([videoUrl, portraitVideo].includes(mixed.videoUrl));
+assert.equal(mixed.mediaUrls.filter((url) => url === videoUrl).length, 1);
+assert.ok(mixed.mediaUrls.includes(portraitVideo));
+assert.deepEqual(Array.from(mixed.images), [inlineUrls[0], ...item.images]);
+assert.ok(!mixed.mediaUrls.some((url) => url.includes("cover.jpg")));
+
+const videoOnlyData = { pageData: { value: { ...pageData.value, dataStruct: "Json",
+  content: JSON.stringify([{ insert: { video: videoUrl } }]), attach: [],
+  videos: [{ url: videoUrl }, { url: "https://example.com/clip-3840x2160.mp4", width: 3840, height: 2160 }],
+} } };
+const videoOnly = normalizeXiaopengBbsThread("3776077", "https://bbs.xiaopeng.com/thread/3776077?tidType=1",
+  flightHtml(`5:${JSON.stringify(videoOnlyData)}\n`));
+assert.equal(videoOnly.mediaType, "video");
+assert.equal(videoOnly.images.length, 0);
+assert.equal(videoOnly.videoUrl, "https://example.com/clip-3840x2160.mp4");
+assert.equal(videoOnly.mediaUrls.filter((url) => url === videoUrl).length, 1);
+for (const invalid of ["javascript:alert(1)", "https://example.com/cover.jpg", ""]) {
+  assert.throws(() => normalizeFixture(JSON.stringify([{ insert: { video: invalid } }])), /invalid rich-text video URL/);
+}
+assert.throws(() => normalizeFixture(JSON.stringify([{ insert: { unknown: true } }])), /unsupported rich-text insert/);
+
+console.log("Xiaopeng BBS import check passed: plain text, Flight UTF-8 records, mixed inline media, video ranking/deduplication and explicit parse failures.");

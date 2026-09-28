@@ -4,7 +4,7 @@ Last updated: 2026-09-28
 
 ## One-Line Status
 
-Xiaopeng BBS rich-text fix reads full body/seven images. Contracts, source lint, types, build and smoke pass; existing data-script lint blocks full baseline. Evidence: archived xiaopeng-rich-text task. Existing drafts need reimport.
+Xiaopeng rich-text video inserts fixed: reported page reads 959 characters, seven images/three video URLs. Contracts, source lint, types, build/smoke pass; existing data lint blocks baseline. Evidence: archived xiaopeng-rich-video task. Reimport required.
 
 ## Current Focus
 
