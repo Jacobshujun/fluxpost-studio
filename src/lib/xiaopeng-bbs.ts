@@ -51,13 +51,14 @@ export function isXiaopengBbsSource(value: string) {
 }
 
 export function normalizeXiaopengBbsThread(sourceId: string, sourceUrl: string, html: string): NormalizedSourceItem {
-  const pageData = extractXiaopengPageData(html);
+  const { pageData, textRecords } = extractXiaopengPageData(html);
   const value = getRecord(pageData.value) || pageData;
   const thread = getRecord(value.value) || value;
 
   const title = firstString(thread, ["title", "subject"]);
-  const contentText = firstString(thread, ["content", "summary", "description"]);
-  const images = extractAttachmentImages(thread);
+  const content = extractThreadContent(thread, textRecords);
+  const contentText = content.text;
+  const images = dedupeStrings([...content.images, ...extractAttachmentImages(thread)]);
   const videos = extractAttachmentVideos(thread);
   const publishedAt = unixSecondsToIso(firstNumber(thread, ["dateline", "createTime", "createdAt"]));
   const topicTitle = extractTopicTitle(thread);
@@ -88,17 +89,78 @@ export function normalizeXiaopengBbsThread(sourceId: string, sourceUrl: string, 
   };
 }
 
-function extractXiaopengPageData(html: string): JsonRecord {
-  const direct = extractPageDataObject(html);
-  if (direct) return direct;
+function extractXiaopengPageData(html: string) {
+  const stream = Array.from(html.matchAll(/self\.__next_f\.push\((\[1,"(?:\\.|[^"\\])*"\])\)\s*;?\s*<\/script>/g))
+    .map((match) => (JSON.parse(match[1]) as [number, string])[1])
+    .join("");
+  const { modelRows, textRecords } = readFlightRows(stream);
+  const pageData = extractPageDataObject(modelRows) || extractPageDataObject(html);
+  if (!pageData) throw new Error("Xiaopeng BBS page data not found");
+  return { pageData, textRecords };
+}
 
-  const decodedFragments = Array.from(html.matchAll(/self\.__next_f\.push\(\[1,"([\s\S]*?)"\]\)<\/script>/g))
-    .map((match) => decodeScriptStringFragment(match[1]))
-    .join("\n");
-  const fromFragments = extractPageDataObject(decodedFragments);
-  if (fromFragments) return fromFragments;
+function readFlightRows(stream: string) {
+  const bytes = Buffer.from(stream, "utf8");
+  const textRecords = new Map<string, string>();
+  const modelRows: string[] = [];
+  let offset = 0;
+  while (offset < bytes.length) {
+    // Flight T records use hexadecimal UTF-8 byte lengths, not JS character counts.
+    const header = /^([\da-f]+):T([\da-f]+),/.exec(bytes.subarray(offset, offset + 64).toString("utf8"));
+    if (header) {
+      const start = offset + header[0].length;
+      const end = start + Number.parseInt(header[2], 16);
+      if (!Number.isSafeInteger(end) || end > bytes.length) throw new Error("Xiaopeng BBS truncated Flight text record");
+      textRecords.set(header[1], bytes.subarray(start, end).toString("utf8"));
+      offset = end;
+    } else {
+      const newline = bytes.indexOf(10, offset);
+      const end = newline < 0 ? bytes.length : newline + 1;
+      modelRows.push(bytes.subarray(offset, end).toString("utf8"));
+      offset = end;
+    }
+  }
+  return { modelRows: modelRows.join(""), textRecords };
+}
 
-  throw new Error("Xiaopeng BBS page data not found");
+function extractThreadContent(thread: JsonRecord, textRecords: Map<string, string>) {
+  let content = typeof thread.content === "string" ? thread.content : "";
+  const reference = /^\$([\da-f]+)$/.exec(content);
+  if (reference) {
+    const resolved = textRecords.get(reference[1]);
+    if (resolved === undefined) throw new Error("Xiaopeng BBS unresolved body text reference");
+    content = resolved;
+  } else if (content.startsWith("$$")) {
+    content = content.slice(1);
+  }
+  if (!content.trim() || thread.dataStruct !== "Json") {
+    return { text: content.trim() ? stripHtml(content) : firstString(thread, ["summary", "description"]), images: [] as string[] };
+  }
+
+  let inserts: unknown;
+  try {
+    inserts = JSON.parse(content);
+  } catch {
+    throw new Error("Xiaopeng BBS invalid rich-text JSON");
+  }
+  if (!Array.isArray(inserts)) throw new Error("Xiaopeng BBS invalid rich-text insert array");
+  const text: string[] = [];
+  const images: string[] = [];
+  for (const operation of inserts) {
+    const insert: unknown = getRecord(operation)?.insert;
+    if (typeof insert === "string") {
+      text.push(insert);
+    } else if (isRecord(insert) && typeof insert.image === "string") {
+      const url = normalizeUrl(insert.image);
+      if (!url || !isLikelyImageUrl(url)) throw new Error("Xiaopeng BBS invalid rich-text image URL");
+      images.push(url);
+    } else if (isRecord(insert) && isRecord(insert.mention) && typeof insert.mention.value === "string") {
+      text.push(`${typeof insert.mention.denotationChar === "string" ? insert.mention.denotationChar : ""}${insert.mention.value}`);
+    } else {
+      throw new Error("Xiaopeng BBS unsupported rich-text insert");
+    }
+  }
+  return { text: text.join("").trim(), images };
 }
 
 function extractPageDataObject(text: string): JsonRecord | undefined {
@@ -140,12 +202,6 @@ function readBalancedJsonObject(text: string, start: number) {
     }
   }
   return "";
-}
-
-function decodeScriptStringFragment(value: string) {
-  return value
-    .replace(/\\"/g, '"')
-    .replace(/\\u([0-9a-f]{4})/gi, (_match, hex: string) => String.fromCharCode(Number.parseInt(hex, 16)));
 }
 
 function extractAttachmentImages(record: JsonRecord) {

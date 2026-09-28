@@ -2,6 +2,7 @@ import { readFileSync } from "node:fs";
 import path from "node:path";
 import vm from "node:vm";
 import ts from "typescript";
+import assert from "node:assert/strict";
 
 const projectRoot = process.cwd();
 
@@ -124,7 +125,7 @@ const pageData = {
     videos: [],
   },
 };
-const fixtureHtml = `<script nonce="test">self.__next_f.push([1,"5:${JSON.stringify({ pageData }).replace(/"/g, '\\"')}\\n"])</script>`;
+const fixtureHtml = flightHtml(`5:${JSON.stringify({ pageData })}\n`);
 const item = normalizeXiaopengBbsThread("3776077", "https://bbs.xiaopeng.com/thread/3776077?tidType=1", fixtureHtml);
 
 if (item.platform !== "xiaopeng_bbs" || item.sourceId !== "3776077") {
@@ -149,4 +150,46 @@ if (item.publishedAt !== "2026-05-12T11:05:49.000Z") {
   throw new Error(`Xiaopeng BBS dateline should map to ISO time, got ${item.publishedAt}.`);
 }
 
-console.log("Xiaopeng BBS import check passed.");
+function flightHtml(stream, splitAt = []) {
+  const boundaries = [0, ...splitAt, stream.length];
+  return boundaries.slice(1).map((end, index) =>
+    `<script>self.__next_f.push(${JSON.stringify([1, stream.slice(boundaries[index], end)])})</script>`,
+  ).join("");
+}
+
+function normalizeFixture(content, records = "", dataStruct = "Json") {
+  const stream = `5:${JSON.stringify({ pageData: { value: { ...pageData.value, content, dataStruct } } })}\n${records}`;
+  return normalizeXiaopengBbsThread("3776077", "https://bbs.xiaopeng.com/thread/3776077?tidType=1",
+    flightHtml(stream, [17, stream.length - 11]));
+}
+
+const inlineUrls = Array.from({ length: 6 }, (_, index) => `https://example.com/inline-${index}.png`);
+const richBody = '体验中文🚙，保留"引号"和\\路径\n第二段\n1f:T4,伪记录';
+const richContent = JSON.stringify([
+  { insert: { mention: { denotationChar: "#", value: "用车记录" } } },
+  { insert: richBody },
+  ...inlineUrls.map((image) => ({ insert: { image } })),
+  { insert: { image: inlineUrls[0] } },
+]);
+const record = `1f:T${Buffer.byteLength(richContent).toString(16)},${richContent}`;
+const richItem = normalizeFixture("$1f", record);
+assert.equal(richItem.contentText, `#用车记录${richBody}`);
+assert.deepEqual(Array.from(richItem.images), [...inlineUrls, ...item.images]);
+assert.equal(normalizeFixture(richContent).contentText, richItem.contentText);
+assert.equal(normalizeFixture("$1f", `${record}20:T3,end`).contentText, richItem.contentText);
+assert.throws(() => normalizeFixture("$1f"), /unresolved.*reference/i);
+assert.throws(() => normalizeFixture("$1f", record.slice(0, -1)), /truncated.*text/i);
+assert.throws(() => normalizeFixture("{broken"), /rich.text/i);
+assert.throws(() => normalizeFixture('{"unexpected":true}'), /rich.text/i);
+assert.equal(normalizeFixture("$$100", "", "Text").contentText, "$100");
+
+// The production incident has six inline pictures and one duplicated attachment.
+const incidentData = { pageData: { value: { ...pageData.value, content: "$1f", dataStruct: "Json",
+  attach: [pageData.value.attach[0], pageData.value.attach[0]] } } };
+const incidentStream = `${record}5:${JSON.stringify(incidentData)}\n`;
+const incident = normalizeXiaopengBbsThread("3776077", "https://bbs.xiaopeng.com/thread/3776077?tidType=1",
+  flightHtml(incidentStream, [8, 40, 100]));
+assert.equal(incident.images.length, 7);
+assert.equal(incident.contentText, `#用车记录${richBody}`);
+
+console.log("Xiaopeng BBS import check passed: plain text, Flight UTF-8 records, rich text, inline images and explicit parse failures.");

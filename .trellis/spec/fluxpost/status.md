@@ -1,10 +1,10 @@
 # FluxPost Current Status
 
-Last updated: 2026-09-22
+Last updated: 2026-09-28
 
 ## One-Line Status
 
-Collected-video audio-only fix passes contracts, source lint, types, build and smoke. Baseline lint remains blocked by existing data scripts. Activation waits for active Canvas jobs; task: collected-video-stream.
+Xiaopeng BBS rich-text fix reads full body/seven images. Contracts, source lint, types, build and smoke pass; existing data-script lint blocks full baseline. Evidence: archived xiaopeng-rich-text task. Existing drafts need reimport.
 
 ## Current Focus
 
