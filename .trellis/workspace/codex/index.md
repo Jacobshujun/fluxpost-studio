@@ -8,8 +8,8 @@
 
 <!-- @@@auto:current-status -->
 - **Active File**: `journal-2.md`
-- **Total Sessions**: 65
-- **Last Active**: 2026-09-17
+- **Total Sessions**: 66
+- **Last Active**: 2026-09-30
 <!-- @@@/auto:current-status -->
 
 ---
@@ -19,7 +19,7 @@
 <!-- @@@auto:active-documents -->
 | File | Lines | Status |
 |------|-------|--------|
-| `journal-2.md` | ~244 | Active |
+| `journal-2.md` | ~277 | Active |
 | `journal-1.md` | ~1967 | Archived |
 <!-- @@@/auto:active-documents -->
 
@@ -30,6 +30,7 @@
 <!-- @@@auto:session-history -->
 | # | Date | Title | Commits | Branch |
 |---|------|-------|---------|--------|
+| 66 | 2026-09-30 | Canvas local image save folders | `70cb543` | `local` |
 | 65 | 2026-09-17 | Layer editor loading batch one | `a864929` | `local` |
 | 64 | 2026-09-07 | Fix Canvas video mask preview | `8001886` | `local` |
 | 63 | 2026-08-28 | 统一图库与高性能资源管理 | `b321b7a`, `8f2902c` | `local` |

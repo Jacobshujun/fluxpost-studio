@@ -242,3 +242,36 @@ Reused upstream media metadata and added bounded, deduplicated inspection with p
 ### Next Steps
 
 - None - task complete
+
+
+## Session 66: Canvas local image save folders
+
+**Date**: 2026-09-30
+**Task**: Canvas local image save folders
+**Branch**: `local`
+
+### Summary
+
+Implemented optional host-local save folders with exclusive numbering and durable retry receipts. Isolated filesystem and six theme/viewport browser checks pass; full baseline stops only on existing data-script lint errors. Details: .trellis/tasks/archive/2026-09/09-30-canvas-local-save/verification.md.
+
+### Main Changes
+
+(Add details)
+
+### Git Commits
+
+| Hash | Message |
+|------|---------|
+| `70cb543` | (see git log) |
+
+### Testing
+
+- [OK] (Add test results)
+
+### Status
+
+[OK] **Completed**
+
+### Next Steps
+
+- None - task complete
