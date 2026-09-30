@@ -24,6 +24,7 @@ This layer is the project-specific operating memory migrated from the previous H
 | [image_transport.md](./image_transport.md) | Image-only Xray routing, health, Canvas recovery, and ToAPIs resume contracts. |
 | [toapis_image_contract.md](./toapis_image_contract.md) | Ordinary/Official image request fields, pixels, transparency and Canvas propagation. |
 | [canvas_image_process.md](./canvas_image_process.md) | Local image processing, size ceilings, geometry, cache and result contracts. |
+| [canvas_local_image_save.md](./canvas_local_image_save.md) | Host-local save folders, exclusive filenames, retry checkpoints and download compatibility. |
 | [canvas_media_mask.md](./canvas_media_mask.md) | Transparent template input, compositing, cache and verification contracts. |
 | [canvas_layer_compose.md](./canvas_layer_compose.md) | Layer editor, exact canvas geometry, mixed media and video/audio composition. |
 | [decisions.md](./decisions.md) | Stable product, architecture, and deployment decisions. |

@@ -2005,6 +2005,12 @@ const CanvasFlowNode = memo(function CanvasFlowNode({ data, selected }: NodeProp
       </details> : null}
     </div>
     <div className="canvas-node-content">
+    {node.type === "utility.save-images" ? <div className="canvas-save-images-controls nodrag nopan nowheel"
+      onPointerDown={(event) => event.stopPropagation()} onClick={(event) => event.stopPropagation()}
+      onDoubleClick={(event) => event.stopPropagation()} onKeyDown={(event) => event.stopPropagation()}
+      onKeyUp={(event) => event.stopPropagation()} onWheel={(event) => event.stopPropagation()}>
+      <CanvasNodeFields node={node} onChange={(key, value) => interaction?.onConfigChange(node.id, key, value)} onPatch={(patch) => interaction?.onConfigPatch(node.id, patch)} onPreviewImage={(url, index) => interaction?.onPreview({ kind: "image", url, index })} />
+    </div> : null}
     {node.type === "utility.layer-compose" ? <CanvasLayerComposeControls node={node} getSources={() => interaction?.getComposeSources?.(node.id) || []} onPatch={(patch) => interaction?.onConfigPatch(node.id, patch)} nodeRun={nodeRun} latestSuccessful={latestSuccessful?.nodeRun} /> : null}
     {node.type === "utility.image-process" ? <>
       <CanvasImageProcessControls node={node} onPatch={(patch) => interaction?.onConfigPatch(node.id, patch)} />
@@ -2612,6 +2618,7 @@ function CanvasSaveImagesNodeResult({
   const currentArtifact = nodeRun ? getSaveImagesArtifact(nodeRun) : undefined;
   const result = currentArtifact ? nodeRun : latestSuccessful?.nodeRun;
   const artifact = result ? getSaveImagesArtifact(result) : undefined;
+  const saved = (nodeRun || result)?.internalMetadata?.saveImages;
   const status = nodeRun?.status || result?.status;
   const [busy, setBusy] = useState(false);
   const [feedback, setFeedback] = useState("");
@@ -2642,8 +2649,14 @@ function CanvasSaveImagesNodeResult({
     onKeyUp={(event) => event.stopPropagation()}
     onWheel={(event) => event.stopPropagation()}
   >
-    <CanvasNodeAttemptHeader nodeRun={nodeRun || result} detail={artifact ? `${artifact.items.length} 张` : undefined} />
+    <CanvasNodeAttemptHeader nodeRun={nodeRun || result} detail={saved ? `${saved.items.length} 张` : artifact ? `${artifact.items.length} 张` : undefined} />
     <CanvasNodeAttemptDetail nodeRun={nodeRun || result} />
+    {saved ? <div className="canvas-save-images-summary" role="status">
+      <strong>本地保存：{saved.items.filter((item) => item.status === "saved").length} / {saved.items.length} 张</strong>
+      <span>保存目录：{saved.outputFolder}</span>
+      {saved.items.some((item) => item.status === "failed") ? <span>失败 {saved.items.filter((item) => item.status === "failed").length} 张，可重试补存。</span> : null}
+      {saved.items.map((item, index) => item.error ? <span key={index}>第 {index + 1} 张：{item.error}</span> : null)}
+    </div> : null}
     {latestSuccessful && result?.id === latestSuccessful.nodeRun.id ? <div className="canvas-node-result-history">最近成功结果 · r{latestSuccessful.workflowRevision} · {new Date(latestSuccessful.runCreatedAt).toLocaleString()}</div> : null}
     {artifact ? <div className="canvas-save-images-actions">
       <button type="button" disabled={busy} onClick={() => void downloadAll()}>
@@ -3082,6 +3095,22 @@ function CanvasImageModelSelector({ node, onPatch }: { node: CanvasNode; onPatch
   })} />;
 }
 
+function CanvasSaveImageTextField({ label, value, placeholder, onChange }: {
+  label: string;
+  value: string;
+  placeholder?: string;
+  onChange: (value: string) => void;
+}) {
+  const inputRef = useRef<HTMLInputElement>(null);
+  const [draft, setDraft] = useState(value);
+  useEffect(() => {
+    if (document.activeElement !== inputRef.current) setDraft(value);
+  }, [value]);
+  return <label><span>{label}</span><input ref={inputRef} type="text" value={draft} placeholder={placeholder}
+    onClick={(event) => event.currentTarget.focus({ preventScroll: true })}
+    onChange={(event) => { setDraft(event.target.value); onChange(event.target.value); }} /></label>;
+}
+
 function CanvasNodeFields({ node, onChange, onPatch, onPreviewImage }: {
   node: CanvasNode;
   onChange: (key: string, value: CanvasEditableConfigValue) => void;
@@ -3090,6 +3119,9 @@ function CanvasNodeFields({ node, onChange, onPatch, onPreviewImage }: {
 }) {
   const definition = getCanvasNodeDefinition(node.type, node.version);
   if (!definition) return null;
+  if (node.type === "utility.save-images") return <>{definition.fields.map((field) => <CanvasSaveImageTextField
+    key={`${node.id}:${field.key}`} label={field.label} value={String(node.config[field.key] ?? "")} placeholder={field.placeholder}
+    onChange={(value) => onChange(field.key, value)} />)}</>;
   if (node.type === "utility.image-process") return <CanvasImageProcessControls node={node} onPatch={onPatch} />;
   return <>{node.type === "model.gpt-image" || node.type === "model.gpt-image-each" ? <CanvasImageModelSelector key={node.id} node={node} onPatch={onPatch} /> : null}{definition.fields.map((field) => {
       if (field.key === "outputCompression" && node.config.outputFormat !== "jpeg") return null;
@@ -6400,7 +6432,8 @@ async function downloadCanvasRunSaveImages(runId: string) {
   const results = data.run.graphSnapshot.nodes.flatMap((node) => {
     if (node.type !== "utility.save-images") return [];
     const nodeRun = latest.get(node.id);
-    const artifact = nodeRun && (nodeRun.status === "completed" || nodeRun.status === "reused")
+    const artifact = nodeRun && (nodeRun.status === "completed" || nodeRun.status === "reused"
+      || (nodeRun.status === "failed" && nodeRun.internalMetadata?.saveImages))
       ? getSaveImagesArtifact(nodeRun)
       : undefined;
     return nodeRun && artifact ? [{ nodeRunId: nodeRun.id, count: artifact.items.length }] : [];

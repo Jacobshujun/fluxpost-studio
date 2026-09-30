@@ -228,6 +228,7 @@ try {
     "./node-utils": require(path.join(temp, "node-utils.js")),
     "./registry": registry,
     "./save-images": require(path.join(temp, "save-images.js")),
+    "./local-image-save": { saveCanvasImagesToFolder: async () => { throw new Error("Unexpected local save in copy-library checks"); } },
     "./source-video-contract": require(path.join(temp, "source-video-contract.js")),
     "./subtitle-style": require(path.join(temp, "subtitle-style.js")),
     "./subtitle-editor": require(path.join(temp, "subtitle-editor.js")),

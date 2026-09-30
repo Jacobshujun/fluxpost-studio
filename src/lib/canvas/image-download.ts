@@ -26,7 +26,8 @@ export function resolveCanvasImageDownload(result: CanvasRunWithNodes, nodeRunId
   if (!node || node.type !== "utility.save-images") {
     throw new CanvasImageDownloadError("Canvas image download result was not found.", 404);
   }
-  if (nodeRun.status !== "completed" && nodeRun.status !== "reused") {
+  const failedLocalSave = nodeRun.status === "failed" && Boolean(nodeRun.internalMetadata?.saveImages);
+  if (nodeRun.status !== "completed" && nodeRun.status !== "reused" && !failedLocalSave) {
     throw new CanvasImageDownloadError("Canvas image download result is not complete.", 400);
   }
   const artifact = nodeRun.outputs.downloads;

@@ -2,7 +2,7 @@ import { canvasMediaMaskUsesImageInput, defaultCanvasMediaMaskConfig, validateCa
 import type { CanvasArtifact, CanvasBatchBindableField, CanvasGraph, CanvasNode, CanvasNodeConfig, CanvasNodeDefinition, CanvasNodeExecutionMode, CanvasNodeType, CanvasPortDefinition } from "./types";
 import { toApisImageRatios, toApisImageResolutions } from "../toapis-image-api";
 import { normalizeImageModel, normalizeToApisRequestFormat } from "../image-model-options";
-import { validateCanvasImageFilenamePrefix } from "./save-images";
+import { validateCanvasImageFilenamePrefix, validateCanvasImageOutputFolder } from "./save-images";
 import { defaultImageProcessConfig, validateImageProcessConfig } from "./image-process-contract";
 import { defaultLayerComposeConfig, validateLayerComposeConfig } from "./layer-compose-contract";
 import { canvasPromptPresets, canvasVisionPresets, parseCanvasImageSelection, parseCanvasVideoTimestamps, resolveCanvasImageDimensions } from "./node-utils";
@@ -385,13 +385,16 @@ const canvasNodeDefinitionVersions: CanvasNodeDefinition[] = [
     type: "utility.save-images",
     version: 1,
     label: "保存图片",
-    description: "将上游图片保留为可逐张下载的浏览器结果。",
+    description: "填写目录后自动保存到运行应用的电脑，留空则仅提供浏览器下载。",
     category: "utility",
     icon: "Download",
     color: "#0f766e",
     inputs: [{ id: "images", label: "图片", kind: "images", required: true, multiple: true }],
     outputs: [],
-    fields: [{ key: "filenamePrefix", label: "文件名前缀", kind: "text", placeholder: "FluxPost" }],
+    fields: [
+      { key: "filenamePrefix", label: "文件名前缀", kind: "text", placeholder: "FluxPost" },
+      { key: "outputFolder", label: "保存目录", kind: "text", placeholder: "D:\\图片输出 或 output（留空仅下载）" },
+    ],
     defaultConfig: { filenamePrefix: "FluxPost" },
     passiveSink: true,
   },
@@ -1101,6 +1104,8 @@ export function validateCanvasNodeConfig(type: CanvasNodeType, config: CanvasNod
   if (type === "utility.save-images") {
     const prefixError = validateCanvasImageFilenamePrefix(config.filenamePrefix);
     if (prefixError) errors.push(prefixError);
+    const folderError = validateCanvasImageOutputFolder(config.outputFolder);
+    if (folderError) errors.push(folderError);
   }
   if (type === "publish.feishu" && version !== 1) {
     try { normalizeFeishuPublishMode(config.publishMode); } catch (error) { errors.push(error instanceof Error ? error.message : "Feishu publish mode is invalid."); }

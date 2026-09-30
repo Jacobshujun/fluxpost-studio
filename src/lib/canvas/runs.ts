@@ -835,6 +835,8 @@ async function runReadyNode(
     outputs: {},
     ...(node.type === "utility.image-iterate" && previousNodeRun?.internalMetadata?.iteration
       ? { internalMetadata: structuredClone(previousNodeRun.internalMetadata) } : {}),
+    ...(node.type === "utility.save-images" && previousNodeRun?.internalMetadata?.saveImages
+      ? { internalMetadata: structuredClone(previousNodeRun.internalMetadata) } : {}),
     ...(run.iterationContext && previousNodeRun?.providerTaskId && previousNodeRun.providerStatus !== "failed" ? {
       providerTaskId: previousNodeRun.providerTaskId, providerTaskRoute: previousNodeRun.providerTaskRoute, providerStatus: previousNodeRun.providerStatus,
     } : {}),

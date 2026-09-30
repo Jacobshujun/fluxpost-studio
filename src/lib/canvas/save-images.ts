@@ -5,6 +5,16 @@ export const CANVAS_IMAGE_DOWNLOAD_MAX_BYTES = 30 * 1024 * 1024;
 
 const invalidFilenamePrefix = /[\u0000-\u001f\u007f-\u009f<>:"/\\|?*]/u;
 
+export function validateCanvasImageOutputFolder(value: unknown) {
+  if (value === undefined || value === "") return undefined;
+  if (typeof value !== "string") return "保存目录必须是文本。";
+  if (/[\u0000-\u001f\u007f-\u009f]/u.test(value) || /^[a-z]+:\/\//iu.test(value.trim())) {
+    return "保存目录必须是本地文件夹路径，不能包含控制字符或网址。";
+  }
+  if (/^[a-z]:(?![\\/])/iu.test(value.trim())) return "请填写完整的磁盘路径，例如 D:\\图片输出。";
+  return undefined;
+}
+
 export function validateCanvasImageFilenamePrefix(value: CanvasNodeConfig[string] | unknown) {
   if (typeof value !== "string" || !value.trim()) return "Save images: Filename prefix is required.";
   if (Array.from(value).length > 80) return "Save images: Filename prefix must be at most 80 characters.";

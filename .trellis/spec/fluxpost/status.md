@@ -1,12 +1,16 @@
 # FluxPost Current Status
 
-Last updated: 2026-09-28
+Last updated: 2026-09-30
 
 ## One-Line Status
 
-Xiaopeng rich-text video inserts fixed: reported page reads 959 characters, seven images/three video URLs. Contracts, source lint, types, build/smoke pass; existing data lint blocks baseline. Evidence: archived xiaopeng-rich-video task. Reimport required.
+Canvas save-images supports host-local folders, exclusive numbered files and retry receipts. Filesystem, snapshot and desktop/mobile checks pass; existing data-script lint blocks baseline. Contract: canvas_local_image_save.md. Task: canvas-local-save.
 
 ## Current Focus
+
+- 2026-09-30: Local image saving verified, including three-theme 1440/390 input/results and clear-folder behavior. Local delivery uses the clean-HEAD LAN wrapper; identity: `/api/version`. Evidence: archived canvas-local-save task. No remote release.
+
+- 2026-09-28: Xiaopeng rich-video parsing fixed; reimport required. Evidence: archived xiaopeng-rich-video task.
 
 - 2026-09-21: Dongchedi failure guidance fixed; focused checks pass. Baseline blocked by existing data-directory lint errors.
 
@@ -27,34 +31,7 @@ Xiaopeng rich-text video inserts fixed: reported page reads 959 characters, seve
 - Desktop LAN launcher: baseline/identity pass; other-device access pending.
   Evidence: archived desktop-lan-launcher task.
 
-- 2026-09-17: Review delivery diagnosis confirms the latest full run's composed
-  video reaches the saved post, with captions visible in actual frames. A separate
-  isolated render has different captions and no downstream post step. The exact
-  operator-view mismatch is pending confirmation; task: layer-compose-review-trace.
-
-- 2026-09-17: Latest local composition failed after successful MP4 persistence:
-  TOS removed the local file before output hashing. Hashing now precedes storage;
-  consuming-storage PNG/MP4 regressions and full baseline pass.
-  Evidence: .trellis/tasks/archive/2026-09/09-17-layer-compose-persistence/verification.md.
-
-- 2026-09-17: Layer composition reruns now bind single-item upstream outputs by
-  node/port; old layers need one explicit replacement, retaining crop/layout.
-  Full baseline and three-theme 1440/390 browser checks pass. Local activation is
-  pending a clean worktree (concurrent canvas-feishu-compression task).
-  Evidence: .trellis/tasks/archive/2026-09/09-17-layer-compose-rerun/verification.md.
-
-- 2026-09-17: Layer editor loading batch one reuses uploaded metadata, removes preview
-  hashing, caches/deduplicates probes and keeps editing available during source loading.
-  Offline and desktop/390 browser evidence: .trellis/tasks/archive/2026-09/09-17-layer-compose-loading/verification.md.
-
-- 2026-09-17: Layer editor white-on-white portal fixed. Three themes pass contrast,
-  live switching and 1440/390 browser checks plus full baseline. Evidence:
-  .trellis/tasks/archive/2026-09/09-17-layer-compose-theme/verification.md.
-
-- 2026-09-17: Layer composition adds exact-size PNG/MP4, mixed image/video layers,
-  visual crop/scale, hold/loop/hide and selected audio. Contract: canvas_layer_compose.md.
-  Evidence: .trellis/tasks/archive/2026-09/09-17-canvas-layer-compose/verification.md.
-  Operator acceptance pending; local delivery uses the clean-HEAD candidate wrapper.
+- Layer composition September 17 evidence and pending review: archive/status-2026-09-30-local-save.md. Contract: canvas_layer_compose.md.
 
 - 2026-09-16: Single-PNG mask input preserves alpha. Evidence: .trellis/tasks/archive/2026-09/09-16-canvas-alpha-overlay/verification.md.
 

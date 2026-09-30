@@ -511,7 +511,25 @@ export type CanvasImageEachRunMetadata = CanvasImageEachRunMetadataBase & (
   | { schemaVersion: 2; sharedReferenceCount: number; referencesPerRequest: number[] }
 );
 
+export type CanvasSavedImage = {
+  url: string;
+  status: "pending" | "saved" | "failed";
+  filePath?: string;
+  sha256?: string;
+  claimed?: boolean;
+  error?: string;
+};
+
+export type CanvasSaveImagesMetadata = {
+  runId: string;
+  nodeId: string;
+  outputFolder: string;
+  filenamePrefix: string;
+  items: CanvasSavedImage[];
+};
+
 export type CanvasNodeRunInternalMetadata = {
+  saveImages?: CanvasSaveImagesMetadata;
   iteration?: CanvasIterationRunMetadata;
   subtitle?: CanvasSubtitleRunMetadata;
   imageEach?: CanvasImageEachRunMetadata;

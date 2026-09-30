@@ -249,6 +249,12 @@ button {
 @keyframes canvas-edge-beam { 0%, 5% { stroke-dashoffset: var(--canvas-edge-layer-start, 100); opacity: 0; } 14%, 86% { opacity: var(--canvas-edge-peak-opacity); } 95%, 100% { stroke-dashoffset: var(--canvas-edge-layer-end, 0); opacity: 0; } }
 .canvas-node { width: 220px; border: 1px solid var(--line-strong); border-top: 3px solid var(--node-color); border-radius: 8px; background: var(--canvas-panel); color: var(--foreground); box-shadow: var(--shadow-soft); overflow: visible; }
 .canvas-image-process-controls { display: grid; gap: 6px; padding: 8px; min-width: 0; font-size: 11px; }
+.canvas-save-images-controls { display: grid; gap: 6px; padding: 8px; min-width: 0; }
+.canvas-save-images-controls:focus-within { visibility: visible; }
+.canvas-save-images-controls label { display: grid; gap: 3px; min-width: 0; color: var(--text-muted); font-size: 10px; }
+.canvas-save-images-controls input { width: 100%; min-width: 0; height: 28px; padding: 3px 5px; border: 1px solid var(--line-strong); border-radius: 4px; color: var(--foreground); background: var(--canvas-panel); font-size: 11px; }
+.canvas-save-images-controls input:focus-visible { outline: 2px solid var(--node-color); outline-offset: 1px; }
+.canvas-save-images-summary { display: grid; gap: 4px; padding: 8px; color: var(--text-soft); font-size: 10px; line-height: 1.4; overflow-wrap: anywhere; }
 .canvas-image-process-controls label { display: grid; grid-template-columns: minmax(0, 0.8fr) minmax(0, 1.2fr); align-items: center; gap: 6px; min-width: 0; }
 .canvas-image-process-controls input:not([type=checkbox]), .canvas-image-process-controls select { width: 100%; min-width: 0; height: 28px; border: 1px solid var(--line-strong); border-radius: 5px; background: var(--panel-solid); color: var(--foreground); padding: 2px 4px; font: inherit; }
 .canvas-image-process-controls input[type=range] { padding: 0; accent-color: var(--accent); }

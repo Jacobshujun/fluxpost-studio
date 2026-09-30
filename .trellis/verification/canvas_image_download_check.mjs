@@ -56,6 +56,12 @@ try {
   assert.throws(() => downloads.resolveCanvasImageDownload(run, "node-run-running", 0), (error) => error.status === 400);
   assert.throws(() => downloads.resolveCanvasImageDownload(run, "node-run-save", -1), (error) => error.status === 400);
   assert.throws(() => downloads.resolveCanvasImageDownload(run, "node-run-save", 3), (error) => error.status === 400);
+  const failedLocalRun = structuredClone(run);
+  failedLocalRun.nodeRuns[0].status = "failed";
+  failedLocalRun.nodeRuns[0].internalMetadata = { saveImages: { items: [] } };
+  assert.equal(downloads.resolveCanvasImageDownload(failedLocalRun, "node-run-save", 0).url, "/generated/one.jpg", "local write failures must retain browser downloads");
+  delete failedLocalRun.nodeRuns[0].internalMetadata;
+  assert.throws(() => downloads.resolveCanvasImageDownload(failedLocalRun, "node-run-save", 0), (error) => error.status === 400);
 
   const pngPath = path.join(temp, "image.png");
   writeFileSync(pngPath, Buffer.from([0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a, 0x00]));

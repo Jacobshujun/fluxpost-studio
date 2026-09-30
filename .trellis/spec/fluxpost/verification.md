@@ -21,6 +21,8 @@ node --env-file=.env.local .trellis/verification/unified_library_postgres_benchm
 
 ## Current Automated Checks
 
+- `canvas_local_image_save_check.mjs` is included in the baseline. It checks real isolated file writes, exclusive naming, retry ownership/hash receipts and error paths. The separate `canvas_local_image_save_browser_check.py` checks three themes at 1440/390 using intercepted APIs on an isolated worker-disabled server via `BROWSER_BASE_URL`; it rejects port 3001. Contract: `canvas_local_image_save.md`.
+
 - `python .trellis/verification/canvas_inspector_browser_check.py` checks initial
   hiding, node switching/editing, dismissal and desktop space recovery with the
   node library open/closed, across three themes at 1440/1000/390px. Requires an

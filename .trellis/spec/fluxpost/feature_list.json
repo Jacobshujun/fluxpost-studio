@@ -9,6 +9,18 @@
   ],
   "features": [
     {
+      "id": "canvas-local-image-save",
+      "title": "Canvas host-local image save folders",
+      "status": "ready_for_review",
+      "definition_of_done": [
+        "Optional folders save original images automatically with collision-safe numbering, durable retries and explicit results"
+      ],
+      "evidence": [
+        "2026-09-30 isolated filesystem, executor/retry, portable/batch config and three-theme 1440/390 browser checks pass; canvas-local-save task."
+      ],
+      "notes": "Operator acceptance pending; existing runtime-data lint errors block the unmodified full baseline. Local activation authorized."
+    },
+    {
       "id": "canvas-groups-shortcuts",
       "title": "Canvas selection, groups and shortcuts",
       "status": "ready_for_review",

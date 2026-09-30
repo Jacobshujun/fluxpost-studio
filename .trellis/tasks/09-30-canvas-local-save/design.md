@@ -1,0 +1,7 @@
+# Design
+
+Use a dedicated server-side local-image-save module from the existing executor; retain downloads artifacts. Add optional saveImages metadata to CanvasNodeRunInternalMetadata with run/node/config/input identity, resolved folder, and ordered per-image URL/path/hash/status/error records. Persist the chosen target before exclusive creation, checkpoint each completed item, and reuse only matching records from the same run/node/config/inputs on retries. Validate completed file hashes; missing or changed files get a new exclusive target without overwriting existing content. A new run never consumes another run's save checkpoint. Handle image failures individually and report failed execution with its downloads artifact and metadata.
+
+Use materializeRuntimeMedia plus inspectCanvasImageDownload, bounded image reads, SHA-256 and exclusive file creation. Only EEXIST advances the numeric suffix; other filesystem errors are surfaced. Remove only a partially written file created by this attempt on an ordinary write error, preserve successful files. Crash leftovers are never overwritten. Local feature enablement reuses canvasLocalDirectoryEnabled. Config shape remains v1 and metadata remains inside existing JSON storage.
+
+UI always projects save metadata from the current attempt when present; historical downloads must be labeled separately. A missing folder retains existing behavior. No automatic browser download or new confirmation flow.

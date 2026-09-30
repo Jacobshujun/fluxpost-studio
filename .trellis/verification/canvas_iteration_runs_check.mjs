@@ -37,6 +37,7 @@ const graphModule = {
   buildCanvasRunPlan: (graph) => ({ includedNodeIds: graph.nodes.map((node) => node.id), blockers: [], steps: graph.nodes.map((node) => ({ nodeId: node.id, action: "execute" })) }),
 };
 let iterationResult;
+let saveImagesExecution;
 let resets = 0;
 const iteration = {
   executeCanvasIteration: async (context) => { await context.saveMetadata(iterationResult.internalMetadata.iteration); return clone(iterationResult); },
@@ -54,7 +55,9 @@ const runtime = load("src/lib/canvas/runs.ts", {
   "../workspace-ownership": { canAccessWorkspaceOwner: (account, owner) => account.id === owner },
   "../concurrency": { concurrencyConfig: { canvasRun: 0 } },
   "../image-transport": { isImageNetworkUnavailableError: () => false },
-  "./executors": { CanvasNeedsConfigError: class extends Error {}, executeCanvasNode: async ({ node, inputs }) => {
+  "./executors": { CanvasNeedsConfigError: class extends Error {}, executeCanvasNode: async (context) => {
+    const { node, inputs } = context;
+    if (node.type === "utility.save-images") return saveImagesExecution(context);
     calls.push({ nodeId: node.id, inputs });
     return node.type === "input.images" ? { outputs: { images: { kind: "images", items: [{ url: "/media/1.jpg" }] } } } : { outputs: { text: { kind: "text", value: "downstream" } } };
   } },
@@ -114,3 +117,26 @@ assert.equal((await runtime.executeForTest(composeRun)).status, "completed");
 assert.deepEqual(calls.at(-1).inputs.images[0].items[0].composeBinding, { nodeId: "generated", port: "images" });
 
 console.log("Canvas iteration runs: durable yield/resume, isolated entry, repair boundary and owner/cancel checks passed.");
+
+const saveRun = { ...run, id: "local-save-retry", graphSnapshot: { nodes: [{ id: "save", type: "utility.save-images", config: { filenamePrefix: "fixture", outputFolder: "output" } }], edges: [] } };
+const receipt = { runId: saveRun.id, nodeId: "save", outputFolder: "output", filenamePrefix: "fixture", items: [{ url: "/fixture.png", status: "saved", claimed: true, filePath: "output/fixture_0001.png", sha256: "fixture-hash" }] };
+saveImagesExecution = async (context) => {
+  await context.onInternalMetadataUpdate({ saveImages: receipt });
+  return { failure: "fixture failure after save", outputs: { downloads: { kind: "images", items: [{ url: "/fixture.png" }] } }, internalMetadata: { saveImages: receipt } };
+};
+records.set(saveRun.id, clone(saveRun));
+assert.equal((await runtime.executeForTest(saveRun)).status, "failed");
+await runtime.retryCanvasNode(saveRun.id, "save", account);
+saveImagesExecution = async (context) => {
+  assert.deepEqual(context.previousNodeRun.internalMetadata.saveImages, receipt);
+  throw new Error("fixture failure before next checkpoint");
+};
+await runtime.executeForTest(records.get(saveRun.id));
+assert.deepEqual(latest(saveRun.id).at(-1).internalMetadata.saveImages, receipt, "new attempts preserve receipts before the first executor checkpoint");
+await runtime.retryCanvasNode(saveRun.id, "save", account);
+saveImagesExecution = async (context) => {
+  assert.deepEqual(context.previousNodeRun.internalMetadata.saveImages, receipt);
+  return { outputs: { downloads: { kind: "images", items: [{ url: "/fixture.png" }] } }, internalMetadata: { saveImages: receipt } };
+};
+assert.equal((await runtime.executeForTest(records.get(saveRun.id))).status, "completed");
+console.log("Canvas local-save dispatcher: durable metadata, failed downloads and repeated retry preservation passed.");

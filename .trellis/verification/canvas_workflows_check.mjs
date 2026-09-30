@@ -327,10 +327,14 @@ try {
   assert.equal(saveImagesDefinition?.label, "保存图片");
   assert.deepEqual(saveImagesDefinition?.inputs, [{ id: "images", label: "图片", kind: "images", required: true, multiple: true }]);
   assert.deepEqual(saveImagesDefinition?.outputs, [], "save-images must remain a terminal node");
-  assert.deepEqual(saveImagesDefinition?.fields, [{ key: "filenamePrefix", label: "文件名前缀", kind: "text", placeholder: "FluxPost" }]);
+  assert.deepEqual(saveImagesDefinition?.fields.map((field) => field.key), ["filenamePrefix", "outputFolder"]);
   assert.deepEqual(saveImagesDefinition?.defaultConfig, { filenamePrefix: "FluxPost" });
   assert.equal(saveImagesDefinition?.passiveSink, true, "save-images must follow selected image producers automatically");
   assert.equal(saveImagesDefinition?.bypass, undefined, "save-images cannot bypass an outputless side-effect boundary");
+  const saveFolderGraph = { viewport: { x: 0, y: 0, zoom: 1 }, nodes: [{ id: "save-folder", type: "utility.save-images", version: 1, position: { x: 0, y: 0 }, config: { filenamePrefix: "车型", outputFolder: "D:\\图片 输出" } }], edges: [] };
+  assert.equal(parseCanvasWorkflowFile(JSON.stringify(createCanvasWorkflowFile("本地保存", saveFolderGraph))).graph.nodes[0].config.outputFolder, "D:\\图片 输出");
+  assert.equal(validateCanvasNodeConfig("utility.save-images", saveFolderGraph.nodes[0].config, 1).length, 0);
+  assert.ok(validateCanvasNodeConfig("utility.save-images", { filenamePrefix: "车型", outputFolder: "D:relative" }, 1).length);
   assert.deepEqual(getCanvasNodeDefinition("utility.prompt-switch")?.inputs.map((port) => port.id), ["input1", "input2", "input3"], "prompt switch must expose three ordinal inputs");
   assert.deepEqual(getCanvasNodeDefinition("utility.prompt-switch")?.inputs.map((port) => port.label), ["输入 1", "输入 2", "输入 3"]);
   assert.deepEqual(getCanvasNodeDefinition("utility.prompt-switch")?.defaultConfig, { selectedInput: "1" });
@@ -698,12 +702,12 @@ try {
   await assert.rejects(() => executeDisplayAny({ inputs: { value: [{ kind: "text", value: "A" }, { kind: "text", value: "B" }] } }), /一个上游结果/, "display-any must reject multiple upstream artifacts");
   const executeSaveImages = compileFunctions(executorSource, ["executeSaveImages", "imageItems"], "executeSaveImages", { structuredClone, CANVAS_SAVE_IMAGE_MAX_ITEMS: 30 });
   const oneSaveImage = { kind: "images", items: [{ url: "/generated/one.png", name: "one" }] };
-  const oneSaveResult = await executeSaveImages({ inputs: { images: [oneSaveImage] } });
+  const oneSaveResult = await executeSaveImages({ node: { config: { filenamePrefix: "FluxPost" } }, inputs: { images: [oneSaveImage] } });
   assert.deepEqual(oneSaveResult.outputs.downloads, oneSaveImage, "save-images must persist the ordered image artifact");
   assert.notEqual(oneSaveResult.outputs.downloads, oneSaveImage, "save-images must clone the upstream artifact");
   assert.notEqual(oneSaveResult.outputs.downloads.items, oneSaveImage.items, "save-images must clone image items");
   await assert.rejects(() => executeSaveImages({ inputs: {} }), /1 to 30 images/i, "save-images must reject an empty input");
-  assert.equal((await executeSaveImages({ inputs: { images: [{ kind: "images", items: Array.from({ length: 30 }, (_, index) => ({ url: `/generated/${index}.png` })) }] } })).outputs.downloads.items.length, 30);
+  assert.equal((await executeSaveImages({ node: { config: { filenamePrefix: "FluxPost" } }, inputs: { images: [{ kind: "images", items: Array.from({ length: 30 }, (_, index) => ({ url: `/generated/${index}.png` })) }] } })).outputs.downloads.items.length, 30);
   await assert.rejects(() => executeSaveImages({ inputs: { images: [{ kind: "images", items: Array.from({ length: 31 }, (_, index) => ({ url: `/generated/${index}.png` })) }] } }), /1 to 30 images/i, "save-images must reject oversized batches");
   const executePromptSwitch = compileFunctions(
     executorSource,

@@ -407,6 +407,14 @@ try {
   assert.deepEqual(injectedV2Graph.nodes.find((item) => item.id === "scene").config.urls, ["/person.jpg"]);
   assert.deepEqual(injectedV2Graph.nodes.find((item) => item.id === "vehicle").config.urls, ["/side.jpg"]);
   schedulerV2.validateCanvasScheduleV2ExpandedGraph(injectedV2Graph, v2Definition);
+  const folderNode = { ...node("save-folder", "utility.save-images"), config: { filenamePrefix: "车型", outputFolder: "output/车型" } };
+  const folderGraph = { ...graph, nodes: [...graph.nodes, folderNode], edges: [...graph.edges, edge("image", "images", "save-folder", "images")] };
+  const folderBatch = schedulerV2.applyCanvasScheduleV2Parameters(folderGraph, v2Definition.parameters, v2Expansion.mainTasks[0].parameterValues);
+  const folderChild = schedulerV2.createCanvasScheduleV2ChildGraph(folderBatch, []);
+  const folderAggregate = schedulerV2.createCanvasScheduleV2AggregateGraph(folderBatch, v2Definition, [{ kind: "images", items: [{ url: "/fixture.png" }] }]);
+  for (const snapshot of [folderBatch, folderChild, folderAggregate]) {
+    assert.deepEqual(snapshot.nodes.find((item) => item.id === "save-folder").config, folderNode.config, "batch/child/aggregate snapshots must preserve local output configuration");
+  }
   const imageGroupParameter = {
     ...v2Definition.parameters[0],
     id: "reference-group",

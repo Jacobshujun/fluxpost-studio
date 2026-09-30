@@ -19,6 +19,7 @@ import { canvasVisionPresets, concatenateCanvasText, parseCanvasImageSelection, 
 import { pixelSizeForRatio } from "../gpt-image-dimensions";
 import { canvasGptImageReferencePortIds, normalizeUrlList, orderedCanvasGptImageInputs } from "./registry";
 import { CANVAS_SAVE_IMAGE_MAX_ITEMS } from "./save-images";
+import { saveCanvasImagesToFolder } from "./local-image-save";
 import { processCanvasImages } from "./image-process";
 import { renderLayerComposition } from "./layer-compose";
 import { composeSources } from "./layer-compose-contract";
@@ -248,12 +249,24 @@ async function executeImagePreview({ inputs }: CanvasNodeExecutionContext) {
   return { outputs: { images: { kind: "images" as const, items: structuredClone(items), ...(imageBatch ? { imageBatch } : {}) } } };
 }
 
-async function executeSaveImages({ inputs }: CanvasNodeExecutionContext) {
+async function executeSaveImages({ inputs, node, runId, previousNodeRun, onInternalMetadataUpdate }: CanvasNodeExecutionContext): Promise<CanvasNodeExecutionResult> {
   const items = imageItems(inputs.images);
   if (!items.length || items.length > CANVAS_SAVE_IMAGE_MAX_ITEMS) {
     throw new Error(`Save images requires 1 to ${CANVAS_SAVE_IMAGE_MAX_ITEMS} images.`);
   }
-  return { outputs: { downloads: { kind: "images" as const, items: structuredClone(items) } } };
+  const outputs = { downloads: { kind: "images" as const, items: structuredClone(items) } };
+  const outputFolder = String(node.config.outputFolder || "").trim();
+  if (!outputFolder) return { outputs };
+  const saveImages = await saveCanvasImagesToFolder({
+    runId, nodeId: node.id, outputFolder, filenamePrefix: String(node.config.filenamePrefix),
+    urls: items.map((item) => item.url), previous: previousNodeRun?.internalMetadata?.saveImages,
+    checkpoint: async (metadata) => { await onInternalMetadataUpdate?.({ saveImages: metadata }); },
+  });
+  const failed = saveImages.items.filter((item) => item.status !== "saved").length;
+  return {
+    outputs, internalMetadata: { saveImages },
+    ...(failed ? { failure: `本地保存成功 ${items.length - failed} 张，失败 ${failed} 张。${saveImages.items.find((item) => item.error)?.error || ""}` } : {}),
+  };
 }
 
 async function executeDisplayAny({ inputs }: CanvasNodeExecutionContext) {
