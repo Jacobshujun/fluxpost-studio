@@ -9,6 +9,7 @@ const types = read("src/lib/types.ts");
 const database = read("src/lib/database.ts");
 const assets = read("src/lib/library-assets.ts");
 const page = read("src/app/library/page.tsx");
+const ui = read("src/app/library/library-ui.ts");
 const css = read("src/app/library/library.module.css");
 const migration = read("db/migrations/005_unified_library.sql");
 
@@ -35,9 +36,9 @@ has(page, /\/api\/library\/navigation/, "Library navigation must load separately
 has(page, /thumbnailUrl/, "Library cards must use thumbnail URLs.");
 has(page, /mode: "query"[\s\S]*excludedAssetIds/, "Browser selection must support all-matching plus exclusions.");
 has(page, /AbortController/, "Asset and tag requests must be cancellable.");
-has(page, /setTimeout\(\(\) => setSearch\(searchDraft\.trim\(\)\), 300\)/, "Search debounce is missing.");
-has(page, /includeDescendants: view\.kind === "collection" \? includeDescendants : undefined/, "Descendant filtering must be scoped to collection views.");
-has(page, /value === false && key !== "includeDescendants"/, "Direct collection queries must serialize includeDescendants=false.");
+has(page, /setTimeout\(\(\) => onSearch\(draft\.trim\(\)\), 300\)/, "Search debounce is missing.");
+has(ui, /includeDescendants: view\.kind === "collection" \? includeDescendants : undefined/, "Descendant filtering must be scoped to collection views.");
+has(ui, /value === false && key !== "includeDescendants"/, "Direct collection queries must serialize includeDescendants=false.");
 has(page, /loading="lazy"/, "Thumbnail lazy loading is missing.");
 has(page, /SmartFolderDialog/, "Smart-folder editing is missing.");
 has(css, /grid-template-columns:repeat\(auto-fill,minmax\(174px,1fr\)\)/, "Stable desktop grid is missing.");

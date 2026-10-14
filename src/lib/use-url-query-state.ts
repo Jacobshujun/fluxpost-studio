@@ -1,7 +1,7 @@
 "use client";
 
 import { usePathname, useRouter } from "next/navigation";
-import { useEffect, useRef, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState, useSyncExternalStore } from "react";
 
 export type UrlQueryCodec<T> = {
   parse: (params: URLSearchParams, key: string) => T;
@@ -81,4 +81,35 @@ export function useUrlQueryState<T>(key: string, defaultValue: T, codec: UrlQuer
   }, [hydrated, key, pathname, router, value]);
 
   return [value, setValue, hydrated];
+}
+
+// One history entry per command, including commands that change several filters.
+// Next.js supports the native History API and synchronizes its router with it.
+const subscribeQueryParams = (notify: () => void) => {
+  window.addEventListener("popstate", notify);
+  return () => window.removeEventListener("popstate", notify);
+};
+const querySnapshot = () => window.location.search;
+const serverQuerySnapshot = () => "";
+
+export function useUrlQueryParams(): [URLSearchParams, (update: (params: URLSearchParams) => void, replace?: boolean) => void, boolean] {
+  const query = useSyncExternalStore(subscribeQueryParams, querySnapshot, serverQuerySnapshot);
+  const params = useMemo(() => new URLSearchParams(query), [query]);
+  const [hydrated, setHydrated] = useState(false);
+  useEffect(() => {
+    // Client URL becomes available after server hydration.
+    // eslint-disable-next-line react-hooks/set-state-in-effect
+    setHydrated(true);
+  }, []);
+  const update = useCallback((command: (params: URLSearchParams) => void, replace = false) => {
+    const next = new URLSearchParams(window.location.search);
+    command(next);
+    const query = next.toString();
+    if (query === new URLSearchParams(window.location.search).toString()) return;
+    const url = `${window.location.pathname}${query ? `?${query}` : ""}${window.location.hash}`;
+    if (replace) window.history.replaceState(null, "", url);
+    else window.history.pushState(null, "", url);
+    window.dispatchEvent(new PopStateEvent("popstate"));
+  }, []);
+  return [params, update, hydrated];
 }

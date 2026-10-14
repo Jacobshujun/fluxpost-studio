@@ -21,5 +21,7 @@ for (const page of [
 
 assert.match(read("src/app/review/page.tsx"), /useUrlQueryState\("postId"/);
 assert.match(read("src/app/canvas/page.tsx"), /useUrlQueryState\("workflowId"/);
-assert.match(read("src/app/library/page.tsx"), /useUrlQueryState<View>\("view"/);
+assert.match(read("src/app/library/page.tsx"), /useUrlQueryParams\(\)/);
+assert.match(helper, /window\.history\.pushState/);
+assert.match(helper, /window\.dispatchEvent\(new PopStateEvent\("popstate"\)\)/);
 console.log("Route state persistence contracts passed.");

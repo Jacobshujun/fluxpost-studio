@@ -1,0 +1,3 @@
+{"file":".trellis/spec/fluxpost/unified_library.md","reason":"Existing asset/query/permissions and new gallery UX contracts"}
+{"file":".trellis/spec/frontend/state-management.md","reason":"URL queries, local drafts and explicit server mutations"}
+{"file":".trellis/spec/frontend/quality-guidelines.md","reason":"Responsive operational UI and explicit error handling"}

@@ -1,6 +1,6 @@
 # Unified Library
 
-Last updated: 2026-09-07
+Last updated: 2026-10-14
 
 ## Scenario: Unified, Query-Driven Image Assets
 
@@ -82,6 +82,60 @@ INSERT INTO app_meta (key, value, updated_at) VALUES ($1, $2, $2);
 
 -- Correct: independently typed placeholders keep migration parsing deterministic.
 INSERT INTO app_meta (key, value, updated_at) VALUES ($1, $2, $3);
+```
+
+## Scenario: Gallery Filters, Viewer And Management
+
+### 1. Scope / Trigger
+
+Image-only `/library` UX uses existing APIs and permission rules. No schema change, automatic import retry or automatic AI tagging. Cards/rail use thumbnails; opening a viewer fetches detail and the original.
+
+### 2. Signatures
+
+- `useUrlQueryParams()` applies one command as one history entry; listens to `popstate`. `asset` opens `GET /api/library/assets/{id}`, independently of loaded pages.
+- `readLibraryFilters(params)` and `filtersToQuery(filters)` in `src/app/library/library-ui.ts` normalize browser state and existing list wire fields; 60 assets per signed cursor page.
+- Detail `PATCH` saves `name`, `note`, `visibility`, `manualOverrides` together. Collection memberships and favorites use existing batch APIs separately.
+
+### 3. Contracts
+
+- Browser `q`, `view=collection:<id>|smart:<id>|all|favorites|uncategorized`, `sort`, `descendants=0`, repeated tag/dimension values and scalar ranges survive refresh/history. Clearing filters preserves collection/sort.
+- API repeated keys are singular: `imageType`, `vehicleModel`, `vehicleColor`, `angle`, `scene`, `people`, `customTag`, `tag`, `ownerId`. `includeDescendants=false` must reach the API; tagging status is `idle|queued|running|completed|failed`.
+- Date-only ranges start at Beijing midnight, with `addedBefore` exclusive at the next day's midnight. Advanced edits apply atomically; search debounces 300ms. Filter changes clear selection with notice.
+- List and cursor writes require the current generation and live normalized query. Detail requests abort on ID change. Viewer stops at final boundaries, retains the image on cursor failure, and resets transforms on asset change.
+- Dirty metadata prompts save/discard before switch/close; save failure keeps draft. Shared read-only assets may still be favorited and organized into manageable collections.
+- Imports snapshot file/collection/visibility, run serially, retain every receipt for this page session, retry only on explicit action and cancel only queued work. Permanent delete snapshots selection and requires app confirmation; editable controls suppress Delete shortcuts.
+
+### 4. Validation & Error Matrix
+
+| Condition | Required result |
+| --- | --- |
+| Invalid dates, negative range or min > max | Show validation; no filter submission |
+| Stale list/cursor response | Ignore; never append into newer query |
+| Inaccessible asset link or failed original | Explicit error and retry; never substitute another asset |
+| Save fails with dirty metadata | Keep editor and draft |
+| Batch partially fails | Show each reason; retain failed IDs selected |
+| Unsupported/empty/>30MB file | Keep failed receipt with reason; no retry for local validation failure |
+| Cancel permanent-delete confirmation | Zero delete requests |
+
+### 5. Good/Base/Bad Cases
+
+- Good: filter two tags with AND, view a deep-linked asset, preserve draft after failed save, explicitly retry a failed import.
+- Base: favorite a shared asset and add it to an editable personal collection.
+- Bad: serialize plural API keys, use obsolete `pending/tagged` status values, drop false descendant scope, wrap viewer to page one or trim import receipts to 20.
+
+### 6. Tests Required
+
+- Baseline `library_ui_check.mjs` executes multi-value/status/descendant/date conversions; existing library runtime/batch checks retain backend permissions and cursor contracts.
+- `library_collection_batch_browser_check.py` intercepts all APIs/images on worker-disabled loopback (rejects 3001); covers history, races, viewer guards/zoom/pan, query exclusions, permission failures, confirmed keyboard deletion and >20 imports across three themes at 1440/390.
+
+### 7. Wrong vs Correct
+
+```ts
+// Wrong: URL/browser plural field names do not match API query names.
+params.append("vehicleModels", model);
+// Correct: use the centralized conversion; it also preserves descendant false.
+filtersToQuery({ vehicleModels: [model], includeDescendants: false, limit: 60 });
+// => vehicleModel=...&includeDescendants=false&limit=60
 ```
 
 ## Scenario: Canvas Library Picker Performance

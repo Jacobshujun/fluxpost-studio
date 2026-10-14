@@ -1,506 +1,425 @@
+"""Isolated gallery acceptance: intercept every API and all media, never use 3001."""
 import base64
 import json
 import os
 import re
 import tempfile
 from urllib.parse import parse_qs, urlparse
-
-from playwright.sync_api import sync_playwright
-from playwright.sync_api import expect
-
+from playwright.sync_api import sync_playwright, expect
 
 BASE_URL = os.environ.get("FLUXPOST_BROWSER_BASE_URL", "http://127.0.0.1:45678")
 assert urlparse(BASE_URL).hostname in ("127.0.0.1", "localhost") and urlparse(BASE_URL).port != 3001
 CHROME = os.environ.get("FLUXPOST_BROWSER_EXECUTABLE")
-PREVIEW_PIXEL = "data:image/gif;base64,R0lGODlhAQABAIAAAAAAAP///ywAAAAAAQABAAACAUwAOw=="
-THUMBNAIL_PIXEL = base64.b64decode("R0lGODlhAQABAIAAAAAAAP///ywAAAAAAQABAAACAUwAOw==")
-EMPTY_TAGS = {
-    "imageTypes": [], "scenes": [], "vehicleModels": [], "vehicleColors": [],
-    "angles": [], "people": "unknown", "customTags": [],
-}
-
-
-def make_asset(index):
-    asset_id = f"asset-{index}"
-    collection_ids = [] if index % 5 == 0 else (["campaign", "detail"] if index % 2 == 0 else ["archive"])
-    custom_tags = ["red"] if index % 3 == 0 else []
-    return {
-        "id": asset_id,
-        "ownerUserId": "owner-2" if index % 7 == 0 else "owner-1",
-        "ownerDisplayName": "Team Member" if index % 7 == 0 else "Owner One",
-        "name": "Front view" if index == 1 else f"Asset {index}",
-        "originalName": f"asset-{index}.jpg",
-        "note": "Launch detail" if index == 1 else "",
-        "objectKey": f"library/{asset_id}.jpg",
-        "publicUrl": PREVIEW_PIXEL,
-        "thumbnailUrl": f"/api/library/assets/{asset_id}/thumbnail",
-        "mimeType": "image/jpeg",
-        "extension": ".jpg",
-        "byteSize": 1024 + index,
-        "width": 1600,
-        "height": 1200,
-        "sha256": asset_id.ljust(64, "0"),
-        "collectionIds": collection_ids,
-        "visibility": "team" if index % 7 == 0 else "private",
-        "aiTags": EMPTY_TAGS,
-        "manualOverrides": {"customTags": custom_tags},
-        "effectiveTags": {**EMPTY_TAGS, "customTags": custom_tags},
-        "taggingStatus": "idle" if index % 4 == 0 else "completed",
-        "cleanupStatus": "ready",
-        "canEdit": index % 7 != 0,
-        "favorite": index <= 2,
-        "createdAt": f"2026-08-{28 - (index % 20):02d}T00:00:00.000Z",
-        "updatedAt": "2026-08-28T00:00:00.000Z",
-    }
-
-
+PIXEL = base64.b64decode("R0lGODlhAQABAIAAAAAAAP///ywAAAAAAQABAAACAUwAOw==")
+EMPTY = {"scenes": [], "vehicleModels": [], "vehicleColors": [], "angles": [], "people": "unknown", "customTags": []}
 COLLECTIONS = [
-    {"id": "campaign", "ownerUserId": "owner-1", "ownerDisplayName": "Owner One", "visibility": "private", "kind": "folder", "name": "Campaign", "relativePath": "Campaign", "createdAt": "2026-08-28T00:00:00.000Z", "updatedAt": "2026-08-28T00:00:00.000Z", "canEdit": True},
-    {"id": "detail", "ownerUserId": "owner-1", "ownerDisplayName": "Owner One", "visibility": "private", "kind": "folder", "name": "Detail", "parentId": "campaign", "relativePath": "Campaign/Detail", "createdAt": "2026-08-28T00:00:00.000Z", "updatedAt": "2026-08-28T00:00:00.000Z", "canEdit": True},
-    {"id": "archive", "ownerUserId": "owner-2", "ownerDisplayName": "Team Member", "visibility": "team", "kind": "folder", "name": "Archive", "relativePath": "Archive", "createdAt": "2026-08-28T00:00:00.000Z", "updatedAt": "2026-08-28T00:00:00.000Z", "canEdit": False},
-]
-SMART_FOLDERS = [
-    {"id": "smart-favorites", "ownerUserId": "owner-1", "ownerDisplayName": "Owner One", "name": "Favorites with tags", "visibility": "private", "match": "all", "conditions": [{"id": "favorite", "field": "favorite", "operator": "is", "value": True}], "createdAt": "2026-08-28T00:00:00.000Z", "updatedAt": "2026-08-28T00:00:00.000Z", "canEdit": True},
+    {"id": "campaign", "name": "Campaign", "relativePath": "Campaign", "visibility": "private", "ownerUserId": "owner-1", "ownerDisplayName": "Owner", "canEdit": True},
+    {"id": "detail", "name": "Detail", "relativePath": "Campaign/Detail", "parentId": "campaign", "visibility": "private", "ownerUserId": "owner-1", "ownerDisplayName": "Owner", "canEdit": True},
+    {"id": "archive", "name": "Archive", "relativePath": "Archive", "visibility": "team", "ownerUserId": "owner-2", "ownerDisplayName": "Team", "canEdit": False},
 ]
 
+def make_asset(i):
+    return {"id": f"asset-{i}", "name": "Front view" if i == 1 else f"Asset {i}", "originalName": f"asset-{i}.jpg", "note": "", "ownerUserId": "owner-2" if i == 7 else "owner-1", "ownerDisplayName": "Team" if i == 7 else "Owner", "visibility": "team", "canEdit": i != 7, "collectionIds": ["detail"] if i % 2 == 0 else [], "width": 1600, "height": 900, "byteSize": 2048, "createdAt": "2026-10-01T00:00:00Z", "updatedAt": "2026-10-01T00:00:00Z", "taggingStatus": "completed", "favorite": False, "aiTags": dict(EMPTY), "manualOverrides": {}, "effectiveTags": dict(EMPTY), "thumbnailUrl": f"/api/library/assets/asset-{i}/thumbnail", "publicUrl": f"/__gallery_original/asset-{i}", "mimeType": "image/jpeg", "extension": ".jpg", "objectKey": f"mock/{i}", "sha256": f"hash-{i}", "cleanupStatus": "ready"}
 
-def query_params(url):
-    return parse_qs(urlparse(url).query, keep_blank_values=True)
+def run_case(browser, theme, width, height):
+    name = f"{theme}-{width}"
+    context = browser.new_context(viewport={"width": width, "height": height})
+    context.add_init_script(f"localStorage.setItem('fluxpost-theme', '{theme}')")
+    page = context.new_page()
+    assets = [make_asset(i) for i in range(1, 66)]
+    calls, queries, imports, unknown, errors, originals = [], [], [], [], [], []
+    held_pages, held_imports = [], []
+    flags = {"hold_page": False, "hold_import": False, "fail_patch": False, "fail_delete": False, "fail_import": True, "fail_collection": False, "fail_cursor": False}
+    page.on("pageerror", lambda error: errors.append(str(error)))
+    page.on("dialog", lambda dialog: (errors.append(f"Unexpected browser dialog: {dialog.message}"), dialog.dismiss()))
 
+    def filtered(params):
+        result = list(assets)
+        q = params.get("search", [""])[0].lower()
+        if q: result = [a for a in result if q in (a["name"] + a["note"]).lower()]
+        if params.get("favorite") == ["true"]: result = [a for a in result if a["favorite"]]
+        if params.get("uncategorized") == ["true"]: result = [a for a in result if not a["collectionIds"]]
+        if params.get("collectionId"):
+            ids = [params["collectionId"][0]]
+            if ids == ["campaign"] and params.get("includeDescendants") != ["false"]: ids += ["detail"]
+            result = [a for a in result if any(i in a["collectionIds"] for i in ids)]
+        if params.get("taggingStatus"): result = [a for a in result if a["taggingStatus"] == params["taggingStatus"][0]]
+        for tag in params.get("tag", []): result = [a for a in result if tag in a["effectiveTags"]["customTags"]]
+        if params.get("minWidth"): result = [a for a in result if a["width"] >= int(params["minWidth"][0])]
+        return result
 
-def filter_assets(url, assets):
-    params = query_params(url)
-    result = assets
-    collection_id = params.get("collectionId", [None])[0]
-    if collection_id:
-        include_descendants = params.get("includeDescendants", ["true"])[0] != "false"
-        accepted = ["campaign", "detail"] if collection_id == "campaign" and include_descendants else [collection_id]
-        result = [asset for asset in result if any(item in accepted for item in asset["collectionIds"])]
-    if params.get("smartFolderId"):
-        result = [asset for asset in result if asset["favorite"]]
-    if params.get("uncategorized", ["false"])[0] == "true":
-        result = [asset for asset in result if not asset["collectionIds"]]
-    if params.get("favorite", ["false"])[0] == "true":
-        result = [asset for asset in result if asset["favorite"]]
-    search = params.get("search", [""])[0].lower()
-    if search:
-        result = [asset for asset in result if search in f'{asset["name"]} {asset["originalName"]} {asset["note"]}'.lower()]
-    for tag in params.get("tag", []):
-        result = [asset for asset in result if tag in asset["effectiveTags"]["customTags"]]
-    return result
+    def selected(body):
+        selection = body["selection"]
+        if selection["mode"] == "ids": return [a for a in assets if a["id"] in selection["assetIds"]]
+        assert "limit" not in selection["filters"]
+        return [a for a in assets if a["id"] not in selection.get("excludedAssetIds", [])]
 
+    def handler(route):
+        request = route.request
+        path = urlparse(request.url).path
+        params = parse_qs(urlparse(request.url).query)
+        method = request.method
+        if path == "/api/library/navigation":
+            route.fulfill(json={"collections": COLLECTIONS, "smartFolders": [], "counts": {"all": len(assets), "uncategorized": sum(not a["collectionIds"] for a in assets), "favorites": sum(a["favorite"] for a in assets)}})
+        elif path == "/api/library/tags" and method == "GET": route.fulfill(json={"tags": [{"label": "red", "count": 3}]})
+        elif path.endswith("/thumbnail"): route.fulfill(content_type="image/gif", body=PIXEL)
+        elif path == "/api/library/assets":
+            queries.append(params)
+            assert params.get("limit") == ["60"]
+            assert "role" not in params
+            if params.get("cursor") and flags["fail_cursor"]:
+                flags["fail_cursor"] = False
+                route.fulfill(status=500, json={"error": "Page unavailable"}); return
+            result = filtered(params)
+            offset = 60 if params.get("cursor") else 0
+            response = {"assets": result[offset:offset + 60], "total": len(result), "nextCursor": "next-page" if offset + 60 < len(result) else None}
+            if params.get("cursor") and flags["hold_page"]: held_pages.append((route, response))
+            else: route.fulfill(json=response)
+        elif path == "/api/library/assets/batch":
+            body = request.post_data_json; calls.append(body)
+            matches = selected(body)
+            if body["action"] == "delete":
+                assert body["confirm"] is True
+                if flags["fail_delete"]:
+                    flags["fail_delete"] = False
+                    route.fulfill(json={"matched": len(matches), "succeeded": 0, "failed": len(matches), "failures": [{"assetId": a["id"], "error": "Object cleanup failed"} for a in matches]}); return
+                assets[:] = [a for a in assets if a not in matches]
+                route.fulfill(json={"matched": len(matches), "succeeded": len(matches), "failed": 0, "failures": []})
+            elif body["action"] in ("add_to_collections", "move_to_collection", "remove_from_collection"):
+                if flags["fail_collection"]:
+                    flags["fail_collection"] = False
+                    route.fulfill(status=400, json={"error": "Target unavailable"}); return
+                for a in matches:
+                    if body["action"] == "add_to_collections": a["collectionIds"] = list(set(a["collectionIds"] + body["collectionIds"]))
+                    elif body["action"] == "move_to_collection": a["collectionIds"] = [i for i in a["collectionIds"] if i != body["sourceCollectionId"]] + [body["targetCollectionId"]]
+                    else: a["collectionIds"] = [i for i in a["collectionIds"] if i != body["collectionId"]]
+                route.fulfill(json={"action": body["action"], "assets": matches, "unchangedAssetIds": [], "failures": []})
+            else:
+                failures = []
+                for a in matches:
+                    if body["action"] == "set_visibility" and not a["canEdit"]: failures.append({"assetId": a["id"], "error": "Read only"})
+                    elif body["action"] == "set_favorite": a["favorite"] = body["favorite"]
+                    elif body["action"] == "set_visibility": a["visibility"] = body["visibility"]
+                route.fulfill(json={"matched": len(matches), "succeeded": len(matches) - len(failures), "failed": len(failures), "failures": failures})
+        elif re.fullmatch(r"/api/library/assets/asset-\d+", path):
+            asset = next((a for a in assets if a["id"] == path.rsplit("/", 1)[-1]), None)
+            if not asset: route.fulfill(status=404, json={"error": "Library asset not found"}); return
+            if method == "PATCH":
+                if flags["fail_patch"]:
+                    flags["fail_patch"] = False
+                    route.fulfill(status=400, json={"error": "Save unavailable"}); return
+                assert asset["canEdit"]
+                body = request.post_data_json; calls.append({"patch": body})
+                asset.update(body)
+                if "manualOverrides" in body: asset["effectiveTags"] = {**asset["aiTags"], **body["manualOverrides"]}
+            route.fulfill(json={"asset": asset})
+        elif path == "/api/library/favorites":
+            for a in selected(request.post_data_json): a["favorite"] = method == "POST"
+            route.fulfill(json={"matched": 1, "succeeded": 1, "failed": 0, "failures": []})
+        elif path == "/api/library/import":
+            raw = request.post_data_buffer.decode("utf8", errors="replace")
+            filename = re.search(r'filename="([^"]+)"', raw).group(1)
+            imports.append((filename, raw))
+            if flags["hold_import"]: held_imports.append(route); return
+            if filename == "failure.png" and flags["fail_import"]:
+                flags["fail_import"] = False; route.fulfill(status=400, json={"error": "Upload unavailable"})
+            else: route.fulfill(json={"status": "skipped_duplicate" if filename == "duplicate.png" else "imported"})
+        elif path == "/api/library/tags" and method == "POST":
+            body = request.post_data_json; calls.append({"tags": body})
+            matches = selected(body)
+            for a in matches: a["manualOverrides"] = {"customTags": body.get("add", [])}; a["effectiveTags"] = {**a["aiTags"], **a["manualOverrides"]}
+            route.fulfill(json={"assets": matches, "failures": []})
+        elif path.startswith("/api/library/collections") or path.startswith("/api/library/smart-folders"):
+            calls.append({"organizer": request.post_data_json}); route.fulfill(json={"ok": True})
+        elif path == "/api/library/tagging": route.fulfill(json={"jobs": []})
+        else:
+            unknown.append(path); route.fulfill(status=404, json={"error": "Unexpected mocked API"})
 
-def run_viewport(browser, viewport):
-    name, width, height = viewport
-    assets = [make_asset(index) for index in range(1, 66)]
-    asset_queries = []
-    batch_calls = []
-    patch_calls = []
-    smart_folder_calls = []
-    browser_errors = []
-    fail_collection = [False]
-    fail_delete = [False]
-    held_delete = []
-    hold_delete = [False]
-    page_cursor_after = [None]
-    fail_cursor_page = [False]
-    page = browser.new_page(viewport={"width": width, "height": height})
-    page.on("console", lambda message: browser_errors.append(message.text) if message.type == "error" and not ("400 (Bad Request)" in message.text and fail_collection[0] is False) else None)
-    page.on("pageerror", lambda error: browser_errors.append(str(error)))
-
-    def navigation_handler(route):
-        route.fulfill(status=200, content_type="application/json", body=json.dumps({
-            "collections": COLLECTIONS,
-            "smartFolders": SMART_FOLDERS,
-            "counts": {
-                "all": len(assets),
-                "uncategorized": len([asset for asset in assets if not asset["collectionIds"]]),
-                "favorites": len([asset for asset in assets if asset["favorite"]]),
-            },
-        }))
-
-    def assets_handler(route):
-        params = query_params(route.request.url)
-        assert "role" not in params, f"{name}: legacy role query leaked into the unified API"
-        asset_queries.append(params)
-        if params.get("cursor") and fail_cursor_page[0]:
-            fail_cursor_page[0] = False
-            route.fulfill(status=400, json={"error": "Cursor page unavailable"})
-            return
-        visible = filter_assets(route.request.url, assets)
-        offset = 0
-        if params.get("cursor", [None])[0] == "next-page":
-            offset = next((index for index, asset in enumerate(visible) if int(asset["id"].split("-")[-1]) > page_cursor_after[0]), len(visible))
-        page_assets = visible[offset:offset + 60]
-        if offset + len(page_assets) < len(visible):
-            page_cursor_after[0] = int(page_assets[-1]["id"].split("-")[-1])
-        route.fulfill(status=200, content_type="application/json", body=json.dumps({
-            "assets": page_assets,
-            "total": len(visible),
-            "nextCursor": "next-page" if offset + len(page_assets) < len(visible) else None,
-        }))
-
-    def batch_handler(route):
-        body = route.request.post_data_json
-        batch_calls.append(body)
-        if body["action"] == "delete":
-            assert body["confirm"] is True
-            assert body["selection"]["mode"] == "ids"
-            asset_ids = body["selection"]["assetIds"]
-            assert asset_ids
-            asset_id = asset_ids[0]
-            if fail_delete[0]:
-                fail_delete[0] = False
-                route.fulfill(json={"matched": 1, "succeeded": 0, "failed": 1, "failures": [{"assetId": asset_id, "error": "Object cleanup failed"}]})
-                return
-            if hold_delete[0]:
-                held_delete.append(route)
-                return
-            assets[:] = [asset for asset in assets if asset["id"] not in asset_ids]
-            route.fulfill(json={"matched": len(asset_ids), "succeeded": len(asset_ids), "failed": 0, "failures": []})
-            return
-        if body["action"] in ("add_to_collections", "move_to_collection"):
-            if fail_collection[0]:
-                fail_collection[0] = False
-                route.fulfill(status=400, content_type="application/json", body=json.dumps({"error": "Target unavailable"}))
-                return
-            route.fulfill(status=200, content_type="application/json", body=json.dumps({"action": body["action"], "assets": [assets[0]], "unchangedAssetIds": [], "failures": []}))
-            return
-        route.fulfill(status=200, content_type="application/json", body=json.dumps({"matched": 65, "succeeded": 65, "failed": 0, "failures": []}))
-
-    def patch_handler(route):
-        body = route.request.post_data_json
-        patch_calls.append(body)
-        asset_id = urlparse(route.request.url).path.rsplit("/", 1)[-1]
-        current = next(asset for asset in assets if asset["id"] == asset_id)
-        updated = {**current, **body, "updatedAt": "2026-08-28T01:00:00.000Z"}
-        assets[assets.index(current)] = updated
-        route.fulfill(status=200, content_type="application/json", body=json.dumps({"asset": updated}))
-
-    def smart_folder_handler(route):
-        if route.request.method == "POST":
-            smart_folder_calls.append(route.request.post_data_json)
-        route.fulfill(status=200, content_type="application/json", body=json.dumps({"smartFolder": SMART_FOLDERS[0]}))
-
-    page.route(re.compile(r"/api/library/navigation(?:\?.*)?$"), navigation_handler)
-    page.route(re.compile(r"/api/library/tags(?:\?.*)?$"), lambda route: route.fulfill(status=200, content_type="application/json", body=json.dumps({"tags": [{"label": "red", "count": 21}]})))
-    page.route(re.compile(r"/api/library/assets/[^/]+/thumbnail(?:\?.*)?$"), lambda route: route.fulfill(status=200, content_type="image/gif", body=THUMBNAIL_PIXEL))
-    page.route(re.compile(r"/api/library/assets(?:\?.*)?$"), assets_handler)
-    page.route(re.compile(r"/api/library/assets/batch(?:\?.*)?$"), batch_handler)
-    page.route(re.compile(r"/api/library/assets/asset-\d+(?:\?.*)?$"), patch_handler)
-    page.route(re.compile(r"/api/library/favorites(?:\?.*)?$"), lambda route: route.fulfill(status=200, content_type="application/json", body=json.dumps({"matched": 1, "succeeded": 1, "failed": 0, "failures": []})))
-    page.route(re.compile(r"/api/library/smart-folders(?:\?.*)?$"), smart_folder_handler)
-
+    page.route("**/api/**", handler)
+    def original(route):
+        originals.append(route.request.url)
+        route.fulfill(content_type="image/svg+xml", body='<svg xmlns="http://www.w3.org/2000/svg" width="1600" height="900"><rect width="1600" height="900" fill="#77918b"/><circle cx="800" cy="450" r="250" fill="#c4ddd4"/></svg>')
+    page.route("**/__gallery_original/**", original)
     page.goto(f"{BASE_URL}/library", wait_until="networkidle")
-    try:
-        page.get_by_text("全部图片 · 65 张", exact=True).wait_for(timeout=10_000)
-    except Exception:
-        debug_path = os.path.join(tempfile.gettempdir(), f"fluxpost-unified-library-{name}-failure.png")
-        page.screenshot(path=debug_path, full_page=False)
-        print(f"{name} first-screen failure: url={page.url} queries={asset_queries} errors={browser_errors} text={page.locator('body').inner_text()!r} screenshot={debug_path}")
-        raise
-    assert page.locator("article").count() == 60, f"{name}: first page did not stay bounded to 60 cards"
-    assert page.get_by_role("tab").count() == 0, f"{name}: legacy role tabs are still rendered"
-    thumbnails = page.locator("article img")
-    assert thumbnails.count() == 60 and "/thumbnail" in (thumbnails.first.get_attribute("src") or ""), f"{name}: cards are not using thumbnail endpoints"
-    assert thumbnails.first.get_attribute("loading") == "lazy", f"{name}: card thumbnails are not lazy-loaded"
+    expect(page.locator("article")).to_have_count(60)
+    assert not originals, "Grid must not load originals"
+    assert page.locator("article img").first.get_attribute("loading") == "lazy"
+    assert page.evaluate("document.documentElement.dataset.theme") == theme
+    title_metrics = page.locator("article strong").first.evaluate("n => ({height:n.getBoundingClientRect().height,line:parseFloat(getComputedStyle(n).lineHeight)})")
+    assert title_metrics["height"] >= title_metrics["line"], "Card names must not be vertically clipped"
 
-    screenshot = os.path.join(tempfile.gettempdir(), f"fluxpost-unified-library-{name}.png")
-    page.screenshot(path=screenshot, full_page=False)
+    # One transaction for several advanced filters; history and explicit descendant false.
+    page.get_by_role("button", name="高级筛选", exact=True).click()
+    dialog = page.get_by_role("dialog", name="高级筛选", exact=True)
+    dialog.get_by_label("最小宽度").fill("600")
+    dialog.get_by_label("打标状态", exact=True).select_option("completed")
+    before = len(queries)
+    dialog.get_by_role("button", name="应用筛选").click()
+    expect(page.get_by_role("button", name="最小宽度：600")).to_be_visible()
+    page.wait_for_function("!document.querySelector('[aria-busy=true]')")
+    assert len(queries) == before + 1
+    assert queries[-1]["taggingStatus"] == ["completed"]
+    page.reload(wait_until="networkidle")
+    expect(page.get_by_role("button", name="打标：已完成")).to_be_visible()
+    page.get_by_role("button", name="清空筛选", exact=True).click()
+    expect(page.get_by_role("button", name="打标：已完成")).to_have_count(0)
+    page.go_back(wait_until="networkidle")
+    expect(page.get_by_role("button", name="打标：已完成")).to_be_visible()
+    page.go_forward(wait_until="networkidle")
+    expect(page.get_by_role("button", name="打标：已完成")).to_have_count(0)
 
-    with page.expect_request(lambda request: query_params(request.url).get("search") == ["Front"]):
-        page.get_by_placeholder("搜索名称、文件名、备注或标签").fill("Front")
-    page.get_by_text("全部图片 · 1 张", exact=True).wait_for()
-    with page.expect_request(lambda request: urlparse(request.url).path == "/api/library/assets" and "search" not in query_params(request.url)):
-        page.get_by_placeholder("搜索名称、文件名、备注或标签").fill("")
-    page.get_by_text("全部图片 · 65 张", exact=True).wait_for()
+    # Checkbox and click have independent behavior. Draft protection includes save failure.
+    page.locator("article input[type=checkbox]").first.check()
+    expect(page.get_by_text("已选择 1 张", exact=True)).to_be_visible()
+    expect(page.locator('dialog[aria-label="图片查看"]')).to_have_count(0)
+    opener = page.locator("article").first.get_by_role("button", name="查看 Front view", exact=True)
+    opener.click()
+    viewer = page.locator('dialog[aria-label="图片查看"]')
+    expect(viewer.get_by_role("button", name="实际尺寸")).to_be_enabled()
+    page.keyboard.press("Escape")
+    expect(viewer).to_have_count(0)
+    expect(opener).to_be_focused()
+    opener.click()
+    expect(viewer.get_by_role("button", name="实际尺寸")).to_be_enabled()
+    viewer.get_by_role("button", name="实际尺寸").click()
+    expect(viewer.get_by_text("100%", exact=True)).to_be_visible()
+    viewer.get_by_role("button", name="放大", exact=True).click()
+    expect(viewer.get_by_text("125%", exact=True)).to_be_visible()
+    stage = viewer.locator('[class*="imageStage"]')
+    stage.hover()
+    page.mouse.wheel(0, -120)
+    expect(viewer.get_by_text("144%", exact=True)).to_be_visible()
+    assert page.evaluate("window.scrollY") == 0
+    box = stage.bounding_box()
+    page.mouse.move(box["x"] + box["width"] / 2, box["y"] + 80)
+    page.mouse.down()
+    page.mouse.move(box["x"] + box["width"] / 2 - 100, box["y"] + 80)
+    page.mouse.up()
+    assert stage.evaluate("n => n.scrollLeft") > 0
+    if width < 640: viewer.get_by_role("button", name="图片详情", exact=True).click()
+    viewer.get_by_label("备注", exact=True).fill("Draft preserved")
+    viewer.get_by_role("button", name="下一张", exact=True).click()
+    guard = page.get_by_role("dialog", name="尚有未保存修改", exact=True)
+    flags["fail_patch"] = True
+    guard.get_by_role("button", name="保存后继续").click()
+    expect(guard.get_by_text("Save unavailable")).to_be_visible()
+    guard.get_by_role("button", name="继续编辑").click()
+    expect(viewer.get_by_label("备注", exact=True)).to_have_value("Draft preserved")
+    viewer.get_by_role("button", name="保存", exact=True).click()
+    expect(viewer.get_by_role("button", name="保存", exact=True)).to_be_disabled()
+    assert assets[0]["note"] == "Draft preserved"
+    viewer.get_by_role("button", name="下一张", exact=True).click()
+    expect(viewer.get_by_text("Asset 2", exact=True)).to_be_visible()
+    viewer.get_by_role("button", name="复位", exact=True).focus()
+    page.keyboard.press("ArrowLeft")
+    expect(viewer.get_by_text("Front view", exact=True)).to_be_visible()
+    viewer.get_by_role("button", name="复位", exact=True).focus()
+    page.keyboard.press("ArrowRight")
+    expect(viewer.get_by_text("Asset 2", exact=True)).to_be_visible()
+    page.keyboard.press("Escape")
+    expect(viewer).to_have_count(0)
+    expect(page.get_by_text("已选择 1 张", exact=True)).to_be_visible()
+    page.get_by_role("button", name="取消选择").click()
 
-    page.locator("article").first.get_by_role("button").nth(1).click()
-    page.get_by_text("图片详情", exact=True).wait_for()
-    page.get_by_label("备注").fill("Updated note")
-    page.get_by_role("button", name="保存").click()
-    page.get_by_text("已保存", exact=True).wait_for()
-    assert patch_calls[-1].get("note") == "Updated note", f"{name}: note update payload is incorrect"
-    page.locator("aside header button").click()
+    # Standalone deep link, shared read-only metadata, owner-independent membership.
+    page.goto(f"{BASE_URL}/library?asset=asset-65", wait_until="networkidle")
+    viewer = page.locator('dialog[aria-label="图片查看"]')
+    expect(viewer.get_by_text("Asset 65", exact=True)).to_be_visible()
+    expect(page.locator("article")).to_have_count(60)
+    expect(viewer.get_by_role("button", name="下一张", exact=True)).to_be_disabled()
+    page.keyboard.press("Escape")
+    page.goto(f"{BASE_URL}/library?asset=asset-999", wait_until="networkidle")
+    viewer = page.locator('dialog[aria-label="图片查看"]')
+    expect(viewer.get_by_text("Library asset not found", exact=True)).to_be_visible()
+    viewer.get_by_role("button", name="重试详情", exact=True).click()
+    expect(viewer.get_by_text("Library asset not found", exact=True)).to_be_visible()
+    page.keyboard.press("Escape")
+    page.goto(f"{BASE_URL}/library?asset=asset-7", wait_until="networkidle")
+    viewer = page.locator('dialog[aria-label="图片查看"]')
+    if width < 640: viewer.get_by_role("button", name="图片详情", exact=True).click()
+    expect(viewer.get_by_label("名称", exact=True)).to_be_disabled()
+    assert viewer.get_by_role("button", name="永久删除", exact=True).count() == 0
+    viewer.get_by_label("Campaign", exact=True).click()
+    expect(viewer.get_by_label("Campaign", exact=True)).to_be_checked()
+    assert calls[-1]["action"] == "add_to_collections"
+    page.keyboard.press("Escape")
 
-    page.locator("article > button").first.dblclick()
-    preview = page.get_by_role("dialog")
-    preview.wait_for()
-    assert (preview.locator(":scope > img").get_attribute("src") or "").startswith("data:image/gif"), f"{name}: preview did not use the original URL"
-    assert "/thumbnail" in (preview.locator("div img").first.get_attribute("src") or ""), f"{name}: preview rail did not use thumbnails"
-    preview.get_by_role("button", name="关闭预览").click()
-
-    page.get_by_role("button", name="加载更多").click()
-    page.wait_for_function("document.querySelectorAll('article').length === 65")
-    page.goto(f"{BASE_URL}/library", wait_until="networkidle")
-    page.locator("article > button").evaluate_all("buttons => buttons.forEach(button => button.click())")
-    page.get_by_text("已选择 60 张", exact=True).wait_for()
-    page.get_by_role("button", name="选择全部匹配").click()
-    page.get_by_text("已选择全部匹配 65 张", exact=True).wait_for()
-    page.get_by_text("已选择全部匹配 65 张", exact=True).locator("..").get_by_role("button", name="收藏", exact=True).click()
-    page.get_by_text("已收藏 65 张", exact=True).wait_for()
-    selection = batch_calls[-1].get("selection", {})
-    assert selection.get("mode") == "query" and "limit" not in selection.get("filters", {}) and "role" not in selection.get("filters", {}), f"{name}: all-matching query snapshot is incorrect"
-
-    page.locator("article > button").first.click()
-    page.get_by_role("button", name="加入图集", exact=True).click()
-    picker = page.get_by_role("dialog", name="加入图集", exact=True)
-    assert picker.get_by_role("button", name="加入图集", exact=True).is_disabled()
-    assert picker.get_by_role("radio").count() == 2, "Read-only collections must not be selectable"
-    picker.get_by_placeholder("搜索图集名称或路径").fill("no-such-collection")
-    picker.get_by_text("没有匹配的图集", exact=True).wait_for()
-    picker.get_by_placeholder("搜索图集名称或路径").fill("Campaign/Detail")
-    picker.get_by_role("radio").check()
-    fail_collection[0] = True
-    picker.get_by_role("button", name="加入图集", exact=True).click()
-    picker.get_by_role("alert").get_by_text("Target unavailable").wait_for()
-    assert picker.get_by_role("radio").is_checked(), "Failure lost chosen target"
-    picker.get_by_role("button", name="加入图集", exact=True).click()
-    picker.wait_for(state="hidden")
-    assert batch_calls[-1]["collectionIds"] == ["detail"]
-
-    page.goto(f"{BASE_URL}/library?view=collection%3Acampaign&descendants=0", wait_until="networkidle")
-    page.locator("article > button").first.click()
+    # Collection move picker validates target, keeps error and excludes shared read-only folders.
+    page.get_by_role("button", name="Campaign", exact=True).click()
+    page.get_by_label("包含子图集", exact=True).uncheck()
+    page.wait_for_function("!document.querySelector('[aria-busy=true]')")
+    assert queries[-1]["includeDescendants"] == ["false"]
+    page.get_by_label("包含子图集", exact=True).check()
+    expect(page.locator("article")).to_have_count(33)
+    page.locator("article input[type=checkbox]").first.check()
     page.get_by_role("button", name="移动到图集", exact=True).click()
     picker = page.get_by_role("dialog", name="移动到图集", exact=True)
-    assert picker.get_by_role("radio").count() == 1, "Source/read-only collection leaked into move targets"
-    picker.get_by_role("radio").check()
-    screenshot = os.path.join(tempfile.gettempdir(), f"fluxpost-library-move-{name}.png")
-    page.screenshot(path=screenshot)
-    bounds = picker.bounding_box()
-    assert bounds and bounds["x"] >= 0 and bounds["x"] + bounds["width"] <= width and bounds["y"] >= 0 and bounds["y"] + bounds["height"] <= height, "Picker overflows viewport"
-    assert picker.evaluate("el => el.scrollWidth <= el.clientWidth"), "Picker content overflows horizontally"
+    assert picker.get_by_text("Archive", exact=True).count() == 0
+    picker.get_by_role("radio").first.check()
+    flags["fail_collection"] = True
     picker.get_by_role("button", name="移动到图集", exact=True).click()
-    picker.wait_for(state="hidden")
-    assert batch_calls[-1]["action"] == "move_to_collection" and batch_calls[-1]["sourceCollectionId"] == "campaign" and batch_calls[-1]["targetCollectionId"] == "detail"
-    page.locator("article > button").first.click()
-    page.get_by_role("button", name="移动到图集", exact=True).click()
-    previous_calls = len(batch_calls)
-    page.keyboard.press("Escape")
-    picker.wait_for(state="hidden")
-    assert len(batch_calls) == previous_calls, "Cancel submitted a mutation"
-    page.goto(f"{BASE_URL}/library?view=collection%3Aarchive", wait_until="networkidle")
-    page.locator("article > button").first.click()
-    assert page.get_by_role("button", name="移动到图集", exact=True).count() == 0, "Read-only source exposes move"
-    page.goto(f"{BASE_URL}/library", wait_until="networkidle")
+    expect(picker.get_by_text("Target unavailable")).to_be_visible()
+    picker.get_by_role("button", name="移动到图集", exact=True).click()
+    expect(picker).to_have_count(0)
+    assert calls[-1]["action"] == "move_to_collection"
 
-    if name == "desktop":
-        page.get_by_role("button", name="Campaign", exact=True).click()
-        with page.expect_request(lambda request: query_params(request.url).get("collectionId") == ["campaign"] and query_params(request.url).get("includeDescendants") == ["false"]):
-            page.get_by_label("包含子图集").uncheck()
-        with page.expect_request(lambda request: query_params(request.url).get("smartFolderId") == ["smart-favorites"]):
-            page.get_by_role("button", name="Favorites with tags", exact=True).click()
-        page.get_by_title("新建智能文件夹").click()
-        dialog = page.locator("section").filter(has_text="新建智能文件夹")
-        dialog.get_by_label("名称").fill("Recent favorites")
-        dialog.locator("input").nth(1).fill("red")
-        dialog.get_by_role("button", name="保存").click()
-        page.get_by_text("新建智能文件夹", exact=True).wait_for(state="hidden")
-        assert smart_folder_calls[-1].get("name") == "Recent favorites" and smart_folder_calls[-1]["conditions"][0].get("value") == "red", "desktop: smart-folder payload is incorrect"
-
-    # Deleting an opened asset must ignore unrelated batch selection.
-    assets[:] = [make_asset(index) for index in (1, 2, 7)]
-    page.goto(f"{BASE_URL}/library", wait_until="networkidle")
-    expect(page.locator("article")).to_have_count(3)
-    page.locator("article > button").nth(1).click()
-    page.locator("article").first.get_by_title("预览", exact=True).click()
-    preview = page.get_by_role("dialog", name="图片预览")
-    delete_button = preview.get_by_role("button", name="删除图片", exact=True)
-    expect(delete_button).to_be_visible()
-    box = delete_button.bounding_box()
-    assert box and 0 <= box["x"] and box["x"] + box["width"] <= width
-    expect(preview).to_be_focused()
-    page.keyboard.press("ArrowRight")
-    expect(preview.locator("header strong")).to_have_text("Asset 2")
-    page.keyboard.press("ArrowLeft")
-    expect(preview.locator("header strong")).to_have_text("Front view")
-    # Wrap at both ends, including removal of the focused editable-only button.
-    delete_button.focus()
-    page.keyboard.press("ArrowLeft")
-    expect(preview.locator("header strong")).to_have_text("Asset 7")
-    expect(preview).to_be_focused()
-    page.keyboard.press("ArrowRight")
-    expect(preview.locator("header strong")).to_have_text("Front view")
-    page.keyboard.press("Tab")
-    expect(delete_button).to_be_focused()
-    page.keyboard.press("Shift+Tab")
-    expect(preview.locator("button").last).to_be_focused()
-    page.keyboard.press("Tab")
-    expect(delete_button).to_be_focused()
-    page.keyboard.press("Escape")
-    expect(preview).to_have_count(0)
-    expect(page.locator("article").first.get_by_title("预览", exact=True)).to_be_focused()
-    page.keyboard.press("ArrowRight")
-    page.keyboard.press("Delete")
-    expect(preview).to_have_count(0)
-    page.locator("article").first.get_by_title("预览", exact=True).click()
-    # Modified shortcuts, held Delete and composition cannot delete.
-    count_before = len(batch_calls)
-    ignored_dialogs = []
-    def dismiss_unexpected(dialog):
-        ignored_dialogs.append(dialog.message)
-        dialog.dismiss()
-    page.on("dialog", dismiss_unexpected)
-    for key in ("Control+Delete", "Shift+Delete", "Alt+ArrowLeft", "Control+ArrowRight"):
-        page.keyboard.press(key)
-    preview.dispatch_event("keydown", {"key": "Delete", "repeat": True})
-    preview.dispatch_event("keydown", {"key": "Delete", "isComposing": True})
-    # Future editable content inside the preview must retain native editing keys.
-    preview.evaluate("element => { const input = document.createElement('input'); input.id = 'keyboard-probe'; element.append(input); input.focus(); }")
-    page.keyboard.press("Delete")
-    page.keyboard.press("ArrowRight")
-    page.keyboard.press("Escape")
-    expect(preview.locator("header strong")).to_have_text("Front view")
-    preview.evaluate("element => { element.querySelector('#keyboard-probe').remove(); element.focus(); }")
-    assert not ignored_dialogs
-    assert len(batch_calls) == count_before
-
-    fail_delete[0] = True
-    page.keyboard.press("Delete")
-    expect(preview.get_by_role("alert")).to_have_text("Object cleanup failed")
-    expect(page.locator("article")).to_have_count(3)
-    expect(delete_button).to_be_enabled()
-    assert batch_calls[-1]["selection"]["assetIds"] == ["asset-1"]
-
-    hold_delete[0] = True
-    page.keyboard.press("Delete")
-    expect(delete_button).to_be_disabled()
-    expect(preview.get_by_role("button", name="下一张")).to_be_disabled()
-    expect(preview.get_by_role("button", name="关闭预览")).to_be_disabled()
-    pending_calls = len(batch_calls)
-    page.keyboard.press("ArrowRight")
-    page.keyboard.press("ArrowLeft")
-    page.keyboard.press("Escape")
-    page.keyboard.press("Delete")
-    expect(preview.locator("header strong")).to_have_text("Front view")
-    assert len(batch_calls) == pending_calls
-    assert len(held_delete) == 1
-    assets[:] = [asset for asset in assets if asset["id"] != "asset-1"]
-    held_delete.pop().fulfill(json={"matched": 1, "succeeded": 1, "failed": 0, "failures": []})
-    hold_delete[0] = False
-    expect(preview.locator("header strong")).to_have_text("Asset 2")
-    expect(delete_button).to_be_enabled()
-    expect(page.locator("article")).to_have_count(2)
-    expect(page.get_by_text("全部图片 · 2 张", exact=True)).to_be_visible()
-    expect(page.get_by_text("已选择 1 张", exact=True)).to_have_count(0)
-    expect(page.locator("article").filter(has_text="Asset 2")).to_have_count(1)
-    # Continue deleting by keyboard without reopening the preview.
-    page.keyboard.press("Delete")
-    expect(preview.locator("header strong")).to_have_text("Asset 7")
-    assert batch_calls[-1]["selection"]["assetIds"] == ["asset-2"]
-    expect(page.locator("article")).to_have_count(1)
-
-    # Shared read-only images expose no destructive action in either panel.
-    readonly = page.locator("article").filter(has_text="Asset 7")
-    expect(preview.get_by_role("button", name="删除图片", exact=True)).to_have_count(0)
-    page.keyboard.press("Delete")
-    assert not ignored_dialogs
-    page.keyboard.press("Escape")
-    readonly.get_by_role("button").nth(1).click()
-    detail = page.locator("aside").filter(has=page.get_by_text("图片详情", exact=True))
-    expect(detail.get_by_role("button", name="删除", exact=True)).to_have_count(0)
-    detail.locator("header button").click()
-
-    # Removing the final image from its detail closes both detail and preview.
-    assets[:] = [make_asset(2)]
-    page.goto(f"{BASE_URL}/library", wait_until="networkidle")
-    expect(page.locator("article")).to_have_count(1)
-    page.locator("article").first.get_by_role("button").nth(1).click()
-    expect(detail.get_by_role("button", name="删除", exact=True)).to_be_visible()
-    detail.locator("button:has(img)").click()
-    preview.get_by_role("button", name="删除图片", exact=True).click()
-    expect(preview).to_have_count(0)
-    expect(detail).to_have_count(0)
-    expect(page.get_by_text("暂无图片", exact=True)).to_be_visible()
-    assert "asset=" not in page.url
-
-    # The detail's own delete entry also deletes immediately.
-    assets[:] = [make_asset(2)]
-    page.goto(f"{BASE_URL}/library", wait_until="networkidle")
-    expect(page.locator("article")).to_have_count(1)
-    page.locator("article").first.get_by_role("button").nth(1).click()
-    detail.get_by_role("button", name="删除", exact=True).click()
-    expect(detail).to_have_count(0)
-    expect(page.get_by_text("暂无图片", exact=True)).to_be_visible()
-
-    # Preserve the second page and choose the next item, then the previous one
-    # when deleting the final loaded item. Do not reset to the first 60 assets.
-    assets[:] = [make_asset(index) for index in range(1, 66)]
-    page.goto(f"{BASE_URL}/library", wait_until="networkidle")
-    page.get_by_role("button", name="加载更多").click()
+    # Cursor-boundary navigation never wraps, stale cursor response cannot contaminate search.
+    page.goto(f"{BASE_URL}/library?asset=asset-60", wait_until="networkidle")
+    viewer = page.locator('dialog[aria-label="图片查看"]')
+    flags["fail_cursor"] = True
+    viewer.get_by_role("button", name="下一张", exact=True).click()
+    expect(viewer.get_by_role("alert")).to_contain_text("Page unavailable")
+    expect(viewer.get_by_text("Asset 60", exact=True)).to_be_visible()
+    viewer.get_by_role("button", name="下一张", exact=True).click()
+    expect(viewer.get_by_text("Asset 61", exact=True)).to_be_visible()
     expect(page.locator("article")).to_have_count(65)
-    page.locator("article").filter(has_text="Asset 64").get_by_title("预览", exact=True).click()
-    queries_before = len(asset_queries)
-    preview.get_by_role("button", name="删除图片", exact=True).click()
-    expect(preview.locator("header strong")).to_have_text("Asset 65")
-    expect(preview.get_by_role("button", name="删除图片", exact=True)).to_be_enabled()
-    expect(page.locator("article")).to_have_count(64)
-    assert len(asset_queries) == queries_before
-    page.keyboard.press("Delete")
-    expect(preview.locator("header strong")).to_have_text("Asset 63")
-    expect(preview.get_by_role("button", name="下一张")).to_be_enabled()
-    assert batch_calls[-1]["selection"]["assetIds"] == ["asset-65"]
-    expect(page.locator("article")).to_have_count(63)
     page.keyboard.press("Escape")
-    expect(preview).to_have_count(0)
-
-    # Deleting the page boundary loads the following cursor page automatically.
-    assets[:] = [make_asset(index) for index in range(1, 66)]
     page.goto(f"{BASE_URL}/library", wait_until="networkidle")
+    flags["hold_page"] = True
+    page.get_by_role("button", name="加载更多", exact=True).click()
+    page.wait_for_timeout(100)
+    assert held_pages
+    page.get_by_placeholder("搜索名称、文件名、备注或标签").fill("Front")
+    expect(page.locator("article")).to_have_count(1)
+    flags["hold_page"] = False
+    route, response = held_pages.pop()
+    try: route.fulfill(json=response)
+    except Exception: pass  # The browser may have already cancelled the old request.
+    page.wait_for_timeout(150)
+    expect(page.locator("article")).to_have_count(1)
+    page.go_back(wait_until="networkidle")
+    expect(page.get_by_placeholder("搜索名称、文件名、备注或标签")).to_have_value("")
     expect(page.locator("article")).to_have_count(60)
-    page.locator("article").filter(has_text="Asset 60").get_by_title("预览", exact=True).click()
+
+    # Batch tags commit on Apply; not while composing suggestions.
+    page.locator("article input[type=checkbox]").first.check()
+    page.get_by_role("button", name="加标签", exact=True).click()
+    tag_dialog = page.get_by_role("dialog", name="批量添加标签", exact=True)
+    tag_dialog.get_by_placeholder("输入标签并按回车").fill("red")
+    tag_dialog.get_by_placeholder("输入标签并按回车").press("Enter")
+    tag_dialog.get_by_role("button", name="应用标签", exact=True).click()
+    expect(tag_dialog).to_have_count(0)
+    assert calls[-1]["tags"]["add"] == ["red"]
+
+    # Query selection, exclusions and partial permission failures retain failed selection.
+    page.get_by_role("button", name="选择已加载 60 张", exact=True).click()
+    page.get_by_role("button", name="选择全部匹配", exact=True).click()
+    page.locator("article input[type=checkbox]").first.uncheck()
+    page.locator('[class*="batchBar"]').get_by_role("button", name="收藏", exact=True).click()
+    assert calls[-1]["selection"]["mode"] == "query"
+    assert calls[-1]["selection"]["excludedAssetIds"] == ["asset-1"]
+    expect(page.locator('[class*="batchBar"]')).to_have_count(0)
+    page.wait_for_function("!document.querySelector('[aria-busy=true]')")
+    page.locator("article input[type=checkbox]").nth(5).check()
+    page.locator("article input[type=checkbox]").nth(6).check()
+    page.get_by_text("更多", exact=True).click()
+    page.get_by_role("button", name="设为个人", exact=True).click()
+    expect(page.get_by_text("已选择 1 张", exact=True)).to_be_visible()
+    expect(page.get_by_text("Asset 7：Read only", exact=True)).to_be_visible()
+    page.get_by_role("button", name="取消选择").click()
+
+    page.locator("article input[type=checkbox]").first.check()
+    page.locator('[class*="batchBar"]').get_by_role("button", name="加标签", exact=True).focus()
     page.keyboard.press("Delete")
-    expect(preview.locator("header strong")).to_have_text("Asset 61")
-    expect(preview.get_by_role("button", name="删除图片", exact=True)).to_be_enabled()
-    expect(page.locator("article")).to_have_count(64)
-    assert asset_queries[-1].get("cursor") == ["next-page"]
-    page.keyboard.press("Escape")
+    batch_confirm = page.get_by_role("dialog", name="永久删除图片", exact=True)
+    before = len(calls)
+    batch_confirm.get_by_role("button", name="取消", exact=True).click()
+    assert len(calls) == before
+    page.get_by_role("button", name="取消选择").click()
 
-    assets[:] = [make_asset(index) for index in range(1, 66)]
-    page.goto(f"{BASE_URL}/library", wait_until="networkidle")
-    expect(page.locator("article")).to_have_count(60)
-    page.locator("article").filter(has_text="Asset 60").get_by_title("预览", exact=True).click()
-    fail_cursor_page[0] = True
+    # Every delete path confirms; cancelled deletion performs zero writes. Failures keep viewer.
+    page.goto(f"{BASE_URL}/library?asset=asset-1", wait_until="networkidle")
+    viewer = page.locator('dialog[aria-label="图片查看"]')
     page.keyboard.press("Delete")
-    expect(preview.locator("header strong")).to_have_text("Asset 59")
-    expect(preview.get_by_role("alert")).to_contain_text("Cursor page unavailable")
-    expect(page.locator("article")).to_have_count(59)
-    expect(preview.get_by_role("button", name="删除图片", exact=True)).to_be_enabled()
-    page.keyboard.press("Escape")
-    page.get_by_role("button", name="加载更多").click()
-    expect(page.locator("article")).to_have_count(64)
+    confirm = page.get_by_role("dialog", name="永久删除图片", exact=True)
+    before = len(calls)
+    confirm.get_by_role("button", name="取消", exact=True).click()
+    assert len(calls) == before
+    page.keyboard.press("Delete")
+    flags["fail_delete"] = True
+    confirm.get_by_role("button", name="确认删除", exact=True).click()
+    expect(confirm.get_by_text("Object cleanup failed", exact=True)).to_be_visible()
+    expect(viewer).to_be_visible()
+    confirm.get_by_role("button", name="确认删除", exact=True).click()
+    expect(confirm).to_have_count(0)
+    expect(viewer).to_have_count(0)
 
-    # Batch deletion submits immediately and clears the selection.
-    assets[:] = [make_asset(index) for index in (1, 2)]
-    page.goto(f"{BASE_URL}/library", wait_until="networkidle")
-    expect(page.locator("article")).to_have_count(2)
-    page.locator("article > button").nth(0).click()
-    page.locator("article > button").nth(1).click()
-    page.get_by_role("button", name="删除", exact=True).click()
-    expect(page.get_by_text("暂无图片", exact=True)).to_be_visible()
-    assert set(batch_calls[-1]["selection"]["assetIds"]) == {"asset-1", "asset-2"}
-    assert not ignored_dialogs
-    page.remove_listener("dialog", dismiss_unexpected)
+    # 25 receipts, supported snapshots, retry only by operator and cancellation of waiting files.
+    files = [{"name": "duplicate.png" if i == 1 else "failure.png" if i == 2 else f"image-{i}.png", "mimeType": "image/png", "buffer": PIXEL} for i in range(25)]
+    page.locator('input[type="file"]').set_input_files(files)
+    importer = page.get_by_role("dialog", name="导入图片", exact=True)
+    importer.get_by_label("目标图集").select_option("campaign")
+    importer.get_by_label("共享范围", exact=True).select_option("private")
+    importer.get_by_role("button", name="开始导入").click()
+    queue = page.get_by_role("region", name="导入队列", exact=True)
+    expect(queue.get_by_text("导入队列 25/25", exact=True)).to_be_visible()
+    assert len(imports) == 25
+    assert all('name="visibility"\r\n\r\nprivate' in raw and '["campaign"]' in raw for _, raw in imports)
+    queue.get_by_role("button", name="重试", exact=True).click()
+    expect(queue.get_by_role("button", name="重试", exact=True)).to_have_count(0)
+    assert len(imports) == 26
+    flags["hold_import"] = True
+    page.locator('input[type="file"]').set_input_files(files[:3])
+    page.get_by_role("dialog", name="导入图片", exact=True).get_by_role("button", name="开始导入").click()
+    page.wait_for_timeout(100)
+    assert len(held_imports) == 1
+    queue.get_by_role("button", name="取消等待项").click()
+    flags["hold_import"] = False
+    held_imports.pop().fulfill(json={"status": "imported"})
+    expect(queue.get_by_text("导入队列 28/28", exact=True)).to_be_visible()
+    expect(queue.get_by_text(re.compile("取消 2"))).to_be_visible()
+    assert len(imports) == 27
+    queue.get_by_role("button", name="清除已结束").click()
+    expect(queue).to_have_count(0)
+    before = len(imports)
+    page.locator('input[type="file"]').set_input_files({"name": "unsupported.txt", "mimeType": "text/plain", "buffer": b"unsupported"})
+    page.get_by_role("dialog", name="导入图片", exact=True).get_by_role("button", name="开始导入").click()
+    expect(queue.get_by_text("导入队列 1/1", exact=True)).to_be_visible()
+    assert queue.get_by_role("button", name="重试", exact=True).count() == 0
+    assert len(imports) == before
+    queue.get_by_role("button", name="清除已结束").click()
 
-    metrics = page.evaluate("() => ({ viewportWidth: innerWidth, documentWidth: document.documentElement.scrollWidth, bodyWidth: document.body.scrollWidth })")
-    assert metrics["documentWidth"] <= metrics["viewportWidth"] + 1 and metrics["bodyWidth"] <= metrics["viewportWidth"] + 1, f"{name}: horizontal overflow {metrics}"
-    assert all("role" not in params for params in asset_queries), f"{name}: legacy role query observed"
-    assert not browser_errors, f"{name}: browser errors: {' | '.join(browser_errors)}"
-    print(f"{name} screenshot: {screenshot}")
-    page.close()
+    # Typed smart folder field changes reset operator/value to valid combinations.
+    page.get_by_title("新建智能文件夹").click()
+    smart = page.get_by_role("dialog", name="新建智能文件夹", exact=True)
+    smart.get_by_label("名称", exact=True).fill("Large pictures")
+    smart.get_by_label("条件字段").select_option("width")
+    assert smart.get_by_label("条件操作符").locator("option").all_text_contents() == ["等于", "大于等于", "小于等于"]
+    smart.get_by_label("条件操作符").select_option("gte")
+    smart.get_by_label("条件值").fill("1200")
+    smart.get_by_role("button", name="保存", exact=True).click()
+    assert calls[-1]["organizer"]["conditions"][0]["value"] == 1200
+    expect(smart).to_have_count(0)
+    page.get_by_title("新建图集").click()
+    form = page.get_by_role("dialog", name="新建图集", exact=True)
+    form.get_by_label("图集名称").fill("New collection")
+    form.get_by_role("button", name="保存", exact=True).click()
+    expect(form).to_have_count(0)
 
+    # Screenshots and containment across all themes and both layouts.
+    page.screenshot(path=os.path.join(tempfile.gettempdir(), f"fluxpost-gallery-{name}.png"))
+    page.goto(f"{BASE_URL}/library?asset=asset-2", wait_until="networkidle")
+    page.keyboard.press("Tab")
+    assert page.evaluate("!!document.activeElement.closest('dialog[open]')"), "Modal focus must stay in the viewer"
+    page.screenshot(path=os.path.join(tempfile.gettempdir(), f"fluxpost-gallery-viewer-{name}.png"))
+    metrics = page.evaluate("({view:innerWidth,doc:document.documentElement.scrollWidth,body:document.body.scrollWidth})")
+    assert metrics["doc"] <= metrics["view"] + 1 and metrics["body"] <= metrics["view"] + 1, metrics
+    assert not errors, errors
+    assert not unknown, unknown
+    print(f"PASS {name}: filters/history, viewer/drafts, paging, permissions, confirms, imports, smart folders and containment")
+    context.close()
 
 with sync_playwright() as playwright:
-    launch_options = {"headless": True}
-    if CHROME:
-        launch_options["executable_path"] = CHROME
-    browser = playwright.chromium.launch(**launch_options)
+    options = {"headless": True}
+    if CHROME: options["executable_path"] = CHROME
+    browser = playwright.chromium.launch(**options)
     try:
-        viewports = [("desktop", 1440, 960), ("mobile", 390, 844)]
-        target = os.environ.get("FLUXPOST_BROWSER_VIEWPORT")
-        selected_viewports = [viewport for viewport in viewports if not target or viewport[0] == target]
-        for item in selected_viewports:
-            run_viewport(browser, item)
-        print(f"Unified library browser check passed for {', '.join(item[0] for item in selected_viewports)} without live services.")
-    finally:
-        browser.close()
+        for theme in ["professional", "editorial", "creator"]:
+            for width, height in [(1440, 960), (390, 844)]:
+                try: run_case(browser, theme, width, height)
+                except Exception:
+                    failed = browser.contexts[-1].pages[-1]
+                    failed.screenshot(path=os.path.join(tempfile.gettempdir(), "fluxpost-gallery-failure.png"))
+                    print(failed.locator("dialog").evaluate_all("nodes => nodes.map(n => ({label:n.getAttribute('aria-label'), open:n.open, inputs:[...n.querySelectorAll('input,textarea')].map(x=>({value:x.value,disabled:x.disabled})),text:n.innerText})).map(x=>JSON.stringify(x)).join('\\n')"), flush=True)
+                    raise
+    finally: browser.close()

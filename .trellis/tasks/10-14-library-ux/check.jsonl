@@ -1,0 +1,3 @@
+{"file":".trellis/spec/fluxpost/verification.md","reason":"Existing deterministic baseline and isolated browser checks"}
+{"file":".trellis/spec/fluxpost/unified_library.md","reason":"Query/status/descendant/date, viewer and management assertions"}
+{"file":".trellis/spec/frontend/quality-guidelines.md","reason":"Source lint/types/build, keyboard dialogs and 1440/390 containment"}

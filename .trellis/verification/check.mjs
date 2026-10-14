@@ -24,6 +24,7 @@ const nodeChecks = [
   ["Workspace accounts check", "workspace_accounts_check.mjs"],
   ["Reference library assets check", "library_assets_check.mjs"],
   ["Library batch collections check", "library_collection_batch_check.mjs"],
+  ["Gallery filters and date boundaries", "library_ui_check.mjs"],
   ["Library thumbnail cache check", "library_thumbnails_check.mjs"],
   ["Vehicle library check", "vehicle_library_check.mjs"],
   ["Unified library runtime check", "unified_library_runtime_check.mjs"],

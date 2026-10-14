@@ -26,7 +26,7 @@ export const libraryImageTypeLabels: Record<LibraryImageType, string> = {
   other: "其他",
 };
 
-const libraryAngleLabels: Record<string, string> = {
+export const libraryAngleLabels: Record<string, string> = {
   front: "正前",
   front_left_three_quarter: "左前 45°",
   left_side: "左侧",
