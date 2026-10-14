@@ -17,7 +17,7 @@ Implement the complete user-approved gallery UX plan and deliver a verified loca
 - [x] Focused runtime and mocked browser checks cover filtering/history/stale pages, viewer drafts/zoom, >20 imports/retry/cancel, permissions/partial failures and delete cancellation.
 - [x] Three themes at 1440/390px, keyboard focus and no horizontal overflow.
 - [x] Full baseline or documented unchanged blocker with remaining checks run separately.
-- [ ] Scoped commit then clean primary-worktree port-3001 activation and identity check.
+- [x] Scoped commit then clean primary-worktree port-3001 activation and identity check.
 
 ## Notes
 

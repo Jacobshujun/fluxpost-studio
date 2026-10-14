@@ -23,4 +23,6 @@ These predate the task (also recorded by the September 30 feature evidence). No 
 
 ## Delivery gate
 
-Commit the verified scoped work, activate with `npm run local:lan` to preserve the existing 0.0.0.0 binding, and require `/api/version` plus candidate HTTP smoke to match clean primary-worktree HEAD. No push or remote deployment.
+Verified implementation commit: `3147e1953ee5deeafdc5172a40b34068069bec69`. `npm run local:lan` built it from the clean primary worktree into `.next-local-b` and activated `0.0.0.0:3001`; `/api/version`, slot/state manifests and candidate HTTP smoke passed with that exact SHA. No push or remote deployment.
+
+After archive/journal commits, repeat `npm run local:lan` and require `/api/version` to match final clean HEAD. The ignored `.fluxpost-local-candidate.json` and active-slot `.fluxpost-commit` record the final runtime receipt; no application code changes are needed for bookkeeping. Real authenticated operator/TOS/AI acceptance remains pending.
