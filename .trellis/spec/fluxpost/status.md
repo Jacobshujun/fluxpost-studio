@@ -1,12 +1,14 @@
 # FluxPost Current Status
 
-Last updated: 2026-10-14
+Last updated: 2026-10-19
 
 ## One-Line Status
 
-Gallery UX verified and delivered locally: generic filters, unified viewer and management; six mocked theme/viewport checks pass. Authenticated operator review remains.
+Canvas scheduling incident diagnosed read-only: expired ordinary runs do not recover, while eight live image-processing runs occupy all worker slots. Recovery and repairs are proposed, not executed; gallery operator review remains.
 
 ## Current Focus
+
+- 2026-10-19: Canvas scheduling diagnosis only. Reported video batch has 30/38 completed main tasks and eight abandoned collection runs with expired leases and pending cancellation. Current process has eight live image-processing runs occupying all execution slots; newer launches persist but wait. HTTP identity responds and PostgreSQL shows no blocking locks. Exact image substep and original collection/process-exit trigger remain unconfirmed. All deterministic baseline checks pass before the existing 17 runtime-import lint errors stop execution. No runtime writes, retries, provider calls or restart. Evidence and recovery proposal: archived `10-19-canvas-schedule-lockup/diagnosis.md`.
 
 - 2026-10-14: Both gallery UX phases implemented. Filter/date/URL, library runtime/batch and six 1440/390 three-theme browser checks pass, along with source lint, types, build and HTTP/SQLite checks. Full baseline stops only at 17 pre-existing lint errors in ignored `data/feishu-copy-import` scripts; remaining steps pass separately. Clean implementation 3147e19 activated with `npm run local:lan`; identity/smoke and 0.0.0.0 binding pass. Evidence: archived library-ux task; final runtime SHA is recorded in the ignored candidate state. No external calls or real asset mutations used.
 
@@ -16,7 +18,7 @@ Gallery UX verified and delivered locally: generic filters, unified viewer and m
 
 ## Next Entry
 
-Authenticated operator review of `/library`: combined filters, original viewing/draft guards, import receipts and batch organization. Preserve provider and migration acceptance gates.
+Review Canvas recovery/repair proposal before runtime actions: preserve completed outputs, reconcile abandoned cancellation, release live image starvation and add bounded cancellation/recovery. Then resume authenticated `/library` operator review. Preserve provider and migration acceptance gates.
 
 ## Risks And Unknowns
 
