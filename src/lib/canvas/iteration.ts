@@ -4,7 +4,7 @@ import { CANVAS_GRAPH_LIMITS } from "./types";
 import type { CanvasArtifact, CanvasGraph, CanvasIterationDefinition, CanvasNode, CanvasNodeConfig, CanvasNodeType, CanvasPortDefinition } from "./types";
 
 export const canvasIterationAllowedNodeTypes: readonly CanvasNodeType[] = [
-  "input.iteration-item", "input.text", "input.images", "model.gpt-text", "model.gpt-image", "model.gpt-vision",
+  "input.iteration-item", "input.text", "input.images", "model.gpt-text", "model.gemini", "model.gpt-image", "model.gpt-vision",
   "utility.prompt-template", "utility.text-concatenate", "utility.prompt-switch", "utility.text-split",
   "utility.image-select", "utility.image-transform", "utility.image-process", "utility.media-mask", "utility.image-preview", "utility.display-any",
 ];

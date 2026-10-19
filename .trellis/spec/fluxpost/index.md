@@ -18,6 +18,7 @@ This layer is the project-specific operating memory migrated from the previous H
 | [rules.md](./rules.md) | Context budgets, history-reading rules, recording policy, and quality rules. |
 | [project_brief.md](./project_brief.md) | Confirmed product, stack, flow, data, deployment, and integration facts. |
 | [verification.md](./verification.md) | Baseline and manual verification commands. |
+| [gemini.md](./gemini.md) | Canvas native Gemini text/vision, configuration and offline validation. |
 | [pitfalls.md](./pitfalls.md) | Known traps and integration risks. |
 | [architecture_rules.md](./architecture_rules.md) | Module, data, deployment, and Trellis boundaries. |
 | [unified_library.md](./unified_library.md) | Unified image asset, collection, smart-folder, query, migration, and performance contracts. |

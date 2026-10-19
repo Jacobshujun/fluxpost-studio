@@ -2,6 +2,7 @@ import { existsSync, readFileSync, writeFileSync } from "node:fs";
 import path from "node:path";
 import { legacyRouteRequestFormat, normalizeToApisRequestFormat } from "./image-model-options";
 import { normalizeFeishuTableId } from "./feishu-table-id";
+import { normalizeGeminiModel } from "./gemini-contract";
 import type { ConfigStatus } from "./types";
 import { getDatabaseRuntimeStatus } from "./database";
 import type { AdvancedConfigPatch, AdvancedConfigPatchValue, AdvancedConfigSnapshot } from "./types";
@@ -53,6 +54,7 @@ export const appConfig = ((globalThis as AppConfigGlobalState).__fluxpostAppConf
 function readAppConfig() {
   const imageProxy = readImageProxyConfig(process.env);
   return {
+  ...readGeminiConfig(process.env),
   tikhubBaseUrl: process.env.TIKHUB_BASE_URL || "https://api.tikhub.io",
   tikhubApiKey: process.env.TIKHUB_API_KEY || "",
   openaiBaseUrl: normalizeBaseUrl(process.env.OPENAI_BASE_URL || "https://api.openai.com/v1"),
@@ -318,6 +320,36 @@ function normalizeOptionalBaseUrl(value: string) {
   return trimmed ? normalizeBaseUrl(trimmed) : "";
 }
 
+function readGeminiConfig(environment: NodeJS.ProcessEnv) {
+  const geminiBaseUrl = validateGeminiUrl(environment.GEMINI_BASE_URL?.trim() || "https://generativelanguage.googleapis.com/v1beta", "GEMINI_BASE_URL");
+  const geminiProxyUrl = environment.GEMINI_PROXY_URL?.trim() || "http://127.0.0.1:10808";
+  validateGeminiUrl(geminiProxyUrl, "GEMINI_PROXY_URL");
+  const proxyValue = environment.GEMINI_PROXY_ENABLED?.trim().toLowerCase();
+  if (proxyValue && proxyValue !== "true" && proxyValue !== "false") throw new Error("GEMINI_PROXY_ENABLED must be true or false.");
+  const geminiRequestTimeoutMs = Number(environment.GEMINI_REQUEST_TIMEOUT_MS || 180_000);
+  if (!Number.isSafeInteger(geminiRequestTimeoutMs) || geminiRequestTimeoutMs < 1 || geminiRequestTimeoutMs > 2_147_483_647) {
+    throw new Error("GEMINI_REQUEST_TIMEOUT_MS must be a positive integer below 2147483648.");
+  }
+  return {
+    geminiApiKey: environment.GEMINI_API_KEY?.trim() || "",
+    geminiBaseUrl,
+    geminiModel: normalizeGeminiModel(environment.GEMINI_MODEL || ""),
+    geminiProxyEnabled: proxyValue === "true",
+    geminiProxyUrl,
+    geminiRequestTimeoutMs,
+  };
+}
+
+function validateGeminiUrl(value: string, key: string) {
+  let parsed: URL;
+  try { parsed = new URL(value); } catch { throw new Error(`${key} must be an HTTP(S) URL.`); }
+  if (!["http:", "https:"].includes(parsed.protocol) || parsed.username || parsed.password || parsed.search || parsed.hash) {
+    throw new Error(`${key} must be an HTTP(S) URL without credentials, query or fragment.`);
+  }
+  if (key === "GEMINI_PROXY_URL" && parsed.pathname !== "/") throw new Error("GEMINI_PROXY_URL must not contain a path.");
+  return parsed.toString().replace(/\/+$/, "");
+}
+
 function readImageProxyConfig(environment: NodeJS.ProcessEnv) {
   const openaiImageProxyUrl = normalizeImageProxyUrl(environment.OPENAI_IMAGE_PROXY_URL ?? (process.platform === "win32" ? "http://127.0.0.1:10808" : ""));
   const openaiImageProxyEnabled = booleanOrDefault(environment.OPENAI_IMAGE_PROXY_ENABLED, Boolean(openaiImageProxyUrl));
@@ -519,6 +551,19 @@ const advancedConfigGroups: ConfigDefinitionGroup[] = [
         options: ["responses", "chat"],
         read: () => appConfig.openaiTextEndpoint,
       }),
+    ],
+  },
+  {
+    id: "gemini",
+    title: "Gemini",
+    description: "画布 Gemini 文本与图片理解，使用独立的原生接口配置。",
+    fields: [
+      configField("GEMINI_API_KEY", "Gemini API Key", "Gemini 原生接口密钥，页面不会回显。", "secret", "gemini", { configured: () => Boolean(appConfig.geminiApiKey) }),
+      configField("GEMINI_BASE_URL", "Gemini Base URL", "原生 API 根地址，包含版本路径。", "text", "gemini", { read: () => appConfig.geminiBaseUrl }),
+      configField("GEMINI_MODEL", "Gemini 默认模型", "填写服务支持的模型 ID；节点可单独覆盖。", "text", "gemini", { read: () => appConfig.geminiModel }),
+      configField("GEMINI_PROXY_ENABLED", "Gemini 使用代理", "仅影响 Gemini 模型请求，保存后对后续请求生效。", "boolean", "gemini", { read: () => String(appConfig.geminiProxyEnabled) }),
+      configField("GEMINI_PROXY_URL", "Gemini 代理地址", "独立的 HTTP(S) 代理地址。", "text", "gemini", { read: () => appConfig.geminiProxyUrl }),
+      configField("GEMINI_REQUEST_TIMEOUT_MS", "Gemini 请求超时毫秒", "包含图片准备、排队和模型响应的总超时。", "number", "gemini", { read: () => String(appConfig.geminiRequestTimeoutMs) }),
     ],
   },
   {
@@ -784,6 +829,14 @@ function normalizeAdvancedConfigPatch(patch: AdvancedConfigPatch) {
       else environment[key] = value;
     }
     readImageProxyConfig(environment);
+  }
+  if (Object.keys(result).some((key) => key.startsWith("GEMINI_"))) {
+    const environment = { ...process.env };
+    for (const [key, value] of Object.entries(result)) {
+      if (value === "") delete environment[key];
+      else environment[key] = value;
+    }
+    readGeminiConfig(environment);
   }
   return result;
 }

@@ -282,6 +282,7 @@ function loadTypeScriptModule(source, fileName, stubs) {
     (name) => {
       if (name === "node:crypto") return require("node:crypto");
       if (name === "./directory-snapshots") return {};
+      if (name === "../gemini") return {};
       if (Object.hasOwn(stubs, name)) return stubs[name];
       if (name === "../image-model-options") return loadTypeScriptModule(read("src/lib/image-model-options.ts"), "image-model-options.ts", {});
       throw new Error(`Unexpected ${fileName} import: ${name}`);

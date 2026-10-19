@@ -9,6 +9,7 @@ import { normalizeImageModel, normalizeToApisRequestFormat } from "../image-mode
 import { validateImageBackground } from "../image-providers/contracts";
 import { IMAGE_NETWORK_WAIT_REASON, isImageNetworkUnavailableError } from "../image-transport";
 import { callOpenAIForText, callOpenAIForVisionText } from "../openai";
+import { callGeminiForText, GeminiNeedsConfigError } from "../gemini";
 import type { GeneratedPost, ImageGenerationQuality, SourceImageTask } from "../types";
 import type { WorkspaceAccessActor } from "../workspace-ownership";
 import { ArkSeedanceNeedsConfigError, queryArkSeedanceVideo, submitArkSeedanceVideo } from "./seedance";
@@ -99,6 +100,7 @@ const executors: Record<CanvasNode["type"], CanvasNodeExecutor> = {
   "input.copy-library": executeLiteralNode,
   "input.competitor-workbook": executeLiteralNode,
   "model.gpt-text": executeGptText,
+  "model.gemini": executeGemini,
   "model.gpt-image": executeGptImage,
   "model.gpt-image-each": executeGptImageEach,
   "model.gpt-vision": executeGptVision,
@@ -378,6 +380,17 @@ async function executeGptText({ node, inputs }: CanvasNodeExecutionContext) {
   const prompt = source ? `${instruction}\n\n输入：\n${source}` : instruction;
   const value = await callOpenAIForText(prompt, { logLabel: `Canvas GPT text node ${node.id}` });
   return { outputs: { text: { kind: "text" as const, value } } };
+}
+
+async function executeGemini({ node, inputs, account, signal }: CanvasNodeExecutionContext) {
+  const prompt = [String(node.config.instruction || "").trim(), ...textValues(inputs.prompt)].filter(Boolean).join("\n\n");
+  try {
+    const value = await callGeminiForText({ prompt, images: imageItems(inputs.images), model: String(node.config.model || ""), account, signal });
+    return { outputs: { text: { kind: "text" as const, value } } };
+  } catch (error) {
+    if (error instanceof GeminiNeedsConfigError) throw new CanvasNeedsConfigError(error.message);
+    throw error;
+  }
 }
 
 async function executeImageProcess({ node, inputs, account, signal }: CanvasNodeExecutionContext): Promise<CanvasNodeExecutionResult> {

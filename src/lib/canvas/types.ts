@@ -317,6 +317,7 @@ export type CanvasNodeType =
   | "input.copy-library"
   | "input.competitor-workbook"
   | "model.gpt-text"
+  | "model.gemini"
   | "model.gpt-image"
   | "model.gpt-image-each"
   | "model.gpt-vision"

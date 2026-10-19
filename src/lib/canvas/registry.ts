@@ -232,6 +232,27 @@ const canvasNodeDefinitionVersions: CanvasNodeDefinition[] = [
     defaultConfig: { path: "", worksheet: "文案汇总", rowNumber: 2, cardIndex: 1, snapshot: undefined, rowTitle: "", rowBody: "", cardText: "" },
   },
   {
+    type: "model.gemini",
+    version: 1,
+    label: "Gemini",
+    description: "使用 Gemini 生成文本或理解最多 8 张图片。",
+    category: "model",
+    icon: "Sparkles",
+    color: "#4285f4",
+    inputs: [
+      { id: "prompt", label: "输入文字", kind: "text", multiple: true },
+      { id: "images", label: "图片", kind: "images", multiple: true },
+    ],
+    outputs: [{ id: "text", label: "结果", kind: "text" }],
+    fields: [
+      { key: "instruction", label: "节点指令", kind: "textarea" },
+      { key: "model", label: "模型 ID", kind: "text", placeholder: "留空使用 Gemini 默认模型" },
+    ],
+    defaultConfig: { instruction: "请根据输入文字和图片完成任务，使用中文回答。", model: "" },
+    capability: "text_model",
+    bypass: { inputPort: "prompt", outputPort: "text" },
+  },
+  {
     type: "model.gpt-text",
     version: 1,
     label: "GPT 文本",

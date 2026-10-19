@@ -6878,6 +6878,7 @@ function iconForNode(type: CanvasNodeType) {
   if (type === "input.copy-library") return <BookOpenText {...props} />;
   if (type === "input.competitor-workbook") return <Sheet {...props} />;
   if (type === "model.gpt-text") return <Sparkles {...props} />;
+  if (type === "model.gemini") return <Sparkles {...props} />;
   if (type === "model.gpt-image") return <WandSparkles {...props} />;
   if (type === "model.gpt-image-each") return <GalleryHorizontalEnd {...props} />;
   if (type === "model.gpt-vision") return <Search {...props} />;

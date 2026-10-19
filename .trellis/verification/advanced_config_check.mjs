@@ -200,6 +200,44 @@ function checkImageProxyConfiguration() {
   assert.equal(noAddress.config.appConfig.openaiImageProxyUrl, "");
 }
 
+{
+  const runtime = loadConfig("win32");
+  const worker = runtime.config.appConfig;
+  assert.equal(worker.geminiModel, "");
+  assert.equal(worker.geminiProxyEnabled, false);
+  assert.equal(worker.geminiRequestTimeoutMs, 180000);
+  const api = runtime.loadModule();
+  api.saveAdvancedConfigPatch({ values: {
+    GEMINI_API_KEY: "fixture-gemini-secret", GEMINI_BASE_URL: "https://gemini.example/v1beta/",
+    GEMINI_MODEL: "models/fixture-flash", GEMINI_PROXY_ENABLED: true,
+    GEMINI_PROXY_URL: "http://127.0.0.1:10809", GEMINI_REQUEST_TIMEOUT_MS: 1000,
+  } });
+  assert.equal(worker.geminiModel, "fixture-flash");
+  assert.equal(worker.geminiBaseUrl, "https://gemini.example/v1beta");
+  assert.equal(worker.geminiProxyEnabled, true);
+  assert.equal(worker.geminiProxyUrl, "http://127.0.0.1:10809");
+  assert.equal(runtime.loadModule().appConfig.geminiApiKey, "fixture-gemini-secret");
+  const key = api.getAdvancedConfigSnapshot().groups.find((group) => group.id === "gemini").fields.find((field) => field.key === "GEMINI_API_KEY");
+  assert.equal(key.configured, true);
+  assert.equal(key.value, undefined);
+  assert.ok(!JSON.stringify(api.getAdvancedConfigSnapshot()).includes("fixture-gemini-secret"));
+  for (const values of [
+    { GEMINI_BASE_URL: "https://secret:password@example.test/v1beta" },
+    { GEMINI_BASE_URL: "https://example.test/v1beta?key=secret" },
+    { GEMINI_MODEL: "../../invalid" }, { GEMINI_PROXY_URL: "socks5://localhost:1080" },
+    { GEMINI_PROXY_URL: "http://localhost:1080/proxy" }, { GEMINI_REQUEST_TIMEOUT_MS: 1.5 },
+  ]) {
+    const before = runtime.persisted();
+    assert.throws(() => api.saveAdvancedConfigPatch({ values }));
+    assert.equal(runtime.persisted(), before, "invalid patch must not reach disk");
+    assert.equal(worker.geminiModel, "fixture-flash");
+  }
+  api.saveAdvancedConfigPatch({ values: { GEMINI_API_KEY: null, GEMINI_MODEL: null, GEMINI_PROXY_ENABLED: false } });
+  assert.equal(worker.geminiApiKey, "");
+  assert.equal(worker.geminiModel, "");
+  assert.equal(worker.geminiProxyEnabled, false);
+}
+
 function loadConfig(platform, values = {}, persisted = "") {
   const configPath = path.join(projectRoot, "isolated-config-fixture", ".env.local");
   const environment = { ...values, FLUXPOST_CONFIG_FILE: configPath };
@@ -232,6 +270,7 @@ function loadConfig(platform, values = {}, persisted = "") {
       URL,
       require: (name) => {
         if (name === "./image-model-options") return load("src/lib/image-model-options.ts");
+        if (name === "./gemini-contract") return load("src/lib/gemini-contract.ts");
         if (name === "node:fs") return fakeFs;
         if (name === "./database") return { getDatabaseRuntimeStatus: () => ({}) };
         if (name === "./feishu-table-id") return load("src/lib/feishu-table-id.ts");

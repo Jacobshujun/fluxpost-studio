@@ -9,6 +9,19 @@
   ],
   "features": [
     {
+      "id": "canvas-gemini-node",
+      "title": "Canvas Gemini native text and vision node",
+      "status": "ready_for_review",
+      "definition_of_done": [
+        "Native text/ordered images produce text across ordinary, V2 and iteration workflows with independent live config, proxy and cancellation",
+        "Offline provider/config/graph/browser checks and local activation pass; live provider acceptance is explicit"
+      ],
+      "evidence": [
+        "2026-10-19 loopback native HTTP/CONNECT proxy, limits/errors/cancellation, source/built config synchronization, Canvas executor/graph/iteration/V2/bypass and six three-theme 1440/390 node/config browser cases pass; canvas-gemini-node task."
+      ],
+      "notes": "Local activation pending verified commit. Real Gemini acceptance remains pending; no live model calls."
+    },
+    {
       "id": "canvas-local-image-save",
       "title": "Canvas host-local image save folders",
       "status": "ready_for_review",
