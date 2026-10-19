@@ -4,11 +4,11 @@ Last updated: 2026-10-19
 
 ## One-Line Status
 
-Local NVIDIA H.264 support is verified and configured for RTX 5880 Ada; commit/activation next. Canvas cancellation recovery is active and completed outputs preserved. Gallery operator review remains.
+Local RTX 5880 Ada NVENC video encoding is active on LAN port 3001, with video concurrency 1. Canvas cancellation recovery remains active and completed outputs preserved. Gallery operator review remains.
 
 ## Current Focus
 
-- 2026-10-19: Added explicit CPU/NVIDIA H.264 selection across five Canvas video paths. Real NVENC output/reconstruction/layer/slideshow checks and CPU baseline pass; local setting resolves h264_nvenc with video concurrency 1. Types, source lint, build and isolated HTTP/SQLite pass; full baseline stops only at 17 existing runtime-import lint errors. Decode/filters/audio remain CPU; unsupported tiny GPU dimensions fail explicitly. Commit/activation next; task `10-19-canvas-nvenc`.
+- 2026-10-19: Explicit CPU/NVIDIA H.264 selection across five Canvas video paths is active. Real NVENC output/reconstruction/layer/slideshow/mask checks and CPU baseline pass; local setting resolves h264_nvenc with video concurrency 1. Types, source lint, build and isolated HTTP/SQLite pass; baseline stops only at 17 existing runtime-import lint errors. Per user instruction, waited for the new 20-item batch to drain before clean d031d1a LAN activation; full-SHA identity/smoke/0.0.0.0:3001 pass. Decode/filters/audio remain CPU; unsupported tiny GPU dimensions fail explicitly. Evidence: archived canvas-nvenc task and canvas_video_encoding.md.
 
 - 2026-10-19: Cancellation repair passes focused worker/resource/storage/scheduler/iteration tests, real PostgreSQL temporary-table SQL, types, changed-source lint, standalone build/native encoder and isolated HTTP/SQLite checks. Full baseline reaches unchanged 17 runtime-import lint errors. Clean code commit 52c8c00 activated through `npm run local:lan`; identity/smoke and 0.0.0.0 binding pass. Scoped backups precede eight abandoned cancellations and eight dead-worker image resumes. Read-only verification confirms original 30 completed snapshots unchanged; both queued batches now running and 11 image nodes completed. Evidence: archived cancellation-recovery task.
 
@@ -22,7 +22,7 @@ Local NVIDIA H.264 support is verified and configured for RTX 5880 Ada; commit/a
 
 ## Next Entry
 
-Commit and activate the verified GPU encoding implementation after confirming no active execution. Then observe normal operator video/cancellation behavior and resume `/library` review. Preserve provider/migration acceptance gates and unrelated historical expired runs.
+Observe normal operator GPU video/cancellation behavior, then resume `/library` review. Preserve provider/migration acceptance gates and unrelated historical expired runs. Existing cached videos remain reusable; new encoding uses NVENC.
 
 ## Risks And Unknowns
 
