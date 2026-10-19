@@ -20,6 +20,10 @@ import {
   type LibraryDatabaseCursor,
 } from "./database";
 import { readLibraryImageDimensions } from "./library-image";
+import { normalizeLibraryColor } from "./library-color";
+import { extractLibraryPalette } from "./library-color-extraction";
+import { saveLibraryPalette } from "./library-color-store";
+import { failedLibraryPalette } from "./library-colors";
 import {
   applyLibraryTagChanges,
   emptyLibraryTagProfile,
@@ -356,7 +360,11 @@ export async function importLibraryAsset(account: WorkspaceAccessActor, input: I
     }
     throw error;
   }
-  return { status: "imported" as const, asset: libraryAssetView(account, asset) };
+  let palette: NonNullable<LibraryAsset["palette"]>;
+  try { palette = await extractLibraryPalette(input.bytes, sha256); }
+  catch (error) { palette = failedLibraryPalette(sha256, error); }
+  await saveLibraryPalette(asset.id, palette);
+  return { status: "imported" as const, asset: libraryAssetView(account, { ...asset, palette }) };
 }
 
 export async function patchLibraryAsset(account: WorkspaceAccessActor, assetId: string, patch: PatchLibraryAssetInput) {
@@ -493,6 +501,7 @@ export function parseLibraryAssetFilters(url: URL): LibraryAssetFilters {
     limit: Number(url.searchParams.get("limit") || 60),
     includeTotal: url.searchParams.get("count") !== "0" && url.searchParams.get("includeTotal") !== "false",
     search: url.searchParams.get("search") || undefined,
+    color: normalizeLibraryColor(url.searchParams.get("color")),
     collectionId: url.searchParams.get("collectionId") || undefined,
     includeDescendants: url.searchParams.get("includeDescendants") !== "false",
     smartFolderId: url.searchParams.get("smartFolderId") || undefined,
@@ -625,6 +634,7 @@ function normalizeLibraryAssetFilters(filters: LibraryAssetFilters): LibraryAsse
     limit: Math.max(1, Math.min(pageLimitMax, Math.floor(filters.limit || 60))),
     sort: normalizeLibraryListSort(filters.sort),
     search: filters.search?.trim().slice(0, 200) || undefined,
+    color: normalizeLibraryColor(filters.color),
     collectionId: filters.collectionId?.trim() || undefined,
     smartFolderId: filters.smartFolderId?.trim() || undefined,
     tags: normalizeStringList(filters.tags, 20), imageTypes: normalizeStringList(filters.imageTypes, 20), scenes: normalizeStringList(filters.scenes, 20),

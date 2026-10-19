@@ -727,6 +727,7 @@ export type CanvasScheduleLeafStatus = Exclude<CanvasScheduleTaskStatus, "partia
 export type CanvasScheduleResultSummary = { produced: number; failed: number };
 
 export type CanvasScheduleAssetFilter = {
+  color?: string;
   mode: "manual" | "random";
   assetIds: string[];
   search: string;

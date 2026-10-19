@@ -1237,6 +1237,26 @@ export type LibraryManualTagOverrides = Partial<{
   customTags: string[];
 }>;
 
+export type LibraryPaletteColor = { hex: string; coverage: number };
+export type LibraryPalette = {
+  status: "completed" | "failed";
+  sha256: string;
+  version: number;
+  colors: LibraryPaletteColor[];
+  analyzedAt: string;
+  error?: string;
+};
+export type LibraryColorJob = {
+  id: string;
+  status: "running" | "completed";
+  total: number;
+  completed: number;
+  failed: number;
+  failures: Array<{ assetId: string; error: string }>;
+};
+export type LibraryColorCoverage = { total: number; analyzed: number; failed: number; manageableMissing: number; manageableFailed: number };
+export type LibraryColorJobState = { job?: LibraryColorJob; coverage: LibraryColorCoverage };
+
 export type LibraryAsset = {
   id: string;
   ownerUserId: string;
@@ -1268,6 +1288,7 @@ export type LibraryAsset = {
   deletedAt?: string;
   favorite?: boolean;
   thumbnailUrl?: string;
+  palette?: LibraryPalette;
 };
 
 export type LibraryCollection = {
@@ -1332,6 +1353,7 @@ export type LibrarySmartFolder = {
 };
 
 export type LibraryAssetFilters = {
+  color?: string;
   cursor?: string;
   limit?: number;
   includeTotal?: boolean;

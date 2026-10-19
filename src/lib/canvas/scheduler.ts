@@ -1,3 +1,4 @@
+import { normalizeLibraryColor } from "../library-color";
 import { createHash, randomUUID } from "node:crypto";
 import {
   createCanvasScheduleInDb,
@@ -1693,6 +1694,7 @@ async function resolveScheduleAssetPool(account: WorkspaceAccessActor, filter: C
       cursor,
       ...(filter.mode === "random" ? {
         search: filter.search,
+        color: filter.color,
         collectionId: filter.collectionId,
         includeDescendants: filter.includeDescendants,
         smartFolderId: filter.smartFolderId,
@@ -1998,6 +2000,7 @@ function normalizeAssetFilter(value: CanvasScheduleAssetFilter | undefined): Can
     mode: value?.mode === "random" ? "random" : "manual",
     assetIds: uniqueStrings(value?.assetIds || []).slice(0, maxImageTasks),
     search: String(value?.search || "").trim().slice(0, 120),
+    color: normalizeLibraryColor(value?.color),
     collectionId: String(value?.collectionId || "").trim() || undefined,
     includeDescendants: value?.includeDescendants,
     smartFolderId: String(value?.smartFolderId || "").trim() || undefined,

@@ -1,3 +1,5 @@
+import { libraryColorSchemaSql } from "./library-color-schema";
+import { hexToLab, libraryColorVersion, libraryColorMinCoverage, libraryColorDistance } from "./library-color";
 import { existsSync, mkdirSync, readFileSync } from "node:fs";
 import { createHash } from "node:crypto";
 import path from "node:path";
@@ -278,14 +280,14 @@ export async function listLibraryAssetsFromDb(): Promise<LibraryAsset[]> {
        FROM library_assets a LEFT JOIN library_collection_assets ca ON ca.asset_id=a.id
        WHERE a.deleted_at IS NULL GROUP BY a.id ORDER BY a.created_at DESC, a.id DESC`,
     );
-    return result.rows.map((row) => fromLibraryAssetJson(row.data_json, row.collection_ids));
+    return attachLibraryPalettes(result.rows.map((row) => fromLibraryAssetJson(row.data_json, row.collection_ids)));
   }
   const rows = getSqliteDatabase().prepare(
     `SELECT a.data_json, COALESCE(group_concat(ca.collection_id, char(31)), '') collection_ids
      FROM library_assets a LEFT JOIN library_collection_assets ca ON ca.asset_id=a.id
      WHERE a.deleted_at IS NULL GROUP BY a.id ORDER BY a.created_at DESC, a.id DESC`,
   ).all() as Array<JsonRow & { collection_ids: string }>;
-  return rows.map((row) => fromLibraryAssetJson(row.data_json, splitSqliteIds(row.collection_ids)));
+  return attachLibraryPalettes(rows.map((row) => fromLibraryAssetJson(row.data_json, splitSqliteIds(row.collection_ids))));
 }
 
 export async function queryLibraryAssetsFromDb(input: LibraryDatabaseQuery) {
@@ -329,10 +331,10 @@ export async function queryLibraryAssetsFromDb(input: LibraryDatabaseQuery) {
   }
   const pageRows = rows.slice(0, limit);
   return {
-    assets: pageRows.map((row) => ({
+    assets: await attachLibraryPalettes(pageRows.map((row) => ({
       ...fromLibraryAssetJson(row.data_json, Array.isArray(row.collection_ids) ? row.collection_ids : splitSqliteIds(row.collection_ids)),
       favorite: Boolean(row.favorite),
-    })),
+    }))),
     total,
     hasMore: rows.length > limit,
   };
@@ -389,6 +391,17 @@ function compileLibraryAssetQuery(input: LibraryDatabaseQuery, postgres: boolean
     const fullText = postgres ? `a.search_vector @@ plainto_tsquery('simple', ${params.add(filters.search.trim())}) OR ` : "";
     where.push(`(${fullText}LOWER(a.name) LIKE ${p1} OR LOWER(a.original_name) LIKE ${p2} OR LOWER(a.note) LIKE ${p3}
       OR EXISTS (SELECT 1 FROM library_asset_labels search_label WHERE search_label.asset_id=a.id AND LOWER(search_label.value) LIKE ${p4}))`);
+  }
+  if (filters.color) {
+    const lab = hexToLab(filters.color);
+    const distance = (column: string, value: number) => `(c.${column}-${params.add(value)})*(c.${column}-${params.add(value)})`;
+    const bounds = lab.map((v, i) => `c.${["l", "a", "b"][i]} BETWEEN ${params.add(v - libraryColorDistance)} AND ${params.add(v + libraryColorDistance)}`);
+    const squared = lab.map((v, i) => distance(["l", "a", "b"][i], v));
+    const version = params.add(libraryColorVersion); const coverage = params.add(libraryColorMinCoverage);
+    // Predicate placeholder order must match SQLite's anonymous parameter order.
+    where.push(`EXISTS (SELECT 1 FROM library_asset_colors c JOIN library_asset_palettes p ON p.asset_id=c.asset_id
+      WHERE c.asset_id=a.id AND ${bounds.join(" AND ")} AND ${squared.join("+")}<=${libraryColorDistance ** 2}
+      AND p.version=${version} AND c.coverage>=${coverage} AND p.sha256=a.sha256 AND p.status='completed')`);
   }
   if (filters.collectionId) where.push(collectionPredicate(params, filters.collectionId, filters.includeDescendants !== false));
   if (filters.uncategorized) where.push("NOT EXISTS (SELECT 1 FROM library_collection_assets uncategorized_ca WHERE uncategorized_ca.asset_id=a.id)");
@@ -518,14 +531,14 @@ export async function getLibraryAssetFromDb(assetId: string, includeDeleted = fa
        FROM library_assets a LEFT JOIN library_collection_assets ca ON ca.asset_id=a.id
        WHERE a.id = $1${deletedClause} GROUP BY a.id`, [assetId],
     );
-    return result.rows[0] ? fromLibraryAssetJson(result.rows[0].data_json, result.rows[0].collection_ids) : undefined;
+    return result.rows[0] ? (await attachLibraryPalettes([fromLibraryAssetJson(result.rows[0].data_json, result.rows[0].collection_ids)]))[0] : undefined;
   }
   const row = getSqliteDatabase().prepare(
     `SELECT a.data_json, COALESCE(group_concat(ca.collection_id, char(31)), '') collection_ids
      FROM library_assets a LEFT JOIN library_collection_assets ca ON ca.asset_id=a.id
      WHERE a.id = ?${deletedClause} GROUP BY a.id`,
   ).get(assetId) as (JsonRow & { collection_ids: string }) | undefined;
-  return row ? fromLibraryAssetJson(row.data_json, splitSqliteIds(row.collection_ids)) : undefined;
+  return row ? (await attachLibraryPalettes([fromLibraryAssetJson(row.data_json, splitSqliteIds(row.collection_ids))]))[0] : undefined;
 }
 
 export async function findLibraryAssetByOwnerHashFromDb(ownerUserId: string, sha256: string) {
@@ -543,6 +556,64 @@ export async function findLibraryAssetByOwnerHashFromDb(ownerUserId: string, sha
   ).get(ownerUserId, sha256) as JsonRow | undefined;
   const asset = row ? fromLibraryAssetJson(row.data_json) : undefined;
   return asset ? getLibraryAssetFromDb(asset.id) : undefined;
+}
+
+type LibraryColorCommand = { query: string; values: unknown[] };
+type LibraryColorRows = Record<string, unknown>[];
+export type LibraryColorSql = <T extends Record<string, unknown> = Record<string, unknown>>(sql: string, values?: unknown[]) => Generator<LibraryColorCommand, T[], LibraryColorRows>;
+
+// Generators keep SQLite transactions fully synchronous while PostgreSQL awaits I/O.
+export async function withLibraryColorDatabase<T>(operation: (sql: LibraryColorSql, postgres: boolean) => Generator<LibraryColorCommand, T, LibraryColorRows>, transaction = false): Promise<T> {
+  await ensureDatabaseReady();
+  const sql: LibraryColorSql = function* <R extends Record<string, unknown>>(query: string, values: unknown[] = []): Generator<LibraryColorCommand, R[], LibraryColorRows> {
+    return (yield { query, values }) as R[];
+  };
+  if (getDatabaseBackend() === "postgres") {
+    const client = await getPostgresPool().connect();
+    try {
+      if (transaction) await client.query("BEGIN");
+      const iterator = operation(sql, true);
+      let step = iterator.next();
+      while (!step.done) {
+        const result = await client.query(step.value.query, step.value.values);
+        step = iterator.next(result.rows);
+      }
+      if (transaction) await client.query("COMMIT");
+      return step.value;
+    } catch (error) {
+      if (transaction) await client.query("ROLLBACK");
+      throw error;
+    } finally { client.release(); }
+  }
+  const db = getSqliteDatabase();
+  if (transaction) db.exec("BEGIN IMMEDIATE");
+  try {
+    const iterator = operation(sql, false);
+    let step = iterator.next();
+    while (!step.done) {
+      const ordered: unknown[] = [];
+      const command = step.value;
+      const prepared = command.query.replace(/\$(\d+)/g, (_, index) => { ordered.push(command.values[Number(index) - 1]); return "?"; });
+      step = iterator.next(db.prepare(prepared).all(...ordered) as LibraryColorRows);
+    }
+    if (transaction) db.exec("COMMIT");
+    return step.value;
+  } catch (error) {
+    if (transaction) db.exec("ROLLBACK");
+    throw error;
+  }
+}
+
+async function attachLibraryPalettes(assets: LibraryAsset[]): Promise<LibraryAsset[]> {
+  if (!assets.length) return assets;
+  return withLibraryColorDatabase(function* (sql) {
+    const rows = yield* sql<{ asset_id: string; data_json: string }>(`SELECT asset_id,data_json FROM library_asset_palettes WHERE asset_id IN (${assets.map((_, i) => `$${i + 1}`).join(",")})`, assets.map((a) => a.id));
+    const palettes = new Map(rows.map((row) => [row.asset_id, fromJson<NonNullable<LibraryAsset["palette"]>>(row.data_json)]));
+    return assets.map((asset) => {
+      const palette = palettes.get(asset.id);
+      return { ...asset, palette: palette?.sha256 === asset.sha256 && palette.version === libraryColorVersion ? palette : undefined };
+    });
+  });
 }
 
 function fromLibraryAssetJson(value: unknown, collectionIds: string[] = []): LibraryAsset {
@@ -3666,6 +3737,7 @@ function getSqliteDatabase() {
   configureSqliteDatabase(sqliteDatabase);
   prepareUnifiedLibrarySqliteColumns(sqliteDatabase);
   createSqliteSchema(sqliteDatabase);
+  sqliteDatabase.exec(libraryColorSchemaSql);
   migrateUnifiedLibrarySqlite(sqliteDatabase);
   retireLegacyMaterialLibrarySqlite(sqliteDatabase);
   migrateLegacyJsonToSqlite(sqliteDatabase);
@@ -3697,6 +3769,7 @@ function getPostgresPool() {
 async function initializePostgres() {
   await prepareUnifiedLibraryPostgresColumns();
   await getPostgresPool().query(postgresSchemaSql);
+  await getPostgresPool().query(libraryColorSchemaSql);
   await migrateUnifiedLibraryPostgres();
   await retireLegacyMaterialLibraryPostgres();
   await migrateLegacyJsonToPostgres();
@@ -5898,7 +5971,7 @@ function libraryAssetValues(asset: LibraryAsset) {
     asset.createdAt,
     asset.updatedAt,
     asset.deletedAt || null,
-    toJson(asset),
+    toJson({ ...asset, palette: undefined }),
   ];
 }
 

@@ -10,6 +10,7 @@ const npmCommand = process.platform === "win32" ? "npm.cmd" : "npm";
 const npxCommand = process.platform === "win32" ? "npx.cmd" : "npx";
 
 const nodeChecks = [
+  ["Library color extraction, queries and durable analysis", "library_colors_check.mjs"],
   ["Canvas Gemini native text and vision", "canvas_gemini_check.mjs"],
   ["Canvas local image saving check", "canvas_local_image_save_check.mjs"],
   ["Canvas layer composition check", "canvas_layer_compose_check.mjs"],

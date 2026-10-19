@@ -5,7 +5,7 @@ export type LibraryView = { kind: "all" } | { kind: "uncategorized" } | { kind: 
 export const taggingLabels: Record<LibraryTaggingStatus, string> = { idle: "未打标", queued: "排队中", running: "打标中", completed: "已完成", failed: "失败" };
 export const numericFilters = ["minWidth", "maxWidth", "minHeight", "maxHeight", "minByteSize", "maxByteSize"] as const;
 export const dimensionFilters = { imageTypes: "imageType", vehicleModels: "vehicleModel", vehicleColors: "vehicleColor", angles: "angle", scenes: "scene", people: "people", customTags: "customTag", tags: "tag", ownerIds: "ownerId" } as const;
-export const filterKeys = ["q", "visibility", "taggingStatus", "addedFrom", "addedBefore", ...numericFilters, ...Object.values(dimensionFilters)];
+export const filterKeys = ["color", "q", "visibility", "taggingStatus", "addedFrom", "addedBefore", ...numericFilters, ...Object.values(dimensionFilters)];
 
 export function readLibraryView(params: URLSearchParams): LibraryView {
   const value = params.get("view") || "all";
@@ -22,6 +22,7 @@ export function readLibraryFilters(params: URLSearchParams): LibraryAssetFilters
   const visibility = params.get("visibility");
   const status = params.get("taggingStatus");
   const filters: LibraryAssetFilters = {
+    color: /^#[0-9a-f]{6}$/i.test(params.get("color") || "") ? params.get("color")!.toUpperCase() : undefined,
     search: params.get("q")?.trim() || undefined, limit: 60, sort: normalizeLibraryListSort(params.get("sort")),
     collectionId: view.kind === "collection" ? view.id : undefined,
     includeDescendants: view.kind === "collection" ? includeDescendants : undefined,

@@ -21,6 +21,8 @@ node --env-file=.env.local .trellis/verification/unified_library_postgres_benchm
 
 ## Current Automated Checks
 
+- Library colors: baseline real Sharp/SQLite/import/job checks, opt-in TEMP PostgreSQL and intercepted three-theme browser commands: `library_colors.md`.
+
 - Gemini: baseline `canvas_gemini_check.mjs` covers loopback HTTP/proxy, config snapshots, media limits, failures/cancellation and Canvas executor/graph/iteration/V2/bypass contracts. Separate `python .trellis/verification/canvas_gemini_browser_check.py` checks node/config UI at 1440/390 in three themes using intercepted APIs; requires worker-disabled loopback `BROWSER_BASE_URL`, rejects 3001. See `gemini.md`; no live Gemini calls.
 
 - Canvas H.264: baseline `canvas_video_encoding_check.mjs` checks CPU output and explicit policy validation; opt-in real GPU/node commands and hardware limits are in `canvas_video_encoding.md`. GPU is never required by the default baseline.

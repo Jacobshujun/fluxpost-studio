@@ -61,6 +61,7 @@ def run_case(browser, theme, width, height):
         method = request.method
         if path == "/api/library/navigation":
             route.fulfill(json={"collections": COLLECTIONS, "smartFolders": [], "counts": {"all": len(assets), "uncategorized": sum(not a["collectionIds"] for a in assets), "favorites": sum(a["favorite"] for a in assets)}})
+        elif path == "/api/library/colors/jobs": route.fulfill(json={"coverage": {"total": len(assets), "analyzed": 0, "failed": 0, "manageableMissing": len(assets), "manageableFailed": 0}})
         elif path == "/api/library/tags" and method == "GET": route.fulfill(json={"tags": [{"label": "red", "count": 3}]})
         elif path.endswith("/thumbnail"): route.fulfill(content_type="image/gif", body=PIXEL)
         elif path == "/api/library/assets":

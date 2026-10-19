@@ -1,5 +1,7 @@
 "use client";
 
+import { LibraryColorFilter, LibraryPalette } from "@/components/library-colors";
+
 import Link from "next/link";
 import Image from "next/image";
 import { CanvasImageProcessControls, CanvasImageProcessResult } from "./CanvasImageProcess";
@@ -4155,6 +4157,7 @@ function LibraryImageSnapshotPicker({ node, onPatch, onPreviewImage }: {
   const [navigation, setNavigation] = useState<LibraryNavigation>({ collections: [], smartFolders: [], counts: { all: 0, uncategorized: 0, favorites: 0 } });
   const [search, setSearch] = useState("");
   const [tag, setTag] = useState("");
+  const [color, setColor] = useState<string>();
   const [collectionId, setCollectionId] = useState("");
   const [smartFolderId, setSmartFolderId] = useState("");
   const [busy, setBusy] = useState(false);
@@ -4167,7 +4170,15 @@ function LibraryImageSnapshotPicker({ node, onPatch, onPreviewImage }: {
   const ids = configStringList(node.config.assetIds);
   const names = configStringList(node.config.assetNames);
   const urls = configStringList(node.config.urls);
-  const hasQuery = Boolean(search.trim() || tag.trim() || collectionId || smartFolderId);
+  const hasQuery = Boolean(color || search.trim() || tag.trim() || collectionId || smartFolderId);
+  const queryKey = JSON.stringify([search.trim(), tag.trim(), collectionId, smartFolderId, color]);
+  const queryKeyRef = useRef(queryKey);
+  useLayoutEffect(() => {
+    queryKeyRef.current = queryKey;
+    requestGenerationRef.current += 1;
+    requestControllerRef.current?.abort();
+  }, [queryKey]);
+  useEffect(() => () => { requestGenerationRef.current += 1; requestControllerRef.current?.abort(); }, []);
   const ensureNavigation = useCallback(() => {
     if (navigationLoaded) return Promise.resolve();
     if (!navigationRequestRef.current) {
@@ -4184,43 +4195,49 @@ function LibraryImageSnapshotPicker({ node, onPatch, onPreviewImage }: {
     if (!hasQuery) {
       setData({ assets: [], total: 0 });
       setBusy(false);
+      setLoadingMore(false);
       return;
     }
     const controller = new AbortController();
     requestControllerRef.current = controller;
     setBusy(true);
+    setLoadingMore(false);
     setError("");
     const params = new URLSearchParams({ limit: "24", count: "0" });
+    if (color) params.set("color", color);
     if (search.trim()) params.set("search", search.trim());
     if (tag.trim()) params.set("tag", tag.trim());
     if (collectionId) params.set("collectionId", collectionId);
     if (smartFolderId) params.set("smartFolderId", smartFolderId);
     try {
       const result = await api<LibraryAssetPage>(`/api/library/assets?${params}`, { signal: controller.signal });
-      if (generation === requestGenerationRef.current) setData(result);
+      if (generation === requestGenerationRef.current && queryKeyRef.current === queryKey) setData(result);
     } catch (loadError) {
       if (!controller.signal.aborted && generation === requestGenerationRef.current) setError(errorMessage(loadError));
     } finally {
       if (generation === requestGenerationRef.current) setBusy(false);
     }
-  }, [collectionId, hasQuery, search, smartFolderId, tag]);
+  }, [color, collectionId, hasQuery, search, smartFolderId, tag, queryKey]);
   const loadMore = useCallback(async () => {
-    if (!hasQuery || !data.nextCursor || loadingMore) return;
+    if (!hasQuery || busy || !data.nextCursor || loadingMore) return;
+    const generation = requestGenerationRef.current;
+    const key = queryKey;
     setLoadingMore(true);
     try {
       const params = new URLSearchParams({ limit: "24", count: "0", cursor: data.nextCursor });
-      if (search.trim()) params.set("search", search.trim());
+      if (color) params.set("color", color);
+    if (search.trim()) params.set("search", search.trim());
       if (tag.trim()) params.set("tag", tag.trim());
       if (collectionId) params.set("collectionId", collectionId);
       if (smartFolderId) params.set("smartFolderId", smartFolderId);
       const result = await api<LibraryAssetPage>(`/api/library/assets?${params}`);
-      setData((current) => ({ ...result, assets: [...current.assets, ...result.assets.filter((asset) => !current.assets.some((item) => item.id === asset.id))] }));
+      if (generation === requestGenerationRef.current && queryKeyRef.current === key) setData((current) => ({ ...result, assets: [...current.assets, ...result.assets.filter((asset) => !current.assets.some((item) => item.id === asset.id))] }));
     } catch (loadError) {
-      setError(errorMessage(loadError));
+      if (generation === requestGenerationRef.current && queryKeyRef.current === key) setError(errorMessage(loadError));
     } finally {
-      setLoadingMore(false);
+      if (generation === requestGenerationRef.current && queryKeyRef.current === key) setLoadingMore(false);
     }
-  }, [collectionId, data.nextCursor, hasQuery, loadingMore, search, smartFolderId, tag]);
+  }, [busy, color, collectionId, data.nextCursor, hasQuery, loadingMore, search, smartFolderId, tag, queryKey]);
   useEffect(() => {
     const timer = setTimeout(() => void load(), 250);
     return () => clearTimeout(timer);
@@ -4260,6 +4277,7 @@ function LibraryImageSnapshotPicker({ node, onPatch, onPreviewImage }: {
       setCollectionId(kind === "collection" ? id : "");
       setSmartFolderId(kind === "smart" ? id : "");
     }}><option value="">全部图集</option><optgroup label="图集">{navigation.collections.map((collection) => <option key={collection.id} value={`collection:${collection.id}`}>{collection.relativePath || collection.name}</option>)}</optgroup><optgroup label="智能文件夹">{navigation.smartFolders.map((folder) => <option key={folder.id} value={`smart:${folder.id}`}>{folder.name}</option>)}</optgroup></select></div>
+    <LibraryColorFilter color={color} onChange={setColor} hint />
     {ids.length ? <div className="canvas-picker-selected">{urls.map((url, index) => <div key={`${ids[index]}-${index}`}>
       <button type="button" className="canvas-picker-thumb" onClick={() => onPreviewImage(url, index)} aria-label={`预览素材 ${index + 1}`}>
         <Image src={ids[index] ? `/api/library/assets/${encodeURIComponent(ids[index])}/thumbnail?variant=square&version=2` : url} alt="" width={72} height={72} unoptimized loading="lazy" decoding="async" referrerPolicy="no-referrer" />
@@ -4270,7 +4288,7 @@ function LibraryImageSnapshotPicker({ node, onPatch, onPreviewImage }: {
       <button type="button" onClick={() => remove(index)} title="移除"><X /></button>
     </div>)}</div> : null}
     {!hasQuery ? <div className="canvas-picker-empty">输入搜索词、标签或选择图集开始查找素材。</div> : null}
-    <div className="canvas-picker-results">{data.assets.map((asset) => <label key={asset.id}><input type="checkbox" checked={ids.includes(asset.id)} onChange={() => toggle(asset)} /><span><Image src={`/api/library/assets/${encodeURIComponent(asset.id)}/thumbnail?variant=square&version=2`} alt="" width={96} height={96} unoptimized loading="lazy" decoding="async" /></span><small>{asset.name}</small></label>)}</div>
+    <div className="canvas-picker-results" aria-busy={busy}>{data.assets.map((asset) => <div key={asset.id}><label><input type="checkbox" disabled={busy} checked={ids.includes(asset.id)} onChange={() => toggle(asset)} /><span><Image src={`/api/library/assets/${encodeURIComponent(asset.id)}/thumbnail?variant=square&version=2`} alt="" width={96} height={96} unoptimized loading="lazy" decoding="async" /></span><small>{asset.name}</small></label><LibraryPalette palette={asset.palette} disabled={busy} onColor={setColor} /></div>)}</div>
     {data.nextCursor ? <button type="button" className="canvas-picker-load-more" onClick={() => void loadMore()} disabled={busy || loadingMore}>{loadingMore ? "正在加载..." : "加载更多"}</button> : null}
     {data.total !== undefined && data.total > data.assets.length ? <small className="canvas-picker-limit">显示前 {data.assets.length} / {data.total} 张，请使用搜索或筛选缩小范围。</small> : null}
     {error ? <p className="canvas-picker-error">{error}</p> : null}
@@ -5253,12 +5271,13 @@ function ScheduleAssetFilterEditor({ title, filter, count, onCountChange, onChan
   const queryString = useMemo(() => {
     const params = new URLSearchParams({ limit: "24" });
     if (filter.search.trim()) params.set("search", filter.search.trim());
+    if (filter.color) params.set("color", filter.color);
     if (filter.collectionId) params.set("collectionId", filter.collectionId);
     if (filter.includeDescendants === false) params.set("includeDescendants", "false");
     if (filter.smartFolderId) params.set("smartFolderId", filter.smartFolderId);
     splitScheduleTags(tagsText).forEach((tag) => params.append("tag", tag));
     return params.toString();
-  }, [filter.collectionId, filter.includeDescendants, filter.search, filter.smartFolderId, tagsText]);
+  }, [filter.color, filter.collectionId, filter.includeDescendants, filter.search, filter.smartFolderId, tagsText]);
   const queryStringRef = useRef(queryString);
   const filterRef = useRef(filter);
   const searchDraft = searchDraftState.source === filter.search ? searchDraftState.value : filter.search;
@@ -5430,6 +5449,7 @@ function ScheduleAssetFilterEditor({ title, filter, count, onCountChange, onChan
       <input value={tagsText} onChange={(event) => onChange({ ...filter, tags: splitScheduleTags(event.target.value) })} placeholder="多个标签，AND" />
       {count !== undefined && filter.mode === "random" ? <label className="canvas-schedule-count"><span>抽取</span><input type="number" min={1} max={500} value={count} onChange={(event) => onCountChange?.(Number(event.target.value))} /></label> : null}
     </div>
+    <LibraryColorFilter color={filter.color} onChange={(color) => onChange({ ...filter, color })} hint />
     <div className="canvas-schedule-asset-toolbar">
       <small className="canvas-schedule-pool-count" aria-live="polite">{status}</small>
       {filter.mode === "manual" && !singleSelection ? <div>
@@ -5445,6 +5465,7 @@ function ScheduleAssetFilterEditor({ title, filter, count, onCountChange, onChan
           <ScheduleAssetThumbnail asset={asset} /><span>{asset.name}</span>{filter.mode === "manual" && filter.assetIds.includes(asset.id) ? <CheckCircle2 className="canvas-schedule-asset-selected-mark" /> : null}
         </button>
         <button className="canvas-schedule-asset-preview" type="button" disabled={busy} onPointerDown={(event) => event.stopPropagation()} onClick={(event) => { event.stopPropagation(); openPreview(asset, index); }} aria-label={`预览 ${asset.name}`} title="预览图片"><Eye /></button>
+        <LibraryPalette palette={asset.palette} disabled={busy} onColor={(color) => onChange({ ...filter, color })} />
       </article>)}</div> : null}
       {data.nextCursor ? <div className="canvas-schedule-asset-load-more"><button type="button" onClick={() => void loadMore()} disabled={busy || loadingMore || selectingAll}>{loadingMore ? <LoaderCircle className="animate-spin" /> : <ArrowDown />}{loadingMore ? "正在加载下一页..." : "加载更多"}</button></div> : null}
     </div>

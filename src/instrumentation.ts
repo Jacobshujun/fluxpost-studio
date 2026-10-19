@@ -39,4 +39,6 @@ export async function register() {
   ensureCanvasRunWorker();
   ensureOriginalBatchWorker();
   ensureFeishuPublishQueueWorker();
+  const { kickLibraryColorWorker } = await import("@/lib/library-colors");
+  kickLibraryColorWorker();
 }

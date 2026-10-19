@@ -15,6 +15,7 @@ let savedSchedule;
 let workflowRecord;
 let copyEntries = [];
 let copyListCalls = 0;
+let libraryQueries = [];
 let libraryAssetsByRole = { reference: [], vehicle: [] };
 let generatedPosts = new Map();
 let canvasRunFixture;
@@ -59,7 +60,9 @@ try {
   }).outputText;
   const schedulerModule = { exports: {} };
   const emptyAsync = async () => undefined;
+  writeFileSync(path.join(temp, "library-color.js"), ts.transpileModule(read("src/lib/library-color.ts"), { compilerOptions: { module: ts.ModuleKind.CommonJS, target: ts.ScriptTarget.ES2022 } }).outputText);
   const stubs = {
+    "../library-color": require(path.join(temp, "library-color.js")),
     "../activity-log": {
       recordExecutionLog: async (entry) => { executionLogs.push(structuredClone(entry)); },
     },
@@ -113,7 +116,7 @@ try {
       },
     }, { get: (target, key) => target[key] || emptyAsync }),
     "../library-assets": new Proxy({
-      listLibraryAssets: async () => ({ assets: structuredClone([...libraryAssetsByRole.reference, ...libraryAssetsByRole.vehicle]), nextCursor: undefined }),
+      listLibraryAssets: async (_account, filters) => { libraryQueries.push(filters); return { assets: structuredClone([...libraryAssetsByRole.reference, ...libraryAssetsByRole.vehicle]), nextCursor: undefined }; },
     }, { get: (target, key) => target[key] || emptyAsync }),
     "../content-pool": new Proxy({
       getSourceItemsByIds: async (ids) => ids.filter((id) => !visibleSourceVideoIds || visibleSourceVideoIds.has(id)).map((id) => ({ id })),
@@ -159,7 +162,7 @@ try {
       getCanvasWorkflow: async () => structuredClone(workflowRecord),
     }, { get: (target, key) => target[key] || emptyAsync }),
   };
-  Function("require", "module", "exports", "structuredClone", "setTimeout", `${schedulerOutput}`)(
+  Function("require", "module", "exports", "structuredClone", "setTimeout", `${schedulerOutput}\nmodule.exports.resolveScheduleAssetPool = resolveScheduleAssetPool;`)(
     (name) => {
       if (name === "node:crypto") return require("node:crypto");
       if (Object.hasOwn(stubs, name)) return stubs[name];
@@ -806,7 +809,7 @@ try {
   });
   assert.deepEqual(savedPromptSchedule.definition.parameters[0].source, promptParameter.source, "save normalization must preserve separator and full prompt strings");
   assert.deepEqual(storedSchedule.definition.parameters[0].source, promptParameter.source, "storage must receive separator metadata");
-  for (const scope of [{ smartFolderId: "smart-favorites" }, { collectionId: "collection-1", includeDescendants: false }]) {
+  for (const scope of [{ smartFolderId: "smart-favorites", color: "#3876C7" }, { collectionId: "collection-1", includeDescendants: false, color: "#D43C3C" }]) {
     const filter = { mode: "random", assetIds: [], search: "car", tags: ["exterior"], ...scope };
     const definition = { ...v2Definition, parameters: [{
       ...v2Definition.parameters[0], source: { mode: "library-filter", filter },
@@ -820,6 +823,8 @@ try {
         "scheduler save, storage and reload must retain smart-folder IDs and explicit descendant scope");
     }
   }
+  await scheduler.resolveScheduleAssetPool(account, { mode: "random", assetIds: [], search: "", tags: [], color: "#3876C7" });
+  assert.equal(libraryQueries.at(-1).color, "#3876C7", "preflight must use the saved color filter");
   const sourceVideoGraph = {
     nodes: [
       { ...node("source-video", "input.source-video"), executionMode: "disabled" },

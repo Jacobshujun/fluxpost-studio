@@ -190,3 +190,7 @@ filtersToQuery({ vehicleModels: [model], includeDescendants: false, limit: 60 })
 // Correct: cards decode a bounded thumbnail; preview resolves the frozen original.
 <Image src={`/api/library/assets/${asset.id}/thumbnail?variant=square&version=2`} loading="lazy" />
 ```
+
+## Image color previews and filtering
+
+See [library_colors.md](./library_colors.md) for pixel extraction, independent indexed palette storage, explicit durable historical analysis, SQL/cursor contracts and Canvas integration.
