@@ -18,7 +18,13 @@
 
 ## Runtime operation
 
-Recovery preview for the reported schedule selects one schedule and eight abandoned runs/nodes/queue rows. Thirty completed main tasks remain untouched. Activation and live recovery results pending.
+Clean implementation `52c8c00c2b44eccf55a1c32bba72bba08ed9bb7b` activated through `npm run local:lan` with full-SHA identity, HTTP smoke and 0.0.0.0:3001 binding verified. Old PID 50532 is absent before interrupted-work recovery.
+
+Recovery preview/apply cancelled one schedule and eight abandoned runs/nodes/queues. Both recovery transactions wrote scoped backups under ignored `data/reports/` before changes. A read-only comparison against the cancellation backup confirms every one of the 30 completed main-task snapshots is byte-structurally unchanged; all eight target queue entries are cancelled.
+
+The eight explicitly identified old-worker image runs passed dead-PID/image-only guards and were requeued without resetting successful nodes. At 11:39 local time, the two previously queued schedules were running, ten queue entries had completed since activation, and eleven image-processing nodes had completed. No synthetic provider/publish test batch was launched; existing user queues continued naturally. Unrelated expired historical work was untouched.
+
+Documentation closeout may advance Git HEAD beyond the active implementation commit; avoid restarting running user work for documentation-only changes.
 
 ## Limits
 
