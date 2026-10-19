@@ -442,6 +442,9 @@ const advancedConfigGroups: ConfigDefinitionGroup[] = [
       configField("SIMPLE_RUN_WORKER_CONCURRENCY", "简单任务 worker 并发", "后台简单任务队列并发。", "number", "runtime"),
       configField("WORKER_ORIGINAL_BATCH_CONCURRENCY", "批量原创 worker 并发", "批量原创选题的后台并发，默认 2，最高 8。", "number", "runtime"),
       configField("WORKER_LOCAL_VIDEO_CONCURRENCY", "本地视频编码并发", "Canvas 本地 FFmpeg 视频编码并发，默认 1，最高 4。", "number", "runtime"),
+      configField("FFMPEG_VIDEO_ENCODER", "本地视频编码器", "libx264 使用 CPU；h264_nvenc 使用 NVIDIA 显卡编码，需要兼容驱动。留空使用 CPU，切换后新编码生效。", "select", "runtime", {
+        options: ["libx264", "h264_nvenc"],
+      }),
       configField("FEISHU_PUBLISH_WORKER_CONCURRENCY", "飞书发布队列并发", "飞书记录写入 worker 并发。", "number", "runtime"),
       configField("WORKER_FEISHU_ATTACHMENT_CONCURRENCY", "飞书附件上传并发", "附件上传独立并发上限。", "number", "runtime"),
     ],

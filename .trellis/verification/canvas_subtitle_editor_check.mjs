@@ -20,6 +20,7 @@ function loadTsModule(relative, requireMap = {}, extras = {}) {
     ...extras,
     require: (name) => {
       if (Object.hasOwn(requireMap, name)) return requireMap[name];
+      if (name === "./video-encoding") return loadTsModule("src/lib/canvas/video-encoding.ts", {});
       if (name.startsWith("node:")) return nodeRequire(name);
       throw new Error(`Unexpected import ${name} from ${relative}`);
     },

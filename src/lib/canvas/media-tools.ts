@@ -6,6 +6,7 @@ import { runWithConcurrencyPool } from "../concurrency";
 import { materializeRuntimeMedia } from "../runtime-media-materializer";
 import { findExistingRuntimeMedia, persistRuntimeMedia } from "../runtime-media-storage";
 import { parseCanvasVideoTimestamps, resolveCanvasImageDimensions } from "./node-utils";
+import { canvasVideoEncodingArgs } from "./video-encoding";
 import { canvasMediaMaskUsesImageInput, normalizeCanvasMediaMaskConfig, validateCanvasMediaMaskConfig } from "./types";
 import type { CanvasMediaMaskConfig, CanvasMaskRegion, CanvasMediaReference, CanvasNodeConfig, CanvasSlideshowTextStyle } from "./types";
 
@@ -78,7 +79,7 @@ export async function renderCanvasImageSlideshow(input: {
   }
   filters.push(overlayPath ? `[base][${images.length + 1}:v]overlay=0:0,trim=duration=${formatSeconds(duration)},format=yuv420p[vout]` : `[base]trim=duration=${formatSeconds(duration)},format=yuv420p[vout]`);
   const fadeStart = Math.max(0, duration - 0.18);
-  args.push("-filter_complex", filters.join(";"), "-map", "[vout]", "-map", `${images.length}:a:0`, "-t", formatSeconds(duration), "-r", "25", "-c:v", "libx264", "-preset", "medium", "-crf", "19", "-profile:v", "main", "-level", "4.0", "-pix_fmt", "yuv420p", "-tag:v", "avc1", "-colorspace", "bt709", "-color_primaries", "bt709", "-color_trc", "bt709", "-color_range", "tv", "-af", `afade=t=out:st=${formatSeconds(fadeStart)}:d=0.18`, "-c:a", "aac", "-profile:a", "aac_low", "-b:a", "160k", "-ar", "48000", "-ac", "2", "-shortest", "-movflags", "+faststart", outputPath);
+  args.push("-filter_complex", filters.join(";"), "-map", "[vout]", "-map", `${images.length}:a:0`, "-t", formatSeconds(duration), "-r", "25", ...canvasVideoEncodingArgs({ preset: "medium", crf: 19 }), "-profile:v", "main", "-level", "4.0", "-pix_fmt", "yuv420p", "-tag:v", "avc1", "-colorspace", "bt709", "-color_primaries", "bt709", "-color_trc", "bt709", "-color_range", "tv", "-af", `afade=t=out:st=${formatSeconds(fadeStart)}:d=0.18`, "-c:a", "aac", "-profile:a", "aac_low", "-b:a", "160k", "-ar", "48000", "-ac", "2", "-shortest", "-movflags", "+faststart", outputPath);
   try {
     await runWithConcurrencyPool("localVideo", () => runMediaCommand("ffmpeg", args, videoEncodeTimeoutMs));
     const url = await persistRuntimeMedia({ filePath: outputPath, publicPath, contentType: "video/mp4", overwrite: false });
@@ -267,7 +268,7 @@ export async function reconstructCanvasVideo(input: {
       "-map", "0:v:0", "-map", "1:a:0",
       "-vf", videoFilter,
       "-t", formatSeconds(sourceMetadata.durationSeconds),
-      "-c:v", "libx264", "-pix_fmt", "yuv420p",
+      ...canvasVideoEncodingArgs(), "-pix_fmt", "yuv420p",
       "-c:a", "aac", "-b:a", "192k",
       "-movflags", "+faststart", "-shortest",
       stagingPath,
@@ -360,7 +361,7 @@ async function renderMaskedMedia(input: { kind: "image" | "video"; items: Canvas
       stagingPath = path.join(outputRoot, `.${fingerprint}-${randomUUID()}.tmp.${extension}`);
       await mkdir(outputRoot, { recursive: true });
       const built = await buildMaskFilter(regions, input.kind, metadata?.width || item.width || 1, metadata?.height || item.height || 1, metadata?.durationSeconds || 0, overlays, inputOverlay?.filePath);
-      const args = ["-hide_banner", "-loglevel", "error", "-y", "-i", source.filePath, ...built.inputs.flatMap((filePath) => ["-i", filePath]), "-filter_complex", built.filter, "-map", "[masked]", ...(input.kind === "video" && metadata?.hasAudio ? ["-map", "0:a:0?", "-c:a", "aac", "-b:a", "160k"] : []), "-c:v", input.kind === "video" ? "libx264" : "png", ...(input.kind === "video" ? ["-pix_fmt", "yuv420p", "-movflags", "+faststart", "-t", formatSeconds(metadata?.durationSeconds || 0)] : ["-frames:v", "1"]), stagingPath];
+      const args = ["-hide_banner", "-loglevel", "error", "-y", "-i", source.filePath, ...built.inputs.flatMap((filePath) => ["-i", filePath]), "-filter_complex", built.filter, "-map", "[masked]", ...(input.kind === "video" && metadata?.hasAudio ? ["-map", "0:a:0?", "-c:a", "aac", "-b:a", "160k"] : []), ...(input.kind === "video" ? canvasVideoEncodingArgs() : ["-c:v", "png"]), ...(input.kind === "video" ? ["-pix_fmt", "yuv420p", "-movflags", "+faststart", "-t", formatSeconds(metadata?.durationSeconds || 0)] : ["-frames:v", "1"]), stagingPath];
       const run = () => runMediaCommand("ffmpeg", args, input.kind === "video" ? videoEncodeTimeoutMs : mediaTimeoutMs);
       if (input.kind === "video") await runWithConcurrencyPool("localVideo", run); else await run();
       const encoded = await stat(stagingPath);
@@ -641,7 +642,7 @@ export function runMediaCommand(command: "ffmpeg" | "ffprobe", args: string[], t
           reject(new CanvasMediaNeedsConfigError(`${command} is not installed or is not available on PATH.`));
           return;
         }
-        const detail = stderr?.toString().trim().split(/\r?\n/).slice(-2).join(" ") || error.message;
+        const detail = stderr?.toString().trim().split(/\r?\n/).slice(0, 2).join(" ") || error.message;
         reject(new Error(`${command} failed: ${detail.slice(0, 300)}`));
         return;
       }

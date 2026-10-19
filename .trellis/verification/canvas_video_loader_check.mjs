@@ -21,6 +21,7 @@ function loadTsModule(relative, requireMap = {}) {
     Buffer, URL, console, process, module: cjs, exports: cjs.exports, structuredClone,
     require: (name) => {
       if (Object.hasOwn(requireMap, name)) return requireMap[name];
+      if (name === "./video-encoding") return loadTsModule("src/lib/canvas/video-encoding.ts", {});
       if (name.startsWith("node:")) return nodeRequire(name);
       throw new Error(`Unexpected import ${name} from ${relative}`);
     },

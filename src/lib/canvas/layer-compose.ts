@@ -9,6 +9,7 @@ import { persistRuntimeMedia } from "../runtime-media-storage";
 import { runWithConcurrencyPool } from "../concurrency";
 import { getCanvasDirectorySnapshot } from "./directory-snapshots";
 import { CanvasMediaNeedsConfigError, probeCanvasMediaFile, runMediaCommand } from "./media-tools";
+import { canvasVideoEncodingArgs } from "./video-encoding";
 import { composeConfigKey, composeDuration, composeLayerGeometry, findComposeSource, isLayerComposeConfig, LAYER_COMPOSE_LIMITS, validateLayerComposeConfig } from "./layer-compose-contract";
 import type { ComposeLayer, ComposeSource, LayerComposeConfig } from "./layer-compose-contract";
 import type { CanvasMediaReference } from "./types";
@@ -195,7 +196,7 @@ export async function renderLayerComposition(rawConfig: unknown, sources: Compos
           if (audioIndex !== undefined) filters.push(`[${audioIndex}:a:0]asetpts=PTS-STARTPTS,apad,atrim=duration=${duration}[audio]`);
           args.push("-filter_complex", filters.join(";"), "-map", "[out]");
           if (audioIndex !== undefined) args.push("-map", "[audio]", "-c:a", "aac", "-b:a", "160k");
-          args.push("-t", String(duration), "-r", "30", "-c:v", "libx264", "-preset", "medium", "-crf", "18", "-pix_fmt", "yuv420p", "-movflags", "+faststart", staging);
+          args.push("-t", String(duration), "-r", "30", ...canvasVideoEncodingArgs({ preset: "medium", crf: 18 }), "-pix_fmt", "yuv420p", "-movflags", "+faststart", staging);
           await runMediaCommand("ffmpeg", args, 30 * 60_000);
         }
         await validateOutput(staging, config, isVideo, duration, hasAudio);

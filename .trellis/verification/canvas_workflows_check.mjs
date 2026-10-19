@@ -46,6 +46,7 @@ const loadTsModule = (relativePath, requireMap = {}, sandboxExtras = {}) => {
     ...sandboxExtras,
     require: (name) => {
       if (Object.hasOwn(requireMap, name)) return requireMap[name];
+      if (name === "./video-encoding") return loadTsModule("src/lib/canvas/video-encoding.ts", {});
       if (name.startsWith("node:")) return createRequire(import.meta.url)(name);
       throw new Error(`Unexpected import in ${relativePath}: ${name}`);
     },

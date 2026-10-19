@@ -9,6 +9,7 @@ import { materializeRuntimeMedia } from "../runtime-media-materializer";
 import { findExistingRuntimeMedia, persistRuntimeMedia } from "../runtime-media-storage";
 import { requireCanvasSubtitleFont } from "./subtitle-fonts";
 import { normalizeCanvasSubtitleStyle } from "./subtitle-style";
+import { canvasVideoEncodingArgs } from "./video-encoding";
 import { CanvasMediaNeedsConfigError, probeCanvasMediaFile } from "./media-tools";
 import { CANVAS_SUBTITLE_TIMELINE_PROTOCOL_VERSION, canvasSubtitleRecognizerSettings, canvasSubtitleRecognizerSettingsHash, transcribeCanvasLocalSubtitleTimeline } from "./local-subtitle-timeline";
 import { CANVAS_SUBTITLE_REVISION_PROTOCOL_VERSION, validateCanvasSubtitleSegments } from "./subtitle-editor";
@@ -55,7 +56,7 @@ export async function addCanvasVideoSubtitles(input: { source: CanvasMediaRefere
       "-i", source.filePath,
       "-map", "0:v:0", "-map", "0:a:0",
       "-vf", `ass=${assFilename}`,
-      "-c:v", "libx264", "-pix_fmt", "yuv420p",
+      ...canvasVideoEncodingArgs(), "-pix_fmt", "yuv420p",
       "-c:a", "aac", "-b:a", "192k",
       "-movflags", "+faststart",
       stagingPath,
@@ -255,7 +256,7 @@ function runFfmpeg(args: string[], cwd: string) {
     execFile("ffmpeg", args, { cwd, timeout: videoEncodeTimeoutMs, maxBuffer: 1024 * 1024 }, (error, _stdout, stderr) => {
       if (!error) return resolve();
       if ((error as NodeJS.ErrnoException).code === "ENOENT") return reject(new CanvasMediaNeedsConfigError("ffmpeg is not installed or available on PATH."));
-      reject(new Error(`ffmpeg subtitle rendering failed: ${(stderr || error.message).toString().trim().split(/\r?\n/).slice(-2).join(" ").slice(0, 300)}`));
+      reject(new Error(`ffmpeg subtitle rendering failed: ${(stderr || error.message).toString().trim().split(/\r?\n/).slice(0, 2).join(" ").slice(0, 300)}`));
     });
   });
 }

@@ -21,6 +21,8 @@ node --env-file=.env.local .trellis/verification/unified_library_postgres_benchm
 
 ## Current Automated Checks
 
+- Canvas H.264: baseline `canvas_video_encoding_check.mjs` checks CPU output and explicit policy validation; opt-in real GPU/node commands and hardware limits are in `canvas_video_encoding.md`. GPU is never required by the default baseline.
+
 - Canvas cancellation: baseline `canvas_cancellation_store_check.mjs`, `canvas_cancellation_runtime_check.mjs` and `canvas_cancellation_recovery_check.mjs` cover atomic run/node/queue cancellation, stale-write fences, real worker/resource release, downstream suppression and scoped recovery backup/rollback. `node --env-file=.env.local .trellis/verification/canvas_cancellation_store_check.mjs --postgres` separately exercises actual PostgreSQL SQL in connection-local temporary tables, never runtime rows. Image checks cover child termination, timeout, download cancellation and staging cleanup.
 
 - Gallery UX: baseline `library_ui_check.mjs` executes date/URL/wire-key contracts. `python .trellis/verification/library_collection_batch_browser_check.py` covers filters/history, original viewer/drafts/zoom/cursor races, permissions, batch failures/deletion, import receipts and smart folders across three themes at 1440/390. Use worker-disabled loopback `FLUXPOST_BROWSER_BASE_URL`; it rejects 3001 and intercepts every API/image request. Evidence: library-ux task.

@@ -4,9 +4,11 @@ Last updated: 2026-10-19
 
 ## One-Line Status
 
-Canvas cancellation repair is active on local LAN port 3001. The reported batch is cancelled with all 30 completed task snapshots unchanged; queued batches are running and image nodes complete again. Gallery operator review remains.
+Local NVIDIA H.264 support is verified and configured for RTX 5880 Ada; commit/activation next. Canvas cancellation recovery is active and completed outputs preserved. Gallery operator review remains.
 
 ## Current Focus
+
+- 2026-10-19: Added explicit CPU/NVIDIA H.264 selection across five Canvas video paths. Real NVENC output/reconstruction/layer/slideshow checks and CPU baseline pass; local setting resolves h264_nvenc with video concurrency 1. Types, source lint, build and isolated HTTP/SQLite pass; full baseline stops only at 17 existing runtime-import lint errors. Decode/filters/audio remain CPU; unsupported tiny GPU dimensions fail explicitly. Commit/activation next; task `10-19-canvas-nvenc`.
 
 - 2026-10-19: Cancellation repair passes focused worker/resource/storage/scheduler/iteration tests, real PostgreSQL temporary-table SQL, types, changed-source lint, standalone build/native encoder and isolated HTTP/SQLite checks. Full baseline reaches unchanged 17 runtime-import lint errors. Clean code commit 52c8c00 activated through `npm run local:lan`; identity/smoke and 0.0.0.0 binding pass. Scoped backups precede eight abandoned cancellations and eight dead-worker image resumes. Read-only verification confirms original 30 completed snapshots unchanged; both queued batches now running and 11 image nodes completed. Evidence: archived cancellation-recovery task.
 
@@ -20,7 +22,7 @@ Canvas cancellation repair is active on local LAN port 3001. The reported batch 
 
 ## Next Entry
 
-Observe normal operator cancellation/new batch behavior, then resume authenticated `/library` review. Non-image providers and already-started uploads retain execution capacity until they settle; unrelated historical expired runs remain untouched. Preserve provider and migration acceptance gates.
+Commit and activate the verified GPU encoding implementation after confirming no active execution. Then observe normal operator video/cancellation behavior and resume `/library` review. Preserve provider/migration acceptance gates and unrelated historical expired runs.
 
 ## Risks And Unknowns
 

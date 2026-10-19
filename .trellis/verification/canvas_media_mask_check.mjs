@@ -89,7 +89,7 @@ function loadTsModule(relativePath, requireMap = {}, extras = {}) {
   const source = read(relativePath);
   const transformed = ts.transpileModule(source, { compilerOptions: { esModuleInterop: true, module: ts.ModuleKind.CommonJS, target: ts.ScriptTarget.ES2022, jsx: ts.JsxEmit.ReactJSX } }).outputText;
   const moduleRecord = { exports: {} };
-  const sandbox = { module: moduleRecord, exports: moduleRecord.exports, require: (name) => requireMap[name] || (name.startsWith("node:") ? createRequire(import.meta.url)(name) : {}), console, process, Buffer, setTimeout, clearTimeout, __dirname: path.dirname(path.join(root, relativePath)), __filename: path.join(root, relativePath), ...extras };
+  const sandbox = { module: moduleRecord, exports: moduleRecord.exports, require: (name) => requireMap[name] || (name === "./video-encoding" ? loadTsModule("src/lib/canvas/video-encoding.ts") : undefined) || (name.startsWith("node:") ? createRequire(import.meta.url)(name) : {}), console, process, Buffer, setTimeout, clearTimeout, __dirname: path.dirname(path.join(root, relativePath)), __filename: path.join(root, relativePath), ...extras };
   vm.runInNewContext(transformed, sandbox, { filename: relativePath });
   return moduleRecord.exports;
 }

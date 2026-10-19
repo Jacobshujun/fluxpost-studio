@@ -16,6 +16,7 @@ function load(file, modules = {}) {
   const loaded = { exports: {} };
   Function("require", "module", "exports", "process", compile(read(file)))((name) => {
     if (Object.hasOwn(modules, name)) return modules[name];
+    if (name === "./video-encoding") return load("src/lib/canvas/video-encoding.ts");
     if (name.startsWith("node:") || name === "sharp") return require(name);
     throw new Error(`Unexpected dependency ${name}`);
   }, loaded, loaded.exports, { ...process, cwd: () => temp });
@@ -30,7 +31,7 @@ const materializer = { resolveRuntimeMediaReference: async (url) => {
   assert.ok(sources.has(url), `No external media allowed: ${url}`);
   return { filePath: sources.get(url), cleanup: async () => { cleanups++; } };
 } };
-const storage = { persistRuntimeMedia: async (input) => { assert.ok(readFileSync(input.filePath).length); return input.publicPath; } };
+const storage = { findExistingRuntimeMedia: async () => undefined, persistRuntimeMedia: async (input) => { assert.ok(readFileSync(input.filePath).length); return input.publicPath; } };
 const concurrency = { runWithConcurrencyPool: async (name, task) => { assert.ok(["localImage", "localVideo", "mediaMetadata"].includes(name)); return task(); } };
 const ffmpeg = (args) => execFileSync("ffmpeg", ["-hide_banner", "-loglevel", "error", "-y", ...args], { stdio: "pipe" });
 try {
@@ -259,6 +260,31 @@ try {
         assert.equal(persisted.kind, kind === "image" ? "images" : "videos");
         assert.equal(existsSync(localPath), false, "persistence cleanup remains intact");
       } finally { storage.persistRuntimeMedia = localPersist; }
+    }
+  }
+  if (process.argv.includes("--nvenc")) {
+    const previousEncoder = process.env.FFMPEG_VIDEO_ENCODER;
+    process.env.FFMPEG_VIDEO_ENCODER = "h264_nvenc";
+    try {
+      const video = await renderer.renderLayerComposition(config([make("gpu", "video", { source: bind("video", "short") })], {
+        width: 320, height: 180, audioLayerId: "gpu",
+      }), videoSources, "owner");
+      const metadata = await media.probeCanvasMediaFile(outputPath(video));
+      assert.equal(metadata.width, 320); assert.equal(metadata.height, 180); assert.equal(metadata.hasAudio, true);
+      const receipt = JSON.parse(execFileSync("ffprobe", ["-v", "error", "-show_streams", "-of", "json", outputPath(video)], { encoding: "utf8" }));
+      assert.match(receipt.streams.find((stream) => stream.codec_type === "video").tags.encoder, /h264_nvenc/);
+      await assert.rejects(renderer.renderLayerComposition(config([make("gpu-small", "video", { source: bind("video", "short") })]), videoSources, "owner"), /minimum supported value/);
+      const slideshow = await media.renderCanvasImageSlideshow({
+        images: [{ url: "red" }], audio: { url: "short" }, durationSeconds: 1,
+        ratio: "1:1", transition: "none", motion: false, seed: "gpu-fixture",
+      });
+      const slideshowReceipt = JSON.parse(execFileSync("ffprobe", ["-v", "error", "-show_streams", "-of", "json", path.join(temp, "public", slideshow.url)], { encoding: "utf8" }));
+      assert.match(slideshowReceipt.streams.find((stream) => stream.codec_type === "video").tags.encoder, /h264_nvenc/);
+      assert.equal(slideshowReceipt.streams.find((stream) => stream.codec_type === "audio").codec_name, "aac");
+      console.log("NVENC layer composition and slideshow: actual GPU receipts/audio; unsupported tiny dimensions fail explicitly.");
+    } finally {
+      if (previousEncoder === undefined) delete process.env.FFMPEG_VIDEO_ENCODER;
+      else process.env.FFMPEG_VIDEO_ENCODER = previousEncoder;
     }
   }
   console.log("Layer composition: PNG/MP4 rendering, metadata reuse/cache/expiry/ownership, no-preview-hash, loading concurrency/retry/cancellation, graph and workflow round trips passed.");

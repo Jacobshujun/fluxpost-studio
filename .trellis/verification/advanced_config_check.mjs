@@ -54,7 +54,23 @@ assertNotContains(files.route, /process\.env\[[^\]]+\][\s\S]*NextResponse\.json/
 
 checkImageProxyConfiguration();
 checkConfigSynchronization();
+checkVideoEncodingConfiguration();
 console.log("Advanced config admin boundary, cross-module synchronization and image proxy persistence checks passed.");
+
+function checkVideoEncodingConfiguration() {
+  const runtime = loadConfig("win32");
+  const field = (config) => config.getAdvancedConfigSnapshot().groups.flatMap((group) => group.fields).find((entry) => entry.key === "FFMPEG_VIDEO_ENCODER");
+  assert.equal(field(runtime.config).kind, "select");
+  runtime.config.saveAdvancedConfigPatch({ values: { FFMPEG_VIDEO_ENCODER: "h264_nvenc" } });
+  assert.equal(field(runtime.loadModule()).value, "h264_nvenc");
+  const restarted = loadConfig("win32", {}, runtime.persisted());
+  assert.equal(field(restarted.config).value, "h264_nvenc");
+  const before = runtime.persisted();
+  assert.throws(() => runtime.config.saveAdvancedConfigPatch({ values: { FFMPEG_VIDEO_ENCODER: "invalid" } }));
+  assert.equal(runtime.persisted(), before);
+  runtime.config.saveAdvancedConfigPatch({ values: { FFMPEG_VIDEO_ENCODER: null } });
+  assert.equal(field(runtime.config).value, "");
+}
 
 function checkConfigSynchronization() {
   for (const platform of ["win32", "linux"]) {
