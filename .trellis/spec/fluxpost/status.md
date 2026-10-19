@@ -4,18 +4,18 @@ Last updated: 2026-10-19
 
 ## One-Line Status
 
-Gemini Canvas text/vision implementation and offline verification are complete; clean-commit LAN activation remains. NVENC encoding (concurrency 1), cancellation recovery and gallery operator gates remain.
+Gemini Canvas text/vision is implemented, verified offline and activated on LAN 3001. Real Gemini acceptance remains pending. NVENC encoding (concurrency 1), cancellation recovery and gallery operator gates remain.
 
 ## Current Focus
 
-- Gemini: native generateContent, independent config/model/proxy, ordered text/images and cancellation implemented. Offline provider/config/graph/iteration/V2, Canvas regression, six three-theme desktop/mobile browser cases, types, changed lint, production build/config synchronization and isolated HTTP/SQLite pass. Baseline domain checks pass; existing lint blocker below. Clean LAN activation remains. No live calls. Task: `.trellis/tasks/10-19-canvas-gemini-node/`.
+- Gemini: native generateContent, independent config/model/proxy, ordered text/images and cancellation implemented. Offline provider/config/graph/iteration/V2, Canvas regression, six three-theme desktop/mobile cases, types, changed lint, build/config synchronization and isolated HTTP/SQLite pass. Baseline domain checks pass; existing lint blocker below. Clean 5ca173a LAN identity/smoke/binding/pages passed; documentation HEAD is activated afterward. No live calls. Evidence: `.trellis/tasks/archive/2026-10/10-19-canvas-gemini-node/verification.md`.
 - NVENC: real output/reconstruction/layer/slideshow/mask checks, CPU baseline, types, source lint, build and isolated HTTP/SQLite pass. Clean d031d1a LAN activation and full-SHA identity/smoke/0.0.0.0:3001 passed after the operator batch drained. Decode/filters/audio remain CPU; unsupported tiny GPU dimensions fail explicitly.
 - Cancellation: worker/resource/storage/scheduler/iteration, temporary-table PostgreSQL SQL, types, lint/build/HTTP/SQLite pass. Scoped recovery preserved all 30 completed snapshots and resumed abandoned work. Normal operator observation remains.
 - Gallery UX: both phases pass runtime/filter/batch and six three-theme 1440/390 browser checks; clean 3147e19 local activation passed. Authenticated operator review remains.
 
 ## Next Entry
 
-Commit verified Gemini implementation and activate LAN 3001 after the read-only work-drain check. Preserve provider gates and historical runs.
+Configure Gemini key and supported default model in admin advanced config; operator live text/image acceptance remains pending. Preserve historical runs. Local runtime SHA is exposed by `/api/version` and the ignored candidate-state file.
 
 ## Risks And Unknowns
 

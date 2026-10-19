@@ -20,7 +20,7 @@ Add a local Canvas Gemini text/vision node using the native generateContent API,
 - [x] Graph, portable, V2 and iteration compatibility pass, including bypass and downstream text.
 - [x] Mocked browser cases pass in three themes at desktop/mobile widths.
 - [x] Existing checks/types/changed lint/build/HTTP/SQLite pass; unrelated baseline failures are recorded accurately.
-- [ ] Clean committed candidate is active on LAN 3001 with matching SHA and health. Live provider acceptance stays pending.
+- [x] Clean committed candidate is active on LAN 3001 with matching SHA and health. Live provider acceptance stays pending.
 
 ## Notes
 

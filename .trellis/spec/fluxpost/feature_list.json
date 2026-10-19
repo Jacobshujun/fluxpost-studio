@@ -19,7 +19,7 @@
       "evidence": [
         "2026-10-19 loopback native HTTP/CONNECT proxy, limits/errors/cancellation, source/built config synchronization, Canvas executor/graph/iteration/V2/bypass and six three-theme 1440/390 node/config browser cases pass; canvas-gemini-node task."
       ],
-      "notes": "Local activation pending verified commit. Real Gemini acceptance remains pending; no live model calls."
+      "notes": "Clean 5ca173a LAN 3001 activation, full-SHA identity, HTTP smoke/binding/pages pass; task archived with evidence. Real Gemini acceptance remains pending; no live calls."
     },
     {
       "id": "canvas-local-image-save",
