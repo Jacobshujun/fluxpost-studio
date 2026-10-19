@@ -11,9 +11,10 @@ Baseline `canvas_video_encoding_check.mjs` verifies real filtered CPU H.264 outp
 ```powershell
 node .trellis/verification/canvas_video_encoding_check.mjs --nvenc
 node .trellis/verification/canvas_layer_compose_check.mjs --nvenc
+node .trellis/verification/canvas_media_mask_check.mjs --nvenc
 $env:FFMPEG_VIDEO_ENCODER = "h264_nvenc"
 node .trellis/verification/canvas_video_reconstruction_check.mjs
 Remove-Item Env:FFMPEG_VIDEO_ENCODER
 ```
 
-Default baseline never requires a GPU. The opt-in composition check confirms actual NVENC receipts/audio for layer composition/slideshow and explicit failure on hardware-incompatible small output. Existing mask/subtitle checks remain CPU regression coverage. No remote production GPU support is assumed or enabled.
+Default baseline never requires a GPU. The opt-in composition/mask checks confirm actual NVENC receipts/audio for layer composition/slideshow/video masking and explicit failure on hardware-incompatible small output. Existing subtitle checks remain CPU regression coverage. No remote production GPU support is assumed or enabled.

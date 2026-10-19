@@ -136,7 +136,7 @@ async function verifyRenderer() {
         return native("node:child_process").execFile(...args);
       } },
       "../runtime-media-materializer": { materializeRuntimeMedia: async (url) => {
-        const filePath = { "fixture:source": source, "fixture:second": source, "fixture:template": template, "fixture:corrupt": corrupt }[url];
+        const filePath = { "fixture:source": source, "fixture:second": source, "fixture:template": template, "fixture:corrupt": corrupt, "fixture:gpu": path.join(temp, "gpu-source.mp4") }[url];
         assert.ok(filePath, `Unknown fixture ${url}`);
         return { filePath, cleanup: async () => { cleanup.push(url); } };
       } },
@@ -202,6 +202,24 @@ async function verifyRenderer() {
     await assert.rejects(() => execute({ ...context, inputs: { ...context.inputs, overlayImages: [{ kind: "images", items: [base.overlayImage, base.overlayImage] }] } }), /只接受一张/);
     await assert.rejects(() => execute({ ...context, inputs: { videos: context.inputs.videos } }), /遮罩图片/);
     await assert.rejects(() => execute({ ...context, inputs: { ...context.inputs, images: [{ kind: "images", items: [base.overlayImage] }] } }), /只能连接图片或视频/);
+    if (process.argv.includes("--nvenc")) {
+      const previousEncoder = process.env.FFMPEG_VIDEO_ENCODER;
+      process.env.FFMPEG_VIDEO_ENCODER = "h264_nvenc";
+      try {
+        execFileSync("ffmpeg", ["-v", "error", "-y", "-i", source, "-vf", "scale=320:180", "-c:v", "libx264", "-c:a", "copy", path.join(temp, "gpu-source.mp4")]);
+        const [gpu] = await media.maskCanvasMedia({ ...base, items: [{ url: "fixture:gpu" }] });
+        const receipt = JSON.parse(execFileSync("ffprobe", ["-v", "error", "-show_streams", "-of", "json", outputFile(gpu.url)], { encoding: "utf8" }));
+        const video = receipt.streams.find((stream) => stream.codec_type === "video");
+        assert.equal(video.width, 320); assert.equal(video.height, 180);
+        assert.match(video.tags.encoder, /h264_nvenc/);
+        assert.equal(receipt.streams.find((stream) => stream.codec_type === "audio").codec_name, "aac");
+        execFileSync("ffmpeg", ["-v", "error", "-i", outputFile(gpu.url), "-f", "null", "-"]);
+        console.log("NVENC video mask: actual GPU encoder receipt, dimensions, audio and decode passed.");
+      } finally {
+        if (previousEncoder === undefined) delete process.env.FFMPEG_VIDEO_ENCODER;
+        else process.env.FFMPEG_VIDEO_ENCODER = previousEncoder;
+      }
+    }
     console.log("Real FFmpeg mask alpha, geometry, timing, audio, batch, cache and error checks passed.");
   } finally {
     rmSync(temp, { recursive: true, force: true });
