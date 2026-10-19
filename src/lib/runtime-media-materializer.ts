@@ -39,21 +39,25 @@ export async function resolveRuntimeMediaReference(url: string): Promise<Runtime
 
 export async function materializeRuntimeMedia(
   url: string,
-  options: { maxBytes: number; kind: "image" | "video"; temporaryRoot?: string; timeoutMs?: number },
+  options: { maxBytes: number; kind: "image" | "video"; temporaryRoot?: string; timeoutMs?: number; signal?: AbortSignal },
 ): Promise<MaterializedRuntimeMedia> {
+  options.signal?.throwIfAborted();
   const resolved = await resolveRuntimeMediaReference(url);
+  options.signal?.throwIfAborted();
   if (resolved.localPath) {
     return { filePath: resolved.localPath, resolvedUrl: resolved.url, temporary: false, cleanup: async () => undefined };
   }
 
   const timeoutMs = options.timeoutMs || (options.kind === "video" ? videoDownloadTimeoutMs : imageDownloadTimeoutMs);
+  const signal = options.signal ? AbortSignal.any([options.signal, AbortSignal.timeout(timeoutMs)]) : AbortSignal.timeout(timeoutMs);
   let response: Response;
   try {
     response = await fetch(resolved.url, {
       headers: buildMediaRequestHeaders(resolved.url),
-      signal: AbortSignal.timeout(timeoutMs),
+      signal,
     });
   } catch (error) {
+    options.signal?.throwIfAborted();
     if (isTimeoutError(error)) {
       throw new Error(`Runtime media download timed out after ${formatTimeoutSeconds(timeoutMs)}s.`);
     }
@@ -76,7 +80,7 @@ export async function materializeRuntimeMedia(
   });
 
   try {
-    await pipeline(Readable.fromWeb(response.body as never), limiter, createWriteStream(filePath));
+    await pipeline(Readable.fromWeb(response.body as never), limiter, createWriteStream(filePath), { signal });
     if (!bytes) throw new Error("Runtime media download returned an empty file.");
     return {
       filePath,
@@ -86,6 +90,7 @@ export async function materializeRuntimeMedia(
     };
   } catch (error) {
     await rm(folder, { recursive: true, force: true });
+    options.signal?.throwIfAborted();
     if (isTimeoutError(error)) {
       throw new Error(`Runtime media download timed out after ${formatTimeoutSeconds(timeoutMs)}s.`);
     }

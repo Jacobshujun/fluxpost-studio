@@ -1,10 +1,12 @@
 import { createHash, randomUUID } from "node:crypto";
 import {
+  cancelCanvasRunInDb,
   claimNextCanvasRunQueueItem,
   enqueueCanvasRunQueueItem,
   finishCanvasRunQueueItem,
   getCanvasNodeRunFromDb,
   getCanvasRunFromDb,
+  getCanvasScheduleFromDb,
   heartbeatCanvasRunQueueItem,
   listCanvasNodeRunsForWorkflowFromDb,
   listCanvasNodeRunsFromDb,
@@ -15,9 +17,9 @@ import {
   requeueCanvasRunQueueItem,
   saveCanvasNodeRunToDb,
   saveCanvasRunToDb,
+  saveCancelledCanvasNodeReceiptInDb,
   parkCanvasIterationRun,
   recoverCanvasIterationRuns,
-  wakeCanvasIterationRun,
 } from "../database";
 import { recordExecutionLog } from "../activity-log";
 import {
@@ -56,12 +58,14 @@ const queueHeartbeatMs = 30_000;
 
 type CanvasQueueGlobalState = typeof globalThis & {
   __fluxpostCanvasQueue?: { activeWorkers?: number; sequence?: number };
+  __fluxpostCanvasExecutions?: Map<string, AbortController>;
 };
 
 const storedQueueState = ((globalThis as CanvasQueueGlobalState).__fluxpostCanvasQueue ||= {});
 storedQueueState.activeWorkers ??= 0;
 storedQueueState.sequence ??= 0;
 const queueState = storedQueueState as Required<typeof storedQueueState>;
+const executions = ((globalThis as CanvasQueueGlobalState).__fluxpostCanvasExecutions ||= new Map<string, AbortController>());
 let iterationRecovery: Promise<void> | undefined;
 
 export async function planCanvasRun(workflowId: string, account: WorkspaceAccessActor, targetNodeIds?: string[]) {
@@ -328,7 +332,7 @@ export async function createCanvasRun(
     updatedAt: now,
   };
   await saveCanvasRunToDb(run);
-  await enqueueCanvasRunQueueItem(run);
+  await enqueueCanvasRunQueueItem(run, { requireActiveRun: true });
   await recordExecutionLog({
     ownerUserId: account.id,
     ownerDisplayName: account.displayName || account.id,
@@ -357,10 +361,11 @@ export async function createCanvasRunFromGraph(input: {
   const existing = await getCanvasRunFromDb(input.id);
   if (existing) return existing;
   const run = prepareCanvasRunFromGraph(input);
-  await saveCanvasRunToDb(run);
-  await enqueueCanvasRunQueueItem(run);
+  const persisted = await saveCanvasRunToDb(run, { requireActiveSchedule: true });
+  if (persisted.status === "cancelled") return persisted;
+  await enqueueCanvasRunQueueItem(persisted, { requireActiveRun: true });
   ensureCanvasRunWorker();
-  return run;
+  return persisted;
 }
 
 export function prepareCanvasRunFromGraph(input: {
@@ -465,15 +470,10 @@ export async function getCanvasRun(runId: string, account: WorkspaceAccessActor)
 export async function cancelCanvasRun(runId: string, account: WorkspaceAccessActor) {
   const current = await getCanvasRun(runId, account);
   if (!current) throw new Error("Canvas run not found");
-  if (["completed", "failed", "cancelled"].includes(current.run.status)) return current.run;
-  const now = new Date().toISOString();
-  const run = await saveCanvasRunToDb({
-    ...current.run,
-    status: current.run.status === "queued" ? "cancelled" : current.run.status,
-    cancelRequestedAt: now,
-    updatedAt: now,
-    ...(current.run.status === "queued" ? { completedAt: now } : {}),
-  });
+  if (["completed", "partial", "failed"].includes(current.run.status)) return current.run;
+  const run = await cancelCanvasRunInDb(runId);
+  if (!run) throw new Error("Canvas run not found");
+  executions.get(runId)?.abort(new Error("Canvas run cancelled."));
   for (const nodeRun of latestNodeRuns(current.nodeRuns).values()) {
     for (const item of nodeRun.internalMetadata?.iteration?.items || []) {
       const child = await getCanvasRunFromDb(item.runId);
@@ -482,10 +482,7 @@ export async function cancelCanvasRun(runId: string, account: WorkspaceAccessAct
       }
     }
   }
-  if (current.run.iterationWaiting) {
-    await wakeCanvasIterationRun(run.id);
-    ensureCanvasRunWorker();
-  }
+  ensureCanvasRunWorker();
   return run;
 }
 
@@ -498,6 +495,10 @@ export async function retryCanvasNode(
   const current = await getCanvasRun(runId, account);
   if (!current) throw new Error("Canvas run not found");
   if (current.run.iterationContext) throw new Error("Retry image items from their iteration region.");
+  if (executions.has(runId) || current.nodeRuns.some((attempt) =>
+    attempt.internalMetadata?.iteration?.items.some((item) => executions.has(item.runId)))) {
+    throw new Error("Wait for the previous Canvas execution to stop before retrying.");
+  }
   if (current.run.batchContext?.schemaVersion === 2 && current.run.batchContext.phase === "shared") {
     if (current.run.status === "completed") {
       throw new Error("Completed shared Canvas results are frozen and cannot be retried.");
@@ -529,7 +530,7 @@ export async function retryCanvasNode(
     error: undefined,
     updatedAt: now,
   }, { resetCancellation: true });
-  if (!(await requeueCanvasRunQueueItem(run.id))) await enqueueCanvasRunQueueItem(run);
+  if (!(await requeueCanvasRunQueueItem(run.id))) await enqueueCanvasRunQueueItem(run, { requireActiveRun: true });
   ensureCanvasRunWorker();
   return run;
 }
@@ -556,6 +557,8 @@ async function drainCanvasRuns(workerId: string) {
   while (true) {
     const queueItem = await claimNextCanvasRunQueueItem(workerId, queueLockMs);
     if (!queueItem) return;
+    const controller = new AbortController();
+    executions.set(queueItem.runId, controller);
     let batchRun: CanvasRun | undefined;
     let batchRunTerminal = false;
     const heartbeat = setInterval(() => {
@@ -574,7 +577,7 @@ async function drainCanvasRuns(workerId: string) {
         batchRunTerminal = true;
         continue;
       }
-      const finalRun = await executeCanvasRun(run);
+      const finalRun = await executeCanvasRun(run, controller.signal);
       batchRun = finalRun;
       if (finalRun.status === "running") {
         if (finalRun.iterationWaiting) {
@@ -607,6 +610,7 @@ async function drainCanvasRuns(workerId: string) {
       batchRunTerminal = true;
     } finally {
       clearInterval(heartbeat);
+      if (executions.get(queueItem.runId) === controller) executions.delete(queueItem.runId);
       if (batchRunTerminal && batchRun?.batchContext) notifyCanvasScheduleRunTerminal(batchRun);
     }
   }
@@ -618,7 +622,7 @@ function notifyCanvasScheduleRunTerminal(run: CanvasRun) {
     .catch((error) => console.error(`Canvas schedule wakeup failed for ${run.id}:`, error));
 }
 
-async function executeCanvasRun(run: CanvasRun) {
+async function executeCanvasRun(run: CanvasRun, signal?: AbortSignal) {
   if (run.iterationContext) {
     const parent = await getCanvasRunFromDb(run.iterationContext.parentRunId);
     if (!parent || parent.cancelRequestedAt || parent.status === "cancelled") {
@@ -643,7 +647,7 @@ async function executeCanvasRun(run: CanvasRun) {
   while (pending.size) {
     const refreshed = await getCanvasRunFromDb(run.id);
     const parent = run.iterationContext ? await getCanvasRunFromDb(run.iterationContext.parentRunId) : undefined;
-    if (refreshed?.cancelRequestedAt || parent?.cancelRequestedAt || parent?.status === "cancelled") {
+    if (signal?.aborted || refreshed?.cancelRequestedAt || refreshed?.status === "cancelled" || parent?.cancelRequestedAt || parent?.status === "cancelled") {
       return finishCancelledRun(refreshed || run, pending, latest);
     }
     const ready = Array.from(pending).filter((nodeId) => dependencies(run.graphSnapshot.edges, nodeId)
@@ -655,6 +659,7 @@ async function executeCanvasRun(run: CanvasRun) {
       stepMap.get(nodeId) || { nodeId, action: "execute" },
       latest,
       outputs,
+      signal,
     )));
     for (const result of results) {
       latest.set(result.nodeId, result.nodeRun);
@@ -713,6 +718,7 @@ async function runPlannedNode(
   step: CanvasRunPlanStep,
   latest: Map<string, CanvasNodeRun>,
   outputs: Map<string, Record<string, CanvasArtifact>>,
+  signal?: AbortSignal,
 ) {
   const inputs = collectInputs(run.graphSnapshot.edges, node.id, outputs, node.type === "utility.layer-compose");
   if (run.iterationRepairing && !run.iterationRefreshRegionIds?.length && !run.retryNodeIds?.includes(node.id)) {
@@ -745,7 +751,7 @@ async function runPlannedNode(
     );
     return { nodeId: node.id, nodeRun };
   }
-  return runReadyNode(run, node, latest, inputs);
+  return runReadyNode(run, node, latest, inputs, signal);
 }
 
 async function runReusedNode(
@@ -817,6 +823,7 @@ async function runReadyNode(
   node: CanvasNode,
   latest: Map<string, CanvasNodeRun>,
   inputs: Record<string, CanvasArtifact[]>,
+  signal?: AbortSignal,
 ) {
   const previousNodeRun = latest.get(node.id);
   const resumableNodeRun = previousNodeRun?.status === "running" && (previousNodeRun.providerTaskId || previousNodeRun.internalMetadata?.iteration)
@@ -845,14 +852,23 @@ async function runReadyNode(
     startedAt,
   });
   let interimSave = Promise.resolve();
+  let executionReceipt: CanvasNodeRun | undefined;
   const queueInterimSave = (update: (current: CanvasNodeRun) => CanvasNodeRun) => {
     interimSave = interimSave.then(async () => {
-      nodeRun = update(nodeRun);
-      await saveCanvasNodeRunToDb(nodeRun);
+      const checkpoint = update(nodeRun);
+      nodeRun = await saveCanvasNodeRunToDb(checkpoint);
+      if (nodeRun.status === "cancelled") await saveCancelledCanvasNodeReceiptInDb(checkpoint);
     });
     return interimSave;
   };
   try {
+    signal?.throwIfAborted();
+    if (nodeRun.status === "cancelled") return { nodeId: node.id, nodeRun };
+    if (run.batchContext && (await getCanvasScheduleFromDb(run.batchContext.scheduleId))?.status === "cancelled") {
+      await cancelCanvasRunInDb(run.id);
+      nodeRun = await saveCanvasNodeRunToDb({ ...nodeRun, status: "cancelled", updatedAt: new Date().toISOString() });
+      return { nodeId: node.id, nodeRun };
+    }
     const result: CanvasNodeExecutionResult = node.type === "utility.image-iterate"
       ? await executeCanvasIteration({ run, node, inputs, previousNodeRun, saveMetadata: async (iteration) => {
         await queueInterimSave((current) => ({ ...current, internalMetadata: { iteration }, updatedAt: new Date().toISOString() }));
@@ -863,6 +879,7 @@ async function runReadyNode(
           return { outputs: run.iterationInputs };
         })()
         : await executeCanvasNode({
+      signal,
       iterationRefresh: Boolean(run.iterationRefreshRegionIds?.length),
       runId: run.id,
       node,
@@ -893,6 +910,15 @@ async function runReadyNode(
       },
     });
     await interimSave;
+    executionReceipt = {
+      ...nodeRun, outputs: result.outputs,
+      internalMetadata: result.internalMetadata || nodeRun.internalMetadata,
+      providerTaskId: result.providerTaskId || nodeRun.providerTaskId,
+      providerTaskRoute: result.providerTaskRoute || nodeRun.providerTaskRoute,
+      providerStatus: result.providerStatus || nodeRun.providerStatus,
+    };
+    await saveCancelledCanvasNodeReceiptInDb(executionReceipt);
+    signal?.throwIfAborted();
     const endedAt = new Date().toISOString();
     nodeRun = await saveCanvasNodeRunToDb({
       ...nodeRun,
@@ -909,10 +935,13 @@ async function runReadyNode(
       updatedAt: endedAt,
       ...(result.pending ? {} : { completedAt: endedAt }),
     });
+    if (nodeRun.status === "cancelled") await saveCancelledCanvasNodeReceiptInDb(executionReceipt);
   } catch (error) {
     await interimSave;
+    if (executionReceipt) await saveCancelledCanvasNodeReceiptInDb(executionReceipt);
     const endedAt = new Date().toISOString();
-    if (isImageNetworkUnavailableError(error) && (node.type === "model.gpt-image" || node.type === "model.gpt-image-each")) {
+    const cancelled = signal?.aborted || Boolean((await getCanvasRunFromDb(run.id))?.cancelRequestedAt);
+    if (!cancelled && isImageNetworkUnavailableError(error) && (node.type === "model.gpt-image" || node.type === "model.gpt-image-each")) {
       nodeRun = await saveCanvasNodeRunToDb({
         ...nodeRun,
         status: "running",
@@ -926,7 +955,7 @@ async function runReadyNode(
     }
     nodeRun = await saveCanvasNodeRunToDb({
       ...nodeRun,
-      status: error instanceof CanvasNeedsConfigError ? "needs_config" : "failed",
+      status: cancelled ? "cancelled" : error instanceof CanvasNeedsConfigError ? "needs_config" : "failed",
       error: error instanceof Error ? error.message : "Canvas node failed",
       waitReason: undefined,
       updatedAt: endedAt,

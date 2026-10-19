@@ -26,6 +26,11 @@ for (const expected of ["public/generated/**/*", "public/media/**/*", "data/**/*
   if (!globalExcludes.includes(expected)) throw new Error(`Missing output trace exclusion: ${expected}`);
 }
 
+const encoderIncludes = dockerConfig.outputFileTracingIncludes?.["/*"] || [];
+for (const expected of ["./src/lib/canvas/image-encoder.mjs", "./node_modules/@img/sharp-*/lib/**/*"]) {
+  if (!encoderIncludes.includes(expected)) throw new Error(`Missing image child/runtime library trace: ${expected}`);
+}
+
 if (!/FROM node:24-bookworm-slim AS builder[\s\S]*ENV FLUXPOST_STANDALONE_BUILD=1[\s\S]*RUN npm run build/.test(dockerfile)) {
   throw new Error("Docker builder must enable standalone output before running the Next build.");
 }

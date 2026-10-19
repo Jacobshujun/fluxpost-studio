@@ -28,13 +28,14 @@ type PoolStats = {
 
 class ConcurrencyPool {
   private active = 0;
-  private readonly queue: Array<() => void> = [];
+  private readonly queue: Array<{ start: () => void; cancel: () => void }> = [];
 
   constructor(readonly limit: number) {}
 
-  async run<T>(task: () => Promise<T>): Promise<T> {
-    await this.acquire();
+  async run<T>(task: () => Promise<T>, signal?: AbortSignal): Promise<T> {
+    await this.acquire(signal);
     try {
+      signal?.throwIfAborted();
       return await task();
     } finally {
       this.release();
@@ -49,24 +50,37 @@ class ConcurrencyPool {
     };
   }
 
-  private acquire() {
+  private acquire(signal?: AbortSignal) {
+    signal?.throwIfAborted();
     if (this.active < this.limit) {
       this.active += 1;
       return Promise.resolve();
     }
 
-    return new Promise<void>((resolve) => {
-      this.queue.push(() => {
-        this.active += 1;
-        resolve();
-      });
+    return new Promise<void>((resolve, reject) => {
+      const onAbort = () => {
+        const index = this.queue.indexOf(waiter);
+        if (index !== -1) this.queue.splice(index, 1);
+        waiter.cancel();
+        reject(signal!.reason);
+      };
+      const waiter = {
+        start: () => {
+          waiter.cancel();
+          this.active += 1;
+          resolve();
+        },
+        cancel: () => signal?.removeEventListener("abort", onAbort),
+      };
+      this.queue.push(waiter);
+      signal?.addEventListener("abort", onAbort, { once: true });
     });
   }
 
   private release() {
     this.active = Math.max(0, this.active - 1);
     const next = this.queue.shift();
-    if (next) next();
+    if (next) next.start();
   }
 }
 
@@ -77,8 +91,8 @@ type GlobalConcurrencyState = typeof globalThis & {
 const globalState = globalThis as GlobalConcurrencyState;
 const pools = (globalState.__fluxpostConcurrencyPools ||= {});
 
-export function runWithConcurrencyPool<T>(name: ConcurrencyPoolName, task: () => Promise<T>) {
-  return getPool(name).run(task);
+export function runWithConcurrencyPool<T>(name: ConcurrencyPoolName, task: () => Promise<T>, options: { signal?: AbortSignal } = {}) {
+  return getPool(name).run(task, options.signal);
 }
 
 export function getConcurrencySnapshot(): Record<ConcurrencyPoolName, PoolStats> {

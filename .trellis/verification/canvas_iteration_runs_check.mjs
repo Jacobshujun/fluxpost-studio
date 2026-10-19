@@ -20,6 +20,7 @@ const database = {
   saveCanvasRunToDb: async (run) => { records.set(run.id, clone(run)); return clone(run); },
   listCanvasNodeRunsFromDb: async (id) => clone(latest(id)),
   saveCanvasNodeRunToDb: async (attempt) => { nodeRecords.set(attempt.id, clone(attempt)); return clone(attempt); },
+  saveCancelledCanvasNodeReceiptInDb: async () => {},
   enqueueCanvasRunQueueItem: async () => {}, wakeCanvasIterationRun: async () => {},
 };
 function load(relative, modules, extra = "") {

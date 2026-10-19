@@ -520,7 +520,7 @@ export async function setCanvasSchedulePaused(scheduleId: string, account: Works
 
 export async function cancelCanvasSchedule(scheduleId: string, account: WorkspaceAccessActor) {
   const current = await requireSchedule(scheduleId, account);
-  if (!["queued", "running", "paused"].includes(current.status)) throw new Error("Only active schedules can be cancelled.");
+  if (!["queued", "running", "paused", "cancelled"].includes(current.status)) throw new Error("Only active schedules can be cancelled.");
   const now = new Date().toISOString();
   const next: CanvasSchedule = {
     ...current,
@@ -557,7 +557,7 @@ export async function cancelCanvasSchedule(scheduleId: string, account: Workspac
   };
   await saveUpdatedSchedule(next, current.revision);
   for (const runId of scheduleRunIds(current)) {
-    await cancelCanvasRun(runId, ownerActor(current)).catch(() => undefined);
+    if (await getCanvasRunFromDb(runId)) await cancelCanvasRun(runId, ownerActor(current));
   }
   return next;
 }
@@ -602,7 +602,7 @@ export async function retryCanvasScheduleImageTask(
     }),
     updatedAt: now,
   };
-  await saveUpdatedSchedule(next, current.revision);
+  await saveUpdatedSchedule(next, current.revision, { resetCancellation: current.status === "cancelled" });
   kickCanvasSchedulerWorker();
   return next;
 }
@@ -646,7 +646,7 @@ export async function retryCanvasScheduleV2ChildTask(
     }),
     updatedAt: now,
   };
-  await saveUpdatedSchedule(next, current.revision);
+  await saveUpdatedSchedule(next, current.revision, { resetCancellation: current.status === "cancelled" });
   kickCanvasSchedulerWorker();
   return next;
 }
@@ -697,7 +697,7 @@ export async function retryCanvasScheduleContentTask(
     }),
     updatedAt: now,
   };
-  await saveUpdatedSchedule(next, current.revision);
+  await saveUpdatedSchedule(next, current.revision, { resetCancellation: current.status === "cancelled" });
   kickCanvasSchedulerWorker();
   return next;
 }
@@ -744,7 +744,7 @@ export async function retryCanvasScheduleV2MainTask(
     }),
     updatedAt: now,
   };
-  await saveUpdatedSchedule(next, current.revision);
+  await saveUpdatedSchedule(next, current.revision, { resetCancellation: current.status === "cancelled" });
   kickCanvasSchedulerWorker();
   return next;
 }
@@ -785,7 +785,7 @@ export async function retryCanvasScheduleV2SharedTask(
     }),
     updatedAt: now,
   };
-  await saveUpdatedSchedule(next, current.revision);
+  await saveUpdatedSchedule(next, current.revision, { resetCancellation: current.status === "cancelled" });
   kickCanvasSchedulerWorker();
   return next;
 }
@@ -849,7 +849,7 @@ export async function retryCanvasScheduleFailedTasks(scheduleId: string, account
   next.completedAt = undefined;
   next.revision = current.revision + 1;
   next.updatedAt = now;
-  await saveUpdatedSchedule(next, current.revision);
+  await saveUpdatedSchedule(next, current.revision, { resetCancellation: current.status === "cancelled" });
   kickCanvasSchedulerWorker();
   return next;
 }
@@ -1231,6 +1231,7 @@ async function reconcileCanvasSchedules(onlyIds?: string[]) {
 }
 
 async function reconcileSchedule(current: CanvasSchedule) {
+  if (current.status === "cancelled") return;
   if (isCanvasScheduleV2(current)) return reconcileCanvasScheduleV2(current);
   if (!current.bindings || !current.workflowSnapshot) return;
   const bindings = current.bindings;
@@ -1675,8 +1676,8 @@ function formatSchedulerRoleList(roles: readonly CanvasSchedulerRole[]) {
   return roles.map((role) => `“${CANVAS_SCHEDULER_ROLE_LABELS[role]}”`).join("、");
 }
 
-async function saveUpdatedSchedule(schedule: CanvasSchedule, expectedRevision: number) {
-  if (!(await updateCanvasScheduleInDb(schedule, expectedRevision))) throw new CanvasScheduleRevisionConflictError();
+async function saveUpdatedSchedule(schedule: CanvasSchedule, expectedRevision: number, options: { resetCancellation?: boolean } = {}) {
+  if (!(await updateCanvasScheduleInDb(schedule, expectedRevision, options))) throw new CanvasScheduleRevisionConflictError();
 }
 
 function assertRevision(schedule: CanvasSchedule, revision: number) {

@@ -1821,7 +1821,23 @@ try {
       || /\.trellis\/verification\/check\.mjs/.test(baseline.replaceAll("\\", "/")),
     "The baseline must keep the isolated smoke contract or delegate to the cross-platform baseline.",
   );
-  console.log("Canvas batch scheduler checks passed.");
+  const cancelledV2 = { ...structuredClone(v2RetryFixture), status: "running" };
+  storedSchedule = cancelledV2;
+  listedSchedules = [structuredClone(cancelledV2)];
+  const cancellationCalls = [];
+  stubs["./runs"].cancelCanvasRun = async (runId) => { cancellationCalls.push(runId); };
+  const cancelled = await scheduler.cancelCanvasSchedule(storedSchedule.id, account);
+  assert.equal(cancelled.status, "cancelled");
+  listedSchedules = [structuredClone(storedSchedule)];
+  const revisionAfterCancel = storedSchedule.revision;
+  const fanOutAfterCancel = fannedOutRuns;
+  const reloadedCancelled = await scheduler.getCanvasSchedule(storedSchedule.id, account);
+  assert.equal(reloadedCancelled.status, "cancelled", "reading a cancelled schedule cannot restore running child status");
+  assert.equal(storedSchedule.revision, revisionAfterCancel, "cancelled reconciliation cannot update or admit work");
+  assert.equal(fannedOutRuns, fanOutAfterCancel);
+  const repeatedCancellation = await scheduler.cancelCanvasSchedule(storedSchedule.id, account);
+  assert.equal(repeatedCancellation.status, "cancelled", "cancel can finish persisted leftovers on a repeat request");
+  console.log("Canvas batch scheduler checks passed, including cancellation persistence across reads and repeated cancellation.");
 } finally {
   rmSync(temp, { recursive: true, force: true });
 }

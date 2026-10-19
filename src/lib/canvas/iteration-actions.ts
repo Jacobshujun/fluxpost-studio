@@ -55,7 +55,7 @@ export async function updateCanvasIteration(runId: string, nodeId: string, actio
     ...current.run, status: "queued", retryNodeIds, targetNodeIds: targets, steps: plan.steps,
     iterationRefreshRegionIds: [nodeId], error: undefined, completedAt: undefined, updatedAt: now,
   });
-  if (!await requeueCanvasRunQueueItem(run.id)) await enqueueCanvasRunQueueItem(run);
+  if (!await requeueCanvasRunQueueItem(run.id)) await enqueueCanvasRunQueueItem(run, { requireActiveRun: true });
   ensureCanvasRunWorker();
   return run;
 }

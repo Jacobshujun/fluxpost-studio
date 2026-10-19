@@ -50,6 +50,7 @@ export class CanvasNeedsConfigError extends Error {
 }
 
 export type CanvasNodeExecutionContext = {
+  signal?: AbortSignal;
   iterationRefresh?: boolean;
   runId: string;
   node: CanvasNode;
@@ -379,8 +380,8 @@ async function executeGptText({ node, inputs }: CanvasNodeExecutionContext) {
   return { outputs: { text: { kind: "text" as const, value } } };
 }
 
-async function executeImageProcess({ node, inputs, account }: CanvasNodeExecutionContext): Promise<CanvasNodeExecutionResult> {
-  const items = await processCanvasImages(imageItems(inputs.images), node.config, account.id);
+async function executeImageProcess({ node, inputs, account, signal }: CanvasNodeExecutionContext): Promise<CanvasNodeExecutionResult> {
+  const items = await processCanvasImages(imageItems(inputs.images), node.config, account.id, signal);
   const imageBatch = inputs.images?.flatMap((artifact) => artifact.kind === "images" && artifact.imageBatch ? [artifact.imageBatch] : [])[0];
   return { outputs: { images: { kind: "images", items, ...(imageBatch ? { imageBatch } : {}) } } };
 }

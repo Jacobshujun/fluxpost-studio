@@ -1,6 +1,8 @@
 import assert from "node:assert/strict";
+import { spawn } from "node:child_process";
 import { createHash } from "node:crypto";
 import { createRequire } from "node:module";
+import { createServer } from "node:http";
 import { mkdtempSync, readFileSync, readdirSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import path from "node:path";
@@ -12,10 +14,18 @@ const root = process.cwd();
 const temp = mkdtempSync(path.join(tmpdir(), "fluxpost-image-process-"));
 const read = (name) => readFileSync(path.join(root, name), "utf8");
 const compile = (source) => ts.transpileModule(source, { compilerOptions: { module: ts.ModuleKind.CommonJS, target: ts.ScriptTarget.ES2022, esModuleInterop: true } }).outputText;
+let lastWorker;
 function load(file, modules = {}) {
   const loadedModule = { exports: {} };
   Function("require", "module", "exports", "process", compile(read(file)))((name) => {
     if (Object.hasOwn(modules, name)) return modules[name];
+    if (name === "node:child_process") return { spawn: (command, _args, options) => {
+      const worker = spawn(command, [path.join(root, "src/lib/canvas/image-encoder.mjs")], options);
+      lastWorker = { worker, closed: false };
+      const record = lastWorker;
+      worker.once("close", () => { record.closed = true; });
+      return worker;
+    } };
     if (name.startsWith("node:") || name === "sharp") return require(name);
     throw new Error(`Unexpected dependency ${name}`);
   }, loadedModule, loadedModule.exports, { ...process, cwd: () => temp });
@@ -25,9 +35,11 @@ const hash = (buffer) => createHash("sha256").update(buffer).digest("hex");
 try {
   const contract = load("src/lib/canvas/image-process-contract.ts");
   const config = (patch = {}) => contract.resolveImageProcessConfig(patch);
-  let materializations = 0, persists = 0;
+  let materializations = 0, persists = 0, onPersist;
+  const appConfig = { tosEnabled: false };
   const sources = new Map();
   const processor = load("src/lib/canvas/image-process.ts", {
+    "../config": { appConfig },
     "./image-process-contract": contract,
     "../concurrency": { runWithConcurrencyPool: async (name, task) => { assert.equal(name, "localImage"); return task(); } },
     "../runtime-media-materializer": { materializeRuntimeMedia: async (url) => {
@@ -38,6 +50,11 @@ try {
       persists++; const bytes = readFileSync(input.filePath);
       const metadata = await sharp(bytes).metadata();
       assert.equal(input.contentType, `image/${metadata.format}`);
+      await onPersist?.(input);
+      if (appConfig.tosEnabled) {
+        assert.equal(hash(readFileSync(input.filePath)), hash(bytes), "each concurrent upload retains its own staging bytes");
+        rmSync(input.filePath);
+      }
       return input.publicPath;
     } },
     "./directory-snapshots": { getCanvasDirectorySnapshot: async (id, owner) => {
@@ -51,6 +68,17 @@ try {
   let seed = 127;
   for (let i = 0; i < noise.length; i++) { seed = (Math.imul(seed, 1664525) + 1013904223) >>> 0; noise[i] = seed >>> 24; }
   const photo = await sharp(noise, { raw: { width: 512, height: 320, channels: 3 } }).png().toBuffer();
+  const aborted = new AbortController(); aborted.abort();
+  const workerBeforeAborted = lastWorker;
+  await assert.rejects(processor.encodeCanvasImage(photo, config(), { signal: aborted.signal }), { name: "AbortError" });
+  assert.equal(lastWorker, workerBeforeAborted, "Pre-cancelled encoding must not spawn native work");
+  await assert.rejects(processor.encodeCanvasImage(photo, config(), { timeoutMs: 1 }), /timed out/);
+  assert.equal(lastWorker.closed, true, "Timeout must await worker termination before freeing capacity");
+  const abortRunning = new AbortController();
+  const running = processor.encodeCanvasImage(photo, config(), { signal: abortRunning.signal });
+  lastWorker.worker.once("spawn", () => abortRunning.abort());
+  await assert.rejects(running, { name: "AbortError" });
+  assert.equal(lastWorker.closed, true, "Cancellation must leave no detached encoder");
   for (const format of ["jpeg", "png", "webp"]) {
     const encoded = await processor.encodeCanvasImage(transparent, config({ format }));
     const meta = await sharp(encoded.buffer).metadata();
@@ -111,6 +139,12 @@ try {
   assert.notEqual(contract.imageProcessConfigKey({}), contract.imageProcessConfigKey({ quality: 89 }));
 
   const sourceFile = path.join(temp, "source.png"); writeFileSync(sourceFile, photo); sources.set("source", sourceFile);
+  const cancelBeforePersist = new AbortController();
+  onPersist = () => cancelBeforePersist.abort();
+  const beforeCancelledBatch = materializations;
+  await assert.rejects(processor.processCanvasImages([{ url: "source" }, { url: "source" }], {}, "owner", cancelBeforePersist.signal), { name: "AbortError" });
+  assert.equal(materializations, beforeCancelledBatch + 1, "Cancellation must not start the next image after upload returns");
+  onPersist = undefined;
   const simpleProcessor = load("src/lib/simple-image-processing.ts", {
     "./canvas/image-process": processor,
     "./canvas/image-process-contract": contract,
@@ -153,6 +187,21 @@ try {
   assert.equal(inspected.size, output[0].imageProcessing.outputBytes);
   assert.equal(inspected.mimeType, "image/jpeg"); assert.equal(inspected.extension, ".jpg");
   const again = await processor.processCanvasImages([items[0]], {}, "owner"); assert.deepEqual(again[0], output[0]);
+  const stagingFiles = [];
+  let releaseUploads;
+  const uploadBarrier = new Promise((resolve) => { releaseUploads = resolve; });
+  appConfig.tosEnabled = true;
+  onPersist = async (input) => {
+    stagingFiles.push(input.filePath);
+    if (stagingFiles.length === 2) releaseUploads();
+    await uploadBarrier;
+  };
+  try {
+    const concurrent = await Promise.all([1, 2].map(() => processor.processCanvasImages([items[0]], {}, "owner")));
+    assert.equal(new Set(stagingFiles).size, 2, "identical cached images upload from separate staging files");
+    assert.equal(concurrent[0][0].url, concurrent[1][0].url, "deduplicated public object identity is preserved");
+    assert.ok(stagingFiles.every((filename) => !readdirSync(path.dirname(filename)).includes(path.basename(filename))));
+  } finally { appConfig.tosEnabled = false; onPersist = undefined; }
   const changed = await processor.processCanvasImages([items[0]], { quality: 80 }, "owner"); assert.notEqual(changed[0].url, output[0].url);
   writeFileSync(sourceFile, transparent);
   const changedSource = await processor.processCanvasImages([items[0]], {}, "owner"); assert.notEqual(changedSource[0].url, output[0].url);
@@ -165,6 +214,43 @@ try {
   await assert.rejects(processor.processCanvasImages([items[0], { url: "bad" }], {}, "owner"), /第 2 张/);
   assert.ok(materializations > 0 && persists > 0);
   assert.ok(readdirSync(path.join(temp, "data/cache/canvas-image-process")).every((file) => !file.endsWith(".tmp")));
+
+  // Stalled local HTTP media must abort both before headers and while streaming.
+  const materializer = load("src/lib/runtime-media-materializer.ts", {
+    "./media-request": { buildMediaRequestHeaders: () => ({}) },
+    "./runtime-media-storage": { findExistingRuntimeMedia: async () => undefined },
+  });
+  const downloadRoot = path.join(temp, "downloads");
+  let onRequest;
+  const server = createServer((request, response) => {
+    if (request.url !== "/headers") {
+      response.writeHead(200, { "content-type": "image/png" });
+      response.write(transparent.subarray(0, 32));
+    }
+    onRequest?.();
+  });
+  await new Promise((resolve) => server.listen(0, "127.0.0.1", resolve));
+  const downloadUrl = `http://127.0.0.1:${server.address().port}`;
+  try {
+    for (const route of ["headers", "body"]) {
+      const controller = new AbortController();
+      let abortTimer;
+      onRequest = () => { abortTimer = setTimeout(() => controller.abort(), 50); };
+      try {
+        await assert.rejects(materializer.materializeRuntimeMedia(`${downloadUrl}/${route}`, {
+          maxBytes: 1024, kind: "image", temporaryRoot: downloadRoot, signal: controller.signal,
+        }), { name: "AbortError" });
+      } finally { clearTimeout(abortTimer); }
+    }
+    onRequest = undefined;
+    await assert.rejects(materializer.materializeRuntimeMedia(`${downloadUrl}/body`, {
+      maxBytes: 1024, kind: "image", temporaryRoot: downloadRoot, timeoutMs: 100,
+    }), /download timed out/);
+    assert.deepEqual(readdirSync(downloadRoot), [], "Aborted and timed out streams must remove temporary files");
+  } finally {
+    server.closeAllConnections();
+    await new Promise((resolve) => server.close(resolve));
+  }
 
   // Exercise actual registry, graph, nested iteration and scheduler contracts in an isolated module tree.
   writeFileSync(path.join(temp, "toapis-image-api.js"), "exports.toApisImageResolutions=['1k'];exports.toApisImageRatios=['1:1'];");

@@ -1,5 +1,7 @@
 import { readFileSync } from "node:fs";
 import path from "node:path";
+import assert from "node:assert/strict";
+import ts from "typescript";
 
 const projectRoot = process.cwd();
 
@@ -100,3 +102,33 @@ assertContains(canvasRuns, /concurrencyConfig\.canvasRun/, "Canvas queue consume
 assertContains(canvasRuns, /activeWorkers/, "Canvas queue worker state must track parallel consumers.");
 
 console.log("Concurrency pool integration check passed.");
+
+const compiled = ts.transpileModule(concurrency, { compilerOptions: { module: ts.ModuleKind.CommonJS, target: ts.ScriptTarget.ES2022 } }).outputText;
+const loaded = { exports: {} };
+Function("module", "exports", compiled)(loaded, loaded.exports);
+const { runWithConcurrencyPool, getConcurrencySnapshot } = loaded.exports;
+let release;
+let started;
+const entered = new Promise((resolve) => { started = resolve; });
+const holding = new Promise((resolve) => { release = resolve; });
+const first = runWithConcurrencyPool("localImage", async () => { started(); await holding; });
+await entered;
+const controller = new AbortController();
+let cancelledCallback = false;
+const waiter = runWithConcurrencyPool("localImage", async () => { cancelledCallback = true; }, { signal: controller.signal });
+assert.equal(getConcurrencySnapshot().localImage.queued, 1);
+const reason = new Error("Cancelled while waiting for image resource");
+controller.abort(reason);
+await assert.rejects(waiter, (error) => error === reason);
+assert.deepEqual(getConcurrencySnapshot().localImage, { limit: 1, active: 1, queued: 0 });
+assert.equal(cancelledCallback, false);
+let nextRan = false;
+const next = runWithConcurrencyPool("localImage", async () => { nextRan = true; });
+assert.equal(getConcurrencySnapshot().localImage.queued, 1);
+release();
+await Promise.all([first, next]);
+assert.equal(nextRan, true);
+assert.deepEqual(getConcurrencySnapshot().localImage, { limit: 1, active: 0, queued: 0 });
+await assert.rejects(runWithConcurrencyPool("localImage", async () => { throw new Error("Must not start"); }, { signal: controller.signal }), (error) => error === reason);
+assert.deepEqual(getConcurrencySnapshot().localImage, { limit: 1, active: 0, queued: 0 });
+console.log("Concurrency cancellation: aborted waiters leave the queue, preserve occupied capacity and admit later work.");

@@ -64,7 +64,7 @@ export async function executeCanvasIteration(context: RegionContext): Promise<Ca
 
   for (const child of existing.values()) {
     if (child.status === "queued" && !child.iterationAdmissionPending) {
-      await enqueueCanvasRunQueueItem(child);
+      await enqueueCanvasRunQueueItem(child, { requireActiveRun: true });
       await wakeCanvasIterationRun(child.id);
     }
   }
@@ -98,7 +98,7 @@ export async function executeCanvasIteration(context: RegionContext): Promise<Ca
       });
     }
     if (child.iterationAdmissionPending) child = await saveCanvasRunToDb({ ...child, iterationAdmissionPending: undefined });
-    await enqueueCanvasRunQueueItem(child);
+    await enqueueCanvasRunQueueItem(child, { requireActiveRun: true });
     await wakeCanvasIterationRun(child.id);
     available -= 1;
   }

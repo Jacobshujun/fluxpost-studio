@@ -21,6 +21,8 @@ node --env-file=.env.local .trellis/verification/unified_library_postgres_benchm
 
 ## Current Automated Checks
 
+- Canvas cancellation: baseline `canvas_cancellation_store_check.mjs`, `canvas_cancellation_runtime_check.mjs` and `canvas_cancellation_recovery_check.mjs` cover atomic run/node/queue cancellation, stale-write fences, real worker/resource release, downstream suppression and scoped recovery backup/rollback. `node --env-file=.env.local .trellis/verification/canvas_cancellation_store_check.mjs --postgres` separately exercises actual PostgreSQL SQL in connection-local temporary tables, never runtime rows. Image checks cover child termination, timeout, download cancellation and staging cleanup.
+
 - Gallery UX: baseline `library_ui_check.mjs` executes date/URL/wire-key contracts. `python .trellis/verification/library_collection_batch_browser_check.py` covers filters/history, original viewer/drafts/zoom/cursor races, permissions, batch failures/deletion, import receipts and smart folders across three themes at 1440/390. Use worker-disabled loopback `FLUXPOST_BROWSER_BASE_URL`; it rejects 3001 and intercepts every API/image request. Evidence: library-ux task.
 
 - `canvas_local_image_save_check.mjs` is included in the baseline. It checks real isolated file writes, exclusive naming, retry ownership/hash receipts and error paths. The separate `canvas_local_image_save_browser_check.py` checks three themes at 1440/390 using intercepted APIs on an isolated worker-disabled server via `BROWSER_BASE_URL`; it rejects port 3001. Contract: `canvas_local_image_save.md`.

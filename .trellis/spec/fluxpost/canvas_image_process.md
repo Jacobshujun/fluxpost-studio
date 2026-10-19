@@ -2,7 +2,9 @@
 
 ## Scope and signatures
 
-`utility.image-process@1` accepts/outputs standard `images` artifacts and permits bypass and iteration membership. `processCanvasImages(items, config, ownerUserId)` runs under the existing localImage pool. No additional endpoint or database schema. The old image-transform node is unchanged.
+`utility.image-process@1` accepts/outputs standard `images` artifacts and permits bypass and iteration membership. `processCanvasImages(items, config, ownerUserId, signal?)` holds the localImage pool only during encoding. Source reads and storage happen outside that pool. No additional endpoint or database schema. The old image-transform node is unchanged.
+
+Encoding runs in the traced `src/lib/canvas/image-encoder.mjs` Node child with a 120-second deadline. Cancellation or timeout kills the child and waits for process closure before releasing capacity. Queued resource acquisition and source downloads accept cancellation; cancellation prevents the next item and downstream execution. An already-started storage upload must settle before its execution slot is released.
 
 ## Configuration and outputs
 

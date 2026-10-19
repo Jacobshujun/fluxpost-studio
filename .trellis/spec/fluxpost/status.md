@@ -4,9 +4,11 @@ Last updated: 2026-10-19
 
 ## One-Line Status
 
-Canvas scheduling incident diagnosed read-only: expired ordinary runs do not recover, while eight live image-processing runs occupy all worker slots. Recovery and repairs are proposed, not executed; gallery operator review remains.
+Canvas cancellation repair implemented: durable cancellation, stale-write fences and abortable bounded image encoding pass focused checks. Clean local activation and scoped recovery are next; gallery operator review remains.
 
 ## Current Focus
+
+- 2026-10-19: Cancellation repair passes focused worker/resource/storage/scheduler/iteration tests, real PostgreSQL temporary-table SQL, types, changed-source lint, standalone build/native encoder and isolated HTTP/SQLite checks. Full baseline reaches unchanged runtime-import lint blocker. Live recovery preview preserves 30 completed main tasks and selects eight orphan cancellations; activation/recovery pending.
 
 - 2026-10-19: Canvas scheduling diagnosis only. Reported video batch has 30/38 completed main tasks and eight abandoned collection runs with expired leases and pending cancellation. Current process has eight live image-processing runs occupying all execution slots; newer launches persist but wait. HTTP identity responds and PostgreSQL shows no blocking locks. Exact image substep and original collection/process-exit trigger remain unconfirmed. All deterministic baseline checks pass before the existing 17 runtime-import lint errors stop execution. No runtime writes, retries, provider calls or restart. Evidence and recovery proposal: archived `10-19-canvas-schedule-lockup/diagnosis.md`.
 
@@ -18,7 +20,7 @@ Canvas scheduling incident diagnosed read-only: expired ordinary runs do not rec
 
 ## Next Entry
 
-Review Canvas recovery/repair proposal before runtime actions: preserve completed outputs, reconcile abandoned cancellation, release live image starvation and add bounded cancellation/recovery. Then resume authenticated `/library` operator review. Preserve provider and migration acceptance gates.
+Finish standalone packaging and isolated smoke, commit verified changes, activate with `npm run local:lan`, then apply scoped cancellation/image interruption recovery with local backups. Preserve completed outputs and verify queued work progresses. Task: `10-19-canvas-cancellation-recovery`.
 
 ## Risks And Unknowns
 

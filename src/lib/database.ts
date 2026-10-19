@@ -2982,20 +2982,21 @@ export async function createCanvasScheduleInDb(schedule: CanvasSchedule) {
   return schedule;
 }
 
-export async function updateCanvasScheduleInDb(schedule: CanvasSchedule, expectedRevision: number) {
+export async function updateCanvasScheduleInDb(schedule: CanvasSchedule, expectedRevision: number, options: { resetCancellation?: boolean } = {}) {
   await ensureDatabaseReady();
+  if (options.resetCancellation && !["queued", "running", "paused"].includes(schedule.status)) throw new Error("Schedule cancellation may only be reset for an explicit retry.");
   if (getDatabaseBackend() === "postgres") {
     const result = await getPostgresPool().query(
       `UPDATE canvas_schedules SET owner_user_id = $1, status = $2, revision = $3, updated_at = $4, data_json = $5::jsonb
-       WHERE id = $6 AND revision = $7`,
-      [schedule.ownerUserId, schedule.status, schedule.revision, schedule.updatedAt, toJson(schedule), schedule.id, expectedRevision],
+       WHERE id = $6 AND revision = $7 AND (status <> 'cancelled' OR $2 = 'cancelled' OR $8)`,
+      [schedule.ownerUserId, schedule.status, schedule.revision, schedule.updatedAt, toJson(schedule), schedule.id, expectedRevision, Boolean(options.resetCancellation)],
     );
     return Number(result.rowCount || 0) === 1;
   }
   const result = getSqliteDatabase().prepare(`
     UPDATE canvas_schedules SET owner_user_id = ?, status = ?, revision = ?, updated_at = ?, data_json = ?
-    WHERE id = ? AND revision = ?
-  `).run(schedule.ownerUserId, schedule.status, schedule.revision, schedule.updatedAt, toJson(schedule), schedule.id, expectedRevision) as { changes?: number };
+    WHERE id = ? AND revision = ? AND (status <> 'cancelled' OR ? = 'cancelled' OR ? = 1)
+  `).run(schedule.ownerUserId, schedule.status, schedule.revision, schedule.updatedAt, toJson(schedule), schedule.id, expectedRevision, schedule.status, Number(Boolean(options.resetCancellation))) as { changes?: number };
   return Number(result.changes || 0) === 1;
 }
 
@@ -3007,7 +3008,7 @@ export async function launchCanvasScheduleInDb(schedule: CanvasSchedule, expecte
       await client.query("BEGIN");
       const updated = await client.query(
         `UPDATE canvas_schedules SET owner_user_id = $1, status = $2, revision = $3, updated_at = $4, data_json = $5::jsonb
-         WHERE id = $6 AND revision = $7`,
+         WHERE id = $6 AND revision = $7 AND status <> 'cancelled'`,
         [schedule.ownerUserId, schedule.status, schedule.revision, schedule.updatedAt, toJson(schedule), schedule.id, expectedRevision],
       );
       if (Number(updated.rowCount || 0) !== 1) throw new Error("Canvas schedule revision conflict");
@@ -3037,7 +3038,7 @@ export async function launchCanvasScheduleInDb(schedule: CanvasSchedule, expecte
   runSqliteTransaction(db, () => {
     const updated = db.prepare(`
       UPDATE canvas_schedules SET owner_user_id = ?, status = ?, revision = ?, updated_at = ?, data_json = ?
-      WHERE id = ? AND revision = ?
+      WHERE id = ? AND revision = ? AND status <> 'cancelled'
     `).run(schedule.ownerUserId, schedule.status, schedule.revision, schedule.updatedAt, toJson(schedule), schedule.id, expectedRevision) as { changes?: number };
     if (Number(updated.changes || 0) !== 1) throw new Error("Canvas schedule revision conflict");
     const insertRun = db.prepare(`
@@ -3065,7 +3066,7 @@ export async function fanOutCanvasScheduleV2ChildrenInDb(schedule: CanvasSchedul
       await client.query("BEGIN");
       const updated = await client.query(
         `UPDATE canvas_schedules SET owner_user_id = $1, status = $2, revision = $3, updated_at = $4, data_json = $5::jsonb
-         WHERE id = $6 AND revision = $7`,
+         WHERE id = $6 AND revision = $7 AND status <> 'cancelled'`,
         [schedule.ownerUserId, schedule.status, schedule.revision, schedule.updatedAt, toJson(schedule), schedule.id, expectedRevision],
       );
       if (Number(updated.rowCount || 0) !== 1) throw new Error("Canvas schedule revision conflict");
@@ -3097,7 +3098,7 @@ export async function fanOutCanvasScheduleV2ChildrenInDb(schedule: CanvasSchedul
   runSqliteTransaction(db, () => {
     const updated = db.prepare(`
       UPDATE canvas_schedules SET owner_user_id = ?, status = ?, revision = ?, updated_at = ?, data_json = ?
-      WHERE id = ? AND revision = ?
+      WHERE id = ? AND revision = ? AND status <> 'cancelled'
     `).run(schedule.ownerUserId, schedule.status, schedule.revision, schedule.updatedAt, toJson(schedule), schedule.id, expectedRevision) as { changes?: number };
     if (Number(updated.changes || 0) !== 1) throw new Error("Canvas schedule revision conflict");
     const insertRun = db.prepare(`
@@ -3244,43 +3245,114 @@ export async function getCanvasRunFromDb(runId: string) {
   return row ? fromJson<CanvasRun>(row.data_json) : undefined;
 }
 
-export async function saveCanvasRunToDb(run: CanvasRun, options: { resetCancellation?: boolean } = {}) {
+export async function cancelCanvasRunInDb(runId: string): Promise<CanvasRun | undefined> {
+  await ensureDatabaseReady();
+  const now = new Date().toISOString();
+  if (getDatabaseBackend() === "postgres") {
+    const client = await getPostgresPool().connect();
+    try {
+      await client.query("BEGIN");
+      const selected = await client.query<JsonRow>("SELECT data_json FROM canvas_runs WHERE id = $1 FOR UPDATE", [runId]);
+      const current = selected.rows[0] ? fromJson<CanvasRun>(selected.rows[0].data_json) : undefined;
+      if (!current || ["completed", "partial", "failed"].includes(current.status)) {
+        await client.query("COMMIT");
+        return current;
+      }
+      const cancelled: CanvasRun = { ...current, status: "cancelled", cancelRequestedAt: current.cancelRequestedAt || now, completedAt: current.completedAt || now, updatedAt: now };
+      await client.query("UPDATE canvas_runs SET status = 'cancelled', updated_at = $1, data_json = $2::jsonb WHERE id = $3", [now, toJson(cancelled), runId]);
+      await client.query(
+        `UPDATE canvas_node_runs SET status = 'cancelled', updated_at = $1::timestamptz,
+          data_json = data_json || jsonb_build_object('status', 'cancelled', 'updatedAt', $1::text, 'completedAt', $1::text)
+         WHERE run_id = $2 AND status IN ('queued', 'running')`, [now, runId],
+      );
+      await client.query(
+        `UPDATE canvas_run_queue SET status = 'cancelled', locked_by = NULL, locked_until = NULL,
+          completed_at = $1::timestamptz, updated_at = $1::timestamptz,
+          data_json = (data_json - 'lockedBy' - 'lockedUntil') || jsonb_build_object('status', 'cancelled', 'updatedAt', $1::text, 'completedAt', $1::text)
+         WHERE run_id = $2 AND status IN ('queued', 'running', 'waiting')`, [now, runId],
+      );
+      await client.query("COMMIT");
+      return cancelled;
+    } catch (error) {
+      await client.query("ROLLBACK");
+      throw error;
+    } finally {
+      client.release();
+    }
+  }
+  const db = getSqliteDatabase();
+  let cancelled: CanvasRun | undefined;
+  runSqliteTransaction(db, () => {
+    const selected = db.prepare("SELECT data_json FROM canvas_runs WHERE id = ?").get(runId) as JsonRow | undefined;
+    const current = selected ? fromJson<CanvasRun>(selected.data_json) : undefined;
+    if (!current || ["completed", "partial", "failed"].includes(current.status)) { cancelled = current; return; }
+    cancelled = { ...current, status: "cancelled", cancelRequestedAt: current.cancelRequestedAt || now, completedAt: current.completedAt || now, updatedAt: now };
+    db.prepare("UPDATE canvas_runs SET status = 'cancelled', updated_at = ?, data_json = ? WHERE id = ?").run(now, toJson(cancelled), runId);
+    db.prepare(`UPDATE canvas_node_runs SET status = 'cancelled', updated_at = ?,
+      data_json = json_set(data_json, '$.status', 'cancelled', '$.updatedAt', ?, '$.completedAt', ?)
+      WHERE run_id = ? AND status IN ('queued', 'running')`).run(now, now, now, runId);
+    db.prepare(`UPDATE canvas_run_queue SET status = 'cancelled', locked_by = NULL, locked_until = NULL,
+      completed_at = ?, updated_at = ?,
+      data_json = json_set(json_remove(data_json, '$.lockedBy', '$.lockedUntil'), '$.status', 'cancelled', '$.updatedAt', ?, '$.completedAt', ?)
+      WHERE run_id = ? AND status IN ('queued', 'running', 'waiting')`).run(now, now, now, now, runId);
+  });
+  return cancelled;
+}
+
+export async function saveCanvasRunToDb(run: CanvasRun, options: { resetCancellation?: boolean; requireActiveSchedule?: boolean } = {}) {
   await ensureDatabaseReady();
   if (options.resetCancellation && (run.status !== "queued" || run.cancelRequestedAt)) throw new Error("Cancellation may only be reset for an explicit queued retry.");
+  const scheduleId = options.requireActiveSchedule ? run.batchContext?.scheduleId : undefined;
   if (getDatabaseBackend() === "postgres") {
     const result = await getPostgresPool().query<JsonRow>(
-      `INSERT INTO canvas_runs (id, workflow_id, owner_user_id, status, created_at, updated_at, data_json)
-       VALUES ($1, $2, $3, $4, $5, $6, $7::jsonb)
+      `${scheduleId ? "WITH schedule_fence AS MATERIALIZED (SELECT status FROM canvas_schedules WHERE id = $9 FOR SHARE)" : ""}
+       INSERT INTO canvas_runs (id, workflow_id, owner_user_id, status, created_at, updated_at, data_json)
+       ${scheduleId ? `SELECT $1, $2, $3,
+         CASE WHEN EXISTS (SELECT 1 FROM schedule_fence WHERE status = 'cancelled') THEN 'cancelled' ELSE $4 END, $5::timestamptz, $6::timestamptz,
+         CASE WHEN EXISTS (SELECT 1 FROM schedule_fence WHERE status = 'cancelled')
+           THEN $7::jsonb || jsonb_build_object('status', 'cancelled', 'cancelRequestedAt', $6::text, 'completedAt', $6::text) ELSE $7::jsonb END`
+        : "VALUES ($1, $2, $3, $4, $5, $6, $7::jsonb)"}
        ON CONFLICT(id) DO UPDATE SET
          status = CASE WHEN NOT $8 AND (canvas_runs.status = 'cancelled' OR
            (COALESCE(canvas_runs.data_json->>'cancelRequestedAt', '') <> '' AND excluded.status IN ('completed', 'failed', 'partial')))
            THEN 'cancelled' ELSE excluded.status END,
          updated_at = excluded.updated_at,
-         data_json = CASE WHEN NOT $8 AND (canvas_runs.status = 'cancelled' OR COALESCE(canvas_runs.data_json->>'cancelRequestedAt', '') <> '')
+         data_json = CASE WHEN NOT $8 AND canvas_runs.status = 'cancelled'
+           THEN canvas_runs.data_json || jsonb_build_object('status', 'cancelled', 'cancelRequestedAt', COALESCE(canvas_runs.data_json->>'cancelRequestedAt', canvas_runs.updated_at::text))
+           WHEN NOT $8 AND COALESCE(canvas_runs.data_json->>'cancelRequestedAt', '') <> ''
            THEN excluded.data_json || jsonb_build_object(
              'cancelRequestedAt', COALESCE(canvas_runs.data_json->>'cancelRequestedAt', canvas_runs.updated_at::text),
              'status', CASE WHEN canvas_runs.status = 'cancelled' OR excluded.status IN ('completed', 'failed', 'partial') THEN 'cancelled' ELSE excluded.status END)
            ELSE excluded.data_json END
        RETURNING data_json`,
-      [run.id, run.workflowId, run.ownerUserId, run.status, run.createdAt, run.updatedAt, toJson(run), Boolean(options.resetCancellation)],
+      [run.id, run.workflowId, run.ownerUserId, run.status, run.createdAt, run.updatedAt, toJson(run), Boolean(options.resetCancellation), ...(scheduleId ? [scheduleId] : [])],
     );
     return fromJson<CanvasRun>(result.rows[0].data_json);
   }
   const row = getSqliteDatabase().prepare(`
     INSERT INTO canvas_runs (id, workflow_id, owner_user_id, status, created_at, updated_at, data_json)
-    VALUES (?, ?, ?, ?, ?, ?, ?)
+    ${scheduleId ? `SELECT ?, ?, ?,
+      CASE WHEN EXISTS (SELECT 1 FROM canvas_schedules WHERE id = ? AND status = 'cancelled') THEN 'cancelled' ELSE ? END, ?, ?,
+      CASE WHEN EXISTS (SELECT 1 FROM canvas_schedules WHERE id = ? AND status = 'cancelled')
+        THEN json_set(?, '$.status', 'cancelled', '$.cancelRequestedAt', ?, '$.completedAt', ?) ELSE ? END WHERE true`
+      : "VALUES (?, ?, ?, ?, ?, ?, ?)"}
     ON CONFLICT(id) DO UPDATE SET
       status = CASE WHEN ? = 0 AND (canvas_runs.status = 'cancelled' OR
         (COALESCE(json_extract(canvas_runs.data_json, '$.cancelRequestedAt'), '') <> '' AND excluded.status IN ('completed', 'failed', 'partial')))
         THEN 'cancelled' ELSE excluded.status END,
       updated_at = excluded.updated_at,
-      data_json = CASE WHEN ? = 0 AND (canvas_runs.status = 'cancelled' OR COALESCE(json_extract(canvas_runs.data_json, '$.cancelRequestedAt'), '') <> '')
+      data_json = CASE WHEN ? = 0 AND canvas_runs.status = 'cancelled'
+        THEN json_set(canvas_runs.data_json, '$.status', 'cancelled', '$.cancelRequestedAt', COALESCE(json_extract(canvas_runs.data_json, '$.cancelRequestedAt'), canvas_runs.updated_at))
+        WHEN ? = 0 AND COALESCE(json_extract(canvas_runs.data_json, '$.cancelRequestedAt'), '') <> ''
         THEN json_set(excluded.data_json,
           '$.cancelRequestedAt', COALESCE(json_extract(canvas_runs.data_json, '$.cancelRequestedAt'), canvas_runs.updated_at),
           '$.status', CASE WHEN canvas_runs.status = 'cancelled' OR excluded.status IN ('completed', 'failed', 'partial') THEN 'cancelled' ELSE excluded.status END)
         ELSE excluded.data_json END
     RETURNING data_json
-  `).get(run.id, run.workflowId, run.ownerUserId, run.status, run.createdAt, run.updatedAt, toJson(run), Number(Boolean(options.resetCancellation)), Number(Boolean(options.resetCancellation))) as JsonRow;
+  `).get(...(scheduleId
+    ? [run.id, run.workflowId, run.ownerUserId, scheduleId, run.status, run.createdAt, run.updatedAt, scheduleId, toJson(run), run.updatedAt, run.updatedAt, toJson(run)]
+    : [run.id, run.workflowId, run.ownerUserId, run.status, run.createdAt, run.updatedAt, toJson(run)]),
+  Number(Boolean(options.resetCancellation)), Number(Boolean(options.resetCancellation)), Number(Boolean(options.resetCancellation))) as JsonRow;
   return fromJson<CanvasRun>(row.data_json);
 }
 
@@ -3307,29 +3379,86 @@ export async function getCanvasNodeRunFromDb(nodeRunId: string) {
 export async function saveCanvasNodeRunToDb(nodeRun: CanvasNodeRun) {
   await ensureDatabaseReady();
   if (getDatabaseBackend() === "postgres") {
-    await getPostgresPool().query(
-      `INSERT INTO canvas_node_runs (id, run_id, node_id, node_type, attempt, status, created_at, updated_at, data_json)
-       VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9::jsonb)
-       ON CONFLICT(id) DO UPDATE SET status = excluded.status, updated_at = excluded.updated_at, data_json = excluded.data_json`,
+    const result = await getPostgresPool().query<JsonRow>(
+      `WITH owner AS MATERIALIZED (
+         SELECT status, data_json FROM canvas_runs WHERE id = $2 FOR UPDATE
+       ), payload AS (
+         SELECT status = 'cancelled' OR COALESCE(data_json->>'cancelRequestedAt', '') <> '' AS cancelled,
+           COALESCE(data_json->>'completedAt', data_json->>'cancelRequestedAt', $8::text) AS cancelled_at FROM owner
+       )
+       INSERT INTO canvas_node_runs (id, run_id, node_id, node_type, attempt, status, created_at, updated_at, data_json)
+       SELECT $1, $2, $3, $4, $5, CASE WHEN cancelled THEN 'cancelled' ELSE $6 END, $7::timestamptz, $8::timestamptz,
+         CASE WHEN cancelled THEN $9::jsonb || jsonb_build_object('status', 'cancelled', 'completedAt', cancelled_at) ELSE $9::jsonb END
+       FROM payload
+       ON CONFLICT(id) DO UPDATE SET status = excluded.status, updated_at = excluded.updated_at, data_json = excluded.data_json
+       WHERE canvas_node_runs.status <> 'cancelled'
+         AND NOT (excluded.status = 'cancelled' AND canvas_node_runs.status NOT IN ('queued', 'running')) RETURNING data_json`,
       [nodeRun.id, nodeRun.runId, nodeRun.nodeId, nodeRun.nodeType, nodeRun.attempt, nodeRun.status, nodeRun.createdAt, nodeRun.updatedAt, toJson(nodeRun)],
     );
-    return nodeRun;
+    if (result.rows[0]) return fromJson<CanvasNodeRun>(result.rows[0].data_json);
+    const existing = await getCanvasNodeRunFromDb(nodeRun.id);
+    if (!existing) throw new Error("Canvas node run owner not found");
+    return existing;
   }
-  getSqliteDatabase().prepare(`
+  const row = getSqliteDatabase().prepare(`
     INSERT INTO canvas_node_runs (id, run_id, node_id, node_type, attempt, status, created_at, updated_at, data_json)
-    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
+    SELECT ?, ?, ?, ?, ?,
+      CASE WHEN status = 'cancelled' OR COALESCE(json_extract(data_json, '$.cancelRequestedAt'), '') <> '' THEN 'cancelled' ELSE ? END, ?, ?,
+      CASE WHEN status = 'cancelled' OR COALESCE(json_extract(data_json, '$.cancelRequestedAt'), '') <> ''
+        THEN json_set(?, '$.status', 'cancelled', '$.completedAt', COALESCE(json_extract(data_json, '$.completedAt'), json_extract(data_json, '$.cancelRequestedAt'), ?)) ELSE ? END
+    FROM canvas_runs WHERE id = ?
     ON CONFLICT(id) DO UPDATE SET status = excluded.status, updated_at = excluded.updated_at, data_json = excluded.data_json
-  `).run(nodeRun.id, nodeRun.runId, nodeRun.nodeId, nodeRun.nodeType, nodeRun.attempt, nodeRun.status, nodeRun.createdAt, nodeRun.updatedAt, toJson(nodeRun));
-  return nodeRun;
+    WHERE canvas_node_runs.status <> 'cancelled'
+      AND NOT (excluded.status = 'cancelled' AND canvas_node_runs.status NOT IN ('queued', 'running')) RETURNING data_json
+  `).get(nodeRun.id, nodeRun.runId, nodeRun.nodeId, nodeRun.nodeType, nodeRun.attempt, nodeRun.status, nodeRun.createdAt, nodeRun.updatedAt, toJson(nodeRun), nodeRun.updatedAt, toJson(nodeRun), nodeRun.runId) as JsonRow | undefined;
+  if (row) return fromJson<CanvasNodeRun>(row.data_json);
+  const existing = await getCanvasNodeRunFromDb(nodeRun.id);
+  if (!existing) throw new Error("Canvas node run owner not found");
+  return existing;
 }
 
-export async function enqueueCanvasRunQueueItem(run: CanvasRun) {
+// External work can acknowledge a submission after cancellation. Keep only its
+// receipts on the original cancelled attempt; never reopen it or deliver output.
+export async function saveCancelledCanvasNodeReceiptInDb(nodeRun: CanvasNodeRun) {
+  const outputs = Object.fromEntries(Object.entries(nodeRun.outputs).filter(([, artifact]) =>
+    nodeRun.nodeType === "publish.feishu" && artifact.kind === "publishJobRef"));
+  const internalMetadata = {
+    ...(nodeRun.internalMetadata?.imageEach ? { imageEach: nodeRun.internalMetadata.imageEach } : {}),
+    ...(nodeRun.internalMetadata?.saveImages ? { saveImages: nodeRun.internalMetadata.saveImages } : {}),
+  };
+  const receipt = {
+    ...(nodeRun.providerTaskId ? { providerTaskId: nodeRun.providerTaskId,
+      ...(nodeRun.providerTaskRoute ? { providerTaskRoute: nodeRun.providerTaskRoute } : {}),
+      ...(nodeRun.providerStatus ? { providerStatus: nodeRun.providerStatus } : {}) } : {}),
+    ...(Object.keys(internalMetadata).length ? { internalMetadata } : {}),
+  };
+  if (!Object.keys(receipt).length && !Object.keys(outputs).length) return;
+  await ensureDatabaseReady();
+  if (getDatabaseBackend() === "postgres") {
+    await getPostgresPool().query(
+      `UPDATE canvas_node_runs SET data_json = data_json || $1::jsonb ||
+        CASE WHEN $2::jsonb <> '{}'::jsonb THEN jsonb_build_object('outputs', $2::jsonb || COALESCE(data_json->'outputs', '{}'::jsonb)) ELSE '{}'::jsonb END
+       WHERE id = $3 AND run_id = $4 AND status = 'cancelled'`,
+      [toJson(receipt), toJson(outputs), nodeRun.id, nodeRun.runId],
+    );
+    return;
+  }
+  getSqliteDatabase().prepare(`UPDATE canvas_node_runs SET data_json =
+    CASE WHEN ? <> '{}' THEN json_set(json_patch(data_json, ?), '$.outputs', json_patch(?, COALESCE(json_extract(data_json, '$.outputs'), '{}')))
+      ELSE json_patch(data_json, ?) END
+    WHERE id = ? AND run_id = ? AND status = 'cancelled'
+  `).run(toJson(outputs), toJson(receipt), toJson(outputs), toJson(receipt), nodeRun.id, nodeRun.runId);
+}
+
+export async function enqueueCanvasRunQueueItem(run: CanvasRun, options: { requireActiveRun?: boolean } = {}) {
   const item = canvasRunQueueItem(run);
   await ensureDatabaseReady();
   if (getDatabaseBackend() === "postgres") {
     await getPostgresPool().query(
       `INSERT INTO canvas_run_queue (id, run_id, status, priority, attempts, max_attempts, run_after, created_at, updated_at, data_json)
-       VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10::jsonb)
+       ${options.requireActiveRun ? `SELECT $1, $2, $3, $4, $5, $6, $7, $8, $9, $10::jsonb
+         FROM canvas_runs WHERE id = $2 AND status IN ('queued', 'running') AND COALESCE(data_json->>'cancelRequestedAt', '') = '' FOR SHARE`
+        : "VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10::jsonb)"}
        ON CONFLICT(run_id) DO NOTHING`,
       [item.id, item.runId, item.status, item.priority, item.attempts, item.maxAttempts, item.runAfter, item.createdAt, item.updatedAt, toJson(item)],
     );
@@ -3337,8 +3466,10 @@ export async function enqueueCanvasRunQueueItem(run: CanvasRun) {
   }
   getSqliteDatabase().prepare(`
     INSERT OR IGNORE INTO canvas_run_queue (id, run_id, status, priority, attempts, max_attempts, run_after, created_at, updated_at, data_json)
-    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
-  `).run(item.id, item.runId, item.status, item.priority, item.attempts, item.maxAttempts, item.runAfter, item.createdAt, item.updatedAt, toJson(item));
+    ${options.requireActiveRun ? `SELECT ?, ?, ?, ?, ?, ?, ?, ?, ?, ? FROM canvas_runs
+      WHERE id = ? AND status IN ('queued', 'running') AND COALESCE(json_extract(data_json, '$.cancelRequestedAt'), '') = ''`
+      : "VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)"}
+  `).run(item.id, item.runId, item.status, item.priority, item.attempts, item.maxAttempts, item.runAfter, item.createdAt, item.updatedAt, toJson(item), ...(options.requireActiveRun ? [run.id] : []));
   return item;
 }
 
@@ -3495,15 +3626,20 @@ export async function requeueCanvasRunQueueItem(runId: string, delayMs = 0) {
   const runAfter = new Date(nowDate.getTime() + Math.max(0, delayMs)).toISOString();
   if (getDatabaseBackend() === "postgres") {
     const result = await getPostgresPool().query(
-      `UPDATE canvas_run_queue SET status = 'queued', attempts = 0, run_after = $1, locked_by = NULL,
-       locked_until = NULL, completed_at = NULL, error = NULL, updated_at = $1 WHERE run_id = $2`,
+      `WITH owner AS MATERIALIZED (
+         SELECT id FROM canvas_runs WHERE id = $2 AND status IN ('queued', 'running')
+           AND COALESCE(data_json->>'cancelRequestedAt', '') = '' FOR UPDATE
+       ) UPDATE canvas_run_queue SET status = 'queued', attempts = 0, run_after = $1, locked_by = NULL,
+       locked_until = NULL, completed_at = NULL, error = NULL, updated_at = $1 WHERE run_id = $2
+       AND run_id IN (SELECT id FROM owner)`,
       [runAfter, runId],
     );
     return Number(result.rowCount || 0) === 1;
   }
   const result = getSqliteDatabase().prepare(
     `UPDATE canvas_run_queue SET status = 'queued', attempts = 0, run_after = ?, locked_by = NULL,
-       locked_until = NULL, completed_at = NULL, error = NULL, updated_at = ? WHERE run_id = ?`,
+       locked_until = NULL, completed_at = NULL, error = NULL, updated_at = ? WHERE run_id = ?
+       AND EXISTS (SELECT 1 FROM canvas_runs WHERE id = canvas_run_queue.run_id AND status IN ('queued', 'running') AND COALESCE(json_extract(data_json, '$.cancelRequestedAt'), '') = '')`,
   ).run(runAfter, now, runId) as { changes?: number };
   return Number(result.changes || 0) === 1;
 }

@@ -15,6 +15,9 @@ const nextConfig: NextConfig = {
   outputFileTracingExcludes: {
     "*": ["public/generated/**/*", "public/media/**/*", "data/**/*", "test-artifacts/**/*"],
   },
+  outputFileTracingIncludes: {
+    "/*": ["./src/lib/canvas/image-encoder.mjs", "./node_modules/@img/sharp-*/lib/**/*"],
+  },
   turbopack: {
     root: process.cwd(),
   },
