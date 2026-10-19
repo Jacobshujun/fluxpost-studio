@@ -11,7 +11,7 @@ Gemini Canvas text/vision is implemented, verified offline and activated on LAN 
 - Gemini: native generateContent, independent config/model/proxy, ordered text/images and cancellation implemented. Offline provider/config/graph/iteration/V2, Canvas regression, six three-theme desktop/mobile cases, types, changed lint, build/config synchronization and isolated HTTP/SQLite pass. Baseline domain checks pass; existing lint blocker below. Clean 5ca173a LAN identity/smoke/binding/pages passed; documentation HEAD is activated afterward. No live calls. Evidence: `.trellis/tasks/archive/2026-10/10-19-canvas-gemini-node/verification.md`.
 - NVENC: real output/reconstruction/layer/slideshow/mask checks, CPU baseline, types, source lint, build and isolated HTTP/SQLite pass. Clean d031d1a LAN activation and full-SHA identity/smoke/0.0.0.0:3001 passed after the operator batch drained. Decode/filters/audio remain CPU; unsupported tiny GPU dimensions fail explicitly.
 - Cancellation: worker/resource/storage/scheduler/iteration, temporary-table PostgreSQL SQL, types, lint/build/HTTP/SQLite pass. Scoped recovery preserved all 30 completed snapshots and resumed abandoned work. Normal operator observation remains.
-- Gallery: color palettes/filtering, explicit durable analysis and Canvas V1/V2 pass real Sharp/isolated SQL, six three-theme browser cases and gallery regression. See `library_colors.md`; local activation next. Operator review remains.
+- Gallery: color previews/filtering and durable analysis pass Sharp/SQL and six three-theme browser cases. Clean 65146eb LAN identity/smoke/pages passed; final docs HEAD activated afterward. See `library_colors.md`. Operator review remains.
 
 ## Next Entry
 

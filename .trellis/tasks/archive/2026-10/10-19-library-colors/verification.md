@@ -14,4 +14,4 @@ Full baseline: `.trellis/verification/check.ps1` final run passes Trellis budget
 
 No paid model, external storage writes, automatic historical backfill, provider acceptance, remote deployment or runtime data migration was performed by these tests. Actual library backfill remains an explicit operator action. Raw local logs/screenshots live under ignored `test-artifacts/`; only this evidence summary is versioned.
 
-Delivery: verified source is ready for commit and clean primary-worktree LAN 3001 activation. Pre-existing Gemini status/task changes are temporarily preserved in a scoped Git stash for the clean-tree gate and must be restored after final activation.
+Delivery: source commit `65146ebc3551bba4530832778746b2420014857b` activated through `npm run local:lan` from the clean primary worktree. Full-SHA candidate identity, HTTP smoke including new endpoint authentication, `0.0.0.0:3001` listener and `/library`/`/canvas` HTTP 200 passed. Final task-archive documentation HEAD is activated afterward through the same guarded entry. Pre-existing paused Gemini status/task changes are restored only after that final activation; no Gemini calls are made.
