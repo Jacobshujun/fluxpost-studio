@@ -1,13 +1,14 @@
 # FluxPost Current Status
 
-Last updated: 2026-10-19
+Last updated: 2026-10-20
 
 ## One-Line Status
 
-Gemini Canvas text/vision is implemented, verified offline and activated on LAN 3001. Real Gemini acceptance remains pending. NVENC encoding (concurrency 1), cancellation recovery and gallery operator gates remain.
+Canvas library placement now follows the viewport/pointer. Gemini live acceptance, NVENC, cancellation recovery and gallery operator gates remain.
 
 ## Current Focus
 
+- Canvas placement: pointer/viewport conversion and first-node view stability verified; evidence: `.trellis/tasks/archive/2026-10/10-20-canvas-node-placement/`.
 - Gemini: native generateContent, independent config/model/proxy, ordered text/images and cancellation implemented. Offline provider/config/graph/iteration/V2, Canvas regression, six three-theme desktop/mobile cases, types, changed lint, build/config synchronization and isolated HTTP/SQLite pass. Baseline domain checks pass; existing lint blocker below. Clean 5ca173a LAN identity/smoke/binding/pages passed; documentation HEAD is activated afterward. No live calls. Evidence: `.trellis/tasks/archive/2026-10/10-19-canvas-gemini-node/verification.md`.
 - NVENC: real output/reconstruction/layer/slideshow/mask checks, CPU baseline, types, source lint, build and isolated HTTP/SQLite pass. Clean d031d1a LAN activation and full-SHA identity/smoke/0.0.0.0:3001 passed after the operator batch drained. Decode/filters/audio remain CPU; unsupported tiny GPU dimensions fail explicitly.
 - Cancellation: worker/resource/storage/scheduler/iteration, temporary-table PostgreSQL SQL, types, lint/build/HTTP/SQLite pass. Scoped recovery preserved all 30 completed snapshots and resumed abandoned work. Normal operator observation remains.

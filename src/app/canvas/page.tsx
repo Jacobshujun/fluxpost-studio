@@ -274,6 +274,7 @@ export default function CanvasPage() {
   const [nodes, setNodes] = useState<FlowNode[]>([]);
   const [edges, setEdges] = useState<FlowEdge[]>([]);
   const [viewport, setViewport] = useState<Viewport>({ x: 0, y: 0, zoom: 1 });
+  const [fitViewOnLoad, setFitViewOnLoad] = useState(false);
   const [selectedNodeId, setSelectedNodeId] = useState<string>();
   const [groups, setGroups] = useState<CanvasGroup[]>([]);
   const [selectedGroupId, setSelectedGroupId] = useState<string>();
@@ -314,6 +315,7 @@ export default function CanvasPage() {
   const reactFlowRef = useRef<ReactFlowInstance<FlowNode, FlowEdge> | null>(null);
   const stageRef = useRef<HTMLDivElement | null>(null);
   const canvasPointerRef = useRef<{ x: number; y: number } | null>(null);
+  const lastCanvasPointerRef = useRef<{ x: number; y: number } | null>(null);
   const pasteSequenceRef = useRef(0);
   const seedanceMentionSequenceRef = useRef(0);
   const seedanceMentionSessionRef = useRef("");
@@ -598,6 +600,8 @@ export default function CanvasPage() {
   }
 
   function selectWorkflow(workflow: CanvasWorkflow) {
+    lastCanvasPointerRef.current = null;
+    setFitViewOnLoad(workflow.graph.nodes.length > 0 && !workflow.graph.groups?.length);
     setIterationEditorId(undefined);
     setWorkflowId(workflow.id);
     stageRef.current?.classList.remove("canvas-stage-viewport-moving");
@@ -762,7 +766,8 @@ export default function CanvasPage() {
   }
 
   function addNode(type: CanvasNodeType, position?: { x: number; y: number }, connection?: QuickAddConnection, port?: CanvasPortDefinition) {
-    if (isMobile) return;
+    const flow = reactFlowRef.current;
+    if (isMobile || !flow) return;
     if (connection && port && !isQuickAddPortCompatible(connection, port)) {
       setMessage("端口类型不兼容");
       return;
@@ -773,7 +778,11 @@ export default function CanvasPage() {
       return;
     }
     const id = `${type.replaceAll(".", "-")}-${Date.now()}`;
-    const canvasNode = createCanvasNode(type, id, position || { x: 80 + nodes.length * 28, y: 80 + nodes.length * 24 });
+    const bounds = stageRef.current?.getBoundingClientRect();
+    const pointer = lastCanvasPointerRef.current;
+    const point = bounds && pointer && pointer.x >= bounds.left && pointer.x < bounds.right && pointer.y >= bounds.top && pointer.y < bounds.bottom
+      ? pointer : stageCenter(stageRef.current);
+    const canvasNode = createCanvasNode(type, id, position ?? flow.screenToFlowPosition(point));
     setNodes((current) => [...current.map((entry) => ({ ...entry, selected: false })), { ...toFlowNode(canvasNode, isMobile), selected: true }]);
     setSelectedGroupId(undefined);
     if (connection && port) {
@@ -1760,7 +1769,7 @@ export default function CanvasPage() {
           if (isEditableClipboardTarget(event.target) || isMobile || !activeWorkflow || !target?.closest(".react-flow__pane")) return;
           event.preventDefault();
           openQuickAdd(event.clientX, event.clientY);
-        }} onPointerMove={(event) => { canvasPointerRef.current = { x: event.clientX, y: event.clientY }; }} onPointerLeave={() => { canvasPointerRef.current = null; }}>
+        }} onPointerMove={(event) => { canvasPointerRef.current = lastCanvasPointerRef.current = { x: event.clientX, y: event.clientY }; }} onPointerLeave={() => { canvasPointerRef.current = null; }}>
           {activeWorkflow ? <CanvasNodeInteractionContext.Provider value={nodeInteraction}><ReactFlow<FlowNode, FlowEdge>
             nodes={displayedNodes}
             edges={displayedEdges}
@@ -1797,7 +1806,7 @@ export default function CanvasPage() {
             nodesConnectable={!isMobile}
             elementsSelectable
             deleteKeyCode={isMobile || iterationEditorId || selectedGroupId ? null : ["Backspace", "Delete"]}
-            fitView={nodes.length > 0 && groups.length === 0}
+            fitView={fitViewOnLoad}
             colorMode={flowColorMode}
           >
             <Background variant={BackgroundVariant.Dots} gap={22} size={1.2} color="var(--canvas-grid-dot)" />
