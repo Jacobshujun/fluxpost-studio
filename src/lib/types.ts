@@ -1601,6 +1601,7 @@ export type AdvancedConfigField = {
   configured: boolean;
   required?: boolean;
   options?: string[];
+  optionLabels?: Record<string, string>;
 };
 
 export type AdvancedConfigGroup = {

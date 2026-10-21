@@ -1198,7 +1198,7 @@ function ConfigFieldRow({
           <select id={inputId} className="field field-compact" value={state.value} onChange={(event) => onChange(field, event.target.value)} disabled={disabled}>
             {(field.options || []).map((option) => (
               <option key={option} value={option}>
-                {option}
+                {field.optionLabels?.[option] || option}
               </option>
             ))}
           </select>

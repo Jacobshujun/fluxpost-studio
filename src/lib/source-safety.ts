@@ -7,6 +7,7 @@ import {
   parseContentSafetyModelOutput,
 } from "./content-safety-policy";
 import { appConfig, openaiTextUrl } from "./config";
+import { buildTextReasoningRequest } from "./text-reasoning";
 import { concurrencyConfig, mapWithConcurrency, runWithConcurrencyPool } from "./concurrency";
 import type { ContentSafetyPolicy, NormalizedSourceItem, SourceSafetyAssessment } from "./types";
 
@@ -190,6 +191,7 @@ async function callResponsesApi(prompt: string) {
       headers: openaiHeaders(),
       body: JSON.stringify({
         model: appConfig.openaiTextModel,
+        ...buildTextReasoningRequest("responses", appConfig.openaiTextReasoningEffort),
         input: prompt,
         text: { format: { type: "json_object" } },
       }),
@@ -210,6 +212,7 @@ async function callChatCompletions(prompt: string) {
       headers: openaiHeaders(),
       body: JSON.stringify({
         model: appConfig.openaiTextModel,
+        ...buildTextReasoningRequest("chat", appConfig.openaiTextReasoningEffort),
         messages: [
           { role: "system", content: "Return one valid JSON object only. Do not use Markdown." },
           { role: "user", content: prompt },

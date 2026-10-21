@@ -6,6 +6,7 @@ import { normalizeGeminiModel } from "./gemini-contract";
 import type { ConfigStatus } from "./types";
 import { getDatabaseRuntimeStatus } from "./database";
 import type { AdvancedConfigPatch, AdvancedConfigPatchValue, AdvancedConfigSnapshot } from "./types";
+import { normalizeTextReasoningEffort, textReasoningEffortValues } from "./text-reasoning";
 import {
   normalizeImageProviderProfile,
   resolveImageProviderProfile,
@@ -24,6 +25,7 @@ type ConfigDefinition = {
   category: string;
   required?: boolean;
   options?: string[];
+  optionLabels?: Record<string, string>;
   read: () => string | undefined;
   configured?: () => boolean;
 };
@@ -66,6 +68,7 @@ function readAppConfig() {
   openaiImageBackupApiKey: process.env.OPENAI_IMAGE_BACKUP_API_KEY || "",
   openaiTextEndpoint: process.env.OPENAI_TEXT_ENDPOINT || "responses",
   openaiTextModel: process.env.OPENAI_TEXT_MODEL || "gpt-5.5",
+  openaiTextReasoningEffort: normalizeTextReasoningEffort(process.env.OPENAI_TEXT_REASONING_EFFORT),
   openaiLibraryTaggingModel: process.env.OPENAI_LIBRARY_TAGGING_MODEL || process.env.OPENAI_TEXT_MODEL || "gpt-5.5",
   openaiImageEndpoint: normalizeImageEndpoint(process.env.OPENAI_IMAGE_ENDPOINT || "images"),
   openaiImageApiDialect: normalizeImageApiDialect(process.env.OPENAI_IMAGE_API_DIALECT || "auto"),
@@ -238,6 +241,7 @@ export function getAdvancedConfigSnapshot(): AdvancedConfigSnapshot {
       category: field.category,
       required: field.required,
       options: field.options,
+      optionLabels: field.optionLabels,
       configured: field.configured ? field.configured() : Boolean(process.env[field.key]),
       value: field.kind === "secret" ? undefined : field.read() ?? "",
     })),
@@ -543,6 +547,20 @@ const advancedConfigGroups: ConfigDefinitionGroup[] = [
       }),
       configField("OPENAI_TEXT_MODEL", "文本模型", "用于内容生成、标签和审核。", "text", "openai-text", {
         read: () => appConfig.openaiTextModel,
+      }),
+      configField("OPENAI_TEXT_REASONING_EFFORT", "思考强度", "越高通常越慢、消耗更多 token，且不保证效果更好。支持范围取决于模型和服务商；“服务商默认”不等于关闭思考。", "select", "openai-text", {
+        options: [...textReasoningEffortValues],
+        optionLabels: {
+          default: "服务商默认（不指定）",
+          none: "关闭思考",
+          minimal: "最低",
+          low: "低",
+          medium: "中",
+          high: "高",
+          xhigh: "超高",
+          max: "最高",
+        },
+        read: () => appConfig.openaiTextReasoningEffort,
       }),
       configField("OPENAI_LIBRARY_TAGGING_MODEL", "参考图库打标模型", "仅用于参考图库的后台视觉打标；留空时使用文本模型。", "text", "openai-text", {
         read: () => appConfig.openaiLibraryTaggingModel,

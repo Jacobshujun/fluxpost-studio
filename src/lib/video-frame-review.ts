@@ -1,5 +1,6 @@
 import { compactError } from "./activity-log";
 import { appConfig, openaiTextUrl } from "./config";
+import { buildTextReasoningRequest } from "./text-reasoning";
 import { runWithConcurrencyPool } from "./concurrency";
 import { toModelImageUrl } from "./model-image-input";
 import type { VideoFrameAsset } from "./types";
@@ -106,6 +107,7 @@ async function callResponsesApi(prompt: string, images: ModelImageInput[]) {
       headers: openaiHeaders(),
       body: JSON.stringify({
         model: appConfig.openaiTextModel,
+        ...buildTextReasoningRequest("responses", appConfig.openaiTextReasoningEffort),
         input: [
           {
             role: "user",
@@ -150,6 +152,7 @@ async function callChatCompletions(prompt: string, images: ModelImageInput[]) {
       headers: openaiHeaders(),
       body: JSON.stringify({
         model: appConfig.openaiTextModel,
+        ...buildTextReasoningRequest("chat", appConfig.openaiTextReasoningEffort),
         messages: [
           {
             role: "system",

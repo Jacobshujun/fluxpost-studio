@@ -53,11 +53,13 @@ const cjsModule = { exports: {} };
         openaiApiKey: "test-key",
         openaiTextEndpoint: "responses",
         openaiTextModel: "test-vision-model",
+        openaiTextReasoningEffort: "default",
         viralImageImitationPrompt: "env prompt: image 1 vehicle, image 2 viral style",
       },
       openaiTextUrl: (name) => `https://example.test/${name}`,
     },
     "./concurrency": { runWithConcurrencyPool: async (_name, task) => task() },
+    "./text-reasoning": { buildTextReasoningRequest: () => ({}) },
     "./model-image-input": {
       toModelImageUrl: async (url) => {
         if (url.includes("fail-input")) throw new Error("mock input failure");

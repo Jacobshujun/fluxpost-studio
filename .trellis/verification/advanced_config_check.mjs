@@ -46,6 +46,9 @@ assertContains(files.dockerfile, /mkdir -p config data public\/media public\/gen
 assertContains(files.page, /sessionData\.account\.role !== "admin"/, "Advanced config page must block non-admin users.");
 assertContains(files.page, /field\.kind === "secret" \? "" : field\.value \|\| ""/, "Advanced config page must not initialize secret inputs with secret values.");
 assertContains(files.page, /清空该项/, "Advanced config page must provide an explicit clear action for hidden secrets.");
+assertContains(files.page, /field\.optionLabels\?\.\[option\]/, "Advanced config select options must support display labels.");
+assertContains(files.config, /OPENAI_TEXT_REASONING_EFFORT/, "Advanced config must expose the text reasoning effort key.");
+assertContains(files.config, /openaiTextReasoningEffort/, "Advanced config must read the text reasoning effort setting.");
 assertContains(files.page, /\/api\/config\?advanced=1/, "Advanced config page must use the admin-only config snapshot endpoint.");
 assertContains(files.home, /currentAccount\.role === "admin"[\s\S]*href="\/config"/, "Home navigation must show advanced config only to admins.");
 
@@ -55,6 +58,7 @@ assertNotContains(files.route, /process\.env\[[^\]]+\][\s\S]*NextResponse\.json/
 checkImageProxyConfiguration();
 checkConfigSynchronization();
 checkVideoEncodingConfiguration();
+checkTextReasoningConfiguration();
 console.log("Advanced config admin boundary, cross-module synchronization and image proxy persistence checks passed.");
 
 function checkVideoEncodingConfiguration() {
@@ -70,6 +74,34 @@ function checkVideoEncodingConfiguration() {
   assert.equal(runtime.persisted(), before);
   runtime.config.saveAdvancedConfigPatch({ values: { FFMPEG_VIDEO_ENCODER: null } });
   assert.equal(field(runtime.config).value, "");
+}
+
+function checkTextReasoningConfiguration() {
+  const runtime = loadConfig("win32");
+  const field = () => runtime.config.getAdvancedConfigSnapshot().groups
+    .flatMap((group) => group.fields)
+    .find((entry) => entry.key === "OPENAI_TEXT_REASONING_EFFORT");
+  assert.equal(runtime.config.appConfig.openaiTextReasoningEffort, "default");
+  assert.equal(field().kind, "select");
+  assert.deepEqual([...field().options], ["default", "none", "minimal", "low", "medium", "high", "xhigh", "max"]);
+  assert.equal(field().optionLabels.default, "服务商默认（不指定）");
+  for (const effort of ["none", "minimal", "low", "medium", "high", "xhigh", "max"]) {
+    runtime.config.saveAdvancedConfigPatch({ values: { OPENAI_TEXT_REASONING_EFFORT: effort } });
+    assert.equal(runtime.config.appConfig.openaiTextReasoningEffort, effort);
+    assert.equal(field().value, effort);
+    assert.equal(loadConfig("win32", {}, runtime.persisted()).config.appConfig.openaiTextReasoningEffort, effort);
+  }
+  const before = runtime.persisted();
+  assert.throws(
+    () => runtime.config.saveAdvancedConfigPatch({ values: { OPENAI_TEXT_REASONING_EFFORT: "invalid" } }),
+    /unsupported value/,
+  );
+  assert.equal(runtime.persisted(), before);
+  assert.equal(runtime.config.appConfig.openaiTextReasoningEffort, "max");
+  assert.throws(() => loadConfig("win32", { OPENAI_TEXT_REASONING_EFFORT: "invalid" }), /OPENAI_TEXT_REASONING_EFFORT/);
+  runtime.config.saveAdvancedConfigPatch({ values: { OPENAI_TEXT_REASONING_EFFORT: null } });
+  assert.equal(runtime.config.appConfig.openaiTextReasoningEffort, "default");
+  assert.equal(field().value, "default");
 }
 
 function checkConfigSynchronization() {
@@ -270,6 +302,7 @@ function loadConfig(platform, values = {}, persisted = "") {
       URL,
       require: (name) => {
         if (name === "./image-model-options") return load("src/lib/image-model-options.ts");
+        if (name === "./text-reasoning") return load("src/lib/text-reasoning.ts");
         if (name === "./gemini-contract") return load("src/lib/gemini-contract.ts");
         if (name === "node:fs") return fakeFs;
         if (name === "./database") return { getDatabaseRuntimeStatus: () => ({}) };

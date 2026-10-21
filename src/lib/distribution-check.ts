@@ -3,6 +3,7 @@ import { randomUUID } from "node:crypto";
 import { promisify } from "node:util";
 import { compactError, recordExecutionLog } from "./activity-log";
 import { appConfig, openaiTextUrl } from "./config";
+import { buildTextReasoningRequest } from "./text-reasoning";
 import { concurrencyConfig, mapWithConcurrency, runWithConcurrencyPool, type ConcurrencyPoolName } from "./concurrency";
 import {
   claimNextDistributionCheckJob,
@@ -808,6 +809,7 @@ async function callResponsesApi(prompt: string) {
       headers: openaiHeaders(),
       body: JSON.stringify({
         model: appConfig.openaiTextModel,
+        ...buildTextReasoningRequest("responses", appConfig.openaiTextReasoningEffort),
         input: prompt,
         text: {
           format: {
@@ -836,6 +838,7 @@ async function callChatCompletions(prompt: string) {
       headers: openaiHeaders(),
       body: JSON.stringify({
         model: appConfig.openaiTextModel,
+        ...buildTextReasoningRequest("chat", appConfig.openaiTextReasoningEffort),
         messages: [
           {
             role: "system",

@@ -1064,9 +1064,10 @@ const makeJsonResponse = (body, ok = true, status = 200) => ({
 const loadVisionModule = (endpoint, apiKey, requests) => loadTsModule("src/lib/openai.ts", {
   "./activity-log": { compactError: (value) => String(value), recordExecutionLog: async () => undefined },
   "./config": {
-    appConfig: { openaiApiKey: apiKey, openaiTextEndpoint: endpoint, openaiTextModel: "vision-test-model" },
+    appConfig: { openaiApiKey: apiKey, openaiTextEndpoint: endpoint, openaiTextModel: "vision-test-model", openaiTextReasoningEffort: "default" },
     openaiTextUrl: (suffix) => `https://openai.example.invalid/${suffix}`,
   },
+  "./text-reasoning": loadTsModule("src/lib/text-reasoning.ts"),
   "./concurrency": { runWithConcurrencyPool: async (pool, task) => { assert.equal(pool, "gpt"); return task(); } },
   "./creation-controls": {},
   "./finished-body-policy": loadTsModule("src/lib/finished-body-policy.ts"),

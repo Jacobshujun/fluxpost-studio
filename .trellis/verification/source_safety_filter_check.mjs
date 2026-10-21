@@ -129,6 +129,7 @@ const sourceSafety = loadTsModule(
         openaiApiKey: "test-key",
         openaiTextEndpoint: "chat",
         openaiTextModel: "test-model",
+        openaiTextReasoningEffort: "default",
       },
       openaiTextUrl: () => "https://openai.example.invalid/chat/completions",
     },
@@ -139,6 +140,7 @@ const sourceSafety = loadTsModule(
       mapWithConcurrency: async (items, _limit, mapper) => Promise.all(items.map(mapper)),
       runWithConcurrencyPool: async (_name, task) => task(),
     },
+    "./text-reasoning": loadTsModule("src/lib/text-reasoning.ts"),
     "./content-safety-policy": contentSafetyPolicy,
   },
   {

@@ -35,6 +35,7 @@ const nodeChecks = [
   ["Unified library runtime check", "unified_library_runtime_check.mjs"],
   ["Compact-only workspace check", "compact_only_workspace_check.mjs"],
   ["Advanced config admin boundary check", "advanced_config_check.mjs"],
+  ["Text reasoning effort contract check", "text_reasoning_effort_check.mjs"],
   ["TOS runtime media storage check", "tos_runtime_media_check.mjs"],
   ["Feishu CLI identity auto-init check", "feishu_cli_identity_check.mjs"],
   ["Local Next build output check", "local_build_output_check.mjs"],

@@ -2,6 +2,7 @@ import path from "node:path";
 import { stat } from "node:fs/promises";
 import { compactError, recordExecutionLog } from "./activity-log";
 import { appConfig, openaiTextUrl } from "./config";
+import { buildTextReasoningRequest } from "./text-reasoning";
 import { runWithConcurrencyPool } from "./concurrency";
 import { generatePost } from "./openai";
 import { toModelImageUrl } from "./model-image-input";
@@ -378,6 +379,7 @@ async function callViralImageResponsesApi(prompt: string, images: ModelImageInpu
       headers: openaiHeaders(),
       body: JSON.stringify({
         model: appConfig.openaiTextModel,
+        ...buildTextReasoningRequest("responses", appConfig.openaiTextReasoningEffort),
         input: [
           {
             role: "user",
@@ -422,6 +424,7 @@ async function callViralImageChatCompletions(prompt: string, images: ModelImageI
       headers: openaiHeaders(),
       body: JSON.stringify({
         model: appConfig.openaiTextModel,
+        ...buildTextReasoningRequest("chat", appConfig.openaiTextReasoningEffort),
         messages: [
           {
             role: "system",

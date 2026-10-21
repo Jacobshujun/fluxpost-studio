@@ -1,5 +1,6 @@
 import { compactError, recordExecutionLog } from "./activity-log";
 import { appConfig, openaiTextUrl } from "./config";
+import { buildTextReasoningRequest } from "./text-reasoning";
 import { runWithConcurrencyPool } from "./concurrency";
 import { formatImageTasksForPrompt } from "./creation-controls";
 import {
@@ -283,6 +284,7 @@ export async function callOpenAIForVisionText(prompt: string, imageUrls: string[
     body: JSON.stringify(appConfig.openaiTextEndpoint === "chat"
       ? {
           model: appConfig.openaiTextModel,
+          ...buildTextReasoningRequest("chat", appConfig.openaiTextReasoningEffort),
           messages: [{ role: "user", content: [
             { type: "text", text: prompt },
             ...prepared.map((imageUrl) => ({ type: "image_url", image_url: { url: imageUrl } })),
@@ -290,6 +292,7 @@ export async function callOpenAIForVisionText(prompt: string, imageUrls: string[
         }
       : {
           model: appConfig.openaiTextModel,
+          ...buildTextReasoningRequest("responses", appConfig.openaiTextReasoningEffort),
           input: [{ role: "user", content: [
             { type: "input_text", text: prompt },
             ...prepared.map((imageUrl) => ({ type: "input_image", image_url: imageUrl })),
@@ -338,6 +341,7 @@ async function callResponsesApi(prompt: string, options: JsonModelOptions = {}) 
       headers: openaiHeaders(),
       body: JSON.stringify({
         model: appConfig.openaiTextModel,
+        ...buildTextReasoningRequest("responses", appConfig.openaiTextReasoningEffort),
         input: prompt,
         ...(webSearch
           ? {
@@ -412,6 +416,7 @@ async function callChatCompletions(prompt: string, options: JsonModelOptions = {
       headers: openaiHeaders(),
       body: JSON.stringify({
         model: appConfig.openaiTextModel,
+        ...buildTextReasoningRequest("chat", appConfig.openaiTextReasoningEffort),
         messages: [
         {
           role: "system",

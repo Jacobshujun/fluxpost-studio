@@ -392,6 +392,19 @@
       "notes": "Runtime data and configuration remain intentionally environment-specific."
     },
     {
+      "id": "text-reasoning-effort",
+      "title": "Global text-model reasoning effort configuration",
+      "status": "ready_for_review",
+      "definition_of_done": [
+        "Admins select a provider default or explicit reasoning effort that applies to every OpenAI-compatible text request without affecting Gemini or media generation",
+        "Config, both endpoint shapes, all request modules, UI and built API/worker synchronization pass isolated deterministic checks"
+      ],
+      "evidence": [
+        "2026-10-21 config enum/persistence/clear/invalid, Responses/Chat request bodies across seven modules, built config sync, source lint/types/build/HTTP and three-theme 1440+390 browser checks pass; text-reasoning-effort task."
+      ],
+      "notes": "Live model/provider support for a selected effort remains an explicit operator gate."
+    },
+    {
       "id": "original-xhs-batch-workspace",
       "title": "Batch original Xiaohongshu card workspace",
       "status": "ready_for_review",

@@ -56,6 +56,7 @@ api.saveAdvancedConfigPatch({ values: {
   OPENAI_IMAGE_BACKUP_API_KEY: "fixture-backup-key",
   OPENAI_IMAGE_PROXY_URL: "http://127.0.0.1:10809",
   OPENAI_IMAGE_PROXY_ENABLED: true,
+  OPENAI_TEXT_REASONING_EFFORT: "high",
   GEMINI_API_KEY: "fixture-gemini-key",
   GEMINI_MODEL: "fixture-gemini-model",
   GEMINI_BASE_URL: "https://gemini.example/v1beta",
@@ -71,6 +72,7 @@ assert.equal(worker.openaiImageRouteConfig("backup").toApisRequestFormat, "ratio
 assert.equal(worker.openaiImageUrl("images/edits", "backup"), "https://backup.example/v1/images/edits");
 assert.equal(worker.appConfig.openaiImageProxyEnabled, true);
 assert.equal(worker.appConfig.openaiImageProxyUrl, "http://127.0.0.1:10809");
+assert.equal(worker.appConfig.openaiTextReasoningEffort, "high");
 assert.equal(worker.appConfig, api.appConfig);
 assert.equal(worker.appConfig.geminiApiKey, "fixture-gemini-key");
 assert.equal(worker.appConfig.geminiModel, "fixture-gemini-model");
@@ -97,7 +99,7 @@ function evaluate(source) {
       if (dependency.includes('"node:fs"')) return fakeFs;
       if (dependency.includes('"node:path"')) return { default: path };
       if (dependency.includes('"getDatabaseRuntimeStatus"')) return { getDatabaseRuntimeStatus: () => ({}) };
-      if (dependency.includes('"normalizeGeminiModel"') || dependency.includes('"normalizeFeishuTableId"') || dependency.includes('"resolveImageProviderProfile"') || dependency.includes('"normalizeToApisRequestFormat"')) {
+      if (dependency.includes('"normalizeGeminiModel"') || dependency.includes('"normalizeFeishuTableId"') || dependency.includes('"resolveImageProviderProfile"') || dependency.includes('"normalizeToApisRequestFormat"') || dependency.includes('"normalizeTextReasoningEffort"')) {
         return evaluate(dependency).exports;
       }
       throw new Error(`Unexpected config dependency ${id}; extend the isolated adapter explicitly.`);

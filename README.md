@@ -146,6 +146,7 @@ OPENAI_IMAGE_BACKUP_API_PROFILE=
 OPENAI_IMAGE_BACKUP_MODEL=
 OPENAI_TEXT_ENDPOINT=responses
 OPENAI_TEXT_MODEL=gpt-5.5
+OPENAI_TEXT_REASONING_EFFORT=
 OPENAI_LIBRARY_TAGGING_MODEL=
 OPENAI_IMAGE_ENDPOINT=images
 OPENAI_IMAGE_API_DIALECT=auto
@@ -219,7 +220,7 @@ OPENAI_IMAGE_MODEL=gpt-image-2
 OPENAI_IMAGE_BACKUP_MODEL=gpt-image-2
 ```
 
-`OPENAI_TEXT_ENDPOINT` 可选 `responses` 或 `chat`。`OPENAI_IMAGE_ENDPOINT` 可选 `responses` 或 `images`。图片主备通道可分别通过 `OPENAI_IMAGE_API_PROFILE` 和 `OPENAI_IMAGE_BACKUP_API_PROFILE` 选择 `openai_json`、`openai_sse` 或 `toapis_async`。旧 `OPENAI_IMAGE_API_DIALECT=auto|openai|toapis` 继续兼容；未设置新档案时，`openai` 保留原 SSE 行为，`toapis` 使用异步任务协议，`auto` 按通道域名识别 ToAPIs。
+`OPENAI_TEXT_ENDPOINT` 可选 `responses` 或 `chat`。`OPENAI_TEXT_REASONING_EFFORT` 可留空或选择 `default`、`none`、`minimal`、`low`、`medium`、`high`、`xhigh`、`max`；留空/`default` 不发送思考强度，具体档位取决于模型和服务商。`OPENAI_IMAGE_ENDPOINT` 可选 `responses` 或 `images`。图片主备通道可分别通过 `OPENAI_IMAGE_API_PROFILE` 和 `OPENAI_IMAGE_BACKUP_API_PROFILE` 选择 `openai_json`、`openai_sse` 或 `toapis_async`。旧 `OPENAI_IMAGE_API_DIALECT=auto|openai|toapis` 继续兼容；未设置新档案时，`openai` 保留原 SSE 行为，`toapis` 使用异步任务协议，`auto` 按通道域名识别 ToAPIs。
 
 飞书 CLI 未配置时，发布接口会把待写入内容保存到 `data/feishu-outbox/*.json`。
 

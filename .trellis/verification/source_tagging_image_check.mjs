@@ -203,6 +203,8 @@ const modelImageInput = loadTsModule(
   },
 );
 
+const textReasoning = loadTsModule("src/lib/text-reasoning.ts");
+
 const sourceTagging = loadTsModule(
   "src/lib/source-tagging.ts",
   {
@@ -215,6 +217,7 @@ const sourceTagging = loadTsModule(
         openaiApiKey: "test-key",
         openaiTextEndpoint: "chat",
         openaiTextModel: "test-model",
+        openaiTextReasoningEffort: "default",
       },
       openaiTextUrl: () => "https://openai.example.invalid/chat/completions",
     },
@@ -225,6 +228,7 @@ const sourceTagging = loadTsModule(
       mapWithConcurrency: async (items, _limit, mapper) => Promise.all(items.map(mapper)),
       runWithConcurrencyPool: async (_name, task) => task(),
     },
+    "./text-reasoning": textReasoning,
     "./media-url-filter": mediaFilter,
     "./model-image-input": modelImageInput,
     "./video-frame-policy": videoFramePolicy,

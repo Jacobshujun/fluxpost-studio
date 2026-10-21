@@ -67,7 +67,8 @@ const logs = [];
 let compressionResponses = 0;
 const openaiModule = loadTsModule("src/lib/openai.ts", {
   "./activity-log": { compactError: (error) => error instanceof Error ? error.message : String(error), recordExecutionLog: async (entry) => { logs.push(entry); } },
-  "./config": { appConfig: { openaiApiKey: "test-key", openaiTextEndpoint: "chat", openaiTextModel: "test-model" }, openaiTextUrl: () => "https://openai.example.invalid/chat/completions" },
+  "./config": { appConfig: { openaiApiKey: "test-key", openaiTextEndpoint: "chat", openaiTextModel: "test-model", openaiTextReasoningEffort: "default" }, openaiTextUrl: () => "https://openai.example.invalid/chat/completions" },
+  "./text-reasoning": loadTsModule("src/lib/text-reasoning.ts"),
   "./concurrency": { runWithConcurrencyPool: async (_pool, operation) => operation() },
   "./creation-controls": { formatImageTasksForPrompt: () => "" },
   "./finished-body-policy": policy,
@@ -118,7 +119,8 @@ assert.equal(modelRequests.length, 3, "each over-limit body must make at most on
 let failedCompressionRequests = 0;
 const failingOpenaiModule = loadTsModule("src/lib/openai.ts", {
   "./activity-log": { compactError: (error) => error instanceof Error ? error.message : String(error), recordExecutionLog: async (entry) => { logs.push(entry); } },
-  "./config": { appConfig: { openaiApiKey: "test-key", openaiTextEndpoint: "chat", openaiTextModel: "test-model" }, openaiTextUrl: () => "https://openai.example.invalid/chat/completions" },
+  "./config": { appConfig: { openaiApiKey: "test-key", openaiTextEndpoint: "chat", openaiTextModel: "test-model", openaiTextReasoningEffort: "default" }, openaiTextUrl: () => "https://openai.example.invalid/chat/completions" },
+  "./text-reasoning": loadTsModule("src/lib/text-reasoning.ts"),
   "./concurrency": { runWithConcurrencyPool: async (_pool, operation) => operation() },
   "./creation-controls": { formatImageTasksForPrompt: () => "" },
   "./finished-body-policy": policy,

@@ -1,5 +1,15 @@
 # Verification
 
+- 2026-08-27: Canvas launcher attribution across execution/schedule/derived runs/posts/review passed owner-filtered history, indexed writes, lint, build, HTTP, and offline baseline checks.
+
+- 2026-08-27: Content-pool custom tags passed owner-scoped suggestions, AND filters, partial batch operations, shared Canvas filtering, build, SQLite, baseline, and 1440/390 browser checks.
+
+- 2026-09-07: Canvas library picker performance contracts passed with idle-until-filtered loading, 24-item count-free pages, lazy versioned thumbnails for result and selected previews, Flow-node memoization, and conditional thumbnail 304 handling. TypeScript, lint, build, isolated HTTP/SQLite smoke, and the complete offline baseline passed; no live services were called.
+
+- 2026-09-03: URL-backed navigation state across content, library, review, Canvas, original, copy-library, distribution-check, and config pages passed the deterministic route-state contract, TypeScript, lint (0 errors with existing warnings), production build, HTTP route checks, SQLite, and the complete offline baseline. Direct browser refresh automation was not run because `playwright` is not installed locally.
+
+- 2026-08-28: Unified assets, nested collections, flat tags, favorites, notes, smart folders, SQL filtering/keyset paging, server query selections, thumbnail UI, role migration, and Canvas/simple frozen consumers passed focused checks, TypeScript, lint (0 errors, 20 warnings), build, isolated HTTP/SQLite smoke, and the complete offline baseline. Mocked Chromium passed at 1440x960 and 390x844 without overflow or live services. An isolated 50,000-asset/1,000,000-label PostgreSQL benchmark measured P95 `9.3ms` default list, `30.2ms` tag filter, `252.6ms` collection subtree, `5.4ms` smart folder, `8.7ms` cursor page, and `11.6ms` navigation metadata.
+
 - 2026-08-25: Explicit Xray image transport, loopback/text/ComfyUI isolation, Canvas 30-second network recovery, ToAPIs GET-only resume, admin health UI/API, TypeScript, lint, production build, isolated HTTP smoke, and the full offline baseline passed; local Xray listened only on `127.0.0.1:10808`, and credential-free primary/backup HTTPS handshakes succeeded.
 
 Last updated: 2026-07-16
