@@ -15,6 +15,8 @@ import { validateCanvasVideoLoaderConfig } from "./video-loader";
 import { validateCanvasCollectionConfig } from "./content-collection";
 import { createCanvasIterationDefinition } from "./iteration";
 
+export const canvasGptImageReferencePortIds = Array.from({ length: 16 }, (_, index) => `image_${index + 1}`);
+
 const canvasNodeDefinitionVersions: CanvasNodeDefinition[] = [
   {
     type: "utility.image-iterate", version: 1, label: "逐图迭代", description: "对 1–18 张图片分别执行内部流程，按原顺序汇总结果。",
@@ -22,7 +24,8 @@ const canvasNodeDefinitionVersions: CanvasNodeDefinition[] = [
     inputs: [
       { id: "images", label: "逐张图片", kind: "images", required: true, multiple: true },
       { id: "text", label: "共享文字", kind: "text", multiple: true },
-      { id: "references", label: "共享参考图", kind: "images", multiple: true },
+      { id: "references", label: "旧版共享参考图（优先）", kind: "images", multiple: true },
+      ...canvasGptImageReferencePortIds.map((id, index): CanvasPortDefinition => ({ id, label: `共享参考图 ${index + 1}`, kind: "images" })),
     ],
     outputs: [{ id: "text", label: "汇总文字", kind: "text" }, { id: "images", label: "汇总图片", kind: "images" }],
     fields: [
@@ -745,19 +748,17 @@ const canvasNodeDefinitionVersions: CanvasNodeDefinition[] = [
   },
 ];
 
-export const canvasGptImageReferencePortIds = Array.from({ length: 16 }, (_, index) => `image_${index + 1}`);
-
 export function orderedCanvasGptImageInputs(inputs: Record<string, CanvasArtifact[]>) {
   return ["references", ...canvasGptImageReferencePortIds].flatMap((id) => inputs[id] || []);
 }
 
 export function getCanvasVisibleInputPorts(node: CanvasNode, connectedPortIds: Iterable<string> = []): CanvasPortDefinition[] {
   const inputs = getCanvasNodeDefinition(node.type, node.version)?.inputs || [];
-  if (node.type !== "model.gpt-image" || node.version < 2) return inputs;
+  if (node.type !== "utility.image-iterate" && (node.type !== "model.gpt-image" || node.version < 2)) return inputs;
   const connected = new Set(connectedPortIds);
   const lastConnected = canvasGptImageReferencePortIds.findLastIndex((id) => connected.has(id));
   const visible = new Set(canvasGptImageReferencePortIds.slice(0, Math.min(lastConnected + 2, 16)));
-  return inputs.filter((port) => port.id === "prompt" || visible.has(port.id) || (port.id === "references" && connected.has(port.id)));
+  return inputs.filter((port) => port.id === "references" ? connected.has(port.id) : !canvasGptImageReferencePortIds.includes(port.id) || visible.has(port.id));
 }
 
 export function getCanvasRequiredInputPorts(node: CanvasNode, availablePortIds: Iterable<string>): CanvasPortDefinition[] {

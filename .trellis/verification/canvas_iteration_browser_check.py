@@ -207,6 +207,35 @@ async def check(browser, width):
     await page.route("**/*", route_handler)
     await page.goto(f"{BASE_URL}/canvas?workflowId=iteration-workflow&runId=iteration-run", wait_until="networkidle")
     original_workflow = copy.deepcopy(workflow)
+    outer = page.locator('.react-flow__node[data-id="region"]')
+    handles = outer.locator('.react-flow__handle.target')
+    await expect(handles).to_have_count(3)
+    await expect(outer.get_by_text("共享参考图 1", exact=True)).to_have_count(1)
+    await expect(outer.get_by_text("共享参考图按接口编号传入，同一接口内按原图序排列。", exact=True)).to_be_visible()
+    workflow["graph"]["nodes"].append(make_node("reference-source", "input.images", {"urls": [IMAGE]}, {"x": -250, "y": 80}))
+    workflow["graph"]["edges"].extend([
+        {"id": "reference-3", "source": "reference-source", "sourcePort": "images", "target": "region", "targetPort": "image_3"},
+        {"id": "reference-legacy", "source": "reference-source", "sourcePort": "images", "target": "region", "targetPort": "references"},
+    ])
+    await page.reload(wait_until="networkidle")
+    await expect(handles).to_have_count(7)
+    await expect(outer.get_by_text("共享参考图 4", exact=True)).to_have_count(1)
+    await expect(outer.get_by_text("旧版共享参考图（优先）", exact=True)).to_have_count(1)
+    for theme in ["professional", "editorial", "creator"]:
+        await page.evaluate("theme => document.documentElement.setAttribute('data-theme', theme)", theme)
+        assert not await outer.locator(".canvas-node-content").evaluate("element => element.scrollWidth > element.clientWidth + 1")
+        Path("test-artifacts").mkdir(exist_ok=True)
+        await page.screenshot(path=f"test-artifacts/canvas-iteration-references-{theme}-{width}.png", full_page=True)
+    if width > 820:
+        reference_edge = page.locator('.react-flow__edge[data-id="reference-3"]')
+        await reference_edge.evaluate("element => element.dispatchEvent(new MouseEvent('click', {bubbles: true}))")
+        await page.keyboard.press("Delete")
+        await expect(handles).to_have_count(4)
+        await page.wait_for_function("!document.querySelector('.canvas-message .is-dirty')")
+        assert not any(edge["id"] == "reference-3" for edge in workflow["graph"]["edges"])
+    workflow = copy.deepcopy(original_workflow)
+    await page.reload(wait_until="networkidle")
+    await expect(handles).to_have_count(3)
     await check_editor_interactions(page, width, lambda: workflow)
     if os.environ.get("CANVAS_ITERATION_INTERACTIONS_ONLY") == "1":
         assert not errors, errors

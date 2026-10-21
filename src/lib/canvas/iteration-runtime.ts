@@ -2,6 +2,7 @@ import { createHash } from "node:crypto";
 import { enqueueCanvasRunQueueItem, getCanvasRunFromDb, holdCanvasIterationItemQueue, listCanvasNodeRunsFromDb, saveCanvasRunToDb, wakeCanvasIterationRun } from "../database";
 import { buildCanvasRunPlan, collectDescendants } from "./graph";
 import { canvasIterationExecutionDefinition } from "./iteration";
+import { orderedCanvasGptImageInputs } from "./registry";
 import type { CanvasNodeExecutionResult } from "./executors";
 import type { CanvasArtifact, CanvasIterationItem, CanvasIterationRunMetadata, CanvasNode, CanvasNodeRun, CanvasRun } from "./types";
 
@@ -92,7 +93,7 @@ export async function executeCanvasIteration(context: RegionContext): Promise<Ca
           images: { kind: "images", items: [item.source] },
           index: { kind: "text", value: String(item.index + 1) },
           text: { kind: "text", value: (inputs.text || []).flatMap((artifact) => artifact.kind === "text" ? [artifact.value] : []).join("\n\n") },
-          references: { kind: "images", items: (inputs.references || []).flatMap((artifact) => artifact.kind === "images" ? artifact.items : []) },
+          references: { kind: "images", items: orderedCanvasGptImageInputs(inputs).flatMap((artifact) => artifact.kind === "images" ? artifact.items : []) },
         },
         createdAt: now, updatedAt: now,
       });

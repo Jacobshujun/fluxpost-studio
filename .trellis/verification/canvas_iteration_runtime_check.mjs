@@ -1,9 +1,11 @@
 import assert from "node:assert/strict";
 import { createRequire } from "node:module";
 import { readFileSync } from "node:fs";
+import { fileURLToPath } from "node:url";
 import ts from "typescript";
 
 const require = createRequire(import.meta.url);
+const registry = require("tsx/cjs/api").require("./src/lib/canvas/registry.ts", fileURLToPath(new URL("../../package.json", import.meta.url)));
 const records = new Map();
 const attempts = new Map();
 const queued = new Set();
@@ -35,6 +37,7 @@ new Function("require", "module", "exports", compiled)((name) => {
   if (name === "../database") return database;
   if (name === "./graph") return graph;
   if (name === "./iteration") return iterationModule.exports;
+  if (name === "./registry") return registry;
   if (name.startsWith("node:")) return require(name);
   throw new Error(`Unexpected import ${name}`);
 }, loaded, loaded.exports);
@@ -158,4 +161,28 @@ const runsSource = readFileSync("src/lib/canvas/runs.ts", "utf8");
 assert.match(runsSource, /parkCanvasIterationRun\(queueItem.id, workerId\)/);
 assert.match(readFileSync("src/lib/database.ts", "utf8"), /wakeCanvasIterationParentSqlite/);
 assert.match(runsSource, /if \(run.iterationContext\) return undefined/);
+for (const legacy of [true, false]) {
+  const ordered = fixture(`ordered-${legacy}`, "all", 2);
+  const images = (...urls) => [{ kind: "images", items: urls.map((url) => ({ url })) }];
+  ordered.inputs = {
+    image_16: images("/media/last.jpg"),
+    image_3: images("/media/third.jpg"),
+    ...ordered.inputs,
+    image_1: [...images("/media/first.jpg", "/media/duplicate.jpg"), ...images("/media/duplicate.jpg")],
+  };
+  if (!legacy) delete ordered.inputs.references;
+  await advance(ordered);
+  const expected = [...(legacy ? ["/media/ref.jpg"] : []), "/media/first.jpg", "/media/duplicate.jpg", "/media/duplicate.jpg", "/media/third.jpg", "/media/last.jpg"];
+  for (const item of ordered.metadata.items) {
+    const childInputs = records.get(item.runId).iterationInputs;
+    assert.deepEqual(childInputs.references.items.map((image) => image.url), expected);
+    assert.deepEqual(childInputs.images.items, [item.source]);
+    assert.equal(childInputs.index.value, String(item.index + 1));
+    assert.equal(childInputs.text.value, "shared");
+  }
+}
+const noReferences = fixture("no-references", "all", 1);
+delete noReferences.inputs.references;
+await advance(noReferences);
+assert.deepEqual(records.get(noReferences.metadata.items[0].runId).iterationInputs.references.items, []);
 console.log("Canvas iteration runtime: ordering, identity, concurrency, retry, partial delivery and frozen output checks passed.");

@@ -4,10 +4,11 @@ Last updated: 2026-10-21
 
 ## One-Line Status
 
-Text reasoning effort is configurable for all OpenAI-compatible text calls. Provider acceptance and existing live/operator gates remain.
+Iteration shared references have verified numbered inputs. Local activation awaits a clean worktree; existing live/operator gates remain.
 
 ## Current Focus
 
+- Iteration references: numbered ports, legacy-first ordering, persistence/runtime and 1440/390 three-theme checks pass. Existing 17 lint errors block full baseline; remaining checks pass separately. Commit/LAN activation authorized; unrelated untracked Gemini task blocks clean-tree activation. Evidence: `.trellis/tasks/archive/2026-10/10-21-iteration-reference-inputs/verification.md`.
 - Text reasoning: admin config offers `OPENAI_TEXT_REASONING_EFFORT` (`default` + seven efforts) across all OpenAI-compatible text calls. Default omits the field. Config/request/built-sync/browser, source lint, types, build, HTTP and SQLite pass. Evidence: `.trellis/tasks/10-21-text-reasoning-effort/verification.md`.
 - Local API tools installed: `.trellis/tasks/archive/2026-10/10-21-local-api-panels/`.
 - Canvas placement: pointer/viewport conversion and first-node view stability verified; evidence: `.trellis/tasks/archive/2026-10/10-20-canvas-node-placement/`.

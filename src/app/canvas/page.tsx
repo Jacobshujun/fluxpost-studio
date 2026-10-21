@@ -2053,6 +2053,8 @@ const CanvasFlowNode = memo(function CanvasFlowNode({ data, selected }: NodeProp
     /> : null}
     {node.type === "utility.image-iterate" ? <div className="canvas-iteration-node nodrag nopan nowheel">
       <button type="button" onClick={(event) => { event.stopPropagation(); interaction?.onIterationEdit?.(node.id); }}><Maximize2 />展开逐图区域</button>
+      <small>共享参考图按接口编号传入，同一接口内按原图序排列。</small>
+      {inputPorts.some((port) => port.id === "references") ? <small>旧版参考图优先传入；需明确顺序时，请重接到编号接口。</small> : null}
       <small>{node.iteration?.graph.nodes.length || 0} 个内层节点 · {nodeRun?.internalMetadata?.iteration ? `${nodeRun.internalMetadata.iteration.items.filter((item) => item.status === "completed").length}/${nodeRun.internalMetadata.iteration.items.length} 项成功` : "等待图片输入"}</small>
       {nodeRun?.internalMetadata?.iteration?.downstreamStale ? <strong>结果已修复，下游待刷新</strong> : null}
     </div> : null}
