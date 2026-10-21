@@ -1,0 +1,11 @@
+# Gemini live provider debugging
+
+- 2026-10-21: user authorized committing these task records with the iteration-reference local/LAN update; Gemini bug fixes are deferred. This does not resume live provider testing. Reviewed all five task files: documentation/manifests only, no credential values or runtime configuration files.
+- User explicitly authorized credential-based minimal text/image acceptance on 2026-10-19, then corrected the host to lingsuan.org and specified gemini-3.8-flash. No credential is recorded here.
+- HTTPS model-list GET succeeds with Node fetch, normal certificate validation and proxy disabled. The supplied key authenticates native x-goog-api-key and compatible Bearer model-list endpoints. No inference success is implied by a model appearing in a catalog.
+- Actual src/lib/canvas/executors.ts -> src/lib/gemini.ts call with the requested model returns HTTP 404. Native direct diagnostic identifies an unavailable account/model in the token's group. The native catalog omits that model; no application defect has been established. Compatible POST also returns HTTP 404.
+- canvas_gemini_check.mjs, advanced_config_check.mjs and advanced_config_build_check.mjs against active .next-local-b pass.
+- Documented full baseline passes all domain checks; existing 17 require-import errors in ignored data/feishu-copy-import scripts still stop lint (17 existing warnings). Context budgets pass: default 34.52KB, typical 69.54KB.
+- No provider configuration has been saved while the requested model is unavailable. Temporary synthetic-media path is cleaned; no operator workflow/queue rows were changed. Model selection and successful text/image acceptance remain pending.
+- User explicitly paused testing after the model-choice question. No further live requests/configuration writes are authorized while paused. Existing LAN candidate is unchanged; task remains unfinished for explicit resumption.
+- On the subsequent model-update instruction, a read-only inspection of the existing configured local environment confirms GEMINI_MODEL=gemini-3.8-flash-high, a lingsuan.org base and key present (value not printed). No write was needed. No provider call, restart or availability claim was made; testing stays paused.
