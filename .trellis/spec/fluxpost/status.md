@@ -1,15 +1,15 @@
 # FluxPost Current Status
 
-Last updated: 2026-10-21
+Last updated: 2026-10-22
 
 ## One-Line Status
 
-Iteration shared references have verified numbered inputs. Commit and local/LAN activation are authorized; existing live/operator gates remain.
+October local commits are published to GitHub `main`; live/operator gates remain.
 
 ## Current Focus
 
-- Iteration references: numbered ports, legacy-first ordering, persistence/runtime and 1440/390 three-theme checks pass. Existing 17 lint errors block full baseline; remaining checks pass separately. Code committed as 6d43165; Gemini records also authorized for commit to permit clean local/LAN activation. Runtime identity: `/api/version`. Evidence: `.trellis/tasks/archive/2026-10/10-21-iteration-reference-inputs/verification.md`.
-- Text reasoning: admin config offers `OPENAI_TEXT_REASONING_EFFORT` (`default` + seven efforts) across all OpenAI-compatible text calls. Default omits the field. Config/request/built-sync/browser, source lint, types, build, HTTP and SQLite pass. Evidence: `.trellis/tasks/10-21-text-reasoning-effort/verification.md`.
+- GitHub sync: 86 local commits from `1298237` are published as `3cd919a4df696ff83aa789223ae9ea04f934891b` on `main` and `local`. TypeScript, production build, tracked-source ESLint (0 errors / 16 existing warnings), and all deterministic baseline domains passed; full baseline still stops at 17 pre-existing ignored-data lint errors. Release notes: `docs/releases/2026-10-22-github-sync.md`.
+- Iteration references and `OPENAI_TEXT_REASONING_EFFORT` are verified; evidence: `.trellis/tasks/archive/2026-10/10-21-iteration-reference-inputs/verification.md` and `.trellis/tasks/10-21-text-reasoning-effort/verification.md`.
 - Local API tools installed: `.trellis/tasks/archive/2026-10/10-21-local-api-panels/`.
 - Canvas placement: pointer/viewport conversion and first-node view stability verified; evidence: `.trellis/tasks/archive/2026-10/10-20-canvas-node-placement/`.
 - Gemini: native text/images, independent config/proxy, cancellation and offline/browser/build/HTTP/SQLite pass; live acceptance paused. Evidence: `.trellis/tasks/archive/2026-10/10-19-canvas-gemini-node/verification.md`.
