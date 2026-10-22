@@ -2,7 +2,7 @@
 
 ## 2026-10-22
 
-本次同步 `1298237` 之后的 85 个本地提交，范围为 2026-09-15 至 2026-10-22；包含 83 个功能/修复/任务提交和 2 个同步说明提交。共变更 424 个文件，新增 14,616 行、删除 1,378 行。完整发布正文见 [`docs/releases/2026-10-22-github-sync.md`](docs/releases/2026-10-22-github-sync.md)。
+本次同步 `1298237` 之后的 86 个本地提交，范围为 2026-09-15 至 2026-10-22；包含 82 个功能/修复/任务提交和 4 个同步说明提交。共变更 424 个文件，新增 14,616 行、删除 1,378 行。完整发布正文见 [`docs/releases/2026-10-22-github-sync.md`](docs/releases/2026-10-22-github-sync.md)。
 
 ### 主要更新
 
@@ -17,7 +17,7 @@
 - 完整离线基线跑完全部确定性领域检查，随后停在既有 17 个 lint 错误；错误来自被忽略的 `data/feishu-copy-import/` 本地脚本。本次未修改、提交或放宽相关规则。
 - 本次只同步 GitHub 代码和文档，不部署生产、不重启 3001，也不执行真实付费模型、飞书、TikHub 或 TOS 请求。真实服务商与人工验收状态仍以 `.trellis/spec/fluxpost/feature_list.json` 为准。
 
-[查看本次代码差异](https://github.com/Jacobshujun/fluxpost-studio/compare/12982377aaa8a5dcbb2c31d711c24672af7e7e43...f3f1d8a1e09e6eecdb29fad4f7edc83ecad6ee22)
+[查看本次代码差异](https://github.com/Jacobshujun/fluxpost-studio/compare/12982377aaa8a5dcbb2c31d711c24672af7e7e43...948f3d291e2491cdd016acf3fe73797ffe94bbc7)
 
 ## 2026-09-15
 

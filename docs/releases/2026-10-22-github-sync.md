@@ -2,7 +2,7 @@
 
 ## 2026-10-22 GitHub 同步
 
-本次同步 `1298237` 之后的 85 个本地提交，覆盖 2026-09-15 至 2026-10-22 的功能、修复、验证与任务记录。范围包含 83 个 `local` 分支提交和 2 个同步说明提交；共变更 424 个文件，新增 14,616 行、删除 1,378 行。
+本次同步 `1298237` 之后的 86 个本地提交，覆盖 2026-09-15 至 2026-10-22 的功能、修复、验证与任务记录。范围包含 82 个 `local` 分支提交和 4 个同步说明提交；共变更 424 个文件，新增 14,616 行、删除 1,378 行。
 
 ### Canvas 工作流与媒体处理
 
@@ -45,4 +45,4 @@
 - Canvas、图库、图片生成、配置、采集和本地启动相关专项检查均已通过；浏览器检查使用隔离端口和拦截 API，不写真实素材、不调用付费模型。
 - 本次只同步 GitHub 代码和文档，不部署生产、不重启 3001、不执行真实 Gemini/OpenAI/TikHub/飞书/TOS 请求。真实服务商与人工验收状态仍以 `.trellis/spec/fluxpost/feature_list.json` 为准。
 
-[查看本次代码差异](https://github.com/Jacobshujun/fluxpost-studio/compare/12982377aaa8a5dcbb2c31d711c24672af7e7e43...f3f1d8a1e09e6eecdb29fad4f7edc83ecad6ee22)
+[查看本次代码差异](https://github.com/Jacobshujun/fluxpost-studio/compare/12982377aaa8a5dcbb2c31d711c24672af7e7e43...948f3d291e2491cdd016acf3fe73797ffe94bbc7)
