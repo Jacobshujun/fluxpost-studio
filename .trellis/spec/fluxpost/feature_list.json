@@ -9,6 +9,17 @@
   ],
   "features": [
     {
+      "id": "generated-image-library",
+      "title": "Generated originals in the unified library and Canvas",
+      "status": "ready_for_review",
+      "definition_of_done": [
+        "Provenance-only resumable history and new-output enrollment preserve ownership, exclusions and originals",
+        "Shared filters, manual vehicles, smart folders and Canvas snapshots pass isolated database/browser checks"
+      ],
+      "evidence": ["2026-10-26 SQLite/PostgreSQL, producer/provenance and three-theme desktop/mobile checks pass; generated-image-library task."],
+      "notes": "Commit/activation pending. Existing 17-error runtime lint gate; no real history scan or paid/storage writes."
+    },
+    {
       "id": "canvas-qwen-image",
       "title": "Canvas Qwen image node",
       "status": "ready_for_review",

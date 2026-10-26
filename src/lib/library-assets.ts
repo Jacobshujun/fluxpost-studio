@@ -1,5 +1,6 @@
 import { createHash, randomUUID } from "node:crypto";
 import path from "node:path";
+import { excludeGeneratedImage, listGeneratedSources } from "./generated-image-store";
 import {
   deleteLibraryAssetFromDb,
   deleteLibraryCollectionFromDb,
@@ -61,12 +62,15 @@ const pageLimitMax = 100;
 const validVisibility = new Set<LibraryVisibility>(["private", "team"]);
 const validTaggingStatuses = new Set<LibraryTaggingStatus>(["idle", "queued", "running", "completed", "failed"]);
 const validSmartFolderFields = new Set<LibrarySmartFolderCondition["field"]>([
+  "generated", "generationEntry", "filename", "generatedAt", "unlabelledVehicle", "vehicleModel",
   "tag", "collection", "text", "owner", "visibility", "imageType", "width", "height", "byteSize", "createdAt", "taggingStatus", "favorite",
 ]);
 const validSmartFolderOperators = new Set<LibrarySmartFolderCondition["operator"]>([
   "contains", "not_contains", "equals", "one_of", "gte", "lte", "before", "after", "is",
 ]);
 const smartFolderOperators: Record<LibrarySmartFolderCondition["field"], Set<LibrarySmartFolderCondition["operator"]>> = {
+  generated: new Set(["is"]), generationEntry: new Set(["equals", "one_of"]), filename: new Set(["contains", "not_contains"]),
+  generatedAt: new Set(["before", "after"]), unlabelledVehicle: new Set(["is"]), vehicleModel: new Set(["equals", "one_of"]),
   tag: new Set(["contains", "not_contains"]), collection: new Set(["contains", "not_contains"]), text: new Set(["contains", "not_contains"]),
   owner: new Set(["equals", "one_of"]), visibility: new Set(["equals", "one_of"]), imageType: new Set(["equals", "one_of", "not_contains"]),
   width: new Set(["equals", "gte", "lte"]), height: new Set(["equals", "gte", "lte"]), byteSize: new Set(["equals", "gte", "lte"]),
@@ -113,17 +117,18 @@ export async function listLibraryAssets(account: WorkspaceAccessActor, filters: 
 }
 
 export async function listLibraryNavigation(account: WorkspaceAccessActor): Promise<LibraryNavigation> {
-  const [collections, smartFolders, all, uncategorized, favorites] = await Promise.all([
+  const [collections, smartFolders, all, uncategorized, favorites, generated] = await Promise.all([
     listLibraryCollectionsFromDb(),
     listLibrarySmartFoldersFromDb(),
     queryLibraryAssetsFromDb({ actorId: account.id, isAdmin: isWorkspaceAdmin(account), filters: { limit: 1 }, includeTotal: true }),
     queryLibraryAssetsFromDb({ actorId: account.id, isAdmin: isWorkspaceAdmin(account), filters: { limit: 1, uncategorized: true }, includeTotal: true }),
     queryLibraryAssetsFromDb({ actorId: account.id, isAdmin: isWorkspaceAdmin(account), filters: { limit: 1, favorite: true }, includeTotal: true }),
+    queryLibraryAssetsFromDb({ actorId: account.id, isAdmin: isWorkspaceAdmin(account), filters: { limit: 1, generated: true }, includeTotal: true }),
   ]);
   return {
     collections: collections.filter((item) => canReadOrganizer(account, item)).map((item) => ({ ...item, canEdit: canEditOrganizer(account, item) })),
     smartFolders: smartFolders.filter((item) => canReadOrganizer(account, item)).map((item) => ({ ...item, canEdit: canEditOrganizer(account, item) })),
-    counts: { all: all.total ?? 0, uncategorized: uncategorized.total ?? 0, favorites: favorites.total ?? 0 },
+    counts: { all: all.total ?? 0, uncategorized: uncategorized.total ?? 0, favorites: favorites.total ?? 0, generated: generated.total ?? 0 },
   };
 }
 
@@ -189,7 +194,8 @@ export async function renameLibraryTag(account: WorkspaceAccessActor, input: { f
 export async function getLibraryAsset(account: WorkspaceAccessActor, assetId: string) {
   const asset = await getLibraryAssetFromDb(assetId);
   if (!asset || !canReadAsset(account, asset)) throw new Error("Library asset not found.");
-  return libraryAssetView(account, { ...asset, favorite: await isLibraryAssetFavoriteInDb(account.id, assetId) });
+  return libraryAssetView(account, { ...asset, favorite: await isLibraryAssetFavoriteInDb(account.id, assetId),
+    ...(asset.generated ? { generatedSources: (await listGeneratedSources(asset.id)).map(({ entry, taskId, sourceId, sourceKind }) => ({ entry, taskId, sourceId, sourceKind })) } : {}) });
 }
 
 export async function createLibraryCollection(
@@ -426,6 +432,10 @@ export async function permanentlyDeleteLibrarySelection(account: WorkspaceAccess
 
 export async function permanentlyDeleteLibraryAsset(account: WorkspaceAccessActor, assetId: string) {
   const asset = await requireEditableAsset(account, assetId);
+  if (asset.generated) {
+    await excludeGeneratedImage(asset);
+    return { status: "deleted" as const, assetId };
+  }
   const pending = { ...asset, cleanupStatus: "pending" as const, cleanupError: undefined, updatedAt: new Date().toISOString() };
   await saveLibraryAssetToDb(pending);
   try {
@@ -497,6 +507,12 @@ export function parseLibraryAssetFilters(url: URL): LibraryAssetFilters {
   const addedBefore = parseLibraryDateFilter(url.searchParams.get("addedBefore"), "addedBefore");
   if (addedFrom && addedBefore && addedFrom >= addedBefore) throw new Error("Library added-time range must start before it ends.");
   return normalizeLibraryAssetFilters({
+    generated: url.searchParams.get("generated") === "true",
+    generationEntry: url.searchParams.get("generationEntry") || undefined,
+    filename: url.searchParams.get("filename") || undefined,
+    generatedFrom: parseLibraryDateFilter(url.searchParams.get("generatedFrom"), "generatedFrom"),
+    generatedBefore: parseLibraryDateFilter(url.searchParams.get("generatedBefore"), "generatedBefore"),
+    unlabelledVehicle: url.searchParams.get("unlabelledVehicle") === "true",
     cursor: url.searchParams.get("cursor") || undefined,
     limit: Number(url.searchParams.get("limit") || 60),
     includeTotal: url.searchParams.get("count") !== "0" && url.searchParams.get("includeTotal") !== "false",
@@ -624,13 +640,21 @@ function normalizeSmartFolderConditions(value: unknown): LibrarySmartFolderCondi
     if (!input.operator || !validSmartFolderOperators.has(input.operator)) throw new Error(`Smart folder condition ${index + 1} has an invalid operator.`);
     if (!smartFolderOperators[input.field].has(input.operator)) throw new Error(`Smart folder condition ${index + 1} does not support that operator.`);
     if (input.value === undefined || input.value === null || input.value === "") throw new Error(`Smart folder condition ${index + 1} requires a value.`);
+    if (["generated", "unlabelledVehicle"].includes(input.field) && typeof input.value !== "boolean") throw new Error("Generated smart-folder flags require a boolean.");
+    if (input.field === "generatedAt" && (typeof input.value !== "string" || !Number.isFinite(Date.parse(input.value)))) throw new Error("Generation date condition requires a valid timestamp.");
+    if (input.field === "generationEntry" && (Array.isArray(input.value) ? input.value : [input.value]).some((entry) => typeof entry !== "string" || !["canvas", "batch", "simple", "images", "unknown"].includes(entry))) throw new Error("Invalid generation entry condition.");
     return { id: typeof input.id === "string" && input.id.trim() ? input.id.trim().slice(0, 80) : `condition-${index + 1}`, field: input.field, operator: input.operator, value: input.value, includeDescendants: input.includeDescendants !== false };
   });
 }
 
 function normalizeLibraryAssetFilters(filters: LibraryAssetFilters): LibraryAssetFilters {
+  if (filters.generationEntry && !["canvas", "batch", "simple", "images", "unknown"].includes(filters.generationEntry)) throw new Error("Invalid generation entry.");
+  const generatedFrom = parseLibraryDateFilter(filters.generatedFrom || null, "generatedFrom");
+  const generatedBefore = parseLibraryDateFilter(filters.generatedBefore || null, "generatedBefore");
+  if (generatedFrom && generatedBefore && generatedFrom >= generatedBefore) throw new Error("Invalid generation date range.");
   return {
     ...filters,
+    filename: filters.filename?.trim().slice(0, 200) || undefined, generatedFrom, generatedBefore,
     limit: Math.max(1, Math.min(pageLimitMax, Math.floor(filters.limit || 60))),
     sort: normalizeLibraryListSort(filters.sort),
     search: filters.search?.trim().slice(0, 200) || undefined,
@@ -738,7 +762,7 @@ async function requireEditableAsset(account: WorkspaceAccessActor, assetId: stri
   return asset;
 }
 
-function canReadAsset(account: WorkspaceAccessActor, asset: LibraryAsset) { return isWorkspaceAdmin(account) || asset.ownerUserId === account.id || asset.visibility === "team"; }
+function canReadAsset(account: WorkspaceAccessActor, asset: LibraryAsset) { return isWorkspaceAdmin(account) || asset.ownerUserId === account.id || Boolean(asset.ownerUserId && asset.visibility === "team"); }
 function canEditAsset(account: WorkspaceAccessActor, asset: LibraryAsset) { return isWorkspaceAdmin(account) || asset.ownerUserId === account.id; }
 function canReadOrganizer(account: WorkspaceAccessActor, item: Pick<LibraryCollection | LibrarySmartFolder, "ownerUserId" | "visibility">) { return isWorkspaceAdmin(account) || item.ownerUserId === account.id || item.visibility === "team"; }
 function canEditOrganizer(account: WorkspaceAccessActor, item: Pick<LibraryCollection | LibrarySmartFolder, "ownerUserId">) { return isWorkspaceAdmin(account) || item.ownerUserId === account.id; }
@@ -750,7 +774,7 @@ function normalizeNote(value: string) { return value.trim().slice(0, 2000); }
 function normalizeRelativePath(value: string) { return value.replace(/\\/g, "/").split("/").map((segment) => segment.trim()).filter((segment) => segment && segment !== "." && segment !== "..").join("/").slice(0, 500) || "image"; }
 function safeObjectSegment(value: string) { return createHash("sha256").update(value).digest("hex").slice(0, 24); }
 function optionalNumber(value: string | null) { if (value === null || !value.trim()) return undefined; const number = Number(value); if (!Number.isFinite(number) || number < 0) throw new Error("Invalid library numeric filter."); return number; }
-function parseLibraryDateFilter(value: string | null, name: "addedFrom" | "addedBefore") { if (value === null) return undefined; const timestamp = Date.parse(value); if (!value.trim() || !Number.isFinite(timestamp)) throw new Error(`Invalid library ${name} timestamp.`); return new Date(timestamp).toISOString(); }
+function parseLibraryDateFilter(value: string | null, name: "addedFrom" | "addedBefore" | "generatedFrom" | "generatedBefore") { if (value === null) return undefined; const timestamp = Date.parse(value); if (!value.trim() || !Number.isFinite(timestamp)) throw new Error(`Invalid library ${name} timestamp.`); return new Date(timestamp).toISOString(); }
 function errorMessage(error: unknown) { return error instanceof Error ? error.message : String(error); }
 function isUniqueConstraintError(error: unknown) { const message = errorMessage(error); const code = error && typeof error === "object" ? String((error as { code?: unknown }).code || "") : ""; return code === "23505" || code === "SQLITE_CONSTRAINT_UNIQUE" || /unique constraint|UNIQUE constraint failed/i.test(message); }
 function normalizeIdArray(values: unknown[], label: string) { const result: string[] = []; const seen = new Set<string>(); for (const value of values) { if (typeof value !== "string" || !value.trim()) throw new Error(`Each library ${label} id must be a non-empty string.`); const id = value.trim(); if (!seen.has(id)) { seen.add(id); result.push(id); } } return result; }

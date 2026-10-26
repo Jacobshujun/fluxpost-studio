@@ -141,6 +141,7 @@ const transpiled = ts.transpileModule(executorSource, {
 const cjsModule = { exports: {} };
 const noopAsync = async () => undefined;
 const stubs = {
+  "../generated-image-capture": { withGeneratedImageContext: (_context, operation) => operation() },
   "../image-model-options": modelModule.exports,
   "../image-providers/contracts": contractModule.exports,
   "../gpt-image-dimensions": { pixelSizeForRatio: () => "1024x1024" },

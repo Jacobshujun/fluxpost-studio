@@ -41,4 +41,6 @@ export async function register() {
   ensureFeishuPublishQueueWorker();
   const { kickLibraryColorWorker } = await import("@/lib/library-colors");
   kickLibraryColorWorker();
+  const { kickGeneratedImageWorker } = await import("@/lib/generated-image-backfill");
+  kickGeneratedImageWorker();
 }

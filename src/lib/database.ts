@@ -1,4 +1,5 @@
 import { libraryColorSchemaSql } from "./library-color-schema";
+import { generatedImageSchemaSql } from "./generated-image-schema";
 import { hexToLab, libraryColorVersion, libraryColorMinCoverage, libraryColorDistance } from "./library-color";
 import { existsSync, mkdirSync, readFileSync } from "node:fs";
 import { createHash } from "node:crypto";
@@ -357,8 +358,8 @@ export async function queryLibraryTagSuggestionsFromDb(input: { actorId: string;
   await ensureDatabaseReady();
   const postgres = getDatabaseBackend() === "postgres";
   const params = new LibrarySqlParams(postgres);
-  const where = ["a.deleted_at IS NULL", "label.dimension='unified'"];
-  if (!input.isAdmin) where.push(`(a.owner_user_id=${params.add(input.actorId)} OR a.visibility='team')`);
+  const where = ["a.deleted_at IS NULL", "label.dimension='unified'", "NOT EXISTS (SELECT 1 FROM generated_image_results removed WHERE removed.id=a.id AND removed.status='excluded')"];
+  if (!input.isAdmin) where.push(`(a.owner_user_id=${params.add(input.actorId)} OR (a.visibility='team' AND a.owner_user_id<>''))`);
   if (input.query?.trim()) where.push(`LOWER(label.value) LIKE ${params.add(`%${input.query.trim().toLocaleLowerCase()}%`)}`);
   const limit = params.add(Math.max(1, Math.min(50, Math.floor(input.limit || 20))));
   const sql = `SELECT MIN(label.value) label, COUNT(DISTINCT label.asset_id) count
@@ -382,9 +383,16 @@ class LibrarySqlParams {
 
 function compileLibraryAssetQuery(input: LibraryDatabaseQuery, postgres: boolean) {
   const params = new LibrarySqlParams(postgres);
-  const where = ["a.deleted_at IS NULL"];
-  if (!input.isAdmin) where.push(`(a.owner_user_id=${params.add(input.actorId)} OR a.visibility='team')`);
+  const where = ["a.deleted_at IS NULL", "NOT EXISTS (SELECT 1 FROM generated_image_results removed WHERE removed.id=a.id AND removed.status='excluded')"];
+  if (!input.isAdmin) where.push(`(a.owner_user_id=${params.add(input.actorId)} OR (a.visibility='team' AND a.owner_user_id<>''))`);
   const filters = input.filters;
+  const generated = "EXISTS (SELECT 1 FROM generated_image_results gr WHERE gr.id=a.id)";
+  if (filters.generated) where.push(generated);
+  if (filters.generationEntry) where.push(`EXISTS (SELECT 1 FROM generated_image_sources gs WHERE gs.asset_id=a.id AND gs.entry=${params.add(filters.generationEntry)})`);
+  if (filters.filename) where.push(`LOWER(a.original_name) LIKE ${params.add(`%${filters.filename.toLocaleLowerCase().replace(/[\\%_]/g, "\\$&")}%`)} ESCAPE '\\'`);
+  if (filters.generatedFrom) where.push(`(${generated} AND a.created_at>=${params.add(filters.generatedFrom)})`);
+  if (filters.generatedBefore) where.push(`(${generated} AND a.created_at<${params.add(filters.generatedBefore)})`);
+  if (filters.unlabelledVehicle) where.push("NOT EXISTS (SELECT 1 FROM library_asset_labels uv WHERE uv.asset_id=a.id AND uv.dimension='vehicleModels')");
   if (filters.search?.trim()) {
     const pattern = `%${filters.search.trim().toLocaleLowerCase()}%`;
     const p1 = params.add(pattern); const p2 = params.add(pattern); const p3 = params.add(pattern); const p4 = params.add(pattern);
@@ -460,6 +468,22 @@ function addNumberRange(where: string[], params: LibrarySqlParams, column: strin
 function smartFolderPredicate(condition: LibrarySmartFolder["conditions"][number], params: LibrarySqlParams, actorId: string) {
   const values = Array.isArray(condition.value) ? condition.value : [condition.value];
   const first = values[0];
+  if (condition.field === "generated") {
+    const exists = "EXISTS (SELECT 1 FROM generated_image_results gr WHERE gr.id=a.id)";
+    return first === true ? exists : `NOT ${exists}`;
+  }
+  if (condition.field === "unlabelledVehicle") {
+    const exists = "EXISTS (SELECT 1 FROM library_asset_labels uv WHERE uv.asset_id=a.id AND uv.dimension='vehicleModels')";
+    return first === true ? `NOT ${exists}` : exists;
+  }
+  if (condition.field === "generationEntry") return `EXISTS (SELECT 1 FROM generated_image_sources gs WHERE gs.asset_id=a.id AND gs.entry IN (${values.map((value) => params.add(value)).join(",")}))`;
+  if (condition.field === "vehicleModel") return `EXISTS (SELECT 1 FROM library_asset_labels vm WHERE vm.asset_id=a.id AND vm.dimension='vehicleModels' AND LOWER(vm.value) IN (${values.map((value) => params.add(String(value).toLocaleLowerCase())).join(",")}))`;
+  if (condition.field === "filename") {
+    const pattern = `%${String(first).toLocaleLowerCase().replace(/[\\%_]/g, "\\$&")}%`;
+    const match = `LOWER(a.original_name) LIKE ${params.add(pattern)} ESCAPE '\\'`;
+    return condition.operator === "not_contains" ? `NOT (${match})` : match;
+  }
+  if (condition.field === "generatedAt") return `(EXISTS (SELECT 1 FROM generated_image_results gr WHERE gr.id=a.id) AND a.created_at${condition.operator === "before" ? "<" : ">="}${params.add(first)})`;
   if (condition.field === "collection" && typeof first === "string") {
     const exists = collectionPredicate(params, first, condition.includeDescendants !== false);
     return condition.operator === "not_contains" ? `NOT (${exists})` : exists;
@@ -524,7 +548,7 @@ function addLibraryCursorPredicate(where: string[], params: LibrarySqlParams, so
 
 export async function getLibraryAssetFromDb(assetId: string, includeDeleted = false) {
   await ensureDatabaseReady();
-  const deletedClause = includeDeleted ? "" : " AND deleted_at IS NULL";
+  const deletedClause = includeDeleted ? "" : " AND deleted_at IS NULL AND NOT EXISTS (SELECT 1 FROM generated_image_results removed WHERE removed.id=a.id AND removed.status='excluded')";
   if (getDatabaseBackend() === "postgres") {
     const result = await getPostgresPool().query<JsonRow & { collection_ids: string[] }>(
       `SELECT a.data_json, COALESCE(array_agg(ca.collection_id) FILTER (WHERE ca.collection_id IS NOT NULL), ARRAY[]::text[]) collection_ids
@@ -3738,6 +3762,7 @@ function getSqliteDatabase() {
   prepareUnifiedLibrarySqliteColumns(sqliteDatabase);
   createSqliteSchema(sqliteDatabase);
   sqliteDatabase.exec(libraryColorSchemaSql);
+  sqliteDatabase.exec(generatedImageSchemaSql);
   migrateUnifiedLibrarySqlite(sqliteDatabase);
   retireLegacyMaterialLibrarySqlite(sqliteDatabase);
   migrateLegacyJsonToSqlite(sqliteDatabase);
@@ -3770,6 +3795,7 @@ async function initializePostgres() {
   await prepareUnifiedLibraryPostgresColumns();
   await getPostgresPool().query(postgresSchemaSql);
   await getPostgresPool().query(libraryColorSchemaSql);
+  await getPostgresPool().query(generatedImageSchemaSql);
   await migrateUnifiedLibraryPostgres();
   await retireLegacyMaterialLibraryPostgres();
   await migrateLegacyJsonToPostgres();

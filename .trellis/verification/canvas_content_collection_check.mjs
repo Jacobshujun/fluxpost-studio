@@ -81,6 +81,7 @@ try {
   const executorSource = read("src/lib/canvas/executors.ts");
   const imports = [...executorSource.matchAll(/from "([^"]+)"/g)].map((match) => match[1]);
   const modules = Object.fromEntries(imports.filter((name) => !name.startsWith("node:")).map((name) => [name, {}]));
+  modules["../generated-image-capture"] = { withGeneratedImageContext: (_context, operation) => operation() };
   const visionCalls = [];
   const imageCalls = [];
   let failedImage;

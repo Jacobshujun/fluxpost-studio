@@ -3,6 +3,7 @@ import { extractLibraryPalette } from "./library-color-extraction";
 import { libraryColorVersion } from "./library-color";
 import { claimLibraryColorItem, completeLibraryColorItem, nextLibraryColorLease } from "./library-color-store";
 import { downloadThumbnailSource } from "./library-thumbnails";
+import { isGeneratedLocalUrl, readGeneratedLocalImage } from "./generated-image-media";
 import { isManagedRuntimeMediaUrl } from "./runtime-media-storage";
 import type { LibraryPalette } from "./types";
 
@@ -38,8 +39,10 @@ async function drain() {
         if (!owner || owner.status !== "active" || !asset || (owner.role !== "admin" && asset.ownerUserId !== owner.id)) throw new Error("图片已删除或不再具有管理权限。");
         authorized = true;
         if (asset.sha256 !== claim.sha256) throw new Error("图片内容已变化，请重新分析。");
-        if (!isManagedRuntimeMediaUrl(asset.publicUrl)) throw new Error("图片来源不是受管图库素材。");
-        const bytes = await downloadThumbnailSource(asset.publicUrl, fetch);
+        if (!(asset.generated && isGeneratedLocalUrl(asset.publicUrl)) && !isManagedRuntimeMediaUrl(asset.publicUrl)) throw new Error("图片来源不是受管图库素材。");
+        const bytes = asset.generated && isGeneratedLocalUrl(asset.publicUrl)
+          ? await readGeneratedLocalImage(asset.publicUrl)
+          : await downloadThumbnailSource(asset.publicUrl, fetch);
         palette = await extractLibraryPalette(bytes, claim.sha256);
       } catch (error) { palette = failedLibraryPalette(claim.sha256, error); }
       await completeLibraryColorItem(claim, palette, authorized);

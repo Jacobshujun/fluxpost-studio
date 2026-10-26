@@ -62,7 +62,7 @@ try {
 
   await assertRejects(
     () => getLibraryThumbnail({ publicUrl: "https://foreign.test/image.jpg", sha256: "b".repeat(64) }, { cacheDirectory, isManagedSource: () => false }),
-    /not managed TOS media/,
+    /not managed application media/,
     "Unmanaged sources must be rejected before fetch.",
   );
   await assertRejects(

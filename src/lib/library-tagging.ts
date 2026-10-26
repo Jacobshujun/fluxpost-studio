@@ -84,6 +84,8 @@ async function processJob(job: LibraryTaggingJob) {
       await finishJob(job, "failed", "Library asset no longer exists.");
       return;
     }
+    // Generated vehicle metadata is source/manual-only, even during explicit AI tagging.
+    if (current.generated) aiTags.vehicleModels = current.aiTags.vehicleModels;
     await saveLibraryAssetToDb({
       ...current,
       aiTags,

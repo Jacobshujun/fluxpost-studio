@@ -209,6 +209,7 @@ try {
     "./types": require(path.join(temp, "types.js")),
   });
   const executors = loadTypeScriptModule(read("src/lib/canvas/executors.ts"), "executors.ts", {
+    "../generated-image-capture": { withGeneratedImageContext: (_context, operation) => operation() },
     "../concurrency": { mapWithConcurrency: async (items, _concurrency, mapper) => Promise.all(items.map(mapper)) },
     "../feishu-publish-queue": {},
     "../feishu-publish-mode": { normalizeFeishuPublishMode: (value) => value || "full" },

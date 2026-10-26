@@ -51,6 +51,7 @@ function loadTsModule(relativePath, requireMap = {}) {
       module: cjsModule,
       exports: cjsModule.exports,
       require: (value) => {
+        if (value === "./generated-image-capture") return { captureGeneratedImage: async (url) => url };
         if (value in requireMap) return requireMap[value];
         throw new Error(`Unexpected require: ${value}`);
       },

@@ -1,3 +1,4 @@
+import { captureGeneratedImage } from "./generated-image-capture";
 import { randomUUID } from "node:crypto";
 import { mkdir, readFile, stat, writeFile } from "node:fs/promises";
 import path from "node:path";
@@ -104,7 +105,7 @@ export async function generateQwenImages(input: {
         signal.throwIfAborted();
         await mkdir(path.dirname(filePath), { recursive: true });
         await writeFile(filePath, bytes, { flag: "wx", signal });
-        const storedUrl = await persistRuntimeMedia({ filePath, publicPath, contentType: "image/png" });
+        const storedUrl = await captureGeneratedImage(await persistRuntimeMedia({ filePath, publicPath, contentType: "image/png" }));
         signal.throwIfAborted();
         results.push({ url: storedUrl, width: metadata.width, height: metadata.height, mimeType: "image/png" });
       }

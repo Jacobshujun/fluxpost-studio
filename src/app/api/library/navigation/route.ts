@@ -1,3 +1,4 @@
+import { startGeneratedBackfill } from "@/lib/generated-image-backfill";
 import { NextResponse } from "next/server";
 import { listLibraryNavigation } from "@/lib/library-assets";
 import { isWorkspaceSignInError, requireWorkspaceAccount } from "@/lib/workspace-accounts";
@@ -6,7 +7,9 @@ export const runtime = "nodejs";
 
 export async function GET(request: Request) {
   try {
-    return NextResponse.json(await listLibraryNavigation(await requireWorkspaceAccount(request)));
+    const actor = await requireWorkspaceAccount(request);
+    await startGeneratedBackfill(actor);
+    return NextResponse.json(await listLibraryNavigation(actor));
   } catch (error) {
     return respond(error);
   }

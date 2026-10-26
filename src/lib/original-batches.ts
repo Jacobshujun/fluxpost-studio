@@ -1,3 +1,4 @@
+import { withGeneratedImageContext } from "./generated-image-capture";
 import { randomUUID } from "node:crypto";
 import { appConfig, getConfigStatus, openaiImageRouteConfig } from "./config";
 import { concurrencyConfig } from "./concurrency";
@@ -265,7 +266,7 @@ export async function regenerateOriginalSeriesCard(
   card.prompt = prompt;
   card.status = "generating";
   card.error = undefined;
-  const result = await generateCanvasGptImages(
+  const result = await withGeneratedImageContext({ ownerUserId: post.ownerUserId, ownerDisplayName: post.ownerDisplayName, entry: "batch", taskId: post.sourceBatchId || post.id, sourceId: post.id, vehicleModels: post.feishuVehicle ? [post.feishuVehicle] : [] }, () => generateCanvasGptImages(
     prompt,
     1,
     card.index > 0 ? [cover.imageUrl!] : [],
@@ -281,7 +282,7 @@ export async function regenerateOriginalSeriesCard(
         await persistRegeneration("generating");
       },
     },
-  );
+  ));
   if (result.status === "pending" && result.providerTaskId) {
     card.providerTaskId = result.providerTaskId;
     card.providerTaskRoute = result.providerTaskRoute;
@@ -360,6 +361,12 @@ async function drainOriginalBatchQueue(workerId: string) {
 }
 
 async function executeOriginalBatchItem(queueItem: OriginalBatchQueueItem) {
+  const item = await requireItem(queueItem.itemId);
+  return withGeneratedImageContext({ ownerUserId: item.ownerUserId, ownerDisplayName: item.ownerDisplayName, entry: "batch", taskId: item.batchId, sourceId: item.id,
+    vehicleModels: item.input.vehicleKeyword ? [item.input.vehicleKeyword] : [] }, () => executeOriginalBatchItemInner(queueItem));
+}
+
+async function executeOriginalBatchItemInner(queueItem: OriginalBatchQueueItem) {
   let item = await requireItem(queueItem.itemId);
   const batch = await assertBatchBoundary(item.batchId);
   item = await saveItemStage(item, "planning");

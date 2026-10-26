@@ -34,6 +34,8 @@ async function main() {
   });
   await expectStatus("/api/content-pool", undefined, 401);
   await expectStatus("/api/library/colors/jobs", undefined, 401);
+  await expectStatus("/api/library/generated", undefined, 401);
+  await expectStatus("/api/library/generated", { method: "POST", headers: { "content-type": "application/json" }, body: '{"action":"retry"}' }, 401);
   await expectStatus("/api/library/colors/jobs/fixture", undefined, 401);
   await expectStatus("/api/library/colors/jobs", { method: "POST", headers: { "content-type": "application/json" }, body: '{"mode":"missing"}' }, 401);
   await expectStatus("/api/review/posts", undefined, 401);

@@ -786,6 +786,12 @@ async function runReusedNode(
     updatedAt: now,
     completedAt: now,
   });
+  try {
+    const { linkReusedCanvasImages } = await import("../generated-image-store");
+    await linkReusedCanvasImages(run, nodeRun);
+  } catch (error) {
+    console.error("Generated library reuse association failed; source receipt retained for history retry:", error);
+  }
   return { nodeId: node.id, nodeRun };
 }
 

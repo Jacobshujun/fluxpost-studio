@@ -1,3 +1,4 @@
+import { captureGeneratedImage } from "./generated-image-capture";
 import { randomUUID } from "node:crypto";
 import { execFile } from "node:child_process";
 import { mkdir, readFile, rm, writeFile } from "node:fs/promises";
@@ -485,11 +486,11 @@ async function saveComfyOutputImages(images: ComfyOutputImage[]) {
       await writeFile(tempInput, Buffer.from(await response.arrayBuffer()));
       await stripComfyOutputMetadataWithFfmpeg(tempInput, outputFile);
       urls.push(
-        await persistRuntimeMedia({
+        await captureGeneratedImage(await persistRuntimeMedia({
           filePath: outputFile,
           publicPath: `/generated/source-edits/${fileName}`,
           contentType: "image/png",
-        }),
+        })),
       );
     } catch (error) {
       await rm(outputFile, { force: true }).catch(() => undefined);
