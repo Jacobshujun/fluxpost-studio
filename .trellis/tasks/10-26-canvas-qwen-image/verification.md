@@ -30,7 +30,7 @@ Date: 2026-10-26. Scope: local implementation, not activation/deployment or live
 
 - Full `check.ps1` second run passes every preceding deterministic check, including Qwen, then stops at the pre-existing 17 lint errors in ignored `data/feishu-copy-import/**/*.cjs` scripts. Do not weaken the lint gate or edit user runtime scripts to conceal this.
 - Remaining baseline stages (types/build/built config/HTTP/SQLite) were run separately and pass. Baseline is not reported as green.
-- No real Qwen provider calls, paid acceptance, production writes, git commit/push or candidate activation. Actual provider quality, regional account permissions and dedicated multi-user PostgreSQL/real V2 executions remain operator gates.
+- No real Qwen provider calls, paid acceptance, production writes, push or candidate activation. Actual provider quality, regional account permissions and dedicated multi-user PostgreSQL/real V2 executions remain operator gates.
 - This worktree already contains OSS migration changes; preserve them. No sibling worktree, clean-guard bypass or port-3001 replacement.
 
 ## Follow-Up
