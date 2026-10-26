@@ -15,8 +15,8 @@
 - [x] Normal Canvas and batch selector changes, normalization and frozen snapshots.
 - [x] Isolated dual-backend regressions and three-theme desktop/mobile checks.
 - [x] Focused checks and full baseline; distinguish unchanged blockers.
-- [ ] Confirm commit plan; stage task-only hunks; commit verified changes.
-- [ ] Activate only if the primary worktree is clean; no remote deployment.
+- [x] Confirm commit plan; stage task-only hunks; commit verified changes (bbe4ff9).
+- [x] Check activation gate: skipped because OSS work keeps the tree dirty; no remote deployment.
 
 ## Existing verification commands
 

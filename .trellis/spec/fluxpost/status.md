@@ -4,16 +4,16 @@ Last updated: 2026-10-26
 
 ## One-Line Status
 
-Generated library verified in isolation; commit confirmation pending. OSS remains read-only; no activation or deployment.
+Generated library verified in isolation; committed as bbe4ff9. OSS remains read-only; no activation or deployment.
 
 ## Current Focus
 
-- Generated library: SQLite/PostgreSQL and three-theme desktop/mobile pass; see `.trellis/tasks/10-26-generated-image-library/verification.md`. Commit confirmation pending; OSS preserved.
+- Generated library: SQLite/PostgreSQL and three-theme desktop/mobile pass; see `.trellis/tasks/archive/2026-10/10-26-generated-image-library/verification.md`. Committed bbe4ff9; OSS preserved.
 - Qwen `0b775c7` activation pending; Gemini live testing paused. Previous verified work and evidence paths: `archive/status-2026-10-26-before-generated-library.md`.
 
 ## Next Entry
 
-Confirm generated-library commit plan, stage task-only hunks, then archive. OSS remains separate: `.trellis/tasks/10-23-tos-oss-migration/verification.md`; no copy/switch. Dirty worktree blocks 3001 activation.
+Generated-library task archived; operator review and clean-tree activation remain. OSS remains separate: `.trellis/tasks/10-23-tos-oss-migration/verification.md`; no copy/switch. Dirty worktree blocks 3001 activation.
 
 ## Risks And Unknowns
 

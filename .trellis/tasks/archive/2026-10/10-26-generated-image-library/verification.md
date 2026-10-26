@@ -2,8 +2,8 @@
 
 ## State
 
-Implementation and isolated acceptance completed. Commit awaits the required
-Trellis commit-plan confirmation; task stays in_progress. No candidate activation,
+Implementation and isolated acceptance completed. User confirmed the commit plan;
+feature committed as bbe4ff9 and task archived. No candidate activation,
 real-user history scan or remote deployment. Existing OSS changes are preserved.
 
 ## Delivered
@@ -71,4 +71,4 @@ real-user history scan or remote deployment. Existing OSS changes are preserved.
 Task-owned source, migration, tests and Trellis artifacts only. Shared-file hunks:
 image-generation.ts (capture only), media_cache_image_format_check.mjs (capture stub
 only), feature_list.json (generated-library entry only). Do not stage OSS hunks.
-Task .gitignore excludes verification logs. Commit confirmation then archive remains.
+Task .gitignore excludes verification logs. Task-only commit and archive completed; activation remains blocked by OSS work.

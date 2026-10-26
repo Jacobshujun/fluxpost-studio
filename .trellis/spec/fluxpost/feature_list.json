@@ -17,7 +17,7 @@
         "Shared filters, manual vehicles, smart folders and Canvas snapshots pass isolated database/browser checks"
       ],
       "evidence": ["2026-10-26 SQLite/PostgreSQL, producer/provenance and three-theme desktop/mobile checks pass; generated-image-library task."],
-      "notes": "Commit/activation pending. Existing 17-error runtime lint gate; no real history scan or paid/storage writes."
+      "notes": "Committed bbe4ff9; activation pending. Existing 17-error runtime lint gate; no real history scan or paid/storage writes."
     },
     {
       "id": "canvas-qwen-image",
