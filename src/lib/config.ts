@@ -7,6 +7,7 @@ import type { ConfigStatus } from "./types";
 import { getDatabaseRuntimeStatus } from "./database";
 import type { AdvancedConfigPatch, AdvancedConfigPatchValue, AdvancedConfigSnapshot } from "./types";
 import { normalizeTextReasoningEffort, textReasoningEffortValues } from "./text-reasoning";
+import { isObjectStorageConfigured, selectObjectStorageConfig } from "./object-storage-config";
 import {
   normalizeImageProviderProfile,
   resolveImageProviderProfile,
@@ -147,6 +148,15 @@ function readAppConfig() {
     120 * 1024 * 1024,
   ),
   tosEnabled: booleanOrDefault(process.env.TOS_ENABLED, false),
+  runtimeStorageProvider: process.env.RUNTIME_STORAGE_PROVIDER || "tos",
+  ossEnabled: booleanOrDefault(process.env.OSS_ENABLED, false),
+  ossAccessKeyId: process.env.OSS_ACCESS_KEY_ID || "",
+  ossAccessKeySecret: process.env.OSS_ACCESS_KEY_SECRET || "",
+  ossBucket: process.env.OSS_BUCKET || "",
+  ossEndpoint: process.env.OSS_ENDPOINT || "",
+  ossRegion: process.env.OSS_REGION || "oss-cn-guangzhou",
+  ossPublicBaseUrl: process.env.OSS_PUBLIC_BASE_URL || "",
+  ossObjectPrefix: process.env.OSS_OBJECT_PREFIX || "fluxpost/flux-lightmoment",
   tosAccessKeyId: process.env.TOS_ACCESS_KEY_ID || "",
   tosAccessKeySecret: process.env.TOS_ACCESS_KEY_SECRET || "",
   tosBucket: process.env.TOS_BUCKET || "",
@@ -218,15 +228,8 @@ export function getConfigStatus(): ConfigStatus {
     feishuCliBin: appConfig.feishuCliBin || undefined,
     feishuNotifyConfigured: Boolean(appConfig.feishuNotifyChatId || appConfig.feishuNotifyUserId),
     volcengineAsrConfigured: Boolean(appConfig.arkApiKey),
-    tosConfigured: Boolean(
-      appConfig.tosAccessKeyId &&
-        appConfig.tosAccessKeySecret &&
-        appConfig.tosBucket &&
-        appConfig.tosEndpoint &&
-        appConfig.tosRegion &&
-        appConfig.tosPublicBaseUrl,
-    ),
-    tosEnabled: appConfig.tosEnabled,
+    tosConfigured: isObjectStorageConfigured(appConfig),
+    tosEnabled: selectObjectStorageConfig(appConfig).enabled,
   };
 }
 
@@ -487,9 +490,20 @@ const advancedConfigGroups: ConfigDefinitionGroup[] = [
   },
   {
     id: "tos",
-    title: "火山对象存储 TOS",
+    title: "对象存储 TOS / OSS",
     description: "新增运行时图片、视频和视频帧的对象存储；默认关闭。",
     fields: [
+      configField("RUNTIME_STORAGE_PROVIDER", "存储服务", "切换前须完成复制、校验及历史引用迁移；生产切换另行确认。", "select", "tos", {
+        options: ["tos", "oss"], read: () => appConfig.runtimeStorageProvider,
+      }),
+      configField("OSS_ENABLED", "启用 OSS", "仅当存储服务选择 oss 时生效。", "boolean", "tos", { read: () => String(appConfig.ossEnabled) }),
+      configField("OSS_ACCESS_KEY_ID", "OSS Access Key", "不会回显的 OSS 凭据。", "secret", "tos", { configured: () => Boolean(appConfig.ossAccessKeyId) }),
+      configField("OSS_ACCESS_KEY_SECRET", "OSS Secret Key", "不会回显的 OSS 凭据。", "secret", "tos", { configured: () => Boolean(appConfig.ossAccessKeySecret) }),
+      configField("OSS_BUCKET", "OSS Bucket", "迁移目标 xpai-imc。", "text", "tos", { read: () => appConfig.ossBucket }),
+      configField("OSS_ENDPOINT", "OSS Endpoint", "HTTPS SDK endpoint，不使用自定义域名。", "text", "tos", { read: () => appConfig.ossEndpoint }),
+      configField("OSS_REGION", "OSS Region", "广州使用 oss-cn-guangzhou。", "text", "tos", { read: () => appConfig.ossRegion }),
+      configField("OSS_PUBLIC_BASE_URL", "OSS 公共域名", "必须验证证书、真实对象读取和预览。", "text", "tos", { read: () => appConfig.ossPublicBaseUrl }),
+      configField("OSS_OBJECT_PREFIX", "OSS 对象前缀", "必须与迁移清单中的源前缀一致。", "text", "tos", { read: () => appConfig.ossObjectPrefix }),
       configField("TOS_ENABLED", "启用 TOS", "true 时新增运行时媒体上传到 TOS。", "boolean", "tos", {
         read: () => String(appConfig.tosEnabled),
       }),

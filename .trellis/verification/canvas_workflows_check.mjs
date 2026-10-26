@@ -1509,7 +1509,7 @@ for (const removedZoomController of ["CanvasViewportControls", "canvasWheelZoomT
   assert.ok(!page.includes(removedZoomController), `custom eased zoom controller must stay removed: ${removedZoomController}`);
 }
 const uploadRoute = read("src/app/api/canvas/media/route.ts");
-requireText(uploadRoute, ["requireWorkspaceAccount", "request.formData()", "form.getAll(\"files\")", "maxCanvasUploadFiles", "maxCanvasUploadBytes", "saveRuntimeImageUpload", 'mode === "seedance-reference"', "appConfig.tosEnabled", "isTosRuntimeMediaConfigured", "public HTTP(S) URL"], "canvas media route");
+requireText(uploadRoute, ["requireWorkspaceAccount", "request.formData()", "form.getAll(\"files\")", "maxCanvasUploadFiles", "maxCanvasUploadBytes", "saveRuntimeImageUpload", 'mode === "seedance-reference"', "isRuntimeMediaStorageEnabled", "isTosRuntimeMediaConfigured", "public HTTP(S) URL"], "canvas media route");
 const runtimeUpload = read("src/lib/runtime-image-upload.ts");
 requireText(runtimeUpload, ["sniffImageFormat(buffer)", "format?.browserSupported", "persistRuntimeMedia", 'directory: "review-uploads" | "canvas-uploads"'], "runtime image upload");
 const styles = read("src/app/globals.css");

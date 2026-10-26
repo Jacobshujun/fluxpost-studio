@@ -1,7 +1,6 @@
 import { NextResponse } from "next/server";
 import { RuntimeImageUploadInputError, saveRuntimeImageUpload } from "@/lib/runtime-image-upload";
-import { appConfig } from "@/lib/config";
-import { isTosRuntimeMediaConfigured } from "@/lib/runtime-media-storage";
+import { isRuntimeMediaStorageEnabled, isTosRuntimeMediaConfigured } from "@/lib/runtime-media-storage";
 import { isWorkspaceSignInError, requireWorkspaceAccount } from "@/lib/workspace-accounts";
 
 export const runtime = "nodejs";
@@ -16,7 +15,7 @@ export async function POST(request: Request) {
     const form = await request.formData();
     const requestedMode = form.get("mode");
     const mode = requestedMode === "gpt-reference" || requestedMode === "seedance-reference" ? requestedMode : "canvas-image";
-    if (mode === "seedance-reference" && (!appConfig.tosEnabled || !isTosRuntimeMediaConfigured())) {
+    if (mode === "seedance-reference" && (!isRuntimeMediaStorageEnabled() || !isTosRuntimeMediaConfigured())) {
       throw new RuntimeImageUploadInputError("Seedance reference uploads require enabled and fully configured TOS storage.");
     }
     const files = form.getAll("files").filter(isUploadedFile);

@@ -46,7 +46,7 @@ try {
       materializations++; assert.ok(sources.has(url));
       return { filePath: sources.get(url), cleanup: async () => {} };
     } },
-    "../runtime-media-storage": { persistRuntimeMedia: async (input) => {
+    "../runtime-media-storage": { isRuntimeMediaStorageEnabled: () => appConfig.tosEnabled, persistRuntimeMedia: async (input) => {
       persists++; const bytes = readFileSync(input.filePath);
       const metadata = await sharp(bytes).metadata();
       assert.equal(input.contentType, `image/${metadata.format}`);

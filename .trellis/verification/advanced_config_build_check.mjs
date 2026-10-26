@@ -62,6 +62,10 @@ api.saveAdvancedConfigPatch({ values: {
   GEMINI_BASE_URL: "https://gemini.example/v1beta",
   GEMINI_PROXY_ENABLED: true,
   GEMINI_PROXY_URL: "http://127.0.0.1:10810",
+  RUNTIME_STORAGE_PROVIDER: "oss",
+  OSS_ENABLED: true,
+  OSS_BUCKET: "fixture-bucket",
+  OSS_ACCESS_KEY_SECRET: "fixture-oss-secret",
 } });
 assert.equal(worker.openaiImageUrl("images/generations"), "https://new.example/v1/images/generations");
 assert.equal(worker.openaiImageApiKey(), "fixture-new-key");
@@ -79,6 +83,10 @@ assert.equal(worker.appConfig.geminiModel, "fixture-gemini-model");
 assert.equal(worker.appConfig.geminiBaseUrl, "https://gemini.example/v1beta");
 assert.equal(worker.appConfig.geminiProxyEnabled, true);
 assert.equal(worker.appConfig.geminiProxyUrl, "http://127.0.0.1:10810");
+assert.equal(worker.appConfig.runtimeStorageProvider, "oss");
+assert.equal(worker.appConfig.ossEnabled, true);
+assert.equal(worker.appConfig.ossBucket, "fixture-bucket");
+assert.equal(worker.appConfig.ossAccessKeySecret, "fixture-oss-secret");
 const lateApi = await loadConfig(apiFactory);
 lateApi.saveAdvancedConfigPatch({ values: { OPENAI_IMAGE_BASE_URL: "https://latest.example/v1" } });
 assert.equal(worker.openaiImageUrl("images/generations"), "https://latest.example/v1/images/generations");
@@ -99,7 +107,7 @@ function evaluate(source) {
       if (dependency.includes('"node:fs"')) return fakeFs;
       if (dependency.includes('"node:path"')) return { default: path };
       if (dependency.includes('"getDatabaseRuntimeStatus"')) return { getDatabaseRuntimeStatus: () => ({}) };
-      if (dependency.includes('"normalizeGeminiModel"') || dependency.includes('"normalizeFeishuTableId"') || dependency.includes('"resolveImageProviderProfile"') || dependency.includes('"normalizeToApisRequestFormat"') || dependency.includes('"normalizeTextReasoningEffort"')) {
+      if (dependency.includes('"selectObjectStorageConfig"') || dependency.includes('"normalizeGeminiModel"') || dependency.includes('"normalizeFeishuTableId"') || dependency.includes('"resolveImageProviderProfile"') || dependency.includes('"normalizeToApisRequestFormat"') || dependency.includes('"normalizeTextReasoningEffort"')) {
         return evaluate(dependency).exports;
       }
       throw new Error(`Unexpected config dependency ${id}; extend the isolated adapter explicitly.`);

@@ -16,7 +16,7 @@ import { defaultImageGenerationSize, normalizeImageGenerationSize } from "./imag
 import { normalizeImageModel, normalizeToApisRequestFormat } from "./image-model-options";
 import { buildMediaRequestHeaders } from "./media-request";
 import { fetchOpenAiImageSse } from "./openai-image-sse";
-import { deleteRuntimeMediaObject, isTosRuntimeMediaConfigured, persistRuntimeMedia, persistTosProbeObject } from "./runtime-media-storage";
+import { isRuntimeMediaStorageEnabled, deleteRuntimeMediaObject, isTosRuntimeMediaConfigured, persistRuntimeMedia, persistTosProbeObject } from "./runtime-media-storage";
 import {
   ImageProviderError,
   IMAGE_PROVIDER_CAPABILITIES,
@@ -488,7 +488,7 @@ async function verifyProbeImageResponse(response: ImagesApiResponse) {
 async function verifyProbeImageBytes(buffer: Buffer) {
   const format = sniffImageFormat(buffer);
   if (!format?.modelSupported) throw new Error("Provider probe returned invalid image bytes.");
-  if (!appConfig.tosEnabled || !isTosRuntimeMediaConfigured()) return true;
+  if (!isRuntimeMediaStorageEnabled() || !isTosRuntimeMediaConfigured()) return true;
 
   const persisted = await persistTosProbeObject({
     objectKeySuffix: `image-provider-${Date.now()}-${randomUUID()}${format.extension}`,

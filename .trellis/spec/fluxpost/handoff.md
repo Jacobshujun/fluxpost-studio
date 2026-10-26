@@ -6,15 +6,18 @@ This file is an on-demand history library. Do not read it during default startup
 
 ## 最近一条
 <!-- TRELLIS-LATEST-START -->
-2026-10-26 Trellis reconciliation is complete.
-
-Changed:
-- Qwen-Image-3.0-Pro T2I/I2I node committed as `0b775c7`; record commits `89b26f7`, `1a16aed`. Endpoint/API key stay in-node; ordered 0-3 references.
-- Offline contracts, runtime, isolated SQLite, six three-theme 1440/390 browser cases, TypeScript, build and HTTP smoke pass. Full baseline stops at 17 existing runtime-data lint errors. No live Qwen call or activation.
-
-Next:
-- Resume OSS migration from `.trellis/tasks/10-23-tos-oss-migration/verification.md`; keep its changes uncommitted until the planned night work.
-- Do not push, deploy, or restart port 3001 without separate approval.
+2026-10-26: User confirmed other-window changes and authorized integrated commit.
+Qwen 0b775c7 and generated-library bbe4ff9 remain intact in history. OSS changes
+include explicit provider/V4, secret exclusion, inventory and guarded trial tools.
+Eight samples were copied by LOCAL SDK, not Aliyun managed migration; SHA-256,
+images and MP4/MOV playback/Range passed. Whole-target preservation is unproven:
+between inventories, 157 other keys appeared and 46 old keys were absent.
+Integrated deterministic tests/types/build/smoke and config desktop/mobile pass;
+baseline stops at known 17 ignored-script lint errors. No paid Qwen calls.
+Continue from `.trellis/tasks/10-23-tos-oss-migration/integration-verification.md`.
+No bulk migration, history rewrite, push, activation or production switch. Keep
+task in progress; coordinate target writers and production inventory before bulk
+copy. TOS retention >=7 days after switch; deletion needs separate confirmation.
 <!-- TRELLIS-LATEST-END -->
 
 ## 历史记录

@@ -59,7 +59,31 @@ checkImageProxyConfiguration();
 checkConfigSynchronization();
 checkVideoEncodingConfiguration();
 checkTextReasoningConfiguration();
+checkObjectStorageConfiguration();
 console.log("Advanced config admin boundary, cross-module synchronization and image proxy persistence checks passed.");
+
+function checkObjectStorageConfiguration() {
+  const runtime = loadConfig("win32");
+  assert.equal(runtime.config.appConfig.runtimeStorageProvider, "tos");
+  assert.equal(runtime.config.appConfig.ossEnabled, false);
+  runtime.config.saveAdvancedConfigPatch({ values: {
+    RUNTIME_STORAGE_PROVIDER: "oss", OSS_ENABLED: true,
+    OSS_ACCESS_KEY_ID: "fixture-oss-id", OSS_ACCESS_KEY_SECRET: "fixture-oss-secret",
+    OSS_BUCKET: "xpai-imc", OSS_ENDPOINT: "https://oss-cn-guangzhou.aliyuncs.com",
+    OSS_PUBLIC_BASE_URL: "https://xpai-imc.oss-cn-guangzhou.aliyuncs.com",
+    OSS_OBJECT_PREFIX: "preserved/prefix",
+  } });
+  const reloaded = loadConfig("win32", {}, runtime.persisted()).config;
+  assert.equal(reloaded.getConfigStatus().tosConfigured, true);
+  assert.equal(reloaded.getConfigStatus().tosEnabled, true);
+  assert.equal(reloaded.appConfig.ossObjectPrefix, "preserved/prefix");
+  assert.equal(runtime.loadModule().appConfig.ossAccessKeyId, "fixture-oss-id");
+  assert(!JSON.stringify(reloaded.getAdvancedConfigSnapshot()).includes("fixture-oss-secret"));
+  assert(!JSON.stringify(reloaded.getAdvancedConfigSnapshot()).includes("fixture-oss-id"));
+  assert.throws(() => runtime.config.saveAdvancedConfigPatch({ values: { RUNTIME_STORAGE_PROVIDER: "invalid" } }));
+  runtime.config.saveAdvancedConfigPatch({ values: { OSS_ACCESS_KEY_SECRET: null } });
+  assert.equal(runtime.config.getConfigStatus().tosConfigured, false);
+}
 
 function checkVideoEncodingConfiguration() {
   const runtime = loadConfig("win32");
@@ -303,6 +327,7 @@ function loadConfig(platform, values = {}, persisted = "") {
       require: (name) => {
         if (name === "./image-model-options") return load("src/lib/image-model-options.ts");
         if (name === "./text-reasoning") return load("src/lib/text-reasoning.ts");
+        if (name === "./object-storage-config") return load("src/lib/object-storage-config.ts");
         if (name === "./gemini-contract") return load("src/lib/gemini-contract.ts");
         if (name === "node:fs") return fakeFs;
         if (name === "./database") return { getDatabaseRuntimeStatus: () => ({}) };

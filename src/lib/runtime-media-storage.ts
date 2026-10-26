@@ -4,6 +4,8 @@ import path from "node:path";
 import TosClient, { ACLType } from "@volcengine/tos-sdk";
 import { compactError, recordExecutionLog } from "./activity-log";
 import { appConfig } from "./config";
+import { isObjectStorageConfigured, selectObjectStorageConfig } from "./object-storage-config";
+import { createOssStorageClient, type ObjectStorageClient } from "./oss-storage-client";
 import {
   buildTosObjectKey,
   buildTosPublicUrl,
@@ -33,32 +35,35 @@ export type PersistLibraryObjectInput = {
   contentType: string;
 };
 
-const pendingRoot = path.join(/*turbopackIgnore: true*/ process.cwd(), "data", "tos-pending");
+function getPendingRoot(provider: "tos" | "oss") {
+  return path.join(/*turbopackIgnore: true*/ process.cwd(), "data",
+    provider === "oss" ? "oss-pending" : "tos-pending");
+}
 const uploadMaxAttempts = 3;
 let cachedClient: { fingerprint: string; client: TosClient } | undefined;
 type RuntimeTosClient = VerifiedTosClient & TosClient;
 
+// Legacy export retained for existing API/consumer contracts; checks the selected backend.
 export function isTosRuntimeMediaConfigured() {
-  return Boolean(
-    appConfig.tosAccessKeyId &&
-      appConfig.tosAccessKeySecret &&
-      appConfig.tosBucket &&
-      appConfig.tosEndpoint &&
-      appConfig.tosRegion &&
-      appConfig.tosPublicBaseUrl,
-  );
+  return isObjectStorageConfigured(appConfig);
+}
+
+export function isRuntimeMediaStorageEnabled() {
+  return selectObjectStorageConfig(appConfig).enabled;
 }
 
 export function isManagedRuntimeMediaUrl(url?: string) {
-  return isManagedTosUrl(url, appConfig.tosPublicBaseUrl, appConfig.tosObjectPrefix);
+  const config = selectObjectStorageConfig(appConfig);
+  return isManagedTosUrl(url, config.publicBaseUrl, config.objectPrefix) ||
+    isManagedTosUrl(url, appConfig.tosPublicBaseUrl, appConfig.tosObjectPrefix);
 }
 
 export function buildRuntimeMediaObjectKey(publicPath: string) {
-  return buildTosObjectKey(publicPath, appConfig.tosObjectPrefix);
+  return buildTosObjectKey(publicPath, selectObjectStorageConfig(appConfig).objectPrefix);
 }
 
 export async function findExistingRuntimeMedia(publicPath: string) {
-  if (!appConfig.tosEnabled || !isTosRuntimeMediaConfigured()) return undefined;
+  if (!isRuntimeMediaStorageEnabled() || !isTosRuntimeMediaConfigured()) return undefined;
   const config = requireTosConfig();
   const objectKey = buildTosObjectKey(publicPath, config.objectPrefix);
   try {
@@ -72,7 +77,7 @@ export async function findExistingRuntimeMedia(publicPath: string) {
 }
 
 export async function persistRuntimeMedia(input: PersistRuntimeMediaInput) {
-  if (!appConfig.tosEnabled) return normalizePublicPath(input.publicPath);
+  if (!isRuntimeMediaStorageEnabled()) return normalizePublicPath(input.publicPath);
   const config = requireTosConfig();
   const fileStat = await stat(input.filePath);
   if (!fileStat.isFile() || !fileStat.size) throw new Error("Runtime media staging file is empty.");
@@ -93,11 +98,11 @@ export async function persistRuntimeMedia(input: PersistRuntimeMediaInput) {
     await rm(input.filePath, { force: true });
     return buildTosPublicUrl({ publicBaseUrl: config.publicBaseUrl, objectKey, etag: metadata.etag });
   } catch (error) {
-    const retainedPath = await retainPendingFile(input.filePath, objectKey);
+    const retainedPath = await retainPendingFile(input.filePath, objectKey, config.provider);
     const message = sanitizeTosError(error);
     await recordExecutionLog({
-      scope: "storage/tos",
-      action: "TOS runtime media upload failed",
+      scope: `storage/${config.provider}`,
+      action: "Object storage runtime media upload failed",
       status: "error",
       message,
       details: {
@@ -105,12 +110,13 @@ export async function persistRuntimeMedia(input: PersistRuntimeMediaInput) {
         retainedPath: path.relative(process.cwd(), retainedPath),
       },
     });
-    throw new Error(`TOS runtime media upload failed for ${objectKey}: ${message}`);
+    throw new Error(`Object storage runtime media upload failed for ${objectKey}: ${message}`);
   }
 }
 
 export async function reconcilePendingRuntimeMedia(): Promise<PendingReconcileResult> {
   const config = requireTosConfig();
+  const pendingRoot = getPendingRoot(config.provider);
   const files = await listPendingFiles(pendingRoot);
   const result: PendingReconcileResult = { uploaded: 0, failed: 0, errors: [] };
   for (const filePath of files) {
@@ -164,8 +170,8 @@ export async function persistTosProbeObject(input: { objectKeySuffix: string; bo
 }
 
 export async function persistLibraryObject(input: PersistLibraryObjectInput) {
-  if (!appConfig.tosEnabled || !isTosRuntimeMediaConfigured()) {
-    throw new Error("Library imports require fully configured TOS object storage.");
+  if (!isRuntimeMediaStorageEnabled() || !isTosRuntimeMediaConfigured()) {
+    throw new Error("Library imports require fully configured object storage.");
   }
   if (!input.body.length) throw new Error("Library image is empty.");
   const config = requireTosConfig();
@@ -188,29 +194,26 @@ export async function persistLibraryObject(input: PersistLibraryObjectInput) {
       publicUrl: buildTosPublicUrl({ publicBaseUrl: config.publicBaseUrl, objectKey, etag: metadata.etag }),
     };
   } catch (error) {
-    throw new Error(`TOS library upload failed for ${objectKey}: ${sanitizeTosError(error)}`);
+    throw new Error(`Object storage library upload failed for ${objectKey}: ${sanitizeTosError(error)}`);
   }
 }
 
 export async function deleteRuntimeMediaObject(objectKey: string) {
   const config = requireTosConfig();
   try {
-    await getTosClient(config).deleteObject({ bucket: config.bucket, key: objectKey });
+    await getVerifiedTosClient(config).deleteObject({ bucket: config.bucket, key: objectKey });
   } catch (error) {
     throw new Error(sanitizeTosError(error));
   }
 }
 
 function requireTosConfig() {
-  if (!isTosRuntimeMediaConfigured()) throw new Error("TOS runtime media storage is not fully configured.");
+  if (!isTosRuntimeMediaConfigured()) throw new Error("Runtime media object storage is not fully configured.");
+  const config = selectObjectStorageConfig(appConfig);
   return {
-    accessKeyId: appConfig.tosAccessKeyId,
-    accessKeySecret: appConfig.tosAccessKeySecret,
-    bucket: appConfig.tosBucket,
-    endpoint: normalizeTosEndpoint(appConfig.tosEndpoint),
-    region: appConfig.tosRegion,
-    publicBaseUrl: normalizeTosEndpoint(appConfig.tosPublicBaseUrl),
-    objectPrefix: appConfig.tosObjectPrefix,
+    ...config,
+    endpoint: normalizeTosEndpoint(config.endpoint),
+    publicBaseUrl: normalizeTosEndpoint(config.publicBaseUrl),
   };
 }
 
@@ -232,9 +235,11 @@ function getTosClient(config: ReturnType<typeof requireTosConfig>): RuntimeTosCl
   return client as unknown as RuntimeTosClient;
 }
 
-function getVerifiedTosClient(config: ReturnType<typeof requireTosConfig>): VerifiedTosClient {
+function getVerifiedTosClient(config: ReturnType<typeof requireTosConfig>): ObjectStorageClient {
+  if (config.provider === "oss") return createOssStorageClient(config);
   const client = getTosClient(config);
   return {
+    deleteObject: (input) => client.deleteObject(input),
     headObject: (input) => client.headObject(input) as Promise<{ data?: Record<string, unknown> }>,
     putObject: (input) =>
       client.putObject({
@@ -244,8 +249,8 @@ function getVerifiedTosClient(config: ReturnType<typeof requireTosConfig>): Veri
   };
 }
 
-async function retainPendingFile(filePath: string, objectKey: string) {
-  const target = path.join(pendingRoot, ...objectKey.split("/"));
+async function retainPendingFile(filePath: string, objectKey: string, provider: "tos" | "oss") {
+  const target = path.join(/*turbopackIgnore: true*/ getPendingRoot(provider), ...objectKey.split("/"));
   await mkdir(path.dirname(target), { recursive: true });
   await rm(target, { force: true });
   try {
@@ -300,7 +305,7 @@ function inferMediaContentType(filePath: string) {
 
 function sanitizeTosError(error: unknown) {
   let message = compactError(error);
-  for (const secret of [appConfig.tosAccessKeyId, appConfig.tosAccessKeySecret]) {
+  for (const secret of [appConfig.tosAccessKeyId, appConfig.tosAccessKeySecret, appConfig.ossAccessKeyId, appConfig.ossAccessKeySecret]) {
     if (secret) message = message.replaceAll(secret, "***");
   }
   return message;

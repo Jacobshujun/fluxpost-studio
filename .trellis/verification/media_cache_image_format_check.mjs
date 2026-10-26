@@ -281,6 +281,7 @@ try {
     "./runtime-media-storage": {
       deleteRuntimeMediaObject: async () => undefined,
       isTosRuntimeMediaConfigured: () => true,
+      isRuntimeMediaStorageEnabled: () => false,
       persistRuntimeMedia: async ({ filePath, publicPath, contentType }) => {
         const bytes = await readFile(filePath);
         assert(imageFormat.sniffImageFormat(bytes)?.mimeType === "image/jpeg", "Keep-mode HEIC persistence should receive JPEG bytes.");

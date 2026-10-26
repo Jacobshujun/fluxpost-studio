@@ -4,6 +4,14 @@ Last updated: 2026-07-20
 
 ## Known Project Pitfalls
 
+- OSS migration: xpai-imc rejects V1 signatures; ali-oss requires authorizationV4=true.
+  Omit empty prefix/marker and undefined TOS continuationToken fields: signed lists
+  otherwise returned SignatureDoesNotMatch despite valid keys. Test with
+  oss_storage_check.mjs. Count/size/ETag alone is not cross-provider integrity proof.
+  Trial scripts are opt-in writes, never baseline live tests; preserve attempted-write
+  receipts and forbid overwrite. A local SDK trial does not validate managed-service
+  transfer, metadata preservation, roles or connector behavior.
+
 - Xiaopeng BBS `dataStruct="Json"` bodies use rich-text insert arrays and may be React Flight `$hex` references to UTF-8 length-prefixed `T` records. Decode complete script chunks and resolve references before parsing inserts; merge inline images with attachments. Valid `{insert:{video:"https://...mp4"}}` nodes must join video quality ranking and media URLs; `attributes.cover` is not an article image. Cache/download uses one primary video. A nonempty reference is not article text. Keep malformed-node failures explicit and cover mixed text/image/video, deduplication and cover exclusion in `xiaopeng_bbs_import_check.mjs`.
 
 - 2026-09-16: GPT Image 2.5 Official is not the legacy or ordinary ratio/tier contract. It uses pixel size, selected quality, n=1, image_urls and optional background=transparent. Ordinary Sunburst/Flare keep ratio/resolution, fixed high and reference_images. See toapis_image_contract.md; the legacy 4K rejection must not govern either family. Custom-size and transparency acceptance remain untested against the live provider.

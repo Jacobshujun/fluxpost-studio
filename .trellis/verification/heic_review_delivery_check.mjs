@@ -67,6 +67,7 @@ const repair = loadTsModule("src/lib/generated-media-repair.ts", {
   "./runtime-media-storage": {
     isManagedRuntimeMediaUrl: (url) => url.includes("tos-cn-guangzhou.volces.com"),
     isTosRuntimeMediaConfigured: () => true,
+    isRuntimeMediaStorageEnabled: () => true,
   },
 });
 const source = {
@@ -166,6 +167,7 @@ const executableRepair = loadTsModule("src/lib/generated-media-repair.ts", {
   "./runtime-media-storage": {
     isManagedRuntimeMediaUrl: (url) => url.includes("tos-cn-guangzhou.volces.com/fluxpost/"),
     isTosRuntimeMediaConfigured: () => true,
+    isRuntimeMediaStorageEnabled: () => true,
   },
 });
 const account = { id: "admin", role: "admin" };
@@ -201,6 +203,7 @@ const failedRepair = loadTsModule("src/lib/generated-media-repair.ts", {
   "./runtime-media-storage": {
     isManagedRuntimeMediaUrl: (url) => url.includes("tos-cn-guangzhou.volces.com/fluxpost/"),
     isTosRuntimeMediaConfigured: () => true,
+    isRuntimeMediaStorageEnabled: () => true,
   },
 });
 const failed = await failedRepair.runGeneratedMediaRepairBatch({ mode: "apply", limit: 10, account });
@@ -227,6 +230,7 @@ const raceRepair = loadTsModule("src/lib/generated-media-repair.ts", {
   "./runtime-media-storage": {
     isManagedRuntimeMediaUrl: (url) => url.includes("tos-cn-guangzhou.volces.com/fluxpost/"),
     isTosRuntimeMediaConfigured: () => true,
+    isRuntimeMediaStorageEnabled: () => true,
   },
 });
 const raced = await raceRepair.runGeneratedMediaRepairBatch({ mode: "apply", limit: 10, account });
@@ -245,6 +249,7 @@ const cursorRepair = loadTsModule("src/lib/generated-media-repair.ts", {
   "./runtime-media-storage": {
     isManagedRuntimeMediaUrl: () => false,
     isTosRuntimeMediaConfigured: () => true,
+    isRuntimeMediaStorageEnabled: () => true,
   },
 });
 const cursorFirst = await cursorRepair.runGeneratedMediaRepairBatch({ mode: "scan", limit: 1, account });

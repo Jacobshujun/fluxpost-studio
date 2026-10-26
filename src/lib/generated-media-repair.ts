@@ -1,9 +1,8 @@
 import { compactError, recordExecutionLog } from "./activity-log";
-import { appConfig } from "./config";
 import { readContentProjectsFromDb, readGeneratedPostsFromDb, saveGeneratedPostToDb } from "./database";
 import { backfillSourceItemMedia } from "./media-backfill";
 import { getCachedImageIndex } from "./media-url-filter";
-import { isManagedRuntimeMediaUrl, isTosRuntimeMediaConfigured } from "./runtime-media-storage";
+import { isRuntimeMediaStorageEnabled, isManagedRuntimeMediaUrl, isTosRuntimeMediaConfigured } from "./runtime-media-storage";
 import type {
   GeneratedMediaRepairBatchResult,
   GeneratedMediaRepairFailure,
@@ -38,7 +37,7 @@ export async function runGeneratedMediaRepairBatch(input: {
 }): Promise<GeneratedMediaRepairBatchResult> {
   const limit = normalizeLimit(input.limit);
   const cursor = input.cursor?.trim() || undefined;
-  if (input.mode === "apply" && (!appConfig.tosEnabled || !isTosRuntimeMediaConfigured())) {
+  if (input.mode === "apply" && (!isRuntimeMediaStorageEnabled() || !isTosRuntimeMediaConfigured())) {
     throw new GeneratedMediaRepairValidationError("Historical media repair requires enabled and fully configured TOS storage.");
   }
 

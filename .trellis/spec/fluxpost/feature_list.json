@@ -28,6 +28,18 @@
       "notes": "No live acceptance or activation; existing lint blocker."
     },
     {
+      "id": "tos-to-oss-migration",
+      "title": "TOS to Aliyun OSS migration",
+      "status": "in_progress",
+      "definition_of_done": [
+        "Verified same-key copy, historical references and local/production cutover with rollback; retain TOS >=7 days"
+      ],
+      "evidence": [
+        "2026-10-26 local SDK trial: 8 objects/1,047,830 bytes hash/preview verified; combined Qwen/library/OSS checks/build pass except existing lint gate. See tos-oss-migration/integration-verification.md."
+      ],
+      "notes": "No full copy/switch. Target has concurrent changes; managed-service trial untested. Production/deletion require separate approval."
+    },
+    {
       "id": "canvas-gemini-node",
       "title": "Canvas Gemini native text and vision node",
       "status": "ready_for_review",

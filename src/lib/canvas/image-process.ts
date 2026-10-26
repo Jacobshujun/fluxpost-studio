@@ -3,10 +3,9 @@ import { createHash, randomUUID } from "node:crypto";
 import { mkdir, readFile, rename, rm, stat, writeFile } from "node:fs/promises";
 import path from "node:path";
 import sharp from "sharp";
-import { appConfig } from "../config";
 import { runWithConcurrencyPool } from "../concurrency";
 import { materializeRuntimeMedia } from "../runtime-media-materializer";
-import { persistRuntimeMedia } from "../runtime-media-storage";
+import { isRuntimeMediaStorageEnabled, persistRuntimeMedia } from "../runtime-media-storage";
 import { getCanvasDirectorySnapshot } from "./directory-snapshots";
 import { IMAGE_PROCESS_LIMITS, imageProcessConfigKey, resolveImageProcessConfig } from "./image-process-contract";
 import type { ImageProcessConfig, ImageProcessingReport } from "./image-process-contract";
@@ -126,7 +125,7 @@ export async function processCanvasImages(items: CanvasMediaReference[], rawConf
       await mkdir(outputRoot, { recursive: true });
       // TOS persistence consumes its staging file. Concurrent cache hits must not
       // upload or remove another run's file, even when the public object is shared.
-      const outputPath = appConfig.tosEnabled
+      const outputPath = isRuntimeMediaStorageEnabled()
         ? path.join(cacheRoot, `${key}.${randomUUID()}.${extension}`)
         : path.join(outputRoot, `${key}.${extension}`);
       await atomicWrite(outputPath, buffer);
@@ -136,7 +135,7 @@ export async function processCanvasImages(items: CanvasMediaReference[], rawConf
         signal?.throwIfAborted();
         url = await persistRuntimeMedia({ filePath: outputPath, publicPath, contentType: mimeType, overwrite: false });
       } finally {
-        if (appConfig.tosEnabled) await rm(outputPath, { force: true });
+        if (isRuntimeMediaStorageEnabled()) await rm(outputPath, { force: true });
       }
       signal?.throwIfAborted();
       const name = (item.name || `image-${index + 1}`).replace(/\.[^.]+$/, "");

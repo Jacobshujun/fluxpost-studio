@@ -317,10 +317,10 @@ export default function AdvancedConfigPage() {
     try {
       const res = await fetch("/api/config/tos-check", { method: "POST" });
       const data = (await res.json()) as Partial<TosStorageProbeResult> & { error?: string };
-      if (!res.ok || !data.ok) throw new Error(data.error || "TOS 连接测试失败");
-      setMessage("TOS 上传、公共读取、视频 Range 和清理检查通过。");
+      if (!res.ok || !data.ok) throw new Error(data.error || "对象存储 连接测试失败");
+      setMessage("对象存储 上传、公共读取、视频 Range 和清理检查通过。");
     } catch (error) {
-      setMessage(error instanceof Error ? error.message : "TOS 连接测试失败");
+      setMessage(error instanceof Error ? error.message : "对象存储 连接测试失败");
     } finally {
       setBusy(null);
     }
@@ -332,10 +332,10 @@ export default function AdvancedConfigPage() {
     try {
       const res = await fetch("/api/config/tos-reconcile", { method: "POST" });
       const data = (await res.json()) as { uploaded?: number; failed?: number; error?: string };
-      if (!res.ok) throw new Error(data.error || "TOS 暂存重试失败");
-      setMessage(`TOS 暂存重试完成：上传 ${data.uploaded || 0} 个，失败 ${data.failed || 0} 个。`);
+      if (!res.ok) throw new Error(data.error || "对象存储 暂存重试失败");
+      setMessage(`对象存储 暂存重试完成：上传 ${data.uploaded || 0} 个，失败 ${data.failed || 0} 个。`);
     } catch (error) {
-      setMessage(error instanceof Error ? error.message : "TOS 暂存重试失败");
+      setMessage(error instanceof Error ? error.message : "对象存储 暂存重试失败");
     } finally {
       setBusy(null);
     }
@@ -469,7 +469,7 @@ export default function AdvancedConfigPage() {
           <StatusTile label={config?.textModel || "文本模型"} ok={Boolean(config?.openaiConfigured)} />
           <StatusTile label={config?.imageModel || "图片模型"} ok={Boolean(config?.openaiImageConfigured)} />
           <StatusTile label="Feishu CLI" ok={Boolean(config?.feishuConfigured)} />
-          <StatusTile label="TOS" ok={Boolean(config?.tosConfigured && config?.tosEnabled)} />
+          <StatusTile label="对象存储" ok={Boolean(config?.tosConfigured && config?.tosEnabled)} />
           <StatusTile label="数据库" ok={Boolean(config?.postgresConfigured || config?.databaseBackend === "sqlite")} meta={config?.databaseBackend || "读取中"} />
         </section>
 
@@ -579,7 +579,7 @@ export default function AdvancedConfigPage() {
                       type="button"
                       onClick={testTosStorage}
                       disabled={Boolean(busy) || dirtyCount > 0 || !config?.tosConfigured}
-                      title={dirtyCount > 0 ? "请先保存 TOS 配置" : "测试 TOS 连接"}
+                      title={dirtyCount > 0 ? "请先保存 对象存储 配置" : "测试 对象存储 连接"}
                     >
                       {busy === "tos-check" ? <Loader2 className="h-4 w-4 animate-spin" /> : <Cloud className="h-4 w-4" />}
                       测试连接
