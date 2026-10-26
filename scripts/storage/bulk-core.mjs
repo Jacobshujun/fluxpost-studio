@@ -1,14 +1,10 @@
-import { createHash, randomUUID } from "node:crypto";
-import { createReadStream, createWriteStream } from "node:fs";
-import { mkdir, unlink } from "node:fs/promises";
-import path from "node:path";
-import { Transform, Writable } from "node:stream";
-import { pipeline } from "node:stream/promises";
+import { createHash } from "node:crypto";
 
 export const SOURCE_BUCKET = "seedance-gz-xpeng22365";
 export const TARGET_BUCKET = "xpai-imc";
 export const PREFIX = "fluxpost/flux-lightmoment/";
 const maxFileBytes = 1024 ** 3;
+export const PART_BYTES = 8 * 1024 * 1024;
 const normalizeEtag = value => String(value || "").replace(/^"|"$/g, "");
 const lowerHeaders = headers => Object.fromEntries(Object.entries(headers).map(([k, v]) => [k.toLowerCase(), v]));
 const failure = code => Object.assign(new Error(code), { code });
@@ -63,59 +59,75 @@ function validateTarget(head, item, headers) {
   }
 }
 
-async function hashStream(stream, expectedSize, destination) {
+async function hashRanges({ size, read }) {
   const hash = createHash("sha256");
-  let bytes = 0;
-  const counter = new Transform({ transform(chunk, _encoding, done) {
-    bytes += chunk.length;
-    if (bytes > expectedSize) { done(failure("BodyExceedsManifestSize")); return; }
-    hash.update(chunk);
-    done(null, chunk);
-  } });
-  const sink = destination || new Writable({ write(_chunk, _encoding, done) { done(); } });
-  await pipeline(stream, counter, sink, { signal: AbortSignal.timeout(300_000) });
-  if (bytes !== expectedSize) throw failure("BodySizeMismatch");
+  for (let start = 0; start < size; start += PART_BYTES) {
+    const end = Math.min(start + PART_BYTES, size) - 1;
+    hash.update(await read(start, end));
+  }
   return hash.digest("hex");
 }
 
-// No cloud deletes or overwrites. One file's bytes are pinned, staged, then read back.
-export async function copyOne({ source, target, item, stagingRoot, record }) {
+function checkedRange(result, start, end, expectedEtag, provider) {
+  const headers = lowerHeaders(result.res?.headers || result.headers || {});
+  const data = result.content ?? result.data?.content;
+  if (!Buffer.isBuffer(data) || data.length !== end - start + 1) throw failure(`${provider}RangeSizeMismatch`);
+  if (result.statusCode !== 206 && result.res?.statusCode !== 206 && result.res?.status !== 206) throw failure(`${provider}RangeStatusMismatch`);
+  if (headers["content-range"] !== `bytes ${start}-${end}/${result.totalSize}`) throw failure(`${provider}ContentRangeMismatch`);
+  if (normalizeEtag(headers.etag || result.data?.etag) !== normalizeEtag(expectedEtag)) throw failure(`${provider}RangeEtagMismatch`);
+  return data;
+}
+
+async function readSourceRange(source, input, item, start, end) {
+  const result = await source.getObjectV2({ ...input, dataType: "buffer", rangeStart: start, rangeEnd: end });
+  return checkedRange({ ...result, totalSize: item.size }, start, end, item.etag, "Source");
+}
+
+async function readTargetRange(target, key, size, etag, start, end) {
+  const result = await target.get(key, { headers: { Range: `bytes=${start}-${end}`, "If-Match": etag } });
+  return checkedRange({ ...result, totalSize: size }, start, end, etag, "Target");
+}
+
+// 8 MiB is the maximum retained object payload per worker; nothing is staged on disk.
+export async function copyOne({ source, target, item, record }) {
   const input = { bucket: SOURCE_BUCKET, key: item.key, ifMatch: item.etag };
   const head = lowerHeaders((await source.headObject(input)).data);
   validateSource(head, item);
   const headers = transferableHeaders(head);
   const existing = await headTarget(target, item.key);
   if (existing) validateTarget(existing, item, headers);
-  await mkdir(stagingRoot, { recursive: true });
-  const stagedPath = path.join(stagingRoot, `${randomUUID()}.part`);
-  let staged = false;
+  let uploadId;
+  let completed = false;
   try {
-    const response = await source.getObjectV2({ ...input, dataType: "stream" });
-    if (normalizeEtag(response.data.etag) !== normalizeEtag(item.etag)) {
-      response.data.content.destroy();
-      throw failure("SourceGetEtagMismatch");
-    }
-    staged = true;
-    const sourceSha256 = await hashStream(response.data.content, item.size, createWriteStream(stagedPath, { flags: "wx", mode: 0o600 }));
+    let sourceSha256;
     if (!existing) {
-      await record({ state: "put-intent", key: item.key, size: item.size, sourceSha256, sourceEtag: item.etag, sourceModified: item.modified, headers });
-      const body = createReadStream(stagedPath);
-      try {
-        const result = await target.put(item.key, body, {
-          contentLength: item.size,
-          mime: headers["content-type"],
-          headers: { ...headers, "x-oss-forbid-overwrite": "true", "x-oss-storage-class": "Standard" },
-        });
-        if (result.res.status !== 200) throw failure("PutUnexpectedStatus");
-      } finally { body.destroy(); }
+      await record({ state: "put-intent", key: item.key, size: item.size, sourceEtag: item.etag, sourceModified: item.modified, headers });
+      const init = await target.initMultipartUpload(item.key, { mime: headers["content-type"], headers: { ...headers, "x-oss-object-acl": "public-read", "x-oss-storage-class": "Standard" } });
+      if (!init.uploadId) throw failure("MultipartUploadIdMissing");
+      uploadId = init.uploadId;
+      await record({ state: "multipart-init", key: item.key, uploadId });
+      const hash = createHash("sha256");
+      const parts = [];
+      for (let start = 0, number = 1; start < item.size; start += PART_BYTES, number++) {
+        const end = Math.min(start + PART_BYTES, item.size) - 1;
+        const buffer = await readSourceRange(source, input, item, start, end);
+        hash.update(buffer);
+        const part = await target.uploadPart(item.key, uploadId, number, buffer, 0, buffer.length);
+        if (!part.etag) throw failure("MultipartPartEtagMissing");
+        parts.push({ number, etag: part.etag });
+      }
+      sourceSha256 = hash.digest("hex");
+      const done = await target.completeMultipartUpload(item.key, uploadId, parts, { headers: { "x-oss-forbid-overwrite": "true" } });
+      if (done.res?.status !== 200) throw failure("MultipartCompleteStatusMismatch");
+      completed = true;
       await record({ state: "uploaded", key: item.key, size: item.size, sourceSha256 });
+    } else {
+      sourceSha256 = await hashRanges({ size: item.size, read: (start, end) => readSourceRange(source, input, item, start, end) });
     }
     const targetHead = await headTarget(target, item.key);
     if (!targetHead) throw failure("TargetMissingAfterUpload");
     validateTarget(targetHead, item, headers);
-    const got = await target.getStream(item.key, { headers: { "If-Match": targetHead.etag } });
-    if (got.res?.status && got.res.status !== 200) { got.stream.destroy(); throw failure("TargetGetUnexpectedStatus"); }
-    const targetSha256 = await hashStream(got.stream, item.size);
+    const targetSha256 = await hashRanges({ size: item.size, read: (start, end) => readTargetRange(target, item.key, item.size, targetHead.etag, start, end) });
     if (sourceSha256 !== targetSha256) throw failure("TargetHashMismatch");
     // Detect mutations during transfer before issuing a success receipt.
     const finalSource = lowerHeaders((await source.headObject(input)).data);
@@ -128,7 +140,11 @@ export async function copyOne({ source, target, item, stagingRoot, record }) {
       sourceEtag: item.etag, sourceModified: item.modified, targetEtag: targetHead.etag, existing: Boolean(existing) };
     await record(result);
     return result;
-  } finally {
-    if (staged) await unlink(stagedPath).catch(error => { if (error.code !== "ENOENT") throw error; });
+  } catch (error) {
+    if (uploadId && !completed) {
+      try { await target.abortMultipartUpload(item.key, uploadId); }
+      catch { await record({ state: "multipart-abort-failed", key: item.key, uploadId }); }
+    }
+    throw error;
   }
 }

@@ -6,15 +6,14 @@ This file is an on-demand history library. Do not read it during default startup
 
 ## 最近一条
 <!-- TRELLIS-LATEST-START -->
-Latest: user authorized full copy and confirmed provider page has no lifecycle
-rules. Two-worker local SDK transfer RUNNING for 69,309 objects / 213.28 GB.
-See `.trellis/tasks/10-23-tos-oss-migration/bulk-run.md` and ignored
-`data/oss-migration/progress.json`; at 11:38:32Z, 565 verified / 1.95 GB, no errors.
-No full-completion claim. Inspect worker/lock/status before any continuation; do
-not launch a second writer or rerun trial. Immutable manifest and fsynced receipts
-are in data/oss-migration. User subsequently authorized committing bulk scripts
-and clean-HEAD LAN activation: see tos-oss-migration/lan-release.md. Do not stop
-bulk worker or switch storage. Runtime identity is /api/version; production unchanged.
+Latest: first two-worker staged-file bulk attempt stopped on ABORT_ERR after
+8,086 verified / 25.16 GB; source retained, original manifest and journals intact.
+User requested 8 MiB in-memory TOS range / OSS multipart, eight workers. New
+attempt PID 5092 under same manifest; at 12:43:23Z reverified 532 existing,
+zero errors. Check ignored `data/oss-migration/progress.json` and PID/lock before
+action. See `.trellis/tasks/10-23-tos-oss-migration/memory-multipart.md`.
+No binary staging, no source deletion or production/storage cutover. LAN remains
+cba71dc. After snapshot completes, coordinate final write freeze/delta separately.
 
 2026-10-26: User confirmed other-window changes and authorized integrated commit.
 Qwen 0b775c7 and generated-library bbe4ff9 remain intact in history. OSS changes

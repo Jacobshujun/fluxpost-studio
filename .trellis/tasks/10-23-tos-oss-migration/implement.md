@@ -56,6 +56,17 @@ preflight gate is historical; use `bulk-run.md` and live progress.json.
 - Keep effective TOS config unchanged; no GitHub push or production deployment.
 - Keep migration task active until copy/delta/reference work actually completes.
 
+## User-requested memory multipart switch
+
+- [x] Inspect old worker: status failed, ABORT_ERR, 8,086 verified / 25.16 GB;
+  process and exclusive lock absent. No concurrent writer to stop.
+- [x] Replace disk staging with 8 MiB conditional ranged TOS reads and OSS
+  multipart parts; eight workers; preserve full SHA/metadata verification.
+- [x] Offline suite and real one-part/multi-part object checks pass.
+- [x] Resume original manifest with safe exclusive lock; existing objects get
+  full hash check, not size-only skip.
+- [x] Monitor live start; do not claim full migration on first resumed snapshot.
+
 1. Resolve public domain/TLS and test actual image/video GET, HEAD, Range and previews.
 2. Review both environment inventories; trial copy with same keys and content hashes.
 3. Full copy and verification; approve final write freeze and backups.

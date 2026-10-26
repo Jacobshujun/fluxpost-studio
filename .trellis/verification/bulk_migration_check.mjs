@@ -2,10 +2,9 @@ import assert from "node:assert/strict";
 import { mkdtemp, rm } from "node:fs/promises";
 import os from "node:os";
 import path from "node:path";
-import { Readable } from "node:stream";
 import { readFileSync } from "node:fs";
 import { spawnSync } from "node:child_process";
-import { copyOne, validateInventory, transferableHeaders } from "../../scripts/storage/bulk-core.mjs";
+import { copyOne, validateInventory, transferableHeaders, PART_BYTES } from "../../scripts/storage/bulk-core.mjs";
 
 const item = { key: "fluxpost/flux-lightmoment/a space/%literal.png", size: 3, etag: '"source-etag"', modified: "2026-10-26T00:00:00.000Z", storageClass: "STANDARD" };
 const inventory = { capturedAt: "2026-10-26T00:00:00.000Z", settings: { bucket: "seedance-gz-xpeng22365", prefix: "fluxpost/flux-lightmoment" }, source: { count: 1, bytes: 3, objects: [item] }, target: { count: 0, objects: [] } };
@@ -16,12 +15,14 @@ for (const changed of [{ key: "outside/x" }, { size: -1 }, { storageClass: "ARCH
 assert.throws(() => validateInventory({ ...inventory, source: { ...inventory.source, objects: [item, item] } }));
 assert.throws(() => validateInventory({ ...inventory, settings: { ...inventory.settings, bucket: "wrong" } }));
 assert.deepEqual(transferableHeaders({ "Content-Type": "image/png", "x-tos-meta-test": "value", authorization: "never" }), { "content-type": "image/png", "x-oss-meta-test": "value" });
+assert.equal(PART_BYTES, 8 * 1024 * 1024);
 
 const root = await mkdtemp(path.join(os.tmpdir(), "fluxpost-bulk-check-"));
 async function scenario({ existing = false, badHash = false, badMime = false, race = false, sourceChange = false, headError = 0, failReceipt = false } = {}) {
   const events = [];
   let puts = 0;
   let gets = 0;
+  let aborted = 0;
   const header = { "content-length": "3", etag: item.etag, "last-modified": "Mon, 26 Oct 2026 00:00:00 GMT", "content-type": "image/png", "cache-control": "max-age=60", "x-tos-meta-test": "value" };
   const targetHeader = { ...transferableHeaders(header), "content-length": "3", etag: '"target-etag"' };
   let exists = existing;
@@ -33,7 +34,9 @@ async function scenario({ existing = false, badHash = false, badMime = false, ra
     async getObjectV2(input) {
       gets++;
       assert.equal(input.ifMatch, item.etag);
-      return { data: { content: Readable.from(Buffer.from("abc")), etag: item.etag } };
+      assert.equal(input.rangeStart, 0);
+      assert.equal(input.rangeEnd, 2);
+      return { statusCode: 206, headers: { "content-range": "bytes 0-2/3", etag: item.etag }, data: { content: Buffer.from("abc"), etag: item.etag } };
     },
   };
   const target = {
@@ -43,24 +46,37 @@ async function scenario({ existing = false, badHash = false, badMime = false, ra
       if (!exists) throw Object.assign(new Error("missing"), { status: 404 });
       return { res: { headers: { ...targetHeader, "content-type": badMime ? "text/plain" : "image/png" } } };
     },
-    async put(key, stream, options) {
+    async initMultipartUpload(key, options) {
       assert.equal(key, item.key);
-      assert.equal(options.headers["x-oss-forbid-overwrite"], "true");
-      assert.equal(options.contentLength, 3);
       assert.equal(options.headers["x-oss-meta-test"], "value");
       assert.equal(events.at(-1).state, "put-intent");
+      return { uploadId: "upload-1" };
+    },
+    async uploadPart(key, uploadId, number, buffer, start, end) {
+      assert.equal(key, item.key);
+      assert.equal(uploadId, "upload-1");
+      assert.equal(number, 1);
+      assert.equal(start, 0);
+      assert.equal(end, 3);
+      assert.equal(buffer.toString(), "abc");
+      return { etag: '"part-1"' };
+    },
+    async completeMultipartUpload(key, uploadId, parts, options) {
+      assert.equal(key, item.key);
+      assert.equal(uploadId, "upload-1");
+      assert.deepEqual(parts, [{ number: 1, etag: '"part-1"' }]);
+      assert.equal(options.headers["x-oss-forbid-overwrite"], "true");
+      if (race) throw Object.assign(new Error("collision"), { status: 409 });
       puts++;
-      if (race) { stream.destroy(); throw Object.assign(new Error("collision"), { status: 409 }); }
-      let bytes = Buffer.alloc(0);
-      for await (const part of stream) bytes = Buffer.concat([bytes, part]);
-      assert.equal(bytes.toString(), "abc");
       exists = true;
       return { res: { status: 200 } };
     },
-    async getStream(key, options) {
+    async abortMultipartUpload() { aborted++; },
+    async get(key, options) {
       assert.equal(key, item.key);
+      assert.equal(options.headers.Range, "bytes=0-2");
       assert.equal(options.headers["If-Match"], '"target-etag"');
-      return { stream: Readable.from(Buffer.from(badHash ? "bad" : "abc")) };
+      return { res: { status: 206, headers: { "content-range": "bytes 0-2/3", etag: '"target-etag"' } }, content: Buffer.from(badHash ? "bad" : "abc") };
     },
   };
   let error;
@@ -71,7 +87,7 @@ async function scenario({ existing = false, badHash = false, badMime = false, ra
       events.push(event);
     } });
   } catch (caught) { error = caught; }
-  return { result, error, events, puts, gets };
+  return { result, error, events, puts, gets, aborted };
 }
 try {
   for (const existing of [false, true]) {
@@ -87,6 +103,7 @@ try {
     assert(r.error, JSON.stringify(options));
     assert(!r.events.some(e => e.state === "verified"));
     if (options.existing || options.sourceChange || options.headError || options.failReceipt) assert.equal(r.puts, 0);
+    if (options.race) assert.equal(r.aborted, 1);
   }
 } finally {
   // mkdtemp's exact returned path is the sole cleanup target.
@@ -94,6 +111,52 @@ try {
   await rm(root, { recursive: true, force: true });
 }
 console.log("Bulk copy: exact keys, conditional source/read-back, SHA-256, metadata, no-overwrite races and durable receipt failures pass offline.");
+
+const large = { ...item, key: `${item.key}-multipart`, size: PART_BYTES + 3 };
+const srcBytes = Buffer.alloc(large.size, 0x58);
+const chunkVisits = [];
+const uploaded = new Map();
+const events = [];
+const largeSource = {
+  async headObject() { return { data: { "content-length": String(large.size), etag: large.etag, "last-modified": "Mon, 26 Oct 2026 00:00:00 GMT", "content-type": "image/png" } }; },
+  async getObjectV2({ rangeStart, rangeEnd, ifMatch }) {
+    assert.equal(ifMatch, large.etag);
+    chunkVisits.push([rangeStart, rangeEnd]);
+    return { statusCode: 206, headers: { "content-range": `bytes ${rangeStart}-${rangeEnd}/${large.size}`, etag: large.etag }, data: { content: srcBytes.subarray(rangeStart, rangeEnd + 1), etag: large.etag } };
+  },
+};
+let completed = false;
+const largeTarget = {
+  async head() {
+    if (!completed) throw Object.assign(new Error("missing"), { status: 404 });
+    return { res: { headers: { "content-length": String(large.size), etag: '"target-large"', "content-type": "image/png" } } };
+  },
+  async initMultipartUpload() { return { uploadId: "large-upload" }; },
+  async uploadPart(_key, _uploadId, number, buffer, start, end) {
+    assert.equal(start, 0);
+    assert.equal(end, buffer.length);
+    uploaded.set(number, Buffer.from(buffer));
+    return { etag: `"part-${number}"` };
+  },
+  async completeMultipartUpload(_key, _uploadId, parts, options) {
+    assert.equal(options.headers["x-oss-forbid-overwrite"], "true");
+    assert.deepEqual(parts.map(x => x.number), [1, 2]);
+    completed = true;
+    return { res: { status: 200 } };
+  },
+  async get(_key, { headers }) {
+    assert.equal(headers["If-Match"], '"target-large"');
+    const [, start, end] = headers.Range.match(/^bytes=(\d+)-(\d+)$/).map(Number);
+    const content = Buffer.concat([...uploaded.values()]).subarray(start, end + 1);
+    return { content, res: { status: 206, headers: { etag: '"target-large"', "content-range": `bytes ${start}-${end}/${large.size}` } } };
+  },
+};
+const largeResult = await copyOne({ source: largeSource, target: largeTarget, item: large, record: async ev => events.push(ev) });
+assert.equal(largeResult.state, "verified");
+assert.deepEqual(chunkVisits, [[0, PART_BYTES - 1], [PART_BYTES, PART_BYTES + 2]]);
+assert.equal(uploaded.size, 2);
+assert.equal(events.at(-1).sourceSha256, events.at(-1).targetSha256);
+console.log("Two-part 8 MiB boundary, byte order and full read-back hash passed offline.");
 
 const denied = spawnSync(process.execPath, ["scripts/storage/bulk-migrate.mjs"], { encoding: "utf8" });
 assert.equal(denied.status, 1);
@@ -144,11 +207,13 @@ const successRun = await runWorkerFixture();
 assert.equal(successRun.summary.status, "snapshot-verified");
 assert.equal(successRun.summary.verifiedObjects, 3);
 assert.equal(successRun.summary.verifiedBytes, 9);
-assert(successRun.peak <= 2);
+assert(successRun.peak <= 8);
+assert.equal(successRun.summary.concurrency, 8);
+assert.equal(successRun.summary.transfer, "memory-8MiB-multipart");
 assert.equal((await runWorkerFixture({ defaultRegion: true })).summary.status, "snapshot-verified");
 const failureRun = await runWorkerFixture({ failed: true });
 assert.equal(failureRun.summary.status, "failed");
-assert(failureRun.copies <= 2);
+assert(failureRun.copies <= 8);
 const stopRun = await runWorkerFixture({ stop: true });
 assert.equal(stopRun.summary.status, "stopped");
 assert.equal(stopRun.copies, 0);

@@ -4,7 +4,7 @@ Last updated: 2026-10-26
 
 ## One-Line Status
 
-OSS bulk copy running; user authorized clean-HEAD LAN activation. Production unchanged.
+OSS memory multipart bulk resumed; LAN/production unchanged. Final delta pending.
 
 ## Current Focus
 
@@ -13,7 +13,7 @@ OSS bulk copy running; user authorized clean-HEAD LAN activation. Production unc
 
 ## Next Entry
 
-LAN release: `.trellis/tasks/10-23-tos-oss-migration/lan-release.md`; runtime SHA via /api/version. Bulk progress: ignored `data/oss-migration/progress.json` (69,309 objects/213.28 GB). Not complete. TOS stays active; no source deletion, reference rewrite or production switch.
+Migration: `.trellis/tasks/10-23-tos-oss-migration/memory-multipart.md`; first attempt verified 8,086/25.16 GB then stopped on ABORT_ERR. Eight-worker 8 MiB in-memory multipart resumed, no binary disk staging; progress in ignored `data/oss-migration/progress.json`. LAN cba71dc/TOS active; no history/production switch.
 
 ## Risks And Unknowns
 

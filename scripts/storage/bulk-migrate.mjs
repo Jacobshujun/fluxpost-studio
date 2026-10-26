@@ -81,7 +81,7 @@ async function main() {
     journal = await open(path.join(attemptRoot, "journal.ndjson"), "ax", 0o600);
     summary = { job: id, attempt, pid: process.pid, status: "running", startedAt: new Date().toISOString(),
       sourceBucket: SOURCE_BUCKET, targetBucket: TARGET_BUCKET, prefix: PREFIX, sourceCapturedAt: inventory.capturedAt,
-      lifecycleEvidence: "operator-confirmed-no-rules", concurrency: 2, totalObjects: items.length,
+      lifecycleEvidence: "operator-confirmed-no-rules", concurrency: 8, transfer: "memory-8MiB-multipart", totalObjects: items.length,
       totalBytes: inventory.source.bytes, verifiedObjects: 0, verifiedBytes: 0, uploadedObjects: 0,
       existingVerified: 0, failures: 0, manifestPath: storedManifest, journalPath: path.join(attemptRoot, "journal.ndjson") };
     await saveSummary();
@@ -107,7 +107,7 @@ async function main() {
         if (existsSync(path.join(root, "STOP"))) { stop = true; break; }
         const item = ordered[cursor++];
         try {
-          await copyOne({ source, target, item, stagingRoot: path.join(attemptRoot, "staging"), record });
+          await copyOne({ source, target, item, record });
         } catch (error) {
           stop = true;
           await record({ state: "error", key: item.key, size: item.size, code: safeCode(error) });
@@ -115,7 +115,7 @@ async function main() {
         }
       }
     };
-    const results = await Promise.allSettled([worker(), worker()]);
+    const results = await Promise.allSettled(Array.from({ length: 8 }, () => worker()));
     await serial;
     if (results.some(x => x.status === "rejected")) throw Object.assign(new Error(), { code: "WorkerOrJournalFailed" });
     summary.status = summary.failures ? "failed" : summary.verifiedObjects === items.length ? "snapshot-verified" : "stopped";

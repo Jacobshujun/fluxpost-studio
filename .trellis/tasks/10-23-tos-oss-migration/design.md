@@ -46,3 +46,20 @@ No automatic retries; rerun validates existing destination content rather than
 trusting size or old receipts. Ctrl-C/STOP file stops dispatch without deleting
 cloud objects; abrupt termination leaves staged bytes/journal for inspection.
 Final write freeze and delta inventory remain separate from this live snapshot.
+
+## Memory-only multipart continuation (user request)
+
+The earlier attempt stopped on ABORT_ERR after 8,086 verified objects / 25.16 GB.
+The reason for that network abort is not established. User requested the TOS SDK
+range-read / OSS SDK multipart-upload approach without a local binary staging
+file. A new attempt uses the same immutable manifest and exclusive writer lock,
+eight workers each holding at most one 8 MiB payload buffer plus SDK overhead.
+Each ranged TOS GET is conditional on manifest ETag and validates 206, Content-
+Range, length and ETag. Initiate multipart with retained MIME/metadata/ACL, upload
+one part at a time, then Complete with x-oss-forbid-overwrite. Abort an incomplete
+multipart transaction on failure; this does not delete a completed object.
+Source SHA-256 accumulates from chunks; target conditional ranged GET recomputes
+the entire SHA-256. Existing objects are fully read/compared and never skipped by
+size alone. Journal records multipart uploadId before first part. No binary is
+stored on disk; progress and private receipts remain local. This still routes
+network traffic through the Windows host; it is not cloud-to-cloud direct transfer.
