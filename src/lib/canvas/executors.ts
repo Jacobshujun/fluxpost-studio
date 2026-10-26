@@ -101,6 +101,7 @@ const executors: Record<CanvasNode["type"], CanvasNodeExecutor> = {
   "input.competitor-workbook": executeLiteralNode,
   "model.gpt-text": executeGptText,
   "model.gemini": executeGemini,
+  "model.qwen-image": executeQwenImage,
   "model.gpt-image": executeGptImage,
   "model.gpt-image-each": executeGptImageEach,
   "model.gpt-vision": executeGptVision,
@@ -380,6 +381,25 @@ async function executeGptText({ node, inputs }: CanvasNodeExecutionContext) {
   const prompt = source ? `${instruction}\n\n输入：\n${source}` : instruction;
   const value = await callOpenAIForText(prompt, { logLabel: `Canvas GPT text node ${node.id}` });
   return { outputs: { text: { kind: "text" as const, value } } };
+}
+
+async function executeQwenImage({ node, inputs, account, signal, runId }: CanvasNodeExecutionContext): Promise<CanvasNodeExecutionResult> {
+  const { generateQwenImages } = await import("../qwen-image");
+  const { qwenCredentialForRun, QwenCredentialError } = await import("./qwen-credentials");
+  try {
+    const credentials = await qwenCredentialForRun(runId, node, account);
+    const items = await generateQwenImages({
+      ...credentials, account, signal,
+      prompt: [...textValues(inputs.prompt), String(node.config.prompt || "")].filter(Boolean).join("\n\n"),
+      images: imageItems(inputs.references),
+      count: Number(node.config.count), size: String(node.config.size || ""),
+      promptExtend: node.config.promptExtend === true,
+    });
+    return { outputs: { images: { kind: "images", items } } };
+  } catch (error) {
+    if (error instanceof QwenCredentialError) throw new CanvasNeedsConfigError(error.message);
+    throw error;
+  }
 }
 
 async function executeGemini({ node, inputs, account, signal }: CanvasNodeExecutionContext) {

@@ -9,6 +9,14 @@
   ],
   "features": [
     {
+      "id": "canvas-qwen-image",
+      "title": "Canvas Qwen image node",
+      "status": "ready_for_review",
+      "definition_of_done": ["T2I/I2I with secure node-local credentials"],
+      "evidence": ["2026-10-26 offline/browser/build pass; canvas-qwen-image task."],
+      "notes": "No live acceptance or activation; existing lint blocker."
+    },
+    {
       "id": "canvas-gemini-node",
       "title": "Canvas Gemini native text and vision node",
       "status": "ready_for_review",

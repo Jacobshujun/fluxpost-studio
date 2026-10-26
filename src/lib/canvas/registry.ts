@@ -235,6 +235,30 @@ const canvasNodeDefinitionVersions: CanvasNodeDefinition[] = [
     defaultConfig: { path: "", worksheet: "文案汇总", rowNumber: 2, cardIndex: 1, snapshot: undefined, rowTitle: "", rowBody: "", cardText: "" },
   },
   {
+    type: "model.qwen-image",
+    version: 1,
+    label: "Qwen-Image-3.0-Pro",
+    description: "文生图或使用 1–3 张参考图编辑；地址和密钥在节点内填写。",
+    category: "model",
+    icon: "WandSparkles",
+    color: "#d97706",
+    inputs: [
+      { id: "prompt", label: "提示词", kind: "text", multiple: true },
+      { id: "references", label: "参考图（最多3张）", kind: "images", multiple: true },
+    ],
+    outputs: [{ id: "images", label: "图片", kind: "images" }],
+    fields: [
+      { key: "endpoint", label: "Qwen 请求地址", kind: "text", placeholder: "https://业务空间ID.cn-beijing.maas.aliyuncs.com/api/v1/services/aigc/multimodal-generation/generation" },
+      { key: "prompt", label: "编辑 / 生成提示词", kind: "textarea", placeholder: "上游文字后追加本段指令" },
+      { key: "count", label: "图片数量", kind: "number", min: 1, max: 6 },
+      { key: "size", label: "输出尺寸", kind: "text", placeholder: "留空自动，例如 1024*1024" },
+      { key: "promptExtend", label: "自动扩写提示词", kind: "boolean" },
+    ],
+    defaultConfig: { endpoint: "", prompt: "", count: 1, size: "", promptExtend: true },
+    capability: "image_model",
+    bypass: { inputPort: "references", outputPort: "images" },
+  },
+  {
     type: "model.gemini",
     version: 1,
     label: "Gemini",
@@ -1013,6 +1037,10 @@ export function validateCanvasNodeConfig(type: CanvasNodeType, config: CanvasNod
   const definition = getCanvasNodeDefinition(type, version);
   if (!definition) return [`Unknown canvas node type: ${type}`];
   const errors: string[] = [];
+  if (type === "model.qwen-image") {
+    if (!String(config.endpoint || "").trim()) errors.push("Qwen: 请在节点中填写请求地址。");
+    if (!Number.isInteger(config.count)) errors.push("Qwen: 图片数量必须为整数。");
+  }
   if (type === "model.gpt-image" || type === "model.gpt-image-each") {
     try {
       if (config.model !== undefined) normalizeImageModel(config.model);

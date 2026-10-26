@@ -318,6 +318,7 @@ export type CanvasNodeType =
   | "input.competitor-workbook"
   | "model.gpt-text"
   | "model.gemini"
+  | "model.qwen-image"
   | "model.gpt-image"
   | "model.gpt-image-each"
   | "model.gpt-vision"

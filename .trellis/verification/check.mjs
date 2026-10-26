@@ -12,6 +12,9 @@ const npxCommand = process.platform === "win32" ? "npx.cmd" : "npx";
 const nodeChecks = [
   ["Library color extraction, queries and durable analysis", "library_colors_check.mjs"],
   ["Canvas Gemini native text and vision", "canvas_gemini_check.mjs"],
+  ["Qwen native image contracts", "qwen_image_contract_check.mjs"],
+  ["Qwen image runtime and node credentials", "qwen_image_runtime_check.mjs"],
+  ["Qwen encrypted credential persistence", "qwen_image_persistence_check.mjs"],
   ["Canvas local image saving check", "canvas_local_image_save_check.mjs"],
   ["Canvas layer composition check", "canvas_layer_compose_check.mjs"],
   ["Canvas image processing check", "canvas_image_process_check.mjs"],
@@ -37,6 +40,7 @@ const nodeChecks = [
   ["Advanced config admin boundary check", "advanced_config_check.mjs"],
   ["Text reasoning effort contract check", "text_reasoning_effort_check.mjs"],
   ["TOS runtime media storage check", "tos_runtime_media_check.mjs"],
+  ["OSS storage adapter check", "oss_storage_check.mjs"],
   ["Feishu CLI identity auto-init check", "feishu_cli_identity_check.mjs"],
   ["Local Next build output check", "local_build_output_check.mjs"],
   ["Runtime production parity check", "runtime_parity_check.mjs"],

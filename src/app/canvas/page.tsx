@@ -238,6 +238,9 @@ type PreviewState =
   | { kind: "video"; url: string; index: number }
   | null;
 type CanvasNodeInteraction = {
+  workflowId?: string;
+  regionId?: string;
+  saveForCredentials?: () => Promise<boolean>;
   getComposeSources?: (nodeId: string) => ComposeSource[];
   activeRun?: CanvasRunWithNodes;
   displayingExplicitRun: boolean;
@@ -496,6 +499,8 @@ export default function CanvasPage() {
     latestSuccessfulNodeRuns,
     canResize: !isMobile,
     workflowRevision: activeWorkflow?.revision,
+    workflowId: activeWorkflow?.id,
+    saveForCredentials: async () => Boolean(await saveCoordinatorRef.current?.request("manual")),
     onConfigChange: updateNodeConfig,
     onConfigPatch: updateNodeConfigPatch,
     onExecutionModeChange: updateNodeExecutionMode,
@@ -503,7 +508,7 @@ export default function CanvasPage() {
     onPreview: setPreview,
     onSubtitleEdit: (node, nodeRun) => setSubtitleEditor({ nodeId: node.id, nodeRunId: nodeRun.id }),
     onIterationEdit: setIterationEditorId,
-  }), [activeRun, activeWorkflow?.revision, displayingExplicitRun, focusCanvasNode, isMobile, latestNodeRuns, latestSuccessfulNodeRuns, updateNodeConfig, updateNodeConfigPatch, updateNodeExecutionMode]);
+  }), [activeRun, activeWorkflow?.id, activeWorkflow?.revision, displayingExplicitRun, focusCanvasNode, isMobile, latestNodeRuns, latestSuccessfulNodeRuns, updateNodeConfig, updateNodeConfigPatch, updateNodeExecutionMode]);
 
   useEffect(() => {
     const query = window.matchMedia("(max-width: 820px)");
@@ -1858,6 +1863,7 @@ export default function CanvasPage() {
             seedanceReferences={selectedSeedanceReferences}
             createSeedanceMentionId={createSeedanceMentionId}
           />
+          {selectedCanvasNode.type === "model.qwen-image" ? <CanvasQwenCredentials key={`${activeWorkflow?.id}:${selectedCanvasNode.id}:${String(selectedCanvasNode.config.endpoint || "")}`} node={selectedCanvasNode} interaction={nodeInteraction} /> : null}
         </aside> : null}
       </section>
 
@@ -1919,6 +1925,7 @@ export default function CanvasPage() {
         onClose={() => setSubtitleEditor(undefined)}
       /> : null}
       {iterationEditorId && nodes.find((entry) => entry.id === iterationEditorId)?.data.canvasNode.iteration ? <CanvasIterationEditor
+        credentialsInteraction={nodeInteraction}
         key={`${activeWorkflow?.id}:${iterationEditorId}`}
         node={nodes.find((entry) => entry.id === iterationEditorId)!.data.canvasNode}
         colorMode={flowColorMode}
@@ -2027,6 +2034,11 @@ const CanvasFlowNode = memo(function CanvasFlowNode({ data, selected }: NodeProp
       <CanvasImageProcessControls node={node} onPatch={(patch) => interaction?.onConfigPatch(node.id, patch)} />
       <CanvasImageProcessResult node={node} nodeRun={nodeRun} latestSuccessful={latestSuccessful?.nodeRun} onPreview={(url, index) => interaction?.onPreview({ kind: "image", url, index })} />
     </> : null}
+    {node.type === "model.qwen-image" ? <div className="canvas-gpt-image-controls nodrag nopan nowheel" onPointerDown={(event) => event.stopPropagation()} onClick={(event) => event.stopPropagation()} onKeyDown={(event) => event.stopPropagation()}>
+      <CanvasNodeFields node={node} onChange={(key, value) => interaction?.onConfigChange(node.id, key, value)} onPatch={(patch) => interaction?.onConfigPatch(node.id, patch)} onPreviewImage={(url, index) => interaction?.onPreview({ kind: "image", url, index })} />
+      <CanvasQwenCredentials key={`${interaction?.workflowId}:${interaction?.regionId || ""}:${node.id}:${String(node.config.endpoint || "")}`} node={node} interaction={interaction} />
+      <small>不接参考图：文生图；接入 1–3 张：图生图，按输入顺序处理。</small>
+    </div> : null}
     {node.type === "model.gpt-image" && node.version >= 2 ? <div className="canvas-gpt-image-controls nodrag nopan nowheel" onPointerDown={(event) => event.stopPropagation()} onClick={(event) => event.stopPropagation()}>
       <CanvasNodeFields node={node} onChange={(key, value) => interaction?.onConfigChange(node.id, key, value)} onPatch={(patch) => interaction?.onConfigPatch(node.id, patch)} onPreviewImage={(url, index) => interaction?.onPreview({ kind: "image", url, index })} />
       <CanvasGptImageDimensions node={node} />
@@ -2114,7 +2126,8 @@ function CanvasIterationOutputSelectors({ node, onChange }: { node: CanvasNode; 
   </div>;
 }
 
-function CanvasIterationEditor({ node, colorMode, onChange, onClose }: {
+function CanvasIterationEditor({ node, colorMode, onChange, onClose, credentialsInteraction }: {
+  credentialsInteraction: CanvasNodeInteraction;
   node: CanvasNode;
   colorMode: "light" | "dark";
   onChange: (iteration: CanvasIterationDefinition) => void;
@@ -2323,6 +2336,9 @@ function CanvasIterationEditor({ node, colorMode, onChange, onClose }: {
   }
 
   const interaction: CanvasNodeInteraction = {
+    workflowId: credentialsInteraction.workflowId,
+    regionId: node.id,
+    saveForCredentials: credentialsInteraction.saveForCredentials,
     displayingExplicitRun: false,
     latestNodeRuns: new Map(),
     latestSuccessfulNodeRuns: new Map(),
@@ -2408,6 +2424,7 @@ function CanvasIterationEditor({ node, colorMode, onChange, onClose }: {
         {selected?.type === "input.iteration-item" ? <p>固定入口：当前图片、原始索引、共享文字和参考图。不能删除或禁用。</p> : selected ? <div className="canvas-inspector-content">
           <label><span>内层节点名称</span><input value={selected.label || ""} maxLength={80} onChange={(event) => patchNode(selected.id, { label: event.target.value })} /></label>
           <CanvasNodeFields node={selected} onChange={(key, value) => patchConfig(selected.id, { [key]: value })} onPatch={(patch) => patchConfig(selected.id, patch)} onPreviewImage={(url, index) => onPreview({ kind: "image", url, index })} />
+          {selected.type === "model.qwen-image" ? <CanvasQwenCredentials key={`${selected.id}:${String(selected.config.endpoint || "")}`} node={selected} interaction={interaction} /> : null}
           {selected.type === "utility.media-mask" ? <CanvasMediaMaskEditor node={selected} onPatch={(patch) => patchConfig(selected.id, patch)} /> : null}
           <button type="button" onClick={() => { commit(innerNodes.filter((entry) => entry.id !== selected.id), innerEdges.filter((edge) => edge.source !== selected.id && edge.target !== selected.id)); setSelectedId(undefined); }}><Trash2 />删除内层节点</button>
         </div> : null}
@@ -2427,6 +2444,35 @@ function CanvasIterationEditor({ node, colorMode, onChange, onClose }: {
     {innerPreview?.kind === "image" ? <CanvasImagePreviewDialog preview={innerPreview} onClose={() => setInnerPreview(null)} /> : null}
     {innerPreview?.kind === "text" ? <CanvasTextPreviewDialog value={innerPreview.value} onClose={() => setInnerPreview(null)} /> : null}
   </dialog>;
+}
+
+function CanvasQwenCredentials({ node, interaction }: { node: CanvasNode; interaction: CanvasNodeInteraction | null }) {
+  const [key, setKey] = useState("");
+  const [message, setMessage] = useState("请保存节点后查询或填写密钥");
+  const [busy, setBusy] = useState(false);
+  const endpoint = String(node.config.endpoint || "");
+  const query = new URLSearchParams({ workflowId: interaction?.workflowId || "", nodeId: node.id, ...(interaction?.regionId ? { regionId: interaction.regionId } : {}) });
+  const url = `/api/canvas/qwen-credentials?${query}`;
+  async function action(method: "GET" | "PUT" | "DELETE") {
+    setBusy(true);
+    const captured = endpoint;
+    try {
+      if (!interaction?.workflowId || !await interaction.saveForCredentials?.()) throw new Error("请先保存工作流。");
+      const result = await api<{ configured: boolean }>(url, { method, ...(method === "PUT" ? { body: JSON.stringify({ apiKey: key, endpoint: captured }) } : {}) });
+      setKey("");
+      setMessage(result.configured ? "密钥已配置（服务端保存，不随工作流导出）" : "尚未配置密钥");
+    } catch (error) { setMessage(errorMessage(error)); }
+    finally { setBusy(false); }
+  }
+  return <div className="canvas-qwen-credentials">
+    <label><span>Qwen API Key</span><input aria-label="Qwen API Key" type="password" autoComplete="new-password" value={key} disabled={busy} onChange={(event) => setKey(event.target.value)} placeholder="仅用于保存或替换，不会回显" /></label>
+    <div style={{ display: "flex", flexWrap: "wrap", gap: 4 }}>
+      <button type="button" disabled={busy || !key.trim()} onClick={() => void action("PUT")}>保存密钥</button>
+      <button type="button" disabled={busy} onClick={() => void action("GET")}>查询配置</button>
+      <button type="button" disabled={busy} onClick={() => void action("DELETE")}>清除密钥</button>
+    </div>
+    <small role="status">{busy ? "处理中…" : message}</small>
+  </div>;
 }
 
 function CanvasNodeTextEditor({
@@ -6911,6 +6957,7 @@ function iconForNode(type: CanvasNodeType) {
   if (type === "input.competitor-workbook") return <Sheet {...props} />;
   if (type === "model.gpt-text") return <Sparkles {...props} />;
   if (type === "model.gemini") return <Sparkles {...props} />;
+  if (type === "model.qwen-image") return <WandSparkles {...props} />;
   if (type === "model.gpt-image") return <WandSparkles {...props} />;
   if (type === "model.gpt-image-each") return <GalleryHorizontalEnd {...props} />;
   if (type === "model.gpt-vision") return <Search {...props} />;

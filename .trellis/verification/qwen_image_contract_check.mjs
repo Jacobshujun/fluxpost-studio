@@ -1,0 +1,17 @@
+import assert from "node:assert/strict";
+import { readFileSync } from "node:fs";
+import ts from "typescript";
+const loadedModule = { exports: {} };
+Function("module", "exports", ts.transpileModule(readFileSync("src/lib/qwen-image-contract.ts", "utf8"), { compilerOptions: { module: ts.ModuleKind.CommonJS, target: ts.ScriptTarget.ES2022 } }).outputText)(loadedModule, loadedModule.exports);
+const { buildQwenImageRequest: build, validateQwenEndpoint: endpoint, qwenImageResponseUrls: urls } = loadedModule.exports;
+const valid = "https://fixture.cn-beijing.maas.aliyuncs.com/api/v1/services/aigc/multimodal-generation/generation";
+assert.equal(endpoint(valid), valid);
+for (const invalid of ["", valid.replace("https:", "http:"), valid + "?key=secret", valid.replace("fixture.", "workspace-id."), valid.replace("fixture.cn-beijing.maas.aliyuncs.com", "localhost"), valid.replace("multimodal-generation", "image-generation")]) assert.throws(() => endpoint(invalid));
+assert.deepEqual(build({ prompt: " city ", images: [], promptExtend: false, count: 1 }), { model: "qwen-image-3.0-pro", input: { messages: [{ role: "user", content: [{ text: "city" }] }] }, parameters: { prompt_extend: false, n: 1 } });
+assert.deepEqual(build({ prompt: "edit", images: ["a", "a", "b"], promptExtend: true, count: 2, size: "1024*1024" }).input.messages[0].content, [{ image: "a" }, { image: "a" }, { image: "b" }, { text: "edit" }]);
+for (const patch of [{ images: ["a", "b", "c", "d"] }, { count: 1.5 }, { count: 7 }, { size: "1024x1024" }, { size: "10*10" }, { size: "4096*4096" }, { size: "100*3000" }, { prompt: " " }]) assert.throws(() => build({ prompt: "ok", images: [], promptExtend: true, count: 1, ...patch }));
+const result = (image) => ({ output: { choices: [{ finish_reason: "stop", message: { content: [{ image }] } }] } });
+const image = "https://dashscope-result-sz.oss-cn-shenzhen.aliyuncs.com/result.png?Expires=123";
+assert.deepEqual(urls(result(image)), [image]);
+for (const invalid of [{}, { code: "InvalidApiKey", ...result(image) }, result("http://127.0.0.1/x"), { output: { choices: [] } }, { output: { choices: [{ finish_reason: "length" }] } }]) assert.throws(() => urls(invalid));
+console.log("Qwen native T2I/I2I contract checks passed.");
