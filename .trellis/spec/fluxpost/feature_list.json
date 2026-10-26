@@ -17,7 +17,7 @@
         "Shared filters, manual vehicles, smart folders and Canvas snapshots pass isolated database/browser checks"
       ],
       "evidence": ["2026-10-26 SQLite/PostgreSQL, producer/provenance and three-theme desktop/mobile checks pass; generated-image-library task."],
-      "notes": "Committed bbe4ff9; activation pending. Existing 17-error runtime lint gate; no real history scan or paid/storage writes."
+      "notes": "Implementation bbe4ff9; LAN release tracked in tos-oss-migration/lan-release.md. Operator review remains; known runtime lint blocker."
     },
     {
       "id": "canvas-qwen-image",
@@ -25,7 +25,7 @@
       "status": "ready_for_review",
       "definition_of_done": ["T2I/I2I with secure node-local credentials"],
       "evidence": ["2026-10-26 offline/browser/build pass; canvas-qwen-image task."],
-      "notes": "No live acceptance or activation; existing lint blocker."
+      "notes": "Live acceptance pending; LAN release tracked in tos-oss-migration/lan-release.md. Existing lint blocker."
     },
     {
       "id": "tos-to-oss-migration",
@@ -37,7 +37,7 @@
       "evidence": [
         "2026-10-26 local SDK trial: 8 objects/1,047,830 bytes hash/preview verified; combined Qwen/library/OSS checks/build pass except existing lint gate. See tos-oss-migration/integration-verification.md."
       ],
-      "notes": "No full copy/switch. Target has concurrent changes; managed-service trial untested. Production/deletion require separate approval."
+      "notes": "Full local-SDK copy running for 69,309 objects; operator confirms no lifecycle rules. See bulk-run.md/progress.json. No switch/deletion."
     },
     {
       "id": "canvas-gemini-node",

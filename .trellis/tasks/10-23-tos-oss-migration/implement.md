@@ -32,6 +32,30 @@ managed-service guide review and browser delivery remain pending; see verificati
 
 ## Later gates (not execution approval)
 
+## Bulk run authorized and lifecycle confirmed
+
+- [x] User confirms provider page contains no lifecycle rules; retain this as user
+  evidence, not as a successful SDK policy read.
+- [x] Build and offline-test bounded create-only bulk runner with durable receipts.
+- [x] Refresh inventory, persist immutable runtime manifest, preflight overlap.
+- [x] Start monitored bulk copy; see bulk-run.md / data/oss-migration/progress.json.
+- [ ] Verify frozen manifest, then perform separately coordinated final delta/cutover.
+
+No cloud deletion, broad target overwrite, database rewrite or storage switch.
+
+2026-10-26 full copy is running after operator lifecycle confirmation. Earlier
+preflight gate is historical; use `bulk-run.md` and live progress.json.
+
+## Authorized LAN release
+
+- User requests committing pending changes and updating LAN 3001.
+- Preserve Qwen/library/OSS prior commits. Commit bulk scripts, tests and records.
+- Run baseline and focused checks; never weaken known ignored-data lint errors.
+- Use npm run local:lan from clean primary worktree; no alternate directory/guard bypass.
+- Verify full-SHA identity, 0.0.0.0 binding, pages/auth smoke and bulk worker continuity.
+- Keep effective TOS config unchanged; no GitHub push or production deployment.
+- Keep migration task active until copy/delta/reference work actually completes.
+
 1. Resolve public domain/TLS and test actual image/video GET, HEAD, Range and previews.
 2. Review both environment inventories; trial copy with same keys and content hashes.
 3. Full copy and verification; approve final write freeze and backups.

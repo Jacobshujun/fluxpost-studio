@@ -6,7 +6,9 @@ Prepare local port 3001 and current production for migration to Aliyun OSS
 bucket `xpai-imc`, Guangzhou, SDK endpoint
 `https://oss-cn-guangzhou.aliyuncs.com`. This phase covers credential safety,
 read-only inventory, opt-in code adaptation and the subsequently authorized bounded
-sample trial. Full copy and cutover remain outside this phase.
+sample trial. On 2026-10-26 the user explicitly requested full migration,
+authorizing bulk copy of the confirmed source prefix after safety preflight.
+Historical-reference changes and environment cutover remain outside this phase.
 
 ## Requirements
 
@@ -17,7 +19,13 @@ sample trial. Full copy and cutover remain outside this phase.
   small trial; eight same-key objects were copied by a local script, not by the
   proposed Aliyun managed migration service. No further copy is authorized by the
   later request to organize and commit the integrated code.
-- No historical-reference writes, source deletion, or runtime restart here.
+- Subsequent explicit full-migration request authorizes same-key bulk copy and
+  integrity verification, but not unrelated target overwrites, source deletion,
+  bucket-wide policy changes or application/production cutover.
+- No historical-reference writes or source deletion. A subsequent explicit user
+  request authorizes committing pending changes and activating clean HEAD on LAN
+  port 3001, while preserving the TOS storage config and independent bulk worker.
+  This is application-code activation, not OSS or production cutover.
 - Later phases: sample copy, full copy and content verification, historical-reference
   migration, then switch with an approved short final write freeze.
 - Retain source objects at least seven days after cutover; deletion needs separate approval.

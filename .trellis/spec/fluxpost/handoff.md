@@ -6,6 +6,16 @@ This file is an on-demand history library. Do not read it during default startup
 
 ## 最近一条
 <!-- TRELLIS-LATEST-START -->
+Latest: user authorized full copy and confirmed provider page has no lifecycle
+rules. Two-worker local SDK transfer RUNNING for 69,309 objects / 213.28 GB.
+See `.trellis/tasks/10-23-tos-oss-migration/bulk-run.md` and ignored
+`data/oss-migration/progress.json`; at 11:38:32Z, 565 verified / 1.95 GB, no errors.
+No full-completion claim. Inspect worker/lock/status before any continuation; do
+not launch a second writer or rerun trial. Immutable manifest and fsynced receipts
+are in data/oss-migration. User subsequently authorized committing bulk scripts
+and clean-HEAD LAN activation: see tos-oss-migration/lan-release.md. Do not stop
+bulk worker or switch storage. Runtime identity is /api/version; production unchanged.
+
 2026-10-26: User confirmed other-window changes and authorized integrated commit.
 Qwen 0b775c7 and generated-library bbe4ff9 remain intact in history. OSS changes
 include explicit provider/V4, secret exclusion, inventory and guarded trial tools.
@@ -15,7 +25,8 @@ between inventories, 157 other keys appeared and 46 old keys were absent.
 Integrated deterministic tests/types/build/smoke and config desktop/mobile pass;
 baseline stops at known 17 ignored-script lint errors. No paid Qwen calls.
 Continue from `.trellis/tasks/10-23-tos-oss-migration/integration-verification.md`.
-No bulk migration, history rewrite, push, activation or production switch. Keep
+At that earlier integration point: no bulk migration, history rewrite, push,
+activation or production switch. Keep
 task in progress; coordinate target writers and production inventory before bulk
 copy. TOS retention >=7 days after switch; deletion needs separate confirmation.
 <!-- TRELLIS-LATEST-END -->

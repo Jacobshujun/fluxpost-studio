@@ -28,3 +28,21 @@ hash/version), streaming copy without key normalization, checksum comparison
 DB/queue/snapshot/outbox reference map, backups and explicit rollback manifests.
 No blanket text replacement across third-party URLs or signed query strings.
 Rollback requires retaining source data and accounting for post-switch OSS writes.
+
+## Authorized bulk implementation
+
+User confirms destination lifecycle has no rules (operator evidence, not SDK proof).
+Fixed bucket/prefix allowlist, private immutable per-job manifest and exclusive
+writer lock. Two workers, at most 1 GiB per staged file. SHA-256 is computed during
+conditional TOS GET to disk, then compared with a conditional full OSS GET. Create
+only with x-oss-forbid-overwrite; existing objects must match bytes and supported
+headers or stop. Forward MIME/cache/encoding/disposition/language/expiry and user
+metadata (x-tos-meta-* to x-oss-meta-*); do not mutate bucket policy. Native modified
+time is not writable in OSS: record source time in journal, not claim preservation.
+Reject non-standard storage/append/symlink inputs for review. One persistent
+append-and-fsync journal records write intent before upload and success only after
+read-back verification. Stop dispatch on first error; current two objects may finish.
+No automatic retries; rerun validates existing destination content rather than
+trusting size or old receipts. Ctrl-C/STOP file stops dispatch without deleting
+cloud objects; abrupt termination leaves staged bytes/journal for inspection.
+Final write freeze and delta inventory remain separate from this live snapshot.
