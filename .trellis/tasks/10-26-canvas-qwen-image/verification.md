@@ -35,4 +35,4 @@ Date: 2026-10-26. Scope: local implementation, not activation/deployment or live
 
 ## Follow-Up
 
-The verified task changes are committed separately from unrelated OSS work. A clean-worktree local activation and exact-SHA production release are separate steps. Enter the real workspace endpoint and key in the node after activation, then intentionally run one T2I and one I2I for paid acceptance.
+The verified task changes are committed as `0b775c7694d681e6c3bbb20b5c30a8c7d5c766c4`, separately from unrelated OSS work. A clean-worktree local activation and exact-SHA production release are separate steps. Enter the real workspace endpoint and key in the node after activation, then intentionally run one T2I and one I2I for paid acceptance.

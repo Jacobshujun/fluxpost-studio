@@ -15,12 +15,12 @@
   "branch": null,
   "base_branch": "local",
   "worktree_path": null,
-  "commit": null,
+  "commit": "0b775c7694d681e6c3bbb20b5c30a8c7d5c766c4",
   "pr_url": null,
   "subtasks": [],
   "children": [],
   "parent": null,
   "relatedFiles": [],
-  "notes": "Verified locally; no live acceptance or activation. Commit recorded at archive time.",
+  "notes": "Verified locally; no live acceptance or activation.",
   "meta": {}
 }
