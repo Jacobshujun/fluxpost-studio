@@ -1258,8 +1258,6 @@ export type LibraryColorCoverage = { total: number; analyzed: number; failed: nu
 export type LibraryColorJobState = { job?: LibraryColorJob; coverage: LibraryColorCoverage };
 
 export type LibraryAsset = {
-  generated?: { entry: string; taskId: string; generatedAt: string; timeBasis: string };
-  generatedSources?: Array<{ entry: string; taskId: string; sourceId: string; sourceKind: string }>;
   id: string;
   ownerUserId: string;
   ownerDisplayName: string;
@@ -1309,12 +1307,6 @@ export type LibraryCollection = {
 };
 
 export type LibrarySmartFolderField =
-  | "generated"
-  | "generationEntry"
-  | "filename"
-  | "generatedAt"
-  | "unlabelledVehicle"
-  | "vehicleModel"
   | "tag"
   | "collection"
   | "text"
@@ -1361,12 +1353,6 @@ export type LibrarySmartFolder = {
 };
 
 export type LibraryAssetFilters = {
-  generated?: boolean;
-  generationEntry?: string;
-  filename?: string;
-  generatedFrom?: string;
-  generatedBefore?: string;
-  unlabelledVehicle?: boolean;
   color?: string;
   cursor?: string;
   limit?: number;
@@ -1425,7 +1411,7 @@ export type LibraryAssetPage = {
 export type LibraryNavigation = {
   collections: LibraryCollection[];
   smartFolders: LibrarySmartFolder[];
-  counts: { all: number; uncategorized: number; favorites: number; generated?: number };
+  counts: { all: number; uncategorized: number; favorites: number };
 };
 
 export type LibraryTagSuggestion = {

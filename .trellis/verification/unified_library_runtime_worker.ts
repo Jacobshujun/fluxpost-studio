@@ -123,6 +123,11 @@ let rejected = false;
 try { library.parseLibraryAssetFilters(new URL("http://local/api/library/assets?role=vehicle")); } catch { rejected = true; }
 assert(rejected, "Public role filter was not rejected.");
 const migrated = new DatabaseSync(file, { readOnly: true });
+assert(migrated.prepare("SELECT name FROM sqlite_master WHERE type='table' AND name LIKE 'generated_image_%'").all().length === 0, "Ordinary library must work without generated-image tables.");
+const navigation = await library.listLibraryNavigation(actor);
+assert(navigation.counts.all === 2 && navigation.collections.length > 0, "Ordinary navigation must survive generated-library retirement.");
+assert((await library.getLibraryAsset(actor, "a-1")).id === "a-1", "Ordinary detail must survive generated-library retirement.");
+assert((await library.listLibraryTagSuggestions(actor)).length > 0, "Ordinary tags must survive generated-library retirement.");
 const workflow = JSON.parse(String((migrated.prepare("SELECT data_json FROM canvas_workflows WHERE id='workflow-1'").get() as { data_json: string }).data_json));
 const source = workflow.graph.nodes[0].config.source;
 assert(!("role" in source) && source.filter.collectionId === vehicleRoot.id && source.filter.includeDescendants === true, "Legacy Canvas source was not migrated to the root collection.");

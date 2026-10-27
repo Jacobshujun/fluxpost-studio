@@ -1,15 +1,15 @@
 import { normalizeLibraryListSort } from "@/lib/library-sort";
 import type { LibraryAssetFilters, LibraryTaggingStatus, LibrarySmartFolderCondition } from "@/lib/types";
 
-export type LibraryView = { kind: "all" } | { kind: "generated" } | { kind: "uncategorized" } | { kind: "favorites" } | { kind: "collection" | "smart"; id: string };
+export type LibraryView = { kind: "all" } | { kind: "uncategorized" } | { kind: "favorites" } | { kind: "collection" | "smart"; id: string };
 export const taggingLabels: Record<LibraryTaggingStatus, string> = { idle: "未打标", queued: "排队中", running: "打标中", completed: "已完成", failed: "失败" };
 export const numericFilters = ["minWidth", "maxWidth", "minHeight", "maxHeight", "minByteSize", "maxByteSize"] as const;
 export const dimensionFilters = { imageTypes: "imageType", vehicleModels: "vehicleModel", vehicleColors: "vehicleColor", angles: "angle", scenes: "scene", people: "people", customTags: "customTag", tags: "tag", ownerIds: "ownerId" } as const;
-export const filterKeys = ["generated", "generationEntry", "filename", "generatedFrom", "generatedBefore", "unlabelledVehicle", "color", "q", "visibility", "taggingStatus", "addedFrom", "addedBefore", ...numericFilters, ...Object.values(dimensionFilters)];
+export const filterKeys = ["color", "q", "visibility", "taggingStatus", "addedFrom", "addedBefore", ...numericFilters, ...Object.values(dimensionFilters)];
 
 export function readLibraryView(params: URLSearchParams): LibraryView {
   const value = params.get("view") || "all";
-  if (value === "uncategorized" || value === "favorites" || value === "generated") return { kind: value };
+  if (value === "uncategorized" || value === "favorites") return { kind: value };
   const separator = value.indexOf(":");
   const kind = value.slice(0, separator);
   if ((kind === "collection" || kind === "smart") && separator > 0 && value.slice(separator + 1)) return { kind, id: value.slice(separator + 1) };
@@ -22,10 +22,6 @@ export function readLibraryFilters(params: URLSearchParams): LibraryAssetFilters
   const visibility = params.get("visibility");
   const status = params.get("taggingStatus");
   const filters: LibraryAssetFilters = {
-    generated: view.kind === "generated" || params.get("generated") === "true",
-    generationEntry: params.get("generationEntry") || undefined, filename: params.get("filename") || undefined,
-    generatedFrom: validDate(params.get("generatedFrom")), generatedBefore: validDate(params.get("generatedBefore")),
-    unlabelledVehicle: params.get("unlabelledVehicle") === "true",
     color: /^#[0-9a-f]{6}$/i.test(params.get("color") || "") ? params.get("color")!.toUpperCase() : undefined,
     search: params.get("q")?.trim() || undefined, limit: 60, sort: normalizeLibraryListSort(params.get("sort")),
     collectionId: view.kind === "collection" ? view.id : undefined,
@@ -80,8 +76,6 @@ export function validateFilterRanges(params: URLSearchParams) {
 }
 
 export const smartOperators: Record<LibrarySmartFolderCondition["field"], LibrarySmartFolderCondition["operator"][]> = {
-  generated: ["is"], generationEntry: ["equals", "one_of"], filename: ["contains", "not_contains"],
-  generatedAt: ["before", "after"], unlabelledVehicle: ["is"], vehicleModel: ["equals", "one_of"],
   tag: ["contains", "not_contains"], collection: ["contains", "not_contains"], text: ["contains", "not_contains"],
   owner: ["equals", "one_of"], visibility: ["equals", "one_of"], imageType: ["equals", "one_of", "not_contains"],
   width: ["equals", "gte", "lte"], height: ["equals", "gte", "lte"], byteSize: ["equals", "gte", "lte"],

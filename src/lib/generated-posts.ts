@@ -17,8 +17,6 @@ import {
 import { clampGeneratedTitleMax } from "./title-guard";
 import { applyFinishedBodyPolicy } from "./finished-body-policy";
 import type { GeneratedPost } from "./types";
-import { linkGeneratedPostImages } from "./generated-image-store";
-import { recordExecutionLog } from "./activity-log";
 
 type StoredGeneratedPosts = {
   posts: GeneratedPost[];
@@ -62,11 +60,6 @@ export async function saveGeneratedPost(post: GeneratedPost, account?: Workspace
     updatedAt: post.updatedAt || new Date().toISOString(),
   };
   await saveGeneratedPostToDb(nextPost);
-  try { await linkGeneratedPostImages(nextPost); }
-  catch (error) {
-    await recordExecutionLog({ scope: "library/generated", action: "Generated image post association failed", status: "error",
-      message: "Post saved; retry generated-library history reconciliation without regenerating images.", details: { postId: nextPost.id, error: error instanceof Error ? error.message : String(error) } });
-  }
   return nextPost;
 }
 

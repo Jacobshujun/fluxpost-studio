@@ -2,7 +2,6 @@ import { randomUUID } from "node:crypto";
 import { mkdir, readFile, rename, rm, stat, writeFile } from "node:fs/promises";
 import path from "node:path";
 import sharp from "sharp";
-import { isGeneratedLocalUrl, readGeneratedLocalImage } from "./generated-image-media";
 import { runWithConcurrencyPool } from "./concurrency";
 import { isManagedRuntimeMediaUrl } from "./runtime-media-storage";
 import type { LibraryAsset } from "./types";
@@ -61,7 +60,7 @@ export function libraryThumbnailPath(sha256: string, cacheDirectory = cacheRoot,
 
 function assertAssetThumbnailSource(asset: Pick<LibraryAsset, "publicUrl" | "sha256">, isManagedSource: (url: string) => boolean) {
   normalizeSha256(asset.sha256);
-  if (!isGeneratedLocalUrl(asset.publicUrl) && !isManagedSource(asset.publicUrl)) throw new Error("Library thumbnail source is not managed application media.");
+  if (!isManagedSource(asset.publicUrl)) throw new Error("Library thumbnail source is not managed TOS media.");
 }
 
 async function generateOrReadThumbnail(
@@ -77,7 +76,7 @@ async function generateOrReadThumbnail(
   const cached = await readValidThumbnail(filePath, dimensions.width, dimensions.height);
   if (cached) return { bytes: cached, cacheStatus: "hit", etag: thumbnailEtag(asset.sha256, variant) };
 
-  const source = isGeneratedLocalUrl(asset.publicUrl) ? await readGeneratedLocalImage(asset.publicUrl) : await downloadThumbnailSource(asset.publicUrl, fetchSource);
+  const source = await downloadThumbnailSource(asset.publicUrl, fetchSource);
   let bytes: Buffer;
   try {
     bytes = await sharp(source, { failOn: "error", limitInputPixels: 80_000_000 })

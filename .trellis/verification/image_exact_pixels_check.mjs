@@ -115,7 +115,6 @@ async function fixture(width, height, format) {
 function harness(buffer, profile = "openai_sse", model = "fixture") {
   const state = { writes: [], uploads: 0, logs: [], requests: 0, generationRequests: 0, preparations: 0, referenceUploads: 0, requestBodies: [] };
   const dependencies = {
-    captureGeneratedImage: async (url) => url,
     sharp, path, Buffer, process, FormData, Blob,
     ImageProviderError: contracts.ImageProviderError,
     IMAGE_PROVIDER_CAPABILITIES: contracts.IMAGE_PROVIDER_CAPABILITIES,

@@ -22,7 +22,6 @@ This layer is the project-specific operating memory migrated from the previous H
 | [pitfalls.md](./pitfalls.md) | Known traps and integration risks. |
 | [architecture_rules.md](./architecture_rules.md) | Module, data, deployment, and Trellis boundaries. |
 | [unified_library.md](./unified_library.md) | Unified image asset, collection, smart-folder, query, migration, and performance contracts. |
-| [generated_library.md](./generated_library.md) | Generated originals, provenance, backfill, exclusions and Canvas filters. |
 | [image_transport.md](./image_transport.md) | Image-only Xray routing, health, Canvas recovery, and ToAPIs resume contracts. |
 | [toapis_image_contract.md](./toapis_image_contract.md) | Ordinary/Official image request fields, pixels, transparency and Canvas propagation. |
 | [canvas_image_process.md](./canvas_image_process.md) | Local image processing, size ceilings, geometry, cache and result contracts. |

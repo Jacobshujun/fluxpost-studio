@@ -1,4 +1,3 @@
-import { withGeneratedImageContext } from "../generated-image-capture";
 import { createHash, randomUUID } from "node:crypto";
 import { mapWithConcurrency } from "../concurrency";
 import { enqueueFeishuPublishJob, ensureFeishuPublishQueueWorker } from "../feishu-publish-queue";
@@ -136,7 +135,7 @@ const executors: Record<CanvasNode["type"], CanvasNodeExecutor> = {
 };
 
 export async function executeCanvasNode(context: CanvasNodeExecutionContext) {
-  return withGeneratedImageContext({ ownerUserId: context.account.id, ownerDisplayName: context.account.displayName, entry: "canvas", taskId: context.runId, sourceId: `${context.runId}:${context.node.id}` }, () => executors[context.node.type](context));
+  return executors[context.node.type](context);
 }
 
 async function executeLiteralNode({ node }: CanvasNodeExecutionContext) {

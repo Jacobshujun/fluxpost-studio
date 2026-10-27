@@ -78,11 +78,17 @@ if (Test-Path -LiteralPath $statePath -PathType Leaf) {
   }
 }
 
-if (-not $previousState -and (Test-Path -LiteralPath (Join-Path $projectRoot ".next\BUILD_ID") -PathType Leaf)) {
+$legacyManifestPath = Join-Path $projectRoot ".next\.fluxpost-commit"
+if (-not $previousState -and
+    (Test-Path -LiteralPath $legacyManifestPath -PathType Leaf) -and
+    (Test-Path -LiteralPath (Join-Path $projectRoot ".next\BUILD_ID") -PathType Leaf)) {
   try {
+    # A running process does not identify files rebuilt on disk after it started.
+    $legacyBuildSha = (Get-Content -LiteralPath $legacyManifestPath -Raw).Trim()
     $legacyVersion = Invoke-RestMethod -Uri "http://127.0.0.1:$Port/api/version" -TimeoutSec 5
     if ($legacyVersion.mode -eq "candidate" -and
         $legacyVersion.commit -match '^[0-9a-f]{40}$' -and
+        $legacyBuildSha -eq $legacyVersion.commit -and
         $legacyVersion.versioned -eq $true) {
       $previousState = [pscustomobject]@{ slot = ".next"; commit = [string]$legacyVersion.commit }
       Write-Host "Using the current primary-worktree .next candidate as first-activation rollback"

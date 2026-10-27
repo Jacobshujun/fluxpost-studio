@@ -48,9 +48,6 @@ try {
     fileName: "list-selection.ts",
   }).outputText, "utf8");
   const require = createRequire(import.meta.url);
-  writeFileSync(path.join(temp, "generated-image-filters.js"), ts.transpileModule(read("src/lib/generated-image-filters.ts"), {
-    compilerOptions: { module: ts.ModuleKind.CommonJS, target: ts.ScriptTarget.ES2022 },
-  }).outputText);
   const selection = require(path.join(temp, "list-selection.js"));
   const registry = require(path.join(temp, "registry.js"));
   const graphModule = require(path.join(temp, "graph.js"));
@@ -168,7 +165,6 @@ try {
   Function("require", "module", "exports", "structuredClone", "setTimeout", `${schedulerOutput}\nmodule.exports.resolveScheduleAssetPool = resolveScheduleAssetPool;`)(
     (name) => {
       if (name === "node:crypto") return require("node:crypto");
-      if (name === "../generated-image-filters") return require(path.join(temp, "generated-image-filters.js"));
       if (Object.hasOwn(stubs, name)) return stubs[name];
       throw new Error(`Unexpected scheduler import: ${name}`);
     },
@@ -813,7 +809,7 @@ try {
   });
   assert.deepEqual(savedPromptSchedule.definition.parameters[0].source, promptParameter.source, "save normalization must preserve separator and full prompt strings");
   assert.deepEqual(storedSchedule.definition.parameters[0].source, promptParameter.source, "storage must receive separator metadata");
-  for (const scope of [{ generated: true, generationEntry: "canvas", filename: "car", vehicleModels: ["Model"], unlabelledVehicle: true, generatedFrom: "2026-01-01T00:00:00.000Z", smartFolderId: "smart-favorites" }, { smartFolderId: "smart-favorites", color: "#3876C7" }, { collectionId: "collection-1", includeDescendants: false, color: "#D43C3C" }]) {
+  for (const scope of [{ smartFolderId: "smart-favorites", color: "#3876C7" }, { collectionId: "collection-1", includeDescendants: false, color: "#D43C3C" }]) {
     const filter = { mode: "random", assetIds: [], search: "car", tags: ["exterior"], ...scope };
     const definition = { ...v2Definition, parameters: [{
       ...v2Definition.parameters[0], source: { mode: "library-filter", filter },
@@ -829,6 +825,23 @@ try {
   }
   await scheduler.resolveScheduleAssetPool(account, { mode: "random", assetIds: [], search: "", tags: [], color: "#3876C7" });
   assert.equal(libraryQueries.at(-1).color, "#3876C7", "preflight must use the saved color filter");
+  const retiredGeneratedSchedule = structuredClone(storedSchedule);
+  retiredGeneratedSchedule.revision += 1;
+  retiredGeneratedSchedule.batches = [{
+    id: "retired-generated-batch", name: "Retired", strategy: "scene", sceneCount: 1, vehicleCountMin: 1, vehicleCountMax: 1,
+    status: "draft", contentTasks: [], createdAt: new Date().toISOString(), updatedAt: new Date().toISOString(),
+    sceneFilter: { mode: "random", assetIds: [], search: "", tags: [], generated: true },
+    vehicleFilter: { mode: "manual", assetIds: [], search: "", tags: [] },
+  }];
+  storedSchedule = retiredGeneratedSchedule;
+  await assert.rejects(
+    () => scheduler.updateCanvasScheduleDraft(storedSchedule.id, account, {
+      revision: storedSchedule.revision,
+      batches: storedSchedule.batches,
+    }),
+    /retired generated-image filter/i,
+    "saved schedules containing generated-image-only filters must be rejected",
+  );
   const sourceVideoGraph = {
     nodes: [
       { ...node("source-video", "input.source-video"), executionMode: "disabled" },

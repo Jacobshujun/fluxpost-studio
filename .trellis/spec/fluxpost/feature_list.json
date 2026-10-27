@@ -11,13 +11,13 @@
     {
       "id": "generated-image-library",
       "title": "Generated originals in the unified library and Canvas",
-      "status": "ready_for_review",
+      "status": "blocked",
       "definition_of_done": [
         "Provenance-only resumable history and new-output enrollment preserve ownership, exclusions and originals",
         "Shared filters, manual vehicles, smart folders and Canvas snapshots pass isolated database/browser checks"
       ],
-      "evidence": ["2026-10-26 SQLite/PostgreSQL, producer/provenance and three-theme desktop/mobile checks pass; generated-image-library task."],
-      "notes": "Implementation bbe4ff9; LAN release tracked in tos-oss-migration/lan-release.md. Operator review remains; known runtime lint blocker."
+      "evidence": ["Cancelled by user on 2026-10-27; implementation removed with local index cleanup evidence in the remove-generated-image-library task."],
+      "notes": "Retired feature. Do not restore generated-image library code, API, filters, or index tables without a new user request and design."
     },
     {
       "id": "canvas-qwen-image",

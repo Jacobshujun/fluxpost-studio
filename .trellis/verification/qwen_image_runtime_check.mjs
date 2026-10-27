@@ -18,7 +18,6 @@ const db = new Map(), calls = [], persisted = [];
 let storageFails = false, responseMode = "ok", downloadedAuth;
 const png = await sharp({ create: { width: 512, height: 512, channels: 4, background: "orange" } }).png().toBuffer();
 const stubs = {
-  "./generated-image-capture": { captureGeneratedImage: async (url) => url },
   "../database": {
     readAppMetaValue: async (key) => db.get(key), writeAppMetaValue: async (key, value) => db.set(key, value),
     compareAndSetAppMetaValue: async (key, expected, value) => { if (db.get(key) !== expected) return false; db.set(key, value); return true; },
@@ -117,7 +116,6 @@ try {
   const executorSource = readFileSync(path.join(root, "src/lib/canvas/executors.ts"), "utf8");
   const executorModule = { exports: {} };
   const imports = Object.fromEntries([...executorSource.matchAll(/from "([^"\n]+)"/g)].map((match) => [match[1], {}]));
-  imports["../generated-image-capture"] = { withGeneratedImageContext: (_context, operation) => operation() };
   let executorInput;
   imports["../qwen-image"] = { generateQwenImages: async (input) => { executorInput = input; return [{ url: "/generated/fixture.png" }]; } };
   imports["./qwen-credentials"] = credentials;

@@ -17,6 +17,13 @@ const maxIdentifierLength = 160;
 const maxNodeLabelLength = 120;
 const maxViewportZoom = 16;
 const schedulerRoles = new Set<string>(CANVAS_SCHEDULER_ROLES);
+const retiredGeneratedImageFields = new Set([
+  "generated",
+  "generationEntry",
+  "generatedFrom",
+  "generatedBefore",
+  "unlabelledVehicle",
+]);
 
 export class CanvasSerializationError extends Error {
   constructor(message: string) {
@@ -27,6 +34,7 @@ export class CanvasSerializationError extends Error {
 
 export function decodeCanvasGraph(value: unknown): CanvasGraph {
   if (!isRecord(value)) throw new CanvasSerializationError("Canvas graph must be an object.");
+  assertNoRetiredGeneratedImageFilters(value);
   const fragment = decodeCanvasGraphFragment(value.nodes, value.edges, true);
   return { ...fragment, viewport: decodeCanvasViewport(value.viewport), ...(value.groups === undefined ? {} : { groups: decodeCanvasGroups(value.groups) }) };
 }
@@ -190,6 +198,19 @@ function isCanvasCoordinate(value: unknown): value is number {
 
 function isCanvasIdentifier(value: unknown): value is string {
   return typeof value === "string" && value.length > 0 && value.length <= maxIdentifierLength;
+}
+
+function assertNoRetiredGeneratedImageFilters(value: unknown) {
+  if (Array.isArray(value)) {
+    for (const entry of value) assertNoRetiredGeneratedImageFilters(entry);
+    return;
+  }
+  if (!isRecord(value)) return;
+  if (value.mode === "library-filter" && isRecord(value.filter)
+    && Object.keys(value.filter).some((key) => retiredGeneratedImageFields.has(key))) {
+    throw new CanvasSerializationError("The workspace contains a retired generated-image filter. Remove it before loading this workflow.");
+  }
+  for (const entry of Object.values(value)) assertNoRetiredGeneratedImageFilters(entry);
 }
 
 function isCanvasNodeConfig(value: unknown, nodeType: CanvasNode["type"]): value is CanvasNode["config"] {

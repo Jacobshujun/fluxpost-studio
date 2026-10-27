@@ -1,5 +1,3 @@
-import { randomUUID } from "node:crypto";
-import { withGeneratedImageContext } from "@/lib/generated-image-capture";
 import { NextResponse } from "next/server";
 import { compactError, recordExecutionLog } from "@/lib/activity-log";
 import { concurrencyConfig } from "@/lib/concurrency";
@@ -13,7 +11,7 @@ export const runtime = "nodejs";
 export async function POST(request: Request) {
   const startedAt = Date.now();
   try {
-    const account = await requireWorkspaceAccount(request);
+    await requireWorkspaceAccount(request);
     const body = (await request.json()) as {
       prompt?: string;
       count?: number;
@@ -46,13 +44,11 @@ export async function POST(request: Request) {
         quality: body.quality || "medium",
       },
     });
-    const prompt = body.prompt.trim();
-    const taskId = `images-${randomUUID()}`;
-    const result = await withGeneratedImageContext({ ownerUserId: account.id, ownerDisplayName: account.displayName, entry: "images", taskId, sourceId: taskId }, () => generateImagesFromPrompt(prompt, body.count || 1, Array.isArray(body.imageTasks) ? body.imageTasks : undefined, {
+    const result = await generateImagesFromPrompt(body.prompt.trim(), body.count || 1, Array.isArray(body.imageTasks) ? body.imageTasks : undefined, {
       size: imageSize,
       quality: body.quality,
       taskConcurrency: concurrencyConfig.image,
-    }));
+    });
     await recordExecutionLog({
       scope: "images",
       action: "图片生成完成",

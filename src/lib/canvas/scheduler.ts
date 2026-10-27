@@ -1,4 +1,3 @@
-import { normalizeGeneratedLibraryFilters } from "../generated-image-filters";
 import { normalizeLibraryColor } from "../library-color";
 import { createHash, randomUUID } from "node:crypto";
 import {
@@ -122,7 +121,9 @@ export async function listCanvasSchedules(account: WorkspaceAccessActor) {
 export async function getCanvasSchedule(scheduleId: string, account: WorkspaceAccessActor) {
   await reconcileCanvasSchedules([scheduleId]);
   const schedule = await getCanvasScheduleFromDb(scheduleId);
-  return schedule && canAccessWorkspaceOwner(account, schedule.ownerUserId) ? normalizeStoredSchedule(schedule) : undefined;
+  if (!schedule || !canAccessWorkspaceOwner(account, schedule.ownerUserId)) return undefined;
+  assertNoRetiredGeneratedImageFilters(schedule);
+  return normalizeStoredSchedule(schedule);
 }
 
 export async function createCanvasSchedule(account: WorkspaceAccessActor, input: { workflowId: string; name?: string; schemaVersion?: 1 | 2 }) {
@@ -158,6 +159,7 @@ export async function updateCanvasScheduleDraft(
   account: WorkspaceAccessActor,
   input: { revision: number; name?: string; batches?: ScheduleBatchDraft[]; definition?: CanvasScheduleV2Definition },
 ) {
+  assertNoRetiredGeneratedImageFilters(input);
   const current = await requireSchedule(scheduleId, account);
   if (!mutableScheduleStatuses.has(current.status)) throw new Error("Launched schedules are immutable. Duplicate this schedule to edit it.");
   assertRevision(current, input.revision);
@@ -298,6 +300,7 @@ export async function launchCanvasSchedule(
   account: WorkspaceAccessActor,
   input: { revision: number; previewRevision: string },
 ) {
+  assertNoRetiredGeneratedImageFilters({ scheduleId, input });
   const current = await requireSchedule(scheduleId, account);
   if (current.status !== "ready" || !current.previewRevision) throw new Error("Run preflight before launching this schedule.");
   assertRevision(current, input.revision);
@@ -1662,6 +1665,7 @@ async function syncGeneratedPostCandidatesV2(
 async function requireSchedule(scheduleId: string, account: WorkspaceAccessActor) {
   const schedule = await getCanvasScheduleFromDb(scheduleId);
   assertCanAccessWorkspaceRecord(account, schedule, "Canvas schedule not found");
+  assertNoRetiredGeneratedImageFilters(schedule);
   return normalizeStoredSchedule(schedule!);
 }
 
@@ -1694,7 +1698,6 @@ async function resolveScheduleAssetPool(account: WorkspaceAccessActor, filter: C
       limit: 100,
       cursor,
       ...(filter.mode === "random" ? {
-        ...normalizeGeneratedLibraryFilters(filter),
         search: filter.search,
         color: filter.color,
         collectionId: filter.collectionId,
@@ -1999,7 +2002,6 @@ function stripBatchRuntime(batch: CanvasScheduleBatch): CanvasScheduleBatch {
 
 function normalizeAssetFilter(value: CanvasScheduleAssetFilter | undefined): CanvasScheduleAssetFilter {
   return {
-    ...normalizeGeneratedLibraryFilters(value),
     mode: value?.mode === "random" ? "random" : "manual",
     assetIds: uniqueStrings(value?.assetIds || []).slice(0, maxImageTasks),
     search: String(value?.search || "").trim().slice(0, 120),
@@ -2009,6 +2011,26 @@ function normalizeAssetFilter(value: CanvasScheduleAssetFilter | undefined): Can
     smartFolderId: String(value?.smartFolderId || "").trim() || undefined,
     tags: uniqueStrings(value?.tags || []).slice(0, 20),
   };
+}
+
+function assertNoRetiredGeneratedImageFilters(value: unknown) {
+  if (Array.isArray(value)) {
+    for (const entry of value) assertNoRetiredGeneratedImageFilters(entry);
+    return;
+  }
+  if (!value || typeof value !== "object") return;
+  const record = value as Record<string, unknown>;
+  const filter = record.mode === "library-filter" && record.filter && typeof record.filter === "object"
+    ? record.filter as Record<string, unknown>
+    : undefined;
+  if (filter && ["generated", "generationEntry", "filename", "generatedFrom", "generatedBefore", "unlabelledVehicle"].some((key) => Object.hasOwn(filter, key))) {
+    throw new Error("The schedule contains a retired generated-image filter. Remove it before loading this schedule.");
+  }
+  if (Array.isArray(record.assetIds) && typeof record.search === "string" && Array.isArray(record.tags)
+    && ["generated", "generationEntry", "filename", "generatedFrom", "generatedBefore", "unlabelledVehicle"].some((key) => Object.hasOwn(record, key))) {
+    throw new Error("The schedule contains a retired generated-image filter. Remove it before loading this schedule.");
+  }
+  for (const entry of Object.values(record)) assertNoRetiredGeneratedImageFilters(entry);
 }
 
 function emptyAssetFilter(): CanvasScheduleAssetFilter {

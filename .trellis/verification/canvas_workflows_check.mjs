@@ -693,6 +693,17 @@ try {
   cyclicWorkflowFile.graph.edges.push({ id: "workflow-cycle", source: "gpt", sourcePort: "text", target: "gpt", targetPort: "prompt" });
   assert.throws(() => parseCanvasWorkflowFile(JSON.stringify(cyclicWorkflowFile)), /cycles/i);
 
+  const retiredGeneratedFilterFile = structuredClone(workflowFile);
+  retiredGeneratedFilterFile.graph.nodes[0].config.source = {
+    mode: "library-filter",
+    filter: { mode: "random", assetIds: [], search: "", tags: [], generationEntry: "canvas" },
+  };
+  assert.throws(
+    () => parseCanvasWorkflowFile(JSON.stringify(retiredGeneratedFilterFile)),
+    /retired generated-image filter/i,
+    "workflow parsing must reject the entire retired generated-image contract",
+  );
+
   const executorSource = read("src/lib/canvas/executors.ts");
   const executeDisplayAny = compileFunction(executorSource, "executeDisplayAny", { structuredClone });
   const displayArtifact = { kind: "socialPost", postId: "post-1", post: { title: "展示标题", imageUrls: [], videoUrls: [], platform: "xiaohongshu" } };

@@ -1,4 +1,3 @@
-import { withGeneratedImageContext } from "./generated-image-capture";
 import { processSimpleImages } from "./simple-image-processing";
 import { compactError, recordExecutionLog, runWithExecutionLogOwner } from "./activity-log";
 import { appConfig } from "./config";
@@ -494,12 +493,7 @@ function runWithSimpleRunOwner<T>(input: SimpleRunInput, operation: () => Promis
   return access ? runWithExecutionLogOwner(access, operation) : operation();
 }
 
-async function runSimpleRunWorkflow(run: SimpleRun, normalizedInput: SimpleRunInput, settings: WorkspacePromptSettings, startedAt: number) {
-  return withGeneratedImageContext({ ownerUserId: run.ownerUserId || normalizedInput.ownerUserId, ownerDisplayName: run.ownerDisplayName || normalizedInput.ownerDisplayName,
-    entry: "simple", taskId: run.id, sourceId: run.id }, () => runSimpleRunWorkflowInner(run, normalizedInput, settings, startedAt));
-}
-
-async function runSimpleRunWorkflowInner(
+async function runSimpleRunWorkflow(
   run: SimpleRun,
   normalizedInput: SimpleRunInput,
   settings: WorkspacePromptSettings,

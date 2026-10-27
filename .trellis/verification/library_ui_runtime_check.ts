@@ -22,4 +22,13 @@ assert.throws(() => validateFilterRanges(new URLSearchParams("minByteSize=-1")))
 assert.throws(() => validateFilterRanges(new URLSearchParams("addedFrom=2026-10-15T00:00:00Z&addedBefore=2026-10-14T00:00:00Z")));
 assert.deepEqual(smartOperators.favorite, ["is"]);
 assert.deepEqual(smartOperators.createdAt, ["before", "after"]);
+for (const field of ["generated", "generationEntry", "filename", "generatedAt", "unlabelledVehicle", "vehicleModel"]) {
+  assert.equal(Object.hasOwn(smartOperators, field), false, `${field} must not remain a smart-folder field`);
+}
+const retired = readLibraryFilters(new URLSearchParams("generated=true&generationEntry=canvas&filename=old.png&unlabelledVehicle=true"));
+for (const field of ["generated", "generationEntry", "filename", "generatedFrom", "generatedBefore", "unlabelledVehicle"]) {
+  assert.equal(Object.hasOwn(retired, field), false, `${field} must not be parsed into library filters`);
+}
+assert.deepEqual(retired.tags, []);
+assert.equal(retired.search, undefined);
 console.log("Gallery filter wire names, descendant scope, statuses, Beijing dates and validation passed.");

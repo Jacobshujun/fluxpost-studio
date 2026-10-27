@@ -6,6 +6,13 @@ This file is an on-demand history library. Do not read it during default startup
 
 ## 最近一条
 <!-- TRELLIS-LATEST-START -->
+2026-10-27 latest: user cancelled the generated-image library. Removed its
+worker, capture, API, filters, schema and UI; retired filters now reject the
+entire workflow/schedule. Local PostgreSQL cleanup removed 22,255 indexed
+assets and the three generated-image tables with no orphaned library rows.
+Ordinary media, generated posts, runs and OSS/TOS objects are unchanged.
+Port 3001 still serves 72dca31; no push, deploy or candidate activation.
+
 Newest 2026-10-27: user requested operator CLI. `npm run migrate` opens Chinese
 menu; status/watch read local progress, start resumes fixed manifest with
 confirmation/process/lock checks, stop uses graceful STOP (not process kill).

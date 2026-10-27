@@ -4,16 +4,16 @@ Last updated: 2026-10-27
 
 ## One-Line Status
 
-Material-overflow fix verified; LAN commit/activation authorized. Library-name audit pending; local copy stopped.
+Ordinary library recovery approved; backup verified. Port 3001 still runs incompatible old code; activation pending.
 
 ## Current Focus
 
-- Generated library: SQLite/PostgreSQL and three-theme desktop/mobile pass; see `.trellis/tasks/archive/2026-10/10-26-generated-image-library/verification.md`. Committed bbe4ff9; OSS preserved.
-- Qwen `0b775c7` included in authorized LAN release; Gemini live testing paused. Prior evidence: `archive/status-2026-10-26-before-generated-library.md`.
+- Generated library retired: 22,255 index assets and three tables removed without a cleanup backup. Ordinary assets remain: 2,301; nonempty collections: 24; memberships: 2,230; labels: 5,302.
+- Qwen `0b775c7` included in authorized LAN release; Gemini live testing paused.
 
 ## Next Entry
 
-Fix evidence: `.trellis/tasks/archive/2026-10/10-27-simple-material-overflow/verification.md`. LAN result: ignored `test-artifacts/lan-material-overflow-release.json`; verify runtime SHA. No replay or filename repair. Cloud copy stays stopped.
+Execute `.trellis/tasks/10-27-10-27-remove-generated-image-library/recovery-plan.md`: verify, commit, activate LAN candidate. No reimport or generated-table recreation. Cloud copy stays stopped.
 
 ## Risks And Unknowns
 
@@ -24,5 +24,7 @@ Fix evidence: `.trellis/tasks/archive/2026-10/10-27-simple-material-overflow/ver
 - Real 621-asset runtime migration and authenticated gallery/multi-user review remain operator gates; isolated fixture migration passed. PostgreSQL subtree benchmark P95 is 252.6ms against 300ms.
 - No paid Qwen model or publishing acceptance. Local OSS copy stopped. Audit: 21 advisories (2 moderate/18 high/1 critical); no forced fix. Qwen key backup is operator-managed.
 - Stationary Mac Chrome Canvas flicker cause remains unconfirmed; Windows evidence points to edge animations/compositing as a candidate only.
+- Old `72dca31` ordinary list/navigation fail on dropped tables (`42P01`); it is not a healthy rollback. Recovery activation is approved, not yet executed.
+- Historical per-ID and cloud-original completeness remain unproven; current inventory is backed up.
 
 History: `archive/status-2026-10-19-before-gemini.md`; tasks: `.trellis/tasks/archive/`.

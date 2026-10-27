@@ -196,7 +196,6 @@ try {
   const executorSource = readFileSync("src/lib/canvas/executors.ts", "utf8");
   const executorModule = { exports: {} };
   const executorImports = Object.fromEntries([...executorSource.matchAll(/from "([^"\n]+)"/g)].map((match) => [match[1], {}]));
-  executorImports["../generated-image-capture"] = { withGeneratedImageContext: (_context, operation) => operation() };
   executorImports["../gemini"] = load("src/lib/gemini.ts");
   executorImports["./node-utils"] = load("src/lib/canvas/node-utils.ts");
   Function("require", "module", "exports", ts.transpileModule(executorSource, { compilerOptions: { module: ts.ModuleKind.CommonJS, target: ts.ScriptTarget.ES2022, esModuleInterop: true } }).outputText)(

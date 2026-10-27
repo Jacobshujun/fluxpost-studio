@@ -1,4 +1,5 @@
 import assert from "node:assert/strict";
+import { spawnSync } from "node:child_process";
 import { existsSync, readFileSync } from "node:fs";
 import path from "node:path";
 import vm from "node:vm";
@@ -111,6 +112,30 @@ assert.match(restart, /\.next-local-b/);
 assert.match(restart, /\.fluxpost-commit/);
 assert.match(restart, /candidateBuildSha -eq \$candidateSha/);
 assert.match(restart, /current primary-worktree \.next candidate as first-activation rollback/);
+assert.match(restart, /legacyBuildSha -eq \$legacyVersion\.commit/);
+assert.match(restart, /Test-Path -LiteralPath \$legacyManifestPath -PathType Leaf/);
+if (process.platform === "win32") {
+  const legacyGuard = restart.slice(restart.indexOf('$legacyManifestPath ='), restart.indexOf('$targetSlot ='));
+  assert(legacyGuard.length > 100);
+  const result = spawnSync("powershell.exe", ["-NoProfile", "-NonInteractive", "-Command", `
+    $ErrorActionPreference = 'Stop'
+    $projectRoot = 'C:\\fixture'
+    $Port = 3001
+    function Test-Path { param($LiteralPath, $PathType); return $script:manifestExists }
+    function Get-Content { param($LiteralPath, [switch]$Raw); return $script:buildSha }
+    function Invoke-RestMethod { param($Uri, $TimeoutSec); $script:requests++; return @{ mode='candidate'; commit='${fullSha}'; versioned=$true } }
+    foreach ($case in @('missing', 'mismatched', 'matched')) {
+      $previousState = $null
+      $script:requests = 0
+      $script:manifestExists = $case -ne 'missing'
+      $script:buildSha = if ($case -eq 'matched') { '${fullSha}' } else { 'ffffffffffffffffffffffffffffffffffffffff' }
+      ${legacyGuard}
+      if (($null -ne $previousState) -ne ($case -eq 'matched')) { throw "Unsafe legacy rollback: $case" }
+      if ($case -eq 'missing' -and $script:requests -ne 0) { throw 'Unstamped legacy build contacted runtime' }
+    }
+  `], { encoding: "utf8" });
+  assert.equal(result.status, 0, result.stderr || result.stdout);
+}
 assert.match(restart, /Remove-Item Env:FLUXPOST_NEXT_DIST_DIR/);
 assert.match(restart, /FLUXPOST_NEXT_DIST_DIR\s*=\s*\$targetSlot/);
 assert.match(restart, /Start-CandidateServer/);

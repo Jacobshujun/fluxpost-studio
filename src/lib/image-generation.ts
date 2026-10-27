@@ -1,4 +1,3 @@
-import { captureGeneratedImage } from "./generated-image-capture";
 import { execFile } from "node:child_process";
 import { access, mkdir, readFile, rm, writeFile } from "node:fs/promises";
 import { randomUUID } from "node:crypto";
@@ -2474,11 +2473,11 @@ async function saveBase64Images(base64Images: string[], options: ImageGeneration
       },
     });
     imageUrls.push(
-      await captureGeneratedImage(await persistRuntimeMedia({
+      await persistRuntimeMedia({
         filePath,
         publicPath: `/generated/${fileName}`,
         contentType: "image/png",
-      })),
+      }),
     );
   }
 
@@ -2533,11 +2532,11 @@ async function downloadGeneratedImageUrl(remoteUrl: string, index: number, optio
       fileName,
     },
   });
-  return captureGeneratedImage(await persistRuntimeMedia({
+  return persistRuntimeMedia({
     filePath,
     publicPath: `/generated/${fileName}`,
     contentType: mimeType,
-  }));
+  });
 }
 
 function parseRequestedPixelSize(requestedSize: ImageGenerationOptions["size"]) {

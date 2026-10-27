@@ -10,9 +10,6 @@ const npmCommand = process.platform === "win32" ? "npm.cmd" : "npm";
 const npxCommand = process.platform === "win32" ? "npx.cmd" : "npx";
 
 const nodeChecks = [
-  ["Generated image provenance", "generated_image_evidence_check.mjs"],
-  ["Generated image producer boundaries", "generated_image_producer_check.mjs"],
-  ["Generated library isolated runtime", "generated_library_check.mjs"],
   ["Library color extraction, queries and durable analysis", "library_colors_check.mjs"],
   ["Canvas Gemini native text and vision", "canvas_gemini_check.mjs"],
   ["Qwen native image contracts", "qwen_image_contract_check.mjs"],

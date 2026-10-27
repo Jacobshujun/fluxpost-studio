@@ -2,7 +2,6 @@ import type { ContentPoolSelectionFilter, ContentTag, GeneratedPost, Platform, S
 import type { CompetitorWorkbookCardSnapshot, CompetitorWorkbookRowSnapshot, CompetitorWorkbookSnapshot } from "../competitor-workbook";
 import type { ImageProcessingReport } from "./image-process-contract";
 import type { ComposeInputBinding, LayerComposeConfig } from "./layer-compose-contract";
-import type { GeneratedLibraryFilters } from "../generated-image-filters";
 
 export type CanvasArtifactKind = "text" | "images" | "audios" | "videos" | "socialPost" | "publishJobRef";
 export type CanvasPortKind = CanvasArtifactKind | "any" | "visual";
@@ -728,7 +727,7 @@ export type CanvasScheduleTaskStatus = "pending" | "queued" | "running" | "compl
 export type CanvasScheduleLeafStatus = Exclude<CanvasScheduleTaskStatus, "partial">;
 export type CanvasScheduleResultSummary = { produced: number; failed: number };
 
-export type CanvasScheduleAssetFilter = GeneratedLibraryFilters & {
+export type CanvasScheduleAssetFilter = {
   color?: string;
   mode: "manual" | "random";
   assetIds: string[];

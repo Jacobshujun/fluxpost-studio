@@ -1,6 +1,4 @@
 "use client";
-import { GeneratedImageFilters } from "@/components/generated-image-controls";
-import { appendGeneratedLibraryFilters, type GeneratedLibraryFilters } from "@/lib/generated-image-filters";
 
 import { LibraryColorFilter, LibraryPalette } from "@/components/library-colors";
 
@@ -4219,7 +4217,6 @@ function LibraryImageSnapshotPicker({ node, onPatch, onPreviewImage }: {
   const [color, setColor] = useState<string>();
   const [collectionId, setCollectionId] = useState("");
   const [smartFolderId, setSmartFolderId] = useState("");
-  const [generatedFilters, setGeneratedFilters] = useState<GeneratedLibraryFilters>({});
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState("");
   const [loadingMore, setLoadingMore] = useState(false);
@@ -4230,8 +4227,8 @@ function LibraryImageSnapshotPicker({ node, onPatch, onPreviewImage }: {
   const ids = configStringList(node.config.assetIds);
   const names = configStringList(node.config.assetNames);
   const urls = configStringList(node.config.urls);
-  const hasQuery = Boolean(Object.values(generatedFilters).some((value) => Array.isArray(value) ? value.some(Boolean) : Boolean(value)) || color || search.trim() || tag.trim() || collectionId || smartFolderId);
-  const queryKey = JSON.stringify([search.trim(), tag.trim(), collectionId, smartFolderId, color, generatedFilters]);
+  const hasQuery = Boolean(color || search.trim() || tag.trim() || collectionId || smartFolderId);
+  const queryKey = JSON.stringify([search.trim(), tag.trim(), collectionId, smartFolderId, color]);
   const queryKeyRef = useRef(queryKey);
   useLayoutEffect(() => {
     queryKeyRef.current = queryKey;
@@ -4269,7 +4266,6 @@ function LibraryImageSnapshotPicker({ node, onPatch, onPreviewImage }: {
     if (tag.trim()) params.set("tag", tag.trim());
     if (collectionId) params.set("collectionId", collectionId);
     if (smartFolderId) params.set("smartFolderId", smartFolderId);
-    appendGeneratedLibraryFilters(params, generatedFilters);
     try {
       const result = await api<LibraryAssetPage>(`/api/library/assets?${params}`, { signal: controller.signal });
       if (generation === requestGenerationRef.current && queryKeyRef.current === queryKey) setData(result);
@@ -4278,7 +4274,7 @@ function LibraryImageSnapshotPicker({ node, onPatch, onPreviewImage }: {
     } finally {
       if (generation === requestGenerationRef.current) setBusy(false);
     }
-  }, [color, collectionId, hasQuery, search, smartFolderId, tag, queryKey, generatedFilters]);
+  }, [color, collectionId, hasQuery, search, smartFolderId, tag, queryKey]);
   const loadMore = useCallback(async () => {
     if (!hasQuery || busy || !data.nextCursor || loadingMore) return;
     const generation = requestGenerationRef.current;
@@ -4291,7 +4287,6 @@ function LibraryImageSnapshotPicker({ node, onPatch, onPreviewImage }: {
       if (tag.trim()) params.set("tag", tag.trim());
       if (collectionId) params.set("collectionId", collectionId);
       if (smartFolderId) params.set("smartFolderId", smartFolderId);
-    appendGeneratedLibraryFilters(params, generatedFilters);
       const result = await api<LibraryAssetPage>(`/api/library/assets?${params}`);
       if (generation === requestGenerationRef.current && queryKeyRef.current === key) setData((current) => ({ ...result, assets: [...current.assets, ...result.assets.filter((asset) => !current.assets.some((item) => item.id === asset.id))] }));
     } catch (loadError) {
@@ -4299,7 +4294,7 @@ function LibraryImageSnapshotPicker({ node, onPatch, onPreviewImage }: {
     } finally {
       if (generation === requestGenerationRef.current && queryKeyRef.current === key) setLoadingMore(false);
     }
-  }, [busy, color, collectionId, data.nextCursor, hasQuery, loadingMore, search, smartFolderId, tag, queryKey, generatedFilters]);
+  }, [busy, color, collectionId, data.nextCursor, hasQuery, loadingMore, search, smartFolderId, tag, queryKey]);
   useEffect(() => {
     const timer = setTimeout(() => void load(), 250);
     return () => clearTimeout(timer);
@@ -4339,7 +4334,6 @@ function LibraryImageSnapshotPicker({ node, onPatch, onPreviewImage }: {
       setCollectionId(kind === "collection" ? id : "");
       setSmartFolderId(kind === "smart" ? id : "");
     }}><option value="">全部图集</option><optgroup label="图集">{navigation.collections.map((collection) => <option key={collection.id} value={`collection:${collection.id}`}>{collection.relativePath || collection.name}</option>)}</optgroup><optgroup label="智能文件夹">{navigation.smartFolders.map((folder) => <option key={folder.id} value={`smart:${folder.id}`}>{folder.name}</option>)}</optgroup></select></div>
-    <GeneratedImageFilters filters={generatedFilters} onChange={(patch) => setGeneratedFilters((current) => ({ ...current, ...patch }))} />
     <LibraryColorFilter color={color} onChange={setColor} hint />
     {ids.length ? <div className="canvas-picker-selected">{urls.map((url, index) => <div key={`${ids[index]}-${index}`}>
       <button type="button" className="canvas-picker-thumb" onClick={() => onPreviewImage(url, index)} aria-label={`预览素材 ${index + 1}`}>
@@ -5338,10 +5332,9 @@ function ScheduleAssetFilterEditor({ title, filter, count, onCountChange, onChan
     if (filter.collectionId) params.set("collectionId", filter.collectionId);
     if (filter.includeDescendants === false) params.set("includeDescendants", "false");
     if (filter.smartFolderId) params.set("smartFolderId", filter.smartFolderId);
-    appendGeneratedLibraryFilters(params, { generated: filter.generated, generationEntry: filter.generationEntry, filename: filter.filename, generatedFrom: filter.generatedFrom, generatedBefore: filter.generatedBefore, unlabelledVehicle: filter.unlabelledVehicle, vehicleModels: filter.vehicleModels });
     splitScheduleTags(tagsText).forEach((tag) => params.append("tag", tag));
     return params.toString();
-  }, [filter.color, filter.collectionId, filter.includeDescendants, filter.search, filter.smartFolderId, filter.generated, filter.generationEntry, filter.filename, filter.generatedFrom, filter.generatedBefore, filter.unlabelledVehicle, filter.vehicleModels, tagsText]);
+  }, [filter.color, filter.collectionId, filter.includeDescendants, filter.search, filter.smartFolderId, tagsText]);
   const queryStringRef = useRef(queryString);
   const filterRef = useRef(filter);
   const searchDraft = searchDraftState.source === filter.search ? searchDraftState.value : filter.search;
@@ -5509,7 +5502,6 @@ function ScheduleAssetFilterEditor({ title, filter, count, onCountChange, onChan
     <div className="canvas-schedule-assets-head"><strong>{title}</strong><div className="canvas-task-filters"><button type="button" aria-pressed={filter.mode === "manual"} onClick={() => onChange({ ...filter, mode: "manual" })}>手动选择</button><button type="button" aria-pressed={filter.mode === "random"} onClick={() => onChange({ ...filter, mode: "random" })}>{filterMatchLabel ? "条件匹配" : "条件随机"}</button></div></div>
     <div className="canvas-schedule-filter-row">
       <label><Search /><input value={searchDraft} onChange={(event) => updateSearchDraft(event.target.value)} onKeyDown={(event) => { if (event.key === "Enter") { event.preventDefault(); commitSearch(searchDraft); } }} placeholder="关键字" /></label>
-      <GeneratedImageFilters filters={filter} onChange={(patch) => onChange({ ...filter, ...patch })} />
       <select value={filter.smartFolderId ? `smart:${filter.smartFolderId}` : filter.collectionId ? `collection:${filter.collectionId}` : ""} onChange={(event) => { const [kind, id] = event.target.value.split(":"); onChange({ ...filter, collectionId: kind === "collection" ? id : undefined, smartFolderId: kind === "smart" ? id : undefined }); }}><option value="">全部图片</option><optgroup label="图集">{navigation.collections.map((collection) => <option value={`collection:${collection.id}`} key={collection.id}>{collection.relativePath || collection.name}</option>)}</optgroup><optgroup label="智能文件夹">{navigation.smartFolders.map((folder) => <option value={`smart:${folder.id}`} key={folder.id}>{folder.name}</option>)}</optgroup></select>
       <input value={tagsText} onChange={(event) => onChange({ ...filter, tags: splitScheduleTags(event.target.value) })} placeholder="多个标签，AND" />
       {count !== undefined && filter.mode === "random" ? <label className="canvas-schedule-count"><span>抽取</span><input type="number" min={1} max={500} value={count} onChange={(event) => onCountChange?.(Number(event.target.value))} /></label> : null}
