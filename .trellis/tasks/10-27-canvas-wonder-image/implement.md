@@ -4,7 +4,7 @@
 - [x] Register and execute the Canvas node, including iteration support and Canvas controls.
 - [x] Add contract, runtime, real isolated persistence and mocked browser checks; wire deterministic checks into the baseline.
 - [x] Run focused checks, TypeScript, build, baseline and isolated smoke/browser checks; resolve introduced failures.
-- [ ] Update Trellis status/feature evidence and commit verified changes before any local candidate activation.
+- [x] Update Trellis status/feature evidence and commit verified changes before any local candidate activation.
 
 ## Validation
 - `node .trellis/verification/wonder_image_contract_check.mjs`

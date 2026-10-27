@@ -101,7 +101,7 @@ Do not deploy a dirty worktree, branch name, abbreviated SHA, local runtime rows
 
 ## Recent Verification
 
-- 2026-10-27: Canvas Wonder Image node passed provider/media/async-resume contracts, encrypted credential and real isolated SQLite checks, six three-theme 1440/390 browser cases, changed-source lint, TypeScript, production build, config synchronization and SQLite checks. Full baseline passed all functional checks and stopped at the existing 17 ignored-data-script lint errors. No live Yike calls or 3001 activation. Evidence: `.trellis/tasks/10-27-canvas-wonder-image/verification.md`.
+- 2026-10-27: Canvas Wonder Image node passed provider/media/async-resume contracts, encrypted credential and real isolated SQLite checks, six three-theme 1440/390 browser cases, changed-source lint, TypeScript, production build, config synchronization and SQLite checks. Full baseline passed all functional checks and stopped at the existing 17 ignored-data-script lint errors. Clean `bc4c770` activated on loopback 3001; HTTP and Wonder credential auth checks passed. No live Yike calls. Evidence: `.trellis/tasks/10-27-canvas-wonder-image/verification.md`.
 
 - 2026-10-21: Global text reasoning effort config passed all-value persistence/default/clear/invalid checks, Responses and Chat request-body contracts across generation, vision, tagging, safety/distribution review, video-frame review and viral image analysis, built API/worker synchronization, changed-source lint, TypeScript, production build, isolated HTTP smoke, and three-theme 1440/390 browser checks. Full baseline passed all preceding checks then stopped at the known 17-error ignored-script lint gate. No live provider calls. Evidence: `.trellis/tasks/10-21-text-reasoning-effort/verification.md`.
 

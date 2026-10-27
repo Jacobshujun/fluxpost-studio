@@ -8,7 +8,7 @@ Ordinary library restored on LAN 3001; generated indexing retired. Backup and au
 
 ## Current Focus
 
-- Wonder Image Canvas node is implemented and ready for review; real Yike/media acceptance and clean-candidate 3001 activation are pending.
+- Wonder Image Canvas node is implemented and ready for review; clean candidate `bc4c770` is active on loopback 3001. Real Yike/media acceptance is pending.
 - Generated library retired: 22,255 index assets and three tables removed without a cleanup backup. Ordinary assets remain: 2,301; nonempty collections: 24; memberships: 2,230; labels: 5,302.
 - Qwen `0b775c7` included in authorized LAN release; Gemini live testing paused.
 
