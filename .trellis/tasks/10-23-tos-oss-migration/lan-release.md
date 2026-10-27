@@ -1,5 +1,23 @@
 # LAN release - 2026-10-26
 
+## Follow-up authorization - 2026-10-27
+
+User authorized committing the pending changes and updating LAN again. Commit
+the migration CLI/resume work and the separate simple-run diagnosis; do not push,
+resume migration, change storage configuration or deploy production. Earlier
+running-migration/PID statements below describe the October 26 release only.
+
+Pre-commit checks: all baseline domains before lint passed, including bulk,
+resume and CLI fake-worker tests. Full baseline stopped at the existing 17 local
+data-script lint errors / 17 warnings. Changed-file ESLint and TypeScript passed;
+no gate was weakened. Simple-run overflow is diagnosed, not fixed.
+
+Activate only with `npm run local:lan` after a clean commit. Its inactive-slot
+build must pass before listener replacement. Final acceptance requires HEAD,
+candidate state and `/api/version` to agree, LAN port 3001 binding and HTTP smoke.
+Post-activation results belong in ignored `test-artifacts/lan-release-2026-10-27.json`;
+this authorization/preflight entry is not itself proof of successful activation.
+
 User explicitly authorized committing remaining changes and updating LAN.
 Preserve Qwen 0b775c7, generated library bbe4ff9 and OSS preparation 6128b6b;
 commit the bulk engine/test/doc changes on top, never amend history.

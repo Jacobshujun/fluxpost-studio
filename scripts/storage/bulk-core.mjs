@@ -89,13 +89,26 @@ async function readTargetRange(target, key, size, etag, start, end) {
 }
 
 // 8 MiB is the maximum retained object payload per worker; nothing is staged on disk.
-export async function copyOne({ source, target, item, record }) {
+export async function copyOne({ source, target, item, record, checkpoint }) {
   const input = { bucket: SOURCE_BUCKET, key: item.key, ifMatch: item.etag };
   const head = lowerHeaders((await source.headObject(input)).data);
   validateSource(head, item);
   const headers = transferableHeaders(head);
   const existing = await headTarget(target, item.key);
   if (existing) validateTarget(existing, item, headers);
+  // Only reuse a prior full hash proof while BOTH provider identities still match.
+  if (existing && checkpoint?.key === item.key && checkpoint.size === item.size &&
+      normalizeEtag(checkpoint.sourceEtag) === normalizeEtag(item.etag) &&
+      Date.parse(checkpoint.sourceModified) === Date.parse(item.modified) &&
+      checkpoint.targetEtag === existing.etag && /^[a-f0-9]{64}$/.test(checkpoint.sourceSha256) &&
+      checkpoint.sourceSha256 === checkpoint.targetSha256) {
+    const result = { state: "verified", key: item.key, size: item.size,
+      sourceSha256: checkpoint.sourceSha256, targetSha256: checkpoint.targetSha256,
+      sourceEtag: item.etag, sourceModified: item.modified, targetEtag: existing.etag,
+      existing: true, checkpointReused: true, verification: "prior-sha256-current-head" };
+    await record(result);
+    return result;
+  }
   let uploadId;
   let completed = false;
   try {

@@ -63,3 +63,32 @@ the entire SHA-256. Existing objects are fully read/compared and never skipped b
 size alone. Journal records multipart uploadId before first part. No binary is
 stored on disk; progress and private receipts remain local. This still routes
 network traffic through the Windows host; it is not cloud-to-cloud direct transfer.
+
+## Production alongside migration
+
+User requires content production and migration concurrently. Keep TOS/app workers
+unchanged. Reduce migration to two workers with shared 4 MiB/s payload admission
+pacing (not an OS-level instantaneous bandwidth cap). Use original manifest and
+fsynced successful receipts from the same job only. Reuse SHA verification only
+when receipt source ETag/time/size/hash and live source HEAD plus target ETag/size/
+metadata still match; otherwise full verification or explicit source-change error.
+Receipts are not a frozen global audit: final delta/full verification remains.
+Retry only idempotent SDK HEAD/GET/upload-part calls for explicit network codes or
+408/429/5xx, max three attempts with 1s/3s waits and visible retry records. Never
+retry ambiguous multipart init/complete, authorization, collision or integrity errors.
+Unknown RequestError remains an error unless an underlying transient code exists.
+
+## Operator CLI
+
+Chinese menu plus status/watch/start/stop commands via npm run migrate. No SDK
+calls in status/watch; display latest attempt verification separately from loaded
+historical proofs and new uploads. Watch polls only local status, Ctrl-C exits
+viewer, not worker. Start reuses current job's hash-checked immutable manifest,
+requires explicit confirmation and existing operator lifecycle evidence, detects
+active worker/lock, and launches detached windowsHide Node with strict TLS and
+private per-launch log files. Do not edit/stop existing bulk worker to test CLI.
+Separate controller lock serializes operator actions. Dead locks are removed only
+after proving PID absent; unrelated/unknown PID is an explicit manual-review gate.
+STOP writes the existing graceful-stop marker; never kill process or clear it
+while a worker lives. Default non-TTY invocation is read-only status, not writes.
+This is current fixed-manifest resume, not automated inventory/delta/cutover.

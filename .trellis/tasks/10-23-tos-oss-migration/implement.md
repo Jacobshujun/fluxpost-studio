@@ -58,6 +58,30 @@ preflight gate is historical; use `bulk-run.md` and live progress.json.
 
 ## User-requested memory multipart switch
 
+## Operator CLI requested 2026-10-27
+
+- [x] Add Chinese menu/status/watch/start/stop wrapper; no changes to running worker.
+- [x] Add offline temporary-workspace/fake-worker tests for locks, crash/PID safety,
+  manifest validation, graceful STOP and safe display; no live start/stop in tests.
+- [x] Run baseline/focused/type/lint; validate live status/help only and document
+  commands in cli-guide.md. Baseline hits known 17 ignored-script lint errors.
+- Real PID 37572 later stopped EPERM (no real STOP/kill sent by CLI tests).
+  CLI reports this correctly; no automatic restart or cutover performed.
+
+Newest 2026-10-27: subsequent explicit resume succeeded. PID 37572 running
+two-worker paced migration with receipt revalidation and bounded retries.
+Prior launch denial is historical. See coexistence.md and live progress.json.
+
+2026-10-27 coexistence request: prepared two-worker paced migration, same-job
+SHA receipt revalidation and bounded idempotent transient retries. Offline tests,
+types/lint pass, baseline hits known ignored-script lint blocker. Background launch
+was rejected by tool policy; NOT running. See coexistence.md before continuation.
+
+2026-10-27: user authorized another resume after RequestError at 30,184 verified
+objects / 117.90 GB. Failed object copied and verified once; unchanged runner
+restarted on original manifest as PID 33960. Full revalidation before completion;
+live progress and detailed evidence are in memory-multipart.md/progress.json.
+
 - [x] Inspect old worker: status failed, ABORT_ERR, 8,086 verified / 25.16 GB;
   process and exclusive lock absent. No concurrent writer to stop.
 - [x] Replace disk staging with 8 MiB conditional ranged TOS reads and OSS

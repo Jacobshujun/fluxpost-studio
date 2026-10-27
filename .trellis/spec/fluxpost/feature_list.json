@@ -37,7 +37,7 @@
       "evidence": [
         "2026-10-26 local SDK trial: 8 objects/1,047,830 bytes hash/preview verified; combined Qwen/library/OSS checks/build pass except existing lint gate. See tos-oss-migration/integration-verification.md."
       ],
-      "notes": "First attempt 8,086 verified/25.16 GB, stopped ABORT_ERR; 8 MiB memory multipart resume running. See memory-multipart.md/progress.json. No switch/deletion."
+      "notes": "CLI status/watch/start/stop ready; PID 37572 stopped EPERM, no auto restart. Prior 30,184/117.90 GB proofs retained. See cli-guide.md. No cutover."
     },
     {
       "id": "canvas-gemini-node",

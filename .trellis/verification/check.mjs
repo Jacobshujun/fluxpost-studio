@@ -46,6 +46,8 @@ const nodeChecks = [
   ["OSS storage adapter check", "oss_storage_check.mjs"],
   ["Bounded migration trial safety", "migration_trial_check.mjs"],
   ["Bulk migration safety", "bulk_migration_check.mjs"],
+  ["Migration production coexistence", "migration_resume_check.mjs"],
+  ["Migration operator CLI", "migration_cli_check.mjs"],
   ["Feishu CLI identity auto-init check", "feishu_cli_identity_check.mjs"],
   ["Local Next build output check", "local_build_output_check.mjs"],
   ["Runtime production parity check", "runtime_parity_check.mjs"],

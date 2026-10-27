@@ -6,6 +6,33 @@ This file is an on-demand history library. Do not read it during default startup
 
 ## 最近一条
 <!-- TRELLIS-LATEST-START -->
+Newest 2026-10-27: user requested operator CLI. `npm run migrate` opens Chinese
+menu; status/watch read local progress, start resumes fixed manifest with
+confirmation/process/lock checks, stop uses graceful STOP (not process kill).
+See cli-guide.md. Real worker unchanged; tests use isolated fake workers only.
+Later live check: real PID 37572 stopped EPERM at 03:15:58Z, 17,090 proofs
+revalidated, 0 new uploads. No real STOP/kill sent. CLI correctly shows failed;
+exact filesystem syscall unknown. Do not claim migration running or auto restart.
+
+Newest 2026-10-27: explicit resume after denial SUCCEEDED via normal Start-Process.
+PID 37572, original manifest, two workers, 4 MiB/s payload pacing. 30,184 prior
+proofs loaded; current HEAD checks are reusing receipts without full redownload.
+See coexistence.md and data/oss-migration/progress.json; verify process before
+claiming running. Workbench cba71dc/TOS unchanged, no deletion/cutover.
+
+LATEST 2026-10-27: migration NOT running; PID 33960 stopped ECONNRESET at 02:06Z.
+User wants production alongside migration. Tested two-worker payload pacing,
+same-job SHA receipt reuse with current HEAD validation and bounded retries.
+Start-Process invocation was blocked by tool policy; no retry/workaround/new PID.
+Continue from `.trellis/tasks/10-23-tos-oss-migration/coexistence.md`.
+Keep TOS/workbench unchanged. Changes uncommitted, no uploads in this turn.
+
+2026-10-27 latest: RequestError stopped the next attempt at 30,184 verified /
+117.90 GB. User authorized continue; failed 13 MB object now hash-verified.
+Unchanged runner resumed original manifest, PID 33960, eight memory-only workers;
+revalidates existing objects with counters starting at zero. Inspect process/lock
+and progress.json, never launch a second writer. See memory-multipart.md.
+
 Latest: first two-worker staged-file bulk attempt stopped on ABORT_ERR after
 8,086 verified / 25.16 GB; source retained, original manifest and journals intact.
 User requested 8 MiB in-memory TOS range / OSS multipart, eight workers. New

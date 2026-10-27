@@ -7,6 +7,7 @@ import { createRequire } from "node:module";
 import { parseEnv } from "node:util";
 import OSS from "ali-oss";
 import { copyOne, validateInventory, SOURCE_BUCKET, TARGET_BUCKET, PREFIX } from "./bulk-core.mjs";
+import { loadCheckpoints, guardedClient, pacePayloads } from "./bulk-resume.mjs";
 
 const safeCode = error => String(error?.code || error?.name || "Error").replace(/[^A-Za-z0-9_-]/g, "").slice(0, 80);
 const root = path.resolve("data", "oss-migration");
@@ -78,10 +79,12 @@ async function main() {
     if (existsSync(storedManifest)) {
       if (await readFile(storedManifest, "utf8") !== raw) throw Object.assign(new Error(), { code: "StoredManifestMismatch" });
     } else await writeFile(storedManifest, raw, { flag: "wx", mode: 0o600 });
+    const checkpoints = await loadCheckpoints(jobRoot, id);
     journal = await open(path.join(attemptRoot, "journal.ndjson"), "ax", 0o600);
     summary = { job: id, attempt, pid: process.pid, status: "running", startedAt: new Date().toISOString(),
       sourceBucket: SOURCE_BUCKET, targetBucket: TARGET_BUCKET, prefix: PREFIX, sourceCapturedAt: inventory.capturedAt,
-      lifecycleEvidence: "operator-confirmed-no-rules", concurrency: 8, transfer: "memory-8MiB-multipart", totalObjects: items.length,
+      lifecycleEvidence: "operator-confirmed-no-rules", concurrency: 2, transfer: "memory-8MiB-multipart", totalObjects: items.length,
+      payloadPacingBytesPerSecond: 4 * 1024 * 1024, availableCheckpoints: checkpoints.size, checkpointReused: 0, retries: 0,
       totalBytes: inventory.source.bytes, verifiedObjects: 0, verifiedBytes: 0, uploadedObjects: 0,
       existingVerified: 0, failures: 0, manifestPath: storedManifest, journalPath: path.join(attemptRoot, "journal.ndjson") };
     await saveSummary();
@@ -93,12 +96,17 @@ async function main() {
           summary.verifiedObjects++;
           summary.verifiedBytes += event.size;
           if (event.existing) summary.existingVerified++;
+          if (event.checkpointReused) summary.checkpointReused++;
         } else if (event.state === "uploaded") summary.uploadedObjects++;
+        else if (event.state === "retry") summary.retries++;
         else if (event.state === "error") { summary.failures++; summary.lastErrorCode = event.code; }
         await saveSummary();
       });
       return serial;
     };
+    const pace = pacePayloads({ bytesPerSecond: summary.payloadPacingBytesPerSecond });
+    const guardedSource = guardedClient(source, { label: "tos", pace, record });
+    const guardedTarget = guardedClient(target, { label: "oss", pace, record });
     // Existing destinations are verified first, so known collisions fail before new writes.
     const ordered = [...items].sort((a, b) => Number(targetKeys.has(b.key)) - Number(targetKeys.has(a.key)));
     let cursor = 0;
@@ -107,7 +115,7 @@ async function main() {
         if (existsSync(path.join(root, "STOP"))) { stop = true; break; }
         const item = ordered[cursor++];
         try {
-          await copyOne({ source, target, item, record });
+          await copyOne({ source: guardedSource, target: guardedTarget, item, record, checkpoint: checkpoints.get(item.key) });
         } catch (error) {
           stop = true;
           await record({ state: "error", key: item.key, size: item.size, code: safeCode(error) });
@@ -115,7 +123,7 @@ async function main() {
         }
       }
     };
-    const results = await Promise.allSettled(Array.from({ length: 8 }, () => worker()));
+    const results = await Promise.allSettled(Array.from({ length: 2 }, () => worker()));
     await serial;
     if (results.some(x => x.status === "rejected")) throw Object.assign(new Error(), { code: "WorkerOrJournalFailed" });
     summary.status = summary.failures ? "failed" : summary.verifiedObjects === items.length ? "snapshot-verified" : "stopped";

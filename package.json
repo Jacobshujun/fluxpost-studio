@@ -18,7 +18,8 @@
     "db:migrate:postgres": "node scripts/db/migrate-sqlite-to-postgres.mjs",
     "db:cleanup:canvas-review-policy": "node scripts/db/remove-canvas-image-batch.mjs",
     "library:thumbnails:prewarm": "tsx scripts/library/prewarm-thumbnails.ts",
-    "lint": "eslint"
+    "lint": "eslint",
+    "migrate": "node scripts/storage/migrate.mjs"
   },
   "dependencies": {
     "@types/pg": "^8.20.0",

@@ -1,5 +1,35 @@
 # In-memory multipart continuation
 
+## 2026-10-27 authorized resume
+
+User asked to continue. Prior PID 5092 had exited; progress recorded failed at
+2026-10-26T14:35:01.998Z with RequestError, 30,184 verified objects and
+117,899,533,182 bytes, one error. No active.lock or STOP marker. No abort-failed
+events found in that attempt's journal. The exact cause of RequestError remains
+unknown; do not call it confirmed network loss.
+
+The one failed manifest object (13,142,412 bytes) was retried once through the
+same core, create-only, and verified SHA-256 and metadata successfully. It was
+absent from the destination at the recovery HEAD. Recovery receipts were fsynced
+under ignored data/oss-migration/recovery-*.ndjson. No other live samples or policy
+changes were performed.
+
+After offline tests, restarted unchanged 697ba81 runner on ORIGINAL immutable
+manifest under hidden PID 33960 at 2026-10-27T01:12:33.738Z. Single exclusive lock,
+strict TLS, eight workers and 8 MiB in-memory ranges. At 01:12:59Z, 49 existing
+objects / 127,606,221 bytes reverified, zero errors. New attempt counters reset;
+previous 30,184 successful copies are not lost or overwritten. All existing objects
+are fully re-read/hashed, so this resumption adds read traffic and takes time.
+No new code, auto-retry loop, cloud deletion, history rewrite, LAN restart or
+production/storage switch. Inspect progress.json and actual process before claims.
+
+Baseline rerun: .tmp-oss-resume-1027-baseline.log. All pre-lint checks passed;
+stopped at existing ignored runtime scripts: 17 errors / 17 warnings. Diff and
+context-budget checks pass. At 01:14:19Z: new attempt reverified 133 objects,
+zero failures, process still running. No full-migration completion claim.
+
+## Earlier attempts
+
 Previous local staged-file attempt: `data/oss-migration/progress.json` reported
 `failed`, `ABORT_ERR`, 8,086 verified objects and 25,155,861,930 verified bytes;
 one failure. PID 46412 was gone and `active.lock` absent. Reason for abort is

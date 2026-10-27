@@ -4,6 +4,7 @@ import os from "node:os";
 import path from "node:path";
 import { readFileSync } from "node:fs";
 import { spawnSync } from "node:child_process";
+import { createHash } from "node:crypto";
 import { copyOne, validateInventory, transferableHeaders, PART_BYTES } from "../../scripts/storage/bulk-core.mjs";
 
 const item = { key: "fluxpost/flux-lightmoment/a space/%literal.png", size: 3, etag: '"source-etag"', modified: "2026-10-26T00:00:00.000Z", storageClass: "STANDARD" };
@@ -18,7 +19,7 @@ assert.deepEqual(transferableHeaders({ "Content-Type": "image/png", "x-tos-meta-
 assert.equal(PART_BYTES, 8 * 1024 * 1024);
 
 const root = await mkdtemp(path.join(os.tmpdir(), "fluxpost-bulk-check-"));
-async function scenario({ existing = false, badHash = false, badMime = false, race = false, sourceChange = false, headError = 0, failReceipt = false } = {}) {
+async function scenario({ existing = false, badHash = false, badMime = false, race = false, sourceChange = false, headError = 0, failReceipt = false, checkpoint } = {}) {
   const events = [];
   let puts = 0;
   let gets = 0;
@@ -82,7 +83,7 @@ async function scenario({ existing = false, badHash = false, badMime = false, ra
   let error;
   let result;
   try {
-    result = await copyOne({ source, target, item, stagingRoot: root, record: async (event) => {
+    result = await copyOne({ source, target, item, checkpoint, record: async (event) => {
       if (failReceipt && event.state === "put-intent") throw new Error("journal failure");
       events.push(event);
     } });
@@ -98,6 +99,21 @@ try {
     assert.equal(r.result.state, "verified");
     assert.equal(r.events.at(-1).state, "verified");
   }
+  const sha = createHash("sha256").update("abc").digest("hex");
+  const checkpoint = { key: item.key, size: item.size, sourceEtag: item.etag, sourceModified: item.modified, targetEtag: '"target-etag"', sourceSha256: sha, targetSha256: sha };
+  const resumed = await scenario({ existing: true, checkpoint });
+  assert.equal(resumed.error, undefined);
+  assert.equal(resumed.gets, 0);
+  assert.equal(resumed.puts, 0);
+  assert.equal(resumed.result.checkpointReused, true);
+  for (const change of [{ targetEtag: '"old"' }, { sourceEtag: '"old"' }, { size: 4 }, { targetSha256: "b".repeat(64) }]) {
+    const r = await scenario({ existing: true, checkpoint: { ...checkpoint, ...change } });
+    assert.equal(r.error, undefined);
+    assert.equal(r.gets, 1);
+    assert.equal(r.result.checkpointReused, undefined);
+  }
+  assert((await scenario({ existing: true, badMime: true, checkpoint })).error);
+  assert((await scenario({ existing: true, sourceChange: true, checkpoint })).error);
   for (const options of [{ badHash: true }, { existing: true, badHash: true }, { existing: true, badMime: true }, { race: true }, { sourceChange: true }, { headError: 403 }, { failReceipt: true }]) {
     const r = await scenario(options);
     assert(r.error, JSON.stringify(options));
@@ -182,7 +198,7 @@ async function runWorkerFixture({ failed = false, stop = false, locked = false, 
   }
   const fakeItems = [item, { ...item, key: `${item.key}-2` }, { ...item, key: `${item.key}-3` }];
   const manifest = { ...inventory, capturedAt: new Date().toISOString(), source: { objects: fakeItems, count: 3, bytes: 9 } };
-  const names = ["createHash", "randomUUID", "existsSync", "mkdir", "open", "readFile", "rename", "unlink", "writeFile", "path", "createRequire", "parseEnv", "OSS", "copyOne", "validateInventory", "SOURCE_BUCKET", "TARGET_BUCKET", "PREFIX", "process", "console"];
+  const names = ["createHash", "randomUUID", "existsSync", "mkdir", "open", "readFile", "rename", "unlink", "writeFile", "path", "createRequire", "parseEnv", "OSS", "copyOne", "validateInventory", "SOURCE_BUCKET", "TARGET_BUCKET", "PREFIX", "process", "console", "loadCheckpoints", "guardedClient", "pacePayloads"];
   await new AsyncFunction(...names, executable)(
     () => ({ update() { return this; }, digest: () => "job-id" }), () => "attempt-id",
     name => files.has(name) || (stop && name.endsWith("STOP")), async () => {}, record,
@@ -199,6 +215,7 @@ async function runWorkerFixture({ failed = false, stop = false, locked = false, 
       } finally { active--; }
     }, validateInventory, "seedance-gz-xpeng22365", "xpai-imc", "fluxpost/flux-lightmoment/", mockProcess,
     { log() {}, error(text) { assert(!text.includes("credential")); } },
+    async () => new Map(), client => client, () => async () => {},
   );
   const summaryFile = [...files.keys()].find(name => name.endsWith("progress.json"));
   return { copies, peak, events, exit: mockProcess.exitCode, summary: summaryFile && JSON.parse(files.get(summaryFile)) };
@@ -207,13 +224,14 @@ const successRun = await runWorkerFixture();
 assert.equal(successRun.summary.status, "snapshot-verified");
 assert.equal(successRun.summary.verifiedObjects, 3);
 assert.equal(successRun.summary.verifiedBytes, 9);
-assert(successRun.peak <= 8);
-assert.equal(successRun.summary.concurrency, 8);
+assert(successRun.peak <= 2);
+assert.equal(successRun.summary.concurrency, 2);
+assert.equal(successRun.summary.payloadPacingBytesPerSecond, 4 * 1024 * 1024);
 assert.equal(successRun.summary.transfer, "memory-8MiB-multipart");
 assert.equal((await runWorkerFixture({ defaultRegion: true })).summary.status, "snapshot-verified");
 const failureRun = await runWorkerFixture({ failed: true });
 assert.equal(failureRun.summary.status, "failed");
-assert(failureRun.copies <= 8);
+assert(failureRun.copies <= 2);
 const stopRun = await runWorkerFixture({ stop: true });
 assert.equal(stopRun.summary.status, "stopped");
 assert.equal(stopRun.copies, 0);

@@ -1,9 +1,26 @@
 # Aliyun online migration console draft
 
-Status: review only. No address, role or task has been created.
+Status: execution authorized on 2026-10-27; console access pending. No address,
+role or managed migration task has been created by this agent.
 An eight-object local SDK trial was subsequently executed. It was NOT an Aliyun
 managed-service trial; connector/role/job acceptance remains untested. Do not rerun
-the sample command or create another migration task under the commit authorization.
+the local sample command under the earlier commit authorization.
+
+## 2026-10-27 cloud migration authorization
+
+User explicitly requests immediate switch to Aliyun Data Online Migration.
+Proceed with bounded managed trial, then same-key no-overwrite bulk after trial
+validation; do not restart the local copy worker. No source deletion, historical
+reference changes, application restart or production/storage cutover authorized.
+
+Read-only `npm run migrate -- status` confirms the latest local attempt stopped
+with EPERM at 11:31:57 CST, 9,799 rechecked objects, 0 new uploads. Live official
+guide links to https://mgwnext.console.aliyun.com/ . Opening a dedicated interactive
+Chrome window was rejected by tool policy. Do not retry via alternate launchers.
+No authenticated console was reached and no managed task was submitted. Next:
+user opens the official console and signs in; confirm accessible control path,
+then inspect existing tasks/addresses before creating anything. Do not claim cloud
+migration is running or that closing the PC is safe for a nonexistent cloud job.
 
 ## Preconditions
 
