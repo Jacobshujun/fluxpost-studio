@@ -1,10 +1,10 @@
 # FluxPost Current Status
 
-Last updated: 2026-10-26
+Last updated: 2026-10-27
 
 ## One-Line Status
 
-OSS memory multipart bulk resumed; LAN/production unchanged. Final delta pending.
+LAN update authorized (lan-release.md); verify runtime SHA. Input-overflow fix pending; local copy stopped.
 
 ## Current Focus
 
@@ -13,7 +13,7 @@ OSS memory multipart bulk resumed; LAN/production unchanged. Final delta pending
 
 ## Next Entry
 
-Migration: `.trellis/tasks/10-23-tos-oss-migration/memory-multipart.md`; first attempt verified 8,086/25.16 GB then stopped on ABORT_ERR. Eight-worker 8 MiB in-memory multipart resumed, no binary disk staging; progress in ignored `data/oss-migration/progress.json`. LAN cba71dc/TOS active; no history/production switch.
+See `.trellis/tasks/10-23-tos-oss-migration/simple-run-material-diagnosis.md`: 24,197 auto-attached TOS URLs caused a 4.77M-character prompt and HTTP 400 input-length rejection. No fix/replay yet. Cloud route: migration-console.md in same task; no managed job created by agent. LAN/TOS unchanged; do not resume local copy.
 
 ## Risks And Unknowns
 
@@ -22,7 +22,7 @@ Migration: `.trellis/tasks/10-23-tos-oss-migration/memory-multipart.md`; first a
 - Gemini live text/image acceptance remains pending. Minimal diagnostics were authorized, then explicitly paused; do not send further calls until resumed.
 - ToAPIs ordinary ratio/tier versus VIP/Official pixels live acceptance is unconfirmed. Concurrent Vision failures previously returned upstream 502 HTML; explicit retry is required by the one-attempt queue.
 - Real 621-asset runtime migration and authenticated gallery/multi-user review remain operator gates; isolated fixture migration passed. PostgreSQL subtree benchmark P95 is 252.6ms against 300ms.
-- No paid Qwen model or publishing acceptance. Authorized OSS bulk writes active. Audit: 21 advisories (2 moderate/18 high/1 critical); no forced fix. Qwen key backup is operator-managed.
+- No paid Qwen model or publishing acceptance. Local OSS copy stopped. Audit: 21 advisories (2 moderate/18 high/1 critical); no forced fix. Qwen key backup is operator-managed.
 - Stationary Mac Chrome Canvas flicker cause remains unconfirmed; Windows evidence points to edge animations/compositing as a candidate only.
 
 History: `archive/status-2026-10-19-before-gemini.md`; tasks: `.trellis/tasks/archive/`.
