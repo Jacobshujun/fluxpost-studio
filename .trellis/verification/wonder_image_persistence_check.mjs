@@ -1,0 +1,66 @@
+import assert from "node:assert/strict";
+import { spawnSync } from "node:child_process";
+import { mkdtempSync, rmSync } from "node:fs";
+import { tmpdir } from "node:os";
+import path from "node:path";
+import { createRequire } from "node:module";
+import { pathToFileURL } from "node:url";
+const root = process.cwd(), temporary = mkdtempSync(path.join(tmpdir(), "wonder-persistence-"));
+const url = (file) => JSON.stringify(pathToFileURL(path.join(root, file)).href);
+const script = `
+import assert from 'node:assert/strict';
+import { createCanvasNode } from ${url("src/lib/canvas/registry.ts")};
+import { createCanvasWorkflow, getCanvasWorkflow, duplicateCanvasWorkflow } from ${url("src/lib/canvas/workflows.ts")};
+import { saveWonderCredential, wonderCredentialStatus, wonderCredentialForRun } from ${url("src/lib/canvas/wonder-credentials.ts")};
+import { createCanvasWorkflowFile, parseCanvasWorkflowFile } from ${url("src/lib/canvas/workflow-file.ts")};
+import { saveCanvasRunToDb, readAppMetaValue } from ${url("src/lib/database.ts")};
+import { createCanvasClipboardPayload } from ${url("src/lib/canvas/clipboard.ts")};
+import { validateCanvasIteration } from ${url("src/lib/canvas/iteration.ts")};
+import { canvasCollectionScheduleDefinition } from ${url("src/lib/canvas/content-collection-schedule.ts")};
+import { validateCanvasScheduleV2Definition, expandCanvasScheduleV2 } from ${url("src/lib/canvas/scheduler-v2.ts")};
+const account = { id:'owner', displayName:'Fixture', role:'operator' };
+const node = createCanvasNode('model.wonder-image','image',{x:10,y:10});
+node.config.endpoint = 'https://yike.cn-shanghai.aliyuncs.com/';
+node.config.prompt = 'Fixture';
+node.config.apiKey = 'must-strip';
+const graph = { nodes:[node], edges:[], viewport:{x:0,y:0,zoom:1} };
+const workflow = await createCanvasWorkflow(account,{name:'Wonder fixture',graph});
+assert.equal(workflow.graph.nodes[0].config.apiKey, undefined);
+const target = {workflowId:workflow.id,nodeId:node.id};
+await saveWonderCredential(target,account,'fixture-db-secret',node.config.endpoint);
+assert.deepEqual(await wonderCredentialStatus(target,account),{configured:true});
+const opened = await getCanvasWorkflow(workflow.id,account);
+const file = createCanvasWorkflowFile('export',opened.graph);
+const imported = parseCanvasWorkflowFile(JSON.stringify(file));
+assert.equal(imported.graph.nodes[0].type,'model.wonder-image');
+const clipboard = JSON.stringify(createCanvasClipboardPayload(opened.graph.nodes,opened.graph.edges,[node.id]));
+for (const text of [JSON.stringify(opened),JSON.stringify(file),clipboard]) { assert.ok(!text.includes('fixture-db-secret')); assert.ok(!text.includes('must-strip')); }
+const duplicate = await duplicateCanvasWorkflow(workflow.id,account);
+assert.deepEqual(await wonderCredentialStatus({...target,workflowId:duplicate.id},account),{configured:false});
+await assert.rejects(wonderCredentialStatus(target,{...account,id:'other'}));
+const now = new Date().toISOString();
+const run = await saveCanvasRunToDb({id:'wonder-test-run',workflowId:workflow.id,workflowRevision:1,ownerUserId:account.id,ownerDisplayName:'Fixture',status:'queued',graphSnapshot:opened.graph,targetNodeIds:[node.id],steps:[],runMode:'with-upstream',confirmation:{},createdAt:now,updatedAt:now});
+assert.equal((await wonderCredentialForRun(run.id,opened.graph.nodes[0],account)).apiKey,'fixture-db-secret');
+assert.ok(await readAppMetaValue('canvas-wonder-master-fingerprint-v1'));
+const region = createCanvasNode('utility.image-iterate','region',{x:0,y:0});
+region.iteration.graph.nodes = [region.iteration.graph.nodes[0],opened.graph.nodes[0]];
+region.iteration.graph.edges = [{id:'reference',source:'iteration-item',sourcePort:'images',target:node.id,targetPort:'references'}];
+region.iteration.outputs = {images:{nodeId:node.id,outputPort:'images'}};
+assert.deepEqual(validateCanvasIteration(region),[]);
+const source = createCanvasNode('input.content-collection','source',{x:0,y:0});
+source.config.links = 'https://www.xiaohongshu.com/explore/fixture-a\\nhttps://www.xiaohongshu.com/explore/fixture-b';
+const scheduledGraph = { ...opened.graph,nodes:[source,opened.graph.nodes[0]],edges:[{id:'prompt',source:'source',sourcePort:'body',target:node.id,targetPort:'prompt'},{id:'images',source:'source',sourcePort:'images',target:node.id,targetPort:'references'}] };
+const schedule = canvasCollectionScheduleDefinition(scheduledGraph);
+validateCanvasScheduleV2Definition(scheduledGraph,schedule);
+assert.equal(expandCanvasScheduleV2(schedule.parameters,schedule).totalChildTasks,2);
+console.log('Wonder real SQLite persistence, export, clipboard, duplicate and run authorization passed.');
+`;
+try {
+  const env = { ...process.env, DATABASE_URL: "", FLUXPOST_DISABLE_BACKGROUND_WORKERS: "1" };
+  const child = spawnSync(process.execPath, ["--import", pathToFileURL(createRequire(import.meta.url).resolve("tsx")).href, "--input-type=module", "-e", script], { cwd: temporary, env, encoding: "utf8", timeout: 60000 });
+  assert.equal(child.status, 0, `${child.stdout}\n${child.stderr}`);
+  process.stdout.write(child.stdout);
+} finally {
+  assert.ok(path.resolve(temporary).startsWith(path.resolve(tmpdir()) + path.sep));
+  rmSync(temporary, { recursive: true, force: true });
+}

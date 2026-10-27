@@ -1,0 +1,166 @@
+import assert from "node:assert/strict";
+import { createRequire } from "node:module";
+import { readFileSync } from "node:fs";
+import { mkdtemp, readFile, writeFile, rm } from "node:fs/promises";
+import { tmpdir } from "node:os";
+import path from "node:path";
+import ts from "typescript";
+import sharp from "sharp";
+
+const root = process.cwd(), require = createRequire(import.meta.url);
+const temporary = await mkdtemp(path.join(tmpdir(), "wonder-runtime-"));
+const endpoint = "https://yike.cn-shanghai.aliyuncs.com/";
+const account = { id: "owner", role: "operator", displayName: "Fixture" };
+const node = { id: "wonder", type: "model.wonder-image", version: 1, config: { endpoint } };
+const workflow = { id: "workflow", ownerUserId: "owner", graph: { nodes: [node] } };
+const run = { id: "run", workflowId: "workflow", ownerUserId: "owner", graphSnapshot: { nodes: [structuredClone(node)] } };
+const db = new Map(), calls = [], persisted = [];
+let mediaReady = false, jobStatus = "Finished", downloadedAuth, storageEnabled = true;
+const png = await sharp({ create: { width: 512, height: 512, channels: 4, background: "orange" } }).png().toBuffer();
+const stubs = {
+  "../database": {
+    readAppMetaValue: async (key) => db.get(key), writeAppMetaValue: async (key, value) => db.set(key, value),
+    compareAndSetAppMetaValue: async (key, expected, value) => { if (db.get(key) !== expected) return false; db.set(key, value); return true; },
+    getCanvasWorkflowFromDb: async (id) => id === "workflow" ? workflow : undefined,
+    getCanvasRunFromDb: async (id) => id === "run" ? run : undefined,
+  },
+  "../workspace-ownership": { canAccessWorkspaceOwner: (actor, owner) => actor.id === owner || actor.role === "admin" },
+  "./concurrency": { runWithConcurrencyPool: async (_name, task, options) => { options.signal.throwIfAborted(); return task(); } },
+  "./runtime-media-materializer": { materializeRuntimeMedia: async (_url, options) => { options.signal.throwIfAborted(); return { filePath: path.join(temporary, "reference.png"), cleanup: async () => {} }; } },
+  "./runtime-media-storage": {
+    isRuntimeMediaStorageEnabled: () => storageEnabled,
+    persistLibraryObject: async (input) => { persisted.push({ kind: "reference", ...input }); return { publicUrl: "https://public.example/reference.png" }; },
+    persistRuntimeMedia: async (input) => { persisted.push({ kind: "output", ...input }); return input.publicPath; },
+  },
+  "./canvas/directory-snapshots": { getCanvasDirectorySnapshot: async (_id, owner) => { assert.equal(owner, "owner"); return { groups: [{ images: [{ id: "image", absolutePath: path.join(temporary, "reference.png") }] }] }; } },
+};
+const cache = new Map();
+function load(file) {
+  if (cache.has(file)) return cache.get(file).exports;
+  const loadedModule = { exports: {} }; cache.set(file, loadedModule);
+  const source = readFileSync(path.join(root, file), "utf8");
+  const output = ts.transpileModule(source, { compilerOptions: { module: ts.ModuleKind.CommonJS, target: ts.ScriptTarget.ES2022, esModuleInterop: true } }).outputText;
+  Function("require", "module", "exports", output)((name) => name in stubs ? stubs[name] : name.startsWith(".") ? load(path.posix.normalize(path.posix.join(path.posix.dirname(file), name + ".ts"))) : require(name), loadedModule, loadedModule.exports);
+  return loadedModule.exports;
+}
+const originalFetch = globalThis.fetch;
+try {
+  process.chdir(temporary);
+  await writeFile(path.join(temporary, "reference.png"), png);
+  const credentials = load("src/lib/canvas/wonder-credentials.ts");
+  const target = { workflowId: "workflow", nodeId: "wonder" };
+  assert.deepEqual(await credentials.wonderCredentialStatus(target, account), { configured: false });
+  await assert.rejects(credentials.saveWonderCredential(target, { ...account, id: "other" }, "secret", endpoint), /无权/);
+  await assert.rejects(credentials.wonderCredentialForRun("run", node, account), /保存/);
+  await Promise.all([credentials.saveWonderCredential(target, account, "fixture-secret", endpoint), credentials.saveWonderCredential(target, account, "fixture-secret", endpoint)]);
+  assert.equal((await credentials.wonderCredentialForRun("run", node, account)).apiKey, "fixture-secret");
+  assert.ok(!JSON.stringify([...db]).includes("fixture-secret"));
+  assert.deepEqual(await credentials.wonderCredentialStatus(target, account), { configured: true });
+  node.config.endpoint = endpoint.replace("cn-shanghai", "ap-southeast-1");
+  assert.deepEqual(await credentials.wonderCredentialStatus(target, account), { configured: false });
+  await assert.rejects(credentials.wonderCredentialForRun("run", run.graphSnapshot.nodes[0], account), /保存/);
+  await assert.rejects(credentials.saveWonderCredential(target, account, "secret", endpoint), /改变/);
+  node.config.endpoint = endpoint;
+  await credentials.removeWonderCredential(target, account);
+  await assert.rejects(credentials.wonderCredentialForRun("run", node, account), /保存/);
+  await credentials.saveWonderCredential(target, account, "fixture-secret", endpoint);
+  const master = path.join(temporary, "data/canvas-secrets/wonder-master.key");
+  const key = await readFile(master);
+  await rm(master);
+  await assert.rejects(credentials.saveWonderCredential(target, account, "new-secret", endpoint), /丢失/);
+  await writeFile(master, key);
+  assert.equal((await credentials.wonderCredentialForRun("run", node, account)).apiKey, "fixture-secret");
+  const inner = { ...node, id: "inner" };
+  workflow.graph.nodes.push({ id: "region", type: "utility.image-iterate", iteration: { graph: { nodes: [inner] } } });
+  await credentials.saveWonderCredential({ ...target, nodeId: "inner", regionId: "region" }, account, "inner-secret", endpoint);
+  run.iterationContext = { regionNodeId: "region" };
+  run.graphSnapshot.nodes = [inner];
+  assert.equal((await credentials.wonderCredentialForRun("run", inner, account)).apiKey, "inner-secret");
+  await assert.rejects(credentials.wonderCredentialForRun("run", inner, { ...account, id: "other" }), /无权/);
+  run.iterationContext = undefined; run.graphSnapshot.nodes = [node];
+
+  globalThis.fetch = async (url, init) => {
+    init?.signal?.throwIfAborted();
+    if (url === endpoint) {
+      const parsed = new URLSearchParams(init.body), action = init.headers["x-acs-action"];
+      calls.push({ url, action, init, parsed });
+      assert.equal(init.headers.Authorization, "fixture-secret");
+      assert.match(init.headers["x-acs-date"], /^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}Z$/);
+      assert.equal(init.headers["x-acs-version"], "2026-07-07");
+      assert.equal(init.headers["Content-Type"], "application/x-www-form-urlencoded");
+      if (action === "ImportMedia") return Response.json({ MediaId: "media-one" });
+      if (action === "GetMedia") { const value = mediaReady; mediaReady = true; return Response.json({ MediaInfo: { MediaBasicInfo: { Status: value ? "Normal" : "Processing" } } }); }
+      if (action === "SubmitImageGenerationJob") return Response.json({ JobId: "ag-one" });
+      if (action === "GetImageGenerationJob") return Response.json({ ImageGenerationJob: { JobId: "ag-one", Status: jobStatus, Output: JSON.stringify({ Medias: [{ MediaId: "result", OutputUrl: "https://signed.example/image.png?secret=private" }] }) } });
+      throw new Error(`Unexpected action ${action}`);
+    }
+    downloadedAuth = init?.headers;
+    return new Response(png);
+  };
+  const { generateWonderImages: generate } = load("src/lib/wonder-image.ts");
+  const base = { endpoint, apiKey: "fixture-secret", prompt: "edit", model: "qwen-image-3.0", images: [], count: 1, resolution: "1K", aspectRatio: "16:9", account };
+  const submitted = await generate(base);
+  assert.deepEqual(submitted, { jobId: "ag-one", status: "Created", pending: true });
+  const submit = calls.find((call) => call.action === "SubmitImageGenerationJob");
+  assert.equal(submit.parsed.get("JobType"), "text_to_image");
+  assert.equal(submit.parsed.get("N"), "1");
+  const beforeResume = calls.length;
+  jobStatus = "Executing";
+  assert.deepEqual(await generate({ ...base, resumeJobId: "ag-one" }), { jobId: "ag-one", status: "Executing", pending: true });
+  assert.equal(calls.length, beforeResume + 1);
+  assert.equal(calls.filter((call) => call.action === "SubmitImageGenerationJob").length, 1);
+  jobStatus = "Finished";
+  const completed = await generate({ ...base, resumeJobId: "ag-one" });
+  assert.equal(completed.pending, false); assert.equal(completed.items[0].width, 512); assert.ok(completed.items[0].url.startsWith("/generated/wonder-"));
+  assert.equal(downloadedAuth, undefined);
+  const publicReference = { url: "https://public.example/reference.png" };
+  await generate({ ...base, images: [publicReference] });
+  const edited = calls.filter((call) => call.action === "SubmitImageGenerationJob").at(-1);
+  assert.equal(edited.parsed.get("JobType"), "image_to_image");
+  assert.deepEqual(JSON.parse(edited.parsed.get("Input")).Medias, [{ Type: "image", MediaId: "media-one" }]);
+  assert.equal(calls.filter((call) => call.action === "GetMedia").length, 2);
+  await generate({ ...base, images: [{ url: "/media/a.png" }, { url: `data:image/png;base64,${png.toString("base64")}` }, { url: "/api/canvas/local-directory/media?snapshot=one&media=image" }] });
+  assert.equal(persisted.filter((item) => item.kind === "reference").length, 3);
+  const beforeInvalid = calls.length;
+  await assert.rejects(generate({ ...base, images: Array(10).fill(publicReference) }), /9/);
+  await assert.rejects(generate({ ...base, prompt: " " }), /提示词/);
+  await assert.rejects(generate({ ...base, signal: AbortSignal.abort() }));
+  assert.equal(calls.length, beforeInvalid);
+  storageEnabled = false;
+  await assert.rejects(generate({ ...base, images: [{ url: "/media/a.png" }] }), /对象存储/);
+  storageEnabled = true;
+  const small = await sharp({ create: { width: 399, height: 512, channels: 3, background: "red" } }).png().toBuffer();
+  await writeFile(path.join(temporary, "reference.png"), small);
+  await assert.rejects(generate({ ...base, images: [publicReference] }), /400px/);
+  await writeFile(path.join(temporary, "reference.png"), png);
+  globalThis.fetch = async () => new Response(JSON.stringify({ Code: "InvalidApiKey", Message: "fixture-secret https://private.invalid" }), { status: 401 });
+  await assert.rejects(generate({ ...base, resumeJobId: "ag-one" }), (error) => !error.message.includes("fixture-secret") && !error.message.includes("https://") && error.message.includes("InvalidApiKey"));
+  globalThis.fetch = async () => { throw new Error("private fetch detail"); };
+  await assert.rejects(generate({ ...base, resumeJobId: "ag-one" }), (error) => !error.message.includes("private fetch detail"));
+
+  const executorSource = readFileSync(path.join(root, "src/lib/canvas/executors.ts"), "utf8");
+  const executorModule = { exports: {} };
+  const imports = Object.fromEntries([...executorSource.matchAll(/from "([^"\n]+)"/g)].map((match) => [match[1], {}]));
+  let executorInput;
+  imports["../wonder-image"] = { generateWonderImages: async (input) => { executorInput = input; return { jobId: "ag-test", status: "Created", pending: true }; } };
+  imports["./wonder-credentials"] = credentials;
+  Function("require", "module", "exports", ts.transpileModule(executorSource, { compilerOptions: { module: ts.ModuleKind.CommonJS, target: ts.ScriptTarget.ES2022, esModuleInterop: true } }).outputText)(
+    (name) => name.startsWith("node:") ? require(name) : imports[name], executorModule, executorModule.exports);
+  node.config = { ...node.config, prompt: "local instruction", model: "qwen-image-3.0", count: 1, resolution: "1K", aspectRatio: "1:1" };
+  let providerState;
+  const inputs = { prompt: [{ kind: "text", value: "first" }, { kind: "text", value: "second" }], references: [{ kind: "images", items: [{ url: "a" }, { url: "a" }, { url: "b" }] }] };
+  const result = await executorModule.exports.executeCanvasNode({ node, runId: "run", account, inputs, onProviderTaskUpdate: async (state) => { providerState = state; } });
+  assert.equal(result.pending, true); assert.equal(providerState.taskId, "ag-test");
+  assert.equal(executorInput.prompt, "first\n\nsecond\n\nlocal instruction");
+  assert.deepEqual(executorInput.images.map((item) => item.url), ["a", "a", "b"]);
+  assert.equal(executorInput.resumeJobId, undefined);
+  await executorModule.exports.executeCanvasNode({ node, runId: "run", account, inputs, previousNodeRun: { providerTaskId: "ag-test" } });
+  assert.equal(executorInput.resumeJobId, "ag-test");
+  await credentials.removeWonderCredential(target, account);
+  await assert.rejects(executorModule.exports.executeCanvasNode({ node, runId: "run", account, inputs }), executorModule.exports.CanvasNeedsConfigError);
+  console.log("Wonder Image runtime: credentials, media, async resume, result persistence, limits, cancellation and safe failures passed.");
+} finally {
+  globalThis.fetch = originalFetch; process.chdir(root);
+  assert.ok(path.resolve(temporary).startsWith(path.resolve(tmpdir()) + path.sep));
+  await rm(temporary, { recursive: true, force: true });
+}

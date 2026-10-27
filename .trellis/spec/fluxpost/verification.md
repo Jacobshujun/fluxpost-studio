@@ -27,6 +27,8 @@ node --env-file=.env.local .trellis/verification/unified_library_postgres_benchm
 
 - Gemini: baseline `canvas_gemini_check.mjs` covers loopback HTTP/proxy, config snapshots, media limits, failures/cancellation and Canvas executor/graph/iteration/V2/bypass contracts. Separate `python .trellis/verification/canvas_gemini_browser_check.py` checks node/config UI at 1440/390 in three themes using intercepted APIs; requires worker-disabled loopback `BROWSER_BASE_URL`, rejects 3001. See `gemini.md`; no live Gemini calls.
 
+- Wonder Image: baseline `wonder_image_contract_check.mjs`, `wonder_image_runtime_check.mjs` and `wonder_image_persistence_check.mjs` cover Yike forms/headers, media registration/readiness, asynchronous JobId resume, result persistence, encrypted node credentials and isolated SQLite/export/iteration behavior. Separate `python .trellis/verification/wonder_image_browser_check.py` covers controls, credentials and graph edges in three themes at 1440/390 using intercepted APIs; use worker-disabled loopback `BROWSER_BASE_URL`, never 3001. Contract: `architecture_rules.md` scenario `Canvas Wonder Image Node`; no live Yike calls.
+
 - Canvas H.264: baseline `canvas_video_encoding_check.mjs` checks CPU output and explicit policy validation; opt-in real GPU/node commands and hardware limits are in `canvas_video_encoding.md`. GPU is never required by the default baseline.
 
 - Canvas cancellation: baseline `canvas_cancellation_store_check.mjs`, `canvas_cancellation_runtime_check.mjs` and `canvas_cancellation_recovery_check.mjs` cover atomic run/node/queue cancellation, stale-write fences, real worker/resource release, downstream suppression and scoped recovery backup/rollback. `node --env-file=.env.local .trellis/verification/canvas_cancellation_store_check.mjs --postgres` separately exercises actual PostgreSQL SQL in connection-local temporary tables, never runtime rows. Image checks cover child termination, timeout, download cancellation and staging cleanup.
@@ -98,6 +100,8 @@ For a production candidate:
 Do not deploy a dirty worktree, branch name, abbreviated SHA, local runtime rows, or unpushed commit.
 
 ## Recent Verification
+
+- 2026-10-27: Canvas Wonder Image node passed provider/media/async-resume contracts, encrypted credential and real isolated SQLite checks, six three-theme 1440/390 browser cases, changed-source lint, TypeScript, production build, config synchronization and SQLite checks. Full baseline passed all functional checks and stopped at the existing 17 ignored-data-script lint errors. No live Yike calls or 3001 activation. Evidence: `.trellis/tasks/10-27-canvas-wonder-image/verification.md`.
 
 - 2026-10-21: Global text reasoning effort config passed all-value persistence/default/clear/invalid checks, Responses and Chat request-body contracts across generation, vision, tagging, safety/distribution review, video-frame review and viral image analysis, built API/worker synchronization, changed-source lint, TypeScript, production build, isolated HTTP smoke, and three-theme 1440/390 browser checks. Full baseline passed all preceding checks then stopped at the known 17-error ignored-script lint gate. No live provider calls. Evidence: `.trellis/tasks/10-21-text-reasoning-effort/verification.md`.
 

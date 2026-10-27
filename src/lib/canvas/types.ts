@@ -319,6 +319,7 @@ export type CanvasNodeType =
   | "model.gpt-text"
   | "model.gemini"
   | "model.qwen-image"
+  | "model.wonder-image"
   | "model.gpt-image"
   | "model.gpt-image-each"
   | "model.gpt-vision"

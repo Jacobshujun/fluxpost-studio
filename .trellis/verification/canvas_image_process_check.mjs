@@ -256,8 +256,9 @@ try {
   writeFileSync(path.join(temp, "toapis-image-api.js"), "exports.toApisImageResolutions=['1k'];exports.toApisImageRatios=['1:1'];");
   writeFileSync(path.join(temp, "feishu-publish-mode.js"), "exports.feishuPublishModeOptions=[];exports.normalizeFeishuPublishMode=v=>v||'full';");
   writeFileSync(path.join(temp, "image-model-options.js"), compile(read("src/lib/image-model-options.ts")));
+  writeFileSync(path.join(temp, "wonder-image-contract.js"), compile(read("src/lib/wonder-image-contract.ts")));
   for (const name of ["layer-compose-contract", "image-process-contract", "types", "node-utils", "source-video-contract", "video-loader", "content-collection", "content-collection-schedule", "save-images", "seedance-references", "subtitle-style", "subtitle-editor", "registry", "graph", "iteration", "serialization", "scheduler-v2"]) {
-    writeFileSync(path.join(temp, `${name}.js`), compile(read(`src/lib/canvas/${name}.ts`).replaceAll('"../toapis-image-api"', '"./toapis-image-api"').replaceAll('"../feishu-publish-mode"', '"./feishu-publish-mode"').replaceAll('"../image-model-options"', '"./image-model-options"')));
+    writeFileSync(path.join(temp, `${name}.js`), compile(read(`src/lib/canvas/${name}.ts`).replaceAll('"../toapis-image-api"', '"./toapis-image-api"').replaceAll('"../feishu-publish-mode"', '"./feishu-publish-mode"').replaceAll('"../image-model-options"', '"./image-model-options"').replaceAll('"../wonder-image-contract"', '"./wonder-image-contract"')));
   }
   const registry = require(path.join(temp, "registry.js"));
   const graphLib = require(path.join(temp, "graph.js"));

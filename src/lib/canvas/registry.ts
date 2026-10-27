@@ -14,6 +14,7 @@ import { decodeCanvasSubtitleRevisionSnapshot } from "./subtitle-editor";
 import { validateCanvasVideoLoaderConfig } from "./video-loader";
 import { validateCanvasCollectionConfig } from "./content-collection";
 import { createCanvasIterationDefinition } from "./iteration";
+import { buildWonderImageRequest, validateWonderEndpoint, WONDER_IMAGE_DEFAULT_ENDPOINT, WONDER_IMAGE_DEFAULT_MODEL } from "../wonder-image-contract";
 
 export const canvasGptImageReferencePortIds = Array.from({ length: 16 }, (_, index) => `image_${index + 1}`);
 
@@ -255,6 +256,34 @@ const canvasNodeDefinitionVersions: CanvasNodeDefinition[] = [
       { key: "promptExtend", label: "自动扩写提示词", kind: "boolean" },
     ],
     defaultConfig: { endpoint: "", prompt: "", count: 1, size: "", promptExtend: true },
+    capability: "image_model",
+    bypass: { inputPort: "references", outputPort: "images" },
+  },
+  {
+    type: "model.wonder-image",
+    version: 1,
+    label: "Wonder Image",
+    description: "万镜一刻文生图或使用 1–9 张参考图编辑；地址和密钥在节点内填写。",
+    category: "model",
+    icon: "WandSparkles",
+    color: "#0f9f7f",
+    inputs: [
+      { id: "prompt", label: "提示词", kind: "text", multiple: true },
+      { id: "references", label: "参考图（最多 9 张）", kind: "images", multiple: true },
+    ],
+    outputs: [{ id: "images", label: "图片", kind: "images" }],
+    fields: [
+      { key: "endpoint", label: "Wonder 请求地址", kind: "select", options: [
+        { value: "https://yike.cn-shanghai.aliyuncs.com/", label: "国内站 · 上海" },
+        { value: "https://yike.ap-southeast-1.aliyuncs.com/", label: "国际站 · 新加坡" },
+      ] },
+      { key: "model", label: "模型 ID", kind: "text", placeholder: WONDER_IMAGE_DEFAULT_MODEL },
+      { key: "prompt", label: "编辑 / 生成提示词", kind: "textarea", placeholder: "上游文字后追加本段指令" },
+      { key: "count", label: "图片数量", kind: "number", min: 1, max: 4 },
+      { key: "resolution", label: "分辨率", kind: "select", options: ["1K", "2K", "4K"].map((value) => ({ value, label: value })) },
+      { key: "aspectRatio", label: "宽高比", kind: "select", options: ["16:9", "9:16", "4:3", "3:4", "1:1"].map((value) => ({ value, label: value })) },
+    ],
+    defaultConfig: { endpoint: WONDER_IMAGE_DEFAULT_ENDPOINT, model: WONDER_IMAGE_DEFAULT_MODEL, prompt: "", count: 1, resolution: "1K", aspectRatio: "16:9" },
     capability: "image_model",
     bypass: { inputPort: "references", outputPort: "images" },
   },
@@ -1040,6 +1069,15 @@ export function validateCanvasNodeConfig(type: CanvasNodeType, config: CanvasNod
   if (type === "model.qwen-image") {
     if (!String(config.endpoint || "").trim()) errors.push("Qwen: 请在节点中填写请求地址。");
     if (!Number.isInteger(config.count)) errors.push("Qwen: 图片数量必须为整数。");
+  }
+  if (type === "model.wonder-image") {
+    try {
+      validateWonderEndpoint(config.endpoint);
+      buildWonderImageRequest({
+        prompt: "Canvas validation", model: String(config.model || ""), mediaIds: [],
+        count: Number(config.count), resolution: String(config.resolution || ""), aspectRatio: String(config.aspectRatio || ""),
+      });
+    } catch (error) { errors.push(error instanceof Error ? error.message : "Wonder Image: 配置无效。"); }
   }
   if (type === "model.gpt-image" || type === "model.gpt-image-each") {
     try {

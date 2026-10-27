@@ -195,9 +195,10 @@ try {
 
   writeFileSync(path.join(temp, "toapis-image-api.js"), "exports.toApisImageResolutions=['1k','2k','4k'];exports.toApisImageRatios=['1:1'];exports.toApis4kImageRatios=['16:9'];", "utf8");
   writeFileSync(path.join(temp, "feishu-publish-mode.js"), "exports.feishuPublishModeOptions=[{value:'full',label:'full'},{value:'text',label:'text'},{value:'media',label:'media'}];exports.normalizeFeishuPublishMode=(value)=>value===undefined?'full':['full','text','media'].includes(value)?value:(()=>{throw new Error('invalid mode')})();", "utf8");
+  writeFileSync(path.join(temp, "wonder-image-contract.js"), ts.transpileModule(read("src/lib/wonder-image-contract.ts"), { compilerOptions: { module: ts.ModuleKind.CommonJS, target: ts.ScriptTarget.ES2022 } }).outputText);
   for (const name of ["layer-compose-contract", "image-process-contract", "types", "node-utils", "source-video-contract", "save-images", "seedance-references", "subtitle-style", "subtitle-editor", "video-loader", "content-collection", "registry", "graph", "iteration"]) {
     writeFileSync(path.join(temp, "image-model-options.js"), ts.transpileModule(read("src/lib/image-model-options.ts"), { compilerOptions: { module: ts.ModuleKind.CommonJS, target: ts.ScriptTarget.ES2022 } }).outputText);
-    const source = read(`src/lib/canvas/${name}.ts`).replace('"../toapis-image-api"', '"./toapis-image-api"').replace('"../feishu-publish-mode"', '"./feishu-publish-mode"').replace('"../image-model-options"', '"./image-model-options"');
+    const source = read(`src/lib/canvas/${name}.ts`).replace('"../toapis-image-api"', '"./toapis-image-api"').replace('"../feishu-publish-mode"', '"./feishu-publish-mode"').replace('"../image-model-options"', '"./image-model-options"').replace('"../wonder-image-contract"', '"./wonder-image-contract"');
     writeFileSync(path.join(temp, `${name}.js`), transpile(source, `${name}.ts`), "utf8");
   }
   const require = createRequire(import.meta.url);

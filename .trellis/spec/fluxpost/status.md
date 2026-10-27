@@ -8,6 +8,7 @@ Ordinary library restored on LAN 3001; generated indexing retired. Backup and au
 
 ## Current Focus
 
+- Wonder Image Canvas node is implemented and ready for review; real Yike/media acceptance and clean-candidate 3001 activation are pending.
 - Generated library retired: 22,255 index assets and three tables removed without a cleanup backup. Ordinary assets remain: 2,301; nonempty collections: 24; memberships: 2,230; labels: 5,302.
 - Qwen `0b775c7` included in authorized LAN release; Gemini live testing paused.
 
@@ -17,6 +18,7 @@ Recovery evidence: `.trellis/tasks/archive/2026-10/10-27-10-27-remove-generated-
 
 ## Risks And Unknowns
 
+- Wonder Image has no live Yike acceptance; its API/model/media behavior remains pending operator validation. No real credentials were used.
 - Baseline stops at 17 existing ignored-script lint errors; no gate weakened.
 - Text reasoning effort must be supported by the configured model and provider; unsupported values surface the upstream error without stripping or retrying the parameter.
 - Gemini live text/image acceptance remains pending. Minimal diagnostics were authorized, then explicitly paused; do not send further calls until resumed.

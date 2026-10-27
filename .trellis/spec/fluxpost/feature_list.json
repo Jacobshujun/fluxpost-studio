@@ -28,6 +28,19 @@
       "notes": "Live acceptance pending; LAN release tracked in tos-oss-migration/lan-release.md. Existing lint blocker."
     },
     {
+      "id": "canvas-wonder-image",
+      "title": "Canvas Wonder Image node",
+      "status": "ready_for_review",
+      "definition_of_done": [
+        "T2I/I2I with secure node-local credentials, media registration and resumable Yike jobs",
+        "Offline contracts, persistence, browser and build checks pass; live provider acceptance is explicit"
+      ],
+      "evidence": [
+        "2026-10-27 contract/runtime/SQLite and six three-theme 1440/390 browser cases passed; TypeScript/build/config/SQLite passed; baseline stopped only at the existing 17-data-script lint gate. See canvas-wonder-image task."
+      ],
+      "notes": "Real Yike API/model/media acceptance and clean-candidate 3001 activation remain pending. No live provider calls."
+    },
+    {
       "id": "tos-to-oss-migration",
       "title": "TOS to Aliyun OSS migration",
       "status": "in_progress",

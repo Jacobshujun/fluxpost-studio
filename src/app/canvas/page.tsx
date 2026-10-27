@@ -1863,7 +1863,7 @@ export default function CanvasPage() {
             seedanceReferences={selectedSeedanceReferences}
             createSeedanceMentionId={createSeedanceMentionId}
           />
-          {selectedCanvasNode.type === "model.qwen-image" ? <CanvasQwenCredentials key={`${activeWorkflow?.id}:${selectedCanvasNode.id}:${String(selectedCanvasNode.config.endpoint || "")}`} node={selectedCanvasNode} interaction={nodeInteraction} /> : null}
+          {selectedCanvasNode.type === "model.qwen-image" || selectedCanvasNode.type === "model.wonder-image" ? <CanvasQwenCredentials key={`${activeWorkflow?.id}:${selectedCanvasNode.id}:${String(selectedCanvasNode.config.endpoint || "")}`} node={selectedCanvasNode} interaction={nodeInteraction} /> : null}
         </aside> : null}
       </section>
 
@@ -2038,6 +2038,11 @@ const CanvasFlowNode = memo(function CanvasFlowNode({ data, selected }: NodeProp
       <CanvasNodeFields node={node} onChange={(key, value) => interaction?.onConfigChange(node.id, key, value)} onPatch={(patch) => interaction?.onConfigPatch(node.id, patch)} onPreviewImage={(url, index) => interaction?.onPreview({ kind: "image", url, index })} />
       <CanvasQwenCredentials key={`${interaction?.workflowId}:${interaction?.regionId || ""}:${node.id}:${String(node.config.endpoint || "")}`} node={node} interaction={interaction} />
       <small>不接参考图：文生图；接入 1–3 张：图生图，按输入顺序处理。</small>
+    </div> : null}
+    {node.type === "model.wonder-image" ? <div className="canvas-gpt-image-controls nodrag nopan nowheel" onPointerDown={(event) => event.stopPropagation()} onClick={(event) => event.stopPropagation()} onKeyDown={(event) => event.stopPropagation()}>
+      <CanvasNodeFields node={node} onChange={(key, value) => interaction?.onConfigChange(node.id, key, value)} onPatch={(patch) => interaction?.onConfigPatch(node.id, patch)} onPreviewImage={(url, index) => interaction?.onPreview({ kind: "image", url, index })} />
+      <CanvasQwenCredentials key={`${interaction?.workflowId}:${interaction?.regionId || ""}:${node.id}:${String(node.config.endpoint || "")}`} node={node} interaction={interaction} />
+      <small>不接参考图：文生图；接入 1–9 张：图生图。本地参考图需要已配置对象存储。</small>
     </div> : null}
     {node.type === "model.gpt-image" && node.version >= 2 ? <div className="canvas-gpt-image-controls nodrag nopan nowheel" onPointerDown={(event) => event.stopPropagation()} onClick={(event) => event.stopPropagation()}>
       <CanvasNodeFields node={node} onChange={(key, value) => interaction?.onConfigChange(node.id, key, value)} onPatch={(patch) => interaction?.onConfigPatch(node.id, patch)} onPreviewImage={(url, index) => interaction?.onPreview({ kind: "image", url, index })} />
@@ -2424,7 +2429,7 @@ function CanvasIterationEditor({ node, colorMode, onChange, onClose, credentials
         {selected?.type === "input.iteration-item" ? <p>固定入口：当前图片、原始索引、共享文字和参考图。不能删除或禁用。</p> : selected ? <div className="canvas-inspector-content">
           <label><span>内层节点名称</span><input value={selected.label || ""} maxLength={80} onChange={(event) => patchNode(selected.id, { label: event.target.value })} /></label>
           <CanvasNodeFields node={selected} onChange={(key, value) => patchConfig(selected.id, { [key]: value })} onPatch={(patch) => patchConfig(selected.id, patch)} onPreviewImage={(url, index) => onPreview({ kind: "image", url, index })} />
-          {selected.type === "model.qwen-image" ? <CanvasQwenCredentials key={`${selected.id}:${String(selected.config.endpoint || "")}`} node={selected} interaction={interaction} /> : null}
+          {selected.type === "model.qwen-image" || selected.type === "model.wonder-image" ? <CanvasQwenCredentials key={`${selected.id}:${String(selected.config.endpoint || "")}`} node={selected} interaction={interaction} /> : null}
           {selected.type === "utility.media-mask" ? <CanvasMediaMaskEditor node={selected} onPatch={(patch) => patchConfig(selected.id, patch)} /> : null}
           <button type="button" onClick={() => { commit(innerNodes.filter((entry) => entry.id !== selected.id), innerEdges.filter((edge) => edge.source !== selected.id && edge.target !== selected.id)); setSelectedId(undefined); }}><Trash2 />删除内层节点</button>
         </div> : null}
@@ -2447,12 +2452,14 @@ function CanvasIterationEditor({ node, colorMode, onChange, onClose, credentials
 }
 
 function CanvasQwenCredentials({ node, interaction }: { node: CanvasNode; interaction: CanvasNodeInteraction | null }) {
+  const provider = node.type === "model.wonder-image" ? "Wonder" : "Qwen";
+  const providerLabel = provider === "Wonder" ? "Wonder Image" : "Qwen";
   const [key, setKey] = useState("");
   const [message, setMessage] = useState("请保存节点后查询或填写密钥");
   const [busy, setBusy] = useState(false);
   const endpoint = String(node.config.endpoint || "");
   const query = new URLSearchParams({ workflowId: interaction?.workflowId || "", nodeId: node.id, ...(interaction?.regionId ? { regionId: interaction.regionId } : {}) });
-  const url = `/api/canvas/qwen-credentials?${query}`;
+  const url = `/api/canvas/${provider.toLowerCase()}-credentials?${query}`;
   async function action(method: "GET" | "PUT" | "DELETE") {
     setBusy(true);
     const captured = endpoint;
@@ -2465,7 +2472,7 @@ function CanvasQwenCredentials({ node, interaction }: { node: CanvasNode; intera
     finally { setBusy(false); }
   }
   return <div className="canvas-qwen-credentials">
-    <label><span>Qwen API Key</span><input aria-label="Qwen API Key" type="password" autoComplete="new-password" value={key} disabled={busy} onChange={(event) => setKey(event.target.value)} placeholder="仅用于保存或替换，不会回显" /></label>
+    <label><span>{providerLabel} API Key</span><input aria-label={`${providerLabel} API Key`} type="password" autoComplete="new-password" value={key} disabled={busy} onChange={(event) => setKey(event.target.value)} placeholder="仅用于保存或替换，不会回显" /></label>
     <div style={{ display: "flex", flexWrap: "wrap", gap: 4 }}>
       <button type="button" disabled={busy || !key.trim()} onClick={() => void action("PUT")}>保存密钥</button>
       <button type="button" disabled={busy} onClick={() => void action("GET")}>查询配置</button>
@@ -6958,6 +6965,7 @@ function iconForNode(type: CanvasNodeType) {
   if (type === "model.gpt-text") return <Sparkles {...props} />;
   if (type === "model.gemini") return <Sparkles {...props} />;
   if (type === "model.qwen-image") return <WandSparkles {...props} />;
+  if (type === "model.wonder-image") return <WandSparkles {...props} />;
   if (type === "model.gpt-image") return <WandSparkles {...props} />;
   if (type === "model.gpt-image-each") return <GalleryHorizontalEnd {...props} />;
   if (type === "model.gpt-vision") return <Search {...props} />;

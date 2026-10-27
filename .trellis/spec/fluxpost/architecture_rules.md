@@ -32,6 +32,43 @@ Last updated: 2026-07-20
 - Text generation belongs in `src/lib/openai.ts`.
 - Image generation belongs in `src/lib/image-generation.ts`.
 - OpenAI-compatible Images API support belongs in `src/lib/image-generation.ts`, including local/remote reference-image normalization, multipart `/images/edits` upload, JSON `/images/generations` requests, and image-provider retry/fallback behavior.
+- Wonder Image OpenAPI payload/response mapping belongs in `src/lib/wonder-image-contract.ts`; asynchronous media registration, generation, result persistence and node-local credential orchestration belongs in `src/lib/wonder-image.ts` and `src/lib/canvas/wonder-credentials.ts`. Do not route it through the OpenAI or Qwen provider modules.
+
+## Scenario: Canvas Wonder Image Node
+
+### 1. Scope / Trigger
+- Trigger: any change to the `model.wonder-image` Canvas node, its node-local credentials or the Yike image-generation/media integration.
+
+### 2. Signatures
+- Credential API: `GET|PUT|DELETE /api/canvas/wonder-credentials` with workflow/node/optional region target; `PUT` accepts `{ apiKey, endpoint }` and returns only `{ configured: boolean }`.
+- Node config: `endpoint`, `model`, `prompt`, `count`, `resolution`, `aspectRatio`; API keys never enter node config or workflow/run serialization.
+- Yike actions: `ImportMedia`, `GetMedia`, `SubmitImageGenerationJob`, `GetImageGenerationJob`, version `2026-07-07`.
+
+### 3. Contracts
+- Only `https://yike.cn-shanghai.aliyuncs.com/` and `https://yike.ap-southeast-1.aliyuncs.com/` are accepted. `Authorization` contains the raw key; form requests include fresh UTC `x-acs-date` and explicit action/version headers.
+- Text and optional 1-9 ordered references produce `text_to_image` or `image_to_image`; count is 1-4, resolution is 1K/2K/4K and ratio is 16:9/9:16/4:3/3:4/1:1.
+- References must be JPEG/PNG/WebP, at most 20MB, short side at least 400px and long side at most 8000px. Public URLs are registered directly; local references require existing configured object storage and a verified public URL.
+- A submitted JobId is persisted through `onProviderTaskUpdate`. Resume only queries that JobId and never resubmits. Finished results are validated and persisted as runtime media without generated-library indexing.
+
+### 4. Validation & Error Matrix
+- Missing/mismatched credential -> Canvas `needs_config`; unauthorized workflow/run credential access is rejected.
+- Invalid endpoint, parameters or reference -> explicit local error before a generation POST.
+- `Created|Queuing|Executing` -> pending node run; `Failed` -> sanitized failure; malformed/unknown result -> failure, never a successful empty output.
+- Provider credentials, request bodies, private storage errors and signed URLs must not enter durable errors.
+
+### 5. Good/Base/Bad Cases
+- Good: a restarted run queries its persisted JobId and saves the returned images.
+- Base: T2I needs no object storage; local I2I reports the missing object-storage prerequisite explicitly.
+- Bad: a retry submits a second paid job, API keys appear in exports, or local `/generated/...` is sent directly to Yike.
+
+### 6. Tests Required
+- Baseline `wonder_image_contract_check.mjs`, `wonder_image_runtime_check.mjs` and `wonder_image_persistence_check.mjs` cover forms, headers, media, async resume, cancellation/redaction and real isolated SQLite/export/clipboard/iteration behavior.
+- `wonder_image_browser_check.py` covers controls, credentials and graph edges in three themes at 1440/390 using intercepted APIs and a worker-disabled non-3001 server.
+- Real Yike/media acceptance is an explicit operator gate; default checks never call the paid provider.
+
+### 7. Wrong vs Correct
+- Wrong: prefix the key with `Bearer`, or POST again when an existing JobId is still executing.
+- Correct: send the raw key with Yike action/version/date headers, persist the JobId immediately and query it on later Canvas attempts.
 - ToAPIs GPT-Image-2 payload/response mapping belongs in `src/lib/toapis-image-api.ts`; asynchronous submission, upload, polling, failover, and final runtime-media persistence orchestration remains in `src/lib/image-generation.ts`.
 - Review-desk manual image replacement/addition belongs in `src/lib/review-image-upload.ts` plus the thin authenticated route `src/app/api/review/images/route.ts`: the route must require workspace auth, validate `postId` and `imageIndex` against an owner-accessible generated post, accept `mode=append` only for the current end-of-list image index, delegate file byte sniffing/persistence to the helper, and return a `/generated/review-uploads/...` URL for later persistence through `/api/review`.
 - Local ComfyUI Klein workflow integration belongs in `src/lib/comfyui-klein.ts`; `src/lib/image-generation.ts` should only dispatch provider-marked selected image tasks to it and keep generic image-provider logic separate.

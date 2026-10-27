@@ -102,6 +102,7 @@ const executors: Record<CanvasNode["type"], CanvasNodeExecutor> = {
   "model.gpt-text": executeGptText,
   "model.gemini": executeGemini,
   "model.qwen-image": executeQwenImage,
+  "model.wonder-image": executeWonderImage,
   "model.gpt-image": executeGptImage,
   "model.gpt-image-each": executeGptImageEach,
   "model.gpt-vision": executeGptVision,
@@ -398,6 +399,30 @@ async function executeQwenImage({ node, inputs, account, signal, runId }: Canvas
     return { outputs: { images: { kind: "images", items } } };
   } catch (error) {
     if (error instanceof QwenCredentialError) throw new CanvasNeedsConfigError(error.message);
+    throw error;
+  }
+}
+
+async function executeWonderImage({ node, inputs, account, signal, runId, previousNodeRun, onProviderTaskUpdate }: CanvasNodeExecutionContext): Promise<CanvasNodeExecutionResult> {
+  const { generateWonderImages } = await import("../wonder-image");
+  const { wonderCredentialForRun, WonderCredentialError } = await import("./wonder-credentials");
+  try {
+    const credentials = await wonderCredentialForRun(runId, node, account);
+    const result = await generateWonderImages({
+      ...credentials, account, signal,
+      prompt: [...textValues(inputs.prompt), String(node.config.prompt || "")].filter(Boolean).join("\n\n"),
+      images: imageItems(inputs.references),
+      model: String(node.config.model || ""), count: Number(node.config.count),
+      resolution: String(node.config.resolution || ""), aspectRatio: String(node.config.aspectRatio || ""),
+      resumeJobId: previousNodeRun?.providerTaskId,
+    });
+    if (result.pending) {
+      if (!previousNodeRun?.providerTaskId) await onProviderTaskUpdate?.({ taskId: result.jobId, route: "primary", status: result.status });
+      return { outputs: {}, providerTaskId: result.jobId, providerTaskRoute: "primary", providerStatus: result.status, pending: true };
+    }
+    return { outputs: { images: { kind: "images", items: result.items } }, providerTaskId: result.jobId, providerTaskRoute: "primary", providerStatus: result.status };
+  } catch (error) {
+    if (error instanceof WonderCredentialError) throw new CanvasNeedsConfigError(error.message);
     throw error;
   }
 }
