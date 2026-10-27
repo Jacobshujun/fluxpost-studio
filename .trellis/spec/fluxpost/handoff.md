@@ -6,12 +6,14 @@ This file is an on-demand history library. Do not read it during default startup
 
 ## 最近一条
 <!-- TRELLIS-LATEST-START -->
-2026-10-27 latest: user cancelled the generated-image library. Removed its
-worker, capture, API, filters, schema and UI; retired filters now reject the
-entire workflow/schedule. Local PostgreSQL cleanup removed 22,255 indexed
-assets and the three generated-image tables with no orphaned library rows.
-Ordinary media, generated posts, runs and OSS/TOS objects are unchanged.
-Port 3001 still serves 72dca31; no push, deploy or candidate activation.
+2026-10-27 latest: ordinary-library incident recovered after user approval.
+Old code depended on already-dropped generated tables, so the gallery failed
+despite 2,301 ordinary assets remaining. Recovery code 4791dcc is active on LAN
+3001; error UI no longer claims an empty gallery on fetch failure. Current DB
+backup decoded; all 11 library tables match its inventory after authenticated
+desktop/mobile acceptance. Generated indexing stays retired; no remote release.
+Evidence: tasks/archive/2026-10/10-27-10-27-remove-generated-image-library/
+recovery-verification.md. Never roll back to schema-incompatible 72dca31.
 
 Newest 2026-10-27: user requested operator CLI. `npm run migrate` opens Chinese
 menu; status/watch read local progress, start resumes fixed manifest with

@@ -4,6 +4,16 @@ Last updated: 2026-07-20
 
 ## Known Project Pitfalls
 
+- Generated-library retirement (2026-10-27): ordinary list/tag/navigation queries
+  in 72dca31 depend on generated tables. Never drop a shared query dependency
+  while leaving dependent code active. Verify real authenticated reads, not just
+  row counts or /api/version. A failed query is not an empty gallery. Recovery
+  evidence: archived remove-generated-image-library task, recovery-verification.md.
+- Legacy `.next` rollback requires its on-disk SHA manifest to match the running
+  candidate: rebuilding files does not replace the old in-memory process. Never
+  label new build files with the old process SHA or use schema-incompatible code
+  as rollback after destructive migrations.
+
 - OSS migration: xpai-imc rejects V1 signatures; ali-oss requires authorizationV4=true.
   Omit empty prefix/marker and undefined TOS continuationToken fields: signed lists
   otherwise returned SignatureDoesNotMatch despite valid keys. Test with

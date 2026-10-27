@@ -1,6 +1,6 @@
 # Ordinary Library Visibility Incident
 
-Date: 2026-10-27. Recovery approved and in progress; see recovery-verification.md.
+Date: 2026-10-27. Recovery completed; see recovery-verification.md.
 
 ## Scope And Evidence
 
@@ -100,7 +100,7 @@ guarantee recovery of original IDs, collections, labels or favorites.
 
 ## Verification
 
-Direct read-only database inspection and old-query reproduction passed as
-diagnostic evidence. Authenticated browser and original-media acceptance remain
-pending. Baseline run: `test-artifacts/library-recovery-diagnosis-baseline.log`
-(ignored local artifact); result recorded in the task verification document.
+Read-only diagnosis, isolated regression checks and authenticated 3001 recovery
+acceptance are recorded in recovery-verification.md. All current library tables
+match the recovery backup; historical completeness remains unproven. Baseline
+retains its existing unrelated lint blocker, with remaining checks run explicitly.

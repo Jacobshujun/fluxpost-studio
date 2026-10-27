@@ -4,7 +4,7 @@ Last updated: 2026-10-27
 
 ## One-Line Status
 
-Ordinary library recovery approved; backup verified. Port 3001 still runs incompatible old code; activation pending.
+Ordinary library restored on LAN 3001; generated indexing retired. Backup and authenticated gallery checks passed.
 
 ## Current Focus
 
@@ -13,7 +13,7 @@ Ordinary library recovery approved; backup verified. Port 3001 still runs incomp
 
 ## Next Entry
 
-Execute `.trellis/tasks/10-27-10-27-remove-generated-image-library/recovery-plan.md`: verify, commit, activate LAN candidate. No reimport or generated-table recreation. Cloud copy stays stopped.
+Recovery evidence: `.trellis/tasks/archive/2026-10/10-27-10-27-remove-generated-image-library/recovery-verification.md`. No reimport or generated-table recreation. Cloud copy stays stopped.
 
 ## Risks And Unknowns
 
@@ -24,7 +24,7 @@ Execute `.trellis/tasks/10-27-10-27-remove-generated-image-library/recovery-plan
 - Real 621-asset runtime migration and authenticated gallery/multi-user review remain operator gates; isolated fixture migration passed. PostgreSQL subtree benchmark P95 is 252.6ms against 300ms.
 - No paid Qwen model or publishing acceptance. Local OSS copy stopped. Audit: 21 advisories (2 moderate/18 high/1 critical); no forced fix. Qwen key backup is operator-managed.
 - Stationary Mac Chrome Canvas flicker cause remains unconfirmed; Windows evidence points to edge animations/compositing as a candidate only.
-- Old `72dca31` ordinary list/navigation fail on dropped tables (`42P01`); it is not a healthy rollback. Recovery activation is approved, not yet executed.
+- Never roll back to generated-table-dependent `72dca31`. Recovery code: `4791dcc`; final identity is in the ignored activation receipt.
 - Historical per-ID and cloud-original completeness remain unproven; current inventory is backed up.
 
 History: `archive/status-2026-10-19-before-gemini.md`; tasks: `.trellis/tasks/archive/`.

@@ -69,6 +69,23 @@ activation. No remote push/deployment or further index cleanup is authorized.
   retry candidates or missing aggregation runs were identified. Historical
   running states exist and are not rewritten or replayed as part of recovery.
 
+## Local Activation
+
+- Clean recovery commit `4791dcc4c431cea1c6de05dc71ce0bd42f737c88` activated
+  through `npm run local:lan` in primary-worktree slot `.next-local-a`.
+- `/api/version` and managed-slot identity matched; HTTP smoke passed and the
+  listener remained `0.0.0.0:3001` with normal workers.
+- Authenticated 3001 checks repeated successfully: 2,301 assets, 24 nonempty
+  collections, one favorite, seven smart folders; desktop/mobile thumbnail and
+  original preview passed without mutations or page errors.
+- All 11 library-table content digests/counts still match the backup snapshot.
+  No generated-image tables reappeared. Temporary authentication was removed.
+- Final documentation/archive commits do not change application code; the same
+  launcher and authenticated acceptance are repeated for the final clean HEAD.
+  Exact final identity and result live in the ignored activation/live receipts.
+- Only the sampled original/thumbnail was fetched; completeness of every cloud
+  original and pre-cleanup historical IDs remains unproven. No paid generation,
+  explicit task retries, remote push or deployment was performed.
+
 Local logs/receipts: ignored `test-artifacts/library-recovery-*` files. They are
-not Trellis context and must not be committed. Port-3001 activation evidence
-will be recorded after the clean-HEAD release.
+not Trellis context and must not be committed.

@@ -74,3 +74,10 @@ Dry-run and apply both targeted loopback PostgreSQL database
   ignored `test-artifacts/library-recovery-diagnosis-baseline.log`.
 - No recovery, application edits, runtime writes, commit, restart or external
   calls were performed. Plan and limitations: `recovery-plan.md` in this task.
+
+## Approved Recovery Completed
+
+The preceding no-recovery statement describes diagnosis only. User subsequently
+approved execution. Backup, error-state repair, clean-HEAD LAN activation,
+authenticated browser/media checks and unchanged library-table digests passed.
+See `recovery-verification.md` for commands, evidence and the existing lint gate.
