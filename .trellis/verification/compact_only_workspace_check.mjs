@@ -23,7 +23,8 @@ const types = read("src/lib/types.ts");
 const database = read("src/lib/database.ts");
 
 has(home, /function CompactWorkspace\(/, "Home must render one compact-only workspace component.");
-has(home, /<CompactWorkspace[\s\S]*materialPaths=\{vehicleLibrary\.assets\.map\(\(asset\) => asset\.publicUrl\)\}/, "Compact workspace must receive vehicle-library URL snapshots.");
+has(home, /<CompactWorkspace[\s\S]*selectedMaterialCount=\{simpleSourceMode === "viral" && simpleGenerateImages && simpleViralImitateImages \? simpleViralMaterialAssetIds\.length : 0\}/, "Compact workspace must count only explicitly selected task materials.");
+lacks(home, /materialPaths=\{vehicleLibrary\.assets/, "Compact workspace must not treat the browsable library as task inputs.");
 has(home, /<SimpleOverallProgressBar/, "Compact workspace must retain the overall multi-run progress surface.");
 has(home, /href="\/content"/, "Home must retain the content desk entry.");
 has(home, /href="\/review"/, "Home must retain the review desk entry.");

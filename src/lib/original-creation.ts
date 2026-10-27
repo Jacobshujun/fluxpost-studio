@@ -25,7 +25,7 @@ export async function buildOriginalGeneratedPost(input: {
 
   const topic = extractOriginalTopic(originalPrompt);
   const vehicleKeyword = normalizeOriginalVehicleKeyword(input.vehicleKeyword) || topic || "原创";
-  const json = await callOpenAIForJson(buildOriginalPrompt(originalPrompt, vehicleKeyword, input.settings, input.materialPaths), {
+  const json = await callOpenAIForJson(buildOriginalPrompt(originalPrompt, vehicleKeyword, input.settings), {
     webSearch: input.useWebSearch,
     logLabel: input.useWebSearch ? "准备联网生成原创图文 Prompt" : "准备生成原创图文 Prompt",
   });
@@ -73,7 +73,7 @@ export function extractOriginalTopic(prompt: string) {
   return (normalized || "原创").slice(0, 96);
 }
 
-function buildOriginalPrompt(prompt: string, vehicleKeyword: string, settings: WorkspacePromptSettings, materialPaths: string[]) {
+function buildOriginalPrompt(prompt: string, vehicleKeyword: string, settings: WorkspacePromptSettings) {
   return [
     "你是社交媒体原创图文内容制作专家。",
     "根据用户给出的选题、提问或要求，生成一篇可直接发布的原创中文图文。",
@@ -85,7 +85,6 @@ function buildOriginalPrompt(prompt: string, vehicleKeyword: string, settings: W
     "每个 imagePrompts 项都必须能独立生成图片，写清主体、构图、风格、画幅和禁止事项，不要引用不存在的本地素材。",
     "不要编造不可验证的事实、价格、配置、销量、政策或时间；联网搜索启用时也要把事实写得克制。",
     `本次文字内容提示词:\n${settings.textInstruction}`,
-    `用户素材路径，仅作背景参考，不要泄露路径:\n${materialPaths.join("\n") || "未提供"}`,
     `用户原创 Prompt:\n${prompt}`,
   ].join("\n");
 }

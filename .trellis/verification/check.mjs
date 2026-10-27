@@ -85,6 +85,7 @@ const nodeChecks = [
   ["Distribution check", "distribution_check.mjs"],
   ["Lark task launcher check", "lark_task_launcher_check.mjs"],
   ["Simple config sync check", "simple_config_sync_check.mjs"],
+  ["Simple material overflow check", "simple_material_overflow_check.mjs"],
   ["User text instruction priority check", "user_text_instruction_priority_check.mjs"],
   ["Crawl strategy save check", "crawl_strategy_save_check.mjs"],
   ["Xiaopeng BBS import check", "xiaopeng_bbs_import_check.mjs"],

@@ -105,7 +105,6 @@ export async function generatePost(input: RewriteInput): Promise<GeneratedPost> 
     `原标题: ${sourceTitle}`,
     `原内容: ${sourceBody}`,
     `数据: ${JSON.stringify(input.source.metrics)}`,
-    `用户素材路径: ${input.materialPaths.join(", ") || "未提供"}`,
   ].join("\n");
 
   const json = await callOpenAIForJson(prompt);

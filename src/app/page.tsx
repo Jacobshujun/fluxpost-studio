@@ -215,7 +215,6 @@ export default function Home() {
   );
   const simpleLinkCount = useMemo(() => splitLines(simpleLinkText).length, [simpleLinkText]);
   const simpleFeishuTaskCount = useMemo(() => splitFeishuTaskNumbers(simpleFeishuTaskText).length, [simpleFeishuTaskText]);
-  const vehicleMaterialAssetIds = useMemo(() => vehicleLibrary.assets.map((asset) => asset.id), [vehicleLibrary.assets]);
   const viralMaterialCandidates = useMemo(() => buildViralMaterialCandidates(vehicleLibrary.assets, libraryNavigation.collections), [libraryNavigation.collections, vehicleLibrary.assets]);
   const viralMaterialFolders = useMemo(
     () => buildViralMaterialFolders(libraryNavigation.collections, vehicleLibrary.assets, simpleViralMaterialAssetIds),
@@ -376,13 +375,18 @@ export default function Home() {
       if (!navigationResponse.ok) throw new Error(navigation.error || "图库导航读取失败");
       setLibraryNavigation(navigation);
       const vehicleRoot = navigation.collections.find((collection) => !collection.parentId && collection.name === "车型库");
+      if (!vehicleRoot) {
+        setVehicleLibrary({ assets: [], total: 0 });
+        setSimpleViralMaterialAssetIds([]);
+        throw new Error("未找到车型库，未加载图库素材。普通任务不受影响；如需选择车型参考图，请先创建车型库。");
+      }
       const assets: LibraryAsset[] = [];
       const seenCursors = new Set<string>();
       let cursor = "";
       let page: LibraryAssetPage | undefined;
       do {
         const params = new URLSearchParams({ limit: "100", sort: "name-asc" });
-        if (vehicleRoot) params.set("collectionId", vehicleRoot.id);
+        params.set("collectionId", vehicleRoot.id);
         if (cursor) params.set("cursor", cursor);
         const res = await fetch(`/api/library/assets?${params}`);
         const data = (await res.json()) as LibraryAssetPage & { error?: string };
@@ -578,7 +582,6 @@ export default function Home() {
           viralMaterialAssetIds: sourceMode === "viral" && simpleGenerateImages && simpleViralImitateImages ? simpleViralMaterialAssetIds : undefined,
           originalPrompt: sourceMode === "original" ? originalPrompt : undefined,
           originalUseWebSearch: sourceMode === "original" ? simpleOriginalUseWebSearch : undefined,
-          materialAssetIds: vehicleMaterialAssetIds,
           settings: settingsForRun,
         }),
       });
@@ -730,7 +733,7 @@ export default function Home() {
             originalPrompt={simpleOriginalPrompt}
             originalUseWebSearch={simpleOriginalUseWebSearch}
             config={config}
-            materialPaths={vehicleLibrary.assets.map((asset) => asset.publicUrl)}
+            selectedMaterialCount={simpleSourceMode === "viral" && simpleGenerateImages && simpleViralImitateImages ? simpleViralMaterialAssetIds.length : 0}
             settings={workspaceSettings}
             runs={simpleRuns}
             activeRun={activeSimpleRun}
@@ -811,7 +814,7 @@ function CompactWorkspace(props: {
   originalPrompt: string;
   originalUseWebSearch: boolean;
   config: ConfigStatus | null;
-  materialPaths: string[];
+  selectedMaterialCount: number;
   settings: WorkspacePromptSettings;
   runs: SimpleRun[];
   activeRun: SimpleRun | null;
@@ -851,7 +854,7 @@ function CompactWorkspace(props: {
   onControlRun: (runId: string, action: "pause" | "resume") => void;
   onSelectRun: (runId: string) => void;
 }) {
-  const { sourceMode, keyword, targetCount, selectedPlatforms, linkText, linkPlatform, pageUrl, cookie, videoFrameOriginalReference, useComfyUiKlein, directOriginalReference, includeSourceVideo, enableVideoTranscription, generateImages, writeFeishu, feishuPublishMode, viralImitateImages, viralMaterialFolders, activeViralMaterialFolderId, viralMaterialCandidates, selectedViralMaterialAssetIds, linkCount, feishuTaskText, feishuTaskCount, viralUrl, originalPrompt, originalUseWebSearch, config, materialPaths, settings, runs, activeRun, busy, terminatingRunId, controllingRunId, settingsBusy } = props;
+  const { sourceMode, keyword, targetCount, selectedPlatforms, linkText, linkPlatform, pageUrl, cookie, videoFrameOriginalReference, useComfyUiKlein, directOriginalReference, includeSourceVideo, enableVideoTranscription, generateImages, writeFeishu, feishuPublishMode, viralImitateImages, viralMaterialFolders, activeViralMaterialFolderId, viralMaterialCandidates, selectedViralMaterialAssetIds, linkCount, feishuTaskText, feishuTaskCount, viralUrl, originalPrompt, originalUseWebSearch, config, selectedMaterialCount, settings, runs, activeRun, busy, terminatingRunId, controllingRunId, settingsBusy } = props;
   const sourceDetail = sourceMode === "dongchedi_page" ? `懂车帝栏目 · ${targetCount} 条` : sourceMode === "links" ? `链接 ${linkCount} 条` : sourceMode === "feishu" ? `飞书 ${feishuTaskCount} 条` : sourceMode === "viral" ? "爆款仿写 1 条" : sourceMode === "original" ? "原创 1 条" : `平台 ${selectedPlatforms.length} 个`;
   const canStart = sourceMode === "dongchedi_page" ? Boolean(keyword.trim() && pageUrl.trim()) : sourceMode === "feishu" ? feishuTaskCount > 0 : sourceMode === "links" ? Boolean(keyword.trim()) && linkCount > 0 : sourceMode === "viral" ? Boolean(keyword.trim() && viralUrl.trim()) && (!generateImages || !viralImitateImages || selectedViralMaterialAssetIds.length > 0) : sourceMode === "original" ? Boolean(keyword.trim() && originalPrompt.trim()) && (!originalUseWebSearch || config?.openaiTextEndpoint === "responses") : Boolean(keyword.trim() && selectedPlatforms.length);
 
@@ -897,7 +900,7 @@ function CompactWorkspace(props: {
 
           {sourceMode !== "dongchedi_page" ? <div className="simple-feishu-controls"><label className="simple-write-feishu-row"><input className="mt-1 h-4 w-4 accent-[var(--mint)]" type="checkbox" checked={writeFeishu} onChange={(event) => props.onWriteFeishuChange(event.target.checked)} disabled={busy || settingsBusy} /><span><span className="block text-xs font-black text-white">写入飞书</span><span className="mt-1 block text-[11px] text-white/50">{writeFeishu ? "生成后自动审查并排队写入。" : "只生成本地草稿。"}</span></span></label>{writeFeishu ? <FeishuPublishModeSelector value={feishuPublishMode} disabled={busy || settingsBusy} onChange={props.onFeishuPublishModeChange} /> : null}</div> : null}
 
-          <div className="simple-policy-preview"><div className="flex items-center justify-between gap-3"><PanelTitle icon={<Lightbulb className="h-4 w-4" />} title="提示词与图片策略" /><span className="status-badge text-[10px] text-[var(--mint)]">可自定义</span></div><div className="simple-prompt-stack mt-3"><label><FieldLabel label="文字内容提示词" /><textarea className="field simple-prompt-textarea" aria-label="精简版文字内容提示词" value={settings.textInstruction} onChange={(event) => props.onSettingsChange({ textInstruction: event.target.value })} disabled={busy || settingsBusy} /></label><ImageStrategyPromptEditor settings={settings} disabled={busy || settingsBusy} onChange={props.onSettingsChange} /><ImageDimensionSelects settings={settings} onChange={props.onSettingsChange} disabled={busy || settingsBusy} /></div><div className="mt-3 flex flex-wrap gap-2"><span className="status-badge text-[10px] text-white/52">素材 {materialPaths.length} 个</span><span className="status-badge text-[10px] text-white/52">{settings.imageQuality}</span></div><button className="soft-button mt-3 flex h-10 w-full items-center justify-center gap-2 text-xs" type="button" onClick={props.onSaveSettings} disabled={busy || settingsBusy}>{settingsBusy ? <Loader2 className="h-4 w-4 animate-spin" /> : <Check className="h-4 w-4" />}保存当前策略</button></div>
+          <div className="simple-policy-preview"><div className="flex items-center justify-between gap-3"><PanelTitle icon={<Lightbulb className="h-4 w-4" />} title="提示词与图片策略" /><span className="status-badge text-[10px] text-[var(--mint)]">可自定义</span></div><div className="simple-prompt-stack mt-3"><label><FieldLabel label="文字内容提示词" /><textarea className="field simple-prompt-textarea" aria-label="精简版文字内容提示词" value={settings.textInstruction} onChange={(event) => props.onSettingsChange({ textInstruction: event.target.value })} disabled={busy || settingsBusy} /></label><ImageStrategyPromptEditor settings={settings} disabled={busy || settingsBusy} onChange={props.onSettingsChange} /><ImageDimensionSelects settings={settings} onChange={props.onSettingsChange} disabled={busy || settingsBusy} /></div><div className="mt-3 flex flex-wrap gap-2"><span className="status-badge text-[10px] text-white/52">已选图库素材 {selectedMaterialCount} 个</span><span className="status-badge text-[10px] text-white/52">{settings.imageQuality}</span></div><button className="soft-button mt-3 flex h-10 w-full items-center justify-center gap-2 text-xs" type="button" onClick={props.onSaveSettings} disabled={busy || settingsBusy}>{settingsBusy ? <Loader2 className="h-4 w-4 animate-spin" /> : <Check className="h-4 w-4" />}保存当前策略</button></div>
 
           <button className="primary-button flex h-12 w-full items-center justify-center gap-2" type="button" onClick={props.onStart} disabled={busy || settingsBusy || !canStart}>{busy ? <Loader2 className="h-4 w-4 animate-spin" /> : <Send className="h-4 w-4" />}{busy ? "正在自动执行" : writeFeishu ? "开始生产并写入飞书" : "开始生产待审查内容"}</button>
         </div>

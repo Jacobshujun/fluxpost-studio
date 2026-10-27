@@ -4,7 +4,7 @@ Last updated: 2026-10-27
 
 ## One-Line Status
 
-LAN update authorized (lan-release.md); verify runtime SHA. Input-overflow fix pending; local copy stopped.
+Material-overflow fix verified; LAN commit/activation authorized. Library-name audit pending; local copy stopped.
 
 ## Current Focus
 
@@ -13,7 +13,7 @@ LAN update authorized (lan-release.md); verify runtime SHA. Input-overflow fix p
 
 ## Next Entry
 
-See `.trellis/tasks/10-23-tos-oss-migration/simple-run-material-diagnosis.md`: 24,197 auto-attached TOS URLs caused a 4.77M-character prompt and HTTP 400 input-length rejection. No fix/replay yet. Cloud route: migration-console.md in same task; no managed job created by agent. LAN/TOS unchanged; do not resume local copy.
+Fix evidence: `.trellis/tasks/archive/2026-10/10-27-simple-material-overflow/verification.md`. LAN result: ignored `test-artifacts/lan-material-overflow-release.json`; verify runtime SHA. No replay or filename repair. Cloud copy stays stopped.
 
 ## Risks And Unknowns
 

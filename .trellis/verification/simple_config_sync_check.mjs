@@ -18,11 +18,11 @@ const simpleRuns = read("src/lib/simple-runs.ts");
 const workspaceSettings = read("src/lib/workspace-settings.ts");
 const types = read("src/lib/types.ts");
 
-assertContains(
-  page,
-  /body:\s*JSON\.stringify\(\{[\s\S]*materialAssetIds:\s*vehicleMaterialAssetIds[\s\S]*settings:\s*settingsForRun/,
-  "Compact start request must submit current vehicle-library asset ids.",
-);
+if (/vehicleMaterialAssetIds|materialAssetIds\s*:/.test(page)) {
+  throw new Error("Compact start must not implicitly submit browsable library assets.");
+}
+assertContains(page, /selectedMaterialCount=\{simpleSourceMode === "viral" && simpleGenerateImages && simpleViralImitateImages \? simpleViralMaterialAssetIds\.length : 0\}/,
+  "Material count must describe actual selected inputs, not browsable library size.");
 
 assertContains(
   page,

@@ -77,5 +77,5 @@ has(page,/请选择至少 1 张车型图用于图片模仿/,'UI viral image sele
 has(page,/viralUrl:\s*sourceMode === "viral" \? viralUrl : undefined/,'UI viral payload missing');
 has(page,/viralImitateImages:\s*sourceMode === "viral" \? simpleViralImitateImages : undefined/,'UI viral image imitation payload missing');
 has(page,/viralMaterialAssetIds:\s*sourceMode === "viral" && simpleGenerateImages && simpleViralImitateImages \? simpleViralMaterialAssetIds : undefined/,'UI should submit selected viral vehicle ids only when image imitation is enabled');
-has(page,/materialAssetIds:\s*vehicleMaterialAssetIds/,'UI should submit accessible vehicle ids for general material references');
+if (/materialAssetIds:\s*vehicleMaterialAssetIds/.test(page)) throw new Error('UI must not submit the whole vehicle library as general material references');
 console.log('Simple viral run check passed.');
