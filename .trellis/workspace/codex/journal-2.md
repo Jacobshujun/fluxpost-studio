@@ -341,3 +341,37 @@ Provenance-only generated library and Canvas integration verified, committed and
 ### Next Steps
 
 - None - task complete
+
+
+## Session 69: Recover ordinary gallery after generated index retirement
+
+**Date**: 2026-10-27
+**Task**: Recover ordinary gallery after generated index retirement
+**Branch**: `local`
+
+### Summary
+
+Backed up current PostgreSQL state; fixed gallery load-error UI and legacy rollback identity guard. Isolated SQLite/PG/browser tests and authenticated LAN gallery acceptance pass; all 11 library tables match backup. Generated indexing remains retired. Full baseline retains known 17 ignored-script lint errors; source lint/types/build pass. Details in archived remove-generated-image-library recovery-verification.md.
+
+### Main Changes
+
+(Add details)
+
+### Git Commits
+
+| Hash | Message |
+|------|---------|
+| `4791dcc` | (see git log) |
+| `2378a80` | (see git log) |
+
+### Testing
+
+- [OK] (Add test results)
+
+### Status
+
+[OK] **Completed**
+
+### Next Steps
+
+- None - task complete
