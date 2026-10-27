@@ -375,3 +375,36 @@ Backed up current PostgreSQL state; fixed gallery load-error UI and legacy rollb
 ### Next Steps
 
 - None - task complete
+
+
+## Session 70: Add Canvas Wonder Image node
+
+**Date**: 2026-10-27
+**Task**: Add Canvas Wonder Image node
+**Branch**: `local`
+
+### Summary
+
+Added Yike Wonder Image Canvas node with encrypted node credentials, media registration, async job resume, offline/browser verification and clean loopback 3001 activation. Existing 17-data-script lint blocker remains; live provider acceptance pending.
+
+### Main Changes
+
+(Add details)
+
+### Git Commits
+
+| Hash | Message |
+|------|---------|
+| `bc4c770` | (see git log) |
+
+### Testing
+
+- [OK] (Add test results)
+
+### Status
+
+[OK] **Completed**
+
+### Next Steps
+
+- None - task complete
