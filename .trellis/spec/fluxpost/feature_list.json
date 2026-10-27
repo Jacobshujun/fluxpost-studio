@@ -38,7 +38,7 @@
       "evidence": [
         "2026-10-27 contract/runtime/SQLite and six three-theme 1440/390 browser cases passed; TypeScript/build/config/SQLite passed; baseline stopped only at the existing 17-data-script lint gate. See canvas-wonder-image task."
       ],
-      "notes": "Clean bc4c770 loopback 3001 activation and auth smoke passed. Real Yike API/model/media acceptance remains pending; no live provider calls."
+      "notes": "Clean 57cba03 LAN 3001 activation, LAN Canvas GET and auth smoke passed. Real Yike API/model/media acceptance remains pending; no live provider calls."
     },
     {
       "id": "tos-to-oss-migration",
