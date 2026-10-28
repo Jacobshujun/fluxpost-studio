@@ -19,6 +19,11 @@
 ## Release Authorization
 - User explicitly requested commit and LAN update after reviewing the curl alignment. Rechecked Wonder contract/runtime, changed-source lint and TypeScript successfully before committing. Activate only through npm run local:lan from clean primary-worktree HEAD; verify build, runtime/state/manifest SHA, LAN binding and HTTP/Canvas health. This authorization does not request a manual paid generation or failed-task replay.
 
+## Activation Result
+- Implementation commit: 950f4722b9efcdb9440c5e8bb14f9ccc4be0ffdf. After task archive/journal, npm run local:lan activated clean HEAD e939d1880bbdaee4068bb2b466de0a984e9d9b7e in primary-worktree slot .next-local-a.
+- Build, loopback and LAN HTTP smoke, Canvas HTTP 200, 0.0.0.0:3001 binding, and local/LAN runtime/state/build-manifest identity checks passed. LAN URL: http://10.182.144.38:3001/canvas . Ignored evidence: test-artifacts/wonder-curl-lan-activation.log and wonder-curl-lan-receipt.json.
+- No manual provider probes, paid acceptance, failed-task replay, credential/model rewrite, OSS config change or remote deployment. Normal workers remain enabled; actual generation is unverified. Later release-record commits only update documentation, not active application code. Earlier uncommitted/unactivated notes describe the pre-release stage.
+
 ## Why Previous Checks Did Not Resolve This Failure
 - Category: incomplete executable-request comparison plus missing documented error interpretation. Previous JSON/media/ingress corrections did not establish provider success; mocks cannot prove provider authorization or infer the live cause.
 - The improved post-release diagnostics expose the exact first failing action and code, unlike the earlier opaque HTTP400. This is new discriminating evidence, not proof that previous unknown failures had the same cause.

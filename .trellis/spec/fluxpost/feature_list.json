@@ -38,7 +38,7 @@
       "evidence": [
         "2026-10-28 ordered upload/numbered ingress, JSON/media/error repairs, isolated provider/upload/SQLite and six three-theme 1440/390 browser cases passed, plus GPT browser regressions. Lint/types/build/smoke passed separately; baseline has existing 17-data-script lint errors. See wonder-image-repair task."
       ],
-        "notes": "Repair b207789 active on LAN 3f71997. Latest ImportMedia MissingSignatureNonce cause remains unproven. Official curl form-only Format alignment and safe guidance are local-only; live provider/model acceptance pending, no paid replay."
+        "notes": "Curl alignment 950f472 active on LAN e939d18; build/identity/LAN HTTP/Canvas checks passed. Latest ImportMedia MissingSignatureNonce cause remains unproven; live provider/model acceptance pending, no manual paid replay."
     },
     {
       "id": "tos-to-oss-migration",
