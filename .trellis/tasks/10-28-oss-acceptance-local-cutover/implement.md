@@ -14,19 +14,19 @@
 - [x] Discover local reference scope with dedicated read-only DB access if available.
 - [x] Record aggregate evidence, coverage gaps and provisional delta; update status
   to distinguish completed managed copy from stopped historical local worker.
-- [ ] Present findings and a concrete cutover/rollback proposal for separate approval.
+- [x] Present findings and a concrete cutover/rollback proposal for separate approval.
 
 ## Stage B: separate approval required
 
-- [ ] Finalize exact runtime/config/reference mapping and rollback based on Stage A.
+- [x] Finalize exact runtime/config/reference mapping and rollback based on Stage A.
 - [x] Obtain explicit approval for task drain/freeze, backup, delta copy, database
   reference updates, config changes and local activation; do not bundle production.
-- [ ] Back up current database/config and verify restore usability without touching
+- [x] Back up current database/config and verify restore usability without touching
   the active database. State any missing restore-drill permissions before proceeding.
-- [ ] Copy only approved delta and verify final frozen set; no blind overwrites.
-- [ ] Apply reversible scoped reference/config changes; validate old and new media.
-- [ ] Verify and commit any code fix before clean primary-worktree local activation.
-- [ ] Run approved authenticated local acceptance; no paid generation/publishing
+- [x] Copy only approved delta and verify final frozen set; no blind overwrites.
+- [x] Apply reversible scoped reference/config changes; validate old and new media.
+- [x] Verify and commit any code fix before clean primary-worktree local activation.
+- [x] Run approved authenticated local acceptance; no paid generation/publishing
   unless separately authorized. Keep TOS >=7 days and track post-switch writes.
 
 ### 2026-10-28 execution checkpoint
@@ -41,11 +41,12 @@
   extra or size-mismatched media keys. OSS's two report files excluded.
 - [x] Current ordinary library: all 2,301 object keys present in source inventory;
   public URLs map exactly to object keys.
-- [ ] Resolve preservation policy for old references absent from BOTH inventories
+- [x] Resolve preservation policy for old references absent from BOTH inventories
   before writing database mapping. Do not rewrite these to known-missing OSS URLs.
-- [ ] Quiesce actual workloads, refresh backup/inventory and execute reviewed mapping.
+- [x] Quiesce actual workloads, refresh backup/inventory and execute reviewed mapping.
 
-No runtime configuration, database references, task states or listener were changed.
+At that intermediate checkpoint no runtime changes had occurred. Final execution
+completed on 2026-10-28; see verification.md for transaction and activation receipts.
 
 ### CLI and full-cutover approval
 
@@ -56,7 +57,7 @@ No runtime configuration, database references, task states or listener were chan
 - [x] User explicitly requests full cutover now; keep missing historical links.
 - [x] Core data receipt captures 1,637 copy entries, 2,301 library assets and all
   organizer relation counts/digests before cutover; acceptance verifies preservation.
-- [ ] Commit checked CLI and run the confirmed pipeline; report real phase progress.
+- [x] Commit checked CLI and run the confirmed pipeline; report real phase progress.
 
 ## Verification
 

@@ -59,7 +59,8 @@ storage switch. Do not repeat the completed bulk copy.
   exact reference-change scope, backup/restore evidence and rollback instructions.
 - Local cutover, if separately approved, preserves historical previews and new
   uploads and passes existing offline checks and approved runtime acceptance.
-- Stage A read-only execution is authorized; neither storage nor database is switched.
+- Local full cutover was explicitly authorized and completed on 2026-10-28;
+  live acceptance and remaining limitations are recorded in verification.md.
 
 ## Out of scope
 

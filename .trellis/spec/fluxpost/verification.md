@@ -100,7 +100,7 @@ Do not deploy a dirty worktree, branch name, abbreviated SHA, local runtime rows
 
 Prior text-reasoning and local-library acceptance entries are preserved in
 `archive/verification-history.md` (2026-10-28 context-budget archive). Current
-OSS evidence: `.trellis/tasks/10-28-oss-acceptance-local-cutover/verification.md`.
+OSS evidence: `.trellis/tasks/archive/2026-10/10-28-oss-acceptance-local-cutover/verification.md`.
 
 ## Missing Coverage
 

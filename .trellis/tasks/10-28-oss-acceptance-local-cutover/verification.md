@@ -193,3 +193,56 @@ User requested full cutover after CLI development. Core preservation receipt now
 records 1,637 copy entries, 2,301 assets, 24 collections, 2,230 memberships,
 5,302 labels, one favorite and seven smart folders. Non-URL core tables must retain
 their exact content digests after activation. Counts are a point-in-time snapshot.
+
+## Final local cutover - 2026-10-28
+
+- Code/CLI commit 10d1ebfb577a148fb90fd751ce36269ebb35756a verified and committed
+  before activation. All application code from Wonder Image was preserved.
+- First preflight refused one live Feishu publish lease. No listener stop or database
+  mutation occurred. After the job ended, all worker/provider/iteration/schedule
+  gates passed. Archived the zero-step failed receipt after inspection, not blind retry.
+- LAN listener stopped at 11:24:56 CST. Exported snapshot backup at 11:24:57:
+  data/backups/oss-cutover-final-20261028/runtime.dump, 786,442,974 bytes, full archive
+  decode and SHA-256 receipt passed. Original config and exact reference undo receipts
+  are in the same ACL-restricted directory. Actual restore drill still not performed.
+- Fresh inventory found 203 additional images / 543,428,050 bytes. This exceeded
+  the 512 MiB per-batch cap; the CLI stopped before copy or database changes.
+  Reviewed recovery split the immutable missing set into 106 files/262,111,022 bytes
+  and 97 files/281,317,028 bytes; both used the unchanged create-only verified helper.
+  All 203 uploaded and SHA-256 verified with zero failures. No cap weakened.
+- Reviewed .tmp-oss-complete-cutover.mjs continued the remaining phases under an
+  exclusive lock and wrote actual stage progress. This manual recovery is not a
+  claim that the stock CLI automatically resumes interrupted runs.
+- 11:31:42 CST inventory: both clouds have 71,788 media keys, zero missing/extra or
+  size mismatches; two target migration-report objects excluded. Local writes frozen;
+  remote production was not stopped, changed or independently verified.
+- One SERIALIZABLE transaction rewrote 161,580 rows / 163,881 cells across 12 tables,
+  7,866,075 JSON/text string values. Started 11:31:42 and committed 11:35:22 CST.
+  Exact before/after hashes and reversible patches are durably compressed before
+  COMMIT. Numeric JSON lexemes, object keys, states, ownership and other data retained.
+  Missing, unverified, ambiguous or signed URLs are not forced to OSS. Execution
+  logs and historical on-disk outbox exports are not rewritten or replayed.
+- Switched only local .env.local to explicit OSS settings, retaining TOS settings.
+  Standard clean-primary-worktree launcher rebuilt and activated LAN 3001 in
+  .next-local-a with normal workers at 11:35:53 CST. Identity matches full 10d1ebf SHA;
+  build and HTTP smoke passed. No remote push or deployment.
+- Authenticated post-switch acceptance passed: runtime selected OSS, 2,301 assets,
+  1,637 copy entries, exact unchanged digests for copy entries/collections/memberships/
+  labels/favorites/smart folders. Three OSS original HEAD reads passed. Existing
+  admin storage probe uploaded/read/range-checked/cleaned two tiny test objects.
+  Temporary admin session removed; no model generation or publishing test.
+- Live authenticated browser at 1440/390 passed 60 first-page assets, thumbnail and
+  original display, layout, zero page errors and no mutation requests. Its temporary
+  session was removed. No user data or secrets were printed or committed.
+- CLI state is completed. Pipeline elapsed about 11 minutes including reviewed
+  split recovery; full local application uses OSS. Keep TOS until at least Nov 4,
+  and do not delete until historical references and separate production are reviewed.
+- Nine pre-existing local data/tos-pending files (~12.8 MB) remain untouched and
+  are not claimed migrated. Existing historical missing URLs remain as approved.
+
+Final receipts: ignored data/oss-cutover/state.json; test-artifacts/oss-acceptance-
+20261028/cutover-acceptance.json, live-browser.json, post-delta-summary.json;
+private final backup/config/transaction receipts. Existing full baseline still fails
+at 17 ignored-data-script lint errors; all preceding domain tests passed. Source lint,
+TypeScript, production build, config synchronization, SQLite and isolated/live HTTP
+smoke passed separately. This is local cutover acceptance, not global parity.

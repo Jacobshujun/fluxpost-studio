@@ -50,7 +50,7 @@
       "evidence": [
         "2026-10-26 local SDK trial: 8 objects/1,047,830 bytes hash/preview verified; combined Qwen/library/OSS checks/build pass except existing lint gate. See tos-oss-migration/integration-verification.md."
       ],
-      "notes": "2026-10-28: report 71,400 matching paths/sizes/CRC64; eight live samples pass. Additional 185 files/263.7 MB copied and SHA-256 verified; current listings align at 71,585 media keys. Database backup decoded. Historical missing-reference policy and final frozen mapping/cutover pending. See oss-acceptance-local-cutover/verification.md."
+      "notes": "2026-10-28 local OSS cutover accepted on 10d1ebf: 71,788 aligned media keys, final backup, 161,580-row reference transaction, preserved library/copy data, upload and browser checks. TOS retained; historical unknown links/pending files remain. Production cutover and global parity pending; see oss-acceptance-local-cutover/verification.md."
     },
     {
       "id": "canvas-gemini-node",
