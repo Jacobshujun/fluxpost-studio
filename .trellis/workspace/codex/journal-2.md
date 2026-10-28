@@ -507,3 +507,36 @@ Matched root URL and form-only Format, exact official curl fields/Unicode/model 
 ### Next Steps
 
 - None - task complete
+
+
+## Session 74: Reuse existing Wonder reference media
+
+**Date**: 2026-10-28
+**Task**: Reuse existing Wonder reference media
+**Branch**: `local`
+
+### Summary
+
+Handle only ImportMedia HTTP400 MediaAlreadyExist with a validated existing ID, preserving GetMedia and Wonder third-party readiness, Overwrite=false, one submission and query-only resume. Positive/negative contracts/runtime, lint/types/build/config/SQLite passed; baseline domain checks pass before 17 existing data-script lint errors. User authorized clean-HEAD LAN update; no manual provider replay.
+
+### Main Changes
+
+(Add details)
+
+### Git Commits
+
+| Hash | Message |
+|------|---------|
+| `63925fbaef2f513604e628b395f8728c010ab5c8` | (see git log) |
+
+### Testing
+
+- [OK] (Add test results)
+
+### Status
+
+[OK] **Completed**
+
+### Next Steps
+
+- None - task complete

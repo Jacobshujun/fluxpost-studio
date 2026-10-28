@@ -8,7 +8,7 @@
 
 <!-- @@@auto:current-status -->
 - **Active File**: `journal-2.md`
-- **Total Sessions**: 73
+- **Total Sessions**: 74
 - **Last Active**: 2026-10-28
 <!-- @@@/auto:current-status -->
 
@@ -19,7 +19,7 @@
 <!-- @@@auto:active-documents -->
 | File | Lines | Status |
 |------|-------|--------|
-| `journal-2.md` | ~509 | Active |
+| `journal-2.md` | ~542 | Active |
 | `journal-1.md` | ~1967 | Archived |
 <!-- @@@/auto:active-documents -->
 
@@ -30,6 +30,7 @@
 <!-- @@@auto:session-history -->
 | # | Date | Title | Commits | Branch |
 |---|------|-------|---------|--------|
+| 74 | 2026-10-28 | Reuse existing Wonder reference media | `63925fbaef2f513604e628b395f8728c010ab5c8` | `local` |
 | 73 | 2026-10-28 | Align Wonder requests with official curl | `950f4722b9efcdb9440c5e8bb14f9ccc4be0ffdf` | `local` |
 | 72 | 2026-10-28 | Repair Wonder Image ingress and Yike contracts | `b207789` | `local` |
 | 71 | 2026-10-28 | Local OSS cutover and visible CLI | `10d1ebf` | `local` |
