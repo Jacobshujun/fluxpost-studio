@@ -474,3 +474,36 @@ Aligned Wonder reference uploads/paste/desktop drop and progressive ports with G
 ### Next Steps
 
 - None - task complete
+
+
+## Session 73: Align Wonder requests with official curl
+
+**Date**: 2026-10-28
+**Task**: Align Wonder requests with official curl
+**Branch**: `local`
+
+### Summary
+
+Matched root URL and form-only Format, exact official curl fields/Unicode/model fixture, raw API-key header set and safe MissingSignatureNonce guidance. Contract/runtime/lint/types passed; baseline domains passed before 17 existing data-script lint errors. Actual provider cause remains unproven; user authorized clean-HEAD LAN activation, no manual paid replay.
+
+### Main Changes
+
+(Add details)
+
+### Git Commits
+
+| Hash | Message |
+|------|---------|
+| `950f4722b9efcdb9440c5e8bb14f9ccc4be0ffdf` | (see git log) |
+
+### Testing
+
+- [OK] (Add test results)
+
+### Status
+
+[OK] **Completed**
+
+### Next Steps
+
+- None - task complete
