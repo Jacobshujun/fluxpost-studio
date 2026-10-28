@@ -82,14 +82,16 @@ try {
 
   globalThis.fetch = async (url, init) => {
     init?.signal?.throwIfAborted();
-    if (url === endpoint + "?Format=JSON") {
+    if (new URL(url).origin === new URL(endpoint).origin) {
       const parsed = new URLSearchParams(init.body), action = init.headers["x-acs-action"];
       calls.push({ url, action, init, parsed });
       assert.equal(init.headers.Authorization, "fixture-secret");
       assert.match(init.headers["x-acs-date"], /^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}Z$/);
       assert.equal(init.headers["x-acs-version"], "2026-07-07");
       assert.equal(init.headers["Content-Type"], "application/x-www-form-urlencoded");
-      assert.equal(new URL(url).searchParams.get("Format"), "JSON");
+      assert.deepEqual(Object.keys(init.headers).sort(), ["Authorization", "Content-Type", "x-acs-action", "x-acs-date", "x-acs-version"].sort(), "API-key authentication must not acquire RAM signature/nonce headers.");
+      assert.equal(url, endpoint, "Match the official curl root URL without additional query parameters.");
+      assert.equal(parsed.get("Format"), "JSON", "The official curl contract sends Format in the form body.");
       if (action === "ImportMedia") return Response.json({ MediaId: "media-one" });
       if (action === "GetMedia") { const value = mediaReady; mediaReady = true; return Response.json({ MediaInfo: { MediaBasicInfo: { Status: value ? "Normal" : "Processing" }, MediaDynamicInfo: { DynamicMetaData: { Data: JSON.stringify({ ThirdPartyAssetStatus: thirdPartyReady ? "Success" : "Failed" }) } } } }); }
       if (action === "SubmitImageGenerationJob") return Response.json({ JobId: "ag-one" });
@@ -116,6 +118,13 @@ try {
   assert.equal(completed.pending, false); assert.equal(completed.items[0].width, 512); assert.ok(completed.items[0].url.startsWith("/generated/wonder-"));
   assert.deepEqual(await readFile(path.join(temporary, "public", completed.items[0].url)), png, "Output bytes must survive temporary download cleanup even with local storage.");
   assert.equal(downloadedAuth, undefined);
+  const curlPrompt = "一只戴宇航头盔的柯基，漂浮在星云中，电影级光影";
+  await generate({ ...base, model: "qwen-image-2.0", prompt: curlPrompt });
+  const curlSubmit = calls.filter((call) => call.action === "SubmitImageGenerationJob").at(-1);
+  assert.deepEqual([...curlSubmit.parsed].sort(), [
+    ["Format", "JSON"], ["JobType", "text_to_image"], ["Model", "qwen-image-2.0"], ["Scene", "general"],
+    ["Input", JSON.stringify({ Prompt: curlPrompt })], ["Resolution", "1K"], ["AspectRatio", "16:9"], ["N", "1"],
+  ].sort(), "Decoded fields must match the official curl, including Unicode and the selected model; field order is not an API requirement.");
   const publicReference = { url: "https://public.example/reference.png" };
   await generate({ ...base, images: [publicReference] });
   const edited = calls.filter((call) => call.action === "SubmitImageGenerationJob").at(-1);
@@ -154,6 +163,10 @@ try {
   }
   globalThis.fetch = async () => Response.json({ Code: "InputCensorBlocked", Message: "fixture-secret https://signed.invalid/image?Signature=private" });
   await assert.rejects(generate(base), (error) => error.message.includes("InputCensorBlocked") && !error.message.includes("fixture-secret") && !error.message.includes("https://"));
+  globalThis.fetch = async () => Response.json({ Code: "MissingSignatureNonce", Message: "SignatureNonce is mandatory for this action.", RequestId: "auth-fixture-123" }, { status: 400 });
+  for (const input of [base, { ...base, images: [publicReference] }, { ...base, resumeJobId: "ag-one" }]) {
+    await assert.rejects(generate(input), (error) => error.message.includes("MissingSignatureNonce") && error.message.includes("HTTP 400") && error.message.includes("auth-fixture-123") && error.message.includes("AliyunYikeFullAccess") && error.message.includes("重新授权") && error.message.includes("站点") && error.message.includes("无需添加") && !error.message.includes("fixture-secret"));
+  }
   globalThis.fetch = async () => { throw new Error("private fetch detail"); };
   await assert.rejects(generate({ ...base, resumeJobId: "ag-one" }), (error) => !error.message.includes("private fetch detail"));
 

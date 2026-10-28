@@ -45,7 +45,7 @@ Last updated: 2026-07-20
 - Yike actions: `ImportMedia`, `GetMedia`, `SubmitImageGenerationJob`, `GetImageGenerationJob`, version `2026-07-07`.
 
 ### 3. Contracts
-- Only `https://yike.cn-shanghai.aliyuncs.com/` and `https://yike.ap-southeast-1.aliyuncs.com/` are accepted. `Authorization` contains the raw key; form requests include fresh UTC `x-acs-date` and explicit action/version headers. Every internal request adds `?Format=JSON`; canonical credential endpoints remain unchanged.
+- Only `https://yike.cn-shanghai.aliyuncs.com/` and `https://yike.ap-southeast-1.aliyuncs.com/` are accepted (official platform service-region table). `Authorization` contains the raw key; form requests include fresh UTC `x-acs-date` and explicit action/version headers. Match the official API-key curl: root URL and `Format=JSON` in the form body, not query/body duplication; credential endpoints remain unchanged.
 - Text and optional 1-9 ordered references produce `text_to_image` or `image_to_image`; count is 1-4, resolution is 1K/2K/4K and ratio is 16:9/9:16/4:3/3:4/1:1.
 - References must be JPEG/PNG/WebP, at most 20MB, short side at least 400px and long side at most 8000px. Public URLs are registered directly; local references require existing configured object storage and a verified public URL.
 - `POST /api/canvas/media` mode `wonder-reference` validates bytes/dimensions before storage. Canvas uploads/paste/desktop drops use that mode; the list supports preview/reorder/remove. Execution and bypass merge direct URLs, legacy inputs, then numbered inputs in ascending order; first URL wins, more than nine unique images fails without truncation.
@@ -57,6 +57,7 @@ Last updated: 2026-07-20
 - Invalid endpoint, parameters or reference -> explicit local error before a generation POST.
 - `Created|Queuing|Executing` -> pending node run; `Failed` -> sanitized failure; malformed/unknown result -> failure, never a successful empty output.
 - Provider credentials, request bodies, private storage errors and signed URLs must not enter durable errors. Request errors expose action, HTTP status and safe RequestId; JSON failures expose redacted code/message, while non-JSON responses expose only format, never raw bodies. Historical HTTP 400/no-JobId evidence alone does not identify which action failed.
+- API-key troubleshooting: `MissingSignatureNonce` means rejected API key/site/OAuth/RAM authorization per the official API-key guide, not missing client signing. Keep raw Authorization without nonce/signature headers. Explain key/site matching, legacy OAuth reauthorization and `AliyunYikeFullAccess`, preserving action/status/RequestId; saved credential status does not prove provider validity. Source: https://open.yikeai.com/docs/develop/api/gs2r7ibxs7okrsci.html .
 
 ### 5. Good/Base/Bad Cases
 - Good: a restarted run queries its persisted JobId and saves the returned images.

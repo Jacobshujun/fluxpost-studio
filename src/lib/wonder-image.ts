@@ -51,20 +51,23 @@ function providerError(value: unknown, status: number, apiKey: string, action: s
   const body = value && typeof value === "object" && !Array.isArray(value) ? value as Record<string, unknown> : {};
   const raw = [body.Code, body.code, body.Message, body.message].filter((entry): entry is string => typeof entry === "string").join(": ");
   const message = safeProviderMessage(raw, apiKey);
+  // Yike documents this legacy gateway code as API-key rejection, not a request to sign with RAM.
+  if (body.Code === "MissingSignatureNonce" || body.code === "MissingSignatureNonce") {
+    return new Error(`Wonder Image: ${action} 鉴权失败（HTTP ${status}${requestId}）：MissingSignatureNonce。官方说明为 API Key 无效或授权不完整，无需添加 nonce 或签名。请核对密钥及其国内/国际站点与请求地址，确认关联 RAM 用户具有 AliyunYikeFullAccess；旧账号请在阿里云 OAuth 应用控制台删除一刻应用后重新授权，再创建密钥并在节点中重新保存。`);
+  }
   return new Error(`Wonder Image: ${action} 请求失败（HTTP ${status}${requestId}）${message ? `：${message}` : "，请检查地址、密钥、模型权限或服务状态。"}`);
 }
 
 async function requestWonder(endpoint: string, apiKey: string, action: string, fields: Record<string, string>, signal: AbortSignal) {
   signal.throwIfAborted();
-  const url = new URL(endpoint);
-  url.searchParams.set("Format", "JSON");
-  const response = await fetch(url.href, {
+  const response = await fetch(endpoint, {
     method: "POST", redirect: "error", signal,
     headers: {
       Authorization: apiKey, "x-acs-action": action, "x-acs-version": WONDER_IMAGE_API_VERSION,
       "x-acs-date": new Date().toISOString().replace(/\.\d{3}Z$/, "Z"), "Content-Type": "application/x-www-form-urlencoded",
     },
-    body: new URLSearchParams(fields).toString(),
+    // Match the official API-key curl: all parameters, including Format, are form fields.
+    body: new URLSearchParams({ Format: "JSON", ...fields }).toString(),
   });
   const bytes = await boundedResponse(response, 1024 * 1024, signal);
   const idSuffix = providerRequestId(response.headers.get("x-acs-request-id"), apiKey);

@@ -18,7 +18,7 @@ OSS evidence: `.trellis/tasks/archive/2026-10/10-28-oss-acceptance-local-cutover
 
 ## Risks And Unknowns
 
-- Wonder user run returned HTTP 400/no JobId; historical action/cause is unconfirmed. Repair is active, with no manual paid replay or live Yike acceptance. See archived wonder-image-repair task.
+- Latest Wonder failure is ImportMedia HTTP 400 `MissingSignatureNonce`; exact cause unproven. Local requests now match the official curl (form-only Format); no live comparison, paid replay or LAN activation. See wonder-request-debug task.
 - Context budget fixed by archive; baseline domain checks pass then stop at 17 existing ignored-script lint errors. Separate lint/type/build/smoke passed; no gate weakened.
 - Text reasoning effort must be supported by the configured model and provider; unsupported values surface the upstream error without stripping or retrying the parameter.
 - Gemini live text/image acceptance remains pending. Minimal diagnostics were authorized, then explicitly paused; do not send further calls until resumed.
