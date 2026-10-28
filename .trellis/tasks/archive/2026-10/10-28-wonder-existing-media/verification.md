@@ -19,3 +19,8 @@
 ## Prevention
 - Category: provider error-to-business-result boundary and missing duplicate-path coverage. Curl/auth alignment alone could not cover a later media conflict.
 - Keep exact code/action/status checks and positive/negative fixtures in the normal offline tests; document reuse versus destructive Overwrite in the domain spec rather than treating every HTTP400 as retryable.
+
+## Authorized LAN Activation
+- Implementation commit 63925fbaef2f513604e628b395f8728c010ab5c8; after archive/journal, npm run local:lan activated clean primary-worktree HEAD ec0cd9f1283011ea4b1f548adb089d98a1d38444 in .next-local-b.
+- Build, local/LAN runtime/state/build-manifest identity, 0.0.0.0:3001 binding, loopback/LAN HTTP smoke and Canvas HTTP200 passed. LAN entry: http://10.182.144.38:3001/canvas . Ignored evidence: test-artifacts/wonder-existing-media-lan-activation.log and wonder-existing-media-lan-receipt.json.
+- Normal workers remain enabled; no manual provider probes, paid acceptance, failed-task replay, credential/model/OSS configuration rewrite or remote deploy. Earlier uncommitted/unactivated notes describe the pre-release stage. Subsequent release-record-only commits do not change active application code.
