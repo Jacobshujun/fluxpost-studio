@@ -8,8 +8,8 @@
 
 <!-- @@@auto:current-status -->
 - **Active File**: `journal-2.md`
-- **Total Sessions**: 70
-- **Last Active**: 2026-10-27
+- **Total Sessions**: 71
+- **Last Active**: 2026-10-28
 <!-- @@@/auto:current-status -->
 
 ---
@@ -19,7 +19,7 @@
 <!-- @@@auto:active-documents -->
 | File | Lines | Status |
 |------|-------|--------|
-| `journal-2.md` | ~410 | Active |
+| `journal-2.md` | ~443 | Active |
 | `journal-1.md` | ~1967 | Archived |
 <!-- @@@/auto:active-documents -->
 
@@ -30,6 +30,7 @@
 <!-- @@@auto:session-history -->
 | # | Date | Title | Commits | Branch |
 |---|------|-------|---------|--------|
+| 71 | 2026-10-28 | Local OSS cutover and visible CLI | `10d1ebf` | `local` |
 | 70 | 2026-10-27 | Add Canvas Wonder Image node | `bc4c770` | `local` |
 | 69 | 2026-10-27 | Recover ordinary gallery after generated index retirement | `4791dcc`, `2378a80` | `local` |
 | 68 | 2026-10-26 | Generated image library committed | `bbe4ff9` | `local` |

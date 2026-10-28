@@ -408,3 +408,36 @@ Added Yike Wonder Image Canvas node with encrypted node credentials, media regis
 ### Next Steps
 
 - None - task complete
+
+
+## Session 71: Local OSS cutover and visible CLI
+
+**Date**: 2026-10-28
+**Task**: Local OSS cutover and visible CLI
+**Branch**: `local`
+
+### Summary
+
+Completed local OSS cutover on LAN 3001: final private backup, bounded delta batches, 71788 aligned media keys, transactional verified URL rewrite, core library/copy preservation and browser/upload acceptance. Retain TOS and unknown history; production unchanged. Full baseline retains known ignored-script lint blocker; focused/source/type/build/smoke pass.
+
+### Main Changes
+
+(Add details)
+
+### Git Commits
+
+| Hash | Message |
+|------|---------|
+| `10d1ebf` | (see git log) |
+
+### Testing
+
+- [OK] (Add test results)
+
+### Status
+
+[OK] **Completed**
+
+### Next Steps
+
+- None - task complete
