@@ -441,3 +441,36 @@ Completed local OSS cutover on LAN 3001: final private backup, bounded delta bat
 ### Next Steps
 
 - None - task complete
+
+
+## Session 72: Repair Wonder Image ingress and Yike contracts
+
+**Date**: 2026-10-28
+**Task**: Repair Wonder Image ingress and Yike contracts
+**Branch**: `local`
+
+### Summary
+
+Aligned Wonder reference uploads/paste/desktop drop and progressive ports with GPT; retained legacy edges and credentials. Fixed JSON format, Wonder third-party media readiness, redacted action diagnostics and local result staging. Offline/SQLite/upload, six Wonder and two GPT browser cases, types/build/smoke pass; baseline retains 17 existing data-script lint errors. Historical HTTP400 action/cause unconfirmed. LAN remains OSS candidate 10d1ebf due queued/running records; no live Yike calls or workflow replay.
+
+### Main Changes
+
+(Add details)
+
+### Git Commits
+
+| Hash | Message |
+|------|---------|
+| `b207789` | (see git log) |
+
+### Testing
+
+- [OK] (Add test results)
+
+### Status
+
+[OK] **Completed**
+
+### Next Steps
+
+- None - task complete
