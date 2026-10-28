@@ -10,7 +10,7 @@ import { getCanvasDirectorySnapshot } from "./canvas/directory-snapshots";
 import type { CanvasMediaReference } from "./canvas/types";
 import type { WorkspaceAccessActor } from "./workspace-ownership";
 import {
-  buildWonderImageRequest, validateWonderEndpoint, wonderImportedMediaId, wonderJobResult,
+  buildWonderImageRequest, validateWonderEndpoint, wonderImportedMediaId, wonderExistingMediaId, wonderJobResult,
   wonderMediaReady, wonderSubmittedJobId, WONDER_IMAGE_API_VERSION, WONDER_IMAGE_MAX_BYTES, WONDER_IMAGE_MAX_REFERENCES, WONDER_IMAGE_MIN_EDGE, WONDER_IMAGE_MAX_EDGE,
 } from "./wonder-image-contract";
 
@@ -78,6 +78,10 @@ async function requestWonder(endpoint: string, apiKey: string, action: string, f
     throw new Error(`Wonder Image: ${action} 返回 ${type} 响应（HTTP ${response.status}${idSuffix}），请检查接口鉴权或联系服务方。`);
   }
   const record = body && typeof body === "object" && !Array.isArray(body) ? body as Record<string, unknown> : {};
+  if (action === "ImportMedia" && response.status === 400) {
+    const mediaId = wonderExistingMediaId(record);
+    if (mediaId) return { MediaId: mediaId };
+  }
   if (!response.ok || record.Code || record.code) throw providerError(body, response.status, apiKey, action, idSuffix || providerRequestId(record.RequestId, apiKey));
   return body;
 }

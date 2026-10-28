@@ -16,7 +16,7 @@ const node = { id: "wonder", type: "model.wonder-image", version: 1, config: { e
 const workflow = { id: "workflow", ownerUserId: "owner", graph: { nodes: [node] } };
 const run = { id: "run", workflowId: "workflow", ownerUserId: "owner", graphSnapshot: { nodes: [structuredClone(node)] } };
 const db = new Map(), calls = [], persisted = [];
-let mediaReady = false, jobStatus = "Finished", downloadedAuth, storageEnabled = true, thirdPartyReady = true;
+let mediaReady = false, jobStatus = "Finished", downloadedAuth, storageEnabled = true, thirdPartyReady = true, duplicateImport = false;
 const png = await sharp({ create: { width: 512, height: 512, channels: 4, background: "orange" } }).png().toBuffer();
 const stubs = {
   "../database": {
@@ -92,7 +92,10 @@ try {
       assert.deepEqual(Object.keys(init.headers).sort(), ["Authorization", "Content-Type", "x-acs-action", "x-acs-date", "x-acs-version"].sort(), "API-key authentication must not acquire RAM signature/nonce headers.");
       assert.equal(url, endpoint, "Match the official curl root URL without additional query parameters.");
       assert.equal(parsed.get("Format"), "JSON", "The official curl contract sends Format in the form body.");
-      if (action === "ImportMedia") return Response.json({ MediaId: "media-one" });
+      if (action === "ImportMedia") {
+        if (duplicateImport) return Response.json({ Code: "MediaAlreadyExist", Message: 'The media with the given inputUrl "https://public.example/reference.png" has already been registered with mediaId "media-existing".' }, { status: 400 });
+        return Response.json({ MediaId: "media-one" });
+      }
       if (action === "GetMedia") { const value = mediaReady; mediaReady = true; return Response.json({ MediaInfo: { MediaBasicInfo: { Status: value ? "Normal" : "Processing" }, MediaDynamicInfo: { DynamicMetaData: { Data: JSON.stringify({ ThirdPartyAssetStatus: thirdPartyReady ? "Success" : "Failed" }) } } } }); }
       if (action === "SubmitImageGenerationJob") return Response.json({ JobId: "ag-one" });
       if (action === "GetImageGenerationJob") return Response.json({ ImageGenerationJob: { JobId: "ag-one", Status: jobStatus, Output: JSON.stringify({ Medias: [{ MediaId: "result", OutputUrl: "https://signed.example/image.png?secret=private" }] }) } });
@@ -135,6 +138,26 @@ try {
   await generate({ ...base, model: "Wonder-Image-2.5-Pro", images: [publicReference] });
   assert.deepEqual(JSON.parse(calls.filter((call) => call.action === "ImportMedia").at(-1).parsed.get("RegisterConfig")), { NeedThirdPartyAsset: true });
   assert.equal(calls.filter((call) => call.action === "SubmitImageGenerationJob").at(-1).parsed.get("Model"), "Wonder-Image-2.5-Pro");
+  duplicateImport = true;
+  const duplicateStart = calls.length, persistedBeforeDuplicate = persisted.length;
+  const duplicateResult = await generate({ ...base, images: [publicReference] });
+  assert.equal(duplicateResult.pending, true, "An already-registered reference should continue to submission.");
+  assert.deepEqual(calls.slice(duplicateStart).map((call) => call.action), ["ImportMedia", "GetMedia", "SubmitImageGenerationJob"]);
+  assert.equal(calls[duplicateStart].parsed.get("Overwrite"), "false");
+  assert.equal(calls[duplicateStart + 1].parsed.get("MediaId"), "media-existing");
+  assert.equal(persisted.length, persistedBeforeDuplicate, "Reuse must not upload or persist a second reference.");
+  assert.deepEqual(JSON.parse(calls.filter((call) => call.action === "SubmitImageGenerationJob").at(-1).parsed.get("Input")).Medias, [{ Type: "image", MediaId: "media-existing" }]);
+  const duplicateResumeStart = calls.length;
+  await generate({ ...base, images: [publicReference], resumeJobId: duplicateResult.jobId });
+  assert.deepEqual(calls.slice(duplicateResumeStart).map((call) => call.action), ["GetImageGenerationJob"], "Resume must not register or submit again.");
+  await generate({ ...base, model: "Wonder-Image-2.5-Pro", images: [publicReference] });
+  assert.deepEqual(JSON.parse(calls.filter((call) => call.action === "SubmitImageGenerationJob").at(-1).parsed.get("Input")).Medias, [{ Type: "image", MediaId: "media-existing" }]);
+  thirdPartyReady = false;
+  const duplicateFailureStart = calls.length;
+  await assert.rejects(generate({ ...base, model: "Wonder-Image-2.5-Pro", images: [publicReference] }), /GetMedia.*失败/);
+  assert.deepEqual(calls.slice(duplicateFailureStart).map((call) => call.action), ["ImportMedia", "GetMedia"], "Reuse cannot bypass Wonder asset readiness.");
+  thirdPartyReady = true;
+  duplicateImport = false;
   thirdPartyReady = false;
   const submitsBeforeFailure = calls.filter((call) => call.action === "SubmitImageGenerationJob").length;
   await assert.rejects(generate({ ...base, model: "Wonder-Image-2.5-Pro", images: [publicReference] }), /GetMedia.*失败/);
@@ -163,6 +186,20 @@ try {
   }
   globalThis.fetch = async () => Response.json({ Code: "InputCensorBlocked", Message: "fixture-secret https://signed.invalid/image?Signature=private" });
   await assert.rejects(generate(base), (error) => error.message.includes("InputCensorBlocked") && !error.message.includes("fixture-secret") && !error.message.includes("https://"));
+  for (const reply of [
+    { Code: "MediaAlreadyExist", Message: "missing ID fixture-secret https://signed.invalid/image?Signature=private" },
+    { Code: "Forbidden", MediaId: "media-existing", Message: "has already been registered with mediaId \"media-existing\"." },
+  ]) {
+    const rejectedActions = [];
+    globalThis.fetch = async (_url, init) => { rejectedActions.push(init.headers["x-acs-action"]); return Response.json(reply, { status: 400 }); };
+    await assert.rejects(generate({ ...base, images: [publicReference] }), (error) => error.message.includes("ImportMedia") && !Object.hasOwn(error, "body") && !error.message.includes("https://") && !error.message.includes("fixture-secret"));
+    assert.deepEqual(rejectedActions, ["ImportMedia"]);
+  }
+  globalThis.fetch = async () => Response.json({ Code: "MediaAlreadyExist", MediaId: "media-existing" }, { status: 400 });
+  await assert.rejects(generate(base), /SubmitImageGenerationJob.*HTTP 400/, "Only ImportMedia can reuse a duplicate media ID.");
+  await assert.rejects(generate({ ...base, resumeJobId: "ag-one" }), /GetImageGenerationJob.*HTTP 400/);
+  globalThis.fetch = async () => Response.json({ Code: "MediaAlreadyExist", MediaId: "media-existing", Message: "duplicate fixture-secret https://signed.invalid/image?Signature=private" }, { status: 500 });
+  await assert.rejects(generate({ ...base, images: [publicReference] }), /ImportMedia.*HTTP 500/, "Do not recover duplicate-looking provider failures outside HTTP 400.");
   globalThis.fetch = async () => Response.json({ Code: "MissingSignatureNonce", Message: "SignatureNonce is mandatory for this action.", RequestId: "auth-fixture-123" }, { status: 400 });
   for (const input of [base, { ...base, images: [publicReference] }, { ...base, resumeJobId: "ag-one" }]) {
     await assert.rejects(generate(input), (error) => error.message.includes("MissingSignatureNonce") && error.message.includes("HTTP 400") && error.message.includes("auth-fixture-123") && error.message.includes("AliyunYikeFullAccess") && error.message.includes("重新授权") && error.message.includes("站点") && error.message.includes("无需添加") && !error.message.includes("fixture-secret"));

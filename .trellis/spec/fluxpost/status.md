@@ -18,7 +18,7 @@ OSS evidence: `.trellis/tasks/archive/2026-10/10-28-oss-acceptance-local-cutover
 
 ## Risks And Unknowns
 
-- Latest Wonder failure is ImportMedia HTTP 400 `MissingSignatureNonce`; exact cause unproven. LAN requests now match the official curl (form-only Format); no live comparison or paid replay. See archived wonder-request-debug task.
+- Latest Wonder report: ImportMedia `MediaAlreadyExist`. Local ID reuse repair preserves GetMedia readiness and Overwrite=false; LAN remains e939d18, no live replay. See wonder-existing-media task; earlier auth cause unproven.
 - Context budget fixed by archive; baseline domain checks pass then stop at 17 existing ignored-script lint errors. Separate lint/type/build/smoke passed; no gate weakened.
 - Text reasoning effort must be supported by the configured model and provider; unsupported values surface the upstream error without stripping or retrying the parameter.
 - Gemini live text/image acceptance remains pending. Minimal diagnostics were authorized, then explicitly paused; do not send further calls until resumed.

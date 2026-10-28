@@ -49,6 +49,16 @@ export function wonderImportedMediaId(value: unknown) {
   return id.trim();
 }
 
+export function wonderExistingMediaId(value: unknown): string | undefined {
+  const body = record(value);
+  if ((body.Code ?? body.code) !== "MediaAlreadyExist") return undefined;
+  if (typeof body.MediaId === "string" && /^[A-Za-z0-9_-]{8,256}$/.test(body.MediaId)) return body.MediaId;
+  const message = body.Message ?? body.message;
+  if (typeof message !== "string") return undefined;
+  // The observed duplicate response embeds the ID after this phrase, not in the input URL.
+  return /\bhas already been registered with mediaId\s+"([A-Za-z0-9_-]{8,256})"\.?\s*$/i.exec(message)?.[1];
+}
+
 export function wonderMediaReady(value: unknown, needThirdPartyAsset = false) {
   const info = record(record(value).MediaInfo), basic = record(info.MediaBasicInfo);
   const status = typeof basic.Status === "string" ? basic.Status : "";
