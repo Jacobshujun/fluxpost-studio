@@ -27,7 +27,7 @@ node --env-file=.env.local .trellis/verification/unified_library_postgres_benchm
 
 - Gemini: baseline `canvas_gemini_check.mjs` covers loopback HTTP/proxy, config snapshots, media limits, failures/cancellation and Canvas executor/graph/iteration/V2/bypass contracts. Separate `python .trellis/verification/canvas_gemini_browser_check.py` checks node/config UI at 1440/390 in three themes using intercepted APIs; requires worker-disabled loopback `BROWSER_BASE_URL`, rejects 3001. See `gemini.md`; no live Gemini calls.
 
-- Wonder Image: baseline `wonder_image_contract_check.mjs`, `wonder_image_runtime_check.mjs` and `wonder_image_persistence_check.mjs` cover Yike forms/headers, media registration/readiness, asynchronous JobId resume, result persistence, encrypted node credentials and isolated SQLite/export/iteration behavior. Separate `python .trellis/verification/wonder_image_browser_check.py` covers controls, credentials and graph edges in three themes at 1440/390 using intercepted APIs; use worker-disabled loopback `BROWSER_BASE_URL`, never 3001. Contract: `architecture_rules.md` scenario `Canvas Wonder Image Node`; no live Yike calls.
+- Wonder Image: baseline `wonder_image_{contract,runtime,persistence,upload}_check.mjs` covers Yike JSON/forms/errors, third-party media, JobId resume, result staging, encrypted credentials, numbered/legacy references and isolated SQLite/upload checks. `python .trellis/verification/wonder_image_browser_check.py` covers upload/paste/desktop drop, ordering/limits, credentials and edges in three themes at 1440/390 using intercepted APIs; use worker-disabled loopback `BROWSER_BASE_URL`, never 3001. Contract: `architecture_rules.md`; no live Yike calls.
 
 - Canvas H.264: baseline `canvas_video_encoding_check.mjs` checks CPU output and explicit policy validation; opt-in real GPU/node commands and hardware limits are in `canvas_video_encoding.md`. GPU is never required by the default baseline.
 
@@ -97,6 +97,8 @@ For a production candidate:
 Do not deploy a dirty worktree, branch name, abbreviated SHA, local runtime rows, or unpushed commit.
 
 ## Recent Verification
+
+- 2026-10-28 Wonder repair: baseline domain checks pass then stop at the existing 17-data-script lint errors; changed-source lint/types/build/config/SQLite/HTTP checks and six Wonder plus two GPT browser cases pass. LAN unchanged due non-idle queues; no paid calls. Evidence: wonder-image-repair task.
 
 Prior text-reasoning and local-library acceptance entries are preserved in
 `archive/verification-history.md` (2026-10-28 context-budget archive). Current

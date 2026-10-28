@@ -2,6 +2,7 @@ import { NextResponse } from "next/server";
 import { RuntimeImageUploadInputError, saveRuntimeImageUpload } from "@/lib/runtime-image-upload";
 import { isRuntimeMediaStorageEnabled, isTosRuntimeMediaConfigured } from "@/lib/runtime-media-storage";
 import { isWorkspaceSignInError, requireWorkspaceAccount } from "@/lib/workspace-accounts";
+import { WONDER_IMAGE_MAX_BYTES, WONDER_IMAGE_MAX_EDGE, WONDER_IMAGE_MIN_EDGE } from "@/lib/wonder-image-contract";
 
 export const runtime = "nodejs";
 
@@ -14,7 +15,7 @@ export async function POST(request: Request) {
     await requireWorkspaceAccount(request);
     const form = await request.formData();
     const requestedMode = form.get("mode");
-    const mode = requestedMode === "gpt-reference" || requestedMode === "seedance-reference" ? requestedMode : "canvas-image";
+    const mode = requestedMode === "gpt-reference" || requestedMode === "seedance-reference" || requestedMode === "wonder-reference" ? requestedMode : "canvas-image";
     if (mode === "seedance-reference" && (!isRuntimeMediaStorageEnabled() || !isTosRuntimeMediaConfigured())) {
       throw new RuntimeImageUploadInputError("Seedance reference uploads require enabled and fully configured TOS storage.");
     }
@@ -34,6 +35,7 @@ export async function POST(request: Request) {
         prefix: "canvas",
         ...(mode === "gpt-reference" ? { maxBytes: maxGptReferenceBytes, allowedMimeTypes: ["image/png", "image/jpeg"] } : {}),
         ...(mode === "seedance-reference" ? { allowedMimeTypes: ["image/png", "image/jpeg", "image/webp", "image/gif"] } : {}),
+        ...(mode === "wonder-reference" ? { maxBytes: WONDER_IMAGE_MAX_BYTES, allowedMimeTypes: ["image/png", "image/jpeg", "image/webp"], dimensions: { minEdge: WONDER_IMAGE_MIN_EDGE, maxEdge: WONDER_IMAGE_MAX_EDGE } } : {}),
       });
       if (mode === "seedance-reference" && !/^https?:\/\//i.test(image.imageUrl)) {
         throw new RuntimeImageUploadInputError("Seedance reference upload did not produce a public HTTP(S) URL.");

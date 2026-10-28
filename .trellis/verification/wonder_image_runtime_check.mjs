@@ -8,6 +8,7 @@ import ts from "typescript";
 import sharp from "sharp";
 
 const root = process.cwd(), require = createRequire(import.meta.url);
+const registry = require("tsx/cjs/api").require(path.join(root, "src/lib/canvas/registry.ts"), path.join(root, "package.json"));
 const temporary = await mkdtemp(path.join(tmpdir(), "wonder-runtime-"));
 const endpoint = "https://yike.cn-shanghai.aliyuncs.com/";
 const account = { id: "owner", role: "operator", displayName: "Fixture" };
@@ -15,7 +16,7 @@ const node = { id: "wonder", type: "model.wonder-image", version: 1, config: { e
 const workflow = { id: "workflow", ownerUserId: "owner", graph: { nodes: [node] } };
 const run = { id: "run", workflowId: "workflow", ownerUserId: "owner", graphSnapshot: { nodes: [structuredClone(node)] } };
 const db = new Map(), calls = [], persisted = [];
-let mediaReady = false, jobStatus = "Finished", downloadedAuth, storageEnabled = true;
+let mediaReady = false, jobStatus = "Finished", downloadedAuth, storageEnabled = true, thirdPartyReady = true;
 const png = await sharp({ create: { width: 512, height: 512, channels: 4, background: "orange" } }).png().toBuffer();
 const stubs = {
   "../database": {
@@ -81,15 +82,16 @@ try {
 
   globalThis.fetch = async (url, init) => {
     init?.signal?.throwIfAborted();
-    if (url === endpoint) {
+    if (url === endpoint + "?Format=JSON") {
       const parsed = new URLSearchParams(init.body), action = init.headers["x-acs-action"];
       calls.push({ url, action, init, parsed });
       assert.equal(init.headers.Authorization, "fixture-secret");
       assert.match(init.headers["x-acs-date"], /^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}Z$/);
       assert.equal(init.headers["x-acs-version"], "2026-07-07");
       assert.equal(init.headers["Content-Type"], "application/x-www-form-urlencoded");
+      assert.equal(new URL(url).searchParams.get("Format"), "JSON");
       if (action === "ImportMedia") return Response.json({ MediaId: "media-one" });
-      if (action === "GetMedia") { const value = mediaReady; mediaReady = true; return Response.json({ MediaInfo: { MediaBasicInfo: { Status: value ? "Normal" : "Processing" } } }); }
+      if (action === "GetMedia") { const value = mediaReady; mediaReady = true; return Response.json({ MediaInfo: { MediaBasicInfo: { Status: value ? "Normal" : "Processing" }, MediaDynamicInfo: { DynamicMetaData: { Data: JSON.stringify({ ThirdPartyAssetStatus: thirdPartyReady ? "Success" : "Failed" }) } } } }); }
       if (action === "SubmitImageGenerationJob") return Response.json({ JobId: "ag-one" });
       if (action === "GetImageGenerationJob") return Response.json({ ImageGenerationJob: { JobId: "ag-one", Status: jobStatus, Output: JSON.stringify({ Medias: [{ MediaId: "result", OutputUrl: "https://signed.example/image.png?secret=private" }] }) } });
       throw new Error(`Unexpected action ${action}`);
@@ -112,6 +114,7 @@ try {
   jobStatus = "Finished";
   const completed = await generate({ ...base, resumeJobId: "ag-one" });
   assert.equal(completed.pending, false); assert.equal(completed.items[0].width, 512); assert.ok(completed.items[0].url.startsWith("/generated/wonder-"));
+  assert.deepEqual(await readFile(path.join(temporary, "public", completed.items[0].url)), png, "Output bytes must survive temporary download cleanup even with local storage.");
   assert.equal(downloadedAuth, undefined);
   const publicReference = { url: "https://public.example/reference.png" };
   await generate({ ...base, images: [publicReference] });
@@ -119,6 +122,15 @@ try {
   assert.equal(edited.parsed.get("JobType"), "image_to_image");
   assert.deepEqual(JSON.parse(edited.parsed.get("Input")).Medias, [{ Type: "image", MediaId: "media-one" }]);
   assert.equal(calls.filter((call) => call.action === "GetMedia").length, 2);
+  assert.equal(calls.find((call) => call.action === "ImportMedia").parsed.has("RegisterConfig"), false);
+  await generate({ ...base, model: "Wonder-Image-2.5-Pro", images: [publicReference] });
+  assert.deepEqual(JSON.parse(calls.filter((call) => call.action === "ImportMedia").at(-1).parsed.get("RegisterConfig")), { NeedThirdPartyAsset: true });
+  assert.equal(calls.filter((call) => call.action === "SubmitImageGenerationJob").at(-1).parsed.get("Model"), "Wonder-Image-2.5-Pro");
+  thirdPartyReady = false;
+  const submitsBeforeFailure = calls.filter((call) => call.action === "SubmitImageGenerationJob").length;
+  await assert.rejects(generate({ ...base, model: "Wonder-Image-2.5-Pro", images: [publicReference] }), /GetMedia.*失败/);
+  assert.equal(calls.filter((call) => call.action === "SubmitImageGenerationJob").length, submitsBeforeFailure);
+  thirdPartyReady = true;
   await generate({ ...base, images: [{ url: "/media/a.png" }, { url: `data:image/png;base64,${png.toString("base64")}` }, { url: "/api/canvas/local-directory/media?snapshot=one&media=image" }] });
   assert.equal(persisted.filter((item) => item.kind === "reference").length, 3);
   const beforeInvalid = calls.length;
@@ -133,8 +145,15 @@ try {
   await writeFile(path.join(temporary, "reference.png"), small);
   await assert.rejects(generate({ ...base, images: [publicReference] }), /400px/);
   await writeFile(path.join(temporary, "reference.png"), png);
-  globalThis.fetch = async () => new Response(JSON.stringify({ Code: "InvalidApiKey", Message: "fixture-secret https://private.invalid" }), { status: 401 });
-  await assert.rejects(generate({ ...base, resumeJobId: "ag-one" }), (error) => !error.message.includes("fixture-secret") && !error.message.includes("https://") && error.message.includes("InvalidApiKey"));
+  globalThis.fetch = async () => new Response(JSON.stringify({ Code: "InvalidApiKey", Message: "fixture-secret https://private.invalid", RequestId: "json-request-123" }), { status: 401 });
+  await assert.rejects(generate({ ...base, resumeJobId: "ag-one" }), (error) => !error.message.includes("fixture-secret") && !error.message.includes("https://") && error.message.includes("InvalidApiKey") && error.message.includes("GetImageGenerationJob") && error.message.includes("json-request-123"));
+  for (const responseBody of ["<Error><Code>private-xml-secret</Code></Error>", "<!doctype html><html>private-html-secret</html>", "private-plain-secret"]) {
+    globalThis.fetch = async () => new Response(responseBody, { status: 400, headers: { "x-acs-request-id": "request-fixture-123" } });
+    await assert.rejects(generate(base), (error) => error.message.includes("SubmitImageGenerationJob") && error.message.includes("HTTP 400") && error.message.includes("request-fixture-123") && !error.message.includes("private-"));
+    await assert.rejects(generate({ ...base, images: [publicReference] }), /ImportMedia.*HTTP 400/);
+  }
+  globalThis.fetch = async () => Response.json({ Code: "InputCensorBlocked", Message: "fixture-secret https://signed.invalid/image?Signature=private" });
+  await assert.rejects(generate(base), (error) => error.message.includes("InputCensorBlocked") && !error.message.includes("fixture-secret") && !error.message.includes("https://"));
   globalThis.fetch = async () => { throw new Error("private fetch detail"); };
   await assert.rejects(generate({ ...base, resumeJobId: "ag-one" }), (error) => !error.message.includes("private fetch detail"));
 
@@ -144,6 +163,7 @@ try {
   let executorInput;
   imports["../wonder-image"] = { generateWonderImages: async (input) => { executorInput = input; return { jobId: "ag-test", status: "Created", pending: true }; } };
   imports["./wonder-credentials"] = credentials;
+  imports["./registry"] = registry;
   Function("require", "module", "exports", ts.transpileModule(executorSource, { compilerOptions: { module: ts.ModuleKind.CommonJS, target: ts.ScriptTarget.ES2022, esModuleInterop: true } }).outputText)(
     (name) => name.startsWith("node:") ? require(name) : imports[name], executorModule, executorModule.exports);
   node.config = { ...node.config, prompt: "local instruction", model: "qwen-image-3.0", count: 1, resolution: "1K", aspectRatio: "1:1" };
@@ -152,15 +172,26 @@ try {
   const result = await executorModule.exports.executeCanvasNode({ node, runId: "run", account, inputs, onProviderTaskUpdate: async (state) => { providerState = state; } });
   assert.equal(result.pending, true); assert.equal(providerState.taskId, "ag-test");
   assert.equal(executorInput.prompt, "first\n\nsecond\n\nlocal instruction");
-  assert.deepEqual(executorInput.images.map((item) => item.url), ["a", "a", "b"]);
+  assert.deepEqual(executorInput.images.map((item) => item.url), ["a", "b"]);
   assert.equal(executorInput.resumeJobId, undefined);
   await executorModule.exports.executeCanvasNode({ node, runId: "run", account, inputs, previousNodeRun: { providerTaskId: "ag-test" } });
   assert.equal(executorInput.resumeJobId, "ag-test");
+  node.config.referenceUrls = ["direct", "a"];
+  const numbered = { ...inputs, image_9: [{ kind: "images", items: [{ url: "nine" }] }], image_2: [{ kind: "images", items: [{ url: "two" }, { url: "a" }] }] };
+  await executorModule.exports.executeCanvasNode({ node, runId: "run", account, inputs: numbered });
+  assert.deepEqual(executorInput.images.map((item) => item.url), ["direct", "a", "b", "two", "nine"]);
+  await assert.rejects(executorModule.exports.executeCanvasNode({ node, runId: "run", account, inputs: { image_1: [{ kind: "images", items: Array.from({ length: 10 }, (_, index) => ({ url: `extra-${index}` })) }] } }), /9/);
+  const runs = ts.createSourceFile("runs.ts", readFileSync(path.join(root, "src/lib/canvas/runs.ts"), "utf8"), ts.ScriptTarget.Latest, true);
+  const bypassFunctions = runs.statements.filter((statement) => ts.isFunctionDeclaration(statement) && ["resolveBypassOutputs", "mergeArtifacts"].includes(statement.name?.text)).map((statement) => statement.getText()).join("\n");
+  const scope = { ...imports["./registry"], mergeCanvasImageBatchSummaries: () => undefined, structuredClone };
+  const bypass = Function(...Object.keys(scope), ts.transpileModule(bypassFunctions, { compilerOptions: { module: ts.ModuleKind.CommonJS, target: ts.ScriptTarget.ES2022 } }).outputText + "\nreturn resolveBypassOutputs;")(...Object.values(scope));
+  assert.deepEqual(bypass({ ...node, executionMode: "bypass" }, numbered).images.items.map((item) => item.url), ["direct", "a", "b", "two", "nine"]);
+  assert.equal(bypass({ ...node, config: {}, executionMode: "bypass" }, {}), undefined);
   await credentials.removeWonderCredential(target, account);
   await assert.rejects(executorModule.exports.executeCanvasNode({ node, runId: "run", account, inputs }), executorModule.exports.CanvasNeedsConfigError);
   console.log("Wonder Image runtime: credentials, media, async resume, result persistence, limits, cancellation and safe failures passed.");
 } finally {
   globalThis.fetch = originalFetch; process.chdir(root);
   assert.ok(path.resolve(temporary).startsWith(path.resolve(tmpdir()) + path.sep));
-  await rm(temporary, { recursive: true, force: true });
+  await rm(temporary, { recursive: true, force: true, maxRetries: 3, retryDelay: 100 });
 }

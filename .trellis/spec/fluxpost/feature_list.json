@@ -36,9 +36,9 @@
         "Offline contracts, persistence, browser and build checks pass; live provider acceptance is explicit"
       ],
       "evidence": [
-        "2026-10-27 contract/runtime/SQLite and six three-theme 1440/390 browser cases passed; TypeScript/build/config/SQLite passed; baseline stopped only at the existing 17-data-script lint gate. See canvas-wonder-image task."
+        "2026-10-28 ordered upload/numbered ingress, JSON/media/error repairs, isolated provider/upload/SQLite and six three-theme 1440/390 browser cases passed, plus GPT browser regressions. Lint/types/build/smoke passed separately; baseline has existing 17-data-script lint errors. See wonder-image-repair task."
       ],
-      "notes": "Clean 57cba03 LAN 3001 activation, LAN Canvas GET and auth smoke passed. Real Yike API/model/media acceptance remains pending; no live provider calls."
+      "notes": "Repair awaits LAN activation: current OSS candidate is 10d1ebf and queues are not idle. Real Yike/model acceptance pending; no paid replay or workflow/credential rewrite."
     },
     {
       "id": "tos-to-oss-migration",

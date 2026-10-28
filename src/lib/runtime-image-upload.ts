@@ -1,6 +1,7 @@
 import { randomUUID } from "node:crypto";
 import { mkdir, writeFile } from "node:fs/promises";
 import path from "node:path";
+import sharp from "sharp";
 import { sniffImageFormat } from "./image-format";
 import { persistRuntimeMedia } from "./runtime-media-storage";
 
@@ -26,6 +27,7 @@ export async function saveRuntimeImageUpload(
     prefix: "review" | "canvas";
     maxBytes?: number;
     allowedMimeTypes?: readonly string[];
+    dimensions?: { minEdge: number; maxEdge: number };
   },
 ): Promise<RuntimeImageUploadResult> {
   const maxBytes = target.maxBytes || maxRuntimeImageUploadBytes;
@@ -39,7 +41,15 @@ export async function saveRuntimeImageUpload(
   const format = sniffImageFormat(buffer);
   if (!format?.browserSupported) throw new RuntimeImageUploadInputError("Uploaded file is not a supported browser image.");
   if (target.allowedMimeTypes && !target.allowedMimeTypes.includes(format.mimeType)) {
-    throw new RuntimeImageUploadInputError("Uploaded image must be PNG or JPEG.");
+    throw new RuntimeImageUploadInputError(`Uploaded image must use: ${target.allowedMimeTypes.join(", ")}.`);
+  }
+  if (target.dimensions) {
+    let metadata;
+    try { metadata = await sharp(buffer, { limitInputPixels: target.dimensions.maxEdge ** 2 }).metadata(); }
+    catch { throw new RuntimeImageUploadInputError("Uploaded image is corrupt or exceeds the pixel limit."); }
+    if (!metadata.width || !metadata.height || Math.min(metadata.width, metadata.height) < target.dimensions.minEdge || Math.max(metadata.width, metadata.height) > target.dimensions.maxEdge) {
+      throw new RuntimeImageUploadInputError(`Uploaded image edges must be ${target.dimensions.minEdge}-${target.dimensions.maxEdge}px.`);
+    }
   }
 
   const uploadDir = target.directory === "canvas-uploads"

@@ -3,6 +3,8 @@ export const WONDER_IMAGE_DEFAULT_MODEL = "qwen-image-3.0";
 export const WONDER_IMAGE_API_VERSION = "2026-07-07";
 export const WONDER_IMAGE_MAX_REFERENCES = 9;
 export const WONDER_IMAGE_MAX_BYTES = 20 * 1024 * 1024;
+export const WONDER_IMAGE_MIN_EDGE = 400;
+export const WONDER_IMAGE_MAX_EDGE = 8000;
 
 const endpoints = new Set([WONDER_IMAGE_DEFAULT_ENDPOINT, "https://yike.ap-southeast-1.aliyuncs.com/"]);
 
@@ -47,11 +49,22 @@ export function wonderImportedMediaId(value: unknown) {
   return id.trim();
 }
 
-export function wonderMediaReady(value: unknown) {
+export function wonderMediaReady(value: unknown, needThirdPartyAsset = false) {
   const info = record(record(value).MediaInfo), basic = record(info.MediaBasicInfo);
   const status = typeof basic.Status === "string" ? basic.Status : "";
   if (["Failed", "Deleted"].includes(status)) throw new Error("Wonder Image: 参考图媒资注册失败。");
-  return status === "Normal";
+  if (status !== "Normal") return false;
+  if (!needThirdPartyAsset) return true;
+  const data = record(record(info.MediaDynamicInfo).DynamicMetaData).Data;
+  if (data === undefined || data === "") return false;
+  let dynamic: unknown;
+  try { dynamic = JSON.parse(typeof data === "string" ? data : ""); }
+  catch { throw new Error("Wonder Image: GetMedia 第三方媒资状态不是有效 JSON。"); }
+  const thirdPartyStatus = record(dynamic).ThirdPartyAssetStatus;
+  if (thirdPartyStatus === "Failed") throw new Error("Wonder Image: GetMedia 第三方媒资注册失败。");
+  if (thirdPartyStatus === "Success") return true;
+  if (thirdPartyStatus === undefined || thirdPartyStatus === "Init" || thirdPartyStatus === "Processing") return false;
+  throw new Error("Wonder Image: GetMedia 返回未知第三方媒资状态。");
 }
 
 export function wonderJobResult(value: unknown): { status: string; urls: string[] } {

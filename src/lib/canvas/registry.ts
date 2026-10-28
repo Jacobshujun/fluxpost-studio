@@ -14,9 +14,10 @@ import { decodeCanvasSubtitleRevisionSnapshot } from "./subtitle-editor";
 import { validateCanvasVideoLoaderConfig } from "./video-loader";
 import { validateCanvasCollectionConfig } from "./content-collection";
 import { createCanvasIterationDefinition } from "./iteration";
-import { buildWonderImageRequest, validateWonderEndpoint, WONDER_IMAGE_DEFAULT_ENDPOINT, WONDER_IMAGE_DEFAULT_MODEL } from "../wonder-image-contract";
+import { buildWonderImageRequest, validateWonderEndpoint, WONDER_IMAGE_DEFAULT_ENDPOINT, WONDER_IMAGE_DEFAULT_MODEL, WONDER_IMAGE_MAX_REFERENCES } from "../wonder-image-contract";
 
 export const canvasGptImageReferencePortIds = Array.from({ length: 16 }, (_, index) => `image_${index + 1}`);
+export const canvasWonderImageReferencePortIds = canvasGptImageReferencePortIds.slice(0, WONDER_IMAGE_MAX_REFERENCES);
 
 const canvasNodeDefinitionVersions: CanvasNodeDefinition[] = [
   {
@@ -269,7 +270,8 @@ const canvasNodeDefinitionVersions: CanvasNodeDefinition[] = [
     color: "#0f9f7f",
     inputs: [
       { id: "prompt", label: "提示词", kind: "text", multiple: true },
-      { id: "references", label: "参考图（最多 9 张）", kind: "images", multiple: true },
+      { id: "references", label: "旧版参考图", kind: "images", multiple: true },
+      ...canvasWonderImageReferencePortIds.map((id): CanvasPortDefinition => ({ id, label: id, kind: "images" })),
     ],
     outputs: [{ id: "images", label: "图片", kind: "images" }],
     fields: [
@@ -283,7 +285,7 @@ const canvasNodeDefinitionVersions: CanvasNodeDefinition[] = [
       { key: "resolution", label: "分辨率", kind: "select", options: ["1K", "2K", "4K"].map((value) => ({ value, label: value })) },
       { key: "aspectRatio", label: "宽高比", kind: "select", options: ["16:9", "9:16", "4:3", "3:4", "1:1"].map((value) => ({ value, label: value })) },
     ],
-    defaultConfig: { endpoint: WONDER_IMAGE_DEFAULT_ENDPOINT, model: WONDER_IMAGE_DEFAULT_MODEL, prompt: "", count: 1, resolution: "1K", aspectRatio: "16:9" },
+    defaultConfig: { endpoint: WONDER_IMAGE_DEFAULT_ENDPOINT, model: WONDER_IMAGE_DEFAULT_MODEL, prompt: "", count: 1, resolution: "1K", aspectRatio: "16:9", referenceUrls: [] },
     capability: "image_model",
     bypass: { inputPort: "references", outputPort: "images" },
   },
@@ -805,12 +807,30 @@ export function orderedCanvasGptImageInputs(inputs: Record<string, CanvasArtifac
   return ["references", ...canvasGptImageReferencePortIds].flatMap((id) => inputs[id] || []);
 }
 
+export function resolveCanvasWonderImageReferences(node: CanvasNode, inputs: Record<string, CanvasArtifact[]>) {
+  const ordered = [
+    ...normalizeUrlList(node.config.referenceUrls).map((url) => ({ url })),
+    ...["references", ...canvasWonderImageReferencePortIds].flatMap((id) => inputs[id] || [])
+      .flatMap((artifact) => artifact.kind === "images" ? artifact.items : []),
+  ];
+  const seen = new Set<string>();
+  const references = ordered.filter((item) => {
+    const url = item.url.trim();
+    if (!url || seen.has(url)) return false;
+    seen.add(url);
+    return true;
+  }).map((item) => ({ ...item, url: item.url.trim() }));
+  if (references.length > WONDER_IMAGE_MAX_REFERENCES) throw new Error("Wonder Image: 合并后的参考图最多支持 9 张，请移除多余图片。");
+  return references;
+}
+
 export function getCanvasVisibleInputPorts(node: CanvasNode, connectedPortIds: Iterable<string> = []): CanvasPortDefinition[] {
   const inputs = getCanvasNodeDefinition(node.type, node.version)?.inputs || [];
-  if (node.type !== "utility.image-iterate" && (node.type !== "model.gpt-image" || node.version < 2)) return inputs;
+  if (node.type !== "model.wonder-image" && node.type !== "utility.image-iterate" && (node.type !== "model.gpt-image" || node.version < 2)) return inputs;
+  const referencePortIds = node.type === "model.wonder-image" ? canvasWonderImageReferencePortIds : canvasGptImageReferencePortIds;
   const connected = new Set(connectedPortIds);
-  const lastConnected = canvasGptImageReferencePortIds.findLastIndex((id) => connected.has(id));
-  const visible = new Set(canvasGptImageReferencePortIds.slice(0, Math.min(lastConnected + 2, 16)));
+  const lastConnected = referencePortIds.findLastIndex((id) => connected.has(id));
+  const visible = new Set(referencePortIds.slice(0, Math.min(lastConnected + 2, referencePortIds.length)));
   return inputs.filter((port) => port.id === "references" ? connected.has(port.id) : !canvasGptImageReferencePortIds.includes(port.id) || visible.has(port.id));
 }
 
@@ -820,6 +840,8 @@ export function getCanvasRequiredInputPorts(node: CanvasNode, availablePortIds: 
     return definition?.inputs.filter((input) => input.required || input.id === "overlayImages") || [];
   }
   if (getCanvasNodeExecutionMode(node) !== "bypass") return definition?.inputs.filter((input) => input.required) || [];
+  if (node.type === "model.wonder-image" && (normalizeUrlList(node.config.referenceUrls).length
+    || Array.from(availablePortIds).some((id) => id === "references" || canvasWonderImageReferencePortIds.includes(id)))) return [];
   // Numbered GPT image inputs are alternatives for bypass, not individually required.
   if (node.type === "model.gpt-image" && node.version >= 2
     && Array.from(availablePortIds).some((id) => id === "references" || canvasGptImageReferencePortIds.includes(id))) return [];
@@ -1073,6 +1095,7 @@ export function validateCanvasNodeConfig(type: CanvasNodeType, config: CanvasNod
   if (type === "model.wonder-image") {
     try {
       validateWonderEndpoint(config.endpoint);
+      if (normalizeUrlList(config.referenceUrls).length > WONDER_IMAGE_MAX_REFERENCES) throw new Error("Wonder Image: 节点内最多上传 9 张参考图。");
       buildWonderImageRequest({
         prompt: "Canvas validation", model: String(config.model || ""), mediaIds: [],
         count: Number(config.count), resolution: String(config.resolution || ""), aspectRatio: String(config.aspectRatio || ""),

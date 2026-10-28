@@ -1,5 +1,6 @@
 import { randomUUID } from "node:crypto";
-import { readFile, stat } from "node:fs/promises";
+import { mkdir, readFile, stat, writeFile } from "node:fs/promises";
+import path from "node:path";
 import sharp from "sharp";
 import { runWithConcurrencyPool } from "./concurrency";
 import { sniffBrowserSupportedImageMime, sniffImageFormat } from "./image-format";
@@ -10,7 +11,7 @@ import type { CanvasMediaReference } from "./canvas/types";
 import type { WorkspaceAccessActor } from "./workspace-ownership";
 import {
   buildWonderImageRequest, validateWonderEndpoint, wonderImportedMediaId, wonderJobResult,
-  wonderMediaReady, wonderSubmittedJobId, WONDER_IMAGE_API_VERSION, WONDER_IMAGE_MAX_BYTES, WONDER_IMAGE_MAX_REFERENCES,
+  wonderMediaReady, wonderSubmittedJobId, WONDER_IMAGE_API_VERSION, WONDER_IMAGE_MAX_BYTES, WONDER_IMAGE_MAX_REFERENCES, WONDER_IMAGE_MIN_EDGE, WONDER_IMAGE_MAX_EDGE,
 } from "./wonder-image-contract";
 
 export type WonderImageSubmission = { jobId: string; status: string; pending: true };
@@ -34,16 +35,30 @@ async function boundedResponse(response: Response, limit: number, signal: AbortS
   } finally { await reader.cancel(); }
 }
 
-function providerError(value: unknown, status: number, apiKey: string) {
+function safeProviderMessage(value: string, apiKey: string) {
+  return value.replaceAll(apiKey, "[redacted]")
+    .replace(/Bearer\s+[^\s,;"'<>]+/gi, "Bearer [redacted]")
+    .replace(/\bsk-[A-Za-z0-9_-]+/g, "[redacted]")
+    .replace(/((?:api[_-]?key|token|authorization|signature)\s*[=:]\s*)[^\s,;"'<>]+/gi, "$1[redacted]")
+    .replace(/https?:\/\/\S+/g, "[provider-url]").replace(/[\r\n\x00-\x1f]+/g, " ").slice(0, 700);
+}
+
+function providerRequestId(value: unknown, apiKey: string) {
+  return typeof value === "string" && /^[a-zA-Z0-9_-]{1,128}$/.test(value) && !value.includes(apiKey) ? `, RequestId=${value}` : "";
+}
+
+function providerError(value: unknown, status: number, apiKey: string, action: string, requestId: string) {
   const body = value && typeof value === "object" && !Array.isArray(value) ? value as Record<string, unknown> : {};
   const raw = [body.Code, body.code, body.Message, body.message].filter((entry): entry is string => typeof entry === "string").join(": ");
-  const message = raw.replaceAll(apiKey, "[redacted]").replace(/https?:\/\/\S+/g, "[provider-url]").slice(0, 500);
-  return new Error(`Wonder Image: 请求失败（HTTP ${status}）${message ? `：${message}` : "，请检查地址、密钥、模型权限或服务状态。"}`);
+  const message = safeProviderMessage(raw, apiKey);
+  return new Error(`Wonder Image: ${action} 请求失败（HTTP ${status}${requestId}）${message ? `：${message}` : "，请检查地址、密钥、模型权限或服务状态。"}`);
 }
 
 async function requestWonder(endpoint: string, apiKey: string, action: string, fields: Record<string, string>, signal: AbortSignal) {
   signal.throwIfAborted();
-  const response = await fetch(endpoint, {
+  const url = new URL(endpoint);
+  url.searchParams.set("Format", "JSON");
+  const response = await fetch(url.href, {
     method: "POST", redirect: "error", signal,
     headers: {
       Authorization: apiKey, "x-acs-action": action, "x-acs-version": WONDER_IMAGE_API_VERSION,
@@ -52,9 +67,15 @@ async function requestWonder(endpoint: string, apiKey: string, action: string, f
     body: new URLSearchParams(fields).toString(),
   });
   const bytes = await boundedResponse(response, 1024 * 1024, signal);
+  const idSuffix = providerRequestId(response.headers.get("x-acs-request-id"), apiKey);
   let body: unknown;
-  try { body = JSON.parse(bytes.toString("utf8")); } catch { throw new Error(`Wonder Image: 服务返回了无效响应（HTTP ${response.status}）。`); }
-  if (!response.ok) throw providerError(body, response.status, apiKey);
+  try { body = JSON.parse(bytes.toString("utf8")); } catch {
+    const text = bytes.toString("utf8").trimStart();
+    const type = /^<\?xml|^<Error[\s>]/i.test(text) ? "XML" : /^<!doctype html|^<html[\s>]/i.test(text) ? "HTML" : "非 JSON";
+    throw new Error(`Wonder Image: ${action} 返回 ${type} 响应（HTTP ${response.status}${idSuffix}），请检查接口鉴权或联系服务方。`);
+  }
+  const record = body && typeof body === "object" && !Array.isArray(body) ? body as Record<string, unknown> : {};
+  if (!response.ok || record.Code || record.code) throw providerError(body, response.status, apiKey, action, idSuffix || providerRequestId(record.RequestId, apiKey));
   return body;
 }
 
@@ -87,14 +108,14 @@ async function referenceBytes(image: CanvasMediaReference, account: WorkspaceAcc
   if (!bytes.length || bytes.length > WONDER_IMAGE_MAX_BYTES) throw new Error("Wonder Image: 参考图为空或超过 20MB。");
   const format = sniffImageFormat(bytes);
   if (!format || !["image/jpeg", "image/png", "image/webp"].includes(format.mimeType)) throw new Error("Wonder Image: 参考图仅支持 JPEG、PNG 或 WebP。");
-  const metadata = await sharp(bytes, { limitInputPixels: 8000 * 8000 }).metadata();
-  if (!metadata.width || !metadata.height || Math.min(metadata.width, metadata.height) < 400 || Math.max(metadata.width, metadata.height) > 8000) {
+  const metadata = await sharp(bytes, { limitInputPixels: WONDER_IMAGE_MAX_EDGE ** 2 }).metadata();
+  if (!metadata.width || !metadata.height || Math.min(metadata.width, metadata.height) < WONDER_IMAGE_MIN_EDGE || Math.max(metadata.width, metadata.height) > WONDER_IMAGE_MAX_EDGE) {
     throw new Error("Wonder Image: 参考图短边须不低于 400px，长边不得超过 8000px。");
   }
   return { bytes, format };
 }
 
-async function registerReference(endpoint: string, apiKey: string, image: CanvasMediaReference, account: WorkspaceAccessActor, signal: AbortSignal) {
+async function registerReference(endpoint: string, apiKey: string, image: CanvasMediaReference, account: WorkspaceAccessActor, signal: AbortSignal, needThirdPartyAsset: boolean) {
   const { bytes, format } = await referenceBytes(image, account, signal);
   let inputUrl = image.url;
   if (!/^https?:\/\//i.test(inputUrl)) {
@@ -102,11 +123,14 @@ async function registerReference(endpoint: string, apiKey: string, image: Canvas
     const uploaded = await persistLibraryObject({ publicPath: `/generated/wonder-reference-${randomUUID()}${format.extension}`, body: bytes, contentType: format.mimeType });
     inputUrl = uploaded.publicUrl;
   }
-  const imported = await requestWonder(endpoint, apiKey, "ImportMedia", { ImportSource: "url", InputURL: inputUrl, MediaType: "image", Overwrite: "false" }, signal);
+  const imported = await requestWonder(endpoint, apiKey, "ImportMedia", {
+    ImportSource: "url", InputURL: inputUrl, MediaType: "image", Overwrite: "false",
+    ...(needThirdPartyAsset ? { RegisterConfig: JSON.stringify({ NeedThirdPartyAsset: true }) } : {}),
+  }, signal);
   const mediaId = wonderImportedMediaId(imported);
   for (let attempt = 0; attempt < 24; attempt += 1) {
     const media = await requestWonder(endpoint, apiKey, "GetMedia", { MediaId: mediaId }, signal);
-    if (wonderMediaReady(media)) return mediaId;
+    if (wonderMediaReady(media, needThirdPartyAsset)) return mediaId;
     await new Promise<void>((resolve, reject) => {
       const abort = () => { clearTimeout(timer); reject(signal.reason); };
       const timer = setTimeout(() => { signal.removeEventListener("abort", abort); resolve(); }, 5_000);
@@ -130,7 +154,7 @@ export async function generateWonderImages(input: {
     return await runWithConcurrencyPool("image", async () => {
       const jobId = input.resumeJobId || await (async () => {
         const mediaIds: string[] = [];
-        for (const image of input.images) mediaIds.push(await registerReference(endpoint, apiKey, image, input.account, signal));
+        for (const image of input.images) mediaIds.push(await registerReference(endpoint, apiKey, image, input.account, signal, /^wonder-/i.test(input.model.trim())));
         const submitted = await requestWonder(endpoint, apiKey, "SubmitImageGenerationJob", buildWonderImageRequest({ ...input, mediaIds }), signal);
         return wonderSubmittedJobId(submitted);
       })();
@@ -148,7 +172,11 @@ export async function generateWonderImages(input: {
           const metadata = await sharp(bytes, { limitInputPixels: 16_000 * 16_000 }).metadata();
           if (!metadata.width || !metadata.height) throw new Error("Wonder Image: 输出图片尺寸无效。");
           const publicPath = `/generated/wonder-${randomUUID()}${format.extension}`;
-          const storedUrl = await persistRuntimeMedia({ filePath: materialized.filePath, publicPath, contentType: mimeType });
+          const filePath = path.join(/*turbopackIgnore: true*/ process.cwd(), "public", publicPath.slice(1));
+          signal.throwIfAborted();
+          await mkdir(path.dirname(filePath), { recursive: true });
+          await writeFile(filePath, bytes, { flag: "wx", signal });
+          const storedUrl = await persistRuntimeMedia({ filePath, publicPath, contentType: mimeType });
           items.push({ url: storedUrl, width: metadata.width, height: metadata.height, mimeType });
         } finally { await materialized.cleanup(); }
       }
@@ -157,7 +185,7 @@ export async function generateWonderImages(input: {
   } catch (error) {
     input.signal?.throwIfAborted();
     if (signal.aborted) throw new Error("Wonder Image: 请求超时，请稍后手动重试。");
-    if (error instanceof Error && error.message.startsWith("Wonder Image:")) throw new Error(error.message.replaceAll(apiKey, "[redacted]").replace(/https?:\/\/\S+/g, "[provider-url]"));
+    if (error instanceof Error && error.message.startsWith("Wonder Image:")) throw new Error(safeProviderMessage(error.message, apiKey));
     throw new Error("Wonder Image: 图片请求或保存失败，请检查参考图、网络和存储配置。");
   }
 }

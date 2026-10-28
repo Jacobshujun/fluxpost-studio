@@ -34,7 +34,7 @@ import { bindComposeInput } from "./layer-compose-contract";
 import { canvasIterationExecutionDefinition } from "./iteration";
 import { ArkSeedanceNeedsConfigError, getArkSeedanceReadiness } from "./seedance";
 import { buildCanvasRunPlan, collectDescendants } from "./graph";
-import { getCanvasNodeDefinition, getCanvasNodeExecutionMode, getCanvasRequiredInputPorts, normalizeUrlList, orderedCanvasGptImageInputs } from "./registry";
+import { getCanvasNodeDefinition, getCanvasNodeExecutionMode, getCanvasRequiredInputPorts, normalizeUrlList, orderedCanvasGptImageInputs, resolveCanvasWonderImageReferences } from "./registry";
 import type {
   CanvasArtifact,
   CanvasEdge,
@@ -1026,6 +1026,10 @@ function missingRequiredInput(node: CanvasNode, inputs: Record<string, CanvasArt
 function resolveBypassOutputs(node: CanvasNode, inputs: Record<string, CanvasArtifact[]>): Record<string, CanvasArtifact> | undefined {
   const bypass = getCanvasNodeDefinition(node.type, node.version)?.bypass;
   if (!bypass) return undefined;
+  if (node.type === "model.wonder-image") {
+    const items = resolveCanvasWonderImageReferences(node, inputs);
+    return items.length ? { images: { kind: "images", items } } : undefined;
+  }
   const artifact = mergeArtifacts(node.type === "model.gpt-image" && node.version >= 2
     ? orderedCanvasGptImageInputs(inputs)
     : inputs[bypass.inputPort] || []);

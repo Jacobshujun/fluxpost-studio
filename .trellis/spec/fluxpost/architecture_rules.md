@@ -41,20 +41,22 @@ Last updated: 2026-07-20
 
 ### 2. Signatures
 - Credential API: `GET|PUT|DELETE /api/canvas/wonder-credentials` with workflow/node/optional region target; `PUT` accepts `{ apiKey, endpoint }` and returns only `{ configured: boolean }`.
-- Node config: `endpoint`, `model`, `prompt`, `count`, `resolution`, `aspectRatio`; API keys never enter node config or workflow/run serialization.
+- Node config: `endpoint`, `model`, `prompt`, `count`, `resolution`, `aspectRatio`, optional ordered `referenceUrls`; API keys never enter node config or workflow/run serialization. Wonder v1 keeps node identity/credentials and existing `references` edges; `image_1` through `image_9` expand progressively like GPT-Image-2. The legacy port stays visible only when connected.
 - Yike actions: `ImportMedia`, `GetMedia`, `SubmitImageGenerationJob`, `GetImageGenerationJob`, version `2026-07-07`.
 
 ### 3. Contracts
-- Only `https://yike.cn-shanghai.aliyuncs.com/` and `https://yike.ap-southeast-1.aliyuncs.com/` are accepted. `Authorization` contains the raw key; form requests include fresh UTC `x-acs-date` and explicit action/version headers.
+- Only `https://yike.cn-shanghai.aliyuncs.com/` and `https://yike.ap-southeast-1.aliyuncs.com/` are accepted. `Authorization` contains the raw key; form requests include fresh UTC `x-acs-date` and explicit action/version headers. Every internal request adds `?Format=JSON`; canonical credential endpoints remain unchanged.
 - Text and optional 1-9 ordered references produce `text_to_image` or `image_to_image`; count is 1-4, resolution is 1K/2K/4K and ratio is 16:9/9:16/4:3/3:4/1:1.
 - References must be JPEG/PNG/WebP, at most 20MB, short side at least 400px and long side at most 8000px. Public URLs are registered directly; local references require existing configured object storage and a verified public URL.
+- `POST /api/canvas/media` mode `wonder-reference` validates bytes/dimensions before storage. Canvas uploads/paste/desktop drops use that mode; the list supports preview/reorder/remove. Execution and bypass merge direct URLs, legacy inputs, then numbered inputs in ascending order; first URL wins, more than nine unique images fails without truncation.
+- For `Wonder-` model IDs, `ImportMedia.RegisterConfig` contains `NeedThirdPartyAsset=true`; `GetMedia` must report Normal plus decoded `MediaDynamicInfo.DynamicMetaData.Data.ThirdPartyAssetStatus=Success`. Init/Processing stays pending; Failed/invalid states fail explicitly. Do not silently replace the operator's model ID.
 - A submitted JobId is persisted through `onProviderTaskUpdate`. Resume only queries that JobId and never resubmits. Finished results are validated and persisted as runtime media without generated-library indexing.
 
 ### 4. Validation & Error Matrix
 - Missing/mismatched credential -> Canvas `needs_config`; unauthorized workflow/run credential access is rejected.
 - Invalid endpoint, parameters or reference -> explicit local error before a generation POST.
 - `Created|Queuing|Executing` -> pending node run; `Failed` -> sanitized failure; malformed/unknown result -> failure, never a successful empty output.
-- Provider credentials, request bodies, private storage errors and signed URLs must not enter durable errors.
+- Provider credentials, request bodies, private storage errors and signed URLs must not enter durable errors. Request errors expose action, HTTP status and safe RequestId; JSON failures expose redacted code/message, while non-JSON responses expose only format, never raw bodies. Historical HTTP 400/no-JobId evidence alone does not identify which action failed.
 
 ### 5. Good/Base/Bad Cases
 - Good: a restarted run queries its persisted JobId and saves the returned images.
@@ -62,7 +64,7 @@ Last updated: 2026-07-20
 - Bad: a retry submits a second paid job, API keys appear in exports, or local `/generated/...` is sent directly to Yike.
 
 ### 6. Tests Required
-- Baseline `wonder_image_contract_check.mjs`, `wonder_image_runtime_check.mjs` and `wonder_image_persistence_check.mjs` cover forms, headers, media, async resume, cancellation/redaction and real isolated SQLite/export/clipboard/iteration behavior.
+- Baseline `wonder_image_contract_check.mjs`, `wonder_image_runtime_check.mjs`, `wonder_image_persistence_check.mjs` and `wonder_image_upload_check.mjs` cover forms/Format, headers, third-party media, async resume, cancellation/redaction, byte-validated uploads, numbered ingress/bypass and real isolated SQLite/export/clipboard/iteration behavior. Output staging must survive download cleanup with object storage disabled.
 - `wonder_image_browser_check.py` covers controls, credentials and graph edges in three themes at 1440/390 using intercepted APIs and a worker-disabled non-3001 server.
 - Real Yike/media acceptance is an explicit operator gate; default checks never call the paid provider.
 

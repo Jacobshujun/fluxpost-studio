@@ -18,7 +18,7 @@ import { CanvasMediaNeedsConfigError, extractCanvasVideoFrames, reconstructCanva
 import { revalidateCanvasDirectoryGroup } from "./directory-snapshots";
 import { canvasVisionPresets, concatenateCanvasText, parseCanvasImageSelection, renderCanvasPromptTemplate, splitCanvasText } from "./node-utils";
 import { pixelSizeForRatio } from "../gpt-image-dimensions";
-import { canvasGptImageReferencePortIds, normalizeUrlList, orderedCanvasGptImageInputs } from "./registry";
+import { canvasGptImageReferencePortIds, normalizeUrlList, orderedCanvasGptImageInputs, resolveCanvasWonderImageReferences } from "./registry";
 import { CANVAS_SAVE_IMAGE_MAX_ITEMS } from "./save-images";
 import { saveCanvasImagesToFolder } from "./local-image-save";
 import { processCanvasImages } from "./image-process";
@@ -407,11 +407,12 @@ async function executeWonderImage({ node, inputs, account, signal, runId, previo
   const { generateWonderImages } = await import("../wonder-image");
   const { wonderCredentialForRun, WonderCredentialError } = await import("./wonder-credentials");
   try {
+    const images = resolveCanvasWonderImageReferences(node, inputs);
     const credentials = await wonderCredentialForRun(runId, node, account);
     const result = await generateWonderImages({
       ...credentials, account, signal,
       prompt: [...textValues(inputs.prompt), String(node.config.prompt || "")].filter(Boolean).join("\n\n"),
-      images: imageItems(inputs.references),
+      images,
       model: String(node.config.model || ""), count: Number(node.config.count),
       resolution: String(node.config.resolution || ""), aspectRatio: String(node.config.aspectRatio || ""),
       resumeJobId: previousNodeRun?.providerTaskId,

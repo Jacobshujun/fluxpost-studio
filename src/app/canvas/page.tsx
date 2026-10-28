@@ -1000,16 +1000,22 @@ export default function CanvasPage() {
     setMediaBusy(true);
     try {
       const target = targetNodeId
-        ? nodes.find((flowNode) => flowNode.id === targetNodeId && ["input.images", "model.gpt-image", "model.seedance"].includes(flowNode.data.canvasNode.type))
+        ? nodes.find((flowNode) => flowNode.id === targetNodeId && ["input.images", "model.gpt-image", "model.wonder-image", "model.seedance"].includes(flowNode.data.canvasNode.type))
         : undefined;
       const isGptReference = target?.data.canvasNode.type === "model.gpt-image" && target.data.canvasNode.version >= 2;
+      const isWonderReference = target?.data.canvasNode.type === "model.wonder-image";
       const isSeedanceReference = target?.data.canvasNode.type === "model.seedance";
-      const configKey = isGptReference || isSeedanceReference ? "referenceUrls" : "urls";
+      const configKey = isGptReference || isWonderReference || isSeedanceReference ? "referenceUrls" : "urls";
       const currentUrls = target ? normalizeConfigUrls(target.data.canvasNode.config[configKey]) : [];
       if (isGptReference) {
         if (currentUrls.length + files.length > 16) throw new Error(`GPT-Image-2 最多支持 16 张参考图片，当前 ${currentUrls.length} 张。`);
         const invalid = files.find((file) => !["image/png", "image/jpeg"].includes(file.type) || file.size > 50 * 1024 * 1024);
         if (invalid) throw new Error(`${invalid.name} 必须是 PNG/JPEG 且不超过 50MB。`);
+      }
+      if (isWonderReference) {
+        if (currentUrls.length + files.length > 9) throw new Error(`Wonder Image 最多支持 9 张参考图片，当前 ${currentUrls.length} 张。`);
+        const invalid = files.find((file) => !["image/png", "image/jpeg", "image/webp"].includes(file.type) || file.size > 20 * 1024 * 1024);
+        if (invalid) throw new Error(`${invalid.name} 必须是 PNG/JPEG/WebP 且不超过 20MB。`);
       }
       if (isSeedanceReference && target) {
         const fixedCount = resolveSeedanceFixedReferences(editableGraph, target.id).length;
@@ -1022,6 +1028,7 @@ export default function CanvasPage() {
         const form = new FormData();
         form.append("files", file);
         if (isGptReference) form.append("mode", "gpt-reference");
+        if (isWonderReference) form.append("mode", "wonder-reference");
         if (isSeedanceReference) form.append("mode", "seedance-reference");
         const response = await fetch("/api/canvas/media", { method: "POST", body: form });
         const data = await response.json() as { images?: Array<{ imageUrl: string }>; error?: string };
@@ -1595,7 +1602,7 @@ export default function CanvasPage() {
       if (iterationEditorId || preview || subtitleEditor || document.querySelector('dialog[open], [role="dialog"][aria-modal="true"]') || isEditableClipboardTarget(event.target) || !event.clipboardData) return;
       const imageFiles = dataTransferImageFiles(event.clipboardData);
       if (imageFiles.length) {
-        const targetImageNodeId = selectedCanvasNode && (selectedCanvasNode.type === "input.images" || (selectedCanvasNode.type === "model.gpt-image" && selectedCanvasNode.version >= 2))
+        const targetImageNodeId = selectedCanvasNode && (selectedCanvasNode.type === "input.images" || selectedCanvasNode.type === "model.wonder-image" || (selectedCanvasNode.type === "model.gpt-image" && selectedCanvasNode.version >= 2))
           ? selectedCanvasNode.id
           : undefined;
         if (isMobile && !targetImageNodeId) return;
@@ -1954,7 +1961,7 @@ const CanvasFlowNode = memo(function CanvasFlowNode({ data, selected }: NodeProp
     ? normalizeConfigUrls(node.config.urls)
     : node.type === "input.content-pool"
       ? normalizeConfigUrls(node.config.snapshotImageUrls)
-    : node.type === "model.gpt-image" && node.version >= 2
+    : node.type === "model.wonder-image" || (node.type === "model.gpt-image" && node.version >= 2)
       ? normalizeConfigUrls(node.config.referenceUrls)
       : [];
   const imageAssetIds = node.type === "input.library-images" ? configStringList(node.config.assetIds) : [];
@@ -2042,7 +2049,8 @@ const CanvasFlowNode = memo(function CanvasFlowNode({ data, selected }: NodeProp
     {node.type === "model.wonder-image" ? <div className="canvas-gpt-image-controls nodrag nopan nowheel" onPointerDown={(event) => event.stopPropagation()} onClick={(event) => event.stopPropagation()} onKeyDown={(event) => event.stopPropagation()}>
       <CanvasNodeFields node={node} onChange={(key, value) => interaction?.onConfigChange(node.id, key, value)} onPatch={(patch) => interaction?.onConfigPatch(node.id, patch)} onPreviewImage={(url, index) => interaction?.onPreview({ kind: "image", url, index })} />
       <CanvasQwenCredentials key={`${interaction?.workflowId}:${interaction?.regionId || ""}:${node.id}:${String(node.config.endpoint || "")}`} node={node} interaction={interaction} />
-      <small>不接参考图：文生图；接入 1–9 张：图生图。本地参考图需要已配置对象存储。</small>
+      {imageUrls.length ? <small className="canvas-gpt-legacy-count">已上传参考图：{imageUrls.length}/9</small> : null}
+      <small>不接参考图：文生图；最多 9 张。上传图片在前，上游参考图按端口编号排列。</small>
     </div> : null}
     {node.type === "model.gpt-image" && node.version >= 2 ? <div className="canvas-gpt-image-controls nodrag nopan nowheel" onPointerDown={(event) => event.stopPropagation()} onClick={(event) => event.stopPropagation()}>
       <CanvasNodeFields node={node} onChange={(key, value) => interaction?.onConfigChange(node.id, key, value)} onPatch={(patch) => interaction?.onConfigPatch(node.id, patch)} onPreviewImage={(url, index) => interaction?.onPreview({ kind: "image", url, index })} />
@@ -3040,9 +3048,12 @@ function NodeInspector({
   }, [defaultLabel, node.id, node.label]);
   if (!definition) return null;
   const isGptImageV2 = node.type === "model.gpt-image" && node.version >= 2;
+  const isWonderImage = node.type === "model.wonder-image";
+  const isNumberedImage = isGptImageV2 || isWonderImage;
+  const maxReferences = isWonderImage ? 9 : 16;
   const isSeedance = node.type === "model.seedance";
-  const imageConfigKey = isGptImageV2 || isSeedance ? "referenceUrls" : "urls";
-  const imageUrls = node.type === "input.images" || isGptImageV2 || isSeedance ? normalizeConfigUrls(node.config[imageConfigKey]) : [];
+  const imageConfigKey = isNumberedImage || isSeedance ? "referenceUrls" : "urls";
+  const imageUrls = node.type === "input.images" || isNumberedImage || isSeedance ? normalizeConfigUrls(node.config[imageConfigKey]) : [];
   const orderedSeedanceReferences = isSeedance ? orderSeedanceFixedReferences(node.config, seedanceReferences) : [];
   const seedanceErrors = isSeedance ? validateSeedanceGraphNode(graph, node) : [];
   const sourceVideoSnapshot = node.type === "input.source-video" ? canvasSourceVideoSnapshotFromConfig(node.config) : undefined;
@@ -3092,21 +3103,22 @@ function NodeInspector({
       onPatch={onPatch}
       createMentionId={createSeedanceMentionId}
     /> : null}
-    {node.type === "input.images" || isGptImageV2 || isSeedance ? <div className={`canvas-image-import ${isSeedance ? "canvas-seedance-references" : ""}`}>
-      {isGptImageV2 ? <div className="canvas-image-import-count"><strong>参考图片</strong><span>{imageUrls.length}/16</span></div> : null}
+    {node.type === "input.images" || isNumberedImage || isSeedance ? <div className={`canvas-image-import ${isSeedance ? "canvas-seedance-references" : ""}`}>
+      {isNumberedImage ? <div className="canvas-image-import-count"><strong>参考图片</strong><span>{imageUrls.length}/{maxReferences}</span></div> : null}
+      {isWonderImage ? <small>PNG/JPEG/WebP，最大 20MB；短边至少 400px，长边最多 8000px。</small> : null}
       {isSeedance ? <div className="canvas-image-import-count"><strong>固定参考图</strong><span>{orderedSeedanceReferences.length}/9</span></div> : null}
       <div className="canvas-image-import-actions">
-        <label className={mediaBusy || (isGptImageV2 && imageUrls.length >= 16) || (isSeedance && orderedSeedanceReferences.length >= 9) ? "is-disabled" : ""}>
+        <label className={mediaBusy || (isNumberedImage && imageUrls.length >= maxReferences) || (isSeedance && orderedSeedanceReferences.length >= 9) ? "is-disabled" : ""}>
           <Upload /><span>{mediaBusy ? "导入中" : "导入图片"}</span>
-          <input className="canvas-image-file-input" type="file" accept={isGptImageV2 ? "image/jpeg,image/png" : isSeedance ? "image/jpeg,image/png,image/gif,image/webp" : "image/jpeg,image/png,image/gif,image/webp,image/avif"} multiple disabled={mediaBusy || (isGptImageV2 && imageUrls.length >= 16) || (isSeedance && orderedSeedanceReferences.length >= 9)} onChange={(event) => {
+          <input className="canvas-image-file-input" type="file" accept={isWonderImage ? "image/jpeg,image/png,image/webp" : isGptImageV2 ? "image/jpeg,image/png" : isSeedance ? "image/jpeg,image/png,image/gif,image/webp" : "image/jpeg,image/png,image/gif,image/webp,image/avif"} multiple disabled={mediaBusy || (isNumberedImage && imageUrls.length >= maxReferences) || (isSeedance && orderedSeedanceReferences.length >= 9)} onChange={(event) => {
             const files = Array.from(event.target.files || []);
             event.target.value = "";
             if (files.length) void onImportImages(files);
           }} />
         </label>
-        <button type="button" onClick={() => void onPasteImages()} disabled={mediaBusy || (isGptImageV2 && imageUrls.length >= 16) || (isSeedance && orderedSeedanceReferences.length >= 9)}><ClipboardPaste /><span>粘贴图片</span></button>
+        <button type="button" onClick={() => void onPasteImages()} disabled={mediaBusy || (isNumberedImage && imageUrls.length >= maxReferences) || (isSeedance && orderedSeedanceReferences.length >= 9)}><ClipboardPaste /><span>粘贴图片</span></button>
       </div>
-      {(isSeedance ? orderedSeedanceReferences.length : imageUrls.length) ? <div className={`canvas-image-preview-list ${isGptImageV2 || isSeedance ? "is-ordered" : ""}`}>{(isSeedance ? orderedSeedanceReferences : imageUrls).map((item, index) => {
+      {(isSeedance ? orderedSeedanceReferences.length : imageUrls.length) ? <div className={`canvas-image-preview-list ${isNumberedImage || isSeedance ? "is-ordered" : ""}`}>{(isSeedance ? orderedSeedanceReferences : imageUrls).map((item, index) => {
         const url = typeof item === "string" ? item : item.url;
         const directIndex = isSeedance ? imageUrls.indexOf(url) : index;
         const isDirect = !isSeedance || directIndex >= 0;
@@ -3114,8 +3126,8 @@ function NodeInspector({
         <button className="canvas-image-preview-open" type="button" onClick={() => onPreviewImage(url, index)} aria-label={`预览图片 ${index + 1}`} title="预览图片">
           <span style={{ backgroundImage: `url(${JSON.stringify(url)})` }} />
         </button>
-        {isGptImageV2 || isSeedance ? <span className="canvas-image-preview-index">图片{index + 1}{isSeedance ? <small>{isDirect ? "上传" : "上游"}</small> : null}</span> : null}
-        {(isGptImageV2 || (isSeedance && isDirect)) ? <span className="canvas-image-preview-order">
+        {isNumberedImage || isSeedance ? <span className="canvas-image-preview-index">图片{index + 1}{isSeedance ? <small>{isDirect ? "上传" : "上游"}</small> : null}</span> : null}
+        {(isNumberedImage || (isSeedance && isDirect)) ? <span className="canvas-image-preview-order">
           <button type="button" disabled={directIndex === 0} onClick={() => onChange(imageConfigKey, moveListItem(imageUrls, directIndex, directIndex - 1))} aria-label={`上移图片 ${index + 1}`} title="上移"><ArrowUp /></button>
           <button type="button" disabled={directIndex === imageUrls.length - 1} onClick={() => onChange(imageConfigKey, moveListItem(imageUrls, directIndex, directIndex + 1))} aria-label={`下移图片 ${index + 1}`} title="下移"><ArrowDown /></button>
         </span> : null}
@@ -6266,7 +6278,7 @@ function canvasImageDropTargetId(target: EventTarget | null, nodes: FlowNode[]) 
   const nodeId = target.closest(".react-flow__node")?.getAttribute("data-id");
   if (!nodeId) return undefined;
   const node = nodes.find((candidate) => candidate.id === nodeId)?.data.canvasNode;
-  return node && (node.type === "input.images" || node.type === "model.seedance" || (node.type === "model.gpt-image" && node.version >= 2)) ? nodeId : undefined;
+  return node && (node.type === "input.images" || node.type === "model.seedance" || node.type === "model.wonder-image" || (node.type === "model.gpt-image" && node.version >= 2)) ? nodeId : undefined;
 }
 
 function canvasVideoDropTargetId(target: EventTarget | null, nodes: FlowNode[]) {
@@ -6351,7 +6363,7 @@ function quickAddChoices(connection: QuickAddConnection | undefined, edges: Flow
     if (definition.type === "input.iteration-item") return [];
     if (!connection) return [{ definition }];
     const ports = connection.handleType === "source"
-      ? definition.type === "model.gpt-image" ? getCanvasVisibleInputPorts(createCanvasNode(definition.type, "input-preview", { x: 0, y: 0 })) : definition.inputs
+      ? definition.type === "model.gpt-image" || definition.type === "model.wonder-image" ? getCanvasVisibleInputPorts(createCanvasNode(definition.type, "input-preview", { x: 0, y: 0 })) : definition.inputs
       : definition.type === "utility.image-iterate" ? getCanvasIterationOutputPorts(createCanvasNode(definition.type, "iteration-preview", { x: 0, y: 0 })) : definition.outputs;
     return ports.filter((port) => isQuickAddPortCompatible(connection, port)).map((port) => ({ definition, port }));
   });

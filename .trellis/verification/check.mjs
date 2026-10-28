@@ -20,6 +20,7 @@ const nodeChecks = [
   ["Wonder Image API contracts", "wonder_image_contract_check.mjs"],
   ["Wonder Image runtime and node credentials", "wonder_image_runtime_check.mjs"],
   ["Wonder Image encrypted credential persistence", "wonder_image_persistence_check.mjs"],
+  ["Wonder Image reference uploads", "wonder_image_upload_check.mjs"],
   ["Canvas local image saving check", "canvas_local_image_save_check.mjs"],
   ["Canvas layer composition check", "canvas_layer_compose_check.mjs"],
   ["Canvas image processing check", "canvas_image_process_check.mjs"],
