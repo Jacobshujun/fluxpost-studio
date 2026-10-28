@@ -98,7 +98,7 @@ Do not deploy a dirty worktree, branch name, abbreviated SHA, local runtime rows
 
 ## Recent Verification
 
-- 2026-10-28 Wonder repair: baseline domain checks pass then stop at the existing 17-data-script lint errors; changed-source lint/types/build/config/SQLite/HTTP checks and six Wonder plus two GPT browser cases pass. LAN unchanged due non-idle queues; no paid calls. Evidence: wonder-image-repair task.
+- 2026-10-28 Wonder repair: baseline domains pass before 17 existing data-script lint errors; focused lint/types/build/config/SQLite/HTTP and six Wonder plus two GPT browser cases pass. Explicitly authorized LAN activation of clean `3f71997` passed build/identity/loopback/LAN HTTP/Canvas checks. No manual paid replay. Evidence: archived wonder-image-repair task.
 
 Prior text-reasoning and local-library acceptance entries are preserved in
 `archive/verification-history.md` (2026-10-28 context-budget archive). Current

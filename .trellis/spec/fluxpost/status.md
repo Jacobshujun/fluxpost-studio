@@ -4,11 +4,11 @@ Last updated: 2026-10-28
 
 ## One-Line Status
 
-Local LAN 3001 uses OSS on 10d1ebf; 71,788 media keys aligned. Final backup, reference transaction and authenticated acceptance passed.
+Local LAN 3001 uses OSS on 3f71997, including Wonder repair b207789. LAN identity/HTTP/Canvas checks passed; media migration remains unchanged.
 
 ## Current Focus
 
-- Wonder Image ingress/JSON/media/error repair passed offline/browser checks; LAN remains OSS candidate `10d1ebf` because queues are not idle. Real Yike/model acceptance is pending.
+- Wonder Image ingress/JSON/media/error repair is active on LAN `3f71997` after explicit restart authorization; offline/browser and LAN smoke checks passed. Real Yike/model acceptance is pending.
 - Generated library retired: 22,255 index assets and three tables removed without a cleanup backup. Ordinary assets remain: 2,301; nonempty collections: 24; memberships: 2,230; labels: 5,302.
 - Qwen `0b775c7` included in authorized LAN release; Gemini live testing paused.
 
@@ -18,7 +18,7 @@ OSS evidence: `.trellis/tasks/archive/2026-10/10-28-oss-acceptance-local-cutover
 
 ## Risks And Unknowns
 
-- Wonder user run returned HTTP 400/no JobId; historical action/cause is unconfirmed. Repair has no live Yike acceptance or paid replay; activate after queue/operator preflight. See wonder-image-repair task.
+- Wonder user run returned HTTP 400/no JobId; historical action/cause is unconfirmed. Repair is active, with no manual paid replay or live Yike acceptance. See archived wonder-image-repair task.
 - Context budget fixed by archive; baseline domain checks pass then stop at 17 existing ignored-script lint errors. Separate lint/type/build/smoke passed; no gate weakened.
 - Text reasoning effort must be supported by the configured model and provider; unsupported values surface the upstream error without stripping or retrying the parameter.
 - Gemini live text/image acceptance remains pending. Minimal diagnostics were authorized, then explicitly paused; do not send further calls until resumed.

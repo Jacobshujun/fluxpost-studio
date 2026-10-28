@@ -38,7 +38,7 @@
       "evidence": [
         "2026-10-28 ordered upload/numbered ingress, JSON/media/error repairs, isolated provider/upload/SQLite and six three-theme 1440/390 browser cases passed, plus GPT browser regressions. Lint/types/build/smoke passed separately; baseline has existing 17-data-script lint errors. See wonder-image-repair task."
       ],
-      "notes": "Repair awaits LAN activation: current OSS candidate is 10d1ebf and queues are not idle. Real Yike/model acceptance pending; no paid replay or workflow/credential rewrite."
+        "notes": "Repair b207789 active on LAN candidate 3f71997 after explicit restart authorization; version/manifest/LAN HTTP/Canvas checks passed. Real Yike/model acceptance pending; no manual paid replay or workflow/credential rewrite."
     },
     {
       "id": "tos-to-oss-migration",

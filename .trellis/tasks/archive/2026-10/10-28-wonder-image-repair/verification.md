@@ -14,3 +14,6 @@ Historical user failures confirm HTTP 400 and no persisted JobId, but no action/
 
 ## Release Boundary
 Read-only queue preflight found queued/running Canvas rows and a queued simple run. Port 3001 remains the OSS candidate `10d1ebfb577a148fb90fd751ce36269ebb35756a`; no restart, workflow mutation, credential rewrite, provider probe or task replay occurred. Activate the clean repair commit only after queue/operator preflight. Real model availability and Yike generation remain operator gates.
+
+## Authorized LAN Activation Follow-Up
+User subsequently explicitly requested committing and updating LAN. `npm run local:lan` built and activated clean HEAD `3f7199742af1c40569b2e4c33d1551934b8922e9` in primary-worktree slot `.next-local-b`, including repair `b207789`. Build, loopback HTTP smoke, LAN HTTP smoke, Canvas HTTP 200, `0.0.0.0:3001` binding and runtime/state/build-manifest identity checks passed. The authorization permitted the restart after the previous queue warning; no queue rows were edited or failed tasks manually retried. Normal application workers remain enabled. OSS configuration and remote production were not changed. Ignored evidence: `test-artifacts/wonder-lan-activation.log` and `test-artifacts/wonder-lan-activation-receipt.json`. Subsequent release-record-only commits do not change the activated application code.
