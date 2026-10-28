@@ -413,3 +413,44 @@ This command runs `npm run build`, stops any process bound to port `3001`, start
 - Feishu publish writes the expected Base payload or outbox file.
 - Video downloads and frames appear under `public/media/crawl` when the source video URL is downloadable.
 - Runtime local media URLs under `/media/crawl/...` and `/generated/...` load in the browser after files are created post-build.
+
+
+## Entries moved during OSS cutover - 2026-10-28
+
+## Recent Verification
+
+- 2026-10-27: Canvas Wonder Image node passed provider/media/async-resume contracts, encrypted credential and real isolated SQLite checks, six three-theme 1440/390 browser cases, changed-source lint, TypeScript, production build, config synchronization and SQLite checks. Full baseline passed all functional checks and stopped at the existing 17 ignored-data-script lint errors. Clean `57cba03` activated on LAN 3001; HTTP, LAN Canvas GET and Wonder credential auth checks passed. No live Yike calls. Evidence: archived `canvas-wonder-image` task.
+
+- 2026-10-21: Global text reasoning effort config passed all-value persistence/default/clear/invalid checks, Responses and Chat request-body contracts across generation, vision, tagging, safety/distribution review, video-frame review and viral image analysis, built API/worker synchronization, changed-source lint, TypeScript, production build, isolated HTTP smoke, and three-theme 1440/390 browser checks. Full baseline passed all preceding checks then stopped at the known 17-error ignored-script lint gate. No live provider calls. Evidence: `.trellis/tasks/10-21-text-reasoning-effort/verification.md`.
+
+- 2026-08-26: Canvas content-pool selection now supports owner-scoped search/project/platform/status/media/tag/local-complete filters, stable cursor paging, compact snapshots, and V2 manual/match fixed/each/random main-task expansion with explicit missing-ID and 200-item limits. Focused checks, TypeScript, lint (0 errors, 5 existing Canvas warnings), production build, isolated smoke, SQLite, and the full offline baseline passed without external calls; mocked Chromium at 1440x960 and 390x844 passed selection, preview, pagination, bulk modes, focus-native controls, and overflow checks on clean candidate `2b3f94b22e118699f82da595d246b901977ea0dc`.
+- 2026-08-26: Library batch multi-collection add/create/remove, target-first validation, partial permissions, stable relationship updates, and 65-item cursor selection retention passed focused domain checks, TypeScript, lint (0 errors, 5 existing Canvas warnings), production build, isolated HTTP smoke, SQLite, and the full offline baseline without external calls. Clean SHA `5f1cb7c11a69cfce763175ac36e5a192ca251c83` activated on loopback port `3001`; mocked system Chrome at 1440x960 and 390x844 passed against that candidate without live services.
+Older evidence is preserved in `.trellis/spec/fluxpost/archive/verification-history.md`.
+
+
+### Historical coverage notes moved 2026-10-28
+
+## Missing Coverage
+
+- No live paid Ark plain-text transcription, Seedance, GPT image/text, TikHub, ComfyUI, Feishu, or Lark action is part of the default baseline. Canvas subtitle timing is local Faster Whisper and was verified separately against one recent local input.
+- No real local library, Canvas history, media, account, or configuration migration was performed; unified-library migration checks use isolated fixtures.
+- No authenticated production Canvas create/save/run walkthrough or multi-user PostgreSQL concurrency test was run during this release.
+- No default check changes DNS, firewall, Nginx routing, Docker volumes, or external production services.
+- No production image cleanup or systemd timer change is performed by the default baseline; the 2026-08-06 live maintenance evidence was an explicitly authorized operator action.
+- Production identity is verified; local parity is pending while active local tasks prevent restart.
+- The package audit reports nine high-severity transitive advisories; do not run automatic `npm audit fix --force` as part of release verification.
+
+
+### Detailed baseline scope moved 2026-10-28
+
+The baseline verifies:
+
+- Trellis file existence, context budgets, latest markers, JSON validity, and feature evidence limits.
+- PostgreSQL schema, accounts/ownership, libraries, configuration, TOS, v4 deployment/image-retention/timer scripts, execution logs, platform mappings, media, video, concurrency, queues, Feishu boundaries, source imports, review flows, and row-level persistence.
+- Unified-library role migration, owner isolation, nested collections, flat tags, smart-folder conditions and permissions, favorites, SQL filtering, keyset cursors, server query selections, thumbnails, and Canvas/simple snapshot consumers.
+- Infinite Canvas graph/API/DAG, incomplete-draft persistence, execution readiness, common nodes, competitor-workbook parsing/redaction/hierarchical scheduling, subtitle recognition/render/revision/waveform/cache contracts, media, provider resume, scheduler, copy-library, and original-batch behavior without paid calls.
+- Canvas local video-loader snapshot, streaming upload/FFprobe, selected-literal output, frozen V2 queue, and single-video task contracts without external storage calls.
+- Finished-body Unicode counting, 800-target prompts, one-repair fallback, history promotion, persistence consistency, editor clamping, Canvas composition, and Feishu exemptions without paid calls.
+- Runtime identity/secrecy, manifest-derived activation identity, candidate-only local startup, loopback/LAN bindings, and parity command contracts.
+- `npm run lint`, `npx --no-install tsc --noEmit`, and `npm run build`.
+- Isolated production HTTP smoke and SQLite store validation.

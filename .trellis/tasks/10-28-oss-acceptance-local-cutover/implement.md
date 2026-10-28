@@ -47,6 +47,17 @@
 
 No runtime configuration, database references, task states or listener were changed.
 
+### CLI and full-cutover approval
+
+- [x] Implement Chinese status/refresh/continue/logs with phase/counter/time output.
+- [x] Isolate legacy bulk copy under explicit copy subcommand.
+- [x] Offline confirmation/lock/stop-on-error/dirty-tree/path/redaction checks pass.
+- [x] Exact reference rewrite and PostgreSQL TEMP rollback/precision tests pass.
+- [x] User explicitly requests full cutover now; keep missing historical links.
+- [x] Core data receipt captures 1,637 copy entries, 2,301 library assets and all
+  organizer relation counts/digests before cutover; acceptance verifies preservation.
+- [ ] Commit checked CLI and run the confirmed pipeline; report real phase progress.
+
 ## Verification
 
 Planning checks: JSON validity and git diff --check; do not call live services in

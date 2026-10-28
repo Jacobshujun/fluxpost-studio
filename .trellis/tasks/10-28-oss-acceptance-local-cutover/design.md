@@ -68,3 +68,25 @@ aggregate exceptions for review. No blanket hostname replacement, broken-referen
 deletion, filename guessing or rebuilding retired generated indexes. User review
 of this preservation policy is needed before mutation; unresolved references block
 any claim of full historical independence from TOS or source deletion readiness.
+
+## Approved CLI-first revision
+
+Preservation policy is approved. Build the CLI before actual cutover; do not stop
+the app during tool development. Keep the existing copy controller under an explicit
+copy subcommand. Default npm run migrate displays the cutover dashboard/menu.
+
+Use maintained operator helpers plus one sequential controller, no extra service.
+Local evidence/backup paths belong in ignored data/oss-cutover/config.json; mutable
+step receipts and sanitized progress belong in data/oss-cutover/, not Trellis.
+Status reads existing receipts without paid/cloud operations, labels timestamps,
+and distinguishes old online backup from final frozen backup. Refresh is explicit
+read-only network inventory/preflight. Continue requires confirmation and a clean
+worktree, then performs preflight, freeze, final backup, current inventory, delta,
+verified-only rewrite, config switch, standard local activation and acceptance.
+
+An exclusive operation lock spans the pipeline. Never silently clear an interrupted
+lock or resume an uncertain database commit. Preserve receipts for manual recovery.
+Ctrl+C requests stop after the current phase, not undo; show actual completed steps
+and whether service was stopped. No unbounded retry. Raw child output is not echoed:
+allowlisted numeric progress/error codes are logged and displayed. Live CLI execution
+is not part of offline baseline; tests use temporary fake helpers and injected IO.

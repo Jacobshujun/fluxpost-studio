@@ -169,3 +169,27 @@ new provider jobs, Feishu writes, listener restart or production deployment occu
   under test-artifacts/oss-acceptance-20261028/. Backup details remain in its private
   backup directory. Helpers .tmp-oss-backup.mjs, .tmp-oss-delta.mjs and
   .tmp-oss-url-inventory.mjs are local operational artifacts, not application code.
+
+## CLI delivery and pre-cutover verification
+
+Maintained helpers now live in scripts/storage/cutover-*.mjs and cutover-local.ps1.
+Default npm run migrate exposes Chinese status/refresh/continue/logs. Legacy copy
+commands moved under explicit copy subcommand. No background service added.
+Status shows dated evidence rather than fabricated percentage; stage boundaries,
+elapsed time, counters and safe errors are persisted under ignored data/oss-cutover.
+
+Offline cutover controller, historical CLI and verified-reference checks passed.
+Changed-source lint and TypeScript pass. Prior production build, built-config sync,
+isolated HTTP smoke and SQLite pass on unchanged application source. Full baseline
+passes domain checks then fails at the known 17 ignored-data-script lint errors;
+context budget was fixed by archiving old verification prose, not weakening limits.
+
+PostgreSQL TEMP test verifies string-only JSON rewriting, preservation of large
+numeric lexemes, optimistic update, persisted hashes and exact reversal. Live dry
+run identified about 161,204 rows / 163,505 cells across 12 tables; no updates yet.
+Unknown/signed/missing references remain unchanged. Source TOS retained.
+
+User requested full cutover after CLI development. Core preservation receipt now
+records 1,637 copy entries, 2,301 assets, 24 collections, 2,230 memberships,
+5,302 labels, one favorite and seven smart folders. Non-URL core tables must retain
+their exact content digests after activation. Counts are a point-in-time snapshot.

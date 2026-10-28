@@ -10,6 +10,8 @@ const npmCommand = process.platform === "win32" ? "npm.cmd" : "npm";
 const npxCommand = process.platform === "win32" ? "npx.cmd" : "npx";
 
 const nodeChecks = [
+  ["Local OSS cutover CLI safety", "storage_cutover_cli_check.mjs"],
+  ["Verified storage reference rewriting and reversal", "storage_reference_rewrite_check.mjs"],
   ["Library color extraction, queries and durable analysis", "library_colors_check.mjs"],
   ["Canvas Gemini native text and vision", "canvas_gemini_check.mjs"],
   ["Qwen native image contracts", "qwen_image_contract_check.mjs"],

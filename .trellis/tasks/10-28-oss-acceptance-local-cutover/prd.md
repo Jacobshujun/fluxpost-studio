@@ -39,6 +39,17 @@ storage switch. Do not repeat the completed bulk copy.
 - R5: Preserve current features, ownership and unrelated OSS objects. Keep TOS
   at least seven days after an eventual switch; deletion needs separate approval.
 - R6: Keep credentials, object lists, runtime references and receipts ignored/local.
+- R7: User now requests a lightweight Chinese CLI before cutover. Default migration
+  entry must show dated real evidence, current phase, elapsed time and counters;
+  offer refresh, confirmed continuation and sanitized logs. Reuse existing work,
+  add no web app/service, and never start the old bulk worker by accident.
+- R8: The CLI must refuse concurrent execution, unsafe paths, dirty activation,
+  stale/incomplete evidence and unsupported recovery. Failures stop the pipeline;
+  stopping the viewer is not rollback. Database rewrite remains transactional.
+- R9: User approved preserving unknown/missing historical URLs and changing only
+  verified OSS references. User subsequently explicitly requested full cutover now
+  without reducing history scope. Execute confirmed CLI after verification/commit;
+  preserve library and copy-library data and retain TOS.
 
 ## Acceptance
 
