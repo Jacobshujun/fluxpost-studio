@@ -4,11 +4,11 @@ Last updated: 2026-10-30
 
 ## One-Line Status
 
-Universal Canvas modes verified; LAN delivery authorized. Active SHA: `/api/version` and launcher receipt. OSS unchanged.
+LAN includes universal Canvas execution modes. Active SHA: `/api/version` and launcher receipt. OSS unchanged.
 
 ## Current Focus
 
-- Universal Canvas modes pass six mode and six group browser cases; impossible routes report errors. LAN delivery authorized. Task: canvas-universal-modes.
+- Universal Canvas modes pass six mode and six group browser cases; impossible routes report errors. LAN smoke passed. Evidence: archived canvas-universal-modes task.
 - Wonder Image existing-media reuse was accepted on LAN `ec0cd9f`; real Yike/model acceptance is pending.
 - Generated library retired: 22,255 index assets and three tables removed without a cleanup backup. Ordinary assets remain: 2,301; nonempty collections: 24; memberships: 2,230; labels: 5,302.
 - Qwen `0b775c7` included in authorized LAN release; Gemini live testing paused.

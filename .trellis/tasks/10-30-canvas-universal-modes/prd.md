@@ -23,5 +23,5 @@ Allow operators to choose enabled, disabled or bypass on every Canvas node, with
 - [x] Iteration root/output draft choices save; unavailable selected outputs block execution. V2 input parameter adapters preserve execution modes.
 - [x] Mocked browser checks cover menus/inspectors/shortcuts/save/reload/undo and iteration roots in three themes at desktop/mobile dimensions; existing viewport/status regressions pass.
 - [x] Run focused checks, baseline, source lint, types, build and isolated HTTP checks; report unchanged blockers without weakening gates.
-- [ ] Commit verified code, archive evidence, activate final clean HEAD on LAN 3001 and verify exact identity, binding and HTTP smoke.
+- [x] Commit verified code, archive evidence, activate final clean HEAD on LAN 3001 and verify exact identity, binding and HTTP smoke.
 

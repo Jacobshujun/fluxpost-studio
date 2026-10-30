@@ -27,4 +27,6 @@ Canonical contract: `.trellis/spec/fluxpost/canvas_execution_modes.md`. No schem
 
 ## Delivery
 
-User authorized automatic commit and LAN activation. Promote only clean primary-worktree HEAD through `npm run local:lan`; verify full runtime/receipt/slot SHA, `0.0.0.0:3001`, loopback/LAN HTTP smoke and `/canvas`. Activation results are recorded after the command. No push or remote production deployment.
+`npm run local:lan` activated clean implementation commit `df7b6752a5c31848aeba92dfa1fcca189434dd6e` in `.next-local-a`. Full runtime/receipt/slot SHA matched, `0.0.0.0:3001` was verified, loopback and `http://10.182.144.38:3001` HTTP smoke passed, and both `/canvas` routes returned 200. No push or remote production deployment.
+
+Promote final metadata-only HEAD through the same clean-tree launcher. Final SHA/state/slot/binding/HTTP evidence lives in ignored `test-artifacts/canvas-universal-modes-final-lan.log`, `test-artifacts/canvas-universal-modes-final-identity.log` and `.fluxpost-local-candidate.json`; no code changes follow verification.
