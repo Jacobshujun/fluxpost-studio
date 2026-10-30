@@ -540,3 +540,36 @@ Handle only ImportMedia HTTP400 MediaAlreadyExist with a validated existing ID, 
 ### Next Steps
 
 - None - task complete
+
+
+## Session 75: Canvas text editing preserves viewport
+
+**Date**: 2026-10-30
+**Task**: Canvas text editing preserves viewport
+**Branch**: `local`
+
+### Summary
+
+Split inline selection from explicit fitView navigation. Regression fails before fix; six text viewport and nine inspector browser cases pass, source lint/types/build/config/HTTP/SQLite pass. Full baseline has the existing 17 data-script lint errors. User-authorized LAN activation verified; final metadata HEAD uses the same clean-HEAD LAN launcher. Evidence in archived canvas-text-viewport task.
+
+### Main Changes
+
+(Add details)
+
+### Git Commits
+
+| Hash | Message |
+|------|---------|
+| `ab78c70` | (see git log) |
+
+### Testing
+
+- [OK] (Add test results)
+
+### Status
+
+[OK] **Completed**
+
+### Next Steps
+
+- None - task complete
