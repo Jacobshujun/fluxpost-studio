@@ -37,7 +37,7 @@ Browser verification uses `python .trellis/verification/canvas_iteration_browser
 
 Progress: steps 1-7 complete; scheduler and all five iteration checks pass.
 The initial regression failed with `Inner prompt: bound node field is not batch-injectable.` before the fix.
-Desktop/mobile browser, types/build/config synchronization/HTTP/SQLite passed. Full baseline domain checks passed before the known 17 unrelated data-script lint errors. See verification.md. Commit and candidate activation await approval.
+Desktop/mobile browser, types/build/config synchronization/HTTP/SQLite passed. Full baseline domain checks passed before the known 17 unrelated data-script lint errors. Authorized commit and LAN activation passed; see verification.md. Finish archive/journal, then align the LAN candidate to final clean HEAD.
 
 - Validate full identity survives UI -> API normalization -> persisted schedule -> frozen graph -> iteration item.
 - Confirm child parameters cannot bypass either UI or server shared-output guards.

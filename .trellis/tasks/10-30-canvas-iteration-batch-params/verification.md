@@ -32,3 +32,12 @@ Date: 2026-10-30
 - The browser uses a worker-disabled loopback smoke server, with all APIs intercepted. Port 3001 and its candidate remain unchanged.
 - The smoke helper left its Windows child listener alive after returning; verified the exact PID/command, stopped only this session's port-45678 Next process, and confirmed that port was released.
 - User approved committing this fix and updating the LAN candidate on 2026-10-30, then explicitly authorized removing the unrelated image-text diagnostic status entry. No remote push is authorized.
+
+## Authorized LAN Release
+
+- Removed only the unrelated image-text diagnostic paragraph as explicitly requested.
+- Release baseline rerun: context/JSON/domain checks pass; unchanged 17 ignored data-script lint errors remain. TypeScript and focused lint pass separately (four existing Canvas warnings). Log: `test-artifacts/canvas-iteration-batch-release-baseline.log`.
+- Work commit: `adaf32de770641e67661b7984bc3c3d0a0bcc846` (`fix(canvas): support iteration inner-node batch parameters`).
+- `npm run local:lan` built clean HEAD into the inactive managed slot, then activated it on `0.0.0.0:3001`; launcher identity and loopback HTTP smoke passed.
+- Independently checked LAN-address HTTP smoke, loopback/LAN `/api/version` equality with the full work SHA, and `/canvas` HTTP 200 on both addresses. No manual model or publishing request was made. Cross-device firewall acceptance was not tested.
+- Archive/journal bookkeeping follows the work commit. Re-run `npm run local:lan` afterwards so the final candidate uses clean current HEAD; final identity is recorded by `/api/version` and the ignored launcher receipt, avoiding a self-referential SHA in tracked documentation.
