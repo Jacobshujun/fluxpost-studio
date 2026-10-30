@@ -29,6 +29,10 @@ Use this pattern for UI that is route-specific. Extract a shared component only 
 - Do not create nested cards or decorative page sections for tool surfaces.
 - For repeated icon-and-text tool rows, use a fixed icon grid track plus `minmax(0, 1fr)` for the text track. A shared flex-button rule can shrink the icon wrapper according to label length and make otherwise identical rows start at different horizontal positions.
 
+## Canvas Node Resizing
+
+Execution status is metadata, not a preview surface. Keep `.canvas-node-result` content-sized; only real text/image/video previews opt into extra space in resized nodes. Use a non-shrinking auto basis for those previews so diagnostics and prior successful results stay readable in the content pane's existing scroll area. Keep status headers content-sized, remove the divider when the header is alone, and preserve normal whole-canvas zoom. The status browser regression covers mouse resize, narrow nodes, saved sizes and failure-with-prior-result rendering.
+
 ## Accessibility And Feedback
 
 - Preserve semantic controls: real `button`, `input`, `textarea`, `select`, and checkbox elements.
