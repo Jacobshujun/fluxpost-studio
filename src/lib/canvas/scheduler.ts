@@ -2452,7 +2452,11 @@ function normalizeCanvasScheduleV2Definition(value: CanvasScheduleV2Definition):
       valueType: parameter.valueType,
       expansion: parameter.expansion,
       sampleCount: parameter.expansion === "random" ? normalizeCanvasScheduleSampleCount(parameter) : undefined,
-      binding: { nodeId: String(parameter.binding?.nodeId || "").trim(), fieldKey: String(parameter.binding?.fieldKey || "").trim() },
+      binding: {
+        nodeId: String(parameter.binding?.nodeId || "").trim(),
+        ...(parameter.binding?.innerNodeId !== undefined ? { innerNodeId: String(parameter.binding.innerNodeId ?? "").trim() } : {}),
+        fieldKey: String(parameter.binding?.fieldKey || "").trim(),
+      },
       source: normalizeCanvasScheduleV2ParameterSource(parameter),
     })),
     expansion: {

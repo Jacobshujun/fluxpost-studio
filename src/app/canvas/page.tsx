@@ -105,7 +105,7 @@ import {
   prepareCanvasClipboardPaste,
   type CanvasClipboardPayload,
 } from "@/lib/canvas/clipboard";
-import { canvasNodeDefinitions, createCanvasNode, getCanvasBatchBindableFields, getCanvasNodeDefinition, getCanvasNodeExecutionMode, getCanvasVisibleInputPorts } from "@/lib/canvas/registry";
+import { canvasBatchBindingKey, canvasNodeDefinitions, createCanvasNode, getCanvasBatchBindings, getCanvasBatchBindableFields, getCanvasNodeDefinition, getCanvasNodeExecutionMode, getCanvasVisibleInputPorts } from "@/lib/canvas/registry";
 import { pixelSizeForRatio } from "@/lib/gpt-image-dimensions";
 import { toApisImageRatios, toApisImageResolutions } from "@/lib/toapis-image-api";
 import { ImageModelSelector } from "@/components/image-model-selector";
@@ -4878,7 +4878,7 @@ function CanvasScheduleV2Editor({ schedule, graph, busy, onDefinitionChange, onA
       valueType,
       source,
       expansion: valueType === "video" || scope === "child" ? "each" : "fixed",
-      binding: { nodeId: first.node.id, fieldKey: first.field.key },
+      binding: first.binding,
     }] });
   };
   const applyPeopleSceneVehiclePreset = () => {
@@ -5037,7 +5037,7 @@ function CanvasScheduleParameterEditor({ parameter, graph, onChange, onRemove, o
       valueType,
       source,
       expansion: valueType === "video" ? "each" : parameter.expansion,
-      binding: binding ? { nodeId: binding.node.id, fieldKey: binding.field.key } : { nodeId: "", fieldKey: "" },
+      binding: binding ? binding.binding : { nodeId: "", fieldKey: "" },
     });
   };
   const updateExpansion = (expansion: CanvasScheduleParameter["expansion"]) => {
@@ -5075,14 +5075,14 @@ function CanvasScheduleParameterEditor({ parameter, graph, onChange, onRemove, o
     <div className="canvas-schedule-parameter-grid">
       <label><span>类型</span><select value={parameter.valueType} onChange={(event) => updateType(event.target.value as CanvasScheduleParameterType)}>{canvasScheduleParameterTypes.map((type) => <option key={type} value={type}>{canvasScheduleParameterTypeLabel(type)}</option>)}</select></label>
       <label><span>展开</span><select value={parameter.expansion} onChange={(event) => updateExpansion(event.target.value as CanvasScheduleParameter["expansion"])}><option value="fixed">{parameter.valueType === "content-pool" ? "固定单条" : "固定共享"}</option><option value="each">{parameter.valueType === "content-pool" ? "每条一项" : "全量逐项"}</option><option value="random">随机抽取</option></select></label>
-      <label><span>绑定字段</span><select value={`${parameter.binding.nodeId}::${parameter.binding.fieldKey}`} onChange={(event) => {
-        const option = bindingOptions.find((candidate) => `${candidate.node.id}::${candidate.field.key}` === event.target.value);
+      <label><span>绑定字段</span><select value={canvasBatchBindingKey(parameter.binding)} onChange={(event) => {
+        const option = bindingOptions.find((candidate) => canvasBatchBindingKey(candidate.binding) === event.target.value);
         if (option) onChange({
           ...parameter,
-          binding: { nodeId: option.node.id, fieldKey: option.field.key },
+          binding: option.binding,
           source: parameter.valueType === "video" ? { mode: "video-loader-queue", nodeId: option.node.id } : parameter.source,
         });
-      }}><option value="::">未选择</option>{bindingOptions.map((option) => <option key={`${option.node.id}-${option.field.key}`} value={`${option.node.id}::${option.field.key}`}>{option.label}</option>)}</select></label>
+      }}><option value={canvasBatchBindingKey({ nodeId: "", fieldKey: "" })}>未选择</option>{bindingOptions.map((option) => <option key={canvasBatchBindingKey(option.binding)} value={canvasBatchBindingKey(option.binding)}>{option.label}</option>)}</select></label>
     </div>
     {parameter.expansion === "random" ? <CanvasScheduleSampleCountEditor parameter={parameter} sampleCount={sampleCount} onChange={onChange} /> : null}
     <CanvasScheduleParameterSourceEditor parameter={parameter} graph={graph} onChange={onChange} onPreview={onPreview} />
@@ -6704,17 +6704,13 @@ function schedulerRolesForNode(node: CanvasNode): CanvasSchedulerRole[] {
 }
 
 function canvasBatchBindingOptions(graph: CanvasGraph, valueType: CanvasScheduleParameterType) {
-  return graph.nodes.flatMap((node) => getCanvasBatchBindableFields(node)
-    .filter((field) => field.parameterTypes.includes(valueType))
-    .map((field) => ({ node, field, label: `${canvasNodeDisplayName(node)} · ${field.label} · ${node.id.slice(-4)}` })));
+  return getCanvasBatchBindings(graph)
+    .filter(({ field }) => field.parameterTypes.includes(valueType))
+    .map((option) => ({ ...option, label: `${option.region ? `${canvasNodeDisplayName(option.region)} · ${option.region.id.slice(-4)} → ` : ""}${canvasNodeDisplayName(option.node)} · ${option.field.label} · ${option.node.id.slice(-4)}` }));
 }
 
 function firstCanvasBatchBinding(graph: CanvasGraph) {
-  for (const node of graph.nodes) {
-    const field = getCanvasBatchBindableFields(node)[0];
-    if (field) return { node, field };
-  }
-  return undefined;
+  return getCanvasBatchBindings(graph)[0];
 }
 
 function canvasNodeDisplayName(node: CanvasNode) {

@@ -1,6 +1,6 @@
 import { randomUUID } from "node:crypto";
 import { buildCanvasRunPlan } from "./graph";
-import { getCanvasBatchBindableFields, getCanvasNodeDefinition, getCanvasNodeExecutionMode } from "./registry";
+import { canvasBatchBindingKey, resolveCanvasBatchBindingNode, getCanvasBatchBindableFields, getCanvasNodeDefinition, getCanvasNodeExecutionMode } from "./registry";
 import { canvasSourceVideoSnapshotConfig, isCanvasSourceVideoSnapshot } from "./source-video-contract";
 import { canvasVideoLoaderConfig, normalizeCanvasVideoSnapshot } from "./video-loader";
 import { freezeCanvasCollectionOutputs } from "./content-collection";
@@ -57,7 +57,7 @@ export function validateCanvasScheduleV2Definition(graph: CanvasGraph, definitio
     if (!['main', 'child'].includes(parameter.scope)) throw new Error(`${name}: task scope is invalid.`);
     if (!['fixed', 'each', 'random'].includes(parameter.expansion)) throw new Error(`${name}: expansion mode is invalid.`);
     if (parameter.expansion === "random") validateCanvasScheduleSampleCount(canvasScheduleParameterSampleCount(parameter), name);
-    const node = graph.nodes.find((item) => item.id === parameter.binding?.nodeId);
+    const node = parameter.binding && resolveCanvasBatchBindingNode(graph, parameter.binding);
     if (!node) throw new Error(`${name}: bound Canvas node was not found.`);
     const field = getCanvasBatchBindableFields(node).find((item) => item.key === parameter.binding.fieldKey);
     if (!field) throw new Error(`${name}: bound node field is not batch-injectable.`);
@@ -69,7 +69,7 @@ export function validateCanvasScheduleV2Definition(graph: CanvasGraph, definitio
       if (!links.length || links.length > 200 || links.some((link) => typeof link !== "string" || !link.trim() || /[\r\n]/.test(link))) throw new Error("采集链接须为 1–200 条非空单行链接或 ID。");
       if (new Set(links.map((link) => String(link).trim())).size !== links.length) throw new Error("采集链接列表包含重复项，请去重后重新预演。");
     }
-    const bindingKey = `${node.id}:${field.key}`;
+    const bindingKey = canvasBatchBindingKey(parameter.binding);
     if (bindings.has(bindingKey)) throw new Error(`${name}: another parameter already binds the same node field.`);
     bindings.add(bindingKey);
     validateCanvasScheduleParameterSource(parameter);
@@ -296,16 +296,12 @@ export function applyCanvasScheduleV2Parameters(
   values: Record<string, CanvasScheduleParameterValue>,
 ) {
   const graph = structuredClone(source);
-  const byNode = new Map<string, Array<{ parameter: CanvasScheduleParameter; value: CanvasScheduleParameterValue }>>();
   for (const parameter of parameters) {
     if (!(parameter.id in values)) continue;
-    byNode.set(parameter.binding.nodeId, [...(byNode.get(parameter.binding.nodeId) || []), { parameter, value: values[parameter.id] }]);
+    const node = resolveCanvasBatchBindingNode(graph, parameter.binding);
+    if (!node) throw new Error(`${parameter.name}: bound Canvas node was not found.`);
+    node.config = applyCanvasParameterValue(node, parameter, values[parameter.id]).config;
   }
-  graph.nodes = graph.nodes.map((node) => {
-    const injections = byNode.get(node.id);
-    if (!injections) return node;
-    return injections.reduce((current, injection) => applyCanvasParameterValue(current, injection.parameter, injection.value), node);
-  });
   return graph;
 }
 

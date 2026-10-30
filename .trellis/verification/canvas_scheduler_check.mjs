@@ -362,6 +362,72 @@ try {
     aggregationPolicy: "at-least-one",
   };
   schedulerV2.validateCanvasScheduleV2Definition(graph, v2Definition);
+  const iterationRegion = (id) => ({
+    ...registry.createCanvasNode("utility.image-iterate", id, { x: 0, y: 0 }),
+    iteration: {
+      graph: { nodes: [node("same-inner", "input.text"), node("root", "input.iteration-item"), node("inner-images", "input.images"), node("inner-model", "model.gpt-image")], edges: [edge("same-inner", "text", "inner-model", "prompt")] },
+      outputs: { text: { nodeId: "same-inner", outputPort: "text" } },
+    },
+  });
+  const nestedGraph = { ...graph, nodes: [...graph.nodes, iterationRegion("region-a"), iterationRegion("region-b"), node("same-inner", "input.text")],
+    edges: [...graph.edges, edge("scene", "images", "region-a", "images"), edge("scene", "images", "region-b", "images")] };
+  const nestedParameter = {
+    id: "nested", name: "Inner prompt", scope: "child", valueType: "text", expansion: "each",
+    binding: { nodeId: "region-a", innerNodeId: "same-inner", fieldKey: "text" },
+    source: { mode: "manual-list", values: ["first", "second"] },
+  };
+  const nestedDefinition = { ...v2Definition, parameters: [nestedParameter], mainTargetNodeId: undefined,
+    childResult: { nodeId: "region-a", outputPort: "text", artifactKind: "text" } };
+  schedulerV2.validateCanvasScheduleV2Definition(nestedGraph, nestedDefinition);
+  const nestedOriginal = structuredClone(nestedGraph);
+  const nestedExpansion = schedulerV2.expandCanvasScheduleV2([nestedParameter], nestedDefinition);
+  for (const [index, child] of nestedExpansion.mainTasks[0].childTasks.entries()) {
+    const applied = schedulerV2.applyCanvasScheduleV2Parameters(nestedGraph, [nestedParameter], child.parameterValues);
+    assert.equal(applied.nodes.find((node) => node.id === "region-a").iteration.graph.nodes[0].config.text, nestedParameter.source.values[index]);
+    assert.deepEqual(applied.nodes.find((node) => node.id === "region-b"), nestedOriginal.nodes.find((node) => node.id === "region-b"));
+  }
+  assert.deepEqual(nestedGraph, nestedOriginal, "nested injection must not mutate the source graph");
+  const nestedOptions = registry.getCanvasBatchBindings(nestedGraph);
+  assert.equal(nestedOptions.filter((option) => option.node.id === "same-inner" && option.field.key === "text").length, 3);
+  assert.equal(new Set(nestedOptions.map((option) => registry.canvasBatchBindingKey(option.binding))).size, nestedOptions.length);
+  assert.ok(!nestedOptions.some((option) => option.node.type === "input.iteration-item"));
+  assert.ok(!nestedOptions.some((option) => option.field.key === "apiKey"));
+  const secondRegionParameter = { ...nestedParameter, id: "nested-b", binding: { ...nestedParameter.binding, nodeId: "region-b" } };
+  const outerCollisionParameter = { ...nestedParameter, id: "outer-same", binding: { nodeId: "same-inner", fieldKey: "text" } };
+  const independentParameters = [nestedParameter, secondRegionParameter, outerCollisionParameter];
+  schedulerV2.validateCanvasScheduleV2Definition(nestedGraph, { ...nestedDefinition, parameters: independentParameters });
+  const independentGraph = schedulerV2.applyCanvasScheduleV2Parameters(nestedGraph, independentParameters, { nested: "A", "nested-b": "B", "outer-same": "Outer" });
+  assert.equal(independentGraph.nodes.find((node) => node.id === "region-a").iteration.graph.nodes[0].config.text, "A");
+  assert.equal(independentGraph.nodes.find((node) => node.id === "region-b").iteration.graph.nodes[0].config.text, "B");
+  assert.equal(independentGraph.nodes.find((node) => node.id === "same-inner").config.text, "Outer");
+  assert.throws(() => schedulerV2.validateCanvasScheduleV2Definition(nestedGraph, {
+    ...nestedDefinition, parameters: [nestedParameter, { ...nestedParameter, id: "duplicate" }],
+  }), /already binds/);
+  for (const binding of [
+    { ...nestedParameter.binding, nodeId: "missing" },
+    { ...nestedParameter.binding, nodeId: "same-inner" },
+    ...["missing", "", null].map((innerNodeId) => ({ ...nestedParameter.binding, innerNodeId })),
+    { ...nestedParameter.binding, fieldKey: "apiKey" },
+  ]) {
+    const parameter = { ...nestedParameter, binding };
+    assert.throws(() => schedulerV2.validateCanvasScheduleV2Definition(nestedGraph, { ...nestedDefinition, parameters: [parameter] }), /not found|not batch-injectable/);
+    assert.throws(() => schedulerV2.applyCanvasScheduleV2Parameters(nestedGraph, [parameter], { nested: "value" }), /not found|no longer compatible/);
+  }
+  assert.throws(() => schedulerV2.validateCanvasScheduleV2Definition(nestedGraph, {
+    ...nestedDefinition, parameters: [{ ...nestedParameter, valueType: "number" }],
+  }), /incompatible/);
+  const nestedImage = { ...nestedParameter, valueType: "image", binding: { nodeId: "region-b", innerNodeId: "inner-images", fieldKey: "urls" } };
+  const imageInjected = schedulerV2.applyCanvasScheduleV2Parameters(nestedGraph, [nestedImage], { nested: { id: "frozen", url: "/frozen.jpg" } });
+  assert.deepEqual(imageInjected.nodes.find((node) => node.id === "region-b").iteration.graph.nodes[2].config.urls, ["/frozen.jpg"]);
+  const nestedSharedGraph = { ...nestedGraph, edges: [...nestedGraph.edges, edge("region-a", "text", "image", "prompt")] };
+  const nestedSharedDefinition = { ...nestedDefinition, childResult: v2Definition.childResult, sharedOutputs: [{ nodeId: "region-a", outputPort: "text", artifactKind: "text" }] };
+  assert.throws(() => schedulerV2.validateCanvasScheduleV2Definition(nestedSharedGraph, nestedSharedDefinition), /child-scoped/);
+  schedulerV2.validateCanvasScheduleV2Definition(nestedSharedGraph, { ...nestedSharedDefinition, parameters: [{ ...nestedParameter, scope: "main" }] });
+  const dependentGraph = { ...nestedGraph, nodes: [...nestedGraph.nodes, node("dependent", "model.gpt-text")],
+    edges: [...nestedGraph.edges, edge("region-a", "text", "dependent", "prompt"), edge("dependent", "text", "image", "prompt")] };
+  assert.throws(() => schedulerV2.validateCanvasScheduleV2Definition(dependentGraph, {
+    ...nestedDefinition, childResult: v2Definition.childResult, sharedOutputs: [{ nodeId: "dependent", outputPort: "text", artifactKind: "text" }],
+  }), /child-scoped/);
   const multilinePrompts = ["Top: A\n  Caption: A\n\nBottom: B --- caption", "Top: C\n\nBottom: D"];
   const promptParameter = {
     id: "multiline-prompt", name: "Multiline prompt", scope: "main", valueType: "text", expansion: "each",
@@ -814,6 +880,24 @@ try {
   });
   assert.deepEqual(savedPromptSchedule.definition.parameters[0].source, promptParameter.source, "save normalization must preserve separator and full prompt strings");
   assert.deepEqual(storedSchedule.definition.parameters[0].source, promptParameter.source, "storage must receive separator metadata");
+  const savedNested = await scheduler.updateCanvasScheduleDraft(storedSchedule.id, account, {
+    revision: storedSchedule.revision, definition: nestedDefinition,
+  });
+  const reloadedNested = await scheduler.getCanvasSchedule(storedSchedule.id, account);
+  for (const result of [savedNested, reloadedNested, storedSchedule]) {
+    assert.deepEqual(result.definition.parameters[0].binding, nestedParameter.binding, "save/reload must retain the region-scoped identity");
+  }
+  workflowRecord = { id: "workflow-1", name: "Nested fixture", revision: 1, ownerUserId: account.id, graph: nestedGraph };
+  const nestedPreview = await scheduler.preflightCanvasSchedule(storedSchedule.id, account, storedSchedule.revision);
+  assert.equal(nestedPreview.totalChildTasks, 2);
+  assert.deepEqual(nestedPreview.definition.parameters[0].binding, nestedParameter.binding);
+  assert.deepEqual(nestedPreview.mainTasks[0].childTasks.map((child) => child.parameterValues.nested), ["first", "second"]);
+  assert.deepEqual(workflowRecord.graph, nestedOriginal);
+  workflowRecord.graph.nodes.find((node) => node.id === "region-a").iteration.graph.nodes[0].config.text = "Later draft edit";
+  await scheduler.launchCanvasSchedule(storedSchedule.id, account, { revision: storedSchedule.revision, previewRevision: storedSchedule.previewRevision });
+  assert.deepEqual(launchedRuns.map((run) => run.graph.nodes.find((node) => node.id === "region-a").iteration.graph.nodes[0].config.text), ["first", "second"], "launch must inject frozen inner values, not current draft values");
+  assert.equal(workflowRecord.graph.nodes.find((node) => node.id === "region-a").iteration.graph.nodes[0].config.text, "Later draft edit");
+  storedSchedule = structuredClone(nestedPreview);
   for (const scope of [{ smartFolderId: "smart-favorites", color: "#3876C7" }, { collectionId: "collection-1", includeDescendants: false, color: "#D43C3C" }]) {
     const filter = { mode: "random", assetIds: [], search: "car", tags: ["exterior"], ...scope };
     const definition = { ...v2Definition, parameters: [{

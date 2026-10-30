@@ -280,10 +280,11 @@ async def check(browser, width):
     assert "draggable" not in (await root.get_attribute("class")).split()
     await library.select_option("model.gpt-image")
     await dialog.get_by_role("button", name="添加内层节点", exact=True).click()
-    await dialog.get_by_label("比例").select_option("3:4")
-    await dialog.get_by_label("分辨率").select_option("4k")
-    await expect(dialog.get_by_label("分辨率")).to_have_value("4k")
-    await expect(dialog.get_by_label("比例")).to_have_value("9:16")
+    inspector = dialog.locator(".canvas-inspector-content")
+    await inspector.get_by_label("比例").select_option("3:4")
+    await inspector.get_by_label("分辨率").select_option("4k")
+    await expect(inspector.get_by_label("分辨率")).to_have_value("4k")
+    await expect(inspector.get_by_label("比例")).to_have_value("3:4")
     await dialog.get_by_role("button", name="删除内层节点", exact=True).click()
     await library.select_option("input.text")
     await dialog.get_by_role("button", name="添加内层节点", exact=True).click()
@@ -353,6 +354,39 @@ async def check(browser, width):
     await expect(shared.locator('input[type="checkbox"]').nth(1)).to_be_checked()
     await shared.locator('input[type="checkbox"]').last.uncheck()
     await expect(shared.locator('input[type="checkbox"]').first).not_to_be_checked()
+    for index, scope in enumerate(["main", "child"]):
+        section = schedule_dialog.locator(".canvas-schedule-parameter-section").nth(index)
+        await section.get_by_role("button", name="添加参数", exact=True).click()
+        parameter = section.locator(".canvas-schedule-parameter").last
+        await parameter.get_by_label("类型").select_option("text")
+        options = await parameter.get_by_label("绑定字段").locator("option").evaluate_all(
+            "options => options.map(o => ({value: o.value, label: o.textContent}))")
+        nested = next(option for option in options if json.loads(option["value"])[1] == "vision")
+        assert "→" in nested["label"]
+        await parameter.get_by_label("绑定字段").select_option(nested["value"])
+        await parameter.get_by_label("展开").select_option("fixed")
+        await parameter.get_by_label("参数值", exact=True).fill(f"{scope} inner instruction")
+        await expect(schedule_dialog.get_by_text("已保存", exact=True)).to_be_visible()
+        saved_parameter = next(p for p in schedule["definition"]["parameters"] if p["scope"] == scope)
+        assert saved_parameter["binding"] == {"nodeId": "region", "innerNodeId": "vision", "fieldKey": json.loads(nested["value"])[2]}
+        assert saved_parameter["source"]["values"] == [f"{scope} inner instruction"]
+        if scope == "main":
+            await expect(shared.locator('input[type="checkbox"]')).to_have_count(2)
+        else:
+            await expect(shared.locator('input[type="checkbox"]')).to_have_count(0)
+    # The shared dependency guard is separate from duplicate-binding validation;
+    # remove the main parameter before retaining the child binding for reload.
+    await schedule_dialog.locator(".canvas-schedule-parameter-section").first.get_by_role("button", name="删除参数").click()
+    await expect(schedule_dialog.get_by_text("已保存", exact=True)).to_be_visible()
+    await schedule_dialog.get_by_role("button", name="关闭批量调度", exact=True).last.click()
+    await expect(page).not_to_have_url(re.compile("panel=schedules"))
+    await page.reload(wait_until="networkidle")
+    await page.get_by_role("button", name="批量调度", exact=True).click()
+    parameter = schedule_dialog.locator(".canvas-schedule-parameter").last
+    await expect(parameter.get_by_label("绑定字段")).to_have_value(nested["value"])
+    await expect(parameter.get_by_label("参数值", exact=True)).to_have_value("child inner instruction")
+    await parameter.scroll_into_view_if_needed()
+    await page.screenshot(path=f"test-artifacts/canvas-iteration-batch-binding-{width}.png", full_page=True)
     assert not await page.evaluate("document.documentElement.scrollWidth > window.innerWidth + 1")
     assert not errors, errors
     assert not violations, violations

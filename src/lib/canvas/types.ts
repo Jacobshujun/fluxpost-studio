@@ -818,6 +818,8 @@ export type CanvasScheduleParameterSource =
 
 export type CanvasScheduleParameterBinding = {
   nodeId: string;
+  /** Inner node within the image-iteration region identified by nodeId. */
+  innerNodeId?: string;
   fieldKey: string;
 };
 

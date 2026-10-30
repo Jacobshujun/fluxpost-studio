@@ -4,10 +4,11 @@ Last updated: 2026-10-30
 
 ## One-Line Status
 
-LAN includes universal Canvas execution modes. Active SHA: `/api/version` and launcher receipt. OSS unchanged.
+LAN: universal Canvas modes. Active SHA: `/api/version` and launcher receipt. OSS unchanged.
 
 ## Current Focus
 
+- Iteration batch fix verified; commit/3001 pending. Task: canvas-iteration-batch-params.
 - Universal Canvas modes pass six mode and six group browser cases; impossible routes report errors. LAN smoke passed. Evidence: archived canvas-universal-modes task.
 - Wonder Image existing-media reuse was accepted on LAN `ec0cd9f`; real Yike/model acceptance is pending.
 - Generated library retired: 22,255 index assets and three tables removed without a cleanup backup. Ordinary assets remain: 2,301; nonempty collections: 24; memberships: 2,230; labels: 5,302.

@@ -1,5 +1,5 @@
 import { areCanvasPortKindsCompatible, canvasMediaMaskUsesImageInput, defaultCanvasMediaMaskConfig, validateCanvasMediaMaskConfig } from "./types";
-import type { CanvasArtifact, CanvasBatchBindableField, CanvasGraph, CanvasNode, CanvasNodeConfig, CanvasNodeDefinition, CanvasNodeExecutionMode, CanvasNodeType, CanvasPortDefinition } from "./types";
+import type { CanvasArtifact, CanvasBatchBindableField, CanvasGraph, CanvasNode, CanvasNodeConfig, CanvasNodeDefinition, CanvasNodeExecutionMode, CanvasNodeType, CanvasPortDefinition, CanvasScheduleParameterBinding } from "./types";
 import { toApisImageRatios, toApisImageResolutions } from "../toapis-image-api";
 import { normalizeImageModel, normalizeToApisRequestFormat } from "../image-model-options";
 import { validateCanvasImageFilenamePrefix, validateCanvasImageOutputFolder } from "./save-images";
@@ -1052,6 +1052,34 @@ const definitionVersionMap = new Map(
 
 export function getCanvasNodeDefinition(type: CanvasNodeType, version?: number) {
   return version === undefined ? definitionMap.get(type) : definitionVersionMap.get(`${type}@${version}`);
+}
+
+export function canvasBatchBindingKey(binding: CanvasScheduleParameterBinding) {
+  return JSON.stringify([binding.nodeId, binding.innerNodeId ?? null, binding.fieldKey]);
+}
+
+export function resolveCanvasBatchBindingNode(graph: CanvasGraph, binding: CanvasScheduleParameterBinding) {
+  const outer = graph.nodes.find((node) => node.id === binding.nodeId);
+  if (binding.innerNodeId === undefined) return outer;
+  if (typeof binding.innerNodeId !== "string" || !binding.innerNodeId.trim() || outer?.type !== "utility.image-iterate") return undefined;
+  return outer.iteration?.graph.nodes.find((node) => node.id === binding.innerNodeId);
+}
+
+export function getCanvasBatchBindings(graph: CanvasGraph) {
+  return graph.nodes.flatMap((outer) => {
+    const targets: Array<{ node: CanvasNode; region?: CanvasNode }> = [{ node: outer }];
+    if (outer.type === "utility.image-iterate" && outer.iteration) {
+      targets.push(...outer.iteration.graph.nodes.map((node) => ({ node, region: outer })));
+    }
+    return targets.flatMap(({ node, region }) => getCanvasBatchBindableFields(node).map((field) => ({
+      node, region, field,
+      binding: {
+        nodeId: outer.id,
+        ...(region ? { innerNodeId: node.id } : {}),
+        fieldKey: field.key,
+      } satisfies CanvasScheduleParameterBinding,
+    })));
+  });
 }
 
 export function getCanvasBatchBindableFields(node: Pick<CanvasNode, "type" | "version">): CanvasBatchBindableField[] {

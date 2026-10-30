@@ -185,4 +185,19 @@ const noReferences = fixture("no-references", "all", 1);
 delete noReferences.inputs.references;
 await advance(noReferences);
 assert.deepEqual(records.get(noReferences.metadata.items[0].runId).iterationInputs.references.items, []);
+const schedulerV2 = require("tsx/cjs/api").require("./src/lib/canvas/scheduler-v2.ts", fileURLToPath(new URL("../../package.json", import.meta.url)));
+const batchContext = fixture("batch-injected", "all", 2);
+batchContext.node.iteration.graph.nodes = [registry.createCanvasNode("input.text", "inner-prompt", { x: 0, y: 0 })];
+const batchSource = { nodes: [batchContext.node], edges: [] };
+const batchSourceBefore = clone(batchSource);
+batchContext.node = schedulerV2.applyCanvasScheduleV2Parameters(batchSource, [{
+  id: "prompt", name: "Inner prompt", scope: "child", valueType: "text", expansion: "fixed",
+  source: { mode: "fixed", values: ["Frozen batch prompt"] },
+  binding: { nodeId: "region", innerNodeId: "inner-prompt", fieldKey: "text" },
+}], { prompt: "Frozen batch prompt" }).nodes[0];
+await advance(batchContext);
+for (const item of batchContext.metadata.items) {
+  assert.equal(records.get(item.runId).graphSnapshot.nodes[0].config.text, "Frozen batch prompt", "each durable image item must inherit the scheduled inner config");
+}
+assert.deepEqual(batchSource, batchSourceBefore);
 console.log("Canvas iteration runtime: ordering, identity, concurrency, retry, partial delivery and frozen output checks passed.");
