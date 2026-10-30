@@ -8,7 +8,7 @@
 
 <!-- @@@auto:current-status -->
 - **Active File**: `journal-2.md`
-- **Total Sessions**: 76
+- **Total Sessions**: 77
 - **Last Active**: 2026-10-30
 <!-- @@@/auto:current-status -->
 
@@ -19,7 +19,7 @@
 <!-- @@@auto:active-documents -->
 | File | Lines | Status |
 |------|-------|--------|
-| `journal-2.md` | ~608 | Active |
+| `journal-2.md` | ~641 | Active |
 | `journal-1.md` | ~1967 | Archived |
 <!-- @@@/auto:active-documents -->
 
@@ -30,6 +30,7 @@
 <!-- @@@auto:session-history -->
 | # | Date | Title | Commits | Branch |
 |---|------|-------|---------|--------|
+| 77 | 2026-10-30 | Universal Canvas execution modes | `df7b675` | `local` |
 | 76 | 2026-10-30 | Compact execution status in resized Canvas nodes | `4f375dc` | `local` |
 | 75 | 2026-10-30 | Canvas text editing preserves viewport | `ab78c70` | `local` |
 | 74 | 2026-10-28 | Reuse existing Wonder reference media | `63925fbaef2f513604e628b395f8728c010ab5c8` | `local` |

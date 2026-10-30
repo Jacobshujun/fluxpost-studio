@@ -606,3 +606,36 @@ Shared CSS keeps status content-sized and real previews expandable without compr
 ### Next Steps
 
 - None - task complete
+
+
+## Session 77: Universal Canvas execution modes
+
+**Date**: 2026-10-30
+**Task**: Universal Canvas execution modes
+**Branch**: `local`
+
+### Summary
+
+All menus/inspectors/shortcuts and iteration roots allow disabled/bypass. Shared unique typed routing reports explicit errors, skips outputless sinks and never invokes disabled/bypassed executors; V2 data-only bindings preserve mode. Registry/version/runtime/iteration/scheduler/provider-reference checks, six mode and six group browser cases, six viewport plus 60 status cases, source lint/types/build/config/HTTP/SQLite pass. Baseline retains the existing 17 data-script lint errors. Authorized LAN SHA verified; final metadata HEAD uses the clean-tree launcher. Canonical contract: canvas_execution_modes.md; evidence in archived task.
+
+### Main Changes
+
+(Add details)
+
+### Git Commits
+
+| Hash | Message |
+|------|---------|
+| `df7b675` | (see git log) |
+
+### Testing
+
+- [OK] (Add test results)
+
+### Status
+
+[OK] **Completed**
+
+### Next Steps
+
+- None - task complete
