@@ -639,3 +639,36 @@ All menus/inspectors/shortcuts and iteration roots allow disabled/bypass. Shared
 ### Next Steps
 
 - None - task complete
+
+
+## Session 78: Iteration inner-node batch parameters and LAN release
+
+**Date**: 2026-10-30
+**Task**: Iteration inner-node batch parameters and LAN release
+**Branch**: `local`
+
+### Summary
+
+Implemented region-scoped inner bindings with save/preflight/launch and per-image snapshot regression coverage. Desktop/mobile browser, types/build and LAN smoke passed; baseline retains 17 unrelated data-script lint errors. Removed unrelated diagnostic paragraph with explicit approval. Authorized LAN activation passed; final bookkeeping HEAD will be activated with the standard clean-tree launcher. No remote push.
+
+### Main Changes
+
+(Add details)
+
+### Git Commits
+
+| Hash | Message |
+|------|---------|
+| `adaf32d` | (see git log) |
+
+### Testing
+
+- [OK] (Add test results)
+
+### Status
+
+[OK] **Completed**
+
+### Next Steps
+
+- None - task complete
