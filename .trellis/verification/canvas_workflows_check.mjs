@@ -86,7 +86,7 @@ try {
     writeFileSync(path.join(temp, `${name}.js`), output, "utf8");
   }
   const require = createRequire(import.meta.url);
-  const { getCanvasNodeDefinition, getCanvasNodeExecutionMode, getCanvasVisibleInputPorts, upgradeCanvasGraph, upgradeCanvasNode, validateCanvasNodeConfig, normalizeUrlList } = require(path.join(temp, "registry.js"));
+  const { canvasNodeDefinitions, createCanvasNode, getCanvasBypassRouting, getCanvasNodeDefinition, getCanvasNodeExecutionMode, getCanvasVisibleInputPorts, upgradeCanvasGraph, upgradeCanvasNode, validateCanvasNodeConfig, normalizeUrlList } = require(path.join(temp, "registry.js"));
   const { validateCanvasGraph, validateCanvasGraphForPersistence, buildCanvasRunPlan } = require(path.join(temp, "graph.js"));
   const { createCanvasClipboardPayload, instantiateCanvasClipboardPayload, parseCanvasClipboardPayload, prepareCanvasClipboardPaste } = require(path.join(temp, "clipboard.js"));
   const { createCanvasWorkflowFile, parseCanvasWorkflowFile, canvasWorkflowFileName, CANVAS_WORKFLOW_FILE_MAX_BYTES } = require(path.join(temp, "workflow-file.js"));
@@ -112,9 +112,9 @@ try {
   const protectedNode = { ...previewNode, id: "root", type: "input.iteration-item" };
   const textNode = { ...previewNode, id: "text", type: "input.text", config: { text: "hello" } };
   const toggled = toggleCanvasNodeModes([previewNode, bypassNode, protectedNode, textNode], ["a", "b", "root", "text"], "bypass");
-  assert.deepEqual(toggled.nodes.map((node) => node.executionMode), ["bypass", "enabled", undefined, undefined]);
-  assert.deepEqual(toggled.skipped, ["root", "text"]);
-  assert.deepEqual(toggleCanvasNodeModes([previewNode, { ...bypassNode, executionMode: "disabled" }, protectedNode], ["a", "b", "root"], "disabled").nodes.map((node) => node.executionMode), ["disabled", "enabled", undefined]);
+  assert.deepEqual(toggled.nodes.map((node) => node.executionMode), ["bypass", "enabled", "bypass", "bypass"]);
+  assert.deepEqual(toggled.skipped, []);
+  assert.deepEqual(toggleCanvasNodeModes([previewNode, { ...bypassNode, executionMode: "disabled" }, protectedNode], ["a", "b", "root"], "disabled").nodes.map((node) => node.executionMode), ["disabled", "enabled", "disabled"]);
   const groupedGraph = { nodes: [previewNode, bypassNode], edges: [], viewport: { x: 0, y: 0, zoom: 1 }, groups: [frame] };
   assert.deepEqual(decodeCanvasGraph(groupedGraph), groupedGraph);
   assert.deepEqual(parseCanvasWorkflowFile(JSON.stringify(createCanvasWorkflowFile("groups", groupedGraph))).graph.groups, [frame]);
@@ -332,7 +332,7 @@ try {
   assert.deepEqual(saveImagesDefinition?.fields.map((field) => field.key), ["filenamePrefix", "outputFolder"]);
   assert.deepEqual(saveImagesDefinition?.defaultConfig, { filenamePrefix: "FluxPost" });
   assert.equal(saveImagesDefinition?.passiveSink, true, "save-images must follow selected image producers automatically");
-  assert.equal(saveImagesDefinition?.bypass, undefined, "save-images cannot bypass an outputless side-effect boundary");
+  assert.equal(saveImagesDefinition?.bypass, undefined, "outputless sink bypass must not invent an output-port mapping");
   const saveFolderGraph = { viewport: { x: 0, y: 0, zoom: 1 }, nodes: [{ id: "save-folder", type: "utility.save-images", version: 1, position: { x: 0, y: 0 }, config: { filenamePrefix: "车型", outputFolder: "D:\\图片 输出" } }], edges: [] };
   assert.equal(parseCanvasWorkflowFile(JSON.stringify(createCanvasWorkflowFile("本地保存", saveFolderGraph))).graph.nodes[0].config.outputFolder, "D:\\图片 输出");
   assert.equal(validateCanvasNodeConfig("utility.save-images", saveFolderGraph.nodes[0].config, 1).length, 0);
@@ -581,7 +581,90 @@ try {
   assert.match(validateCanvasGraph(occupiedDisplayGraph).errors.join(" "), /accepts one connection/i, "display-any must reject a second upstream edge");
   const unsupportedBypass = structuredClone(previewGraph);
   unsupportedBypass.nodes[0].executionMode = "bypass";
-  assert.match(validateCanvasGraph(unsupportedBypass).errors.join(" "), /does not support bypass/i, "nodes without explicit mappings must reject bypass");
+  assert.equal(validateCanvasGraphForPersistence(unsupportedBypass).valid, true, "unexecutable bypass choices must save");
+  assert.match(buildCanvasRunPlan(unsupportedBypass).blockers[0].message, /cannot bypass.*images/i, "source bypass must explicitly report unavailable upstream data");
+
+  const { toggleCanvasNodeModes } = require(path.join(temp, "editor-commands.js"));
+  const modeDefinitions = canvasNodeDefinitions.flatMap((definition) => [1, 2].map((version) => getCanvasNodeDefinition(definition.type, version)).filter(Boolean));
+  for (const definition of modeDefinitions) {
+    const original = { ...createCanvasNode(definition.type, `mode-${definition.type}`, { x: 0, y: 0 }), version: definition.version, config: structuredClone(definition.defaultConfig) };
+    for (const mode of ["disabled", "bypass"]) {
+      const changed = toggleCanvasNodeModes([original], [original.id], mode);
+      assert.equal(changed.nodes[0].executionMode, mode, `${definition.type} must allow ${mode}`);
+      assert.deepEqual(changed.skipped, []);
+      assert.equal(original.executionMode, "enabled", "mode changes must not mutate source nodes");
+      const graph = { nodes: changed.nodes, edges: [], viewport: { x: 0, y: 0, zoom: 1 } };
+      assert.equal(validateCanvasGraphForPersistence(graph).valid, true, `${definition.type} ${mode} draft must save`);
+      if (definition.type !== "input.iteration-item") {
+        assert.equal(parseCanvasWorkflowFile(JSON.stringify(createCanvasWorkflowFile("Modes", graph))).graph.nodes[0].executionMode, mode);
+      }
+      if (mode === "disabled") assert.equal(buildCanvasRunPlan(graph).steps[0].action, "disabled");
+    }
+  }
+  const modeSource = createCanvasNode("input.text", "mode-source", { x: 0, y: 0 });
+  modeSource.config.text = "unchanged source";
+  const concatBypass = { ...createCanvasNode("utility.text-concatenate", "mode-concat", { x: 200, y: 0 }), executionMode: "bypass" };
+  const modeEdge = { id: "mode-edge", source: modeSource.id, sourcePort: "text", target: concatBypass.id, targetPort: "text_a" };
+  const modeGraph = { nodes: [modeSource, concatBypass], edges: [modeEdge], viewport: { x: 0, y: 0, zoom: 1 } };
+  assert.equal(buildCanvasRunPlan(modeGraph).steps.at(-1).action, "bypass", "previously unsupported utility must pass through one compatible port");
+  const ambiguous = { ...modeGraph, edges: [modeEdge, { ...modeEdge, id: "mode-edge-b", targetPort: "text_b" }] };
+  assert.match(buildCanvasRunPlan(ambiguous).blockers[0].message, /mode-concat.*ambiguous.*text_a.*text_b/i);
+  assert.match(buildCanvasRunPlan({ ...modeGraph, nodes: [{ ...modeSource, executionMode: "disabled" }, concatBypass] }).blockers[0].message, /mode-concat.*upstream/i);
+  const sinkBypass = { ...createCanvasNode("utility.save-images", "mode-sink", { x: 400, y: 0 }), executionMode: "bypass" };
+  assert.equal(buildCanvasRunPlan({ ...modeGraph, nodes: [sinkBypass], edges: [] }).steps[0].action, "bypass", "outputless sinks skip without requiring or writing data");
+  assert.deepEqual(buildCanvasRunPlan({ ...modeGraph, nodes: [sinkBypass], edges: [] }).capabilities, []);
+
+  const receipts = [];
+  const modeRuntime = compileFunctions(read("src/lib/canvas/runs.ts"), [
+    "resolveCanvasRunPlan", "findNode", "canReachNode", "runPlannedNode", "runBypassedNode", "resolveBypassOutputs", "bypassFailureMessage", "mergeArtifacts", "mergeCanvasImageBatchSummaries", "collectInputs", "missingRequiredInput", "saveTerminalNodeRun",
+  ], "({ resolveCanvasRunPlan, runPlannedNode, resolveBypassOutputs, mergeArtifacts })", {
+    getCanvasBypassRouting, getCanvasNodeDefinition, getCanvasNodeExecutionMode, buildCanvasRunPlan,
+    listCanvasSuccessfulNodeRunsForWorkflowFromDb: async () => [],
+    canAccessWorkspaceOwner: () => true,
+    resolveCanvasLiteralOutputs: (node) => node.id === modeSource.id ? { text: { kind: "text", value: node.config.text } } : undefined,
+    getCanvasRequiredInputPorts: require(path.join(temp, "registry.js")).getCanvasRequiredInputPorts,
+    orderedCanvasGptImageInputs: require(path.join(temp, "registry.js")).orderedCanvasGptImageInputs,
+    resolveCanvasWonderImageReferences: require(path.join(temp, "registry.js")).resolveCanvasWonderImageReferences,
+    randomUUID: () => `fixture-${receipts.length}`,
+    saveCanvasNodeRunToDb: async (receipt) => { receipts.push(receipt); return receipt; },
+    fingerprintCanvasNodeExecution: () => "fixture-fingerprint",
+    runReadyNode: () => { throw new Error("disabled/bypass must never execute node/provider"); },
+    runReusedNode: () => { throw new Error("disabled/bypass must never reuse prior outputs"); },
+  });
+  const modeArtifact = { kind: "text", value: "literal \ud83d\ude42\u200d\u2195\ufe0f\n\nkeep text" };
+  assert.deepEqual(modeRuntime.mergeArtifacts([{ kind: "audios", items: [{ url: "/one.mp3" }] }, { kind: "audios", items: [{ url: "/two.mp3" }] }]).items.map((item) => item.url), ["/one.mp3", "/two.mp3"]);
+  assert.equal(modeRuntime.mergeArtifacts([{ kind: "publishJobRef", jobId: "one" }, { kind: "publishJobRef", jobId: "two" }]), undefined, "opaque outputs must not silently discard multiple values");
+  const forwarded = modeRuntime.resolveBypassOutputs(concatBypass, { text_a: [modeArtifact] });
+  assert.deepEqual(forwarded, { text: modeArtifact });
+  forwarded.text.value = "changed copy";
+  assert.notEqual(modeArtifact.value, forwarded.text.value);
+  assert.equal(modeRuntime.resolveBypassOutputs(concatBypass, { text_a: [{ kind: "images", items: [] }] }), undefined, "incompatible artifacts must not cross typed outputs");
+  const splitBypass = { ...createCanvasNode("utility.text-split", "mode-split", { x: 0, y: 0 }), version: 1, executionMode: "bypass" };
+  assert.deepEqual(modeRuntime.resolveBypassOutputs(splitBypass, { text: [modeArtifact] }), { head: modeArtifact, tail: modeArtifact }, "skip does not run the split function");
+  const modeRun = { id: "fixture-mode-run", graphSnapshot: { ...modeGraph, edges: [] } };
+  for (const mode of ["disabled", "bypass"]) {
+    const result = await modeRuntime.runPlannedNode(modeRun, sinkBypass, { nodeId: sinkBypass.id, action: mode }, new Map(), new Map());
+    assert.equal(result.nodeRun.status, mode === "bypass" ? "bypassed" : "disabled");
+    assert.deepEqual(result.nodeRun.outputs, {});
+  }
+  const blockedBypass = await modeRuntime.runPlannedNode(modeRun, concatBypass, { nodeId: concatBypass.id, action: "bypass" }, new Map(), new Map());
+  assert.equal(blockedBypass.nodeRun.status, "blocked");
+  assert.match(blockedBypass.nodeRun.error, /mode-concat.*text.*upstream/i);
+  const disabledSource = await modeRuntime.runPlannedNode(modeRun, modeSource, { nodeId: modeSource.id, action: "disabled" }, new Map(), new Map());
+  assert.deepEqual(disabledSource.nodeRun.outputs, {}, "disabling a source must not reuse or execute its literal value");
+  const isolatedBypass = await modeRuntime.resolveCanvasRunPlan(modeGraph, "fixture-workflow", [concatBypass.id], "isolated", { id: "fixture" });
+  assert.equal(isolatedBypass.preflightBlocked, false);
+  assert.equal(isolatedBypass.steps.at(-1).action, "bypass");
+  assert.deepEqual(isolatedBypass.capabilities, []);
+  const isolatedDisabled = await modeRuntime.resolveCanvasRunPlan({ ...modeGraph, nodes: [modeSource, { ...concatBypass, executionMode: "disabled" }] }, "fixture-workflow", [concatBypass.id], "isolated", { id: "fixture" });
+  assert.equal(isolatedDisabled.preflightBlocked, true, "isolated disabled targets must fail before enqueue");
+  const rootModeNode = createCanvasNode("input.iteration-item", "mode-entry", { x: 0, y: 0 });
+  const injectedModeRun = { ...modeRun, iterationContext: { index: 0 }, iterationInputs: { images: { kind: "images", items: [{ url: "/fixture.png" }] } } };
+  for (const mode of ["disabled", "bypass"]) {
+    const result = await modeRuntime.runPlannedNode(injectedModeRun, rootModeNode, { nodeId: rootModeNode.id, action: mode }, new Map(), new Map());
+    assert.equal(result.nodeRun.status, mode === "disabled" ? "disabled" : "blocked");
+    assert.deepEqual(result.nodeRun.outputs, {}, "root mode must not be overwritten by injected iteration data");
+  }
 
   const cyclic = structuredClone(validGraph);
   cyclic.edges.push({ id: "e2", source: "gpt", sourcePort: "text", target: "text", targetPort: "missing" });
@@ -1340,6 +1423,27 @@ assert.ok(!page.includes("setConfirmation"), "canvas runs must not retain confir
 assert.ok(!page.includes("width={1600}"), "image preview must not impose a fixed 4:3 intrinsic width");
 assert.ok(!page.includes("height={1200}"), "image preview must not impose a fixed 4:3 intrinsic height");
 assert.ok(!page.includes("style={{ top:"), "canvas handles must be positioned by their port rows, not node-level pixel offsets");
+// Root inspector/menu patches may change mode, never fixed identity/config/position.
+{
+  const ast = ts.createSourceFile("canvas-page.tsx", page, ts.ScriptTarget.Latest, true, ts.ScriptKind.TSX);
+  let declaration;
+  const visit = (node) => {
+    if (ts.isFunctionDeclaration(node) && node.name?.text === "patchNode") declaration = node;
+    ts.forEachChild(node, visit);
+  };
+  visit(ast);
+  assert.ok(declaration);
+  const root = { id: "root", data: { canvasNode: { id: "root", type: "input.iteration-item", config: {}, position: { x: 0, y: 0 }, executionMode: "enabled" } } };
+  let changed;
+  const output = ts.transpileModule(declaration.getText(ast), { compilerOptions: { target: ts.ScriptTarget.ES2022 } }).outputText;
+  const patch = Function("innerNodes", "innerEdges", "commit", `${output}\nreturn patchNode;`)([root], [], (nodes) => { changed = nodes[0].data.canvasNode; });
+  patch("root", { executionMode: "disabled", config: { invalid: true }, position: { x: 900, y: 900 } });
+  assert.deepEqual(changed, { ...root.data.canvasNode, executionMode: "disabled" });
+  patch("root", { executionMode: "bypass" });
+  assert.equal(changed.executionMode, "bypass");
+  patch("root", { config: { invalid: true } });
+  assert.deepEqual(changed, root.data.canvasNode);
+}
 // Execute the actual editor-focus callbacks, not a duplicate selection implementation.
 {
   const ast = ts.createSourceFile("canvas-page.tsx", page, ts.ScriptTarget.Latest, true, ts.ScriptKind.TSX);

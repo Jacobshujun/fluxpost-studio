@@ -74,7 +74,7 @@ export function validateCanvasIteration(node: CanvasNode, validateExecution = tr
   if (children.some((child) => child.type === "utility.image-iterate" || child.iteration !== undefined)) return ["Nested iteration regions are not allowed."];
   const roots = children.filter((child) => child.type === "input.iteration-item");
   if (roots.length !== 1) errors.push("Image iteration requires exactly one iteration item root.");
-  if (roots.some((root) => getCanvasNodeExecutionMode(root) !== "enabled" || Object.keys(root.config).length)) errors.push("Iteration item root must be enabled with empty config.");
+  if (roots.some((root) => Object.keys(root.config).length)) errors.push("Iteration item root must have empty config.");
   if (iteration.graph.edges.some((edge) => roots.some((root) => edge.target === root.id))) errors.push("Iteration item root cannot have incoming edges.");
   for (const child of children) {
     if (!canvasIterationAllowedNodeTypes.includes(child.type)) errors.push(`Node type ${child.type} is not allowed inside image iteration.`);
@@ -89,7 +89,7 @@ export function validateCanvasIteration(node: CanvasNode, validateExecution = tr
     const selected = selector && children.find((child) => child.id === selector.nodeId);
     const port = selected && getCanvasNodeDefinition(selected.type, selected.version)?.outputs.find((output) => output.id === selector.outputPort);
     if (!selected || !port || port.kind !== kind) errors.push(`Iteration ${kind} output must select a matching inner node port.`);
-    else if (getCanvasNodeExecutionMode(selected) === "disabled") errors.push(`Iteration ${kind} output selects a disabled node.`);
+    else if (validateExecution && !node.frozenOutputs && getCanvasNodeExecutionMode(selected) === "disabled") errors.push(`Iteration ${kind} output selects disabled node ${selected.id}.`);
   }
   const budget = getCanvasGraphBudget({ nodes: [node], edges: [] });
   if (budget.nodes > CANVAS_GRAPH_LIMITS.maxNodes || budget.edges > CANVAS_GRAPH_LIMITS.maxEdges) errors.push("Iteration exceeds the total Canvas graph budget.");

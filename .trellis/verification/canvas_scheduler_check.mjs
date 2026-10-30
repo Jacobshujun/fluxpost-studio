@@ -318,6 +318,10 @@ try {
     expansion: "each",
     binding: { nodeId: contentPoolNode.id, fieldKey: "sourceItemId" },
   };
+  for (const mode of ["disabled", "bypass"]) {
+    const injected = schedulerV2.applyCanvasScheduleV2Parameters({ ...graph, nodes: [{ ...contentPoolNode, executionMode: mode }], edges: [] }, [contentPoolParameter], { "content-source": contentPoolSnapshot });
+    assert.equal(injected.nodes[0].executionMode, mode, "content-pool binding must preserve selected mode");
+  }
   scheduler.validateCanvasContentPoolScheduleCapacity(contentPoolParameter, 200);
   assert.throws(
     () => scheduler.validateCanvasContentPoolScheduleCapacity(contentPoolParameter, 201),
@@ -845,7 +849,7 @@ try {
   );
   const sourceVideoGraph = {
     nodes: [
-      { ...node("source-video", "input.source-video"), executionMode: "disabled" },
+      { ...node("source-video", "input.source-video"), executionMode: "enabled" },
       node("replacement-prompt", "input.text"),
       node("replacement-image", "model.gpt-image"),
       node("video-reconstruct", "utility.video-reconstruct"),
@@ -895,6 +899,15 @@ try {
     height: 720,
     resolvedAt: "2026-08-11T00:00:00.000Z",
   }));
+  for (const mode of ["disabled", "bypass"]) {
+    const chosenModeGraph = structuredClone(sourceVideoGraph);
+    chosenModeGraph.nodes.find((item) => item.id === "source-video").executionMode = mode;
+    const injected = schedulerV2.applyCanvasScheduleV2Parameters(chosenModeGraph, sourceVideoDefinition.parameters, {
+      "source-video-parameter": sourceVideoSnapshots[0], "replacement-prompt-parameter": "fixture prompt",
+    });
+    assert.equal(injected.nodes.find((item) => item.id === "source-video").executionMode, mode, "parameter injection must not re-enable selected source mode");
+    assert.ok(graphModule.buildCanvasRunPlan(injected).blockers.length, "disabled or bypassed source must block its required dependent");
+  }
   sourceVideoResolveCalls = 0;
   visibleSourceVideoIds = new Set(sourceVideoSnapshots.map((snapshot) => snapshot.id));
   workflowRecord = { id: "workflow-source-video", name: "Video rebuild", revision: 1, ownerUserId: account.id, ownerDisplayName: account.displayName, graph: sourceVideoGraph };
@@ -971,6 +984,11 @@ try {
     aggregationPolicy: "all",
   };
   workflowRecord = { id: "workflow-video-loader", name: "Video loader", revision: 1, ownerUserId: account.id, ownerDisplayName: account.displayName, graph: videoLoaderGraph };
+  for (const mode of ["disabled", "bypass"]) {
+    const chosen = structuredClone(videoLoaderGraph);
+    chosen.nodes[0].executionMode = mode;
+    assert.equal(schedulerV2.applyCanvasScheduleV2Parameters(chosen, videoLoaderDefinition.parameters, { "video-parameter": loaderVideos[0] }).nodes[0].executionMode, mode, "video binding must preserve selected mode");
+  }
   storedSchedule = {
     id: "schedule-video-loader", schemaVersion: 2, ownerUserId: account.id, ownerDisplayName: account.displayName,
     name: "Video loader batch", revision: 1, workflowId: workflowRecord.id, workflowRevision: 1, status: "draft",

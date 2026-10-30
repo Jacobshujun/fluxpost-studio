@@ -34,7 +34,7 @@ import { bindComposeInput } from "./layer-compose-contract";
 import { canvasIterationExecutionDefinition } from "./iteration";
 import { ArkSeedanceNeedsConfigError, getArkSeedanceReadiness } from "./seedance";
 import { buildCanvasRunPlan, collectDescendants } from "./graph";
-import { getCanvasNodeDefinition, getCanvasNodeExecutionMode, getCanvasRequiredInputPorts, normalizeUrlList, orderedCanvasGptImageInputs, resolveCanvasWonderImageReferences } from "./registry";
+import { getCanvasBypassRouting, getCanvasNodeDefinition, getCanvasNodeExecutionMode, getCanvasRequiredInputPorts, normalizeUrlList, orderedCanvasGptImageInputs, resolveCanvasWonderImageReferences } from "./registry";
 import type {
   CanvasArtifact,
   CanvasEdge,
@@ -156,7 +156,7 @@ async function resolveCanvasRunPlan(
     const mode = getCanvasNodeExecutionMode(node);
 
     if (mode === "disabled") {
-      const message = nodeId === targetId ? `${definition.label} is disabled.` : undefined;
+      const message = nodeId === targetId ? `${node.label?.trim() || definition.label} (${nodeId}) is disabled.` : undefined;
       steps.push({ nodeId, action: "disabled", message });
       if (message) blockers.push({ nodeId, message });
       continue;
@@ -164,7 +164,7 @@ async function resolveCanvasRunPlan(
     if (mode === "bypass") {
       const output = resolveBypassOutputs(node, inputs);
       if (!output) {
-        const message = `${definition.label} cannot bypass because input ${definition.bypass?.inputPort || "(unsupported)"} is unavailable.`;
+        const message = bypassFailureMessage(node, inputs);
         steps.push({ nodeId, action: "blocked", message });
         blockers.push({ nodeId, message });
       } else {
@@ -183,7 +183,7 @@ async function resolveCanvasRunPlan(
     const executesLocally = nodeId === targetId || (node.type.startsWith("input.") && node.type !== "input.content-collection");
     if (executesLocally) {
       if (missingInput) {
-        const message = `${definition.label}: Missing required input ${missingInput}.`;
+        const message = `${node.label?.trim() || definition.label} (${nodeId}): Missing required input ${missingInput}.`;
         steps.push({ nodeId, action: "blocked", message });
         blockers.push({ nodeId, message });
       } else {
@@ -795,9 +795,15 @@ async function runBypassedNode(
   latest: Map<string, CanvasNodeRun>,
   inputs: Record<string, CanvasArtifact[]>,
 ) {
-  const bypassOutputs = resolveBypassOutputs(node, inputs);
+  let bypassOutputs: Record<string, CanvasArtifact> | undefined;
+  let resolutionError: string | undefined;
+  try {
+    bypassOutputs = resolveBypassOutputs(node, inputs);
+  } catch (error) {
+    resolutionError = `${node.label?.trim() || node.id}: ${error instanceof Error ? error.message : "Bypass data validation failed."}`;
+  }
   if (!bypassOutputs) {
-    const nodeRun = await saveTerminalNodeRun(run, node, latest, "blocked", {}, "Bypass input is unavailable.", inputs);
+    const nodeRun = await saveTerminalNodeRun(run, node, latest, "blocked", {}, resolutionError || bypassFailureMessage(node, inputs), inputs);
     return { nodeId: node.id, nodeRun };
   }
   const now = new Date().toISOString();
@@ -1024,8 +1030,22 @@ function missingRequiredInput(node: CanvasNode, inputs: Record<string, CanvasArt
 }
 
 function resolveBypassOutputs(node: CanvasNode, inputs: Record<string, CanvasArtifact[]>): Record<string, CanvasArtifact> | undefined {
-  const bypass = getCanvasNodeDefinition(node.type, node.version)?.bypass;
-  if (!bypass) return undefined;
+  const definition = getCanvasNodeDefinition(node.type, node.version);
+  const bypass = definition?.bypass;
+  if (!definition) return undefined;
+  if (!bypass) {
+    const routing = getCanvasBypassRouting(node, Object.keys(inputs).filter((id) => inputs[id].length));
+    if (routing.error) return undefined;
+    const outputs: Record<string, CanvasArtifact> = {};
+    for (const route of routing.routes) {
+      const values = route.inputPorts.flatMap((id) => inputs[id] || []);
+      const artifact = mergeArtifacts(values);
+      const output = definition.outputs.find((port) => port.id === route.outputPort);
+      if (!artifact || artifact.kind !== output?.kind) return undefined;
+      outputs[route.outputPort] = structuredClone(artifact);
+    }
+    return outputs;
+  }
   if (node.type === "model.wonder-image") {
     const items = resolveCanvasWonderImageReferences(node, inputs);
     return items.length ? { images: { kind: "images", items } } : undefined;
@@ -1033,7 +1053,14 @@ function resolveBypassOutputs(node: CanvasNode, inputs: Record<string, CanvasArt
   const artifact = mergeArtifacts(node.type === "model.gpt-image" && node.version >= 2
     ? orderedCanvasGptImageInputs(inputs)
     : inputs[bypass.inputPort] || []);
-  return artifact ? { [bypass.outputPort]: artifact } : undefined;
+  return artifact && definition.outputs.find((port) => port.id === bypass.outputPort)?.kind === artifact.kind
+    ? { [bypass.outputPort]: artifact } : undefined;
+}
+
+function bypassFailureMessage(node: CanvasNode, inputs: Record<string, CanvasArtifact[]>) {
+  const routing = getCanvasBypassRouting(node, Object.keys(inputs).filter((id) => inputs[id].length));
+  const label = node.label?.trim() || getCanvasNodeDefinition(node.type, node.version)?.label || node.type;
+  return routing.error || `${label} (${node.id}) cannot bypass output ${routing.routes.map((route) => route.outputPort).join(", ")}: missing or incompatible upstream data.`;
 }
 
 function mergeArtifacts(artifacts: CanvasArtifact[]): CanvasArtifact | undefined {
@@ -1054,7 +1081,10 @@ function mergeArtifacts(artifacts: CanvasArtifact[]): CanvasArtifact | undefined
   if (first.kind === "videos") {
     return { kind: "videos", items: artifacts.flatMap((artifact) => artifact.kind === "videos" ? artifact.items : []) };
   }
-  return structuredClone(first);
+  if (first.kind === "audios") {
+    return { kind: "audios", items: artifacts.flatMap((artifact) => artifact.kind === "audios" ? artifact.items : []) };
+  }
+  return artifacts.length === 1 ? structuredClone(first) : undefined;
 }
 
 function fingerprintCanvasNodeExecution(node: CanvasNode, inputs: Record<string, CanvasArtifact[]>) {

@@ -1,4 +1,4 @@
-import { canvasMediaMaskUsesImageInput, defaultCanvasMediaMaskConfig, validateCanvasMediaMaskConfig } from "./types";
+import { areCanvasPortKindsCompatible, canvasMediaMaskUsesImageInput, defaultCanvasMediaMaskConfig, validateCanvasMediaMaskConfig } from "./types";
 import type { CanvasArtifact, CanvasBatchBindableField, CanvasGraph, CanvasNode, CanvasNodeConfig, CanvasNodeDefinition, CanvasNodeExecutionMode, CanvasNodeType, CanvasPortDefinition } from "./types";
 import { toApisImageRatios, toApisImageResolutions } from "../toapis-image-api";
 import { normalizeImageModel, normalizeToApisRequestFormat } from "../image-model-options";
@@ -834,18 +834,57 @@ export function getCanvasVisibleInputPorts(node: CanvasNode, connectedPortIds: I
   return inputs.filter((port) => port.id === "references" ? connected.has(port.id) : !canvasGptImageReferencePortIds.includes(port.id) || visible.has(port.id));
 }
 
+export function getCanvasBypassRouting(node: CanvasNode, availablePortIds: Iterable<string>): {
+  routes: Array<{ inputPorts: string[]; outputPort: string }>;
+  error?: string;
+} {
+  const definition = getCanvasNodeDefinition(node.type, node.version);
+  const label = `${node.label?.trim() || definition?.label || node.type} (${node.id})`;
+  if (!definition) return { routes: [], error: `${label}: unknown node type.` };
+  const available = new Set(availablePortIds);
+  if (definition.bypass) {
+    let inputPorts = [definition.bypass.inputPort];
+    if (node.type === "model.wonder-image" || (node.type === "model.gpt-image" && node.version >= 2)) {
+      const numbered = node.type === "model.wonder-image" ? canvasWonderImageReferencePortIds : canvasGptImageReferencePortIds;
+      const connected = ["references", ...numbered].filter((id) => available.has(id));
+      if (connected.length || (node.type === "model.wonder-image" && normalizeUrlList(node.config.referenceUrls).length)) inputPorts = connected;
+    }
+    const missing = inputPorts.find((id) => !available.has(id));
+    return {
+      routes: [{ inputPorts, outputPort: definition.bypass.outputPort }],
+      ...(missing ? { error: `${label} cannot bypass output ${definition.bypass.outputPort}: input ${missing} is unavailable.` } : {}),
+    };
+  }
+  const outputs = node.type === "utility.image-iterate"
+    ? definition.outputs.filter((port) => Object.hasOwn(node.iteration?.outputs || {}, port.id))
+    : definition.outputs;
+  const routes: Array<{ inputPorts: string[]; outputPort: string }> = [];
+  for (const output of outputs) {
+    const candidates = definition.inputs.filter((input) => available.has(input.id) && areCanvasPortKindsCompatible(output.kind, input.kind));
+    if (candidates.length !== 1) {
+      const reason = candidates.length
+        ? `ambiguous upstream inputs ${candidates.map((input) => `${input.label} (${input.id})`).join(", ")}`
+        : `no compatible upstream input for ${output.kind}`;
+      return { routes: [], error: `${label} cannot bypass output ${output.label} (${output.id}): ${reason}.` };
+    }
+    routes.push({ inputPorts: [candidates[0].id], outputPort: output.id });
+  }
+  return { routes };
+}
+
 export function getCanvasRequiredInputPorts(node: CanvasNode, availablePortIds: Iterable<string>): CanvasPortDefinition[] {
   const definition = getCanvasNodeDefinition(node.type, node.version);
+  if (getCanvasNodeExecutionMode(node) === "bypass") {
+    const routing = getCanvasBypassRouting(node, availablePortIds);
+    // Ordered reference inputs are alternatives, not individually required ports.
+    if (!routing.error && (node.type === "model.wonder-image" || (node.type === "model.gpt-image" && node.version >= 2))) return [];
+    const ports = new Set(routing.routes.flatMap((route) => route.inputPorts));
+    return definition?.inputs.filter((input) => ports.has(input.id)) || [];
+  }
   if (node.type === "utility.media-mask" && canvasMediaMaskUsesImageInput(node.config.mask)) {
     return definition?.inputs.filter((input) => input.required || input.id === "overlayImages") || [];
   }
-  if (getCanvasNodeExecutionMode(node) !== "bypass") return definition?.inputs.filter((input) => input.required) || [];
-  if (node.type === "model.wonder-image" && (normalizeUrlList(node.config.referenceUrls).length
-    || Array.from(availablePortIds).some((id) => id === "references" || canvasWonderImageReferencePortIds.includes(id)))) return [];
-  // Numbered GPT image inputs are alternatives for bypass, not individually required.
-  if (node.type === "model.gpt-image" && node.version >= 2
-    && Array.from(availablePortIds).some((id) => id === "references" || canvasGptImageReferencePortIds.includes(id))) return [];
-  return definition?.inputs.filter((input) => input.id === definition.bypass?.inputPort) || [];
+  return definition?.inputs.filter((input) => input.required) || [];
 }
 
 const gptImageV2Definition: CanvasNodeDefinition = {

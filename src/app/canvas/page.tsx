@@ -877,11 +877,11 @@ export default function CanvasPage() {
 
   function toggleSelectedModes(mode: "bypass" | "disabled") {
     const result = toggleCanvasNodeModes(nodes.map((node) => node.data.canvasNode), getSelectedNodeIds(), mode);
-    if (result.nodes.every((node, index) => node === nodes[index].data.canvasNode)) { setMessage("选中节点受保护或不支持此操作，保持原状态"); return; }
+    if (result.nodes.every((node, index) => node === nodes[index].data.canvasNode)) { setMessage("请先选择节点"); return; }
     scheduleCanvasHistoryCommit();
     setNodes((current) => current.map((node, index) => ({ ...node, data: { canvasNode: result.nodes[index] } })));
     markDirty();
-    setMessage(result.skipped.length ? `已更新可操作节点；${result.skipped.length} 个节点不支持此操作，保持原状态` : "已更新选中节点状态");
+    setMessage("已更新选中节点状态");
   }
 
   function beginCanvasGesture(groupId?: string) {
@@ -2017,7 +2017,7 @@ const CanvasFlowNode = memo(function CanvasFlowNode({ data, selected }: NodeProp
       lineClassName="canvas-node-resize-line"
     />
     <div className="canvas-node-head"><span>{iconForNode(node.type)}</span><strong>{node.label || definition.label}</strong><small>{executionMode === "enabled" ? `v${node.version}` : executionMode === "bypass" ? "跳过" : "禁用"}</small>
-      {node.type !== "input.iteration-item" ? <details className="canvas-node-mode-menu nodrag nopan nowheel" onPointerDown={(event) => event.stopPropagation()} onClick={(event) => event.stopPropagation()}>
+      <details className="canvas-node-mode-menu nodrag nopan nowheel" onPointerDown={(event) => event.stopPropagation()} onClick={(event) => event.stopPropagation()}>
         <summary aria-label="设置节点状态" title="设置节点状态"><EllipsisVertical /></summary>
         <div role="menu">
           {(["enabled", "bypass", "disabled"] as CanvasNodeExecutionMode[]).map((mode) => <button
@@ -2027,11 +2027,10 @@ const CanvasFlowNode = memo(function CanvasFlowNode({ data, selected }: NodeProp
             aria-checked={executionMode === mode}
             aria-keyshortcuts={mode === "bypass" ? "Control+B Meta+B" : mode === "disabled" ? "Control+M Meta+M" : undefined}
             title={mode === "bypass" ? "跳过（Ctrl/Cmd+B）" : mode === "disabled" ? "禁用（Ctrl/Cmd+M）" : "启用"}
-            disabled={mode === "bypass" && !definition.bypass}
             onClick={() => interaction?.onExecutionModeChange(node.id, mode)}
           >{mode === "enabled" ? "启用" : mode === "bypass" ? "跳过" : "禁用"}</button>)}
         </div>
-      </details> : null}
+      </details>
     </div>
     <div className="canvas-node-content">
     {node.type === "utility.save-images" ? <div className="canvas-save-images-controls nodrag nopan nowheel"
@@ -2264,9 +2263,9 @@ function CanvasIterationEditor({ node, colorMode, onChange, onClose, credentials
 
   function toggleInnerModes(mode: "bypass" | "disabled") {
     const result = toggleCanvasNodeModes(innerNodes.map((entry) => entry.data.canvasNode), selectedNodeIds(), mode);
-    if (result.nodes.every((node, index) => node === innerNodes[index].data.canvasNode)) { setNotice("选中节点受保护或不支持此操作，保持原状态"); return; }
+    if (result.nodes.every((node, index) => node === innerNodes[index].data.canvasNode)) { setNotice("请先选择节点"); return; }
     commit(innerNodes.map((entry, index) => ({ ...entry, data: { canvasNode: result.nodes[index] } })), innerEdges);
-    setNotice(result.skipped.length ? `${result.skipped.length} 个节点受保护或不支持此操作，保持原状态` : "已更新选中节点状态");
+    setNotice("已更新选中节点状态");
   }
 
   function innerPayload() {
@@ -2333,8 +2332,15 @@ function CanvasIterationEditor({ node, colorMode, onChange, onClose, credentials
   });
 
   function patchNode(nodeId: string, patch: Partial<CanvasNode>) {
-    commit(innerNodes.map((entry) => entry.id === nodeId && entry.data.canvasNode.type !== "input.iteration-item"
-      ? { ...entry, data: { canvasNode: { ...entry.data.canvasNode, ...patch } } } : entry), innerEdges);
+    commit(innerNodes.map((entry) => {
+      if (entry.id !== nodeId) return entry;
+      const current = entry.data.canvasNode;
+      if (current.type === "input.iteration-item") {
+        if (patch.executionMode === undefined) return entry;
+        return { ...entry, data: { canvasNode: { ...current, executionMode: patch.executionMode } } };
+      }
+      return { ...entry, data: { canvasNode: { ...current, ...patch } } };
+    }), innerEdges);
   }
 
   function patchConfig(nodeId: string, patch: CanvasNode["config"]) {
@@ -2438,7 +2444,10 @@ function CanvasIterationEditor({ node, colorMode, onChange, onClose, credentials
         }}><Plus />添加内层节点</button></div>
         <CanvasIterationOutputSelectors node={node} onChange={(next) => { innerCurrent.current = next; recordInnerHistory(next); onChange(next); }} />
         <label><span>编辑内层节点</span><select value={selectedId || ""} onChange={(event) => { const id = event.target.value; setSelectedId(id || undefined); setSelectedGroupId(undefined); setInnerNodes((current) => current.map((entry) => ({ ...entry, selected: entry.id === id }))); }}><option value="">选择节点</option>{innerNodes.map((entry) => <option key={entry.id} value={entry.id}>{entry.data.canvasNode.label || getCanvasNodeDefinition(entry.data.canvasNode.type, entry.data.canvasNode.version)?.label}</option>)}</select></label>
-        {selected?.type === "input.iteration-item" ? <p>固定入口：当前图片、原始索引、共享文字和参考图。不能删除或禁用。</p> : selected ? <div className="canvas-inspector-content">
+        {selected ? <label><span>内层节点状态</span><select aria-label="内层节点状态" value={getCanvasNodeExecutionMode(selected)} onChange={(event) => patchNode(selected.id, { executionMode: event.target.value as CanvasNodeExecutionMode })}>
+          <option value="enabled">启用</option><option value="bypass">跳过</option><option value="disabled">禁用</option>
+        </select></label> : null}
+        {selected?.type === "input.iteration-item" ? <p>固定入口：当前图片、原始索引、共享文字和参考图。不能删除；禁用或跳过后若缺少必要输入，运行时会报错。</p> : selected ? <div className="canvas-inspector-content">
           <label><span>内层节点名称</span><input value={selected.label || ""} maxLength={80} onChange={(event) => patchNode(selected.id, { label: event.target.value })} /></label>
           <CanvasNodeFields node={selected} onChange={(key, value) => patchConfig(selected.id, { [key]: value })} onPatch={(patch) => patchConfig(selected.id, patch)} onPreviewImage={(url, index) => onPreview({ kind: "image", url, index })} />
           {selected.type === "model.qwen-image" || selected.type === "model.wonder-image" ? <CanvasQwenCredentials key={`${selected.id}:${String(selected.config.endpoint || "")}`} node={selected} interaction={interaction} /> : null}
@@ -3082,7 +3091,7 @@ function NodeInspector({
     <label><span>节点名称</span><input ref={labelInputRef} maxLength={80} value={labelDraft} placeholder={definition.label} onChange={(event) => setLabelDraft(event.target.value)} onBlur={commitLabel} onKeyDown={(event) => { if (event.key === "Enter") event.currentTarget.blur(); }} /></label>
     <label><span>节点状态</span><select value={executionMode} onChange={(event) => onExecutionModeChange(event.target.value as CanvasNodeExecutionMode)}>
       <option value="enabled">启用</option>
-      <option value="bypass" disabled={!definition.bypass}>跳过</option>
+      <option value="bypass">跳过</option>
       <option value="disabled">禁用</option>
     </select></label>
     <label><span>调度角色</span><select value={node.schedulerRole || ""} onChange={(event) => onSchedulerRoleChange((event.target.value || undefined) as CanvasSchedulerRole | undefined)}>

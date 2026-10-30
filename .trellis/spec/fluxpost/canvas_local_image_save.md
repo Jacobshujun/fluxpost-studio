@@ -2,7 +2,7 @@
 
 ## 1. Scope / Trigger
 
-`utility.save-images@1` automatically writes files when `config.outputFolder` contains a non-whitespace folder. Empty/missing folders retain browser-only downloads. Paths belong to the application host, including when accessed over LAN. The node remains an outputless, non-bypassable passive sink with its existing required multi-connection images input.
+`utility.save-images@1` automatically writes files when `config.outputFolder` contains a non-whitespace folder. Empty/missing folders retain browser-only downloads. Paths belong to the application host, including when accessed over LAN. The node remains an outputless passive sink with its existing enabled-mode required multi-connection images input. Disabled and bypass modes do not save files or produce downloads; bypass is a no-op. See `canvas_execution_modes.md`.
 
 ## 2. Signatures
 

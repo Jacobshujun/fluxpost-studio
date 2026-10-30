@@ -1,4 +1,4 @@
-import { getCanvasNodeDefinition, getCanvasNodeExecutionMode } from "./registry";
+import { getCanvasNodeExecutionMode } from "./registry";
 import type { CanvasGroup, CanvasNode, CanvasNodeExecutionMode, CanvasPosition } from "./types";
 
 export type CanvasNodeBounds = { id: string; position: CanvasPosition; width: number; height: number };
@@ -24,10 +24,6 @@ export function toggleCanvasNodeModes(nodes: CanvasNode[], ids: Iterable<string>
   const skipped: string[] = [];
   const changed = nodes.map((node) => {
     if (!selected.has(node.id)) return node;
-    if (node.type === "input.iteration-item" || (mode === "bypass" && !getCanvasNodeDefinition(node.type, node.version)?.bypass)) {
-      skipped.push(node.id);
-      return node;
-    }
     return { ...node, executionMode: getCanvasNodeExecutionMode(node) === mode ? "enabled" as const : mode };
   });
   return { nodes: changed, skipped };

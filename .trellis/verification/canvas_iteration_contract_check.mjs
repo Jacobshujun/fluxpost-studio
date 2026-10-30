@@ -90,7 +90,15 @@ try {
     assert.throws(() => serialization.decodeCanvasGraph(graphOf([bad])), /not allowed/);
   }
   assert.match(iteration.validateCanvasIteration(mutate((node) => node.iteration.graph.nodes.push({ ...structuredClone(root), id: "another-root" }))).join(" "), /exactly one/);
-  assert.match(iteration.validateCanvasIteration(mutate((node) => { node.iteration.graph.nodes[0].executionMode = "disabled"; })).join(" "), /root must be enabled/);
+  const disabledRoot = mutate((node) => { node.iteration.graph.nodes[0].executionMode = "disabled"; });
+  assert.deepEqual(iteration.validateCanvasIteration(disabledRoot, false), [], "root modes must remain valid drafts");
+  assert.equal(serialization.decodeCanvasGraph(graphOf([disabledRoot])).nodes[0].iteration.graph.nodes[0].executionMode, "disabled");
+  assert.equal(validation.buildCanvasRunPlan(graphOf([source, disabledRoot], [entry])).steps.find((step) => step.nodeId === region.id).action, "blocked", "missing injected root outputs must block before provider execution");
+  const bypassRoot = mutate((node) => { node.iteration.graph.nodes[0].executionMode = "bypass"; });
+  assert.deepEqual(iteration.validateCanvasIteration(bypassRoot, false), []);
+  const blockedRootPlan = validation.buildCanvasRunPlan(graphOf([source, bypassRoot], [entry]));
+  assert.match(blockedRootPlan.blockers[0].message, /cannot bypass.*images/i);
+  assert.deepEqual(blockedRootPlan.capabilities, [], "a blocked region must not invoke billable inner nodes");
   assert.match(iteration.validateCanvasIteration(mutate((node) => { node.iteration.graph.nodes[0].config.index = 2; })).join(" "), /empty config/);
   assert.match(iteration.validateCanvasIteration(mutate((node) => { node.iteration.graph.nodes[1].schedulerRole = "image-target"; })).join(" "), /scheduler roles/);
   for (const selector of [{ nodeId: "missing", outputPort: "text" }, { nodeId: root.id, outputPort: "images" }]) {
@@ -102,6 +110,7 @@ try {
   assert.equal(validation.validateCanvasGraphForPersistence(graphOf([draft])).valid, true);
   assert.match(iteration.validateCanvasIteration(draft).join(" "), /at least one selected output/);
   const disabledOutput = mutate((node) => { node.iteration.graph.nodes[1].executionMode = "disabled"; });
+  assert.deepEqual(iteration.validateCanvasIteration(disabledOutput, false), [], "disabled selected output must be saveable");
   assert.match(iteration.validateCanvasIteration(disabledOutput).join(" "), /disabled/);
   const preview = create("utility.image-preview", "preview");
   const unconfiguredEdge = { id: "unconfigured", source: region.id, sourcePort: "images", target: preview.id, targetPort: "images" };

@@ -1,4 +1,4 @@
-import { getCanvasNodeDefinition, getCanvasNodeExecutionMode, getCanvasRequiredInputPorts, validateCanvasNodeConfig } from "./registry";
+import { getCanvasBypassRouting, getCanvasNodeDefinition, getCanvasNodeExecutionMode, getCanvasRequiredInputPorts, validateCanvasNodeConfig } from "./registry";
 import { areCanvasPortKindsCompatible, CANVAS_GRAPH_LIMITS, CANVAS_NODE_SIZE_LIMITS, CANVAS_SCHEDULER_ROLES, isCanvasNodeSize } from "./types";
 import type { CanvasEdge, CanvasGraph, CanvasGraphValidation, CanvasNodeCapability, CanvasRunPlan, CanvasSchedulerRole } from "./types";
 import { validateSeedanceGraphNode } from "./seedance-references";
@@ -46,7 +46,6 @@ function validateCanvasGraphWithMode(graph: CanvasGraph, validateExecution: bool
     if (validateExecution && executionMode === "enabled" && !schedulerBoundImageInput && !schedulerBoundCopyInput && !node.frozenOutputs) {
       errors.push(...validateCanvasNodeConfig(node.type, node.config || {}, node.version));
     }
-    if (executionMode === "bypass" && !definition.bypass) errors.push(`${definition.label} does not support bypass mode.`);
     if (!Number.isFinite(node.position?.x) || !Number.isFinite(node.position?.y)) errors.push(`Node ${node.id} has an invalid position.`);
     if (node.size !== undefined && !isCanvasNodeSize(node.size)) {
       errors.push(`Node ${node.id} size must be between ${CANVAS_NODE_SIZE_LIMITS.minWidth}x${CANVAS_NODE_SIZE_LIMITS.minHeight} and ${CANVAS_NODE_SIZE_LIMITS.maxWidth}x${CANVAS_NODE_SIZE_LIMITS.maxHeight}.`);
@@ -90,12 +89,12 @@ function validateCanvasGraphWithMode(graph: CanvasGraph, validateExecution: bool
   for (const node of graph.nodes) {
     const definition = getCanvasNodeDefinition(node.type, node.version);
     const executionMode = getCanvasNodeExecutionMode(node);
-    const requiredInputs = !validateExecution || executionMode === "disabled" || node.frozenOutputs
+    const requiredInputs = !validateExecution || executionMode === "disabled" || (node.frozenOutputs && executionMode !== "bypass")
       ? []
       : getCanvasRequiredInputPorts(node, graph.edges.filter((edge) => edge.target === node.id).map((edge) => edge.targetPort));
     for (const input of requiredInputs) {
       if (!(incoming.get(`${node.id}:${input.id}`) || []).length) {
-        errors.push(`${definition?.label || node.id} requires input ${input.label}.`);
+        errors.push(`${node.label?.trim() || definition?.label || node.id} (${node.id}) requires input ${input.label} (${input.id}).`);
       }
     }
     if (validateExecution && node.type === "model.seedance" && executionMode === "enabled") errors.push(...validateSeedanceGraphNode(graph, node));
@@ -126,7 +125,10 @@ export function buildCanvasRunPlan(graph: CanvasGraph, targetNodeIds?: string[])
     const executionMode = getCanvasNodeExecutionMode(node);
     if (executionMode === "disabled") return { nodeId, action: "disabled" as const };
 
-    const requiredInputs = node.frozenOutputs ? [] : getCanvasRequiredInputPorts(node, graph.edges.filter((edge) =>
+    const availablePortIds = graph.edges.filter((edge) => edge.target === nodeId && availableOutputs.has(`${edge.source}:${edge.sourcePort}`)).map((edge) => edge.targetPort);
+    const bypassRouting = executionMode === "bypass" ? getCanvasBypassRouting(node, availablePortIds) : undefined;
+    if (bypassRouting?.error) return { nodeId, action: "blocked" as const, message: bypassRouting.error };
+    const requiredInputs = node.frozenOutputs && executionMode !== "bypass" ? [] : getCanvasRequiredInputPorts(node, graph.edges.filter((edge) =>
       edge.target === nodeId && availableOutputs.has(`${edge.source}:${edge.sourcePort}`),
     ).map((edge) => edge.targetPort));
     const missingInput = requiredInputs.find((input) => !graph.edges.some((edge) =>
@@ -138,7 +140,7 @@ export function buildCanvasRunPlan(graph: CanvasGraph, targetNodeIds?: string[])
       return {
         nodeId,
         action: "blocked" as const,
-        message: `${definition.label}: Missing required input ${missingInput.label}.`,
+        message: `${node.label?.trim() || definition.label} (${nodeId}): Missing required input ${missingInput.label}.`,
       };
     }
 
@@ -149,7 +151,8 @@ export function buildCanvasRunPlan(graph: CanvasGraph, targetNodeIds?: string[])
       if (innerPlan.confirmationNodeIds.length) confirmationNodeIds.push(nodeId);
       for (const capability of innerPlan.capabilities) if (!capabilities.includes(capability)) capabilities.push(capability);
     }
-    for (const output of getCanvasIterationOutputPorts(node)) availableOutputs.add(`${nodeId}:${output.id}`);
+    const outputIds = bypassRouting ? bypassRouting.routes.map((route) => route.outputPort) : getCanvasIterationOutputPorts(node).map((output) => output.id);
+    for (const outputId of outputIds) availableOutputs.add(`${nodeId}:${outputId}`);
     if (action === "execute" && definition.capability) {
       confirmationNodeIds.push(nodeId);
       if (!capabilities.includes(definition.capability)) capabilities.push(definition.capability);

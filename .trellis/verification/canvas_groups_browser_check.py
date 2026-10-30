@@ -200,7 +200,8 @@ async def check(browser, theme, width):
         await expect(page.get_by_role("button", name="选择分组 图像处理", exact=True)).to_be_in_viewport()
         await page.locator('.react-flow__node[data-id="region"] .canvas-node-head strong').click()
         await page.keyboard.press("Control+b")
-        await expect(page.locator('.react-flow__node[data-id="region"] .canvas-node-bypassed')).to_have_count(0)
+        await expect(page.locator('.react-flow__node[data-id="region"] .canvas-node-bypassed')).to_have_count(1)
+        await page.keyboard.press("Control+b")
 
         # Inner editor owns selection, gestures, clipboard and history while open.
         await page.locator('.react-flow__node[data-id="region"] .canvas-node-head strong').dblclick()
@@ -234,8 +235,8 @@ async def check(browser, theme, width):
         assert restored["groups"] == before_inner["groups"]
         await inner_title.click()
         await page.keyboard.press("Control+m")
-        await expect(dialog.locator('.canvas-node-disabled')).to_have_count(2)
-        await expect(dialog.locator('.react-flow__node[data-id="root"] .canvas-node-disabled')).to_have_count(0)
+        await expect(dialog.locator('.canvas-node-disabled')).to_have_count(3)
+        await expect(dialog.locator('.react-flow__node[data-id="root"] .canvas-node-disabled')).to_have_count(1)
         await page.keyboard.press("Control+m")
         payload = await clipboard_copy(page)
         assert all(n["type"] != "input.iteration-item" for n in json.loads(payload)["nodes"])

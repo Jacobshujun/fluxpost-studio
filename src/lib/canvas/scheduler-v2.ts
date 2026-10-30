@@ -538,7 +538,6 @@ function applyCanvasParameterValue(node: CanvasNode, parameter: CanvasSchedulePa
     return {
       ...node,
       config: { ...node.config, ...canvasSourceVideoSnapshotConfig(value) },
-      executionMode: "enabled",
     };
   }
   if (field.adapter === "content-pool-input") {
@@ -555,13 +554,12 @@ function applyCanvasParameterValue(node: CanvasNode, parameter: CanvasSchedulePa
         snapshotImageUrls: [...value.imageUrls],
         snapshotVideoUrls: [...value.videoUrls],
       },
-      executionMode: "enabled",
     };
   }
   if (field.adapter === "video-input") {
     const video = normalizeCanvasVideoSnapshot(value);
     if (!video) throw new Error(`${parameter.name}: expected a frozen video snapshot.`);
-    return { ...node, config: canvasVideoLoaderConfig([video], video.id), executionMode: "enabled" };
+    return { ...node, config: canvasVideoLoaderConfig([video], video.id) };
   }
   if (typeof value === "object") throw new Error(`${parameter.name}: scalar binding received a structured value.`);
   return { ...node, config: { ...node.config, [field.key]: value } };
