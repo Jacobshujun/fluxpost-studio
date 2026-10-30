@@ -20,5 +20,5 @@ Keep execution status compact when users resize Canvas nodes, prioritizing usabl
 - [x] Running, failed, waiting and idle states remain compact/readable; actual text/image/video output panels retain expansion.
 - [x] Browser checks demonstrate a pre-fix failure and cover mouse resizing, saved dimensions, narrow/large nodes, three themes and desktop/mobile sizes using isolated fixtures.
 - [x] Focused checks, source lint, types, build and baseline run; unchanged blockers are reported, not suppressed.
-- [ ] Commit verified changes, archive task evidence and activate clean HEAD on LAN 3001 with exact identity and HTTP smoke.
+- [x] Commit verified changes, archive task evidence and activate clean HEAD on LAN 3001 with exact identity and HTTP smoke.
 

@@ -20,4 +20,6 @@ No component, execution, graph, database, media or API changes. Canvas zoom is u
 
 ## LAN Delivery
 
-User authorized automatic commit and `npm run local:lan`. Only clean primary-worktree HEAD may be activated. Verify exact runtime/receipt/slot SHA, `0.0.0.0:3001`, loopback and LAN HTTP smoke, and `/canvas`. Record activation evidence after the command; no remote push/deployment or data migration.
+`npm run local:lan` activated clean repair commit `4f375dcf6998f4f169d947b482568f8f7ee6c412` in `.next-local-a`. Runtime/receipt/slot SHA agreed, `0.0.0.0:3001` was verified, and loopback plus `http://10.182.144.38:3001` HTTP smoke and `/canvas` returned expected results. No push, remote deployment or data migration.
+
+After the metadata-only finish commits, activate final clean HEAD through the same launcher. Final identity/slot/binding/HTTP receipts are kept in ignored `test-artifacts/canvas-compact-status-final-lan.log`, `test-artifacts/canvas-compact-status-final-identity.log` and `.fluxpost-local-candidate.json`; no code changes follow verification.

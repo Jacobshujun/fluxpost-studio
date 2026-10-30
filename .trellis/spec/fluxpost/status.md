@@ -4,11 +4,11 @@ Last updated: 2026-10-30
 
 ## One-Line Status
 
-Canvas status sizing and text viewport checks pass; LAN update authorized. Active SHA: `/api/version` and launcher receipt. OSS unchanged.
+LAN includes compact Canvas statuses and the text viewport fix. Active SHA: `/api/version` and launcher receipt. OSS unchanged.
 
 ## Current Focus
 
-- Canvas status stays compact on resize; 60 state and six viewport browser cases pass. LAN delivery authorized. Evidence: canvas-compact-status task.
+- Canvas status stays compact on resize; 60 state and six viewport cases pass. LAN smoke passed. Evidence: archived canvas-compact-status task.
 - Wonder Image existing-media reuse was accepted on LAN `ec0cd9f`; real Yike/model acceptance is pending.
 - Generated library retired: 22,255 index assets and three tables removed without a cleanup backup. Ordinary assets remain: 2,301; nonempty collections: 24; memberships: 2,230; labels: 5,302.
 - Qwen `0b775c7` included in authorized LAN release; Gemini live testing paused.
