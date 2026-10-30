@@ -1,14 +1,15 @@
 # FluxPost Current Status
 
-Last updated: 2026-10-28
+Last updated: 2026-10-30
 
 ## One-Line Status
 
-Local LAN 3001 uses OSS on ec0cd9f, including Wonder media reuse 63925fb. Build/identity/LAN HTTP/Canvas checks passed; media migration unchanged.
+Canvas text editing preserves the user's viewport; offline/build and six browser cases pass. Automatic commit and LAN activation are authorized; media migration is unchanged.
 
 ## Current Focus
 
-- Wonder Image existing-media reuse is active on LAN `ec0cd9f` after explicit restart authorization; offline/build and LAN smoke checks passed. Real Yike/model acceptance is pending.
+- Canvas text viewport repair separates inline selection from explicit node location; text saving and manual viewport controls pass six three-theme 1440/390 cases plus nine inspector regressions. LAN activation follows verified clean commits.
+- Wonder Image existing-media reuse was accepted on LAN `ec0cd9f`; real Yike/model acceptance is pending.
 - Generated library retired: 22,255 index assets and three tables removed without a cleanup backup. Ordinary assets remain: 2,301; nonempty collections: 24; memberships: 2,230; labels: 5,302.
 - Qwen `0b775c7` included in authorized LAN release; Gemini live testing paused.
 

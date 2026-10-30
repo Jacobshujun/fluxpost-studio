@@ -251,6 +251,7 @@ type CanvasNodeInteraction = {
   onConfigChange: (nodeId: string, key: string, value: CanvasEditableConfigValue) => void;
   onConfigPatch: (nodeId: string, patch: CanvasNode["config"]) => void;
   onExecutionModeChange: (nodeId: string, mode: CanvasNodeExecutionMode) => void;
+  /** Select an inline editor's node without changing the viewport. */
   onNodeFocus: (nodeId: string) => void;
   onPreview: (preview: NonNullable<PreviewState>) => void;
   onSubtitleEdit: (node: CanvasNode, nodeRun: CanvasNodeRun) => void;
@@ -483,14 +484,17 @@ export default function CanvasPage() {
     const selectedNode = selectedNodes.at(-1);
     if (selectedNode) setSelectedNodeId(selectedNode.id);
   }, []);
-  const focusCanvasNode = useCallback((nodeId: string) => {
+  const selectCanvasNode = useCallback((nodeId: string) => {
     setSelectedNodeId(nodeId);
     setSelectedGroupId(undefined);
     setNodes((current) => current.map((entry) => ({ ...entry, selected: entry.id === nodeId })));
     setMobilePalette(false);
+  }, []);
+  const focusCanvasNode = useCallback((nodeId: string) => {
+    selectCanvasNode(nodeId);
     const target = nodesRef.current.find((node) => node.id === nodeId);
     if (target) void reactFlowRef.current?.fitView({ nodes: [target], padding: 0.8, duration: 260 });
-  }, []);
+  }, [selectCanvasNode]);
   const nodeInteraction = useMemo<CanvasNodeInteraction>(() => ({
     getComposeSources: (nodeId) => resolveComposeEditorSources(currentGraph(nodesRef.current, edgesRef.current, viewportRef.current, groupsRef.current), nodeId, new Map([...latestSuccessfulNodeRuns].map(([id, entry]) => [id, entry.nodeRun]))),
     activeRun,
@@ -504,11 +508,11 @@ export default function CanvasPage() {
     onConfigChange: updateNodeConfig,
     onConfigPatch: updateNodeConfigPatch,
     onExecutionModeChange: updateNodeExecutionMode,
-    onNodeFocus: focusCanvasNode,
+    onNodeFocus: selectCanvasNode,
     onPreview: setPreview,
     onSubtitleEdit: (node, nodeRun) => setSubtitleEditor({ nodeId: node.id, nodeRunId: nodeRun.id }),
     onIterationEdit: setIterationEditorId,
-  }), [activeRun, activeWorkflow?.id, activeWorkflow?.revision, displayingExplicitRun, focusCanvasNode, isMobile, latestNodeRuns, latestSuccessfulNodeRuns, updateNodeConfig, updateNodeConfigPatch, updateNodeExecutionMode]);
+  }), [activeRun, activeWorkflow?.id, activeWorkflow?.revision, displayingExplicitRun, selectCanvasNode, isMobile, latestNodeRuns, latestSuccessfulNodeRuns, updateNodeConfig, updateNodeConfigPatch, updateNodeExecutionMode]);
 
   useEffect(() => {
     const query = window.matchMedia("(max-width: 820px)");

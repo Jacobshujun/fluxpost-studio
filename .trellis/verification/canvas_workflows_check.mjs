@@ -1340,6 +1340,48 @@ assert.ok(!page.includes("setConfirmation"), "canvas runs must not retain confir
 assert.ok(!page.includes("width={1600}"), "image preview must not impose a fixed 4:3 intrinsic width");
 assert.ok(!page.includes("height={1200}"), "image preview must not impose a fixed 4:3 intrinsic height");
 assert.ok(!page.includes("style={{ top:"), "canvas handles must be positioned by their port rows, not node-level pixel offsets");
+// Execute the actual editor-focus callbacks, not a duplicate selection implementation.
+{
+  const ast = ts.createSourceFile("canvas-page.tsx", page, ts.ScriptTarget.Latest, true, ts.ScriptKind.TSX);
+  const declarations = [];
+  const visit = (node) => {
+    if (ts.isVariableDeclaration(node) && ts.isIdentifier(node.name) && ["selectCanvasNode", "focusCanvasNode"].includes(node.name.text)) {
+      declarations.push(`const ${node.getText(ast)};`);
+    }
+    ts.forEachChild(node, visit);
+  };
+  visit(ast);
+  const focusHandler = page.match(/onNodeFocus:\s*(\w+),/)[1];
+  const output = ts.transpileModule(declarations.join("\n"), {
+    compilerOptions: { module: ts.ModuleKind.None, target: ts.ScriptTarget.ES2022 },
+  }).outputText;
+  const originalNodes = [{ id: "text-a", selected: false }, { id: "text-b", selected: true }];
+  let selectedNodes = originalNodes;
+  let selectedId, selectedGroup = "group", mobilePalette = true;
+  const navigations = [];
+  const scope = {
+    useCallback: (callback) => callback,
+    setSelectedNodeId: (id) => { selectedId = id; },
+    setSelectedGroupId: (id) => { selectedGroup = id; },
+    setNodes: (update) => { selectedNodes = update(selectedNodes); },
+    setMobilePalette: (value) => { mobilePalette = value; },
+    nodesRef: { current: originalNodes },
+    reactFlowRef: { current: { fitView: (options) => { navigations.push(options); } } },
+  };
+  const callbacks = Function(...Object.keys(scope), `${output}\nreturn { edit: ${focusHandler}, locate: focusCanvasNode };`)(...Object.values(scope));
+  for (const id of ["text-a", "text-a", "text-b"]) {
+    callbacks.edit(id);
+    assert.equal(selectedId, id);
+    assert.equal(selectedGroup, undefined);
+    assert.equal(mobilePalette, false);
+    assert.deepEqual(selectedNodes.filter((node) => node.selected).map((node) => node.id), [id]);
+    assert.equal(navigations.length, 0, "inline editing must select without reframing the user's viewport");
+  }
+  assert.equal(originalNodes[0].selected, false, "selection must not mutate previous state");
+  callbacks.locate("text-a");
+  assert.equal(navigations.length, 1, "explicit node navigation must retain fitView");
+  assert.equal(navigations[0].nodes[0].id, "text-a");
+}
 const latestAttempts = compileFunction(page, "latestAttempts");
 const markActiveCanvasEdges = compileFunction(page, "markActiveCanvasEdges");
 const viewportDetailFunctions = compileFunctions(
