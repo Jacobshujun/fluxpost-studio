@@ -573,3 +573,36 @@ Split inline selection from explicit fitView navigation. Regression fails before
 ### Next Steps
 
 - None - task complete
+
+
+## Session 76: Compact execution status in resized Canvas nodes
+
+**Date**: 2026-10-30
+**Task**: Compact execution status in resized Canvas nodes
+**Branch**: `local`
+
+### Summary
+
+Shared CSS keeps status content-sized and real previews expandable without compressing diagnostics. Pre-fix browser measured 204px card/29px header; 60 node/state cases and six viewport regressions pass across three themes at desktop/mobile widths. Source lint/types/build/config/HTTP/SQLite pass; full baseline retains the existing 17 data-script lint errors. Authorized LAN activation verified; metadata-only finish HEAD is promoted through the clean-HEAD launcher. See archived canvas-compact-status verification.
+
+### Main Changes
+
+(Add details)
+
+### Git Commits
+
+| Hash | Message |
+|------|---------|
+| `4f375dc` | (see git log) |
+
+### Testing
+
+- [OK] (Add test results)
+
+### Status
+
+[OK] **Completed**
+
+### Next Steps
+
+- None - task complete
