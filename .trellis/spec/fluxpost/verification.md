@@ -21,7 +21,7 @@ node --env-file=.env.local .trellis/verification/unified_library_postgres_benchm
 
 ## Current Automated Checks
 
-- Canvas inline text focus: baseline `canvas_workflows_check.mjs` executes the real selection/navigation callbacks and forbids editor-triggered `fitView` while retaining explicit node location. `python .trellis/verification/canvas_text_viewport_browser_check.py` verifies viewport stability during click/focus/type/paste/caret/node switching, saved text, and manual pan/zoom/fit in three themes at 1440/390. Use worker-disabled loopback `BROWSER_BASE_URL`, never 3001; all APIs are intercepted.
+- Canvas text viewport: `canvas_workflows_check.mjs` covers non-navigating editor focus. `canvas_text_viewport_browser_check.py` tests editing/saving and manual view controls in three themes at 1440/390; intercepted APIs, worker-disabled loopback `BROWSER_BASE_URL`, never 3001.
 
 - Library colors: baseline real Sharp/SQLite/import/job checks, opt-in TEMP PostgreSQL and intercepted three-theme browser commands: `library_colors.md`.
 

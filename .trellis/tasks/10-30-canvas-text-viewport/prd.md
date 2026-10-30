@@ -17,7 +17,7 @@ Keep the user's Canvas position and zoom unchanged while editing inline text.
 - [x] Selection/inspector and saved text still update; manual pan/zoom/fit and explicit node location still work.
 - [x] Deterministic regression checks pass, with a pre-fix failure demonstrated; mocked desktop/mobile browser checks cover all three themes without runtime writes or provider calls.
 - [x] Run the documented baseline and separately verify remaining gates if an unchanged blocker prevents completion.
-- [ ] Commit verified changes, activate clean HEAD with `npm run local:lan`, and confirm exact-SHA identity, LAN binding and HTTP smoke.
+- [x] Commit verified changes, activate clean HEAD with `npm run local:lan`, and confirm exact-SHA identity, LAN binding and HTTP smoke.
 
 ## Scope
 

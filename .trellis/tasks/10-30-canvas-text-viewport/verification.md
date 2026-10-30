@@ -20,4 +20,6 @@ Date: 2026-10-30
 
 ## Authorized LAN Delivery
 
-User explicitly requested automatic commit and LAN update. Use only `npm run local:lan` from the clean primary worktree; verify exact `/api/version` identity, `.fluxpost-local-candidate.json` and slot marker agreement, `0.0.0.0:3001`, LAN HTTP smoke and `/canvas`. Activation results are recorded after the release command. No push or remote production deployment is authorized.
+User explicitly requested automatic commit and LAN update. `npm run local:lan` activated clean repair commit `ab78c70a3f1b41fcbbc835870ad46306afda52f2` in `.next-local-a`. Exact `/api/version`, launcher receipt and slot SHA agree; listener is `0.0.0.0:3001`. Loopback and `http://10.182.144.38:3001` HTTP smoke passed, and both `/canvas` routes returned 200. No push, remote deployment or data migration.
+
+Final metadata-only commits are promoted through the same clean-HEAD launcher, with final identity/slot/binding/HTTP results kept in the ignored `test-artifacts/canvas-text-viewport-final-lan.log` and launcher receipt. No code changes follow verification.

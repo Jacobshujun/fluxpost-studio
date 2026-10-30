@@ -4,11 +4,11 @@ Last updated: 2026-10-30
 
 ## One-Line Status
 
-Canvas text editing preserves the user's viewport; offline/build and six browser cases pass. Automatic commit and LAN activation are authorized; media migration is unchanged.
+LAN includes the Canvas text viewport repair; checks pass. Active SHA: `/api/version` and launcher receipt. OSS and media migration unchanged.
 
 ## Current Focus
 
-- Canvas text viewport repair separates inline selection from explicit node location; text saving and manual viewport controls pass six three-theme 1440/390 cases plus nine inspector regressions. LAN activation follows verified clean commits.
+- Canvas text editing preserves position/zoom. Six 1440/390 browser and nine inspector cases pass; LAN smoke/identity passed. Evidence: archived canvas-text-viewport task.
 - Wonder Image existing-media reuse was accepted on LAN `ec0cd9f`; real Yike/model acceptance is pending.
 - Generated library retired: 22,255 index assets and three tables removed without a cleanup backup. Ordinary assets remain: 2,301; nonempty collections: 24; memberships: 2,230; labels: 5,302.
 - Qwen `0b775c7` included in authorized LAN release; Gemini live testing paused.
