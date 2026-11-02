@@ -65,7 +65,8 @@ Do not deploy a dirty worktree, branch name, abbreviated SHA, local runtime rows
   portrait images visible at 1440x900, and badge/tools geometry is verified for
   image and video tiles. Full baseline (0 lint errors/16 warnings), 45
   three-theme layout cases, video/series/scrollbar/interaction checks and two
-  performance runs pass. Logs: `test-artifacts/review-ratio-*.log`.
+  performance runs pass. Committed `0428b64` and activated on LAN; `/review`
+  returns 200 on loopback and LAN. Logs: `test-artifacts/review-ratio-*.log`.
 
 - 2026-11-02 Review desk usability: exact-tree baseline (153 logged steps, 0 lint errors,
   16 existing warnings, types/build/config sync/HTTP smoke on 45678/SQLite),
