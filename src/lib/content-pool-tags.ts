@@ -1,7 +1,34 @@
+import type { ContentPoolTagColor } from "./types";
+
 export const CONTENT_POOL_CUSTOM_TAG_LIMIT = 20;
 export const CONTENT_POOL_CUSTOM_TAG_LENGTH_LIMIT = 40;
+export const contentPoolTagColorValues = ["mint", "cyan", "amber", "rose", "violet", "blue", "lime", "slate"] as const;
+export const contentPoolTagColorHex: Record<ContentPoolTagColor, string> = {
+  mint: "#36d399",
+  cyan: "#22d3ee",
+  amber: "#f4c55d",
+  rose: "#ff566a",
+  violet: "#a78bfa",
+  blue: "#60a5fa",
+  lime: "#a3e635",
+  slate: "#94a3b8",
+};
 
 export class ContentPoolTagValidationError extends Error {}
+
+export function contentPoolTagColor(key: string): ContentPoolTagColor {
+  let hash = 0;
+  for (const character of key) hash = (hash * 31 + (character.codePointAt(0) || 0)) >>> 0;
+  return contentPoolTagColorValues[hash % contentPoolTagColorValues.length];
+}
+
+export function normalizeContentPoolTagColor(value: unknown): ContentPoolTagColor | undefined {
+  if (typeof value !== "string") return undefined;
+  const normalized = value.trim().toLocaleLowerCase();
+  return contentPoolTagColorValues.includes(normalized as (typeof contentPoolTagColorValues)[number])
+    ? (normalized as ContentPoolTagColor)
+    : undefined;
+}
 
 export function normalizeContentPoolCustomTags(value: unknown, limit = CONTENT_POOL_CUSTOM_TAG_LIMIT) {
   if (value === undefined) return [];

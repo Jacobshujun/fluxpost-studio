@@ -11,6 +11,8 @@ export async function GET(request: Request) {
     const searchParams = new URL(request.url).searchParams;
     const filter: Partial<ContentPoolSelectionFilter> = {
       projectId: searchParams.get("projectId") || undefined,
+      collectionId: searchParams.get("collectionId") || undefined,
+      includeDescendants: searchParams.get("descendants") !== "0",
       query: searchParams.get("q") || "",
       platforms: searchParams.getAll("platform") as Platform[],
       statuses: searchParams.getAll("status") as SourceUsageStatus[],
@@ -23,7 +25,7 @@ export async function GET(request: Request) {
     const itemId = searchParams.get("itemId")?.trim();
     if (itemId) {
       const item = (await resolveContentPoolSelection({}, account)).find((candidate) => candidate.id === itemId);
-      return NextResponse.json({ items: item ? [item] : [], projects: [], total: item ? 1 : 0 });
+      return NextResponse.json({ items: item ? [item] : [], projects: [], collections: [], total: item ? 1 : 0 });
     }
     const page = await listContentPoolSelection(
       filter,

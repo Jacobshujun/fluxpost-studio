@@ -1,6 +1,7 @@
 import { NextResponse } from "next/server";
 import { compactError, recordExecutionLog } from "@/lib/activity-log";
 import { ingestCrawlItems } from "@/lib/content-pool";
+import { requireContentPoolCollectionWriteTarget } from "@/lib/content-pool-collections";
 import { getContentSafetyPolicy, normalizeContentSafetyPolicySnapshot } from "@/lib/content-safety-policy";
 import { filterUnsafeSourceItems } from "@/lib/source-safety";
 import { markItemsAsSkippedTagging, tagSourceItems } from "@/lib/source-tagging";
@@ -15,6 +16,7 @@ export const runtime = "nodejs";
 type CrawlJobRequest = Partial<CrawlInput> & {
   enableVideoTranscription?: boolean;
   skipTagging?: boolean;
+  collectionId?: string;
 };
 
 export async function GET(request: Request) {
@@ -35,6 +37,8 @@ export async function POST(request: Request) {
     const account = await requireWorkspaceAccount(request);
     const body = (await request.json()) as CrawlJobRequest;
     const input = parseCrawlInput(body);
+    const collectionId = typeof body.collectionId === "string" ? body.collectionId.trim() : "";
+    if (collectionId) await requireContentPoolCollectionWriteTarget(account, collectionId);
     const contentSafetyPolicy = normalizeContentSafetyPolicySnapshot(await getContentSafetyPolicy());
     await recordExecutionLog({
       scope: "crawl/jobs",
@@ -105,7 +109,7 @@ export async function POST(request: Request) {
           taggedVisual: taggedVisualCount,
         },
       });
-      const project = await ingestCrawlItems(input.query, items, account);
+      const project = await ingestCrawlItems(input.query, items, account, { collectionId: collectionId || undefined });
       items = items.slice(0, input.targetCount);
       const updated = await saveJob({
         ...job,
@@ -139,7 +143,7 @@ export async function POST(request: Request) {
         items: isMissingTikHubKey ? makeDemoSourceItems(input.platform, input.targetCount) : [],
         updatedAt: new Date().toISOString(),
       }, account);
-      const project = isMissingTikHubKey ? await ingestCrawlItems(input.query, updated.items, account) : undefined;
+      const project = isMissingTikHubKey ? await ingestCrawlItems(input.query, updated.items, account, { collectionId: collectionId || undefined }) : undefined;
       await recordExecutionLog({
         scope: "crawl/jobs",
         action: isMissingTikHubKey ? "采集降级为演示数据" : "采集任务失败",

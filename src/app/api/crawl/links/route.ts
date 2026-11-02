@@ -1,6 +1,7 @@
 import { NextResponse } from "next/server";
 import { compactError, recordExecutionLog } from "@/lib/activity-log";
 import { getContentSafetyPolicy, normalizeContentSafetyPolicySnapshot } from "@/lib/content-safety-policy";
+import { requireContentPoolCollectionWriteTarget } from "@/lib/content-pool-collections";
 import { importSourceLinks } from "@/lib/source-link-import";
 import { isWorkspaceSignInError, requireWorkspaceAccount } from "@/lib/workspace-accounts";
 import type { SourceLinkPlatform } from "@/lib/types";
@@ -18,10 +19,13 @@ export async function POST(request: Request) {
       cookie?: string;
       videoFrameOriginalReference?: boolean;
       enableVideoTranscription?: boolean;
+      collectionId?: string;
     };
     const input = parseLinkImportInput(body);
+    const collectionId = typeof body.collectionId === "string" ? body.collectionId.trim() : "";
+    if (collectionId) await requireContentPoolCollectionWriteTarget(account, collectionId);
     const contentSafetyPolicy = normalizeContentSafetyPolicySnapshot(await getContentSafetyPolicy());
-    const result = await importSourceLinks({ ...input, owner: account, contentSafetyPolicy });
+    const result = await importSourceLinks({ ...input, collectionId: collectionId || undefined, owner: account, contentSafetyPolicy });
     return NextResponse.json(result);
   } catch (error) {
     await recordExecutionLog({

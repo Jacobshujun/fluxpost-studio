@@ -129,7 +129,7 @@ assertContains(linkImportSource, /tagSourceItems\(safetyResult\.items\)/, "Link 
 assertContains(linkImportSource, /owner\?:\s*WorkspaceAccessActor/, "Link import must accept workspace owner context.");
 assertContains(linkImportSource, /enableVideoTranscription\?:\s*boolean/, "Link import must accept the video transcription switch.");
 assertContains(linkImportSource, /enableVideoTranscription:\s*input\.enableVideoTranscription === true/, "Link import must forward explicit video transcription opt-in.");
-assertContains(linkImportSource, /ingestCrawlItems\(input\.query,\s*taggedItems,\s*input\.owner\)/, "Link import must persist through the owner-scoped content-pool ingest boundary.");
+assertContains(linkImportSource, /ingestCrawlItems\(input\.query,\s*taggedItems,\s*input\.owner,\s*\{ collectionId: input\.collectionId \}\)/, "Link import must persist through the owner-scoped content-pool ingest boundary.");
 assertContains(linkRouteSource, /importSourceLinks/, "Link import API route must delegate to source-link-import domain logic.");
 assertContains(linkRouteSource, /enableVideoTranscription\?:\s*boolean/, "Link import API route must accept the video transcription switch.");
 assertContains(linkRouteSource, /enableVideoTranscription:\s*body\.enableVideoTranscription === true/, "Link import API route must default video transcription off.");

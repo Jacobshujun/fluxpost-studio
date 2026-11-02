@@ -55,6 +55,9 @@ Do not deploy a dirty worktree, branch name, abbreviated SHA, local runtime rows
 
 ## Recent Verification
 
+- 2026-11-02 Content-pool libraries: SQLite, browser, types, lint, build and
+  baseline pass; PostgreSQL review remains.
+
 - 2026-11-02 Review gallery drag regression: the image fieldset disables only
   under the media lock, and regenerate joins up/down/delete as disabled during
   drag. Headed Chrome real-mouse drag, the 45-case three-theme suite and the

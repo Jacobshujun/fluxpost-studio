@@ -1,4 +1,7 @@
 import type {
+  ContentPoolCollection,
+  ContentPoolCollectionMembership,
+  ContentPoolSelectionCollection,
   ContentPoolSelectionFilter,
   ContentPoolSelectionItem,
   ContentPoolSelectionPage,
@@ -24,6 +27,8 @@ type ContentPoolSelectionCursor = {
 export function normalizeContentPoolSelectionFilter(input: Partial<ContentPoolSelectionFilter> = {}): ContentPoolSelectionFilter {
   return {
     projectId: cleanString(input.projectId) || undefined,
+    collectionId: cleanString(input.collectionId) || undefined,
+    includeDescendants: input.includeDescendants !== false,
     query: cleanString(input.query),
     platforms: uniqueValues(input.platforms),
     statuses: uniqueValues(input.statuses),
@@ -66,6 +71,7 @@ export function paginateContentPoolSelection(
   sort: ContentPoolSelectionSort,
   cursor?: string,
   requestedLimit = CONTENT_POOL_SELECTION_PAGE_LIMIT,
+  collections: ContentPoolSelectionCollection[] = [],
 ): ContentPoolSelectionPage {
   const limit = Math.min(CONTENT_POOL_SELECTION_MAX_LIMIT, Math.max(1, Math.trunc(requestedLimit) || CONTENT_POOL_SELECTION_PAGE_LIMIT));
   const decoded = cursor ? decodeContentPoolSelectionCursor(cursor) : undefined;
@@ -77,11 +83,70 @@ export function paginateContentPoolSelection(
   return {
     items: pageItems,
     projects,
+    collections,
     total: items.length,
     nextCursor: last && start + pageItems.length < items.length
       ? encodeContentPoolSelectionCursor({ sort, projectId: last.projectId, itemId: last.id })
       : undefined,
   };
+}
+
+export function contentPoolSelectionCollections(collections: ContentPoolCollection[]): ContentPoolSelectionCollection[] {
+  return collections
+    .map((collection) => ({
+      id: collection.id,
+      name: collection.name,
+      parentId: collection.parentId,
+      relativePath: collection.relativePath || collection.name,
+    }))
+    .sort((left, right) => left.relativePath.localeCompare(right.relativePath, "zh-CN") || left.id.localeCompare(right.id));
+}
+
+export function contentPoolCollectionDescendantIds(
+  collections: Array<Pick<ContentPoolCollection, "id" | "parentId">>,
+  rootId: string,
+): string[] {
+  const childrenByParent = new Map<string, string[]>();
+  for (const collection of collections) {
+    if (!collection.parentId) continue;
+    const children = childrenByParent.get(collection.parentId) || [];
+    children.push(collection.id);
+    childrenByParent.set(collection.parentId, children);
+  }
+  const descendants: string[] = [];
+  const seen = new Set<string>([rootId]);
+  const queue = [...(childrenByParent.get(rootId) || [])];
+  while (queue.length) {
+    const current = queue.shift() as string;
+    if (seen.has(current)) continue;
+    seen.add(current);
+    descendants.push(current);
+    queue.push(...(childrenByParent.get(current) || []));
+  }
+  return descendants;
+}
+
+export function filterProjectsByCollection(
+  projects: ContentProject[],
+  memberships: ContentPoolCollectionMembership[],
+  collectionIds: Set<string>,
+) {
+  if (!collectionIds.size) return [];
+  const selected = memberships.filter((membership) => collectionIds.has(membership.collectionId));
+  const ownedKeys = new Set(selected.map((membership) => contentPoolMembershipKey(membership.ownerUserId, membership.itemId)));
+  const itemIds = new Set(selected.map((membership) => membership.itemId));
+  return projects
+    .map((project) => {
+      const items = project.items.filter((item) => item.ownerUserId
+        ? ownedKeys.has(contentPoolMembershipKey(item.ownerUserId, item.id))
+        : itemIds.has(item.id));
+      return items.length === project.items.length ? project : { ...project, items };
+    })
+    .filter((project) => project.items.length > 0);
+}
+
+export function contentPoolMembershipKey(ownerUserId: string | undefined, itemId: string) {
+  return `${ownerUserId || ""}\u0000${itemId}`;
 }
 
 export function contentPoolSelectionProjects(projects: ContentProject[]): ContentPoolSelectionProject[] {

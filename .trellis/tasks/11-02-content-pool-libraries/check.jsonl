@@ -1,0 +1,5 @@
+{"file": ".trellis/spec/fluxpost/rules.md", "reason": "Quality rules, context budgets, and the no-fallback/no-silent-swallow constraints the check pass must enforce."}
+{"file": ".trellis/spec/fluxpost/verification.md", "reason": "Exact baseline commands and deterministic check conventions."}
+{"file": ".trellis/spec/frontend/quality-guidelines.md", "reason": "Frontend quality bar for responsive layout, accessibility, and UI checks."}
+{"file": ".trellis/spec/fluxpost/architecture_rules.md", "reason": "Boundary and persistence rules to verify the implementation against."}
+{"file": ".trellis/spec/fluxpost/pitfalls.md", "reason": "Known traps to target during the check pass."}

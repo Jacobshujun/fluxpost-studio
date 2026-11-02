@@ -35,13 +35,20 @@ assert.match(selectionSource, /projectId[\s\S]+itemId/, "stable item ordering mu
 assert.match(selectionSource, /encodeContentPoolSelectionCursor/);
 assert.match(selectionSource, /decodeContentPoolSelectionCursor/);
 assert.match(selectionSource, /export function freezeContentPoolSelectionItem/);
+assert.match(selectionSource, /collectionId:\s*cleanString\(input\.collectionId\)/, "selection filter must normalize collection ids");
+assert.match(selectionSource, /includeDescendants:\s*input\.includeDescendants !== false/, "selection filter must default to including descendants");
+assert.match(selectionSource, /export function contentPoolCollectionDescendantIds/, "descendant traversal must be shared");
+assert.match(selectionSource, /export function filterProjectsByCollection/, "collection item filtering must be shared");
 assert.doesNotMatch(selectionSource, /\braw\b/, "compact selection snapshots must never expose source raw payloads");
 
 assert.match(routeSource, /requireWorkspaceAccount\(request\)/, "the selection route must be authenticated");
 assert.match(routeSource, /listContentPoolSelection/);
+assert.match(routeSource, /searchParams\.get\("collectionId"\)/, "the selection route must parse collection filters");
+assert.match(routeSource, /descendants/, "the selection route must parse the descendants toggle");
 assert.match(routeSource, /searchParams\.getAll\("contentTag"\)/);
 assert.match(routeSource, /searchParams\.getAll\("customTag"\)/);
 assert.match(contentPoolSource, /filterWorkspaceOwnedRecords\(pool\.projects[\s\S]+account\)/, "selection reads must remain owner-scoped");
+assert.match(contentPoolSource, /scopeContentPoolProjectsByCollection/, "selection domain must scope projects by collection");
 assert.doesNotMatch(schedulerSource, /batchUpdateSourceItemStatus|updateSourceItem/, "scheduler preflight and launch must not mutate content-pool status");
 
 assert.match(canvasTypes, /CanvasScheduleParameterType[\s\S]+"content-pool"/);
@@ -59,6 +66,9 @@ assert.match(pageSource, /function ContentPoolSelectionBrowser/);
 assert.match(pageSource, /\/api\/content-pool\/selection/);
 assert.match(pageSource, /ContentPoolCustomTagPicker/, "Canvas should reuse the shared custom-tag picker");
 assert.match(pageSource, /search\.append\("customTag", value\)/, "Canvas should send custom-tag filters to the selection API");
+assert.match(pageSource, /search\.set\("collectionId", filter\.collectionId\)/, "Canvas should send collection filters to the selection API");
+assert.match(pageSource, /search\.set\("descendants", "0"\)/, "Canvas should send the descendants toggle to the selection API");
+assert.match(pageSource, /包含子集/, "Canvas should expose the include-descendants toggle");
 assert.match(pageSource, /function ContentPoolScheduleSourceEditor/);
 assert.doesNotMatch(
   pageSource.match(/function ContentPoolSnapshotPicker[\s\S]+?\n}\n/)?.[0] || "",
@@ -124,6 +134,25 @@ try {
   const manual = selection.freezeContentPoolSelectionItemsByIds(sorted, ["item-2", "item-1", "item-2", "missing"], "2026-08-26T00:00:00.000Z");
   assert.deepEqual(manual.values.map((entry) => entry.id), ["item-2", "item-1"], "manual snapshots must preserve the first selected-id order and deduplicate ids");
   assert.deepEqual(manual.missingIds, ["missing"], "missing or unauthorized manual ids must remain explicit");
+
+  assert.deepEqual(
+    selection.contentPoolCollectionDescendantIds([
+      { id: "root" },
+      { id: "child", parentId: "root" },
+      { id: "grand", parentId: "child" },
+      { id: "other" },
+    ], "root"),
+    ["child", "grand"],
+    "collection descendant traversal must be recursive and cycle-safe",
+  );
+  const memberships = [
+    { collectionId: "root", ownerUserId: "owner-a", itemId: "item-1" },
+    { collectionId: "child", ownerUserId: "owner-a", itemId: "item-2" },
+  ];
+  const directOnly = selection.filterProjectsByCollection(projects, memberships, new Set(["root"]));
+  assert.deepEqual(directOnly.flatMap((entry) => entry.items.map((item) => item.id)), ["item-1"], "direct collection filtering must exclude child memberships");
+  const withChildren = selection.filterProjectsByCollection(projects, memberships, new Set(["root", "child"]));
+  assert.deepEqual(new Set(withChildren.flatMap((entry) => entry.items.map((item) => item.id))), new Set(["item-1", "item-2"]), "descendant filtering must include child memberships");
 } finally {
   rmSync(temp, { recursive: true, force: true });
 }

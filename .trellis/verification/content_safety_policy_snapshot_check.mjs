@@ -52,7 +52,7 @@ assertContains(
 
 assertContains(
   crawlLinksRoute,
-  /const contentSafetyPolicy = normalizeContentSafetyPolicySnapshot\(await getContentSafetyPolicy\(\)\);[\s\S]*importSourceLinks\(\{ \.\.\.input, owner: account, contentSafetyPolicy \}\)/,
+  /const contentSafetyPolicy = normalizeContentSafetyPolicySnapshot\(await getContentSafetyPolicy\(\)\);[\s\S]*importSourceLinks\(\{ \.\.\.input,[^}]*owner: account,[^}]*contentSafetyPolicy \}\)/,
   "Synchronous link imports must read policy once and pass it into domain logic.",
 );
 assertContains(

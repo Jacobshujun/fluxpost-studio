@@ -1,0 +1,6 @@
+{"file": ".trellis/spec/fluxpost/architecture_rules.md", "reason": "Module boundaries, content-pool persistence ownership, thin API routes, row-level writes, and owner-scoping rules that this feature must preserve."}
+{"file": ".trellis/spec/fluxpost/unified_library.md", "reason": "Reference behavior for nested collections, descendant inclusion, delete/reparent, and batch membership semantics that the content-pool library model mirrors."}
+{"file": ".trellis/spec/frontend/component-guidelines.md", "reason": "Page-local component, dialog, and styling conventions for the new content-pool sidebar and dialogs."}
+{"file": ".trellis/spec/frontend/state-management.md", "reason": "Client state and URL-query patterns used by the content desk and Canvas pickers."}
+{"file": ".trellis/spec/frontend/type-safety.md", "reason": "Strict typing rules for the new snapshot, collection, membership, and tag contracts."}
+{"file": ".trellis/spec/fluxpost/pitfalls.md", "reason": "Known integration traps for content-pool writes, Canvas filters, and verification."}

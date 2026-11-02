@@ -6,6 +6,9 @@ import path from "node:path";
 import { Pool, type PoolClient } from "pg";
 import type { CanvasDirectorySnapshot, CanvasNodeRun, CanvasRun, CanvasRunQueueItem, CanvasSchedule, CanvasSubtitlePreset, CanvasSubtitleRevision, CanvasSubtitleTranscriptCacheEntry, CanvasSubtitleWaveform, CanvasWorkflow } from "./canvas/types";
 import type {
+  ContentPoolCollection,
+  ContentPoolCollectionMembership,
+  ContentPoolTag,
   ContentProject,
   CopyLibraryEntry,
   CrawlJob,
@@ -1087,6 +1090,278 @@ export async function mutateSourceProjectsInDb(sourceItemId: string, mutate: (pr
       if (next) db.prepare("UPDATE content_projects SET updated_at=?, data_json=? WHERE id=?").run(next.updatedAt, toJson(next), next.id);
     }
   });
+}
+
+export async function mutateAllSourceProjectsInDb(mutate: (project: ContentProject) => ContentProject | undefined) {
+  await ensureDatabaseReady();
+  if (getDatabaseBackend() === "postgres") {
+    const client = await getPostgresPool().connect();
+    let changed = 0;
+    try {
+      await client.query("BEGIN");
+      const rows = await client.query<JsonRow>("SELECT data_json FROM content_projects ORDER BY id FOR UPDATE");
+      for (const row of rows.rows) {
+        const next = mutate(fromJson<ContentProject>(row.data_json));
+        if (!next) continue;
+        await client.query("UPDATE content_projects SET updated_at=$1, data_json=$2::jsonb WHERE id=$3", [next.updatedAt, toJson(next), next.id]);
+        changed += 1;
+      }
+      await client.query("COMMIT");
+    } catch (error) {
+      await client.query("ROLLBACK");
+      throw error;
+    } finally { client.release(); }
+    return changed;
+  }
+  const db = getSqliteDatabase();
+  let changed = 0;
+  runSqliteTransaction(db, () => {
+    const rows = db.prepare("SELECT data_json FROM content_projects ORDER BY id").all() as JsonRow[];
+    for (const row of rows) {
+      const next = mutate(fromJson<ContentProject>(row.data_json));
+      if (!next) continue;
+      db.prepare("UPDATE content_projects SET updated_at=?, data_json=? WHERE id=?").run(next.updatedAt, toJson(next), next.id);
+      changed += 1;
+    }
+  });
+  return changed;
+}
+
+export async function listContentPoolCollectionsFromDb(): Promise<ContentPoolCollection[]> {
+  await ensureDatabaseReady();
+  const rows = getDatabaseBackend() === "postgres"
+    ? (await getPostgresPool().query<JsonRow>("SELECT data_json FROM content_pool_collections ORDER BY created_at ASC, id ASC")).rows
+    : getSqliteDatabase().prepare("SELECT data_json FROM content_pool_collections ORDER BY created_at ASC, id ASC").all() as JsonRow[];
+  return rows.map((row) => fromContentPoolCollectionJson(row.data_json));
+}
+
+export async function saveContentPoolCollectionToDb(collection: ContentPoolCollection) {
+  await ensureDatabaseReady();
+  const stored = {
+    id: collection.id,
+    ownerUserId: collection.ownerUserId,
+    ownerDisplayName: collection.ownerDisplayName,
+    name: collection.name,
+    parentId: collection.parentId,
+    relativePath: collection.relativePath,
+    createdAt: collection.createdAt,
+    updatedAt: collection.updatedAt,
+  };
+  const values = [stored.id, stored.ownerUserId, stored.parentId || null, stored.name, stored.relativePath || null, stored.createdAt, stored.updatedAt, toJson(stored)];
+  if (getDatabaseBackend() === "postgres") {
+    await getPostgresPool().query(
+      `INSERT INTO content_pool_collections (id, owner_user_id, parent_id, name, relative_path, created_at, updated_at, data_json)
+       VALUES ($1,$2,$3,$4,$5,$6,$7,$8::jsonb)
+       ON CONFLICT(id) DO UPDATE SET owner_user_id=excluded.owner_user_id, parent_id=excluded.parent_id, name=excluded.name,
+       relative_path=excluded.relative_path, updated_at=excluded.updated_at, data_json=excluded.data_json`,
+      values,
+    );
+    return collection;
+  }
+  getSqliteDatabase().prepare(
+    `INSERT INTO content_pool_collections (id, owner_user_id, parent_id, name, relative_path, created_at, updated_at, data_json)
+     VALUES (?,?,?,?,?,?,?,?)
+     ON CONFLICT(id) DO UPDATE SET owner_user_id=excluded.owner_user_id, parent_id=excluded.parent_id, name=excluded.name,
+     relative_path=excluded.relative_path, updated_at=excluded.updated_at, data_json=excluded.data_json`,
+  ).run(...values);
+  return collection;
+}
+
+function fromContentPoolCollectionJson(value: unknown): ContentPoolCollection {
+  const stored = fromJson<Omit<ContentPoolCollection, "itemCount" | "canEdit">>(value);
+  return { ...stored, itemCount: 0, canEdit: false };
+}
+
+export async function deleteContentPoolCollectionFromDb(collectionId: string) {
+  await ensureDatabaseReady();
+  if (getDatabaseBackend() === "postgres") {
+    const client = await getPostgresPool().connect();
+    try {
+      await client.query("BEGIN");
+      const row = await client.query<{ parent_id?: string | null }>("SELECT parent_id FROM content_pool_collections WHERE id=$1 FOR UPDATE", [collectionId]);
+      if (!row.rows[0]) throw new Error("Content-pool collection not found.");
+      await client.query("UPDATE content_pool_collections SET parent_id=$1 WHERE parent_id=$2", [row.rows[0].parent_id || null, collectionId]);
+      await client.query("DELETE FROM content_pool_collections WHERE id=$1", [collectionId]);
+      await client.query("COMMIT");
+    } catch (error) {
+      await client.query("ROLLBACK");
+      throw error;
+    } finally { client.release(); }
+    return;
+  }
+  const db = getSqliteDatabase();
+  runSqliteTransaction(db, () => {
+    const row = db.prepare("SELECT parent_id FROM content_pool_collections WHERE id=?").get(collectionId) as { parent_id?: string | null } | undefined;
+    if (!row) throw new Error("Content-pool collection not found.");
+    db.prepare("UPDATE content_pool_collections SET parent_id=? WHERE parent_id=?").run(row.parent_id || null, collectionId);
+    db.prepare("DELETE FROM content_pool_collections WHERE id=?").run(collectionId);
+  });
+}
+
+export async function listContentPoolCollectionItemsFromDb(): Promise<ContentPoolCollectionMembership[]> {
+  await ensureDatabaseReady();
+  const rows = getDatabaseBackend() === "postgres"
+    ? (await getPostgresPool().query<{ collection_id: string; owner_user_id: string; item_id: string }>(
+      `SELECT i.collection_id, c.owner_user_id, i.item_id
+       FROM content_pool_collection_items i
+       INNER JOIN content_pool_collections c ON c.id = i.collection_id
+       ORDER BY i.created_at ASC, i.item_id ASC`,
+    )).rows
+    : getSqliteDatabase().prepare(
+      `SELECT i.collection_id, c.owner_user_id, i.item_id
+       FROM content_pool_collection_items i
+       INNER JOIN content_pool_collections c ON c.id = i.collection_id
+       ORDER BY i.created_at ASC, i.item_id ASC`,
+    ).all() as Array<{ collection_id: string; owner_user_id: string; item_id: string }>;
+  return rows.map((row) => ({ collectionId: row.collection_id, ownerUserId: row.owner_user_id, itemId: row.item_id }));
+}
+
+export async function applyContentPoolCollectionMembershipChangesFromDb(input: {
+  additions: Array<{ collectionId: string; itemId: string }>;
+  removals: Array<{ collectionId: string; itemId: string }>;
+  clearItems: Array<{ ownerUserId: string; itemId: string }>;
+  createdAt?: string;
+}) {
+  await ensureDatabaseReady();
+  const createdAt = input.createdAt || new Date().toISOString();
+  const additions = uniqueMembershipChanges(input.additions);
+  const removals = uniqueMembershipChanges(input.removals);
+  const clearItems = Array.from(new Map(input.clearItems.map((item) => [`${item.ownerUserId}\u0000${item.itemId}`, item])).values());
+  if (getDatabaseBackend() === "postgres") {
+    const client = await getPostgresPool().connect();
+    try {
+      await client.query("BEGIN");
+      for (const item of removals) await client.query(
+        "DELETE FROM content_pool_collection_items WHERE collection_id=$1 AND item_id=$2",
+        [item.collectionId, item.itemId],
+      );
+      for (const item of clearItems) await client.query(
+        `DELETE FROM content_pool_collection_items WHERE item_id=$1
+         AND collection_id IN (SELECT id FROM content_pool_collections WHERE owner_user_id=$2)`,
+        [item.itemId, item.ownerUserId],
+      );
+      for (const item of additions) await client.query(
+        "INSERT INTO content_pool_collection_items (collection_id, item_id, created_at) VALUES ($1,$2,$3) ON CONFLICT DO NOTHING",
+        [item.collectionId, item.itemId, createdAt],
+      );
+      await client.query("COMMIT");
+    } catch (error) {
+      await client.query("ROLLBACK");
+      throw error;
+    } finally { client.release(); }
+    return;
+  }
+  const db = getSqliteDatabase();
+  runSqliteTransaction(db, () => {
+    const remove = db.prepare("DELETE FROM content_pool_collection_items WHERE collection_id=? AND item_id=?");
+    removals.forEach((item) => remove.run(item.collectionId, item.itemId));
+    const clear = db.prepare(
+      `DELETE FROM content_pool_collection_items WHERE item_id=?
+       AND collection_id IN (SELECT id FROM content_pool_collections WHERE owner_user_id=?)`,
+    );
+    clearItems.forEach((item) => clear.run(item.itemId, item.ownerUserId));
+    const insert = db.prepare("INSERT INTO content_pool_collection_items (collection_id, item_id, created_at) VALUES (?,?,?) ON CONFLICT DO NOTHING");
+    additions.forEach((item) => insert.run(item.collectionId, item.itemId, createdAt));
+  });
+}
+
+export async function deleteContentPoolCollectionItemsForItemsFromDb(items: Array<{ ownerUserId?: string; itemId: string }>) {
+  await ensureDatabaseReady();
+  const unique = Array.from(new Map(items.map((item) => [`${item.ownerUserId || ""}\u0000${item.itemId}`, item])).values());
+  if (!unique.length) return;
+  if (getDatabaseBackend() === "postgres") {
+    const client = await getPostgresPool().connect();
+    try {
+      await client.query("BEGIN");
+      for (const item of unique) {
+        if (item.ownerUserId) await client.query(
+          `DELETE FROM content_pool_collection_items WHERE item_id=$1
+           AND collection_id IN (SELECT id FROM content_pool_collections WHERE owner_user_id=$2)`,
+          [item.itemId, item.ownerUserId],
+        );
+        else await client.query("DELETE FROM content_pool_collection_items WHERE item_id=$1", [item.itemId]);
+      }
+      await client.query("COMMIT");
+    } catch (error) {
+      await client.query("ROLLBACK");
+      throw error;
+    } finally { client.release(); }
+    return;
+  }
+  const db = getSqliteDatabase();
+  runSqliteTransaction(db, () => {
+    const scoped = db.prepare(
+      `DELETE FROM content_pool_collection_items WHERE item_id=?
+       AND collection_id IN (SELECT id FROM content_pool_collections WHERE owner_user_id=?)`,
+    );
+    const bare = db.prepare("DELETE FROM content_pool_collection_items WHERE item_id=?");
+    unique.forEach((item) => item.ownerUserId ? scoped.run(item.itemId, item.ownerUserId) : bare.run(item.itemId));
+  });
+}
+
+export async function listContentPoolTagsFromDb(): Promise<ContentPoolTag[]> {
+  await ensureDatabaseReady();
+  const rows = getDatabaseBackend() === "postgres"
+    ? (await getPostgresPool().query<ContentPoolTagRow>(
+      "SELECT id, owner_user_id, tag_key, label, color, created_at, updated_at FROM content_pool_tags ORDER BY updated_at ASC, id ASC",
+    )).rows
+    : getSqliteDatabase().prepare(
+      "SELECT id, owner_user_id, tag_key, label, color, created_at, updated_at FROM content_pool_tags ORDER BY updated_at ASC, id ASC",
+    ).all() as ContentPoolTagRow[];
+  return rows.map((row) => ({
+    id: row.id,
+    ownerUserId: row.owner_user_id,
+    tagKey: row.tag_key,
+    label: row.label,
+    color: row.color === "mint" || row.color === "cyan" || row.color === "amber" || row.color === "rose" || row.color === "violet" || row.color === "blue" || row.color === "lime" || row.color === "slate" ? row.color : "",
+    createdAt: row.created_at,
+    updatedAt: row.updated_at,
+  }));
+}
+
+type ContentPoolTagRow = {
+  id: string;
+  owner_user_id: string;
+  tag_key: string;
+  label: string;
+  color: string;
+  created_at: string;
+  updated_at: string;
+};
+
+export async function saveContentPoolTagToDb(tag: ContentPoolTag) {
+  await ensureDatabaseReady();
+  const values = [tag.id, tag.ownerUserId, tag.tagKey, tag.label, tag.color || "", tag.createdAt, tag.updatedAt, toJson(tag)];
+  if (getDatabaseBackend() === "postgres") {
+    await getPostgresPool().query(
+      `INSERT INTO content_pool_tags (id, owner_user_id, tag_key, label, color, created_at, updated_at, data_json)
+       VALUES ($1,$2,$3,$4,$5,$6,$7,$8::jsonb)
+       ON CONFLICT(owner_user_id, tag_key) DO UPDATE SET label=excluded.label, color=excluded.color,
+       updated_at=excluded.updated_at, data_json=excluded.data_json`,
+      values,
+    );
+    return tag;
+  }
+  getSqliteDatabase().prepare(
+    `INSERT INTO content_pool_tags (id, owner_user_id, tag_key, label, color, created_at, updated_at, data_json)
+     VALUES (?,?,?,?,?,?,?,?)
+     ON CONFLICT(owner_user_id, tag_key) DO UPDATE SET label=excluded.label, color=excluded.color,
+     updated_at=excluded.updated_at, data_json=excluded.data_json`,
+  ).run(...values);
+  return tag;
+}
+
+export async function deleteContentPoolTagFromDb(ownerUserId: string, tagKey: string) {
+  await ensureDatabaseReady();
+  if (getDatabaseBackend() === "postgres") {
+    await getPostgresPool().query("DELETE FROM content_pool_tags WHERE owner_user_id=$1 AND tag_key=$2", [ownerUserId, tagKey]);
+    return;
+  }
+  getSqliteDatabase().prepare("DELETE FROM content_pool_tags WHERE owner_user_id=? AND tag_key=?").run(ownerUserId, tagKey);
+}
+
+function uniqueMembershipChanges(items: Array<{ collectionId: string; itemId: string }>) {
+  return Array.from(new Map(items.map((item) => [`${item.collectionId}\u0000${item.itemId}`, item])).values());
 }
 
 export async function writeGeneratedPostsToDb(posts: GeneratedPost[]) {
@@ -3947,6 +4222,41 @@ function createSqliteSchema(db: SqliteDatabase) {
     );
     CREATE INDEX IF NOT EXISTS idx_content_projects_updated_at ON content_projects(updated_at DESC);
 
+    CREATE TABLE IF NOT EXISTS content_pool_collections (
+      id TEXT PRIMARY KEY,
+      owner_user_id TEXT NOT NULL,
+      parent_id TEXT,
+      name TEXT NOT NULL,
+      relative_path TEXT,
+      created_at TEXT NOT NULL,
+      updated_at TEXT NOT NULL,
+      data_json TEXT NOT NULL
+    );
+    CREATE INDEX IF NOT EXISTS idx_content_pool_collections_owner_parent ON content_pool_collections(owner_user_id, parent_id, name);
+    CREATE INDEX IF NOT EXISTS idx_content_pool_collections_owner_path ON content_pool_collections(owner_user_id, relative_path);
+
+    CREATE TABLE IF NOT EXISTS content_pool_collection_items (
+      collection_id TEXT NOT NULL,
+      item_id TEXT NOT NULL,
+      created_at TEXT NOT NULL,
+      PRIMARY KEY(collection_id, item_id),
+      FOREIGN KEY(collection_id) REFERENCES content_pool_collections(id) ON DELETE CASCADE
+    );
+    CREATE INDEX IF NOT EXISTS idx_content_pool_collection_items_item ON content_pool_collection_items(item_id, collection_id);
+
+    CREATE TABLE IF NOT EXISTS content_pool_tags (
+      id TEXT PRIMARY KEY,
+      owner_user_id TEXT NOT NULL,
+      tag_key TEXT NOT NULL,
+      label TEXT NOT NULL,
+      color TEXT NOT NULL DEFAULT '',
+      created_at TEXT NOT NULL,
+      updated_at TEXT NOT NULL,
+      data_json TEXT NOT NULL,
+      UNIQUE(owner_user_id, tag_key)
+    );
+    CREATE INDEX IF NOT EXISTS idx_content_pool_tags_owner_key ON content_pool_tags(owner_user_id, tag_key);
+
     CREATE TABLE IF NOT EXISTS generated_posts (
       id TEXT PRIMARY KEY,
       source_item_id TEXT NOT NULL,
@@ -4456,6 +4766,40 @@ const postgresSchemaSql = `
     data_json JSONB NOT NULL
   );
   CREATE INDEX IF NOT EXISTS idx_content_projects_updated_at ON content_projects(updated_at DESC);
+
+  CREATE TABLE IF NOT EXISTS content_pool_collections (
+    id TEXT PRIMARY KEY,
+    owner_user_id TEXT NOT NULL,
+    parent_id TEXT,
+    name TEXT NOT NULL,
+    relative_path TEXT,
+    created_at TIMESTAMPTZ NOT NULL,
+    updated_at TIMESTAMPTZ NOT NULL,
+    data_json JSONB NOT NULL
+  );
+  CREATE INDEX IF NOT EXISTS idx_content_pool_collections_owner_parent ON content_pool_collections(owner_user_id, parent_id, name);
+  CREATE INDEX IF NOT EXISTS idx_content_pool_collections_owner_path ON content_pool_collections(owner_user_id, relative_path);
+
+  CREATE TABLE IF NOT EXISTS content_pool_collection_items (
+    collection_id TEXT NOT NULL REFERENCES content_pool_collections(id) ON DELETE CASCADE,
+    item_id TEXT NOT NULL,
+    created_at TIMESTAMPTZ NOT NULL,
+    PRIMARY KEY(collection_id, item_id)
+  );
+  CREATE INDEX IF NOT EXISTS idx_content_pool_collection_items_item ON content_pool_collection_items(item_id, collection_id);
+
+  CREATE TABLE IF NOT EXISTS content_pool_tags (
+    id TEXT PRIMARY KEY,
+    owner_user_id TEXT NOT NULL,
+    tag_key TEXT NOT NULL,
+    label TEXT NOT NULL,
+    color TEXT NOT NULL DEFAULT '',
+    created_at TIMESTAMPTZ NOT NULL,
+    updated_at TIMESTAMPTZ NOT NULL,
+    data_json JSONB NOT NULL,
+    UNIQUE(owner_user_id, tag_key)
+  );
+  CREATE INDEX IF NOT EXISTS idx_content_pool_tags_owner_key ON content_pool_tags(owner_user_id, tag_key);
 
   CREATE TABLE IF NOT EXISTS generated_posts (
     id TEXT PRIMARY KEY,

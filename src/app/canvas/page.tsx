@@ -4087,7 +4087,7 @@ function ContentPoolSelectionBrowser({ filter, selectedIds, mode, onFilterChange
   onSelectionChange?: (ids: string[]) => void;
   onPreviewImage: (url: string, index: number) => void;
 }) {
-  const [page, setPage] = useState<ContentPoolSelectionPage>({ items: [], projects: [], total: 0 });
+  const [page, setPage] = useState<ContentPoolSelectionPage>({ items: [], projects: [], collections: [], total: 0 });
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState("");
   const loadSequence = useRef(0);
@@ -4143,6 +4143,8 @@ function ContentPoolSelectionBrowser({ filter, selectedIds, mode, onFilterChange
     <div className="canvas-content-pool-primary-filters">
       <label className="canvas-picker-search"><Search /><input value={filter.query} onChange={(event) => onFilterChange({ ...filter, query: event.target.value })} placeholder="搜索标题、正文、作者或来源 ID" /></label>
       <label><span>项目</span><select value={filter.projectId || ""} onChange={(event) => onFilterChange({ ...filter, projectId: event.target.value || undefined })}><option value="">全部项目</option>{page.projects.map((project) => <option key={project.id} value={project.id}>{project.name} ({project.totalItems})</option>)}</select></label>
+      <label><span>内容库</span><select value={filter.collectionId || ""} onChange={(event) => onFilterChange({ ...filter, collectionId: event.target.value || undefined })}><option value="">全部库</option>{page.collections.map((collection) => <option key={collection.id} value={collection.id}>{collection.relativePath}</option>)}</select></label>
+      {filter.collectionId ? <label className="canvas-content-pool-local"><input type="checkbox" checked={filter.includeDescendants} onChange={(event) => onFilterChange({ ...filter, includeDescendants: event.target.checked })} /><span>包含子集</span></label> : null}
       <label><span>排序</span><select value={filter.sort} onChange={(event) => onFilterChange({ ...filter, sort: event.target.value as ContentPoolSelectionFilter["sort"] })}><option value="hot-desc">热度最高</option><option value="published-desc">发布时间最新</option><option value="crawled-desc">抓取时间最新</option></select></label>
     </div>
     <details className="canvas-content-pool-advanced">
@@ -6181,12 +6183,16 @@ function configStringList(value: CanvasNode["config"][string]) {
 }
 
 function emptyContentPoolSelectionFilter(): ContentPoolSelectionFilter {
-  return { query: "", platforms: [], statuses: [], mediaTypes: [], contentTags: [], customTags: [], localMediaComplete: false, sort: "hot-desc" };
+  return { query: "", platforms: [], statuses: [], mediaTypes: [], contentTags: [], customTags: [], localMediaComplete: false, includeDescendants: true, sort: "hot-desc" };
 }
 
 function contentPoolSelectionUrl(filter: ContentPoolSelectionFilter, cursor?: string, limit = 40) {
   const search = new URLSearchParams({ q: filter.query, sort: filter.sort, limit: String(limit) });
   if (filter.projectId) search.set("projectId", filter.projectId);
+  if (filter.collectionId) {
+    search.set("collectionId", filter.collectionId);
+    if (!filter.includeDescendants) search.set("descendants", "0");
+  }
   if (filter.localMediaComplete) search.set("localMedia", "complete");
   filter.platforms.forEach((value) => search.append("platform", value));
   filter.statuses.forEach((value) => search.append("status", value));

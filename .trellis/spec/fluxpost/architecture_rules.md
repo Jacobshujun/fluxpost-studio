@@ -15,6 +15,10 @@ Last updated: 2026-07-20
 - Content-pool custom tags are a separate manual layer from fixed AI `contentTagging.tags`: normalize with NFKC/trim/whitespace collapse/case-insensitive keys, cap each item at 20 labels and 40 characters per label, and treat missing legacy `customTags` as `[]`.
 - The authenticated `GET /api/content-pool/tags` and `POST /api/content-pool/tags` routes delegate to owner-scoped domain helpers. Batch add/remove changes only manual tags, processes each selected id independently, writes the content pool once when at least one item succeeds, and returns `{ items, failures }` with per-item errors.
 - Content-pool and Canvas selection filters must share `normalizeContentPoolCustomTags`/`matchesAllContentPoolCustomTags`; `contentTag` and `customTag` dimensions both use AND semantics, and ordinary search normalizes NFKC text and includes custom labels.
+- Content-pool libraries/subsets persist in `content_pool_collections` and `content_pool_collection_items`; `ContentProject` remains the source batch and item payloads stay in `content_projects.data_json`. The default library is implicit: it is the set of items with no membership rows. Never duplicate item JSON to express membership.
+- Content-pool membership writes must be row-level idempotent inserts/deletes. Deleting an item must clean its memberships; deleting a collection reparents children and never deletes items.
+- Content-pool tag colors/display preferences live in `content_pool_tags`, while item `customTags` remain the source of truth. Rename/merge/delete may update only changed `content_projects` rows in one transaction and must not touch `contentTagging.tags`.
+- Content-pool library/tag APIs and domain helpers must require workspace auth and owner scope; cross-owner membership and cross-owner collection edits are rejected even for admins.
 - Batch production persistence belongs in `src/lib/batch-production.ts`.
 - Generated post persistence belongs in `src/lib/generated-posts.ts`.
 - TOS-backed reference/vehicle library persistence and selection validation belong in `src/lib/library-assets.ts`.

@@ -182,6 +182,21 @@
       "notes": "Live provider/model behavior remains pending operator approval."
     },
     {
+      "id": "content-pool-library-management",
+      "title": "Content-pool libraries, subsets and tags",
+      "status": "ready_for_review",
+      "definition_of_done": [
+        "Users create and manage owner-scoped content libraries and nested subsets",
+        "Items use multi-collection membership with an implicit default library",
+        "Free tags support colors, rename, merge, delete and batch edits",
+        "Canvas selection filters by library and descendants"
+      ],
+      "evidence": [
+        "2026-11-02 isolated SQLite, mocked desktop/mobile, types, lint, build and full baseline passed."
+      ],
+      "notes": "Real authenticated PostgreSQL review remains; image-library data stays independent."
+    },
+    {
       "id": "media-cache-video-frames",
       "title": "Crawled media cache, video frames, and video transcription",
       "status": "ready_for_review",

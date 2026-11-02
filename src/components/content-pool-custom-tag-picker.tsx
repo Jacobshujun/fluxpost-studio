@@ -5,6 +5,8 @@ import { LoaderCircle, Plus, X } from "lucide-react";
 import {
   CONTENT_POOL_CUSTOM_TAG_LIMIT,
   contentPoolCustomTagKey,
+  contentPoolTagColor,
+  contentPoolTagColorHex,
   normalizeContentPoolCustomTags,
 } from "@/lib/content-pool-tags";
 import type { ContentPoolTagSuggestion } from "@/lib/types";
@@ -109,6 +111,7 @@ export function ContentPoolCustomTagPicker({
       <div className="content-pool-tag-picker-control" onClick={(event) => (event.currentTarget.querySelector("input") as HTMLInputElement | null)?.focus()}>
         {tags.map((label) => (
           <span className="content-pool-tag-chip" key={contentPoolCustomTagKey(label)}>
+            <i className="content-pool-tag-chip-dot" style={{ background: contentPoolTagColorHex[contentPoolTagColor(contentPoolCustomTagKey(label))] }} />
             {label}
             {onRemove && !disabled ? <button type="button" title={`删除 ${label}`} aria-label={`删除自定义标签 ${label}`} onClick={() => void onRemove(label)}><X /></button> : null}
           </span>
@@ -143,7 +146,10 @@ export function ContentPoolCustomTagPicker({
               onMouseDown={(event) => event.preventDefault()}
               onClick={() => void commit(item.label)}
             >
-              <span>{item.label}</span><small>{item.count}</small>
+              <span className="content-pool-tag-suggestion-label">
+                <i className="content-pool-tag-suggestion-dot" style={{ background: contentPoolTagColorHex[item.color] }} />
+                {item.label}
+              </span><small>{item.count}</small>
             </button>
           )) : allowCreate && draft.trim() ? (
             <button type="button" role="option" aria-selected="true" onMouseDown={(event) => event.preventDefault()} onClick={() => void commit(draft)}>

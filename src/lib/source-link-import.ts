@@ -53,6 +53,7 @@ export type SourceLinkImportInput = {
   owner?: WorkspaceAccessActor;
   contentSafetyPolicy: ContentSafetyPolicy;
   skipTagging?: boolean;
+  collectionId?: string;
 };
 
 export type SourceLinkResolveInput = {
@@ -142,7 +143,7 @@ export async function importSourceLinks(input: SourceLinkImportInput): Promise<S
     }
   }
 
-  const project = taggedItems.length ? await ingestCrawlItems(input.query, taggedItems, input.owner) : undefined;
+  const project = taggedItems.length ? await ingestCrawlItems(input.query, taggedItems, input.owner, { collectionId: input.collectionId }) : undefined;
   const summary = summarizeLinkImport(parsedLinks.length, results, taggedItems);
   await recordExecutionLog({
     scope: "crawl/links",

@@ -1,7 +1,7 @@
 "use client";
 
 import Link from "next/link";
-import { useEffect, useMemo, useState, useSyncExternalStore, type ReactNode } from "react";
+import { useCallback, useEffect, useMemo, useState, useSyncExternalStore, type ReactNode } from "react";
 import {
   BarChart3,
   Camera,
@@ -12,13 +12,12 @@ import {
   ExternalLink,
   FileText,
   Filter,
+  FolderPlus,
   Layers3,
   Loader2,
   Maximize2,
-  Minus,
   Moon,
   Play,
-  Plus,
   Radio,
   RefreshCw,
   Search,
@@ -35,17 +34,29 @@ import {
 } from "lucide-react";
 import { ContentPoolCustomTagPicker } from "@/components/content-pool-custom-tag-picker";
 import { contentPoolCustomTagKey, matchesAllContentPoolCustomTags } from "@/lib/content-pool-tags";
+import { contentPoolCollectionDescendantIds } from "@/lib/content-pool-selection";
 import { getStoredTheme, setStoredTheme, subscribeTheme, type ThemeMode } from "@/lib/theme";
 import { enumCodec, listCodec, optionalStringCodec, useUrlQueryState } from "@/lib/use-url-query-state";
 import { toRemoteImagePreviewSrc } from "@/lib/media-preview";
 import { selectBestVideoHighlightFrames } from "@/lib/video-frame-policy";
 import { mergeDownloadedAndRemoteImages } from "@/lib/media-url-filter";
+import { ContentPoolCollectionSidebar, type ContentPoolLibraryView } from "./content-pool-collection-sidebar";
+import {
+  ContentPoolBatchTagDialog,
+  ContentPoolCollectionNameDialog,
+  ContentPoolCollectionPicker,
+  ContentPoolConfirmDialog,
+} from "./content-pool-collection-dialogs";
+import { ContentPoolTagManagerDialog } from "./content-pool-tag-manager";
 import {
   contentTagOptions,
   defaultSimpleRunMediaSettings,
   visualTagOptions,
   type ConfigStatus,
+  type ContentPoolCollection,
+  type ContentPoolCollectionMembership,
   type ContentPoolTagBatchResult,
+  type ContentPoolTagSuggestion,
   type ContentProject,
   type ContentTag,
   type CrawlJob,
@@ -75,6 +86,11 @@ const crawlPlatformCodec = enumCodec(["wechat_channels", "xiaohongshu", "douyin"
 const poolStatusCodec = enumCodec(["all", "new", "analyzed", "rewritten", "approved", "published"] as const, "all");
 const poolPlatformCodec = enumCodec(["all", "wechat_channels", "xiaohongshu", "douyin", "weibo", "xiaopeng_bbs", "dongchedi", "feishu", "original"] as const, "all");
 const poolSortCodec = enumCodec(["hot_desc", "published_desc", "published_asc", "crawled_desc", "crawled_asc", "engagement_desc"] as const, "hot_desc");
+const includeDescendantsCodec = enumCodec(["1", "0"] as const, "1");
+
+type CollectionDialogState =
+  | { mode: "create"; parentId?: string; parentPath?: string }
+  | { mode: "rename"; collection: ContentPoolCollection };
 
 type LinkImportResultStatus = "imported" | "filtered" | "duplicate" | "unsupported" | "failed";
 
@@ -312,8 +328,19 @@ export default function ContentDeskPage() {
   const [poolSearch, setPoolSearch] = useUrlQueryState("poolQ", "", optionalStringCodec());
   const [poolContentTagFilters, setPoolContentTagFilters] = useUrlQueryState<ContentTag[]>("contentTag", [], listCodec() as unknown as import("@/lib/use-url-query-state").UrlQueryCodec<ContentTag[]>);
   const [poolCustomTagFilters, setPoolCustomTagFilters] = useUrlQueryState("customTag", [], listCodec());
-  const [batchTagsOpen, setBatchTagsOpen] = useState(false);
-  const [batchTagMode, setBatchTagMode] = useState<"add" | "remove">("add");
+  const [libraryParam, setLibraryParam] = useUrlQueryState("library", "all", optionalStringCodec("all"));
+  const [includeDescendantsParam, setIncludeDescendantsParam] = useUrlQueryState<"1" | "0">("descendants", "1", includeDescendantsCodec);
+  const [poolProjectFilter, setPoolProjectFilter] = useUrlQueryState("poolProject", "all", optionalStringCodec("all"));
+  const [collections, setCollections] = useState<ContentPoolCollection[]>([]);
+  const [memberships, setMemberships] = useState<ContentPoolCollectionMembership[]>([]);
+  const [poolTags, setPoolTags] = useState<ContentPoolTagSuggestion[]>([]);
+  const [libraryRailOpen, setLibraryRailOpen] = useState(false);
+  const [ingestCollectionOverride, setIngestCollectionOverride] = useState<string | null>(null);
+  const [collectionDialog, setCollectionDialog] = useState<CollectionDialogState | null>(null);
+  const [deleteCollectionTarget, setDeleteCollectionTarget] = useState<ContentPoolCollection | null>(null);
+  const [collectionPicker, setCollectionPicker] = useState<{ mode: "add" | "move"; itemIds: string[]; sourceCollectionId?: string } | null>(null);
+  const [tagManagerOpen, setTagManagerOpen] = useState(false);
+  const [batchTagDialog, setBatchTagDialog] = useState<"add" | "remove" | null>(null);
   const [batchTagFailures, setBatchTagFailures] = useState<ContentPoolTagBatchResult["failures"]>([]);
   const [simpleRuns, setSimpleRuns] = useState<SimpleRun[]>([]);
   const [workspaceSettings, setWorkspaceSettings] = useState<WorkspacePromptSettings | null>(null);
@@ -334,20 +361,94 @@ export default function ContentDeskPage() {
   const [busy, setBusy] = useState<BusyState>("load");
   const [preview, setPreview] = useState<PreviewState>(null);
 
+  const libraryView = useMemo<ContentPoolLibraryView>(() => {
+    if (libraryParam === "default") return { kind: "default" };
+    if (libraryParam !== "all" && collections.some((collection) => collection.id === libraryParam)) {
+      return { kind: "collection", id: libraryParam };
+    }
+    return { kind: "all" };
+  }, [collections, libraryParam]);
+  const includeDescendants = includeDescendantsParam !== "0";
+  const ingestCollectionId = ingestCollectionOverride ?? (libraryView.kind === "collection" ? libraryView.id : "");
+  const membershipIndex = useMemo(() => {
+    const owned = new Map<string, string[]>();
+    const bare = new Map<string, string[]>();
+    for (const membership of memberships) {
+      const key = `${membership.ownerUserId}\u0000${membership.itemId}`;
+      const ownedIds = owned.get(key) || [];
+      ownedIds.push(membership.collectionId);
+      owned.set(key, ownedIds);
+      const bareIds = bare.get(membership.itemId) || [];
+      bareIds.push(membership.collectionId);
+      bare.set(membership.itemId, bareIds);
+    }
+    return { owned, bare };
+  }, [memberships]);
+  const getItemCollectionIds = useCallback((item: NormalizedSourceItem) => {
+    const collectionIds = item.ownerUserId
+      ? membershipIndex.owned.get(`${item.ownerUserId}\u0000${item.id}`)
+      : membershipIndex.bare.get(item.id);
+    return collectionIds || [];
+  }, [membershipIndex]);
+  const libraryCollectionIds = useMemo(() => {
+    if (libraryView.kind !== "collection") return new Set<string>();
+    const ids = new Set([libraryView.id]);
+    if (includeDescendants) {
+      for (const id of contentPoolCollectionDescendantIds(collections, libraryView.id)) ids.add(id);
+    }
+    return ids;
+  }, [collections, includeDescendants, libraryView]);
+  const libraryScopedSources = useMemo(() => {
+    if (libraryView.kind === "all") return sources;
+    if (libraryView.kind === "default") return sources.filter((item) => getItemCollectionIds(item).length === 0);
+    return sources.filter((item) => getItemCollectionIds(item).some((id) => libraryCollectionIds.has(id)));
+  }, [getItemCollectionIds, libraryCollectionIds, libraryView, sources]);
+  const libraryCounts = useMemo(() => {
+    const byCollection: Record<string, number> = {};
+    let defaultCount = 0;
+    for (const item of sources) {
+      const collectionIds = Array.from(new Set(getItemCollectionIds(item)));
+      if (!collectionIds.length) {
+        defaultCount += 1;
+        continue;
+      }
+      for (const id of collectionIds) byCollection[id] = (byCollection[id] || 0) + 1;
+    }
+    return { all: sources.length, default: defaultCount, byCollection };
+  }, [getItemCollectionIds, sources]);
+  const libraryScopedStats = useMemo(() => ({
+    total: libraryScopedSources.length,
+    analyzed: libraryScopedSources.filter((item) => item.analysis).length,
+    rewritten: libraryScopedSources.filter((item) => item.poolStatus === "rewritten").length,
+  }), [libraryScopedSources]);
+  const itemProjectIds = useMemo(() => {
+    const map = new Map<string, string>();
+    for (const project of projects) {
+      for (const item of project.items) if (!map.has(item.id)) map.set(item.id, project.id);
+    }
+    return map;
+  }, [projects]);
   const visibleSources = useMemo(() => {
     const normalizedSearch = poolSearch.normalize("NFKC").trim().toLocaleLowerCase();
-    const filtered = sources.filter((item) => {
+    const filtered = libraryScopedSources.filter((item) => {
       const statusMatched = poolStatusFilter === "all" || (item.poolStatus || "new") === poolStatusFilter;
       const platformMatched = poolPlatformFilter === "all" || item.platform === poolPlatformFilter;
+      const projectMatched = poolProjectFilter === "all" || itemProjectIds.get(item.id) === poolProjectFilter;
       const contentTags = getContentTags(item);
       const contentTagsMatched = poolContentTagFilters.every((tag) => contentTags.includes(tag));
       const customTagsMatched = matchesAllContentPoolCustomTags(item.customTags, poolCustomTagFilters);
       const searchMatched = !normalizedSearch || [item.title, item.contentText, item.authorName, item.sourceId, ...(item.customTags || [])]
         .some((value) => String(value || "").normalize("NFKC").toLocaleLowerCase().includes(normalizedSearch));
-      return statusMatched && platformMatched && contentTagsMatched && customTagsMatched && searchMatched;
+      return statusMatched && platformMatched && projectMatched && contentTagsMatched && customTagsMatched && searchMatched;
     });
     return sortSources(filtered, poolSort);
-  }, [poolContentTagFilters, poolCustomTagFilters, poolPlatformFilter, poolSearch, poolSort, poolStatusFilter, sources]);
+  }, [itemProjectIds, libraryScopedSources, poolContentTagFilters, poolCustomTagFilters, poolPlatformFilter, poolProjectFilter, poolSearch, poolSort, poolStatusFilter]);
+  const libraryTitle = useMemo(() => {
+    if (libraryView.kind === "all") return "全部内容";
+    if (libraryView.kind === "default") return "默认库";
+    const collection = collections.find((item) => item.id === libraryView.id);
+    return collection?.relativePath || collection?.name || "内容库";
+  }, [collections, libraryView]);
 
   const selectedContentItems = useMemo(
     () => visibleSources.filter((item) => selectedContentItemIds.includes(item.id)),
@@ -454,18 +555,158 @@ export default function ContentDeskPage() {
       const params = new URLSearchParams();
       if (nextQuery.trim()) params.set("query", nextQuery.trim());
       const res = await fetch(`/api/content-pool?${params.toString()}`);
-      const data = (await res.json()) as { projects?: ContentProject[]; activeProject?: ContentProject; error?: string };
+      const data = (await res.json()) as {
+        projects?: ContentProject[];
+        activeProject?: ContentProject;
+        collections?: ContentPoolCollection[];
+        memberships?: ContentPoolCollectionMembership[];
+        tags?: ContentPoolTagSuggestion[];
+        error?: string;
+      };
       if (!res.ok) throw new Error(data.error || "内容池读取失败");
       const nextProject = data.activeProject || null;
-      setProjects(data.projects || []);
+      const nextProjects = data.projects || [];
+      const mergedSources = mergeContentPoolSources(nextProjects);
+      setProjects(nextProjects);
       setActiveProject(nextProject);
-      setSources(nextProject?.items || []);
+      setCollections(data.collections || []);
+      setMemberships(data.memberships || []);
+      setPoolTags(data.tags || []);
+      setSources(mergedSources);
       if (nextProject && !nextQuery.trim()) setQuery(nextProject.query);
-      setSelectedSourceId((current) => (nextProject?.items.some((item) => item.id === current) ? current : nextProject?.items[0]?.id || ""));
-      setSelectedContentItemIds((current) => current.filter((id) => nextProject?.items.some((item) => item.id === id)));
+      setSelectedSourceId((current) => (mergedSources.some((item) => item.id === current) ? current : mergedSources[0]?.id || ""));
+      setSelectedContentItemIds((current) => current.filter((id) => mergedSources.some((item) => item.id === id)));
     } catch (error) {
       setMessage(error instanceof Error ? error.message : "内容池读取失败");
     }
+  }
+
+  function selectLibraryView(view: ContentPoolLibraryView) {
+    setLibraryParam(view.kind === "all" ? "all" : view.kind === "default" ? "default" : view.id);
+    setLibraryRailOpen(false);
+    setSelectedContentItemIds([]);
+    setBatchTagFailures([]);
+    setIngestCollectionOverride(null);
+  }
+
+  function openCreateCollection(parent?: ContentPoolCollection) {
+    setCollectionDialog({ mode: "create", parentId: parent?.id, parentPath: parent?.relativePath });
+  }
+
+  function openRenameCollection(collection: ContentPoolCollection) {
+    setCollectionDialog({ mode: "rename", collection });
+  }
+
+  async function saveCollection(name: string) {
+    if (!collectionDialog) return;
+    const response = collectionDialog.mode === "rename"
+      ? await fetch(`/api/content-pool/collections/${encodeURIComponent(collectionDialog.collection.id)}`, {
+        method: "PATCH",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ name }),
+      })
+      : await fetch("/api/content-pool/collections", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ name, parentId: collectionDialog.parentId }),
+      });
+    const data = (await response.json()) as { error?: string; collection?: ContentPoolCollection };
+    if (!response.ok || !data.collection) throw new Error(data.error || "内容库保存失败");
+    const wasRename = collectionDialog.mode === "rename";
+    setCollectionDialog(null);
+    await loadContentPool(activeProject?.query || query);
+    setMessage(wasRename ? "内容库已重命名。" : "内容库已创建。");
+  }
+
+  async function deleteCollection(collection: ContentPoolCollection) {
+    const response = await fetch(`/api/content-pool/collections/${encodeURIComponent(collection.id)}`, { method: "DELETE" });
+    const data = (await response.json()) as { error?: string };
+    if (!response.ok) throw new Error(data.error || "内容库删除失败");
+    const removedIds = new Set([collection.id, ...contentPoolCollectionDescendantIds(collections, collection.id)]);
+    if (libraryView.kind === "collection" && removedIds.has(libraryView.id)) setLibraryParam("all");
+    if (ingestCollectionId && removedIds.has(ingestCollectionId)) setIngestCollectionOverride(null);
+    setSelectedContentItemIds([]);
+    setDeleteCollectionTarget(null);
+    await loadContentPool(activeProject?.query || query);
+    setMessage("内容库已删除，条目不删除。");
+  }
+
+  function openCollectionPickerForItems(mode: "add" | "move", itemIds: string[], sourceCollectionId?: string) {
+    if (!itemIds.length) {
+      setMessage("请先勾选内容池样本。");
+      return;
+    }
+    setCollectionPicker({ mode, itemIds: [...itemIds], sourceCollectionId });
+  }
+
+  function openCollectionPicker(mode: "add" | "move") {
+    openCollectionPickerForItems(
+      mode,
+      selectedContentItemIds,
+      mode === "move" && libraryView.kind === "collection" ? libraryView.id : undefined,
+    );
+  }
+
+  async function postCollectionBatch(body: Record<string, unknown>) {
+    setBusy("batch");
+    try {
+      const response = await fetch("/api/content-pool/collections/batch", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify(body),
+      });
+      const data = (await response.json()) as { error?: string; failures?: Array<{ itemId: string; error: string }> };
+      if (!response.ok) throw new Error(data.error || "内容库归属更新失败");
+      await loadContentPool(activeProject?.query || query);
+      setMessage(data.failures?.length ? `内容库归属已更新，失败 ${data.failures.length} 条。` : "内容库归属已更新。");
+      return data;
+    } finally {
+      setBusy(null);
+    }
+  }
+
+  async function submitCollectionMembership(collectionIds: string[], moveToDefault: boolean) {
+    if (!collectionPicker) return;
+    const body = moveToDefault
+      ? { action: "move_to_default", itemIds: collectionPicker.itemIds }
+      : collectionPicker.mode === "move"
+        ? {
+          action: "move_to_collection",
+          itemIds: collectionPicker.itemIds,
+          sourceCollectionId: collectionPicker.sourceCollectionId,
+          targetCollectionId: collectionIds[0],
+        }
+        : { action: "add_to_collections", itemIds: collectionPicker.itemIds, collectionIds };
+    await postCollectionBatch(body);
+    setCollectionPicker(null);
+  }
+
+  async function moveItemsToDefault(itemIds: string[]) {
+    if (!itemIds.length) {
+      setMessage("请先勾选内容池样本。");
+      return;
+    }
+    try {
+      await postCollectionBatch({ action: "move_to_default", itemIds });
+    } catch (error) {
+      setMessage(error instanceof Error ? error.message : "移回默认库失败");
+    }
+  }
+
+  function moveSelectedToDefault() {
+    return moveItemsToDefault(selectedContentItemIds);
+  }
+
+  async function submitBatchTags(labels: string[]) {
+    if (!batchTagDialog) return;
+    await updateSelectedContentItemCustomTags(batchTagDialog, labels);
+    setBatchTagDialog(null);
+  }
+
+  function applyTagFilter(label: string) {
+    setPoolCustomTagFilters((current) => current.some((item) => contentPoolCustomTagKey(item) === contentPoolCustomTagKey(label))
+      ? current
+      : [...current, label]);
   }
 
   async function loadSimpleRuns() {
@@ -606,6 +847,7 @@ export default function ContentDeskPage() {
           cookie: platform === "douyin" ? cookie : undefined,
           enableVideoTranscription: crawlEnableVideoTranscription,
           skipTagging: crawlSkipTagging,
+          collectionId: ingestCollectionId || undefined,
         }),
       });
       const data = (await res.json()) as CrawlJob & { error?: string; project?: ContentProject };
@@ -655,6 +897,7 @@ export default function ContentDeskPage() {
           videoFrameOriginalReference: linkImportVideoFrameOriginalReference,
           enableVideoTranscription: linkImportEnableVideoTranscription,
           skipTagging: linkImportSkipTagging,
+          collectionId: ingestCollectionId || undefined,
         }),
       });
       const data = (await res.json()) as LinkImportResponse;
@@ -744,6 +987,7 @@ export default function ContentDeskPage() {
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
           query,
+          collectionId: ingestCollectionId || undefined,
           item: {
             platform,
             title: manualSource.title.trim(),
@@ -838,20 +1082,21 @@ export default function ContentDeskPage() {
     }
   }
 
-  async function updateSelectedContentItemCustomTags(mode: "add" | "remove", label: string) {
+  async function updateSelectedContentItemCustomTags(mode: "add" | "remove", labels: string[]) {
     if (!selectedContentItemIds.length) throw new Error("请先勾选内容池样本。");
+    if (!labels.length) throw new Error("请先输入标签。");
     setBusy("batch");
     setBatchTagFailures([]);
     try {
       const res = await fetch("/api/content-pool/tags", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ ids: selectedContentItemIds, [mode]: [label] }),
+        body: JSON.stringify({ ids: selectedContentItemIds, [mode]: labels }),
       });
       const data = (await res.json()) as ContentPoolTagBatchResult & { error?: string };
       if (!res.ok) throw new Error(data.error || "批量标签更新失败");
       setBatchTagFailures(data.failures);
-      await loadContentPool(query);
+      await loadContentPool(activeProject?.query || query);
       setMessage(`标签操作完成：已更新 ${data.items.length} 条，失败 ${data.failures.length} 条。`);
     } catch (error) {
       const message = error instanceof Error ? error.message : "批量标签更新失败";
@@ -949,7 +1194,6 @@ export default function ContentDeskPage() {
 
   function clearContentItemSelection() {
     setSelectedContentItemIds([]);
-    setBatchTagsOpen(false);
     setBatchTagFailures([]);
   }
 
@@ -957,6 +1201,7 @@ export default function ContentDeskPage() {
     setPoolSearch("");
     setPoolStatusFilter("all");
     setPoolPlatformFilter("all");
+    setPoolProjectFilter("all");
     setPoolContentTagFilters([]);
     setPoolCustomTagFilters([]);
   }
@@ -1018,6 +1263,15 @@ export default function ContentDeskPage() {
               内容审查台
             </Link>
             <button
+              className="soft-button content-desk-library-toggle inline-flex h-10 items-center justify-center gap-2 px-3 text-xs font-black"
+              type="button"
+              aria-expanded={libraryRailOpen}
+              onClick={() => setLibraryRailOpen((current) => !current)}
+            >
+              <Layers3 className="h-4 w-4" />
+              内容库
+            </button>
+            <button
               className="soft-button inline-flex h-10 items-center justify-center gap-2 px-3 text-xs font-black"
               type="button"
               onClick={() => loadContentPool(query)}
@@ -1030,14 +1284,28 @@ export default function ContentDeskPage() {
         </header>
 
         <section className="content-desk-metrics">
-          <Metric label="内容样本" value={projectStats.total} />
+          <Metric label="内容样本" value={libraryScopedStats.total} />
           <Metric label="当前筛选" value={visibleSources.length} />
-          <Metric label="已分析" value={projectStats.analyzed} />
-          <Metric label="已仿写" value={projectStats.rewritten} />
+          <Metric label="已分析" value={libraryScopedStats.analyzed} />
+          <Metric label="已仿写" value={libraryScopedStats.rewritten} />
           <Metric label="已选择" value={selectedContentItemIds.length} />
         </section>
 
         <section className="content-desk-workspace">
+          <ContentPoolCollectionSidebar
+            collections={collections}
+            view={libraryView}
+            counts={libraryCounts}
+            tags={poolTags}
+            open={libraryRailOpen}
+            onSelectView={selectLibraryView}
+            onCreateRoot={() => openCreateCollection()}
+            onCreateChild={openCreateCollection}
+            onRename={openRenameCollection}
+            onDelete={setDeleteCollectionTarget}
+            onManageTags={() => setTagManagerOpen(true)}
+            onTagClick={applyTagFilter}
+          />
           <aside className="content-desk-pane content-desk-capture glass ops-panel thin-scrollbar">
             <PanelTitle icon={<Radio className="h-4 w-4" />} title="采集入口" />
             <div className="mt-4 grid grid-cols-2 gap-2">
@@ -1262,6 +1530,16 @@ export default function ContentDeskPage() {
               </div>
             )}
 
+            <div className="mt-3">
+              <FieldLabel label="采集到" />
+              <select className="field h-10" value={ingestCollectionId} onChange={(event) => setIngestCollectionOverride(event.target.value)}>
+                <option value="">默认库</option>
+                {collections.filter((collection) => collection.canEdit).map((collection) => (
+                  <option key={collection.id} value={collection.id}>{collection.relativePath || collection.name}</option>
+                ))}
+              </select>
+            </div>
+
             {crawlProgress ? <TaskProgressCard progress={crawlProgress} /> : null}
             {linkImportSummary ? (
               <div className="mt-4 grid grid-cols-2 gap-2">
@@ -1329,6 +1607,18 @@ export default function ContentDeskPage() {
 
           <section className="content-desk-pane content-desk-pool glass-strong ops-panel thin-scrollbar">
             <div className="content-desk-toolbar">
+              <div className="content-pool-library-scope">
+                <div className="min-w-0">
+                  <strong>{libraryTitle}</strong>
+                  <small>{libraryScopedSources.length} 条内容</small>
+                </div>
+                {libraryView.kind === "collection" ? (
+                  <label className="content-pool-descendants-toggle">
+                    <input type="checkbox" checked={includeDescendants} onChange={(event) => setIncludeDescendantsParam(event.target.checked ? "1" : "0")} />
+                    包含子集
+                  </label>
+                ) : null}
+              </div>
               <label className="content-pool-search-field">
                 <Search className="h-4 w-4" />
                 <input value={poolSearch} onChange={(event) => setPoolSearch(event.target.value)} placeholder="搜索标题、正文、作者、来源 ID 或自定义标签" aria-label="搜索内容池" />
@@ -1347,6 +1637,15 @@ export default function ContentDeskPage() {
                   <select className="field h-10" value={poolPlatformFilter} onChange={(event) => setPoolPlatformFilter(event.target.value as PoolPlatformFilter)}>
                     {poolPlatformOptions.map((option) => (
                       <option key={option.value} value={option.value}>{option.label}</option>
+                    ))}
+                  </select>
+                </label>
+                <label className="review-filter-field">
+                  <span><Layers3 className="h-3.5 w-3.5" />来源项目</span>
+                  <select className="field h-10" value={poolProjectFilter} onChange={(event) => setPoolProjectFilter(event.target.value)}>
+                    <option value="all">全部项目</option>
+                    {projects.map((project) => (
+                      <option key={project.id} value={project.id}>{project.query} · {project.totalItems}</option>
                     ))}
                   </select>
                 </label>
@@ -1374,7 +1673,7 @@ export default function ContentDeskPage() {
                   </div>
                 </div>
               </details>
-              {(poolSearch || poolStatusFilter !== "all" || poolPlatformFilter !== "all" || poolContentTagFilters.length || poolCustomTagFilters.length) ? <button className="content-pool-clear-filters" type="button" onClick={clearPoolFilters}><X className="h-3.5 w-3.5" />清除筛选</button> : null}
+              {(poolSearch || poolStatusFilter !== "all" || poolPlatformFilter !== "all" || poolProjectFilter !== "all" || poolContentTagFilters.length || poolCustomTagFilters.length) ? <button className="content-pool-clear-filters" type="button" onClick={clearPoolFilters}><X className="h-3.5 w-3.5" />清除筛选</button> : null}
               <BatchActionBar
                 selectedCount={selectedContentItemIds.length}
                 totalCount={visibleSources.length}
@@ -1384,24 +1683,20 @@ export default function ContentDeskPage() {
                 onClear={clearContentItemSelection}
                 actions={[
                   { label: "补全本地素材", onClick: () => cacheSelectedContentItemMedia() },
-                  { label: "管理标签", onClick: () => setBatchTagsOpen((current) => !current) },
+                  { label: "加入库/子集", onClick: () => openCollectionPicker("add") },
+                  ...(libraryView.kind === "collection" ? [{ label: "移动到", onClick: () => openCollectionPicker("move") }] : []),
+                  { label: "移回默认库", onClick: moveSelectedToDefault },
+                  { label: "加标签", onClick: () => setBatchTagDialog("add") },
+                  { label: "移除标签", onClick: () => setBatchTagDialog("remove") },
                   { label: "二次创作", onClick: startPoolSecondaryCreation },
                   { label: "标记已分析", onClick: () => updateSelectedContentItemStatus("analyzed") },
                   { label: "标记已审查", onClick: () => updateSelectedContentItemStatus("approved") },
                   { label: "删除已选", danger: true, onClick: deleteSelectedContentItems },
                 ]}
               />
-              {batchTagsOpen && selectedContentItemIds.length ? <div className="content-pool-batch-tags" aria-label="批量管理自定义标签">
-                <div className="content-pool-batch-tag-head"><strong>管理 {selectedContentItemIds.length} 条内容的自定义标签</strong><button type="button" onClick={() => { setBatchTagsOpen(false); setBatchTagFailures([]); }} title="关闭批量标签" aria-label="关闭批量标签"><X /></button></div>
-                <div className="content-pool-batch-tag-modes" role="group" aria-label="标签操作">
-                  <button type="button" aria-pressed={batchTagMode === "add"} onClick={() => { setBatchTagMode("add"); setBatchTagFailures([]); }}><Plus />批量添加</button>
-                  <button type="button" aria-pressed={batchTagMode === "remove"} onClick={() => { setBatchTagMode("remove"); setBatchTagFailures([]); }}><Minus />批量删除</button>
-                </div>
-                <ContentPoolCustomTagPicker key={batchTagMode} tags={[]} placeholder={batchTagMode === "add" ? "输入或选择要添加的标签" : "输入或选择要删除的标签"} allowCreate={batchTagMode === "add"} onAdd={(label) => updateSelectedContentItemCustomTags(batchTagMode, label)} />
-                {batchTagFailures.length ? <ul className="content-pool-batch-tag-failures" aria-label="标签更新失败明细">
-                  {batchTagFailures.map((failure) => <li key={failure.itemId}><strong>{failure.itemId}</strong><span>{failure.error}</span></li>)}
-                </ul> : null}
-              </div> : null}
+              {batchTagFailures.length ? <ul className="content-pool-batch-tag-failures" aria-label="标签更新失败明细">
+                {batchTagFailures.map((failure) => <li key={failure.itemId}><strong>{failure.itemId}</strong><span>{failure.error}</span></li>)}
+              </ul> : null}
             </div>
 
             <div className="content-desk-list thin-scrollbar">
@@ -1425,6 +1720,7 @@ export default function ContentDeskPage() {
                           <p className="mt-2 line-clamp-2 text-xs leading-5 text-white/52">{item.contentText}</p>
                           <TagChipRow tags={getContentTags(item)} status={item.contentTagging?.status} compact />
                           <CustomTagChipRow tags={item.customTags || []} compact />
+                          <ContentPoolCollectionChips collections={collections.filter((collection) => getItemCollectionIds(item).includes(collection.id))} />
                           <MediaCacheMiniBadge item={item} />
                           <div className="mt-2 grid gap-1 text-[10px] text-white/42">
                             <span className="inline-flex min-w-0 items-center gap-1">
@@ -1473,6 +1769,21 @@ export default function ContentDeskPage() {
                     </div>
                   </div>
                   <TaggingOverview item={selectedSource} />
+                  <div className="content-pool-item-collections">
+                    <div className="content-pool-item-collections-head">
+                      <span><FolderPlus />所属内容库</span>
+                      <button type="button" className="soft-button" onClick={() => openCollectionPickerForItems("add", [selectedSource.id])}>加入</button>
+                    </div>
+                    <div className="content-pool-item-collection-chips">
+                      {collections.filter((collection) => getItemCollectionIds(selectedSource).includes(collection.id)).map((collection) => (
+                        <span key={collection.id}>{collection.relativePath || collection.name}</span>
+                      ))}
+                      {!getItemCollectionIds(selectedSource).length ? <span className="is-empty">默认库</span> : null}
+                    </div>
+                    {getItemCollectionIds(selectedSource).length ? (
+                      <button type="button" className="soft-button" onClick={() => void moveItemsToDefault([selectedSource.id])}>移回默认库</button>
+                    ) : null}
+                  </div>
                   <MediaCacheStatusCard
                     item={selectedSource}
                     busy={busy === "batch"}
@@ -1627,6 +1938,48 @@ export default function ContentDeskPage() {
           })
         }
       />
+      {collectionDialog ? (
+        <ContentPoolCollectionNameDialog
+          title={collectionDialog.mode === "rename" ? "重命名内容库" : "新建内容库"}
+          initial={collectionDialog.mode === "rename" ? collectionDialog.collection.name : ""}
+          parentPath={collectionDialog.mode === "create" ? collectionDialog.parentPath : undefined}
+          onClose={() => setCollectionDialog(null)}
+          onSave={saveCollection}
+        />
+      ) : null}
+      {deleteCollectionTarget ? (
+        <ContentPoolConfirmDialog
+          title="删除内容库"
+          text={`删除“${deleteCollectionTarget.name}”只移除库/子集关系，条目不删除，子集会上移。`}
+          onClose={() => setDeleteCollectionTarget(null)}
+          onConfirm={() => deleteCollection(deleteCollectionTarget)}
+        />
+      ) : null}
+      {collectionPicker ? (
+        <ContentPoolCollectionPicker
+          mode={collectionPicker.mode}
+          collections={collections}
+          selectedCount={collectionPicker.itemIds.length}
+          sourceCollectionId={collectionPicker.sourceCollectionId}
+          onClose={() => setCollectionPicker(null)}
+          onSubmit={submitCollectionMembership}
+        />
+      ) : null}
+      {batchTagDialog ? (
+        <ContentPoolBatchTagDialog
+          mode={batchTagDialog}
+          selectedCount={selectedContentItemIds.length}
+          onClose={() => setBatchTagDialog(null)}
+          onSubmit={submitBatchTags}
+        />
+      ) : null}
+      {tagManagerOpen ? (
+        <ContentPoolTagManagerDialog
+          tags={poolTags}
+          onClose={() => setTagManagerOpen(false)}
+          onChanged={async () => { await loadContentPool(activeProject?.query || query); }}
+        />
+      ) : null}
     </main>
   );
 }
@@ -1801,6 +2154,16 @@ function TagChipRow({ tags, status, compact = false }: { tags: ContentTag[]; sta
 function CustomTagChipRow({ tags, compact = false }: { tags: string[]; compact?: boolean }) {
   if (!tags.length) return null;
   return <div className={`${compact ? "mt-2" : "mt-3"} flex min-w-0 flex-wrap gap-1.5`}>{tags.slice(0, compact ? 4 : 20).map((tag) => <span key={tag} className="content-pool-custom-tag-badge">{tag}</span>)}</div>;
+}
+
+function ContentPoolCollectionChips({ collections }: { collections: ContentPoolCollection[] }) {
+  if (!collections.length) return null;
+  return (
+    <div className="content-pool-item-collection-chips mt-2">
+      {collections.slice(0, 2).map((collection) => <span key={collection.id}>{collection.name}</span>)}
+      {collections.length > 2 ? <span>+{collections.length - 2}</span> : null}
+    </div>
+  );
 }
 
 function TaggingOverview({ item }: { item: NormalizedSourceItem }) {
@@ -2406,6 +2769,19 @@ function parseOptionalNumber(value: string) {
 
 function splitLines(value: string) {
   return value.split(/\r?\n/).map((item) => item.trim()).filter(Boolean);
+}
+
+function mergeContentPoolSources(projects: ContentProject[]) {
+  const seen = new Set<string>();
+  const items: NormalizedSourceItem[] = [];
+  for (const project of [...projects].sort((left, right) => right.updatedAt.localeCompare(left.updatedAt))) {
+    for (const item of project.items) {
+      if (seen.has(item.id)) continue;
+      seen.add(item.id);
+      items.push(item);
+    }
+  }
+  return items;
 }
 
 function buildProjectStats(project: ContentProject | null) {

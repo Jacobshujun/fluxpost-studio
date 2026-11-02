@@ -583,6 +583,9 @@ export type ContentProject = {
 export type ContentPoolSnapshot = {
   projects: ContentProject[];
   activeProject?: ContentProject;
+  collections: ContentPoolCollection[];
+  memberships: ContentPoolCollectionMembership[];
+  tags: ContentPoolTagSuggestion[];
 };
 
 export type SourceMediaType = NonNullable<NormalizedSourceItem["mediaType"]>;
@@ -591,6 +594,8 @@ export type ContentPoolSelectionSort = "hot-desc" | "published-desc" | "crawled-
 
 export type ContentPoolSelectionFilter = {
   projectId?: string;
+  collectionId?: string;
+  includeDescendants: boolean;
   query: string;
   platforms: Platform[];
   statuses: SourceUsageStatus[];
@@ -630,9 +635,76 @@ export type ContentPoolSelectionItem = {
   localMediaComplete: boolean;
 };
 
+export type ContentPoolTagColor = "mint" | "cyan" | "amber" | "rose" | "violet" | "blue" | "lime" | "slate";
+
 export type ContentPoolTagSuggestion = {
+  key: string;
   label: string;
+  color: ContentPoolTagColor;
   count: number;
+};
+
+export type ContentPoolTag = {
+  id: string;
+  ownerUserId: string;
+  tagKey: string;
+  label: string;
+  color: ContentPoolTagColor | "";
+  createdAt: string;
+  updatedAt: string;
+};
+
+export type ContentPoolCollection = {
+  id: string;
+  ownerUserId: string;
+  ownerDisplayName: string;
+  name: string;
+  parentId?: string;
+  relativePath?: string;
+  itemCount: number;
+  canEdit: boolean;
+  createdAt: string;
+  updatedAt: string;
+};
+
+export type ContentPoolCollectionMembership = {
+  collectionId: string;
+  ownerUserId: string;
+  itemId: string;
+};
+
+export type ContentPoolSelectionCollection = {
+  id: string;
+  name: string;
+  parentId?: string;
+  relativePath: string;
+};
+
+export type ContentPoolCollectionBatchAction =
+  | "add_to_collections"
+  | "move_to_collection"
+  | "remove_from_collection"
+  | "move_to_default"
+  | "create_collection_and_add";
+
+export type ContentPoolCollectionBatchRequest =
+  | { action: "add_to_collections"; itemIds: string[]; collectionIds: string[] }
+  | { action: "move_to_collection"; itemIds: string[]; sourceCollectionId: string; targetCollectionId: string }
+  | { action: "remove_from_collection"; itemIds: string[]; collectionId: string }
+  | { action: "move_to_default"; itemIds: string[] }
+  | { action: "create_collection_and_add"; itemIds: string[]; name: string; parentId?: string };
+
+export type ContentPoolCollectionBatchFailure = {
+  itemId: string;
+  error: string;
+};
+
+export type ContentPoolCollectionBatchResult = {
+  action: ContentPoolCollectionBatchAction;
+  collection?: ContentPoolCollection;
+  memberships: ContentPoolCollectionMembership[];
+  unchangedItemIds: string[];
+  failures: ContentPoolCollectionBatchFailure[];
 };
 
 export type ContentPoolTagBatchFailure = {
@@ -648,6 +720,7 @@ export type ContentPoolTagBatchResult = {
 export type ContentPoolSelectionPage = {
   items: ContentPoolSelectionItem[];
   projects: ContentPoolSelectionProject[];
+  collections: ContentPoolSelectionCollection[];
   total: number;
   nextCursor?: string;
 };

@@ -1,5 +1,6 @@
 import { NextResponse } from "next/server";
 import { createSourceItem, deleteSourceItem, getContentPoolSnapshot, updateSourceItem } from "@/lib/content-pool";
+import { requireContentPoolCollectionWriteTarget } from "@/lib/content-pool-collections";
 import { isWorkspaceSignInError, requireWorkspaceAccount } from "@/lib/workspace-accounts";
 import type { NormalizedSourceItem } from "@/lib/types";
 
@@ -23,10 +24,12 @@ export async function GET(request: Request) {
 export async function POST(request: Request) {
   try {
     const account = await requireWorkspaceAccount(request);
-    const body = (await request.json()) as { query?: string; item?: NormalizedSourceItem };
+    const body = (await request.json()) as { query?: string; item?: NormalizedSourceItem; collectionId?: string };
     if (!body.query?.trim()) return NextResponse.json({ error: "Query is required" }, { status: 400 });
     if (!body.item) return NextResponse.json({ error: "Item is required" }, { status: 400 });
-    const result = await createSourceItem(body.query.trim(), body.item, account);
+    const collectionId = typeof body.collectionId === "string" ? body.collectionId.trim() : "";
+    if (collectionId) await requireContentPoolCollectionWriteTarget(account, collectionId);
+    const result = await createSourceItem(body.query.trim(), body.item, account, { collectionId: collectionId || undefined });
     return NextResponse.json(result);
   } catch (error) {
     return NextResponse.json(

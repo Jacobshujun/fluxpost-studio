@@ -1,7 +1,17 @@
 import { filterAlignedDownloadedImages, isLikelyNonContentImageUrl, normalizeContentImageUrls } from "./media-url-filter";
-import { readContentProjectsFromDb, writeContentProjectsToDb, mutateSourceProjectsInDb } from "./database";
+import {
+  applyContentPoolCollectionMembershipChangesFromDb,
+  deleteContentPoolCollectionItemsForItemsFromDb,
+  listContentPoolCollectionItemsFromDb,
+  listContentPoolCollectionsFromDb,
+  listContentPoolTagsFromDb,
+  readContentProjectsFromDb,
+  writeContentProjectsToDb,
+  mutateSourceProjectsInDb,
+} from "./database";
 import { buildMediaCacheStatus } from "./media-cache-status";
-import { applyContentPoolCustomTagChanges, ContentPoolTagValidationError, contentPoolCustomTagKey, normalizeContentPoolCustomTags } from "./content-pool-tags";
+import { applyContentPoolCustomTagChanges, ContentPoolTagValidationError, contentPoolCustomTagKey, contentPoolTagColor, normalizeContentPoolCustomTags } from "./content-pool-tags";
+import { contentPoolTagColorMap, requireContentPoolCollectionWriteTarget } from "./content-pool-collections";
 import { updateSourceContentTags, updateSourceVisualTags } from "./source-tagging";
 import { enrichSourceTimestamps } from "./source-timestamps";
 import { extractDouyinCarouselImageUrls } from "./douyin-media";
@@ -11,13 +21,17 @@ import {
   applyWorkspaceOwner,
   canAccessWorkspaceOwner,
   filterWorkspaceOwnedRecords,
+  isWorkspaceAdmin,
   scopeWorkspaceOwner,
   type WorkspaceAccessActor,
 } from "./workspace-ownership";
-import type { ContentPoolSnapshot, ContentPoolTagBatchResult, ContentPoolTagSuggestion, ContentProject, GeneratedPost, NormalizedSourceItem, Platform, SourceUsageStatus, ViralAnalysis } from "./types";
+import type { ContentPoolCollection, ContentPoolCollectionMembership, ContentPoolSnapshot, ContentPoolTagBatchResult, ContentPoolTagSuggestion, ContentPoolTag, ContentProject, GeneratedPost, NormalizedSourceItem, Platform, SourceUsageStatus, ViralAnalysis } from "./types";
 import type { ContentPoolSelectionFilter } from "./types";
 import {
+  contentPoolCollectionDescendantIds,
+  contentPoolSelectionCollections,
   contentPoolSelectionProjects,
+  filterProjectsByCollection,
   freezeContentPoolSelectionItemsByIds,
   normalizeContentPoolSelectionFilter,
   paginateContentPoolSelection,
@@ -32,13 +46,36 @@ const sourceRewriteMaxAttempts = 3;
 const sourceRewriteRetryDelayMs = 35;
 
 export async function getContentPoolSnapshot(query?: string, account?: WorkspaceAccessActor): Promise<ContentPoolSnapshot> {
-  const pool = await readPool();
+  const [pool, collections, memberships, tagRows] = await Promise.all([
+    readPool(),
+    listContentPoolCollectionsFromDb(),
+    listContentPoolCollectionItemsFromDb(),
+    listContentPoolTagsFromDb(),
+  ]);
   const projects = filterWorkspaceOwnedRecords(pool.projects.map(refreshProjectStats), account).sort((a, b) => b.updatedAt.localeCompare(a.updatedAt));
   const matchedProject = query
     ? projects.find((project) => project.normalizedQuery === normalizeProjectKey(query, project.ownerUserId) || normalizeQuery(project.query) === normalizeQuery(query))
     : undefined;
   const activeProject = matchedProject || projects[0];
-  return { projects, activeProject };
+  const visibleCollections = account
+    ? collections.filter((collection) => canAccessWorkspaceOwner(account, collection.ownerUserId))
+    : collections;
+  const visibleCollectionIds = new Set(visibleCollections.map((collection) => collection.id));
+  const presence = buildContentPoolItemPresence(projects);
+  const visibleMemberships = memberships.filter((membership) => visibleCollectionIds.has(membership.collectionId)
+    && contentPoolMembershipItemExists(presence, membership));
+  const counts = new Map<string, number>();
+  for (const membership of visibleMemberships) counts.set(membership.collectionId, (counts.get(membership.collectionId) || 0) + 1);
+  const collectionViews = visibleCollections.map((collection) => ({
+    ...collection,
+    itemCount: counts.get(collection.id) || 0,
+    canEdit: account ? canAccessWorkspaceOwner(account, collection.ownerUserId) : true,
+  }));
+  const tags = buildContentPoolTagSuggestions(projects, tagRows, {
+    limit: 100,
+    ownerUserId: account && !isWorkspaceAdmin(account) ? account.id : undefined,
+  });
+  return { projects, activeProject, collections: collectionViews, memberships: visibleMemberships, tags };
 }
 
 export async function getSourceItemsByIds(sourceItemIds: string[], account?: WorkspaceAccessActor) {
@@ -58,23 +95,12 @@ export async function listContentPoolTagSuggestions(
   account?: WorkspaceAccessActor,
   options: { query?: string; limit?: number } = {},
 ): Promise<ContentPoolTagSuggestion[]> {
-  const pool = await readPool();
-  const query = String(options.query || "").normalize("NFKC").trim().toLocaleLowerCase();
-  const counts = new Map<string, ContentPoolTagSuggestion>();
-  for (const project of filterWorkspaceOwnedRecords(pool.projects.map(refreshProjectStats), account)) {
-    for (const item of project.items) {
-      for (const label of normalizeContentPoolCustomTags(item.customTags)) {
-        if (query && !label.toLocaleLowerCase().includes(query)) continue;
-        const key = contentPoolCustomTagKey(label);
-        const current = counts.get(key);
-        counts.set(key, current ? { ...current, count: current.count + 1 } : { label, count: 1 });
-      }
-    }
-  }
-  const limit = Math.max(1, Math.min(50, Math.trunc(options.limit || 20)));
-  return [...counts.values()]
-    .sort((left, right) => right.count - left.count || left.label.localeCompare(right.label, "zh-CN"))
-    .slice(0, limit);
+  const [pool, tagRows] = await Promise.all([readPool(), listContentPoolTagsFromDb()]);
+  const projects = filterWorkspaceOwnedRecords(pool.projects.map(refreshProjectStats), account);
+  return buildContentPoolTagSuggestions(projects, tagRows, {
+    ...options,
+    ownerUserId: account && !isWorkspaceAdmin(account) ? account.id : undefined,
+  });
 }
 
 export async function batchUpdateSourceItemCustomTags(
@@ -125,20 +151,28 @@ export async function listContentPoolSelection(
   cursor?: string,
   limit?: number,
 ) {
-  const pool = await readPool();
-  const projects = filterWorkspaceOwnedRecords(pool.projects.map(refreshProjectStats), account);
+  const { projects, collections, memberships } = await contentPoolSelectionContext(account);
   const filter = normalizeContentPoolSelectionFilter(input);
-  const items = selectContentPoolItems(projects, filter);
-  return paginateContentPoolSelection(items, contentPoolSelectionProjects(projects), filter.sort, cursor, limit);
+  const scopedProjects = scopeContentPoolProjectsByCollection(projects, filter, collections, memberships);
+  const items = selectContentPoolItems(scopedProjects, filter);
+  return paginateContentPoolSelection(
+    items,
+    contentPoolSelectionProjects(projects),
+    filter.sort,
+    cursor,
+    limit,
+    contentPoolSelectionCollections(collections),
+  );
 }
 
 export async function resolveContentPoolSelection(
   input: Partial<ContentPoolSelectionFilter>,
   account?: WorkspaceAccessActor,
 ) {
-  const pool = await readPool();
-  const projects = filterWorkspaceOwnedRecords(pool.projects.map(refreshProjectStats), account);
-  return selectContentPoolItems(projects, input);
+  const { projects, collections, memberships } = await contentPoolSelectionContext(account);
+  const filter = normalizeContentPoolSelectionFilter(input);
+  const scopedProjects = scopeContentPoolProjectsByCollection(projects, filter, collections, memberships);
+  return selectContentPoolItems(scopedProjects, filter);
 }
 
 export async function freezeContentPoolItemsByIds(
@@ -153,7 +187,13 @@ export async function freezeContentPoolItemsByIds(
   return freezeContentPoolSelectionItemsByIds(all, ids, snapshotAt);
 }
 
-export async function ingestCrawlItems(query: string, items: NormalizedSourceItem[], account?: WorkspaceAccessActor) {
+export async function ingestCrawlItems(
+  query: string,
+  items: NormalizedSourceItem[],
+  account?: WorkspaceAccessActor,
+  options: { collectionId?: string } = {},
+) {
+  if (options.collectionId && account) await requireContentPoolCollectionWriteTarget(account, options.collectionId);
   const pool = await readPool();
   const now = new Date().toISOString();
   const owner = account ? scopeWorkspaceOwner(account) : undefined;
@@ -239,6 +279,13 @@ export async function ingestCrawlItems(query: string, items: NormalizedSourceIte
   project.items = Array.from(existing.values()).sort((a, b) => (b.hotScore || 0) - (a.hotScore || 0));
   Object.assign(project, refreshProjectStats(project));
   await writePool(pool);
+  if (options.collectionId) {
+    await applyContentPoolCollectionMembershipChangesFromDb({
+      additions: items.map((item) => ({ collectionId: options.collectionId as string, itemId: item.id })),
+      removals: [],
+      clearItems: [],
+    });
+  }
   return project;
 }
 
@@ -246,7 +293,8 @@ export async function createSourceItem(query: string, item: Omit<NormalizedSourc
   id?: string;
   sourceId?: string;
   poolStatus?: SourceUsageStatus;
-}, account?: WorkspaceAccessActor) {
+}, account?: WorkspaceAccessActor, options: { collectionId?: string } = {}) {
+  if (options.collectionId && account) await requireContentPoolCollectionWriteTarget(account, options.collectionId);
   const pool = await readPool();
   const now = new Date().toISOString();
   const owner = account ? scopeWorkspaceOwner(account) : undefined;
@@ -293,6 +341,13 @@ export async function createSourceItem(query: string, item: Omit<NormalizedSourc
   project.items = [nextItem, ...project.items.filter((existing) => existing.id !== enrichedItem.id)];
   Object.assign(project, refreshProjectStats({ ...project, ...owner, updatedAt: now }));
   await writePool(pool);
+  if (options.collectionId) {
+    await applyContentPoolCollectionMembershipChangesFromDb({
+      additions: [{ collectionId: options.collectionId, itemId: nextItem.id }],
+      removals: [],
+      clearItems: [],
+    });
+  }
   return { project, item: nextItem };
 }
 
@@ -360,11 +415,13 @@ export async function deleteSourceItem(sourceItemId: string, account?: Workspace
   const pool = await readPool();
   const now = new Date().toISOString();
   let deleted = false;
+  const deletedItems: Array<{ ownerUserId?: string; itemId: string }> = [];
 
   pool.projects = pool.projects.map((project) => {
     const nextItems = project.items.filter((item) => {
       if (item.id !== sourceItemId) return true;
       if (!canMutateWorkspaceContent(account, item)) return true;
+      deletedItems.push({ ownerUserId: item.ownerUserId, itemId: item.id });
       return false;
     });
     if (nextItems.length === project.items.length) return project;
@@ -374,6 +431,7 @@ export async function deleteSourceItem(sourceItemId: string, account?: Workspace
 
   if (!deleted) throw new Error("Content item not found");
   await writePool(pool);
+  await deleteContentPoolCollectionItemsForItemsFromDb(deletedItems);
 }
 
 export async function batchUpdateSourceItemStatus(sourceItemIds: string[], poolStatus: SourceUsageStatus, account?: WorkspaceAccessActor) {
@@ -415,20 +473,27 @@ export async function batchDeleteSourceItems(sourceItemIds: string[], account?: 
   const ids = makeUniqueIds(sourceItemIds);
   const selectedIds = new Set(ids);
   const foundIds = new Set<string>();
+  const deletedItems: Array<{ ownerUserId?: string; itemId: string }> = [];
   const pool = await readPool();
   const now = new Date().toISOString();
 
   pool.projects = pool.projects.map((project) => {
     const nextItems = project.items.filter((item) => {
       const shouldDelete = selectedIds.has(item.id) && canMutateWorkspaceContent(account, item);
-      if (shouldDelete) foundIds.add(item.id);
+      if (shouldDelete) {
+        foundIds.add(item.id);
+        deletedItems.push({ ownerUserId: item.ownerUserId, itemId: item.id });
+      }
       return !shouldDelete;
     });
     if (nextItems.length === project.items.length) return project;
     return refreshProjectStats({ ...project, items: nextItems, updatedAt: now });
   });
 
-  if (foundIds.size) await writePool(pool);
+  if (foundIds.size) {
+    await writePool(pool);
+    await deleteContentPoolCollectionItemsForItemsFromDb(deletedItems);
+  }
   return {
     deletedCount: foundIds.size,
     notFoundIds: ids.filter((id) => !foundIds.has(id)),
@@ -638,6 +703,80 @@ function normalizeVideoFrames(frames: NormalizedSourceItem["videoFrames"]) {
 
 function makeUniqueIds(values: string[]) {
   return Array.from(new Set(values.map((value) => value.trim()).filter(Boolean)));
+}
+
+async function contentPoolSelectionContext(account?: WorkspaceAccessActor) {
+  const [pool, collections, memberships] = await Promise.all([
+    readPool(),
+    listContentPoolCollectionsFromDb(),
+    listContentPoolCollectionItemsFromDb(),
+  ]);
+  const projects = filterWorkspaceOwnedRecords(pool.projects.map(refreshProjectStats), account);
+  const visibleCollections = account
+    ? collections.filter((collection) => canAccessWorkspaceOwner(account, collection.ownerUserId))
+    : collections;
+  return { projects, collections: visibleCollections, memberships };
+}
+
+function scopeContentPoolProjectsByCollection(
+  projects: ContentProject[],
+  filter: ContentPoolSelectionFilter,
+  collections: ContentPoolCollection[],
+  memberships: ContentPoolCollectionMembership[],
+) {
+  if (!filter.collectionId) return projects;
+  const root = collections.find((collection) => collection.id === filter.collectionId);
+  if (!root) throw new Error("Content-pool collection not found.");
+  const collectionIds = new Set([root.id]);
+  if (filter.includeDescendants) {
+    for (const id of contentPoolCollectionDescendantIds(collections, root.id)) collectionIds.add(id);
+  }
+  return filterProjectsByCollection(projects, memberships, collectionIds);
+}
+
+function buildContentPoolTagSuggestions(
+  projects: ContentProject[],
+  tagRows: ContentPoolTag[],
+  options: { query?: string; limit?: number; ownerUserId?: string } = {},
+): ContentPoolTagSuggestion[] {
+  const query = String(options.query || "").normalize("NFKC").trim().toLocaleLowerCase();
+  const colors = contentPoolTagColorMap(tagRows, options.ownerUserId);
+  const counts = new Map<string, ContentPoolTagSuggestion>();
+  for (const project of projects) {
+    for (const item of project.items) {
+      for (const label of normalizeContentPoolCustomTags(item.customTags)) {
+        if (query && !label.normalize("NFKC").toLocaleLowerCase().includes(query)) continue;
+        const key = contentPoolCustomTagKey(label);
+        const current = counts.get(key);
+        counts.set(key, current
+          ? { ...current, count: current.count + 1 }
+          : { key, label, color: colors.get(key) || contentPoolTagColor(key), count: 1 });
+      }
+    }
+  }
+  const limit = Math.max(1, Math.min(500, Math.trunc(options.limit || 20)));
+  return [...counts.values()]
+    .sort((left, right) => right.count - left.count || left.label.localeCompare(right.label, "zh-CN"))
+    .slice(0, limit);
+}
+
+function buildContentPoolItemPresence(projects: ContentProject[]) {
+  const owned = new Set<string>();
+  const unowned = new Set<string>();
+  for (const project of projects) {
+    for (const item of project.items) {
+      if (item.ownerUserId) owned.add(`${item.ownerUserId}\u0000${item.id}`);
+      else unowned.add(item.id);
+    }
+  }
+  return { owned, unowned };
+}
+
+function contentPoolMembershipItemExists(
+  presence: { owned: Set<string>; unowned: Set<string> },
+  membership: ContentPoolCollectionMembership,
+) {
+  return presence.owned.has(`${membership.ownerUserId}\u0000${membership.itemId}`) || presence.unowned.has(membership.itemId);
 }
 
 async function readPool(): Promise<StoredContentPool> {
