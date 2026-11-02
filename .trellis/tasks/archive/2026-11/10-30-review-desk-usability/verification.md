@@ -69,14 +69,39 @@ so existing detailed verification coverage was preserved verbatim in
 `.trellis/spec/fluxpost/archive/verification-coverage-2026-10-30.md`; old structural
 tests were updated for the shared patch type, atomic URL and semantic cover.
 
+## Post-Verification Audit Fixes
+
+An independent three-lens audit of the committed diff surfaced issues that were
+fixed and re-verified on 2026-11-02:
+
+- Replacing/regenerating an image now sends the unchanged index-aligned
+  `imagePrompts` with `imageUrls` in both save paths, so the legacy URL-only
+  clearing branch can no longer erase saved prompts.
+- Regeneration/upload results capture the starting slot URL and are refused when
+  the slot changed; regenerated series cards rebase onto the reviewer's submitted
+  order instead of reverting unsaved moves.
+- Series drafts no longer offer `新增图片` outside the card list.
+- Preview dialog, media mutations, save, approval and publish share one
+  busy/image/series-generation media lock.
+- Drag edge autoscroll stops when the pointer leaves the gallery.
+- Invalid filter URLs clear visible and selectable rows; wide layouts hide the
+  duplicate batch drawer trigger; the applied summary localizes only enums and
+  date presets; server `asOf` is applied to the parsed filters instead of
+  re-serializing a near-limit payload.
+
+Known limits left unchanged: SQLite `LOWER()` folds ASCII only (non-ASCII case
+folding differs from PostgreSQL; CJK has no case), and very large CJK filter
+payloads can still exceed Node's request-line limit before reaching the
+documented 16,000-character API cap.
+
 ## Release And Remaining Gates
 
 LAN activation passed on 2026-11-02 from clean committed
 `fae42774ce8e245c55f381a2e2f77082594cf2cc` into slot `.next-local-b` on
 `0.0.0.0:3001`. `/api/version` reports that commit in candidate/versioned mode;
 `/review` returns 200 on loopback and LAN; the launcher receipt
-`.fluxpost-local-candidate.json` records the same SHA. Re-activation after the
-bookkeeping commit is the final identity step.
+`.fluxpost-local-candidate.json` records the same SHA. Final activation runs from
+the audit-fix commit; `/api/version` and the launcher receipt are authoritative.
 
 Real authenticated operator review, actual model outputs and real Feishu
 publication remain separate acceptance gates. Browser low-height cases emulate

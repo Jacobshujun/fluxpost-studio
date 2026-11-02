@@ -4,7 +4,7 @@ import type { ReviewListItem, ReviewListPage, ReviewMetadata } from "./review-co
 import { reviewListItemFromPost } from "./review-contract";
 import type { GeneratedPost, Platform } from "./types";
 import type { WorkspaceAccessActor } from "./workspace-ownership";
-import { parseReviewFilters, reviewTimeBounds, ReviewFilterError, type ReviewCondition, type ReviewGroup } from "./review-filters";
+import { parseReviewFilters, reviewTimeBounds, ReviewFilterError, type ReviewCondition, type ReviewFilters, type ReviewGroup } from "./review-filters";
 
 export class ReviewQueryError extends ReviewFilterError {}
 export function reviewImageVersion(url: string) { return createHash("sha256").update(url).digest("hex").slice(0, 24); }
@@ -13,7 +13,7 @@ export function reviewListItem(post: GeneratedPost): ReviewListItem {
   return { ...reviewListItemFromPost(post), thumbnailVersion: post.imageUrls[0] ? reviewImageVersion(post.imageUrls[0]) : undefined };
 }
 
-function queryScope(account: WorkspaceAccessActor, params: URLSearchParams, filtered: boolean) {
+function queryScope(account: WorkspaceAccessActor, params: URLSearchParams, filtered: boolean, prepared?: ReviewFilters) {
   const pg = getDatabaseBackend() === "postgres";
   const values: unknown[] = [];
   const bind = (value: unknown) => { values.push(value); return pg ? `$${values.length}` : "?"; };
@@ -27,7 +27,7 @@ function queryScope(account: WorkspaceAccessActor, params: URLSearchParams, filt
   if (account.role !== "admin") where.push(`${json("ownerUserId")}=${bind(account.id)}`);
   if (params.get("sourceBatchId")) where.push(`${json("sourceBatchId")}=${bind(params.get("sourceBatchId"))}`);
   if (filtered && params.has("filters")) {
-    const filters = parseReviewFilters(params.get("filters")!);
+    const filters = prepared || parseReviewFilters(params.get("filters")!);
     const asOf = filters.asOf || new Date().toISOString();
     const fieldSql = (field: string) => field === "vehicle" ? vehicle : field === "author" ? author : field === "status" || field === "platform" ? field : `COALESCE(${json(field)}, '')`;
     const contains = (expr: string, value: string) => `${pg ? "STRPOS" : "INSTR"}(LOWER(${expr}), ${bind(value.toLowerCase())})>0`;
@@ -93,13 +93,15 @@ export async function listReviewPosts(account: WorkspaceAccessActor, params: URL
     position = value;
   }
   let asOf: string | undefined;
+  let prepared: ReviewFilters | undefined;
   if (params.has("filters")) {
     const filters = parseReviewFilters(params.get("filters")!);
     asOf = filters.asOf || position?.asOf || new Date().toISOString();
+    prepared = { ...filters, asOf };
     params = new URLSearchParams(params);
-    params.set("filters", JSON.stringify({ ...filters, asOf }));
+    params.set("filters", JSON.stringify(prepared));
   }
-  const { pg, values, bind, json, author, where } = queryScope(account, params, true);
+  const { pg, values, bind, json, author, where } = queryScope(account, params, true, prepared);
   if (position) where.push(`(updated_at, id) < (${bind(position.at)}, ${bind(position.id)})`);
   const arrayLength = (field: string) => pg ? `jsonb_array_length(COALESCE(NULLIF(data_json->'${field}', 'null'::jsonb), '[]'::jsonb))` : `COALESCE(json_array_length(data_json, '$.${field}'),0)`;
   const image = pg ? "data_json->'imageUrls'->>0" : "json_extract(data_json, '$.imageUrls[0]')";

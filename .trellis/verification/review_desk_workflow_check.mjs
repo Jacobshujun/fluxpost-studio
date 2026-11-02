@@ -41,8 +41,13 @@ assertNotContains(
 
 assertContains(
   reviewPage,
-  /onClick=\{publishSelected\}\s+disabled=\{Boolean\(busy\)\}/,
-  "Review publish availability must depend on the existing busy state rather than Canvas partial metadata.",
+  /const mediaBusy = Boolean\(busy\) \|\| Boolean\(imageBusyKey\) \|\| seriesMediaBusy/,
+  "Review actions must share one local media lock instead of relying on Canvas partial metadata.",
+);
+assertContains(
+  reviewPage,
+  /onClick=\{publishSelected\}\s+disabled=\{mediaBusy\}/,
+  "Review publish availability must use the shared busy/media lock rather than Canvas partial metadata.",
 );
 
 if (!approveDraftSource) {

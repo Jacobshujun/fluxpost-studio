@@ -10,8 +10,14 @@ const newGroup = (): ReviewGroup => ({ match: "all", children: [newCondition()] 
 function Match({ value, onChange }: { value: ReviewMatch; onChange: (value: ReviewMatch) => void }) {
   return <select className="field" aria-label="条件关系" value={value} onChange={(e) => onChange(e.target.value as ReviewMatch)}><option value="all">全部满足（且）</option><option value="any">任一满足（或）</option></select>;
 }
+function conditionValue(child: ReviewCondition): string {
+  if (Array.isArray(child.value)) return child.value.map(label).join(" / ");
+  const value = String(child.value ?? "");
+  const date = child.field === "createdAt" || child.field === "updatedAt";
+  return date && child.op === "preset" ? label(value) : value;
+}
 function description(group: ReviewGroup): string {
-  return `(${group.children.map((child) => "children" in child ? description(child) : `${label(child.field)} ${label(child.op)} ${Array.isArray(child.value) ? child.value.map(label).join(" / ") : label(String(child.value ?? ""))}${child.end ? ` 至 ${child.end}` : ""}`).join(group.match === "all" ? " 且 " : " 或 ")})`;
+  return `(${group.children.map((child) => "children" in child ? description(child) : `${label(child.field)} ${label(child.op)} ${conditionValue(child)}${child.end ? ` 至 ${child.end}` : ""}`).join(group.match === "all" ? " 且 " : " 或 ")})`;
 }
 
 export function ReviewFilterPanel({ filters, error, metadata, onApply }: { filters: ReviewFilters; error?: string; metadata: ReviewMetadata; onApply: (value: ReviewFilters) => void }) {

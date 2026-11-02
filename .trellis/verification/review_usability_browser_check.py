@@ -129,6 +129,11 @@ async def interactions(browser):
     await expect(page.get_by_role("button", name="拖动配图 1", exact=True)).to_be_disabled()
     await expect(page.get_by_role("button", name="拖动配图 1", exact=True)).to_be_enabled()
     await expect(prompts.first).to_have_value("second")
+    # Replacing one URL must carry the unchanged, index-aligned prompt array.
+    await page.get_by_role("button", name="保存修改", exact=True).click()
+    await expect(page.get_by_role("button", name="保存修改", exact=True)).to_be_enabled()
+    assert saves[-1]["manualPatch"]["imagePrompts"] == ["second", "third", "first"], saves[-1]
+    assert saves[-1]["manualPatch"]["imageUrls"][0] == "/generated/replaced.png", saves[-1]
     await page.get_by_role("button", name="上移配图", exact=True).nth(2).click()
     await expect(prompts.nth(1)).to_have_value("first")
     # A canceled drag cannot mutate the draft.
@@ -180,6 +185,8 @@ async def interactions(browser):
     # Missing cards move freely; regeneration preserves unsaved local order.
     await page.locator(".review-list-card").nth(1).locator("button").click()
     await expect(page.locator(".review-order-item")).to_have_count(3)
+    # Series media is card-owned; an arbitrary appended image would be invisible and later dropped.
+    await expect(page.get_by_role("button", name="新增配图")).to_have_count(0)
     await page.locator(".review-image-prompt").first.fill("")
     await expect(page.locator(".review-image-prompt").first).to_have_value("")
     await page.locator(".review-image-prompt").first.fill("card prompt 0")

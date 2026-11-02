@@ -33,7 +33,9 @@ Ordinary `imagePrompts?: string[]` is a shared ReviewPatch field aligned with
 imageUrls. Legacy relevant edits initialize via existing prompt precedence;
 explicit empty prompts remain empty. Server rejects malformed supplied arrays.
 Legacy URL replacement without a corresponding prompt array clears the stale
-mapping instead of silently keeping mismatched prompts.
+mapping instead of silently keeping mismatched prompts. Page saves always send
+the unchanged index-aligned `imagePrompts` alongside a replaced or regenerated
+URL sequence, so this loading path never erases user prompt edits.
 
 Insertion transforms URLs/prompts/preview together; never identify an ordinary
 slot by URL equality. Series cards move whole records by stable ID, including
@@ -42,15 +44,23 @@ update indices and project available URLs. No image pixels or source image tasks
 are rewritten. Save persists order; first available image is display/publish first.
 
 Manual regeneration AND background resumption find the semantic cover rather
-than assuming index zero. Async operations disable ordering; returned regenerated
-cards merge by ID without discarding unsaved local order. Missing cards later
-filled with images stay at their current position.
+than assuming index zero. One media lock covers uploads, replacements,
+regenerations, ordering, saves, approval and publishing while any series card is
+generating or validating. Async results capture the source URL or card identity
+and are refused when the slot changed; returned regenerated cards merge by ID
+without discarding unsaved local order. Series drafts never append images outside
+the card list. Missing cards later filled with images stay at their current
+position.
 
 ## Layout And Checks
 
-Wide >=1600: three columns; 960-1599: list/editor with batch drawer; narrow/short
-viewports allow page scrolling. Preserve three themes, collapsed AI editing and
-independent-scroll filter editor. Expanded AI keeps a usable minimum editor height.
+Wide >=1600: three columns and the batch column replaces the drawer trigger;
+960-1599: list/editor with batch drawer; narrow/short viewports allow page
+scrolling. Preserve three themes, collapsed AI editing and independent-scroll
+filter editor. Expanded AI keeps a usable minimum editor height. An invalid filter
+URL clears visible and selectable rows instead of leaving stale hidden posts for
+batch actions; the applied summary shows raw text values and localized only for
+enums and date presets.
 
 Baseline includes `review_usability_check.mjs` plus existing review checks.
 Separate PostgreSQL benchmark and intercepted browser checks are documented in

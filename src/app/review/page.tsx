@@ -161,6 +161,11 @@ export default function ReviewPage() {
   const { summary } = review.metadata;
   const loadPosts = review.refresh;
   const refreshDetail = review.refreshDetail;
+  // Background series generation owns the card media; every local mutation waits for it.
+  const seriesMediaBusy = Boolean(draft?.xhsSeries?.cards.some((card) => card.status === "generating" || card.status === "validating"));
+  const mediaBusy = Boolean(busy) || Boolean(imageBusyKey) || seriesMediaBusy;
+  const latestDraftRef = useRef<GeneratedPost | null>(draft);
+  useLayoutEffect(() => { latestDraftRef.current = draft; }, [draft]);
 
   const pollPublishJob = useCallback(async (jobId: string) => {
     try {
@@ -254,11 +259,16 @@ export default function ReviewPage() {
   const mergeSavedPost = review.mergeSavedPost;
 
   async function saveDraft(patch?: Partial<GeneratedPost>, instruction?: string, options?: { busyState?: BusyState }) {
-    if (!draft || imageBusyKey) return;
+    if (!draft || mediaBusy) return;
     setBusy(options?.busyState || (instruction ? "review" : "save"));
     setMessage("");
     try {
       const manualPatch = { ...changedReviewFields(draft, persistedPost(draft.id) || draft), ...patch };
+      // Index-aligned prompts travel with a replaced/regenerated URL sequence so the
+      // server does not mistake a page save for a legacy caller and clear them.
+      if (!draft.xhsSeries && manualPatch.imageUrls && !("imagePrompts" in manualPatch) && draft.imagePrompts) {
+        manualPatch.imagePrompts = draft.imagePrompts;
+      }
       const res = await fetch("/api/review", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
@@ -281,7 +291,7 @@ export default function ReviewPage() {
   }
 
   function reorderImages(from: number, to: number) {
-    if (!draft || busy || imageBusyKey || draft.xhsSeries?.cards.some((card) => card.status === "generating" || card.status === "validating")) return;
+    if (!draft || mediaBusy) return;
     const next = reorderReviewImages(draft, from, to);
     setDraft(next);
     setImagePromptByIndex({});
@@ -300,7 +310,7 @@ export default function ReviewPage() {
     reorderImages(index, index + delta);
   }
   function changeImagePrompt(index: number, value: string) {
-    if (!draft || busy || imageBusyKey) return;
+    if (!draft || mediaBusy) return;
     if (draft.xhsSeries) {
       const target = seriesCardAtImageIndex(draft, index);
       setDraft({ ...draft, xhsSeries: { ...draft.xhsSeries, cards: draft.xhsSeries.cards.map((card) => card.id === target?.id ? { ...card, prompt: value } : card) } });
@@ -312,7 +322,7 @@ export default function ReviewPage() {
   }
 
   function removeDraftImage(index: number) {
-    if (!draft || busy || imageBusyKey || !draft.imageUrls[index]) return;
+    if (!draft || mediaBusy || !draft.imageUrls[index]) return;
     const imageUrls = draft.imageUrls.filter((_, currentIndex) => currentIndex !== index);
     const nextDraft = draft.xhsSeries ? updateSeriesCardImage(draft, index, undefined)
       : { ...draft, imageUrls, imagePrompts: ordinaryImagePrompts(draft).filter((_, i) => i !== index) };
@@ -337,11 +347,16 @@ export default function ReviewPage() {
     });
   }
 
-  function replaceDraftImage(index: number, imageUrl: string, nextMessage: string) {
+  function replaceDraftImage(index: number, imageUrl: string, nextMessage: string, expectedUrl: string) {
     if (!draft || !draft.imageUrls[index]) return;
     const postId = draft.id;
+    const latest = latestDraftRef.current;
+    if (!latest || latest.id !== postId || latest.imageUrls[index] !== expectedUrl) {
+      setMessage("图片顺序已变化，本次异步结果未应用，请重试");
+      return;
+    }
     setDraft((currentDraft) => {
-      if (!currentDraft || currentDraft.id !== postId || !currentDraft.imageUrls[index]) return currentDraft;
+      if (!currentDraft || currentDraft.id !== postId || currentDraft.imageUrls[index] !== expectedUrl) return currentDraft;
       const nextDraft = currentDraft.xhsSeries
         ? updateSeriesCardImage(currentDraft, index, imageUrl)
         : { ...currentDraft, imageUrls: currentDraft.imageUrls.map((url, currentIndex) => currentIndex === index ? imageUrl : url) };
@@ -369,8 +384,9 @@ export default function ReviewPage() {
   }
 
   async function regenerateDraftImage(index: number) {
-    if (busy || imageBusyKey) return;
+    if (mediaBusy) return;
     if (!draft || !draft.imageUrls[index]) return;
+    const expectedUrl = draft.imageUrls[index];
     const prompt = resolveDraftImagePrompt(draft, imagePromptByIndex, index).trim();
     if (!prompt) {
       setMessage(`第 ${index + 1} 张图片缺少 Prompt`);
@@ -400,7 +416,7 @@ export default function ReviewPage() {
       }
       const imageUrl = data.imageUrls?.[0];
       if (!res.ok || !imageUrl) throw new Error(data.error || data.message || "图片模型没有返回新图");
-      replaceDraftImage(index, imageUrl, `第 ${index + 1} 张图片已重新生成，保存后生效`);
+      replaceDraftImage(index, imageUrl, `第 ${index + 1} 张图片已重新生成，保存后生效`, expectedUrl);
     } catch (error) {
       setMessage(error instanceof Error ? error.message : "图片重新生成失败");
     } finally {
@@ -409,7 +425,7 @@ export default function ReviewPage() {
   }
 
   async function regenerateMissingSeriesCard(card: XhsCard) {
-    if (busy || imageBusyKey) return;
+    if (mediaBusy) return;
     if (!draft?.xhsSeries) return;
     setImageBusyKey(`series:${card.id}`);
     setMessage("");
@@ -431,7 +447,7 @@ export default function ReviewPage() {
   }
 
   function selectSeriesCandidate(index: number, imageUrl: string) {
-    if (!draft?.xhsSeries || busy || imageBusyKey) return;
+    if (!draft?.xhsSeries || mediaBusy) return;
     setDraft(updateSeriesCardImage(draft, index, imageUrl));
     setMessage(`已选择第 ${index + 1} 张卡片候选图，保存后生效`);
   }
@@ -441,13 +457,15 @@ export default function ReviewPage() {
     setDraft((current) => {
       if (!current || current.id !== submitted.id || !submitted.xhsSeries || !saved.xhsSeries) return current;
       const generated = saved.xhsSeries.cards.find((card) => card.id === cardId);
+      // The server saved its own card order; rebase the regenerated card onto the
+      // order the reviewer submitted so unsaved local moves survive the merge.
       const cards = submitted.xhsSeries.cards.map((card, index) => card.id === cardId && generated ? { ...generated, index } : card);
       return { ...current, xhsSeries: { ...submitted.xhsSeries, cards }, imageUrls: cards.flatMap((card) => card.imageUrl ? [card.imageUrl] : []) };
     });
   }
 
   async function uploadDraftImageAddition(file: File) {
-    if (busy || imageBusyKey) return;
+    if (mediaBusy) return;
     if (!draft) return;
     const uploadImageIndex = (persistedPost(draft.id)?.imageUrls.length ?? draft.imageUrls.length);
     const displayImageIndex = draft.imageUrls.length;
@@ -475,8 +493,9 @@ export default function ReviewPage() {
   }
 
   async function uploadDraftImageReplacement(file: File, index: number) {
-    if (busy || imageBusyKey) return;
+    if (mediaBusy) return;
     if (!draft || !draft.imageUrls[index]) return;
+    const expectedUrl = draft.imageUrls[index];
     setImageBusyKey(`upload:${index}`);
     setMessage("");
     try {
@@ -490,7 +509,7 @@ export default function ReviewPage() {
       });
       const data = (await res.json()) as ReviewImageUploadResponse;
       if (!res.ok || !data.imageUrl) throw new Error(data.error || "图片上传失败");
-      replaceDraftImage(index, data.imageUrl, `第 ${index + 1} 张图片已替换，保存后生效`);
+      replaceDraftImage(index, data.imageUrl, `第 ${index + 1} 张图片已替换，保存后生效`, expectedUrl);
     } catch (error) {
       setMessage(error instanceof Error ? error.message : "图片替换失败");
     } finally {
@@ -525,14 +544,14 @@ export default function ReviewPage() {
     if (!file) return;
     event.preventDefault();
     event.stopPropagation();
-    if (busy || imageBusyKey) return;
+    if (mediaBusy) return;
     void uploadDraftImageAddition(file);
   }
 
   function handleDraftImageAddDrop(event: DragEvent<HTMLElement>) {
     event.preventDefault();
     event.stopPropagation();
-    if (busy || imageBusyKey) return;
+    if (mediaBusy) return;
     const file = getDataTransferImageFile(event.dataTransfer);
     if (!file) return;
     void uploadDraftImageAddition(file);
@@ -584,7 +603,7 @@ export default function ReviewPage() {
   }
 
   async function publishSelected() {
-    if (imageBusyKey) return;
+    if (mediaBusy) return;
     let postsToPublish: Array<GeneratedPost | ReviewListItem> = selectedPosts.length ? selectedPosts : draft ? [draft] : [];
     if (!postsToPublish.length) return;
     setBusy("publish");
@@ -631,13 +650,14 @@ export default function ReviewPage() {
   }
 
   async function saveDraftForPublish(value: GeneratedPost) {
+    const manualPatch = { ...changedReviewFields(value, persistedPost(value.id) || value), status: "approved" as const };
+    if (!value.xhsSeries && manualPatch.imageUrls && !("imagePrompts" in manualPatch) && value.imagePrompts) {
+      manualPatch.imagePrompts = value.imagePrompts;
+    }
     const res = await fetch("/api/review", {
       method: "POST",
       headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({
-        postId: value.id,
-        manualPatch: { ...changedReviewFields(value, persistedPost(value.id) || value), status: "approved" },
-      }),
+      body: JSON.stringify({ postId: value.id, manualPatch }),
     });
     const data = (await res.json()) as { post?: GeneratedPost; item?: ReviewListItem; error?: string };
     if (!res.ok || !data.post) throw new Error(data.error || "Failed to save Feishu vehicle before publish");
@@ -681,11 +701,11 @@ export default function ReviewPage() {
 
             <div className="mt-4 grid gap-2">
               <FeishuPublishModeSelector value={feishuPublishMode} disabled={Boolean(busy)} onChange={setFeishuPublishMode} />
-              <button className="soft-button flex h-11 items-center justify-center gap-2 text-xs font-black" type="button" onClick={() => batchSetStatus("approved")} disabled={Boolean(busy) || !selectedPostIds.length}>
+              <button className="soft-button flex h-11 items-center justify-center gap-2 text-xs font-black" type="button" onClick={() => batchSetStatus("approved")} disabled={mediaBusy || !selectedPostIds.length}>
                 <ShieldCheck className="h-4 w-4" />
                 批量审查通过
               </button>
-              <button className="primary-button flex h-11 items-center justify-center gap-2 text-xs font-black" type="button" onClick={publishSelected} disabled={Boolean(busy) || (!selectedPostIds.length && !draft)}>
+              <button className="primary-button flex h-11 items-center justify-center gap-2 text-xs font-black" type="button" onClick={publishSelected} disabled={mediaBusy || (!selectedPostIds.length && !draft)}>
                 {busy === "publish" ? <Loader2 className="h-4 w-4 animate-spin" /> : <Send className="h-4 w-4" />}
                 批量写入飞书
               </button>
@@ -822,15 +842,15 @@ export default function ReviewPage() {
                     <Maximize2 className="h-4 w-4" />
                     大图预览
                   </button>
-                  <button className="soft-button inline-flex h-11 items-center justify-center gap-2 px-4 text-xs font-black" type="button" onClick={() => saveDraft()} disabled={Boolean(busy)}>
+                  <button className="soft-button inline-flex h-11 items-center justify-center gap-2 px-4 text-xs font-black" type="button" onClick={() => saveDraft()} disabled={mediaBusy}>
                     {busy === "save" ? <Loader2 className="h-4 w-4 animate-spin" /> : <Check className="h-4 w-4" />}
                     保存修改
                   </button>
-                  <button className="soft-button inline-flex h-11 items-center justify-center gap-2 px-4 text-xs font-black" type="button" onClick={approveDraft} disabled={Boolean(busy)}>
+                  <button className="soft-button inline-flex h-11 items-center justify-center gap-2 px-4 text-xs font-black" type="button" onClick={approveDraft} disabled={mediaBusy}>
                     {busy === "approve" ? <Loader2 className="h-4 w-4 animate-spin" /> : <ShieldCheck className="h-4 w-4 text-[var(--mint)]" />}
                     审查通过
                   </button>
-                  <button className="primary-button inline-flex h-11 items-center justify-center gap-2 px-4 text-xs font-black" type="button" onClick={publishSelected} disabled={Boolean(busy)}>
+                  <button className="primary-button inline-flex h-11 items-center justify-center gap-2 px-4 text-xs font-black" type="button" onClick={publishSelected} disabled={mediaBusy}>
                     {busy === "publish" ? <Loader2 className="h-4 w-4 animate-spin" /> : <Send className="h-4 w-4" />}
                     {selectedPosts.length > 1 ? `写入飞书 ${selectedPosts.length}` : "写入飞书"}
                   </button>
@@ -844,10 +864,12 @@ export default function ReviewPage() {
                     className="soft-button mt-2 inline-flex h-10 items-center justify-center gap-2 px-4 text-xs font-black"
                     type="button"
                     onClick={() => {
-                      void saveDraft(undefined, reviewPrompt.trim());
+                      const instruction = reviewPrompt.trim();
+                      if (!instruction || mediaBusy || !draft) return;
+                      void saveDraft(undefined, instruction);
                       setReviewPrompt("");
                     }}
-                    disabled={Boolean(busy) || !reviewPrompt.trim()}
+                    disabled={mediaBusy || !reviewPrompt.trim()}
                   >
                     {busy === "review" ? <Loader2 className="h-4 w-4 animate-spin" /> : <Wand2 className="h-4 w-4" />}
                     AI 修改
@@ -887,6 +909,7 @@ export default function ReviewPage() {
           preview={preview}
           imageBusyKey={imageBusyKey}
           busy={Boolean(busy)}
+          mediaLocked={seriesMediaBusy}
           onClose={() => setPreview(null)}
           onNavigate={(delta) => setPreview((current) => navigatePreview(current, delta))}
           onRemove={(kind, index) => (kind === "video" ? removeDraftVideo(index) : removeDraftImage(index))}
@@ -1066,6 +1089,7 @@ function PreviewDialog({
   preview,
   imageBusyKey,
   busy,
+  mediaLocked,
   onClose,
   onNavigate,
   onRemove,
@@ -1074,6 +1098,7 @@ function PreviewDialog({
   preview: PreviewState;
   imageBusyKey: string;
   busy: boolean;
+  mediaLocked: boolean;
   onClose: () => void;
   onNavigate: (delta: number) => void;
   onRemove: (kind: "image" | "video", index: number) => void;
@@ -1084,7 +1109,7 @@ function PreviewDialog({
   const media = kind === "video" ? postVideoUrls(preview.post) : preview.post.imageUrls;
   const index = Math.min(Math.max(preview.index, 0), Math.max(media.length - 1, 0));
   const url = media[index];
-  const disableImageAction = busy || Boolean(imageBusyKey);
+  const disableImageAction = busy || Boolean(imageBusyKey) || mediaLocked;
   return (
     <div className="review-preview-backdrop" role="dialog" aria-modal="true">
       <div className="review-preview-panel">
@@ -1447,7 +1472,9 @@ const ReviewGallery = memo(function ReviewGallery({ draft, persistedImages, busy
     <button type="button" className="review-gallery-tool" aria-label="上移配图" disabled={locked || position === 0 || drag !== null} onClick={() => actions.moveDraftImage(position, -1)}><ArrowUp size={14} /></button>
     <button type="button" className="review-gallery-tool" aria-label="下移配图" disabled={locked || position === slots.length - 1 || drag !== null} onClick={() => actions.moveDraftImage(position, 1)}><ArrowDown size={14} /></button>
   </div>;
-  return (<div className="review-gallery" ref={galleryRef} onKeyDown={(event) => { if (event.key === "Escape") { setDrag(null); setTarget(null); } }}>
+  return (<div className="review-gallery" ref={galleryRef}
+    onKeyDown={(event) => { if (event.key === "Escape") { setDrag(null); setTarget(null); } }}
+    onDragLeave={(event) => { if (!event.currentTarget.contains(event.relatedTarget as Node | null)) edge.current = 0; }}>
 
                     {slots.length ? (
                       <>
@@ -1522,9 +1549,9 @@ const ReviewGallery = memo(function ReviewGallery({ draft, persistedImages, busy
                           <button className="soft-button" disabled={locked || drag !== null} onClick={() => actions.regenerateMissingSeriesCard(card)}>重新生成</button>
                         </div> : null}</div>;
                         })}
-                        <ReviewImageAddTile busy={Boolean(busy) || Boolean(imageBusyKey)} isUploading={imageBusyKey === "upload:add"} onOpen={() => setImageUploadPanelOpen(true)} />
+                        {draft.xhsSeries ? null : <ReviewImageAddTile busy={Boolean(busy) || Boolean(imageBusyKey)} isUploading={imageBusyKey === "upload:add"} onOpen={() => setImageUploadPanelOpen(true)} />}
                       </>
-                    ) : (
+                    ) : draft.xhsSeries ? null : (
                       <ReviewImageAddTile empty busy={Boolean(busy) || Boolean(imageBusyKey)} isUploading={imageBusyKey === "upload:add"} onOpen={() => setImageUploadPanelOpen(true)} />
                     )}
                     {postVideoUrls(draft).map((url, index) => (

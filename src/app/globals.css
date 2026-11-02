@@ -3408,6 +3408,7 @@ a {
 .review-metric { display: flex; align-items: center; gap: 8px; padding: 6px 12px; }
 .review-metric strong { font-size: 18px; }
 .review-batch-trigger { padding: 6px 12px; margin-left: auto; }
+@media (min-width: 1600px) { .review-batch-trigger { display: none; } }
 .review-sidebar .batch-action-bar { padding: 6px; margin-top: 6px; }
 .review-ai-box { padding: 8px 12px; min-height: 0; }
 .review-ai-box summary { cursor: pointer; font-weight: 700; }

@@ -44,7 +44,12 @@ export function useReviewData(filters: Filters, selectedId: string, setSelectedI
     setSelectedPostIds([]);
     setSelectionItems({});
     setNextCursor(undefined);
-  }, [filterKey]);
+    // An invalid URL must not leave the previous rows selectable behind the error.
+    if (filters.invalid) {
+      setPosts([]);
+      setLoading(false);
+    }
+  }, [filterKey, filters.invalid]);
   const query = useMemo(() => new URLSearchParams({ filters: filters.structured, sourceBatchId: filters.sourceBatchId }).toString(), [filters.structured, filters.sourceBatchId]);
 
   const loadDetail = useCallback(async (id: string, force = false) => {

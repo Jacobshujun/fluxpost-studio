@@ -61,8 +61,14 @@ Do not deploy a dirty worktree, branch name, abbreviated SHA, local runtime rows
   suite and review performance regressions pass. Clean-tree `npm run local:lan`
   activated the committed candidate into `.next-local-b` on `0.0.0.0:3001`:
   build, candidate identity, HTTP smoke and `/review` 200 on loopback and LAN
-  passed; the receipt records the active SHA. Real authenticated operator review
-  remains. Logs: `test-artifacts/review-usability-*-final.log`.
+  passed; the receipt records the active SHA. Post-verification audit fixes
+  (prompt preservation, async slot identity, series media ownership, shared media
+  lock, dragleave, invalid-filter rows, batch trigger, summary labels, asOf reuse)
+  re-ran the full baseline, isolated PostgreSQL benchmark and both browser suites
+  on the final tree. Real authenticated operator review remains. Logs:
+  `test-artifacts/review-usability-*-final.log`,
+  `test-artifacts/review-usability-*-fixes*.log`,
+  `test-artifacts/review-usability-baseline-final-audit.log`.
 
 - 2026-10-30 ESLint scope: excluded `data/**` operator artifacts only. Lint passes
   with 0 errors/16 source warnings; ESLint API assertions confirm source/config
