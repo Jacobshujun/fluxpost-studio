@@ -5,7 +5,7 @@ import { getGeneratedPost, saveGeneratedPost } from "@/lib/generated-posts";
 import { editPostWithPrompt } from "@/lib/openai";
 import { savePost } from "@/lib/store";
 import { isWorkspaceSignInError, requireWorkspaceAccount } from "@/lib/workspace-accounts";
-import type { ReviewSaveRequest } from "@/lib/review-contract";
+import type { ReviewSaveRequest, ReviewPatch } from "@/lib/review-contract";
 import { reviewListItem } from "@/lib/review-posts";
 import type { GeneratedPost } from "@/lib/types";
 import type { WorkspaceAccessActor } from "@/lib/workspace-ownership";
@@ -48,7 +48,18 @@ export async function POST(request: Request) {
     const readMs = performance.now() - readStarted;
     let post = currentPost;
     if (body.manualPatch) {
-      const allowedPatch: Partial<Pick<GeneratedPost, "title" | "body" | "imagePrompt" | "status" | "imageUrls" | "videoUrls" | "imageTasks" | "feishuVehicle" | "xhsSeries">> = {};
+      const allowedPatch: ReviewPatch = {};
+      if ("imagePrompts" in body.manualPatch) {
+        const prompts = body.manualPatch.imagePrompts;
+        const urls = body.manualPatch.imageUrls ?? post.imageUrls;
+        if (!Array.isArray(prompts) || prompts.length !== urls.length || prompts.some((value) => typeof value !== "string")) {
+          return NextResponse.json({ error: "Image prompts must match image order and count" }, { status: 400 });
+        }
+        allowedPatch.imagePrompts = prompts;
+      } else if (body.manualPatch.imageUrls && JSON.stringify(body.manualPatch.imageUrls) !== JSON.stringify(post.imageUrls)) {
+        // Legacy callers cannot preserve an index mapping when replacing the sequence.
+        allowedPatch.imagePrompts = undefined;
+      }
       if ("title" in body.manualPatch) allowedPatch.title = body.manualPatch.title;
       if ("body" in body.manualPatch) allowedPatch.body = body.manualPatch.body;
       if ("imagePrompt" in body.manualPatch) allowedPatch.imagePrompt = body.manualPatch.imagePrompt;

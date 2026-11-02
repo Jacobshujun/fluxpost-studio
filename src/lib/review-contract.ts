@@ -1,4 +1,5 @@
 import type { GeneratedPost, Platform } from "./types";
+export type { ReviewFilters, ReviewCondition, ReviewGroup } from "./review-filters";
 
 export type ReviewListItem = Pick<GeneratedPost, "id" | "title" | "status" | "platform" | "updatedAt"> & {
   excerpt: string;
@@ -11,10 +12,11 @@ export type ReviewMetadata = {
   summary: { total: number; ready: number; approved: number; published: number };
   authors: string[];
   platforms: Platform[];
+  vehicles: string[];
 };
-export type ReviewPatch = Partial<Pick<GeneratedPost, "title" | "body" | "imagePrompt" | "status" | "imageUrls" | "videoUrls" | "imageTasks" | "feishuVehicle" | "xhsSeries">>;
+export type ReviewPatch = Partial<Pick<GeneratedPost, "title" | "body" | "imagePrompt" | "imagePrompts" | "status" | "imageUrls" | "videoUrls" | "imageTasks" | "feishuVehicle" | "xhsSeries">>;
 export type ReviewSaveRequest = { postId?: string; post?: GeneratedPost; manualPatch?: ReviewPatch; instruction?: string };
-export const reviewPatchFields = ["title", "body", "imagePrompt", "status", "imageUrls", "videoUrls", "imageTasks", "feishuVehicle", "xhsSeries"] as const;
+export const reviewPatchFields = ["title", "body", "imagePrompt", "imagePrompts", "status", "imageUrls", "videoUrls", "imageTasks", "feishuVehicle", "xhsSeries"] as const;
 
 export function changedReviewFields(draft: GeneratedPost, persisted: GeneratedPost): ReviewPatch {
   return Object.fromEntries(reviewPatchFields.filter((key) => draft[key] !== persisted[key] && JSON.stringify(draft[key]) !== JSON.stringify(persisted[key])).map((key) => [key, draft[key]])) as ReviewPatch;

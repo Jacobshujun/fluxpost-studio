@@ -112,6 +112,7 @@ const nodeChecks = [
   ["Review preview layout check", "review_preview_layout_check.mjs"],
   ["Review desk workflow check", "review_desk_workflow_check.mjs"],
   ["Review performance behavior check", "review_performance_check.mjs"],
+  ["Review filters, dates and ordering", "review_usability_check.mjs"],
   ["Review desk scroll layout check", "review_desk_scroll_layout_check.mjs"],
   ["Image task fallback check", "image_task_fallback_check.mjs"],
   ["Simple image discard check", "simple_image_discard_check.mjs"],

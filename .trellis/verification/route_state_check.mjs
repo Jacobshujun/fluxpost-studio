@@ -19,7 +19,8 @@ for (const page of [
   assert.match(source, /use-url-query-state/, `${page} page must use the shared URL state helper`);
 }
 
-assert.match(read("src/app/review/page.tsx"), /useUrlQueryState\("postId"/);
+assert.match(read("src/app/review/page.tsx"), /useUrlQueryParams\(\)/);
+assert.match(read("src/app/review/page.tsx"), /params\.set\("postId", id\)/);
 assert.match(read("src/app/canvas/page.tsx"), /useUrlQueryState\("workflowId"/);
 assert.match(read("src/app/library/page.tsx"), /useUrlQueryParams\(\)/);
 assert.match(helper, /window\.history\.pushState/);

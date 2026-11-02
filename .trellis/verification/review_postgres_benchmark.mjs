@@ -88,6 +88,15 @@ try {
     const second=await after.reviews.listReviewPosts(actor,new URLSearchParams({cursor:first.nextCursor}));
     assert.equal(new Set([...first.posts,...second.posts].map(p=>p.id)).size,100);
     assert.equal((await after.reviews.getReviewMetadata(actor,new URLSearchParams())).summary.total,count);
+    const advancedTimes = [];
+    const advancedParams = new URLSearchParams({ filters: JSON.stringify({ version: 1, search: { field: "all", value: "Benchmark" }, match: "all", groups: [{ match: "all", children: Array.from({ length: 50 }, () => ({ field: "body", op: "contains", value: "body" })) }] }) });
+    for (let sample = 0; sample < 6; sample++) {
+      const start = performance.now();
+      assert.equal((await after.reviews.listReviewPosts(actor, advancedParams)).posts.length, 50);
+      advancedTimes.push(performance.now() - start);
+    }
+    console.log(JSON.stringify({ backend: "postgres", count, predicates: 50, structuredListP95Ms: p95(advancedTimes) }));
+    assert.ok(p95(advancedTimes) <= 500, "Structured list exceeds the review benchmark latency budget");
     assert.equal((await after.reviews.listReviewPosts({...actor,id:"other"},new URLSearchParams())).posts.length,0);
     const current=await after.generated.getGeneratedPost("post-0",actor);
     await Promise.all(Array.from({length:12},(_,i)=>after.content.markSourceRewritten(`source-${i%2}`,{...current,status:"published"},actor)));
@@ -95,7 +104,16 @@ try {
     assert.equal(row.items[0].poolStatus,"published");assert.equal(row.items[1].poolStatus,"published");
     assert.equal(row.items[0].usedCount,1);assert.equal(row.items[1].usedCount,1);
   }
-  console.log("Isolated PostgreSQL pagination, metadata, ownership and concurrent source sync passed.");
+  const cases = load(".trellis/verification/review_usability_cases.ts", { "node:assert/strict": { ...assert, deepEqual: (actual, expected) => assert.deepEqual(JSON.parse(JSON.stringify(actual)), JSON.parse(JSON.stringify(expected))) } });
+  const saveImages = (manualPatch) => after.route.POST(new Request("http://localhost/api/review", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ postId: "post-0", manualPatch }) }));
+  assert.equal((await saveImages({ imageUrls: ["same", "same", "third"], imagePrompts: ["second", "first", "third"] })).status, 200);
+  assert.deepEqual(JSON.parse(JSON.stringify((await after.generated.getGeneratedPost("post-0", actor)).imagePrompts)), ["second", "first", "third"]);
+  assert.equal((await saveImages({ imagePrompts: ["wrong count"] })).status, 400);
+  cases.pureReviewCases();
+  for (const post of cases.fixturePosts()) await after.db.saveGeneratedPostToDb(post);
+  const filterActor = { id: "filter-owner", role: "operator" };
+  await cases.queryReviewCases({ list: (params) => after.reviews.listReviewPosts(filterActor, params), metadata: (params) => after.reviews.getReviewMetadata(filterActor, params) });
+  console.log("Isolated PostgreSQL structured filters, dates, pagination, metadata, ownership and source sync passed.");
 } finally {
   await pool.end();
   await admin.query(`DROP SCHEMA IF EXISTS "${schema}" CASCADE`);

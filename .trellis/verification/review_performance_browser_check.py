@@ -42,7 +42,8 @@ async def check(browser, width, total):
         if path == "/api/review/posts/metadata":
             await route.fulfill(json=dict(summary=dict(total=total, ready=total, approved=0, published=0), authors=["Tester"], platforms=["xiaohongshu"]))
         elif path == "/api/review/posts":
-            q = query.get("q", [""])[0]
+            filters = json.loads(query["filters"][0]) if "filters" in query else None
+            q = filters["search"]["value"] if filters else query.get("q", [""])[0]
             if controls["query"] == q and q:
                 controls["query"] = ""
                 hold_list.set()
@@ -140,7 +141,7 @@ async def check(browser, width, total):
     controls["fail"] = True
     await body.fill("Preserve failed edit")
     await save.click()
-    await expect(page.get_by_text("Fixture save failed", exact=True)).to_be_visible()
+    await expect(page.locator(".review-feedback")).to_be_visible()
     await expect(body).to_have_value("Preserve failed edit")
     await approve.click()
     await expect(approve).to_be_enabled()
@@ -176,15 +177,17 @@ async def check(browser, width, total):
     await page.get_by_role("button", name="下一页", exact=True).click()
     await expect(cards.first).to_contain_text("Post 50")
     await cards.nth(0).locator("label").click()
-    await page.get_by_role("button", name="批量写入飞书", exact=True).click()
-    await expect(page.get_by_text("Fixture queued", exact=True).first).to_be_visible()
+    await page.locator(".review-batch-trigger").click()
+    await page.locator("dialog").get_by_role("button", name="批量写入飞书", exact=True).click()
+    await expect(page.locator("dialog").get_by_text("Fixture queued", exact=True).first).to_be_visible()
+    await page.get_by_role("button", name="关闭批量操作").click()
     payloads = [payload for method,path,payload in requests if method=="POST" and path=="/api/publish/feishu"]
     assert set(payloads[-1]["postIds"]) == {"p-0","p-50"}
     await page.get_by_role("button", name="上一页", exact=True).click()
     await expect(cards.first).to_contain_text("Post 0")
     await expect(cards.first.locator("input")).to_be_checked()
     # Filter reset and stale list response.
-    search = page.locator(".review-search input")
+    search = page.locator(".review-search-row input")
     controls["query"] = "Post 1"
     await search.fill("Post 1")
     await asyncio.wait_for(hold_list.wait(), 5)
@@ -193,7 +196,7 @@ async def check(browser, width, total):
     release_list.set()
     await page.wait_for_timeout(100)
     await expect(cards.first).to_contain_text("Post 9")
-    await expect(page.locator('.review-publish-panel > div').first).to_contain_text("0 已选")
+    await expect(page.locator('.review-batch-trigger')).to_contain_text("0 已选")
     await page.reload(wait_until="networkidle")
     await expect(search).to_have_value("Post 9")
     await expect(title).to_have_value("Post 2")
@@ -213,7 +216,7 @@ async def check(browser, width, total):
         await page.get_by_role("button", name="下一页", exact=True).click()
         await expect(page.get_by_role("button", name="下一页", exact=True)).to_be_enabled()
         await page.get_by_role("button", name="全选本页", exact=True).click()
-    await expect(page.locator('.review-publish-panel > div').first).to_contain_text("200 已选")
+    await expect(page.locator('.review-batch-trigger')).to_contain_text("200 已选")
     await page.get_by_role("button", name="清空", exact=True).click()
     controls["thumbnail_fail"] = True
     chosen_title = await cards.first.locator("p").first.inner_text()

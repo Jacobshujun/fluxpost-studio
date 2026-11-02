@@ -213,13 +213,13 @@ assertContains(
 
 assertContains(
   reviewPage,
-  /timeFilter[\s\S]*keywordFilter[\s\S]*authorFilter[\s\S]*platformFilter/,
-  "Review sidebar should keep separate filters for time, keyword, content author, and platform.",
+  /reviewFiltersFromUrl[\s\S]*useUrlQueryParams[\s\S]*ReviewFilterPanel filters=/,
+  "Review sidebar must use the atomic structured filter URL and separate filter panel.",
 );
 
 assertContains(
   reviewPage,
-  /onClick=\{\(\) => (?:actions\.)?moveDraftImage\(index,\s*-1\)\}/,
+  /onClick=\{\(\) => (?:actions\.)?moveDraftImage\(position,\s*-1\)\}/,
   "Generated images should support moving earlier in the order.",
 );
 
@@ -459,19 +459,19 @@ assertContains(
 
 assertContains(
   globals,
-  /@media \(min-width:\s*1120px\)[\s\S]*\.review-main\s*\{[\s\S]*display:\s*grid;[\s\S]*grid-template-rows:\s*auto minmax\(0,\s*1fr\) auto auto;[\s\S]*overflow:\s*hidden;/,
+  /@media \(min-width:\s*960px\)[\s\S]*\.review-main\s*\{[\s\S]*display:\s*grid;[\s\S]*grid-template-rows:\s*auto minmax\(0,\s*1fr\) auto auto;[\s\S]*overflow:\s*hidden;/,
   "Desktop review panel should reserve visible rows for title/actions while the editor content scrolls internally.",
 );
 
 assertContains(
   globals,
-  /@media \(min-width:\s*1120px\)[\s\S]*\.review-editor-grid\s*\{[\s\S]*min-height:\s*0;[\s\S]*overflow:\s*hidden;/,
+  /@media \(min-width:\s*960px\)[\s\S]*\.review-editor-grid\s*\{[\s\S]*min-height:\s*0;[\s\S]*overflow:\s*hidden;/,
   "Desktop review editor grid should not expand the review panel when many images are present.",
 );
 
 assertContains(
   globals,
-  /@media \(min-width:\s*1120px\)[\s\S]*\.review-gallery,[\s\S]*\.review-editor-fields\s*\{[\s\S]*min-height:\s*0;[\s\S]*overflow-y:\s*auto;/,
+  /@media \(min-width:\s*960px\)[\s\S]*\.review-gallery,[\s\S]*\.review-editor-fields\s*\{[\s\S]*min-height:\s*0;[\s\S]*overflow-y:\s*auto;/,
   "Desktop review image and text columns should scroll independently so action buttons remain reachable.",
 );
 

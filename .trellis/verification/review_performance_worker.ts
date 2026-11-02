@@ -33,6 +33,11 @@ async function main() {
   const third = await query.listReviewPosts(actor, new URLSearchParams({ cursor: second.nextCursor! }));
   assert.equal(new Set([...first.posts,...second.posts,...third.posts].map(row=>row.id)).size,125);
   assert.equal(third.nextCursor,undefined);
+  const structured = JSON.stringify({ version: 1, search: { field: "all", value: "" }, match: "all", groups: [] });
+  const structuredFirst = await query.listReviewPosts(actor, new URLSearchParams({ filters: structured }));
+  const structuredSecond = await query.listReviewPosts(actor, new URLSearchParams({ filters: structured, cursor: structuredFirst.nextCursor! }));
+  assert.equal(JSON.parse(Buffer.from(structuredFirst.nextCursor!, "base64url").toString()).asOf,
+    JSON.parse(Buffer.from(structuredSecond.nextCursor!, "base64url").toString()).asOf, "API cursor freezes relative boundaries even without client asOf");
   assert.equal((await query.getReviewMetadata(actor,new URLSearchParams())).summary.total,125);
   assert.equal((await query.getReviewMetadata(admin,new URLSearchParams())).summary.total,126);
   for (const filters of [{q:"Post 124"}, {q:"long BODY", status:"approved"}, {author:"Alice", platform:"xiaohongshu", sourceBatchId:"batch"}]) assert.ok((await query.listReviewPosts(actor,new URLSearchParams(filters))).posts.length);

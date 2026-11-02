@@ -4,8 +4,8 @@ import type { Dispatch, SetStateAction } from "react";
 import { changedReviewFields, reviewListItemFromPost, type ReviewListItem, type ReviewListPage, type ReviewMetadata } from "@/lib/review-contract";
 import type { GeneratedPost } from "@/lib/types";
 
-type Filters = { status: string; time: string; q: string; author: string; platform: string; sourceBatchId: string };
-const emptyMetadata: ReviewMetadata = { summary: { total: 0, ready: 0, approved: 0, published: 0 }, authors: [], platforms: [] };
+type Filters = { q: string; sourceBatchId: string; structured: string; invalid: boolean };
+const emptyMetadata: ReviewMetadata = { summary: { total: 0, ready: 0, approved: 0, published: 0 }, authors: [], platforms: [], vehicles: [] };
 
 export function useReviewData(filters: Filters, selectedId: string, setSelectedId: (id: string) => void, hydrated: boolean, onError: (message: string) => void) {
   const [posts, setPosts] = useState<ReviewListItem[]>([]);
@@ -45,16 +45,7 @@ export function useReviewData(filters: Filters, selectedId: string, setSelectedI
     setSelectionItems({});
     setNextCursor(undefined);
   }, [filterKey]);
-  const query = useMemo(() => {
-    const params = new URLSearchParams({ status: filters.status, q: debouncedQ, author: filters.author, platform: filters.platform, sourceBatchId: filters.sourceBatchId });
-    if (filters.time !== "all") {
-      const now = new Date();
-      const since = filters.time === "today" ? new Date(now.getFullYear(), now.getMonth(), now.getDate()) : new Date(now.getTime() - (filters.time === "7d" ? 7 : 30) * 86400000);
-      params.set("since", since.toISOString());
-      if (filters.time === "today") params.set("until", new Date(now.getFullYear(), now.getMonth(), now.getDate()+1).toISOString());
-    }
-    return params.toString();
-  }, [filters.status, filters.author, filters.platform, filters.sourceBatchId, filters.time, debouncedQ]);
+  const query = useMemo(() => new URLSearchParams({ filters: filters.structured, sourceBatchId: filters.sourceBatchId }).toString(), [filters.structured, filters.sourceBatchId]);
 
   const loadDetail = useCallback(async (id: string, force = false) => {
     detailRequest.current?.abort();
@@ -94,7 +85,7 @@ export function useReviewData(filters: Filters, selectedId: string, setSelectedI
 
   const cursor = cursors.at(-1) || "";
   useEffect(() => {
-    if (!hydrated || filters.q !== debouncedQ || currentFilterKey !== filterKey) return;
+    if (!hydrated || filters.invalid || filters.q !== debouncedQ || currentFilterKey !== filterKey) return;
     const controller = new AbortController();
     const generation = ++listGeneration.current;
     // eslint-disable-next-line react-hooks/set-state-in-effect
@@ -111,11 +102,11 @@ export function useReviewData(filters: Filters, selectedId: string, setSelectedI
         setNextCursor(data.nextCursor);
         if (!selectedRef.current && data.posts[0]) selectPost(data.posts[0]);
       } catch (error) {
-        if (!controller.signal.aborted) onError(error instanceof Error ? error.message : "加载列表失败");
+        if (!controller.signal.aborted) { setPosts([]); setNextCursor(undefined); onError(error instanceof Error ? error.message : "加载列表失败"); }
       } finally { if (!controller.signal.aborted && generation === listGeneration.current) setLoading(false); }
     })();
     return () => { controller.abort(); };
-  }, [query, cursor, hydrated, revision, selectPost, onError, filters.q, debouncedQ, currentFilterKey, filterKey]);
+  }, [query, cursor, hydrated, filters.invalid, revision, selectPost, onError, filters.q, debouncedQ, currentFilterKey, filterKey]);
   useEffect(() => {
     if (!hydrated) return;
     const controller = new AbortController();

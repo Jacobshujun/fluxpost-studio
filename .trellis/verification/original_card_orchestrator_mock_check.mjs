@@ -1,7 +1,7 @@
 import { generateCoverAnchoredCards } from "../../src/lib/original-card-orchestrator.ts";
 
 const assert = (condition, message) => { if (!condition) throw new Error(message); };
-const makeCard = (index) => ({ index, prompt: `prompt-${index}`, candidateUrls: [], status: "planned", qa: { status: "pending", attempts: 0, issues: [] } });
+const makeCard = (index) => ({ index, role: index === 0 ? "cover" : "content", prompt: `prompt-${index}`, candidateUrls: [], status: "planned", qa: { status: "pending", attempts: 0, issues: [] } });
 
 const cards = Array.from({ length: 4 }, (_, index) => makeCard(index));
 const generateCalls = [];
@@ -117,4 +117,15 @@ releaseSlowCard();
 await settledRun.catch((error) => assert(error.message === "paused", "Settled parallel run must preserve the pause error."));
 assert(slowCardSettled, "Already-started parallel results must persist before the worker requeues the item.");
 
+const reordered = [makeCard(1), makeCard(2), makeCard(0)];
+const reorderedCalls = [];
+await generateCoverAnchoredCards(reordered, {
+  beforeStage: async () => {},
+  generate: async (_prompt, references, card) => { reorderedCalls.push({ role: card.role, references }); return { status: "completed", imageUrls: [card.role === "cover" ? "original-cover" : "content"] }; },
+  qa: async () => ({ passed: true, issues: [] }),
+  onUpdate: async () => {},
+});
+assert(reorderedCalls[0].role === "cover" && reorderedCalls[0].references.length === 0, "Moved cover remains the reference identity on resume.");
+assert(reorderedCalls.slice(1).every((call) => call.references[0] === "original-cover"), "Reordered content receives the semantic cover.");
+assert(reordered[2].role === "cover", "Generation must not reorder the review cards.");
 console.log("Original card orchestrator mock check passed.");

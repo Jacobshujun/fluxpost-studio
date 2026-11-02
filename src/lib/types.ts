@@ -669,6 +669,7 @@ export type GeneratedPost = {
   sourceUrl?: string;
   sourceSafetyAssessment?: SourceSafetyAssessment;
   imagePrompt: string;
+  imagePrompts?: string[];
   imageUrls: string[];
   videoUrls?: string[];
   contentTags?: ContentTag[];

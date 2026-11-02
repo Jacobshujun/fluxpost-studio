@@ -1,5 +1,6 @@
 export type OrchestratorCard = {
   index: number;
+  role: "cover" | "content" | "ending";
   prompt: string;
   candidateUrls: string[];
   imageUrl?: string;
@@ -30,18 +31,21 @@ export type OriginalCardOrchestratorDeps<TCard extends OrchestratorCard> = {
 
 export async function generateCoverAnchoredCards<TCard extends OrchestratorCard>(cards: TCard[], deps: OriginalCardOrchestratorDeps<TCard>) {
   if (!cards.length) throw new Error("At least one card is required.");
-  await generateCard(cards[0], [], deps);
-  if (isOriginalCardProviderPending(cards[0])) return { cards, pending: true };
-  const coverUrl = cards[0].imageUrl;
+  const cover = cards.find((card) => card.role === "cover");
+  if (!cover) throw new Error("Cover card is required.");
+  const remaining = cards.filter((card) => card !== cover);
+  await generateCard(cover, [], deps);
+  if (isOriginalCardProviderPending(cover)) return { cards, pending: true };
+  const coverUrl = cover.imageUrl;
   if (!coverUrl) {
-    for (const card of cards.slice(1)) {
+    for (const card of remaining) {
       card.status = "failed";
       card.error = "封面未生成，无法建立系列风格锚点。";
       await deps.onUpdate(card);
     }
     return { cards, pending: false };
   }
-  const results = await Promise.allSettled(cards.slice(1).map((card) => generateCard(card, [coverUrl], deps)));
+  const results = await Promise.allSettled(remaining.map((card) => generateCard(card, [coverUrl], deps)));
   const rejected = results.find((result): result is PromiseRejectedResult => result.status === "rejected");
   if (rejected) throw rejected.reason;
   return { cards, pending: cards.some(isOriginalCardProviderPending) };

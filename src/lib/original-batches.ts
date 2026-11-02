@@ -234,8 +234,9 @@ export async function regenerateOriginalSeriesCard(
   const series = post.xhsSeries;
   const card = series.cards.find((entry) => entry.id === input.cardId);
   if (!card) throw new OriginalBatchInputError("Original series card not found.");
-  const cover = series.cards[0];
-  if (card.index > 0 && !cover?.imageUrl) throw new OriginalBatchInputError("Cover anchor is unavailable.");
+  const cover = series.cards.find((entry) => entry.role === "cover");
+  const needsCover = card.id !== cover?.id;
+  if (needsCover && !cover?.imageUrl) throw new OriginalBatchInputError("Cover anchor is unavailable.");
   const imageOptions = resolveXhsImageOptions(openaiImageRouteConfig("primary").profile);
   const prompt = normalizeString(input.prompt) || card.prompt;
   let batchItem = post.sourceBatchItemId ? await getOriginalBatchItemFromDb(post.sourceBatchItemId) : undefined;
@@ -268,7 +269,7 @@ export async function regenerateOriginalSeriesCard(
   const result = await generateCanvasGptImages(
     prompt,
     1,
-    card.index > 0 ? [cover.imageUrl!] : [],
+    needsCover ? [cover!.imageUrl!] : [],
     { ...imageOptions, quality: "high" },
     {
       resumeTaskId: isOriginalCardProviderPending(card) ? card.providerTaskId : undefined,

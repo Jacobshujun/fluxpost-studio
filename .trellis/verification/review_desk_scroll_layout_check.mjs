@@ -34,31 +34,31 @@ assertContains(
 
 assertContains(
   globals,
-  /@media \(min-width:\s*1120px\)[\s\S]*\.review-frame\s*\{[\s\S]*height:\s*100vh;[\s\S]*height:\s*100dvh;[\s\S]*overflow:\s*hidden;/,
+  /@media \(min-width:\s*960px\)[\s\S]*\.review-frame\s*\{[\s\S]*height:\s*100vh;[\s\S]*height:\s*100dvh;[\s\S]*overflow:\s*hidden;/,
   "Desktop review frame should be viewport-bounded so child panels can scroll internally.",
 );
 
 assertContains(
   globals,
-  /@media \(min-width:\s*1120px\)[\s\S]*\.review-workspace\s*\{[\s\S]*flex:\s*1 1 auto;[\s\S]*grid-template-columns:[\s\S]*overflow:\s*hidden;/,
+  /@media \(min-width:\s*960px\)[\s\S]*\.review-workspace\s*\{[\s\S]*flex:\s*1 1 auto;[\s\S]*grid-template-columns:[\s\S]*overflow:\s*hidden;/,
   "Desktop review workspace should fill remaining height and hide outer overflow.",
 );
 
 assertContains(
   globals,
-  /@media \(min-width:\s*1120px\)[\s\S]*\.review-main\s*\{[\s\S]*display:\s*grid;[\s\S]*grid-template-rows:\s*auto minmax\(0,\s*1fr\) auto auto;[\s\S]*overflow:\s*hidden;/,
+  /@media \(min-width:\s*960px\)[\s\S]*\.review-main\s*\{[\s\S]*display:\s*grid;[\s\S]*grid-template-rows:\s*auto minmax\(0,\s*1fr\) auto auto;[\s\S]*overflow:\s*hidden;/,
   "Desktop review main panel should reserve visible rows for title, actions, and AI edit controls.",
 );
 
 assertContains(
   globals,
-  /@media \(min-width:\s*1120px\)[\s\S]*\.review-editor-grid\s*\{[\s\S]*min-height:\s*0;[\s\S]*overflow:\s*hidden;/,
+  /@media \(min-width:\s*960px\)[\s\S]*\.review-editor-grid\s*\{[\s\S]*min-height:\s*0;[\s\S]*overflow:\s*hidden;/,
   "Desktop review editor grid should not expand the review panel when many images are present.",
 );
 
 assertContains(
   globals,
-  /@media \(min-width:\s*1120px\)[\s\S]*\.review-gallery,[\s\S]*\.review-editor-fields\s*\{[\s\S]*min-height:\s*0;[\s\S]*overflow-y:\s*auto;/,
+  /@media \(min-width:\s*960px\)[\s\S]*\.review-gallery,[\s\S]*\.review-editor-fields\s*\{[\s\S]*min-height:\s*0;[\s\S]*overflow-y:\s*auto;/,
   "Desktop review image and text columns should scroll independently so action buttons remain reachable.",
 );
 

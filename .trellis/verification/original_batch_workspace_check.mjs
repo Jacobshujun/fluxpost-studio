@@ -44,8 +44,8 @@ contains(service, /createOriginalBatchRecords\(batch, items, queueItems\)/, "Val
 contains(service, /generateCoverAnchoredCards\(series\.cards/, "Production workers must use the tested cover-anchor orchestrator.");
 contains(service, /let writing = item\.writing/, "Paused items must reuse their persisted writing snapshot.");
 contains(service, /let series = item\.series/, "Paused items must reuse their persisted structured card series.");
-contains(orchestrator, /await generateCard\(cards\[0\], \[\], deps\)/, "Cover generation must happen first without a reference.");
-contains(orchestrator, /Promise\.allSettled\(cards\.slice\(1\)\.map\(\(card\) => generateCard\(card, \[coverUrl\], deps\)\)\)/, "Later cards must run in parallel with the cover as sole anchor and settle before requeue.");
+contains(orchestrator, /cards\.find\(\(card\) => card\.role === "cover"\)[\s\S]*await generateCard\(cover, \[\], deps\)/, "Semantic cover generation must happen first without a reference, independent of review order.");
+contains(orchestrator, /Promise\.allSettled\(remaining\.map\(\(card\) => generateCard\(card, \[coverUrl\], deps\)\)\)/, "Other cards must run in parallel with the cover as sole anchor and settle before requeue.");
 contains(orchestrator, /generateCandidate\(card, correction, referenceImages, deps, true\)/, "A failed QA card must have exactly one explicit image retry path.");
 assert((orchestrator.match(/generateCandidate\(card, correction/g) || []).length === 1, "QA correction must not contain a second automatic retry path.");
 contains(orchestrator, /providerTaskId\?: string;[\s\S]*providerTaskRoute\?: "primary" \| "backup";[\s\S]*providerStatus\?: string;/, "Card orchestration must retain accepted provider task identity.");

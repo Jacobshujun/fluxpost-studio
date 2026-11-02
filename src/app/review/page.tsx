@@ -1,35 +1,34 @@
 "use client";
 
 import Link from "next/link";
+import { insertAt, ordinaryImagePrompts, reorderReviewImages } from "@/lib/review-image-order";
+import { ReviewFilterPanel } from "./review-filter-panel";
+import { emptyReviewFilters, reviewFiltersFromUrl, type ReviewFilters } from "@/lib/review-filters";
 import { useReviewData } from "./use-review-data";
 import { changedReviewFields, reviewThumbnailUrl, type ReviewListItem } from "@/lib/review-contract";
 import Image from "next/image";
 import { memo, useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState, useSyncExternalStore } from "react";
 import type { ChangeEvent, ClipboardEvent, DragEvent, ReactNode, Dispatch, SetStateAction } from "react";
 import {
+  GripVertical,
   ArrowDown,
   ArrowUp,
-  CalendarClock,
   Check,
   ClipboardCheck,
   Clock3,
   ExternalLink,
-  Filter,
   Image as ImageIcon,
   ImagePlus,
   Loader2,
   Maximize2,
   Moon,
   RefreshCw,
-  Search,
   Send,
   ShieldCheck,
   Sparkles,
   Sun,
-  Tag,
   Trash2,
   Upload,
-  UserRound,
   Wand2,
   X,
 } from "lucide-react";
@@ -37,11 +36,9 @@ import { toRemoteImagePreviewSrc } from "@/lib/media-preview";
 import { feishuPublishModeIncludesMedia, feishuPublishModeOptions, formatFeishuPublishMode } from "@/lib/feishu-publish-mode";
 import { FINISHED_BODY_MAX_CHARS, clampFinishedBodyInput, countFinishedBodyChars } from "@/lib/finished-body-policy";
 import { getStoredTheme, setStoredTheme, subscribeTheme, type ThemeMode } from "@/lib/theme";
-import { enumCodec, optionalStringCodec, useUrlQueryState } from "@/lib/use-url-query-state";
+import { useUrlQueryParams } from "@/lib/use-url-query-state";
 import type { FeishuPostPublishState, FeishuPublishJob, FeishuPublishMode, GeneratedPost, Platform, XhsCard } from "@/lib/types";
 
-type ReviewFilter = GeneratedPost["status"] | "all" | "ready";
-type ReviewTimeFilter = "all" | "today" | "7d" | "30d";
 type BusyState = "load" | "save" | "approve" | "review" | "batch" | "publish" | null;
 
 type FeishuPublishResponse = {
@@ -104,26 +101,6 @@ type PreviewState = {
 
 const localMediaPreviewVersion = "20260605-image-format-v2";
 
-const reviewFilters: Array<{ value: ReviewFilter; label: string }> = [
-  { value: "ready", label: "待发布" },
-  { value: "draft", label: "草稿" },
-  { value: "editing", label: "编辑中" },
-  { value: "approved", label: "已审查" },
-  { value: "published", label: "已发布" },
-  { value: "all", label: "全部" },
-];
-
-const reviewTimeFilters: Array<{ value: ReviewTimeFilter; label: string }> = [
-  { value: "all", label: "全部时间" },
-  { value: "today", label: "今天" },
-  { value: "7d", label: "近 7 天" },
-  { value: "30d", label: "近 30 天" },
-];
-
-const reviewFilterCodec = enumCodec(reviewFilters.map((item) => item.value), "ready");
-const reviewTimeFilterCodec = enumCodec(reviewTimeFilters.map((item) => item.value), "all");
-const platformFilterCodec = enumCodec<Platform | "all">(["all", "xiaohongshu", "douyin", "weibo", "wechat_channels", "xiaopeng_bbs", "dongchedi", "feishu", "original"], "all");
-
 const themeOptions: Array<{ value: ThemeMode; label: string; icon: ReactNode }> = [
   { value: "professional", label: "专业浅色", icon: <Sun className="h-3.5 w-3.5" /> },
   { value: "editorial", label: "编辑室", icon: <Sparkles className="h-3.5 w-3.5" /> },
@@ -142,13 +119,29 @@ const platformLabels: Record<Platform, string> = {
 };
 
 export default function ReviewPage() {
-  const [selectedPostId, setSelectedPostId, selectedPostHydrated] = useUrlQueryState("postId", "", optionalStringCodec());
-  const [sourceBatchId, , sourceBatchHydrated] = useUrlQueryState("sourceBatchId", "", optionalStringCodec());
-  const [filter, setFilter] = useUrlQueryState<ReviewFilter>("status", "ready", reviewFilterCodec);
-  const [timeFilter, setTimeFilter] = useUrlQueryState<ReviewTimeFilter>("time", "all", reviewTimeFilterCodec);
-  const [keywordFilter, setKeywordFilter] = useUrlQueryState("q", "", optionalStringCodec());
-  const [authorFilter, setAuthorFilter] = useUrlQueryState("author", "", optionalStringCodec());
-  const [platformFilter, setPlatformFilter] = useUrlQueryState<Platform | "all">("platform", "all", platformFilterCodec);
+  const [urlParams, updateUrl, hydrated] = useUrlQueryParams();
+  const selectedPostId = urlParams.get("postId") || "";
+  const sourceBatchId = urlParams.get("sourceBatchId") || "";
+  const setSelectedPostId = useCallback((id: string) => updateUrl((params) => { if (id) params.set("postId", id); else params.delete("postId"); }, true), [updateUrl]);
+  const filterUrlKey = JSON.stringify(["filters", "status", "time", "q", "author", "platform", "since", "until"].map((key) => [key, urlParams.get(key)]));
+  const [timeRevision, setTimeRevision] = useState(0);
+  const filterState = useMemo(() => {
+    const params = new URLSearchParams();
+    for (const [key, value] of JSON.parse(filterUrlKey) as [string, string | null][]) if (value !== null) params.set(key, value);
+    try { return { filters: reviewFiltersFromUrl(params), error: "" }; }
+    catch (error) { return { filters: emptyReviewFilters(), error: error instanceof Error ? error.message : "筛选无效" }; }
+  }, [filterUrlKey]);
+  const structuredFilters = useMemo(() => JSON.stringify({ ...filterState.filters, asOf: new Date(Math.max(timeRevision, Date.now())).toISOString() }), [filterState, timeRevision]);
+  function applyFilters(value: ReviewFilters, replace = false) {
+    updateUrl((params) => {
+      for (const key of ["status", "time", "q", "author", "platform", "since", "until"]) params.delete(key);
+      params.set("filters", JSON.stringify(value));
+    }, replace);
+    if (!replace) setTimeRevision(Date.now());
+  }
+  const [batchOpen, setBatchOpen] = useState(false);
+  const batchRef = useRef<HTMLDialogElement>(null);
+  useEffect(() => { const dialog = batchRef.current; if (batchOpen) dialog?.showModal(); else dialog?.close(); }, [batchOpen]);
   const [reviewPrompt, setReviewPrompt] = useState("");
   const [imagePromptByIndex, setImagePromptByIndex] = useState<Record<string, string>>({});
   const [imageBusyKey, setImageBusyKey] = useState("");
@@ -163,9 +156,9 @@ export default function ReviewPage() {
   const [feishuVehicleOptionsMessage, setFeishuVehicleOptionsMessage] = useState("");
   const theme = useSyncExternalStore(subscribeTheme, getStoredTheme, () => "professional" as ThemeMode);
 
-  const review = useReviewData({ status: filter, time: timeFilter, q: keywordFilter, author: authorFilter, platform: platformFilter, sourceBatchId }, selectedPostId, setSelectedPostId, selectedPostHydrated && sourceBatchHydrated, setMessage);
+  const review = useReviewData({ q: filterState.filters.search.value, sourceBatchId, structured: structuredFilters, invalid: Boolean(filterState.error) }, selectedPostId, setSelectedPostId, hydrated, setMessage);
   const { posts: filteredPosts, draft, setDraft, selectedPostIds, setSelectedPostIds, selectedPosts, toggleSelection, selectVisible, persistedPost } = review;
-  const { summary, authors: authorOptions, platforms: platformOptions } = review.metadata;
+  const { summary } = review.metadata;
   const loadPosts = review.refresh;
   const refreshDetail = review.refreshDetail;
 
@@ -254,7 +247,6 @@ export default function ReviewPage() {
   const selectReviewPost = review.selectPost;
   const selectPost = useCallback((post: ReviewListItem) => {
     selectReviewPost(post);
-    setImageBusyKey("");
     setImageUploadPanelOpen(false);
     setMessage("");
   }, [selectReviewPost]);
@@ -262,7 +254,7 @@ export default function ReviewPage() {
   const mergeSavedPost = review.mergeSavedPost;
 
   async function saveDraft(patch?: Partial<GeneratedPost>, instruction?: string, options?: { busyState?: BusyState }) {
-    if (!draft) return;
+    if (!draft || imageBusyKey) return;
     setBusy(options?.busyState || (instruction ? "review" : "save"));
     setMessage("");
     try {
@@ -288,32 +280,48 @@ export default function ReviewPage() {
     await saveDraft({ status: "approved" }, undefined, { busyState: "approve" });
   }
 
+  function reorderImages(from: number, to: number) {
+    if (!draft || busy || imageBusyKey || draft.xhsSeries?.cards.some((card) => card.status === "generating" || card.status === "validating")) return;
+    const next = reorderReviewImages(draft, from, to);
+    setDraft(next);
+    setImagePromptByIndex({});
+    setPreview((current) => {
+      if (!current || current.post.id !== draft.id || current.kind === "video") return current;
+      const cardId = seriesCardAtImageIndex(draft, current.index)?.id;
+      const index = cardId ? next.xhsSeries!.cards.filter((card) => card.imageUrl).findIndex((card) => card.id === cardId)
+        : insertAt(draft.imageUrls.map((_, i) => i), from, to).indexOf(current.index);
+      return { ...current, post: next, index };
+    });
+  }
   function moveDraftImage(index: number, delta: -1 | 1) {
     if (!draft) return;
-    if (draft.xhsSeries) return;
-    const nextIndex = index + delta;
-    if (nextIndex < 0 || nextIndex >= draft.imageUrls.length) return;
-    const imageUrls = [...draft.imageUrls];
-    [imageUrls[index], imageUrls[nextIndex]] = [imageUrls[nextIndex], imageUrls[index]];
-    setDraft({ ...draft, imageUrls });
-    setImagePromptByIndex((current) => moveImagePromptValues(current, draft, index, nextIndex));
+    const count = draft.xhsSeries?.cards.length ?? draft.imageUrls.length;
+    if (index + delta < 0 || index + delta >= count) return;
+    reorderImages(index, index + delta);
+  }
+  function changeImagePrompt(index: number, value: string) {
+    if (!draft || busy || imageBusyKey) return;
+    if (draft.xhsSeries) {
+      const target = seriesCardAtImageIndex(draft, index);
+      setDraft({ ...draft, xhsSeries: { ...draft.xhsSeries, cards: draft.xhsSeries.cards.map((card) => card.id === target?.id ? { ...card, prompt: value } : card) } });
+    } else {
+      const imagePrompts = ordinaryImagePrompts(draft);
+      imagePrompts[index] = value;
+      setDraft({ ...draft, imagePrompts });
+    }
   }
 
   function removeDraftImage(index: number) {
-    if (!draft || !draft.imageUrls[index]) return;
-    if (draft.xhsSeries) {
-      const nextDraft = updateSeriesCardImage(draft, index, undefined);
-      setDraft(nextDraft);
-      return;
-    }
+    if (!draft || busy || imageBusyKey || !draft.imageUrls[index]) return;
     const imageUrls = draft.imageUrls.filter((_, currentIndex) => currentIndex !== index);
-    const nextDraft = { ...draft, imageUrls };
+    const nextDraft = draft.xhsSeries ? updateSeriesCardImage(draft, index, undefined)
+      : { ...draft, imageUrls, imagePrompts: ordinaryImagePrompts(draft).filter((_, i) => i !== index) };
     setDraft(nextDraft);
     setImagePromptByIndex((current) => removeImagePromptValue(current, draft, index));
     setPreview((current) => {
       if (!current || current.post.id !== draft.id || current.kind === "video") return current;
       if (!imageUrls.length) return null;
-      return { post: nextDraft, index: Math.min(current.index, imageUrls.length - 1), kind: "image" };
+      return { post: nextDraft, index: Math.min(current.index > index ? current.index - 1 : current.index, imageUrls.length - 1), kind: "image" };
     });
   }
 
@@ -353,7 +361,7 @@ export default function ReviewPage() {
     setDraft((currentDraft) => {
       if (!currentDraft || currentDraft.id !== postId) return currentDraft;
       const imageUrls = [...currentDraft.imageUrls, imageUrl];
-      const nextDraft = { ...currentDraft, imageUrls };
+      const nextDraft = { ...currentDraft, imageUrls, imagePrompts: [...ordinaryImagePrompts(currentDraft), currentDraft.imagePrompt] };
       setPreview((current) => (current && current.post.id === postId && current.kind !== "video" ? { post: nextDraft, index: current.index, kind: "image" } : current));
       return nextDraft;
     });
@@ -361,6 +369,7 @@ export default function ReviewPage() {
   }
 
   async function regenerateDraftImage(index: number) {
+    if (busy || imageBusyKey) return;
     if (!draft || !draft.imageUrls[index]) return;
     const prompt = resolveDraftImagePrompt(draft, imagePromptByIndex, index).trim();
     if (!prompt) {
@@ -384,7 +393,8 @@ export default function ReviewPage() {
           });
       const data = (await res.json()) as ImageGenerationResponse & { post?: GeneratedPost; item?: ReviewListItem; pending?: boolean };
       if (seriesCard && data.post) {
-        mergeSavedPost(data.post, draft, data.item);
+        if (!res.ok) throw new Error(data.error || "卡片重新生成失败");
+        mergeRegeneratedCard(data.post, draft, seriesCard.id, data.item);
         setMessage(data.pending ? `第 ${index + 1} 张卡片已受理，后台继续生成` : `第 ${index + 1} 张卡片已重新生成并完成 QA`);
         return;
       }
@@ -399,6 +409,7 @@ export default function ReviewPage() {
   }
 
   async function regenerateMissingSeriesCard(card: XhsCard) {
+    if (busy || imageBusyKey) return;
     if (!draft?.xhsSeries) return;
     setImageBusyKey(`series:${card.id}`);
     setMessage("");
@@ -410,7 +421,7 @@ export default function ReviewPage() {
       });
       const data = (await res.json()) as { post?: GeneratedPost; item?: ReviewListItem; error?: string; pending?: boolean };
       if (!res.ok || !data.post) throw new Error(data.error || "卡片重新生成失败");
-      mergeSavedPost(data.post, draft, data.item);
+      mergeRegeneratedCard(data.post, draft, card.id, data.item);
       setMessage(data.pending ? `第 ${card.index + 1} 张卡片已受理，后台继续生成` : `第 ${card.index + 1} 张卡片已重新生成`);
     } catch (error) {
       setMessage(error instanceof Error ? error.message : "卡片重新生成失败");
@@ -420,12 +431,23 @@ export default function ReviewPage() {
   }
 
   function selectSeriesCandidate(index: number, imageUrl: string) {
-    if (!draft?.xhsSeries) return;
+    if (!draft?.xhsSeries || busy || imageBusyKey) return;
     setDraft(updateSeriesCardImage(draft, index, imageUrl));
     setMessage(`已选择第 ${index + 1} 张卡片候选图，保存后生效`);
   }
 
+  function mergeRegeneratedCard(saved: GeneratedPost, submitted: GeneratedPost, cardId: string, item?: ReviewListItem) {
+    mergeSavedPost(saved, submitted, item);
+    setDraft((current) => {
+      if (!current || current.id !== submitted.id || !submitted.xhsSeries || !saved.xhsSeries) return current;
+      const generated = saved.xhsSeries.cards.find((card) => card.id === cardId);
+      const cards = submitted.xhsSeries.cards.map((card, index) => card.id === cardId && generated ? { ...generated, index } : card);
+      return { ...current, xhsSeries: { ...submitted.xhsSeries, cards }, imageUrls: cards.flatMap((card) => card.imageUrl ? [card.imageUrl] : []) };
+    });
+  }
+
   async function uploadDraftImageAddition(file: File) {
+    if (busy || imageBusyKey) return;
     if (!draft) return;
     const uploadImageIndex = (persistedPost(draft.id)?.imageUrls.length ?? draft.imageUrls.length);
     const displayImageIndex = draft.imageUrls.length;
@@ -453,6 +475,7 @@ export default function ReviewPage() {
   }
 
   async function uploadDraftImageReplacement(file: File, index: number) {
+    if (busy || imageBusyKey) return;
     if (!draft || !draft.imageUrls[index]) return;
     setImageBusyKey(`upload:${index}`);
     setMessage("");
@@ -561,6 +584,7 @@ export default function ReviewPage() {
   }
 
   async function publishSelected() {
+    if (imageBusyKey) return;
     let postsToPublish: Array<GeneratedPost | ReviewListItem> = selectedPosts.length ? selectedPosts : draft ? [draft] : [];
     if (!postsToPublish.length) return;
     setBusy("publish");
@@ -621,11 +645,13 @@ export default function ReviewPage() {
     return data.post;
   }
 
-  const latestGalleryActions = { handleDraftImagePaste, moveDraftImage, removeDraftImage, regenerateDraftImage, handleDraftImageFileChange, selectSeriesCandidate, regenerateMissingSeriesCard, removeDraftVideo,
+  const latestGalleryActions = { reorderImages, changeImagePrompt, handleDraftImagePaste, moveDraftImage, removeDraftImage, regenerateDraftImage, handleDraftImageFileChange, selectSeriesCandidate, regenerateMissingSeriesCard, removeDraftVideo,
     openPreview: (index: number, kind: "image" | "video") => { if (draft) setPreview({ post: draft, index, kind }); } };
   const galleryActionsRef = useRef(latestGalleryActions);
   useLayoutEffect(() => { galleryActionsRef.current = latestGalleryActions; });
   const galleryActions = useMemo(() => ({
+    reorderImages: (...args: Parameters<GalleryActions["reorderImages"]>) => galleryActionsRef.current.reorderImages(...args),
+    changeImagePrompt: (...args: Parameters<GalleryActions["changeImagePrompt"]>) => galleryActionsRef.current.changeImagePrompt(...args),
     handleDraftImagePaste: (...args: Parameters<GalleryActions["handleDraftImagePaste"]>) => galleryActionsRef.current.handleDraftImagePaste(...args),
     moveDraftImage: (...args: Parameters<GalleryActions["moveDraftImage"]>) => galleryActionsRef.current.moveDraftImage(...args),
     removeDraftImage: (...args: Parameters<GalleryActions["removeDraftImage"]>) => galleryActionsRef.current.removeDraftImage(...args),
@@ -639,10 +665,54 @@ export default function ReviewPage() {
   const galleryDraft = useMemo(() => draft ? { ...draft } : null,
     // Text edits deliberately do not change the media view; actions use latest committed state.
     // eslint-disable-next-line react-hooks/exhaustive-deps
-    [draft?.id, draft?.imageUrls, draft?.videoUrls, draft?.imagePrompt, draft?.imageTasks, draft?.xhsSeries]);
+    [draft?.id, draft?.imagePrompts, draft?.imageUrls, draft?.videoUrls, draft?.imagePrompt, draft?.imageTasks, draft?.xhsSeries]);
   const changeText = useCallback((field: "title" | "body" | "feishuVehicle", value: string) => {
     setDraft((current) => current ? { ...current, [field]: value } : current);
   }, [setDraft]);
+
+  const batchPanel = <>
+            <div className="flex items-center justify-between gap-3">
+              <div className="min-w-0">
+                <p className="header-eyebrow">Batch publish</p>
+                <h2 className="truncate text-base font-black">批量操作</h2>
+              </div>
+              <span className="status-badge text-[11px] text-[var(--text-muted)]">{selectedPostIds.length} 已选</span>
+            </div>
+
+            <div className="mt-4 grid gap-2">
+              <FeishuPublishModeSelector value={feishuPublishMode} disabled={Boolean(busy)} onChange={setFeishuPublishMode} />
+              <button className="soft-button flex h-11 items-center justify-center gap-2 text-xs font-black" type="button" onClick={() => batchSetStatus("approved")} disabled={Boolean(busy) || !selectedPostIds.length}>
+                <ShieldCheck className="h-4 w-4" />
+                批量审查通过
+              </button>
+              <button className="primary-button flex h-11 items-center justify-center gap-2 text-xs font-black" type="button" onClick={publishSelected} disabled={Boolean(busy) || (!selectedPostIds.length && !draft)}>
+                {busy === "publish" ? <Loader2 className="h-4 w-4 animate-spin" /> : <Send className="h-4 w-4" />}
+                批量写入飞书
+              </button>
+              <button className="soft-button flex h-11 items-center justify-center gap-2 text-xs font-black text-[var(--rose)]" type="button" onClick={deleteSelected} disabled={Boolean(busy) || !selectedPostIds.length}>
+                <Trash2 className="h-4 w-4" />
+                删除所选
+              </button>
+            </div>
+
+            {message ? <div className="approval-banner mt-4">{message}</div> : null}
+            {publish ? <PublishStatusCard publish={publish} /> : null}
+
+            <div className="content-cluster mt-4">
+              <p className="mb-2 text-xs font-black">当前选择</p>
+              <div className="space-y-2">
+                {(selectedPosts.length ? selectedPosts : draft ? [draft] : []).slice(0, 10).map((post) => (
+                  <div key={post.id} className="review-selected-row">
+                    <span className="truncate">{post.title || "未命名生成稿"}</span>
+                    <span className="status-badge max-w-[8rem] truncate text-[11px] text-[var(--text-muted)]">
+                      {("author" in post ? post.author : post.feishuVehicle || post.taskKeyword) || "未选择"}
+                    </span>
+                    <StatusBadge status={post.status} />
+                  </div>
+                ))}
+              </div>
+            </div>
+  </>;
 
   return (
     <main className="app-shell review-shell overflow-x-hidden">
@@ -677,7 +747,7 @@ export default function ReviewPage() {
               <ExternalLink className="h-4 w-4" />
               返回工作台
             </Link>
-            <button className="soft-button inline-flex h-10 items-center justify-center gap-2 px-3 text-xs font-black" type="button" onClick={() => { loadPosts(); review.refreshDetail(); }} disabled={Boolean(busy)}>
+            <button className="soft-button inline-flex h-10 items-center justify-center gap-2 px-3 text-xs font-black" type="button" onClick={() => { setTimeRevision((value) => value + 1); loadPosts(); review.refreshDetail(); }} disabled={Boolean(busy)}>
               {busy === "load" ? <Loader2 className="h-4 w-4 animate-spin" /> : <RefreshCw className="h-4 w-4" />}
               刷新
             </button>
@@ -689,59 +759,20 @@ export default function ReviewPage() {
           <Metric label="待发布" value={summary.ready} />
           <Metric label="已审查" value={summary.approved} />
           <Metric label="已发布" value={summary.published} />
-          <Metric label="已选" value={selectedPostIds.length} />
+          <button className="soft-button review-batch-trigger" type="button" onClick={() => setBatchOpen(true)}>批量操作 · {selectedPostIds.length} 已选</button>
         </section>
 
         <section className="review-workspace">
           <aside className="review-sidebar glass ops-panel">
             <div className="review-filter-stack">
-              <div className="review-search">
-                <Search className="h-4 w-4" />
-                <input className="field search-field h-10" value={keywordFilter} onChange={(event) => setKeywordFilter(event.target.value)} placeholder="关键字：标题、正文、车型" />
+              <div className="review-search-row">
+                <select className="field" aria-label="搜索字段" value={filterState.filters.search.field} onChange={(event) => applyFilters({ ...filterState.filters, search: { ...filterState.filters.search, field: event.target.value as ReviewFilters["search"]["field"] } })}>
+                  <option value="all">全部文本</option><option value="title">标题</option><option value="body">正文</option><option value="vehicle">车型（精准）</option>
+                </select>
+                <input className="field search-field h-10" aria-label="搜索稿件" list={filterState.filters.search.field === "vehicle" ? "review-vehicle-candidates" : undefined} value={filterState.filters.search.value} onChange={(event) => applyFilters({ ...filterState.filters, search: { ...filterState.filters.search, value: event.target.value } }, true)} placeholder="搜索稿件" />
+                <datalist id="review-vehicle-candidates">{review.metadata.vehicles?.map((vehicle) => <option key={vehicle} value={vehicle} />)}</datalist>
               </div>
-              <div className="review-filter-grid">
-                <label className="review-filter-field">
-                  <span><CalendarClock className="h-3.5 w-3.5" />时间</span>
-                  <select className="field h-10" value={timeFilter} onChange={(event) => setTimeFilter(event.target.value as ReviewTimeFilter)}>
-                    {reviewTimeFilters.map((item) => (
-                      <option key={item.value} value={item.value}>{item.label}</option>
-                    ))}
-                  </select>
-                </label>
-                <label className="review-filter-field">
-                  <span><UserRound className="h-3.5 w-3.5" />内容作者</span>
-                  <select className="field h-10" value={authorFilter} onChange={(event) => setAuthorFilter(event.target.value)}>
-                    <option value="">全部作者</option>
-                    {authorOptions.map((author) => (
-                      <option key={author} value={author}>{author}</option>
-                    ))}
-                  </select>
-                </label>
-                <label className="review-filter-field">
-                  <span><Filter className="h-3.5 w-3.5" />采集平台</span>
-                  <select className="field h-10" value={platformFilter} onChange={(event) => setPlatformFilter(event.target.value as Platform | "all")}>
-                    <option value="all">全部平台</option>
-                    {platformOptions.map((item) => (
-                      <option key={item} value={item}>{platformLabels[item] || item}</option>
-                    ))}
-                  </select>
-                </label>
-                <label className="review-filter-field">
-                  <span><Tag className="h-3.5 w-3.5" />状态</span>
-                  <select className="field h-10" value={filter} onChange={(event) => setFilter(event.target.value as ReviewFilter)}>
-                    {reviewFilters.map((item) => (
-                      <option key={item.value} value={item.value}>{item.label}</option>
-                    ))}
-                  </select>
-                </label>
-              </div>
-            </div>
-            <div className="mt-3 flex flex-wrap gap-1.5">
-              {reviewFilters.map((item) => (
-                <button key={item.value} className={`filter-chip ${filter === item.value ? "filter-chip-active" : ""}`} type="button" onClick={() => setFilter(item.value)}>
-                  {item.label}
-                </button>
-              ))}
+              <ReviewFilterPanel filters={filterState.filters} error={filterState.error} metadata={review.metadata} onApply={applyFilters} />
             </div>
             <div className="batch-action-bar mt-3">
               <div className="min-w-0">
@@ -757,7 +788,7 @@ export default function ReviewPage() {
                 </button>
               </div>
             </div>
-            <ReviewPostList posts={filteredPosts} selectedPostId={selectedPostId} selectedPostIds={selectedPostIds} selectPost={selectPost} toggleSelection={toggleSelection} loading={review.loading} />
+            <ReviewPostList posts={filterState.error ? [] : filteredPosts} selectedPostId={selectedPostId} selectedPostIds={selectedPostIds} selectPost={selectPost} toggleSelection={toggleSelection} loading={review.loading} />
             <div className="flex shrink-0 items-center justify-between gap-2 pt-2">
               <button className="soft-button px-3 py-2 text-xs" onClick={review.previousPage} disabled={review.loading || review.pageNumber === 1}>上一页</button>
               <span className="text-xs" aria-live="polite">第 {review.pageNumber} 页{review.loading ? " · 加载中" : ""}</span>
@@ -805,8 +836,9 @@ export default function ReviewPage() {
                   </button>
                 </div>
 
-                <div className="review-ai-box">
-                  <FieldLabel label="Prompt 修改" />
+                <details className="review-ai-box">
+                  <summary>AI 修改</summary>
+                  <div className="review-ai-content">
                   <textarea className="field mt-2 min-h-24 resize-y" value={reviewPrompt} onChange={(event) => setReviewPrompt(event.target.value)} />
                   <button
                     className="soft-button mt-2 inline-flex h-10 items-center justify-center gap-2 px-4 text-xs font-black"
@@ -820,7 +852,8 @@ export default function ReviewPage() {
                     {busy === "review" ? <Loader2 className="h-4 w-4 animate-spin" /> : <Wand2 className="h-4 w-4" />}
                     AI 修改
                   </button>
-                </div>
+                  </div>
+                </details>
               </>
             ) : (
               <div className="empty-state">
@@ -830,52 +863,15 @@ export default function ReviewPage() {
             )}
           </section>
 
-          <aside className="review-publish-panel glass ops-panel">
-            <div className="flex items-center justify-between gap-3">
-              <div className="min-w-0">
-                <p className="header-eyebrow">Batch publish</p>
-                <h2 className="truncate text-base font-black">批量操作</h2>
-              </div>
-              <span className="status-badge text-[11px] text-[var(--text-muted)]">{selectedPostIds.length} 已选</span>
-            </div>
-
-            <div className="mt-4 grid gap-2">
-              <FeishuPublishModeSelector value={feishuPublishMode} disabled={Boolean(busy)} onChange={setFeishuPublishMode} />
-              <button className="soft-button flex h-11 items-center justify-center gap-2 text-xs font-black" type="button" onClick={() => batchSetStatus("approved")} disabled={Boolean(busy) || !selectedPostIds.length}>
-                <ShieldCheck className="h-4 w-4" />
-                批量审查通过
-              </button>
-              <button className="primary-button flex h-11 items-center justify-center gap-2 text-xs font-black" type="button" onClick={publishSelected} disabled={Boolean(busy) || (!selectedPostIds.length && !draft)}>
-                {busy === "publish" ? <Loader2 className="h-4 w-4 animate-spin" /> : <Send className="h-4 w-4" />}
-                批量写入飞书
-              </button>
-              <button className="soft-button flex h-11 items-center justify-center gap-2 text-xs font-black text-[var(--rose)]" type="button" onClick={deleteSelected} disabled={Boolean(busy) || !selectedPostIds.length}>
-                <Trash2 className="h-4 w-4" />
-                删除所选
-              </button>
-            </div>
-
-            {message ? <div className="approval-banner mt-4">{message}</div> : null}
-            {publish ? <PublishStatusCard publish={publish} /> : null}
-
-            <div className="content-cluster mt-4">
-              <p className="mb-2 text-xs font-black">当前选择</p>
-              <div className="space-y-2">
-                {(selectedPosts.length ? selectedPosts : draft ? [draft] : []).slice(0, 10).map((post) => (
-                  <div key={post.id} className="review-selected-row">
-                    <span className="truncate">{post.title || "未命名生成稿"}</span>
-                    <span className="status-badge max-w-[8rem] truncate text-[11px] text-[var(--text-muted)]">
-                      {("author" in post ? post.author : post.feishuVehicle || post.taskKeyword) || "未选择"}
-                    </span>
-                    <StatusBadge status={post.status} />
-                  </div>
-                ))}
-              </div>
-            </div>
-          </aside>
+          <aside className="review-publish-panel glass ops-panel">{batchPanel}</aside>
         </section>
       </div>
 
+      <dialog ref={batchRef} className="review-overlay" onCancel={() => setBatchOpen(false)} onClose={() => setBatchOpen(false)}>
+        <button className="soft-button" onClick={() => setBatchOpen(false)}>关闭批量操作</button>
+        {batchOpen ? batchPanel : null}
+      </dialog>
+      {message ? <div role="status" className="review-feedback">{message}</div> : null}
       <ReviewImageUploadPanel
         open={imageUploadPanelOpen}
         busy={Boolean(busy) || Boolean(imageBusyKey)}
@@ -1286,11 +1282,11 @@ function navigatePreview(current: PreviewState, delta: number): PreviewState {
 }
 
 function resolveDraftImagePrompt(post: GeneratedPost, imagePromptByIndex: Record<string, string>, index: number) {
+  const seriesPrompt = seriesCardAtImageIndex(post, index)?.prompt;
+  if (seriesPrompt !== undefined) return seriesPrompt;
+  if (post.imagePrompts && !post.xhsSeries) return post.imagePrompts[index] ?? "";
   const manualPrompt = imagePromptByIndex[imagePromptKey(post.id, index)];
   if (manualPrompt !== undefined) return manualPrompt;
-
-  const seriesPrompt = seriesCardAtImageIndex(post, index)?.prompt;
-  if (seriesPrompt) return seriesPrompt;
 
   const imagePromptParts = splitImagePrompt(post.imagePrompt);
   if (imagePromptParts.length > 1 && imagePromptParts[index]) return imagePromptParts[index];
@@ -1332,18 +1328,6 @@ function updateSeriesCardImage(post: GeneratedPost, imageIndex: number, imageUrl
   });
   const xhsSeries = { ...post.xhsSeries, cards };
   return { ...post, xhsSeries, imageUrls: cards.map((card) => card.imageUrl).filter((url): url is string => Boolean(url)) };
-}
-
-function moveImagePromptValues(current: Record<string, string>, post: GeneratedPost, index: number, nextIndex: number) {
-  const next = { ...current };
-  const sourceKey = imagePromptKey(post.id, index);
-  const targetKey = imagePromptKey(post.id, nextIndex);
-  const sourceValue = resolveDraftImagePrompt(post, current, index);
-  const targetValue = resolveDraftImagePrompt(post, current, nextIndex);
-  next[targetKey] = sourceValue;
-  next[sourceKey] = targetValue;
-
-  return next;
 }
 
 function removeImagePromptValue(current: Record<string, string>, post: GeneratedPost, removedIndex: number) {
@@ -1427,6 +1411,8 @@ const ReviewPostList = memo(function ReviewPostList({ posts, selectedPostId, sel
             </div>); });
 
 type GalleryActions = {
+  reorderImages: (from: number, to: number) => void;
+  changeImagePrompt: (index: number, value: string) => void;
   handleDraftImagePaste: (event: ClipboardEvent<HTMLElement>, index: number) => void;
   moveDraftImage: (index: number, delta: -1 | 1) => void;
   removeDraftImage: (index: number) => void;
@@ -1437,14 +1423,48 @@ type GalleryActions = {
   removeDraftVideo: (index: number) => void;
   openPreview: (index: number, kind: "image" | "video") => void;
 };
-const ReviewGallery = memo(function ReviewGallery({ draft, persistedImages, busy, imageBusyKey, imagePromptByIndex, setImagePromptByIndex, setImageUploadPanelOpen, actions }: {
+const ReviewGallery = memo(function ReviewGallery({ draft, persistedImages, busy, imageBusyKey, imagePromptByIndex, setImageUploadPanelOpen, actions }: {
   draft: GeneratedPost; persistedImages?: string[]; busy: BusyState; imageBusyKey: string; imagePromptByIndex: Record<string,string>;
   setImagePromptByIndex: Dispatch<SetStateAction<Record<string,string>>>; setImageUploadPanelOpen: Dispatch<SetStateAction<boolean>>; actions: GalleryActions;
-}) { return (                  <div className="review-gallery">
-                    {draft.imageUrls.length ? (
+}) {
+  const [drag, setDrag] = useState<number | null>(null);
+  const [target, setTarget] = useState<number | null>(null);
+  const galleryRef = useRef<HTMLDivElement>(null);
+  const edge = useRef(0);
+  useEffect(() => {
+    if (drag === null) return;
+    let frame = 0;
+    const tick = () => { if (galleryRef.current) galleryRef.current.scrollTop += edge.current; frame = requestAnimationFrame(tick); };
+    frame = requestAnimationFrame(tick);
+    return () => cancelAnimationFrame(frame);
+  }, [drag]);
+  const locked = Boolean(busy) || Boolean(imageBusyKey) || Boolean(draft.xhsSeries?.cards.some((card) => card.status === "generating" || card.status === "validating"));
+  const slots = draft.xhsSeries ? draft.xhsSeries.cards.map((card) => ({ url: card.imageUrl, card })) : draft.imageUrls.map((url) => ({ url, card: undefined }));
+  const tools = (position: number) => <div className="review-order-tools">
+    <button type="button" draggable={!locked} disabled={locked} className="review-gallery-tool" aria-label={`拖动配图 ${position + 1}`}
+      onDragStart={(event) => { event.dataTransfer.setData("application/x-review-order", JSON.stringify({ postId: draft.id, position })); event.dataTransfer.effectAllowed = "move"; setDrag(position); }}
+      onDragEnd={() => { setDrag(null); setTarget(null); edge.current = 0; }}><GripVertical size={16} /></button>
+    <button type="button" className="review-gallery-tool" aria-label="上移配图" disabled={locked || position === 0 || drag !== null} onClick={() => actions.moveDraftImage(position, -1)}><ArrowUp size={14} /></button>
+    <button type="button" className="review-gallery-tool" aria-label="下移配图" disabled={locked || position === slots.length - 1 || drag !== null} onClick={() => actions.moveDraftImage(position, 1)}><ArrowDown size={14} /></button>
+  </div>;
+  return (<div className="review-gallery" ref={galleryRef} onKeyDown={(event) => { if (event.key === "Escape") { setDrag(null); setTarget(null); } }}>
+
+                    {slots.length ? (
                       <>
-                        {draft.imageUrls.map((url, index) => (
-                        <div
+                        {slots.map(({ url, card }, position) => {
+                          const index = draft.xhsSeries ? slots.slice(0, position).filter((slot) => slot.url).length : position;
+                          return <div key={card?.id || `${draft.id}:${position}`} className={`review-order-item ${target === position ? `review-drop-target ${drag !== null && drag < position ? "review-drop-after" : ""}` : ""} ${drag === position ? "review-dragging" : ""}`}
+                            onDragOver={(event) => {
+                              if (locked || drag === null || !event.dataTransfer.types.includes("application/x-review-order")) return;
+                              event.preventDefault(); setTarget(position);
+                              const rect = galleryRef.current!.getBoundingClientRect();
+                              edge.current = event.clientY < rect.top + 60 ? -12 : event.clientY > rect.bottom - 60 ? 12 : 0;
+                            }}
+                            onDrop={(event) => { if (locked || drag === null) return; event.preventDefault(); actions.reorderImages(drag, position); setDrag(null); setTarget(null); edge.current = 0; }}>
+                            {tools(position)}
+                            {url ? (
+
+                        <fieldset disabled={drag !== null || locked}
                           key={`${url}-${index}`}
                           className={`review-gallery-tile ${index === 0 ? "review-gallery-tile-primary" : ""}`}
                           tabIndex={0}
@@ -1455,15 +1475,7 @@ const ReviewGallery = memo(function ReviewGallery({ draft, persistedImages, busy
                             <span className="review-gallery-index">{index + 1}</span>
                           </button>
                           <div className="review-gallery-tools" aria-label={`配图 ${index + 1} 操作`}>
-                            {!draft.xhsSeries ? <>
-                            <button className="review-gallery-tool" type="button" onClick={() => actions.moveDraftImage(index, -1)} disabled={index === 0 || Boolean(busy)} aria-label="上移配图">
-                              <ArrowUp className="h-3.5 w-3.5" />
-                            </button>
-                            <button className="review-gallery-tool" type="button" onClick={() => actions.moveDraftImage(index, 1)} disabled={index === draft.imageUrls.length - 1 || Boolean(busy)} aria-label="下移配图">
-                              <ArrowDown className="h-3.5 w-3.5" />
-                            </button>
-                            </> : null}
-                            <button className="review-gallery-tool review-gallery-tool-danger" type="button" onClick={() => actions.removeDraftImage(index)} disabled={Boolean(busy)} aria-label="删除配图">
+                            <button className="review-gallery-tool review-gallery-tool-danger" type="button" onClick={() => actions.removeDraftImage(index)} disabled={locked || drag !== null} aria-label="删除配图">
                               <Trash2 className="h-3.5 w-3.5" />
                             </button>
                           </div>
@@ -1471,12 +1483,7 @@ const ReviewGallery = memo(function ReviewGallery({ draft, persistedImages, busy
                             <textarea
                               className="field review-image-prompt"
                               value={resolveDraftImagePrompt(draft, imagePromptByIndex, index)}
-                              onChange={(event) =>
-                                setImagePromptByIndex((current) => ({
-                                  ...current,
-                                  [imagePromptKey(draft.id, index)]: event.target.value,
-                                }))
-                              }
+                              onChange={(event) => actions.changeImagePrompt(index, event.target.value)}
                               onPaste={(event) => actions.handleDraftImagePaste(event, index)}
                               placeholder={`第 ${index + 1} 张图片 Prompt`}
                             />
@@ -1508,13 +1515,13 @@ const ReviewGallery = memo(function ReviewGallery({ draft, persistedImages, busy
                             </div>
                           </div>
                           {seriesCardAtImageIndex(draft, index) ? <SeriesCardMeta card={seriesCardAtImageIndex(draft, index)!} onSelect={(url) => actions.selectSeriesCandidate(index, url)} /> : null}
-                        </div>
-                        ))}
-                        {draft.xhsSeries?.cards.filter((card) => !card.imageUrl).map((card) => <div className="review-gallery-tile review-series-missing" key={card.id}>
-                          <div><ImagePlus className="h-5 w-5" /><strong>第 {card.index + 1} 张待补图</strong><span>{card.error || card.qa.issues.join("；") || card.status}</span></div>
-                          <textarea className="field review-image-prompt" value={card.prompt} readOnly aria-label={`第 ${card.index + 1} 张图片 Prompt`} />
-                          <button className="soft-button" type="button" onClick={() => actions.regenerateMissingSeriesCard(card)} disabled={Boolean(busy) || Boolean(imageBusyKey)}>{imageBusyKey === `series:${card.id}` ? <Loader2 className="h-3.5 w-3.5 animate-spin" /> : <Wand2 className="h-3.5 w-3.5" />}重新生成</button>
-                        </div>)}
+                        </fieldset>
+                        ) : card ? <div className="review-gallery-tile review-series-missing">
+                          <strong>第 {position + 1} 张待补图</strong><span>{card.error || card.status}</span>
+                          <textarea className="field" value={card.prompt} readOnly />
+                          <button className="soft-button" disabled={locked || drag !== null} onClick={() => actions.regenerateMissingSeriesCard(card)}>重新生成</button>
+                        </div> : null}</div>;
+                        })}
                         <ReviewImageAddTile busy={Boolean(busy) || Boolean(imageBusyKey)} isUploading={imageBusyKey === "upload:add"} onOpen={() => setImageUploadPanelOpen(true)} />
                       </>
                     ) : (

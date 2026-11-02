@@ -75,7 +75,8 @@ assertNotContains(simpleRuns, /Skipped video source without extracted video fram
 assertContains(simpleRuns, /includeSourceVideo:\s*normalizedInput\.includeSourceVideo === true/, "Simple runs must normalize source-video attachment off by default.");
 assertContains(simpleRuns, /includeSourceVideo:\s*normalizedInput\.includeSourceVideo === true/, "Simple production generatePost calls must use the normalized source-video opt-in.");
 
-assertContains(reviewRoute, /"imageUrls" \| "videoUrls" \| "imageTasks" \| "feishuVehicle"/, "Review API manual patch must allow videoUrls.");
+assertContains(read("src/lib/review-contract.ts"), /"imageUrls" \| "videoUrls" \| "imageTasks" \| "feishuVehicle"/, "Shared ReviewPatch must allow videoUrls.");
+assertContains(reviewRoute, /allowedPatch: ReviewPatch/, "Review API must use the shared patch contract.");
 assertContains(reviewRoute, /if \("videoUrls" in body\.manualPatch\) allowedPatch\.videoUrls = body\.manualPatch\.videoUrls/, "Review API must preserve videoUrls in manual patches.");
 assertContains(reviewPage, /changedReviewFields\(draft, persistedPost\(draft\.id\)/, "Review saveDraft must send changed fields, including changed video URLs.");
 assertContains(reviewPage, /removeDraftVideo/, "Review desk must support removing a video material from the draft.");
