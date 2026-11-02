@@ -1,18 +1,20 @@
 # FluxPost Current Status
 
-Last updated: 2026-10-30
+Last updated: 2026-11-02
 
 ## One-Line Status
 
-LAN: universal Canvas modes. Active SHA: `/api/version` and launcher receipt. OSS unchanged.
+LAN: review desk layout, ordering and structured filters candidate. Active SHA: `/api/version` and launcher receipt. OSS unchanged.
 
 ## Current Focus
 
+- Review desk usability: responsive 960/1600 layout, free insertion ordering for ordinary and series cards (including missing-image cards), and versioned Beijing-time structured filters verified on the exact tree: 153-step baseline, opt-in PostgreSQL, 30-case three-theme browser suite and performance regressions. Evidence: active 10-30-review-desk-usability task. Real authenticated operator review remains.
 - Iteration batch fix on LAN. Evidence: archived canvas-iteration-batch-params task.
 - Universal Canvas modes pass six mode and six group browser cases; impossible routes report errors. LAN smoke passed. Evidence: archived canvas-universal-modes task.
 - Wonder Image existing-media reuse was accepted on LAN `ec0cd9f`; real Yike/model acceptance is pending.
 - Generated library retired: 22,255 index assets and three tables removed without a cleanup backup. Ordinary assets remain: 2,301; nonempty collections: 24; memberships: 2,230; labels: 5,302.
 - Qwen `0b775c7` included in authorized LAN release; Gemini live testing paused.
+- Claude Code Trellis integration installed via `trellis init --claude`: `.claude/` provides SessionStart/UserPromptSubmit/PreToolUse hooks, nine skills, three subagents, and two slash commands. Restart Claude Code to activate; no application code changed.
 
 ## Next Entry
 
@@ -21,7 +23,7 @@ OSS evidence: `.trellis/tasks/archive/2026-10/10-28-oss-acceptance-local-cutover
 ## Risks And Unknowns
 
 - Latest Wonder report: ImportMedia `MediaAlreadyExist`. LAN ID reuse repair preserves GetMedia readiness and Overwrite=false; no manual live replay. See archived wonder-existing-media task; earlier auth cause unproven.
-- Context budget fixed by archive; baseline domain checks pass then stop at 17 existing ignored-script lint errors. Separate lint/type/build/smoke passed; no gate weakened.
+- ESLint excludes local `data/` artifacts; lint passes with 0 errors/16 source warnings. Full baseline passes (2026-10-30); source rules and LAN unchanged.
 - Text reasoning effort must be supported by the configured model and provider; unsupported values surface the upstream error without stripping or retrying the parameter.
 - Gemini live text/image acceptance remains pending. Minimal diagnostics were authorized, then explicitly paused; do not send further calls until resumed.
 - ToAPIs ordinary ratio/tier versus VIP/Official pixels live acceptance is unconfirmed. Concurrent Vision failures previously returned upstream 502 HTML; explicit retry is required by the one-attempt queue.

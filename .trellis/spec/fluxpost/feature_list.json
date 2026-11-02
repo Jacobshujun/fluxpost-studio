@@ -460,6 +460,19 @@
         "Original batch schema/API/orchestration/recovery/build/browser checks and production route/schema health passed."
       ],
       "notes": "A real small provider batch and authenticated multi-user lifecycle remain."
+    },
+    {
+      "id": "review-desk-usability",
+      "title": "Review desk layout, free card ordering and structured filters",
+      "status": "ready_for_review",
+      "definition_of_done": [
+        "Laptop-width list/editor/batch access, free insertion ordering for ordinary and series cards including missing-image cards, and composable Beijing-time filters pass focused, SQLite/PostgreSQL, browser and full-baseline checks",
+        "Approval and publishing payloads remain unchanged and real authenticated operator review remains an explicit gate"
+      ],
+      "evidence": [
+        "2026-11-02 exact-tree baseline (153 logged steps, 0 errors/16 existing warnings), opt-in PostgreSQL filter/save/reorder checks, 30-case three-theme browser suite and review performance regressions passed; see 10-30-review-desk-usability/verification.md."
+      ],
+      "notes": "LAN activation runs from the clean committed SHA. Real authenticated review, provider outputs and Feishu publication remain operator gates; no production release."
     }
   ]
 }
