@@ -228,6 +228,7 @@ async def check(browser, width, total):
     await page.reload(wait_until="networkidle")
     await page.locator('.review-gallery-preview img').first.scroll_into_view_if_needed()
     await expect(page.locator('.review-gallery-preview img').first).to_be_visible()
+    await page.wait_for_function("() => { const img = document.querySelector('.review-gallery-preview img'); return Boolean(img && img.complete && img.naturalWidth > 0); }")
     assert await page.locator('.review-gallery-preview img').first.evaluate("img=>img.complete && img.naturalWidth > 0")
     assert await page.evaluate("document.documentElement.scrollWidth <= innerWidth"), "Horizontal overflow"
     os.makedirs("test-artifacts/review-performance", exist_ok=True)

@@ -60,11 +60,12 @@ Do not deploy a dirty worktree, branch name, abbreviated SHA, local runtime rows
   drag. Headed Chrome real-mouse drag, the 45-case three-theme suite and the
   153-step baseline pass. Logs: `test-artifacts/review-gallery-drag-*.log`.
 
-- 2026-11-02 Review gallery layout: `>=960px` multi-column gallery, 24px
-  overlay ordering controls, compact prompt, container/series hero rules.
-  153-step baseline, 45 three-theme layout cases incl. simulated classic
-  scrollbar, series layout and edge autoscroll, plus performance regressions
-  pass. Logs: `test-artifacts/review-gallery-*-final.log`.
+- 2026-11-02 Review image preview 3:4: image tiles use 3:4 (video 4:3),
+  the first-image `16 / 9` hero is removed, the 112px desktop grid keeps four
+  portrait images visible at 1440x900, and badge/tools geometry is verified for
+  image and video tiles. Full baseline (0 lint errors/16 warnings), 45
+  three-theme layout cases, video/series/scrollbar/interaction checks and two
+  performance runs pass. Logs: `test-artifacts/review-ratio-*.log`.
 
 - 2026-11-02 Review desk usability: exact-tree baseline (153 logged steps, 0 lint errors,
   16 existing warnings, types/build/config sync/HTTP smoke on 45678/SQLite),

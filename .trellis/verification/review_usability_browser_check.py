@@ -12,7 +12,16 @@ assert urlparse(BASE).hostname in ("127.0.0.1", "localhost") and urlparse(BASE).
 ARTIFACTS = Path("test-artifacts/review-usability")
 
 
-async def fixture(browser, width, height, theme, image_count=4):
+def boxes_overlap(a, b):
+    return not (
+        a["x"] + a["width"] <= b["x"]
+        or b["x"] + b["width"] <= a["x"]
+        or a["y"] + a["height"] <= b["y"]
+        or b["y"] + b["height"] <= a["y"]
+    )
+
+
+async def fixture(browser, width, height, theme, image_count=4, video_count=0):
     page = await browser.new_page(viewport={"width": width, "height": height})
     await page.add_init_script(f"localStorage.setItem('fluxpost-theme', {json.dumps(theme)})")
     posts = {f"p-{i}": post(i) for i in range(80)}
@@ -21,6 +30,8 @@ async def fixture(browser, width, height, theme, image_count=4):
     images += [f"/generated/extra-{i}.png" for i in range(4, image_count)]
     prompts += [f"prompt {i}" for i in range(4, image_count)]
     posts["p-0"].update(imageUrls=images[:image_count], imagePrompts=prompts[:image_count])
+    if video_count:
+        posts["p-0"]["videoUrls"] = [f"/generated/video-{i}.mp4" for i in range(video_count)]
     cards = [dict(id=f"card-{i}", index=i, role="cover" if i == 0 else "content", prompt=f"card prompt {i}", imageUrl=f"/generated/card-{i}.png" if i != 1 else None, candidateUrls=[f"/generated/card-{i}.png", f"/generated/candidate-{i}.png"], status="completed" if i != 1 else "failed", qa=dict(status="passed", attempts=1, issues=[])) for i in range(3)]
     posts["p-1"].update(xhsSeries=dict(schemaVersion=1, cards=cards), imageUrls=[c["imageUrl"] for c in cards if c["imageUrl"]])
     queries, errors, saves = [], [], []
@@ -78,11 +89,18 @@ async def layout(browser, width, height, theme):
     assert await page.evaluate("document.documentElement.scrollWidth <= innerWidth"), (width, height, theme)
     gallery = page.locator(".review-gallery")
     tracks = await gallery.evaluate("el => getComputedStyle(el).gridTemplateColumns.split(' ').filter(Boolean).length")
+    image_ratios = await page.locator(".review-gallery-tile:not(.review-video-tile) .review-gallery-preview").evaluate_all("els => els.map(e => getComputedStyle(e).aspectRatio)")
+    assert image_ratios and all(ratio.replace(" ", "") == "3/4" for ratio in image_ratios), (width, height, theme, image_ratios)
+    primary_ratio = await page.locator(".review-order-item-primary .review-gallery-preview").first.evaluate("e => getComputedStyle(e).aspectRatio")
+    assert primary_ratio.replace(" ", "") == "3/4", (width, height, theme, primary_ratio)
     if width >= 960:
         assert tracks >= 2, (width, height, theme, tracks)
+        primary_item = await page.locator(".review-order-item-primary").first.bounding_box()
+        next_item = await page.locator(".review-order-item").nth(1).bounding_box()
+        assert abs(primary_item["width"] - next_item["width"]) <= 1, (width, height, theme, primary_item, next_item)
         index_box = await page.locator(".review-gallery-index").first.bounding_box()
         tools_box = await page.locator(".review-gallery-tools").first.bounding_box()
-        assert index_box["x"] + index_box["width"] <= tools_box["x"], (width, height, theme, index_box, tools_box)
+        assert not boxes_overlap(index_box, tools_box), (width, height, theme, index_box, tools_box)
     prompt_height = await page.locator(".review-image-prompt").first.evaluate("e => e.getBoundingClientRect().height")
     assert prompt_height <= 56, (width, height, theme, prompt_height)
     if (width, height) in [(1280, 720), (1440, 900), (1512, 982), (1920, 900), (1440, 1000), (1280, 1024), (1600, 1000), (1920, 1080)]:
@@ -284,6 +302,22 @@ async def series_layout(browser):
         print(json.dumps(dict(width=width, height=height, result="series layout passed")), flush=True)
 
 
+async def video_layout(browser):
+    page, _, _, errors, _ = await fixture(browser, 1440, 900, "professional", video_count=1)
+    await expect(page.locator(".review-video-tile")).to_have_count(1)
+    preview = page.locator(".review-video-tile .review-gallery-preview")
+    ratio = await preview.evaluate("e => getComputedStyle(e).aspectRatio")
+    assert ratio.replace(" ", "") == "4/3", ratio
+    preview_box = await preview.bounding_box()
+    badge_box = await page.locator(".review-video-tile .review-gallery-index").bounding_box()
+    tools_box = await page.locator(".review-video-tile .review-gallery-tools").bounding_box()
+    assert badge_box["y"] <= preview_box["y"] + preview_box["height"] / 2, (preview_box, badge_box)
+    assert not boxes_overlap(badge_box, tools_box), (badge_box, tools_box)
+    assert not errors, errors
+    await page.close()
+    print(json.dumps(dict(width=1440, height=900, result="video layout passed")), flush=True)
+
+
 async def classic_scrollbar(browser):
     page, _, _, errors, _ = await fixture(browser, 960, 720, "professional")
     # Headless Chrome uses overlay scrollbars, but real Chrome reserves 15px at
@@ -294,7 +328,7 @@ async def classic_scrollbar(browser):
     assert tracks >= 2, tracks
     index_box = await page.locator(".review-gallery-index").first.bounding_box()
     tools_box = await page.locator(".review-gallery-tools").first.bounding_box()
-    assert index_box["x"] + index_box["width"] <= tools_box["x"], (index_box, tools_box)
+    assert not boxes_overlap(index_box, tools_box), (index_box, tools_box)
     assert await page.evaluate("document.documentElement.scrollWidth <= innerWidth")
     assert not errors, errors
     await page.close()
@@ -334,6 +368,7 @@ async def main():
                     print(json.dumps(dict(theme=theme, width=width, height=height, result="passed")), flush=True)
             await interactions(browser)
             await series_layout(browser)
+            await video_layout(browser)
             await classic_scrollbar(browser)
             await edge_autoscroll(browser)
             print("Review drag, edge autoscroll, missing-card regeneration, save/reload, URL history and draft retention passed.", flush=True)

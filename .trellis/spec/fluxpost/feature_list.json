@@ -471,7 +471,7 @@
       ],
       "evidence": [
         "2026-11-02 exact-tree baseline (153 logged steps, 0 errors/16 existing warnings), opt-in PostgreSQL filter/save/reorder checks, 30-case three-theme browser suite and review performance regressions passed; see 10-30-review-desk-usability/verification.md.",
-        "2026-11-02 gallery layout: multi-column grid, 24px overlay ordering controls, compact prompt, container/series hero rules; 45 three-theme layout cases, simulated classic scrollbar, edge autoscroll, reduced motion, full baseline and performance regressions passed. See 11-02-review-image-gallery-layout.",
+        "2026-11-02 3:4 previews: image tiles use 3:4 (video 4:3), the 16:9 first-image hero is removed, the 112px desktop grid keeps four portrait images visible at 1440x900, and the video badge stays top-left. 45 three-theme layout cases, video/series/scrollbar/interaction checks, two performance runs and the full baseline passed. See 11-02-review-image-preview-3-4.",
         "2026-11-02 drag regression: the image fieldset disables only under media lock; headed Chrome real-mouse drag, 45-case suite and 153-step baseline passed. See 11-02-review-gallery-drag-regression."
       ],
       "notes": "LAN activation runs from the clean committed SHA. Real authenticated review, provider outputs and Feishu publication remain operator gates; no production release."
