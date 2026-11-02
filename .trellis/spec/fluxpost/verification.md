@@ -55,6 +55,12 @@ Do not deploy a dirty worktree, branch name, abbreviated SHA, local runtime rows
 
 ## Recent Verification
 
+- 2026-11-02 Review gallery layout: `>=960px` multi-column gallery, 24px
+  overlay ordering controls, compact prompt, container/series hero rules.
+  153-step baseline, 45 three-theme layout cases incl. simulated classic
+  scrollbar, series layout and edge autoscroll, plus performance regressions
+  pass. Logs: `test-artifacts/review-gallery-*-final.log`.
+
 - 2026-11-02 Review desk usability: exact-tree baseline (153 logged steps, 0 lint errors,
   16 existing warnings, types/build/config sync/HTTP smoke on 45678/SQLite),
   opt-in isolated PostgreSQL filters/save/reorder, three-theme 30-case browser

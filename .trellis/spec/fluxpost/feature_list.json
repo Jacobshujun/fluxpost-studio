@@ -470,7 +470,8 @@
         "Approval and publishing payloads remain unchanged and real authenticated operator review remains an explicit gate"
       ],
       "evidence": [
-        "2026-11-02 exact-tree baseline (153 logged steps, 0 errors/16 existing warnings), opt-in PostgreSQL filter/save/reorder checks, 30-case three-theme browser suite and review performance regressions passed; see 10-30-review-desk-usability/verification.md."
+        "2026-11-02 exact-tree baseline (153 logged steps, 0 errors/16 existing warnings), opt-in PostgreSQL filter/save/reorder checks, 30-case three-theme browser suite and review performance regressions passed; see 10-30-review-desk-usability/verification.md.",
+        "2026-11-02 gallery layout: multi-column grid, 24px overlay ordering controls, compact prompt, container/series hero rules; 45 three-theme layout cases, simulated classic scrollbar, edge autoscroll, reduced motion, full baseline and performance regressions passed. See 11-02-review-image-gallery-layout."
       ],
       "notes": "LAN activation runs from the clean committed SHA. Real authenticated review, provider outputs and Feishu publication remain operator gates; no production release."
     }

@@ -52,6 +52,38 @@ without discarding unsaved local order. Series drafts never append images outsid
 the card list. Missing cards later filled with images stay at their current
 position.
 
+## Gallery Layout
+
+`<960px`: one column. `>=960px`:
+`grid-template-columns: repeat(auto-fill, minmax(145px, 1fr))`. Do not raise the
+145px track minimum: a classic 15px scrollbar leaves about 303px of gallery
+content at a 960px viewport, and two 147px tracks still fit while 150px does not.
+Headless Chrome uses overlay scrollbars and hides this failure; keep the
+simulated classic-scrollbar case.
+
+`.review-gallery-preview` owns `aspect-ratio: 4 / 3`; tiles use `min-height: 0`.
+Never restore the old fixed 360/430px tile heights. The prompt editor is 46px
+idle and 110px on focus; `prefers-reduced-motion` disables the transition.
+
+Hero rules apply only to ordinary galleries
+(`.review-gallery:not(.review-gallery-series)`) and only when the gallery
+container is at least 470px wide:
+
+- viewport height `>=1000px`: first image spans all columns, 16:9 preview
+  capped at 260px;
+- viewport height 900-999px: first image spans 2 columns, capped at 160px;
+- below 900px: no hero.
+
+Series galleries never get a hero because their cards are the fixed sequence.
+The editor split at `>=960px` is
+`minmax(320px, 1.05fr) minmax(240px, 1fr)`.
+
+Ordering controls are one overlay group per tile: drag, up, down and delete at
+top-right with a 6px inset, 24px buttons and a 2px gap. The index badge stays
+top-left at 6px and must not overlap the group. Missing series cards use the
+same group without delete and reserve 44px top padding for it. Keep the
+`拖动配图 N`, `上移配图`, `下移配图` and `删除配图` labels.
+
 ## Layout And Checks
 
 Wide >=1600: three columns and the batch column replaces the drawer trigger;
@@ -62,6 +94,11 @@ URL clears visible and selectable rows instead of leaving stale hidden posts for
 batch actions; the applied summary shows raw text values and localized only for
 enums and date presets.
 
-Baseline includes `review_usability_check.mjs` plus existing review checks.
-Separate PostgreSQL benchmark and intercepted browser checks are documented in
-`verification.md`; never use port 3001 as the fixture server.
+`review_usability_browser_check.py` asserts at least two gallery tracks at
+960px+, fully visible image counts (2 at 1280x720, 4 at 1440x900 and
+1920x1080), badge/tool separation, the classic 15px scrollbar case, series
+layout at 1280x1024 and 1920x1080, edge autoscroll with a 16-image fixture, and
+reduced-motion prompt behavior. Baseline includes `review_usability_check.mjs`
+plus existing review checks. Separate PostgreSQL benchmark and intercepted
+browser checks are documented in `verification.md`; never use port 3001 as the
+fixture server.

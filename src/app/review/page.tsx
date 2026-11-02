@@ -1465,14 +1465,14 @@ const ReviewGallery = memo(function ReviewGallery({ draft, persistedImages, busy
   }, [drag]);
   const locked = Boolean(busy) || Boolean(imageBusyKey) || Boolean(draft.xhsSeries?.cards.some((card) => card.status === "generating" || card.status === "validating"));
   const slots = draft.xhsSeries ? draft.xhsSeries.cards.map((card) => ({ url: card.imageUrl, card })) : draft.imageUrls.map((url) => ({ url, card: undefined }));
-  const tools = (position: number) => <div className="review-order-tools">
+  const orderTools = (position: number) => <>
     <button type="button" draggable={!locked} disabled={locked} className="review-gallery-tool" aria-label={`拖动配图 ${position + 1}`}
       onDragStart={(event) => { event.dataTransfer.setData("application/x-review-order", JSON.stringify({ postId: draft.id, position })); event.dataTransfer.effectAllowed = "move"; setDrag(position); }}
       onDragEnd={() => { setDrag(null); setTarget(null); edge.current = 0; }}><GripVertical size={16} /></button>
     <button type="button" className="review-gallery-tool" aria-label="上移配图" disabled={locked || position === 0 || drag !== null} onClick={() => actions.moveDraftImage(position, -1)}><ArrowUp size={14} /></button>
     <button type="button" className="review-gallery-tool" aria-label="下移配图" disabled={locked || position === slots.length - 1 || drag !== null} onClick={() => actions.moveDraftImage(position, 1)}><ArrowDown size={14} /></button>
-  </div>;
-  return (<div className="review-gallery" ref={galleryRef}
+  </>;
+  return (<div className={`review-gallery${draft.xhsSeries ? " review-gallery-series" : ""}`} ref={galleryRef}
     onKeyDown={(event) => { if (event.key === "Escape") { setDrag(null); setTarget(null); } }}
     onDragLeave={(event) => { if (!event.currentTarget.contains(event.relatedTarget as Node | null)) edge.current = 0; }}>
 
@@ -1480,7 +1480,7 @@ const ReviewGallery = memo(function ReviewGallery({ draft, persistedImages, busy
                       <>
                         {slots.map(({ url, card }, position) => {
                           const index = draft.xhsSeries ? slots.slice(0, position).filter((slot) => slot.url).length : position;
-                          return <div key={card?.id || `${draft.id}:${position}`} className={`review-order-item ${target === position ? `review-drop-target ${drag !== null && drag < position ? "review-drop-after" : ""}` : ""} ${drag === position ? "review-dragging" : ""}`}
+                          return <div key={card?.id || `${draft.id}:${position}`} className={`review-order-item ${url && index === 0 ? "review-order-item-primary" : ""} ${target === position ? `review-drop-target ${drag !== null && drag < position ? "review-drop-after" : ""}` : ""} ${drag === position ? "review-dragging" : ""}`}
                             onDragOver={(event) => {
                               if (locked || drag === null || !event.dataTransfer.types.includes("application/x-review-order")) return;
                               event.preventDefault(); setTarget(position);
@@ -1488,7 +1488,6 @@ const ReviewGallery = memo(function ReviewGallery({ draft, persistedImages, busy
                               edge.current = event.clientY < rect.top + 60 ? -12 : event.clientY > rect.bottom - 60 ? 12 : 0;
                             }}
                             onDrop={(event) => { if (locked || drag === null) return; event.preventDefault(); actions.reorderImages(drag, position); setDrag(null); setTarget(null); edge.current = 0; }}>
-                            {tools(position)}
                             {url ? (
 
                         <fieldset disabled={drag !== null || locked}
@@ -1502,6 +1501,7 @@ const ReviewGallery = memo(function ReviewGallery({ draft, persistedImages, busy
                             <span className="review-gallery-index">{index + 1}</span>
                           </button>
                           <div className="review-gallery-tools" aria-label={`配图 ${index + 1} 操作`}>
+                            {orderTools(position)}
                             <button className="review-gallery-tool review-gallery-tool-danger" type="button" onClick={() => actions.removeDraftImage(index)} disabled={locked || drag !== null} aria-label="删除配图">
                               <Trash2 className="h-3.5 w-3.5" />
                             </button>
@@ -1544,6 +1544,9 @@ const ReviewGallery = memo(function ReviewGallery({ draft, persistedImages, busy
                           {seriesCardAtImageIndex(draft, index) ? <SeriesCardMeta card={seriesCardAtImageIndex(draft, index)!} onSelect={(url) => actions.selectSeriesCandidate(index, url)} /> : null}
                         </fieldset>
                         ) : card ? <div className="review-gallery-tile review-series-missing">
+                          <div className="review-gallery-tools" aria-label={`第 ${position + 1} 张待补图操作`}>
+                            {orderTools(position)}
+                          </div>
                           <strong>第 {position + 1} 张待补图</strong><span>{card.error || card.status}</span>
                           <textarea className="field" value={card.prompt} readOnly />
                           <button className="soft-button" disabled={locked || drag !== null} onClick={() => actions.regenerateMissingSeriesCard(card)}>重新生成</button>

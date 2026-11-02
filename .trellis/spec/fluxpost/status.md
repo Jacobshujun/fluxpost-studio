@@ -4,10 +4,11 @@ Last updated: 2026-11-02
 
 ## One-Line Status
 
-LAN: review desk layout, ordering and structured filters candidate. Active SHA: `/api/version` and launcher receipt. OSS unchanged.
+LAN: review desk layout, ordering and structured filters candidate. Active SHA: `/api/version` and launcher receipt. Gallery layout optimization verified locally, pending commit/activation. OSS unchanged.
 
 ## Current Focus
 
+- Review image gallery layout: restored the compact multi-image grid after the 10-30 rebuild. `>=960px` uses `repeat(auto-fill, minmax(145px, 1fr))`, tiles use preview aspect-ratio without fixed heights, ordering controls are one 24px overlay group, and the prompt editor is compact. Container-query hero rules and a series exclusion keep 4 images visible at 1440x900 and all series cards visible at 1920x1080. Verified with 45 three-theme layout cases, a simulated classic 15px scrollbar, edge autoscroll, reduced motion, full baseline and performance regressions. Evidence: `.trellis/tasks/11-02-review-image-gallery-layout/`; no commit or LAN activation yet.
 - Review desk usability: responsive 960/1600 layout, free insertion ordering for ordinary and series cards (including missing-image cards), and versioned Beijing-time structured filters verified on the exact tree: 153-step baseline, opt-in PostgreSQL, 30-case three-theme browser suite and performance regressions. LAN activation passed build/identity/smoke with `/review` 200 on loopback and LAN. Evidence: archived 10-30-review-desk-usability task; active SHA in `/api/version` and launcher receipt. Real authenticated operator review remains.
 - Iteration batch fix on LAN. Evidence: archived canvas-iteration-batch-params task.
 - Universal Canvas modes pass six mode and six group browser cases; impossible routes report errors. LAN smoke passed. Evidence: archived canvas-universal-modes task.

@@ -1,0 +1,3 @@
+{"file": ".trellis/spec/fluxpost/review_desk.md", "reason": "Review image ordering, media-lock, responsive layout and filter contracts that this layout change must preserve."}
+{"file": ".trellis/spec/frontend/component-guidelines.md", "reason": "Component, control, icon and layout conventions for the review page gallery markup."}
+{"file": ".trellis/spec/frontend/quality-guidelines.md", "reason": "Required checks and forbidden UI shortcuts before finishing a frontend change."}
