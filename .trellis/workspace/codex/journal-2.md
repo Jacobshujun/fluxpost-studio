@@ -706,3 +706,37 @@ Restored the compact multi-image review gallery: responsive multi-column grid ab
 ### Next Steps
 
 - None - task complete
+
+
+## Session 80: Review gallery drag regression fix and LAN release
+
+**Date**: 2026-11-02
+**Task**: Review gallery drag regression fix and LAN release
+**Branch**: `local`
+
+### Summary
+
+Fixed drag ordering regression from the gallery layout change: the per-image fieldset disables only under media lock, so dragstart no longer disables the drag handle; regenerate joins up/down/delete as disabled mid-drag. Added browser assertions and verified with headed Chrome real-mouse drag, 45 three-theme layout cases and the 153-step baseline. Committed 725271b and activated on LAN; /api/version and receipt match, /review 200 on loopback and 10.182.144.38:3001. Task archived.
+
+### Main Changes
+
+(Add details)
+
+### Git Commits
+
+| Hash | Message |
+|------|---------|
+| `725271b` | (see git log) |
+| `f145798` | (see git log) |
+
+### Testing
+
+- [OK] (Add test results)
+
+### Status
+
+[OK] **Completed**
+
+### Next Steps
+
+- None - task complete
