@@ -419,7 +419,7 @@ export default function ContentDeskPage() {
   const libraryScopedStats = useMemo(() => ({
     total: libraryScopedSources.length,
     analyzed: libraryScopedSources.filter((item) => item.analysis).length,
-    rewritten: libraryScopedSources.filter((item) => item.poolStatus === "rewritten").length,
+    rewritten: libraryScopedSources.filter((item) => item.poolStatus === "rewritten" || item.poolStatus === "approved" || item.poolStatus === "published").length,
   }), [libraryScopedSources]);
   const itemProjectIds = useMemo(() => {
     const map = new Map<string, string>();
