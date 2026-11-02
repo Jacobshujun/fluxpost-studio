@@ -672,3 +672,37 @@ Implemented region-scoped inner bindings with save/preflight/launch and per-imag
 ### Next Steps
 
 - None - task complete
+
+
+## Session 79: Review image gallery layout and LAN release
+
+**Date**: 2026-11-02
+**Task**: Review image gallery layout and LAN release
+**Branch**: `local`
+
+### Summary
+
+Restored the compact multi-image review gallery: responsive multi-column grid above 960px, 24px overlay ordering controls, compact prompt, and container/series hero rules. Full baseline, 45 three-theme layout cases, classic-scrollbar, series, reduced-motion and edge-autoscroll coverage, and performance regressions pass. Committed 246ff0a and activated on LAN; /api/version and receipt match, /review 200 on loopback and 10.182.144.38:3001. Task archived.
+
+### Main Changes
+
+(Add details)
+
+### Git Commits
+
+| Hash | Message |
+|------|---------|
+| `246ff0a` | (see git log) |
+| `61e6ed0` | (see git log) |
+
+### Testing
+
+- [OK] (Add test results)
+
+### Status
+
+[OK] **Completed**
+
+### Next Steps
+
+- None - task complete
