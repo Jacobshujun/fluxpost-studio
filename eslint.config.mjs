@@ -14,6 +14,8 @@ const eslintConfig = defineConfig([
     "out/**",
     "build/**",
     "next-env.d.ts",
+    // Local runtime data and operator artifacts are not application source.
+    "data/**",
     ".tmp-*",
     ".tmp-*/**",
     "docs/harness.disabled/**",
