@@ -71,10 +71,12 @@ tests were updated for the shared patch type, atomic URL and semantic cover.
 
 ## Release And Remaining Gates
 
-No LAN activation yet. Final commit/runtime SHA belongs in the launcher receipt
-and `/api/version` after clean-tree `npm run local:lan` succeeds. Existing user
-ESLint scope changes are preserved. No sibling worktree, clean-guard bypass,
-production deployment, live model or Feishu write is part of verification.
+LAN activation passed on 2026-11-02 from clean committed
+`fae42774ce8e245c55f381a2e2f77082594cf2cc` into slot `.next-local-b` on
+`0.0.0.0:3001`. `/api/version` reports that commit in candidate/versioned mode;
+`/review` returns 200 on loopback and LAN; the launcher receipt
+`.fluxpost-local-candidate.json` records the same SHA. Re-activation after the
+bookkeeping commit is the final identity step.
 
 Real authenticated operator review, actual model outputs and real Feishu
 publication remain separate acceptance gates. Browser low-height cases emulate

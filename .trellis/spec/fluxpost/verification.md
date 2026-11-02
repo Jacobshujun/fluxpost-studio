@@ -58,9 +58,11 @@ Do not deploy a dirty worktree, branch name, abbreviated SHA, local runtime rows
 - 2026-11-02 Review desk usability: exact-tree baseline (153 logged steps, 0 lint errors,
   16 existing warnings, types/build/config sync/HTTP smoke on 45678/SQLite),
   opt-in isolated PostgreSQL filters/save/reorder, three-theme 30-case browser
-  suite and review performance regressions pass. LAN runs the clean committed
-  candidate; real authenticated operator review remains. Logs:
-  `test-artifacts/review-usability-*-final.log`.
+  suite and review performance regressions pass. Clean-tree `npm run local:lan`
+  activated the committed candidate into `.next-local-b` on `0.0.0.0:3001`:
+  build, candidate identity, HTTP smoke and `/review` 200 on loopback and LAN
+  passed; the receipt records the active SHA. Real authenticated operator review
+  remains. Logs: `test-artifacts/review-usability-*-final.log`.
 
 - 2026-10-30 ESLint scope: excluded `data/**` operator artifacts only. Lint passes
   with 0 errors/16 source warnings; ESLint API assertions confirm source/config
