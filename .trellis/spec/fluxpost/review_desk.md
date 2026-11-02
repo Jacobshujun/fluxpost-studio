@@ -84,6 +84,12 @@ top-left at 6px and must not overlap the group. Missing series cards use the
 same group without delete and reserve 44px top padding for it. Keep the
 `拖动配图 N`, `上移配图`, `下移配图` and `删除配图` labels.
 
+Disable the per-image fieldset only for the media lock, never for an in-progress
+drag. Disabling it on `dragstart` also disables the drag handle and applies
+`pointer-events: none`, which cancels native drag in real Chrome. During a drag,
+disable up/down/delete/regenerate individually while leaving the handle enabled
+and `draggable="true"`.
+
 ## Layout And Checks
 
 Wide >=1600: three columns and the batch column replaces the drawer trigger;

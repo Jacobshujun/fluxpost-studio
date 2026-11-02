@@ -166,7 +166,23 @@ async def interactions(browser):
     # A canceled drag cannot mutate the draft.
     before = await prompts.evaluate_all("rows => rows.map(e=>e.value)")
     handle = page.get_by_role("button", name="拖动配图 1", exact=True)
+    second_up = page.get_by_role("button", name="上移配图", exact=True).nth(1)
+    first_down = page.get_by_role("button", name="下移配图", exact=True).nth(0)
+    first_delete = page.get_by_role("button", name="删除配图", exact=True).nth(0)
+    first_regenerate = page.get_by_role("button", name="重新生成第 1 张配图", exact=True)
+    await expect(second_up).to_be_enabled()
+    await expect(first_down).to_be_enabled()
+    await expect(first_delete).to_be_enabled()
+    await expect(first_regenerate).to_be_enabled()
     await handle.dispatch_event("dragstart", {"dataTransfer": await page.evaluate_handle("new DataTransfer()")})
+    fieldset = page.locator(".review-gallery fieldset").first
+    assert not await fieldset.evaluate("e => e.disabled"), "drag source fieldset must stay enabled during drag"
+    assert await handle.get_attribute("draggable") == "true"
+    await expect(handle).to_be_enabled()
+    await expect(second_up).to_be_disabled()
+    await expect(first_down).to_be_disabled()
+    await expect(first_delete).to_be_disabled()
+    await expect(first_regenerate).to_be_disabled()
     await page.keyboard.press("Escape")
     await handle.dispatch_event("dragend")
     assert await prompts.evaluate_all("rows => rows.map(e=>e.value)") == before

@@ -1490,7 +1490,7 @@ const ReviewGallery = memo(function ReviewGallery({ draft, persistedImages, busy
                             onDrop={(event) => { if (locked || drag === null) return; event.preventDefault(); actions.reorderImages(drag, position); setDrag(null); setTarget(null); edge.current = 0; }}>
                             {url ? (
 
-                        <fieldset disabled={drag !== null || locked}
+                        <fieldset disabled={locked}
                           key={`${url}-${index}`}
                           className={`review-gallery-tile ${index === 0 ? "review-gallery-tile-primary" : ""}`}
                           tabIndex={0}
@@ -1519,7 +1519,7 @@ const ReviewGallery = memo(function ReviewGallery({ draft, persistedImages, busy
                                 className="review-gallery-tool"
                                 type="button"
                                 onClick={() => actions.regenerateDraftImage(index)}
-                                disabled={Boolean(busy) || Boolean(imageBusyKey)}
+                                disabled={Boolean(busy) || Boolean(imageBusyKey) || drag !== null}
                                 aria-label={`重新生成第 ${index + 1} 张配图`}
                                 title="重新生成"
                               >

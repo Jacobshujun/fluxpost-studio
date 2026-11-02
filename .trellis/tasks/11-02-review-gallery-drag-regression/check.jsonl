@@ -1,0 +1,2 @@
+{"file": ".trellis/spec/fluxpost/review_desk.md", "reason": "Verify drag insertion, media locking and overlay controls still satisfy the review desk contract."}
+{"file": ".trellis/spec/fluxpost/verification.md", "reason": "Baseline and isolated browser commands for the regression fix."}
