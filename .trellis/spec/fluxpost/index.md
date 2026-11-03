@@ -18,6 +18,7 @@ This layer is the project-specific operating memory migrated from the previous H
 | [rules.md](./rules.md) | Context budgets, history-reading rules, recording policy, and quality rules. |
 | [project_brief.md](./project_brief.md) | Confirmed product, stack, flow, data, deployment, and integration facts. |
 | [verification.md](./verification.md) | Baseline and manual verification commands. |
+| [local_diagnostics.md](./local_diagnostics.md) | Bounded local server logs, fatal reports, retention and launcher contracts. |
 | [review_desk.md](./review_desk.md) | Review filters, Beijing dates, image/card ordering and responsive layout. |
 | [oss_cutover.md](./oss_cutover.md) | Local OSS CLI, transactional reference migration and recovery boundaries. |
 | [gemini.md](./gemini.md) | Canvas native Gemini text/vision, configuration and offline validation. |

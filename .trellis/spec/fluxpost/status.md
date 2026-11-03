@@ -4,11 +4,12 @@ Last updated: 2026-11-03
 
 ## One-Line Status
 
-Two local exits confirmed with code 134; fatal trigger unproven. Service restarted at 16:46; active identity is in `/api/version`.
+Bounded local crash diagnostics implemented; activation deferred for running jobs. Historical exit-134 trigger remains unproven.
 
 ## Current Focus
 
-- Local crash diagnosis: npm records exit 134 at approximately 16:38:10 and 16:43:45. Prior fatal output was not retained; no matching Windows crash/resource event. OOM/native assertion remains unproven. PID 9372 started 16:46:32 on LAN; no diagnostic restart. Baseline passes. Evidence: `archive/2026-11/11-03-local-crash-diagnosis/verification.md`. Earlier dirty-tree recovery: `archive/2026-11/11-03-local-startup-recovery/verification.md`.
+- Local diagnostics: logs <=100 MiB; reports <=3 / 7 days / 30 MiB. Focused/baseline/Windows launch checks pass. Running jobs defer activation; 3001 unchanged. Contract: `local_diagnostics.md`; evidence: `archive/2026-11/11-03-local-crash-logging/verification.md`.
+- Crashes: exit 134 at ~16:38 and ~16:43; fatal trigger unproven. Evidence: `archive/2026-11/11-03-local-crash-diagnosis/verification.md`.
 - Feishu publishing: eight offline-reproduced risks include media skipping/omission, edit overwrite, path escape, deleted-post revival and record/lease persistence. Application unchanged; fixes and live acceptance remain. Evidence: `11-03-feishu-publish-owner-recovery/code-review-2026-11-03.md`.
 - Content-pool performance: row-scoped library/item writes; paginated desk/summary/ids with `raw` stripped; baseline, types, build, browser and PG timing pass (desk 960ms, summary 898ms). Committed and active on LAN; authenticated 3001 timing remains.
 - Content-pool libraries: owner-scoped rail with subsets, default library, tags and Canvas filters; checks pass, PostgreSQL review remains.

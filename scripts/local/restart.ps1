@@ -162,16 +162,23 @@ function Start-CandidateServer {
   }
   $env:FLUXPOST_RELEASE_SHA = $Commit
   Write-Host "== Start Next production server from $Slot on ${HostName}:$Port"
+  $diagnosticsScript = Join-Path $controllerRoot "scripts\local\server-diagnostics.mjs"
+  $diagnosticsErrorPath = Join-Path $projectRoot "data\local-diagnostics\supervisor.stderr.log"
   $server = Start-Process `
-    -FilePath "npm.cmd" `
-    -ArgumentList @("run", "start", "--", "-H", $HostName, "-p", "$Port") `
+    -FilePath (Get-Command node.exe -ErrorAction Stop).Source `
+    -ArgumentList @(('"' + $diagnosticsScript + '"'), $HostName, "$Port") `
     -WorkingDirectory $projectRoot `
     -WindowStyle Hidden `
+    -RedirectStandardError $diagnosticsErrorPath `
     -PassThru
 
   $healthUrl = "http://127.0.0.1:$Port/api/config"
   $ready = $false
   for ($i = 0; $i -lt 45; $i++) {
+    $server.Refresh()
+    if ($server.HasExited) {
+      throw "Server exited before readiness (code $($server.ExitCode)); see data/local-diagnostics"
+    }
     try {
       $response = Invoke-WebRequest -Uri $healthUrl -UseBasicParsing -TimeoutSec 2
       if ($response.StatusCode -eq 200) {
@@ -184,7 +191,7 @@ function Start-CandidateServer {
   }
 
   if (-not $ready) {
-    throw "Server did not become ready at $healthUrl"
+    throw "Server did not become ready at $healthUrl; see data/local-diagnostics"
   }
 
   $versionUrl = "http://127.0.0.1:$Port/api/version"
@@ -225,6 +232,11 @@ $stateTempPath = "$statePath.tmp"
 @{ slot = $targetSlot; commit = $ReleaseSha } | ConvertTo-Json | Set-Content -LiteralPath $stateTempPath -Encoding utf8
 
 $listenerStopped = $false
+# Validate diagnostics storage before interrupting the current listener.
+& node (Join-Path $controllerRoot "scripts\local\server-diagnostics.mjs") --check
+if ($LASTEXITCODE -ne 0) {
+  throw "Diagnostics preflight failed; the current local app is still running"
+}
 try {
   Write-Host "== Replace existing server on port $Port"
   Stop-PortListener -Port $Port

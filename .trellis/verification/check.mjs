@@ -53,6 +53,7 @@ const nodeChecks = [
   ["Migration operator CLI", "migration_cli_check.mjs"],
   ["Feishu CLI identity auto-init check", "feishu_cli_identity_check.mjs"],
   ["Local Next build output check", "local_build_output_check.mjs"],
+  ["Bounded local server diagnostics", "local_server_diagnostics_check.mjs"],
   ["Runtime production parity check", "runtime_parity_check.mjs"],
   ["Ubuntu VPS deployment check", "vps_deployment_check.mjs"],
   ["Execution log append check", "execution_log_append_check.mjs"],
