@@ -4,11 +4,11 @@ Last updated: 2026-11-03
 
 ## One-Line Status
 
-LAN: Feishu owner-recovery `58f48b1` active on 3001; `/review` and `/content` 200; SHA in `/api/version`.
+Feishu repairs and audit verified; LAN identity comes from `/api/version` and the activation receipt; live publish acceptance remains.
 
 ## Current Focus
 
-- Feishu publish owner recovery: author preserved through review and queue persistence, stale record IDs replaced, attachment rate limits retried. Owner mismatches repaired to 0; targeted checks and baseline pass. LAN active; re-publish acceptance remains. Task `11-03-feishu-publish-owner-recovery`.
+- Feishu publish owner recovery: review/queue preserve author; stale records replaced; attachments throttled/retried. Audit snapshot: owner mismatches 0, last terminal retry attachment-limited, two latest jobs running/queued. Baseline passes; live publish acceptance remains. Task `11-03-feishu-publish-owner-recovery/audit-2026-11-03.md`.
 - Content-pool performance: row-scoped library/item writes; paginated desk/summary/ids with `raw` stripped; baseline, types, build, browser and PG timing pass (desk 960ms, summary 898ms). Committed and active on LAN; authenticated 3001 timing remains.
 - Content-pool libraries: owner-scoped rail with subsets, default library, tags and Canvas filters; checks pass, PostgreSQL review remains.
 - Review filter dialog: the advanced-filter modal and its sticky action bar now use opaque `--panel-solid` instead of translucent `--surface-raised`, so editor/media content no longer shows through in the creator dark theme. Baseline passed; verified on the active LAN candidate with computed background `rgb(19, 29, 27)` and a dark-theme screenshot. Committed `505c9b9`; included in the active LAN candidate.
