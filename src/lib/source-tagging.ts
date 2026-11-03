@@ -265,6 +265,10 @@ export function updateSourceVisualTags(
   const now = new Date().toISOString();
   const currentById = new Map((item.visualTagging?.assets || []).map((asset) => [asset.id, asset]));
   const baseAssets = collectVisualAssets(item);
+  // Manual reordering can move a labelled image past the nine-image tagging UI.
+  const preserved = item.manualEditedFields?.includes("images")
+    ? (item.visualTagging?.assets || []).filter((asset) => !baseAssets.some((base) => base.id === asset.id))
+    : [];
   const patchMap = new Map<string, VisualTag>();
 
   if (Array.isArray(patchAssets)) {
@@ -294,10 +298,10 @@ export function updateSourceVisualTags(
   }, []);
 
   return {
-    assets,
+    assets: [...assets, ...preserved],
     model: item.visualTagging?.model,
     taggedAt: item.visualTagging?.taggedAt,
-    status: assets.length ? "success" : "skipped",
+    status: assets.length || preserved.length ? "success" : "skipped",
     error: undefined,
   };
 }

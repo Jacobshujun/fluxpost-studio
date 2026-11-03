@@ -53,9 +53,9 @@ export async function POST(request: Request) {
 export async function PATCH(request: Request) {
   try {
     const account = await requireWorkspaceAccount(request);
-    const body = (await request.json()) as { id?: string; patch?: Partial<NormalizedSourceItem> };
+    const body = (await request.json()) as { id?: string; patch?: Partial<NormalizedSourceItem>; manualEdit?: boolean };
     if (!body.id) return NextResponse.json({ error: "Item id is required" }, { status: 400 });
-    const item = await updateSourceItem(body.id, body.patch || {}, account);
+    const item = await updateSourceItem(body.id, body.patch || {}, account, { manualEdit: body.manualEdit === true });
     return NextResponse.json({ item: contentPoolItemWithoutRaw(item) });
   } catch (error) {
     return NextResponse.json(

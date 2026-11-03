@@ -20,6 +20,7 @@ This layer is the project-specific operating memory migrated from the previous H
 | [verification.md](./verification.md) | Baseline and manual verification commands. |
 | [local_diagnostics.md](./local_diagnostics.md) | Bounded local server logs, fatal reports, retention and launcher contracts. |
 | [review_desk.md](./review_desk.md) | Review filters, Beijing dates, image/card ordering and responsive layout. |
+| [content_pool_editing.md](./content_pool_editing.md) | Staged source edits, uploads, manual-field protection and cache ordering. |
 | [oss_cutover.md](./oss_cutover.md) | Local OSS CLI, transactional reference migration and recovery boundaries. |
 | [gemini.md](./gemini.md) | Canvas native Gemini text/vision, configuration and offline validation. |
 | [pitfalls.md](./pitfalls.md) | Known traps and integration risks. |

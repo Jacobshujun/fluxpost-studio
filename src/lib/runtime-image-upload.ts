@@ -23,8 +23,8 @@ const maxRuntimeImageUploadBytes = 30 * 1024 * 1024;
 export async function saveRuntimeImageUpload(
   file: File,
   target: {
-    directory: "review-uploads" | "canvas-uploads";
-    prefix: "review" | "canvas";
+    directory: "review-uploads" | "canvas-uploads" | "content-uploads";
+    prefix: "review" | "canvas" | "content";
     maxBytes?: number;
     allowedMimeTypes?: readonly string[];
     dimensions?: { minEdge: number; maxEdge: number };
@@ -52,9 +52,7 @@ export async function saveRuntimeImageUpload(
     }
   }
 
-  const uploadDir = target.directory === "canvas-uploads"
-    ? path.join(/*turbopackIgnore: true*/ process.cwd(), "public", "generated", "canvas-uploads")
-    : path.join(/*turbopackIgnore: true*/ process.cwd(), "public", "generated", "review-uploads");
+  const uploadDir = path.join(/*turbopackIgnore: true*/ process.cwd(), "public", "generated", target.directory);
   await mkdir(uploadDir, { recursive: true });
 
   const fileName = `${target.prefix}-${Date.now()}-${randomUUID()}${format.extension}`;

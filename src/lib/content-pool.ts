@@ -20,6 +20,7 @@ import { updateSourceContentTags, updateSourceVisualTags } from "./source-taggin
 import { enrichSourceTimestamps } from "./source-timestamps";
 import { extractDouyinCarouselImageUrls } from "./douyin-media";
 import { replaceVideoFrameUrlsInMediaUrls, selectBestVideoHighlightFrames } from "./video-frame-policy";
+import { applyManualSourceImages, manualSourceFields, preserveManualSourceFields, validateManualSourcePatch } from "./content-pool-edit";
 import {
   accessActorFromOwner,
   applyWorkspaceOwner,
@@ -653,7 +654,7 @@ export async function ingestCrawlItems(
           const visualTagging = shouldKeepManualVisualTagging(previous)
             ? previous.visualTagging
             : chooseVisualTagging(enrichedItem, previous);
-          const nextItem: NormalizedSourceItem = {
+          const nextItem: NormalizedSourceItem = preserveManualSourceFields(previous, {
             ...previous,
             ...enrichedItem,
             downloadedImages,
@@ -682,7 +683,7 @@ export async function ingestCrawlItems(
             contentTagging,
             customTags: normalizeContentPoolCustomTags(previous.customTags),
             visualTagging,
-          };
+          });
           existing.set(enrichedItem.id, {
             ...nextItem,
             mediaCache: buildMediaCacheStatus(nextItem, now),
@@ -793,7 +794,12 @@ export async function createSourceItem(query: string, item: Omit<NormalizedSourc
   return { project, item: nextItem };
 }
 
-export async function updateSourceItem(sourceItemId: string, patch: Partial<NormalizedSourceItem>, account?: WorkspaceAccessActor) {
+export async function updateSourceItem(sourceItemId: string, patch: Partial<NormalizedSourceItem>, account?: WorkspaceAccessActor, options: { manualEdit?: boolean } = {}) {
+  if (options.manualEdit) {
+    const editable = new Set(["title", "contentText", "images", "authorName", "sourceUrl", "poolStatus", "mediaType", "metrics", "contentTagging", "customTags", "visualTagging"]);
+    patch = Object.fromEntries(Object.entries(patch).filter(([key]) => editable.has(key))) as Partial<NormalizedSourceItem>;
+  }
+  validateManualSourcePatch(patch);
   const now = new Date().toISOString();
   let updatedItem: NormalizedSourceItem | undefined;
 
@@ -810,9 +816,10 @@ export async function updateSourceItem(sourceItemId: string, patch: Partial<Norm
         id: item.id,
         ownerUserId: item.ownerUserId,
         ownerDisplayName: item.ownerDisplayName,
+        manualEditedFields: item.manualEditedFields,
         platform: patch.platform || item.platform,
         sourceId: patch.sourceId || item.sourceId,
-        images: patch.images ? normalizeContentImageUrls(patch.images) : item.images,
+        images: patch.images === undefined ? item.images : normalizeContentImageUrls(patch.images),
         videoFrames,
         mediaUrls: replaceVideoFrameUrlsInMediaUrls(patch.mediaUrls ? mergeStringArrays(patch.mediaUrls) : item.mediaUrls, videoFrames),
         metrics: {
@@ -831,6 +838,16 @@ export async function updateSourceItem(sourceItemId: string, patch: Partial<Norm
             ? item.visualTagging
             : updateSourceVisualTags(item, patch.visualTagging.assets),
       };
+      if (options.manualEdit) {
+        const fields = new Set(item.manualEditedFields || []);
+        for (const field of manualSourceFields) if (patch[field] !== undefined) fields.add(field);
+        nextItem.manualEditedFields = [...fields];
+        if (patch.images !== undefined) {
+          Object.assign(nextItem, applyManualSourceImages({ ...nextItem, images: item.images, downloadedImages: item.downloadedImages, visualTagging: item.visualTagging }, nextItem.images));
+          if (patch.visualTagging !== undefined) nextItem.visualTagging = updateSourceVisualTags(nextItem, patch.visualTagging.assets);
+        }
+      }
+      if (!isValidSourceItem(nextItem)) throw new Error("样本至少需要标题、正文、图片、视频或来源链接之一");
       const recalculatedBase: NormalizedSourceItem = {
         ...nextItem,
         hotScore: patch.hotScore ?? calculateHotScore(nextItem),
@@ -1028,7 +1045,7 @@ export function analyzeSourceItem(item: NormalizedSourceItem): ViralAnalysis {
 function normalizeContentPoolItemForRead(item: NormalizedSourceItem, observedAt: string): NormalizedSourceItem {
   const enrichedItem = enrichSourceTimestamps(item, observedAt);
   const storedImages = normalizeContentImageUrls(enrichedItem.images || []);
-  const rawDouyinImages = enrichedItem.platform === "douyin" ? extractDouyinCarouselImageUrls(enrichedItem.raw) : [];
+  const rawDouyinImages = enrichedItem.platform === "douyin" && !enrichedItem.manualEditedFields?.includes("images") ? extractDouyinCarouselImageUrls(enrichedItem.raw) : [];
   const images = rawDouyinImages.length ? rawDouyinImages : storedImages;
   const rawImageRepairApplied =
     rawDouyinImages.length > 0 && rawDouyinImages.join("\n") !== storedImages.join("\n");

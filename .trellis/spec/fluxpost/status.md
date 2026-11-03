@@ -8,6 +8,7 @@ November updates: `docs/releases/2026-11-03-github-sync.md`; baseline passes. Ru
 
 ## Current Focus
 
+- Content-pool editor: manual text/images and recrawl/cache protection; baseline/browser checks pass. Contract: `content_pool_editing.md`; task `11-03-content-pool-editor`; operator acceptance pending.
 - Temp files: 297/299 removed; two inventories kept.
 - Local diagnostics: logs <=100 MiB; reports <=3 / 7 days / 30 MiB. Baseline/Windows checks pass. User requested LAN cutover; managed startup, identity, diagnostic flags/receipt and loopback/LAN pages pass. Contract: `local_diagnostics.md`; evidence: `archive/2026-11/11-03-local-crash-logging/verification.md`.
 - Crashes: exit 134 at ~16:38 and ~16:43; fatal trigger unproven. Evidence: `archive/2026-11/11-03-local-crash-diagnosis/verification.md`.
@@ -15,9 +16,9 @@ November updates: `docs/releases/2026-11-03-github-sync.md`; baseline passes. Ru
 - Content-pool performance: row-scoped library/item writes; paginated desk/summary/ids with `raw` stripped; baseline, types, build, browser and PG timing pass (desk 960ms, summary 898ms). Committed and active on LAN; authenticated 3001 timing remains.
 - Content-pool libraries: owner-scoped rail with subsets, default library, tags and Canvas filters; checks pass, PostgreSQL review remains.
 - Review filter dialog: opaque `--panel-solid` prevents editor/media bleed-through. Baseline, active-LAN computed background and dark screenshot pass; committed `505c9b9` and active on LAN.
-- Review gallery drag fix: the per-image fieldset disables only under the media lock, so `dragstart` no longer disables the drag handle; up/down/delete/regenerate disable individually during drag. Headed Chrome real-mouse drag, the 45-case three-theme suite and the 153-step baseline pass. Committed `725271b` and activated on LAN. Evidence: archived 11-02-review-gallery-drag-regression task.
-- Review image previews: 3:4 images, 4:3 videos, 112px desktop grid and media-specific badge placement pass 45 three-theme cases, interaction/video/series/scrollbar checks, performance and baseline. Committed `0428b64` and active on LAN; real authenticated review remains. Evidence: 11-02-review-image-preview-3-4 task.
-- Review desk usability: responsive 960/1600 layout, free insertion ordering for ordinary and series cards (including missing-image cards), and versioned Beijing-time structured filters verified on the exact tree: 153-step baseline, opt-in PostgreSQL, 30-case three-theme browser suite and performance regressions. LAN activation passed build/identity/smoke with `/review` 200 on loopback and LAN. Evidence: archived 10-30-review-desk-usability task; active SHA in `/api/version` and launcher receipt. Real authenticated operator review remains.
+- Review gallery drag: real-mouse drag and baseline passed; `725271b` activated. Evidence: archived 11-02-review-gallery-drag-regression task.
+- Review previews: 3:4 image / 4:3 video layout passed three-theme tests; `0428b64` activated. Evidence: archived 11-02-review-image-preview-3-4 task.
+- Review usability: responsive layout, insertion ordering and Beijing-time filters passed offline/PostgreSQL/browser/LAN checks. Evidence: archived 10-30-review-desk-usability task.
 - Iteration batch fix on LAN. Evidence: archived canvas-iteration-batch-params task.
 - Universal Canvas modes pass six mode and six group browser cases; impossible routes report errors. LAN smoke passed. Evidence: archived canvas-universal-modes task.
 - Wonder Image existing-media reuse was accepted on LAN `ec0cd9f`; real Yike/model acceptance is pending.

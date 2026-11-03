@@ -1,3 +1,4 @@
+import { mergeDownloadedAndRemoteImages } from "./media-url-filter";
 import type {
   ContentPoolCollection,
   ContentPoolCollectionMembership,
@@ -255,7 +256,9 @@ function contentPoolSelectionItem(
   customTags: string[],
 ): ContentPoolSelectionItem {
   const downloadedImages = uniqueStrings(item.downloadedImages);
-  const imageUrls = downloadedImages.length ? downloadedImages : uniqueStrings(item.images);
+  const imageUrls = item.manualEditedFields?.includes("images")
+    ? mergeDownloadedAndRemoteImages(item.downloadedImages, item.images)
+    : downloadedImages.length ? downloadedImages : uniqueStrings(item.images);
   const videoUrls = uniqueStrings(item.downloadedVideoUrl ? [item.downloadedVideoUrl] : item.videoUrl ? [item.videoUrl] : []);
   return {
     id: item.id,

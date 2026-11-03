@@ -1,4 +1,5 @@
 import { execFile } from "node:child_process";
+import { createHash } from "node:crypto";
 import { createWriteStream } from "node:fs";
 import { mkdir, readFile, readdir, rm, stat } from "node:fs/promises";
 import { request as httpRequest } from "node:http";
@@ -39,8 +40,10 @@ export type CacheCrawledMediaOptions = {
 export async function cacheCrawledMedia(items: NormalizedSourceItem[], options: CacheCrawledMediaOptions = {}) {
   return mapWithConcurrency(items, concurrencyConfig.media, async (item) => {
     const downloadErrors: string[] = [];
-    const itemDir = path.join(mediaCacheRoot, item.platform, sanitizePathSegment(item.sourceId));
-    const publicDir = `/media/crawl/${item.platform}/${sanitizePathSegment(item.sourceId)}`;
+    const sourceDirectory = sanitizePathSegment(item.sourceId);
+    const imageRevision = item.manualEditedFields?.includes("images") ? createHash("sha256").update(JSON.stringify(item.images)).digest("hex").slice(0, 16) : "";
+    const itemDir = path.join(mediaCacheRoot, item.platform, sourceDirectory);
+    const publicDir = `/media/crawl/${item.platform}/${sourceDirectory}`;
 
     const downloadedImages: string[] = [];
     for (const [index, imageUrl] of item.images.slice(0, maxImagesToCache).entries()) {
@@ -53,7 +56,7 @@ export async function cacheCrawledMedia(items: NormalizedSourceItem[], options: 
         continue;
       }
       try {
-        const localUrl = await cacheRemoteMedia(imageUrl, itemDir, publicDir, `image-${index + 1}`, "image", {
+        const localUrl = await cacheRemoteMedia(imageUrl, imageRevision ? path.join(itemDir, imageRevision) : itemDir, imageRevision ? `${publicDir}/${imageRevision}` : publicDir, `image-${index + 1}`, "image", {
           overwrite: options.forceImageRefresh === true,
           sourceItem: item,
         });

@@ -1,0 +1,86 @@
+﻿import assert from "node:assert/strict";
+import { mkdirSync, existsSync } from "node:fs";
+import path from "node:path";
+import { createServer } from "node:http";
+import { readFile } from "node:fs/promises";
+import type { NormalizedSourceItem } from "../../src/lib/types";
+async function main() {
+  const fixture = process.env.FLUXPOST_CONTENT_POOL_FIXTURE;
+  assert.ok(fixture);
+  mkdirSync(path.join(fixture, "data"), { recursive: true });
+  process.chdir(fixture);
+  const pool = await import("../../src/lib/content-pool");
+  const accounts = await import("../../src/lib/workspace-accounts");
+  const { PATCH } = await import("../../src/app/api/content/items/route");
+  const { POST } = await import("../../src/app/api/content/items/images/route");
+  const { applyManualSourceImages } = await import("../../src/lib/content-pool-edit");
+  await accounts.createWorkspaceAccount({ username: "admin", password: "test-password-123" });
+  const owner = await accounts.createWorkspaceAccount({ username: "owner", password: "test-password-123" });
+  const other = await accounts.createWorkspaceAccount({ username: "other", password: "test-password-123" });
+  const session = await accounts.createWorkspaceSession(owner.id);
+  const otherSession = await accounts.createWorkspaceSession(other.id);
+  const images = Array.from({ length: 15 }, (_, i) => `https://example.test/photo-${i}.png`);
+  const source: NormalizedSourceItem = { id: "sample", sourceId: "sample", platform: "douyin", title: "Original", contentText: "Body", images, mediaUrls: images,
+    sourceUrl: "https://example.test/source", metrics: { likes: 1 }, raw: { images }, ownerUserId: owner.id,
+    visualTagging: { status: "success", assets: [{ id: "image-1", index: 0, kind: "image", url: images[0], tag: "车型" }] } };
+  await pool.ingestCrawlItems("editor", [source], owner);
+  const patch = { title: "Manual", contentText: "正文".repeat(1100), images: [...images].reverse(), visualTagging: { assets: [] }, raw: {}, ownerUserId: other.id, sourceId: "hacked" };
+  const request = (body: unknown, token?: string) => new Request("http://localhost/api/content/items", { method: "PATCH", headers: { "Content-Type": "application/json", ...(token ? { cookie: `fluxpost_session=${token}` } : {}) }, body: JSON.stringify(body) });
+  assert.equal((await PATCH(request({ id: "sample", patch, manualEdit: true }))).status, 401);
+  assert.notEqual((await PATCH(request({ id: "sample", patch, manualEdit: true }, otherSession.token))).status, 200);
+  const response = await PATCH(request({ id: "sample", patch, manualEdit: true }, session.token));
+  assert.equal(response.status, 200, await response.clone().text());
+  const read = async () => (await pool.getSourceItemsByIds(["sample"], owner))[0];
+  let saved = await read();
+  assert.equal(saved.title, "Manual"); assert.equal(saved.contentText?.length, 2200); assert.deepEqual(saved.images, patch.images);
+  assert.deepEqual(saved.raw, source.raw); assert.equal(saved.ownerUserId, owner.id); assert.equal(saved.sourceId, "sample");
+  assert.equal(saved.visualTagging?.assets[0].index, 14);
+  assert.equal(saved.downloadedImages, undefined);
+  await pool.ingestCrawlItems("editor", [{ ...source, title: "Recrawled", metrics: { likes: 9 } }], owner);
+  saved = await read(); assert.equal(saved.title, "Manual"); assert.equal(saved.metrics.likes, 9); assert.deepEqual(saved.images, patch.images);
+  const frozen = await pool.freezeContentPoolItemsByIds(["sample"], owner);
+  assert.equal(frozen.values[0].title, "Manual"); assert.deepEqual(frozen.values[0].imageUrls, patch.images);
+  await pool.updateSourceItem("sample", { images: [] }, owner, { manualEdit: true });
+  await pool.ingestCrawlItems("editor", [source], owner);
+  saved = await read(); assert.deepEqual(saved.images, []); assert.deepEqual(saved.mediaUrls, []); assert.equal(saved.visualTagging?.assets.length, 0);
+  const tagged = { ...source, downloadedImages: ["/media/crawl/image-1.png"], visualTagging: { status: "success" as const, assets: [{ id: "image-1", index: 0, kind: "image" as const, url: "/media/crawl/image-1.png", tag: "车型" as const }] } };
+  const remapped = applyManualSourceImages(tagged, [images[1], images[0]]);
+  assert.equal(remapped.visualTagging?.assets[0].index, 1);
+  assert.equal(applyManualSourceImages(tagged, ["/generated/replacement.png"]).visualTagging?.assets.length, 0);
+  const png = Buffer.from("iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mP8/x8AAwMCAO+aWZkAAAAASUVORK5CYII=", "base64");
+  const upload = (token?: string, file = new File([png], "tiny.png", { type: "image/png" }), id = "sample") => {
+    const form = new FormData(); form.set("id", id); form.set("file", file);
+    return POST(new Request("http://localhost/api/content/items/images", { method: "POST", headers: token ? { cookie: `fluxpost_session=${token}` } : {}, body: form }));
+  };
+  assert.equal((await upload()).status, 401);
+  assert.equal((await upload(otherSession.token)).status, 404);
+  assert.equal((await upload(session.token, undefined, "missing")).status, 404);
+  assert.equal((await upload(session.token, new File(["bad"], "bad.png", { type: "image/png" }))).status, 400);
+  assert.equal((await upload(session.token, new File([], "empty.png"))).status, 400);
+  assert.equal((await upload(session.token, new File([new Uint8Array(30 * 1024 * 1024 + 1)], "big.png"))).status, 400);
+  const uploaded = await upload(session.token); assert.equal(uploaded.status, 200, await uploaded.clone().text());
+  const data = await uploaded.json(); assert.ok(data.imageUrl.startsWith("/generated/content-uploads/"));
+  assert.ok(existsSync(path.join(fixture, "public", data.imageUrl))); assert.deepEqual((await read()).images, []);
+  const { saveReviewImageUpload } = await import("../../src/lib/review-image-upload");
+  const reviewUpload = await saveReviewImageUpload(new File([png], "review.png"));
+  assert.ok(reviewUpload.imageUrl.startsWith("/generated/review-uploads/"));
+  assert.ok(existsSync(path.join(fixture, "public", reviewUpload.imageUrl)), "Review uploads retain their real storage directory");
+  const { cacheCrawledMedia } = await import("../../src/lib/media-cache");
+  const { default: sharp } = await import("sharp");
+  const red = await sharp({ create: { width: 4, height: 4, channels: 3, background: "red" } }).png().toBuffer();
+  const blue = await sharp({ create: { width: 4, height: 4, channels: 3, background: "blue" } }).png().toBuffer();
+  const server = createServer((req, res) => { res.writeHead(200, { "Content-Type": "image/png" }); res.end(req.url === "/red.png" ? red : blue); });
+  await new Promise<void>((resolve) => server.listen(0, "127.0.0.1", resolve));
+  try {
+    const address = server.address(); assert.ok(address && typeof address !== "string");
+    const urls = [`http://127.0.0.1:${address.port}/red.png`, `http://127.0.0.1:${address.port}/blue.png`];
+    const cacheSource = { ...source, platform: "xiaohongshu" as const, images: urls, mediaUrls: urls, videoFrames: undefined };
+    const [before] = await cacheCrawledMedia([cacheSource], { skipVideoProcessing: true });
+    const [after] = await cacheCrawledMedia([{ ...applyManualSourceImages(before, [...urls].reverse()), manualEditedFields: ["images"] }], { skipVideoProcessing: true });
+    assert.notEqual(after.downloadedImages?.[0], before.downloadedImages?.[0], "Reorders must not reuse stale image-1 cache files");
+    assert.deepEqual(await readFile(path.join(fixture, "public", after.downloadedImages![0])), blue);
+    assert.deepEqual(await readFile(path.join(fixture, "public", after.downloadedImages![1])), red);
+  } finally { await new Promise<void>((resolve, reject) => server.close((error) => error ? reject(error) : resolve())); }
+  console.log("Content editor: manual persistence, recrawl/raw protection, full snapshots, labels, empty images, auth and uploads passed.");
+}
+void main().catch((error) => { console.error(error); process.exitCode = 1; });

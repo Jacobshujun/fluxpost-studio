@@ -9,6 +9,14 @@
   ],
   "features": [
     {
+      "id": "content-pool-manual-editor",
+      "title": "Content pool text/image editing",
+      "status": "ready_for_review",
+      "definition_of_done": ["Staged title/body and full image editing with ownership, dirty guards and recrawl/cache protection"],
+      "evidence": ["2026-11-03 isolated API/cache and six three-theme browser cases pass; content-library/review regressions pass. See content-pool-editor task."],
+      "notes": "Authenticated operator acceptance pending; no AI/video editing or remote deployment."
+    },
+    {
       "id": "generated-image-library",
       "title": "Generated originals in the unified library and Canvas",
       "status": "blocked",

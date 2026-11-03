@@ -428,8 +428,8 @@ assertContains(
 
 assertContains(
   runtimeImageUpload,
-  /public",\s*"generated",\s*"review-uploads"/,
-  "Review image uploads should be written under public/generated/review-uploads.",
+  /public",\s*"generated",\s*target\.directory/,
+  "Runtime uploads must resolve public/generated with the caller's typed directory (review-uploads below).",
 );
 
 assertContains(

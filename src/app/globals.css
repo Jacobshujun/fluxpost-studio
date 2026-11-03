@@ -5778,3 +5778,24 @@ body {
   .review-editor-grid { grid-template-columns: minmax(320px, 1.05fr) minmax(240px, 1fr); }
   .review-main:has(.review-ai-box[open]) { grid-template-rows: auto minmax(320px, 1fr) auto auto; overflow-y: auto; }
 }
+.content-source-editor { margin-bottom: 16px; }
+.content-source-editor-heading { display: flex; align-items: center; flex-wrap: wrap; gap: 12px; }
+.content-source-editor-actions { display: flex; gap: 8px; margin-left: auto; }
+.content-source-editor-actions button { padding: 9px 12px; font-size: 12px; }
+.content-source-gallery { display: grid; grid-template-columns: repeat(auto-fill, minmax(112px, 1fr)); gap: 12px; margin-top: 12px; }
+.content-source-gallery .review-gallery-preview { aspect-ratio: 3 / 4; }
+.content-source-gallery .review-gallery-preview img { width: 100%; height: 100%; object-fit: cover; }
+.content-source-image-tools { display: flex; justify-content: space-between; padding: 5px; gap: 2px; }
+.content-source-replace { display: flex; align-items: center; justify-content: center; gap: 6px; padding: 8px; border-top: 1px solid var(--line); font-size: 11px; cursor: pointer; }
+.content-source-add { display: flex; flex-direction: column; justify-content: center; align-items: center; gap: 10px; min-height: 168px; border: 1px dashed var(--line); border-radius: 8px; font-size: 12px; background: var(--panel); }
+.content-source-editor :focus-visible { outline: 2px solid var(--cyan); outline-offset: 2px; }
+.content-source-editor button:disabled { opacity: .45; cursor: not-allowed; }
+.content-source-editor textarea.field { min-height: 160px; resize: vertical; font-weight: 400; }
+.content-source-gallery .review-gallery-tile { display: flex; flex-direction: column; min-width: 0; }
+.content-source-image-tools .review-gallery-tool { width: 24px; height: 26px; min-width: 0; padding: 3px; }
+@media (min-width: 1180px) {
+  .content-desk-workspace { grid-template-columns: minmax(160px, .6fr) minmax(220px, .8fr) minmax(320px, 1.2fr) minmax(360px, 1.4fr); }
+}
+.content-source-guard { margin: auto; width: min(480px, calc(100vw - 32px)); color: var(--foreground); background: var(--panel-solid); }
+.content-source-guard::backdrop { background: rgb(0 0 0 / .45); }
+.content-source-guard button { padding: 10px 12px; }

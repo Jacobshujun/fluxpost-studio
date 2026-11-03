@@ -85,6 +85,8 @@ export async function backfillSourceItemMedia(
 }
 
 function applyCachedMedia(item: NormalizedSourceItem, cachedItem: NormalizedSourceItem, now: string) {
+  // A cache job can finish after an operator saves a new image order.
+  if (JSON.stringify(item.images) !== JSON.stringify(cachedItem.images)) return item;
   const downloadedImages = cachedItem.downloadedImages?.length
     ? cachedItem.downloadedImages
     : item.downloadedImages;
@@ -94,7 +96,7 @@ function applyCachedMedia(item: NormalizedSourceItem, cachedItem: NormalizedSour
   const videoTranscript = cachedItem.videoTranscript || item.videoTranscript;
   const nextItem: NormalizedSourceItem = {
     ...item,
-    contentText: cachedItem.contentText || item.contentText,
+    contentText: item.manualEditedFields?.includes("contentText") ? item.contentText : cachedItem.contentText || item.contentText,
     downloadedImages,
     downloadedVideoUrl,
     videoFrames,

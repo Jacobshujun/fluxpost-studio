@@ -78,6 +78,10 @@ assert.doesNotMatch(
 
 const temp = mkdtempSync(path.join(tmpdir(), "fluxpost-content-pool-selection-"));
 try {
+  writeFileSync(path.join(temp, "media-url-filter.js"), ts.transpileModule(read("src/lib/media-url-filter.ts"), {
+    compilerOptions: { module: ts.ModuleKind.CommonJS, target: ts.ScriptTarget.ES2022 },
+    fileName: "media-url-filter.ts",
+  }).outputText, "utf8");
   writeFileSync(path.join(temp, "content-pool-tags.js"), ts.transpileModule(tagsSource, {
     compilerOptions: { module: ts.ModuleKind.CommonJS, target: ts.ScriptTarget.ES2022 },
     fileName: "content-pool-tags.ts",

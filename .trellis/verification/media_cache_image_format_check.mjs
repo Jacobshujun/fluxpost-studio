@@ -162,6 +162,7 @@ const mediaCacheRuntimeStorage = {
   },
 };
 const mediaCacheModule = loadTsModule("src/lib/media-cache.ts", {
+  "node:crypto": requireFromCheck("node:crypto"),
   "node:child_process": requireFromCheck("node:child_process"),
   "node:fs": { createWriteStream },
   "node:fs/promises": requireFromCheck("node:fs/promises"),

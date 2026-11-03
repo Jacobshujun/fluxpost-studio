@@ -515,6 +515,7 @@ export type SourceVideoTranscript = {
 };
 
 export type NormalizedSourceItem = {
+  manualEditedFields?: Array<"title" | "contentText" | "images">;
   id: string;
   ownerUserId?: string;
   ownerDisplayName?: string;

@@ -59,6 +59,11 @@ Do not deploy a dirty worktree, branch name, abbreviated SHA, local runtime rows
 
 ## Recent Verification
 
+- 2026-11-03 Content-pool manual editor: full baseline (0 errors/16 existing
+  warnings), isolated SQLite/API/upload/cache contracts, six three-theme
+  1440/390 browser cases, library regression and 45 review layout cases pass.
+  Task: `11-03-content-pool-editor`; contract: `content_pool_editing.md`.
+
 - 2026-11-03 Feishu publish owner recovery: targeted checks and the full
   baseline pass (0 errors/16 warnings, TypeScript, smoke); owner mismatches
   repaired to 0; LAN `58f48b1` active. Task `11-03-feishu-publish-owner-recovery`.
@@ -85,20 +90,6 @@ Do not deploy a dirty worktree, branch name, abbreviated SHA, local runtime rows
   performance runs pass. Committed `0428b64` and activated on LAN; `/review`
   returns 200 on loopback and LAN. Logs: `test-artifacts/review-ratio-*.log`.
 
-- 2026-11-02 Review desk usability: exact-tree baseline (153 logged steps, 0 lint errors,
-  16 existing warnings, types/build/config sync/HTTP smoke on 45678/SQLite),
-  opt-in isolated PostgreSQL filters/save/reorder, three-theme 30-case browser
-  suite and review performance regressions pass. Clean-tree `npm run local:lan`
-  activated the committed candidate into `.next-local-b` on `0.0.0.0:3001`:
-  build, candidate identity, HTTP smoke and `/review` 200 on loopback and LAN
-  passed; the receipt records the active SHA. Post-verification audit fixes
-  (prompt preservation, async slot identity, series media ownership, shared media
-  lock, dragleave, invalid-filter rows, batch trigger, summary labels, asOf reuse)
-  re-ran the full baseline, isolated PostgreSQL benchmark and both browser suites
-  on the final tree. Real authenticated operator review remains. Logs:
-  `test-artifacts/review-usability-*-final.log`,
-  `test-artifacts/review-usability-*-fixes*.log`,
-  `test-artifacts/review-usability-baseline-final-audit.log`.
 
 Prior text-reasoning and local-library acceptance entries are preserved in
 `archive/verification-history.md` (2026-10-28 context-budget archive). Current

@@ -1,7 +1,9 @@
 "use client";
 
 import Link from "next/link";
-import { useCallback, useEffect, useMemo, useRef, useState, useSyncExternalStore, type ReactNode } from "react";
+import { ContentSourceEditor, ContentSourceEditGuard } from "./content-source-editor";
+import { applyManualSourceImages } from "@/lib/content-pool-edit";
+import { useCallback, useEffect, useMemo, useRef, useState, useSyncExternalStore, type ReactNode, type SetStateAction } from "react";
 import {
   BarChart3,
   Camera,
@@ -135,6 +137,7 @@ type LinkImportResponse = {
 };
 
 type SourceEditForm = {
+  images: string[];
   title: string;
   contentText: string;
   authorName: string;
@@ -311,7 +314,7 @@ export default function ContentDeskPage() {
   const deskAbortRef = useRef<AbortController | null>(null);
   const deskSummaryAbortRef = useRef<AbortController | null>(null);
   const deskSummaryQueryInitializedRef = useRef(false);
-  const [selectedSourceId, setSelectedSourceId] = useUrlQueryState("sourceId", "", optionalStringCodec());
+  const [selectedSourceId, setSelectedSourceIdRaw] = useUrlQueryState("sourceId", "", optionalStringCodec());
   const [selectedContentItemIds, setSelectedContentItemIds] = useState<string[]>([]);
   const [selectedItemOwners, setSelectedItemOwners] = useState<Map<string, string | undefined>>(() => new Map());
   const [crawlInputMode, setCrawlInputMode] = useUrlQueryState<CrawlInputMode>("mode", "keyword", crawlInputModeCodec);
@@ -338,16 +341,16 @@ export default function ContentDeskPage() {
   const [poolDirectOriginalReference, setPoolDirectOriginalReference] = useState(defaultSimpleRunMediaSettings.directOriginalReference);
   const [poolIncludeSourceVideo, setPoolIncludeSourceVideo] = useState(defaultSimpleRunMediaSettings.includeSourceVideo);
   const [poolEnableVideoTranscription, setPoolEnableVideoTranscription] = useState(defaultSimpleRunMediaSettings.enableVideoTranscription);
-  const [poolStatusFilter, setPoolStatusFilter] = useUrlQueryState<PoolStatusFilter>("status", "all", poolStatusCodec);
-  const [poolPlatformFilter, setPoolPlatformFilter] = useUrlQueryState<PoolPlatformFilter>("poolPlatform", "all", poolPlatformCodec);
-  const [poolSort, setPoolSort] = useUrlQueryState<PoolSortMode>("poolSort", "hot_desc", poolSortCodec);
-  const [poolSearch, setPoolSearch] = useUrlQueryState("poolQ", "", optionalStringCodec());
+  const [poolStatusFilter, setPoolStatusFilterRaw] = useUrlQueryState<PoolStatusFilter>("status", "all", poolStatusCodec);
+  const [poolPlatformFilter, setPoolPlatformFilterRaw] = useUrlQueryState<PoolPlatformFilter>("poolPlatform", "all", poolPlatformCodec);
+  const [poolSort, setPoolSortRaw] = useUrlQueryState<PoolSortMode>("poolSort", "hot_desc", poolSortCodec);
+  const [poolSearch, setPoolSearchRaw] = useUrlQueryState("poolQ", "", optionalStringCodec());
   const [debouncedPoolSearch, setDebouncedPoolSearch] = useState(poolSearch);
-  const [poolContentTagFilters, setPoolContentTagFilters] = useUrlQueryState<ContentTag[]>("contentTag", [], listCodec() as unknown as import("@/lib/use-url-query-state").UrlQueryCodec<ContentTag[]>);
-  const [poolCustomTagFilters, setPoolCustomTagFilters] = useUrlQueryState("customTag", [], listCodec());
-  const [libraryParam, setLibraryParam] = useUrlQueryState("library", "all", optionalStringCodec("all"));
-  const [includeDescendantsParam, setIncludeDescendantsParam] = useUrlQueryState<"1" | "0">("descendants", "1", includeDescendantsCodec);
-  const [poolProjectFilter, setPoolProjectFilter] = useUrlQueryState("poolProject", "all", optionalStringCodec("all"));
+  const [poolContentTagFilters, setPoolContentTagFiltersRaw] = useUrlQueryState<ContentTag[]>("contentTag", [], listCodec() as unknown as import("@/lib/use-url-query-state").UrlQueryCodec<ContentTag[]>);
+  const [poolCustomTagFilters, setPoolCustomTagFiltersRaw] = useUrlQueryState("customTag", [], listCodec());
+  const [libraryParam, setLibraryParamRaw] = useUrlQueryState("library", "all", optionalStringCodec("all"));
+  const [includeDescendantsParam, setIncludeDescendantsParamRaw] = useUrlQueryState<"1" | "0">("descendants", "1", includeDescendantsCodec);
+  const [poolProjectFilter, setPoolProjectFilterRaw] = useUrlQueryState("poolProject", "all", optionalStringCodec("all"));
   const [collections, setCollections] = useState<ContentPoolCollection[]>([]);
   const [memberships, setMemberships] = useState<ContentPoolCollectionMembership[]>([]);
   const [poolTags, setPoolTags] = useState<ContentPoolTagSuggestion[]>([]);
@@ -361,7 +364,7 @@ export default function ContentDeskPage() {
   const [batchTagFailures, setBatchTagFailures] = useState<ContentPoolTagBatchResult["failures"]>([]);
   const [simpleRuns, setSimpleRuns] = useState<SimpleRun[]>([]);
   const [workspaceSettings, setWorkspaceSettings] = useState<WorkspacePromptSettings | null>(null);
-  const [sourceEditState, setSourceEditState] = useState<{ sourceId: string; form: SourceEditForm }>({
+  const [sourceEditState, setSourceEditState] = useState<{ sourceId: string; form: SourceEditForm; base?: ContentPoolDeskSource }>({
     sourceId: "",
     form: makeEmptySourceEditForm(),
   });
@@ -376,6 +379,10 @@ export default function ContentDeskPage() {
   const [crawlProgress, setCrawlProgress] = useState<TaskProgressSnapshot | null>(null);
   const [message, setMessage] = useState("");
   const [busy, setBusy] = useState<BusyState>("load");
+  const [imageUploading, setImageUploading] = useState(false);
+  const [pendingEditAction, setPendingEditAction] = useState<(() => void) | null>(null);
+  const editorLockRef = useRef(false);
+  const leaveApprovedRef = useRef(false);
   const [preview, setPreview] = useState<PreviewState>(null);
 
   const libraryView = useMemo<ContentPoolLibraryView>(() => {
@@ -417,35 +424,110 @@ export default function ContentDeskPage() {
     return collection?.relativePath || collection?.name || "内容库";
   }, [collections, libraryView]);
 
+  const sourceDirty = Boolean(sourceEditState.base && JSON.stringify(sourceEditState.form) !== JSON.stringify(makeSourceEditForm(sourceEditState.base)));
   const selectedSource = useMemo(
-    () => visibleSources.find((item) => item.id === selectedSourceId) || visibleSources[0] || null,
-    [selectedSourceId, visibleSources],
+    () => (sourceDirty || imageUploading ? sourceEditState.base : null) || visibleSources.find((item) => item.id === selectedSourceId) || visibleSources[0] || null,
+    [selectedSourceId, visibleSources, sourceDirty, imageUploading, sourceEditState.base],
   );
 
   const sourceEdit = useMemo(
     () =>
       selectedSource
-        ? sourceEditState.sourceId === selectedSource.id
+        ? sourceEditState.sourceId === selectedSource.id && (sourceDirty || imageUploading)
           ? sourceEditState.form
           : makeSourceEditForm(selectedSource)
         : makeEmptySourceEditForm(),
-    [selectedSource, sourceEditState],
+    [selectedSource, sourceEditState, sourceDirty, imageUploading],
   );
 
-  const sourceEditVisualAssets = useMemo(() => (selectedSource ? buildEditableVisualAssets(selectedSource) : []), [selectedSource]);
-  const selectedSourceImages = useMemo(() => (selectedSource ? getDisplayImages(selectedSource) : []), [selectedSource]);
+
+  function guardSourceAction(action: () => void) {
+    if (editorLockRef.current) return;
+    if (sourceDirty) setPendingEditAction(() => action); else action();
+  }
+  function setSelectedSourceId(value: SetStateAction<typeof selectedSourceId>) { guardSourceAction(() => setSelectedSourceIdRaw(value)); }
+  function setPoolStatusFilter(value: SetStateAction<typeof poolStatusFilter>) { guardSourceAction(() => setPoolStatusFilterRaw(value)); }
+  function setPoolPlatformFilter(value: SetStateAction<typeof poolPlatformFilter>) { guardSourceAction(() => setPoolPlatformFilterRaw(value)); }
+  function setPoolSort(value: SetStateAction<typeof poolSort>) { guardSourceAction(() => setPoolSortRaw(value)); }
+  function setPoolSearch(value: SetStateAction<typeof poolSearch>) { guardSourceAction(() => setPoolSearchRaw(value)); }
+  function setPoolContentTagFilters(value: SetStateAction<typeof poolContentTagFilters>) { guardSourceAction(() => setPoolContentTagFiltersRaw(value)); }
+  function setPoolCustomTagFilters(value: SetStateAction<typeof poolCustomTagFilters>) { guardSourceAction(() => setPoolCustomTagFiltersRaw(value)); }
+  function setLibraryParam(value: SetStateAction<typeof libraryParam>) { guardSourceAction(() => setLibraryParamRaw(value)); }
+  function setIncludeDescendantsParam(value: SetStateAction<typeof includeDescendantsParam>) { guardSourceAction(() => setIncludeDescendantsParamRaw(value)); }
+  function setPoolProjectFilter(value: SetStateAction<typeof poolProjectFilter>) { guardSourceAction(() => setPoolProjectFilterRaw(value)); }
+  function changeSourceForm(patch: Partial<SourceEditForm>) {
+    if (!selectedSource || editorLockRef.current || busy) return;
+    leaveApprovedRef.current = false;
+    if (patch.images) {
+      const assets = sourceEdit.visualTags.flatMap(({ id, tag }): SourceVisualTaggingAsset[] => {
+        const index = sourceEdit.images.findIndex((_, position) => id === `image-${position + 1}`);
+        if (index >= 0) return [{ id, tag, index, kind: "image", url: sourceEdit.images[index] }];
+        const frame = selectedSource.visualTagging?.assets.find((asset) => asset.id === id && asset.kind === "video_frame");
+        return frame ? [{ ...frame, tag }] : [];
+      });
+      const taggedDraft = { ...selectedSource, images: sourceEdit.images, downloadedImages: undefined,
+        visualTagging: { assets, status: "success" as const } };
+      patch.visualTags = applyManualSourceImages(taggedDraft, patch.images).visualTagging?.assets.map(({ id, tag }) => ({ id, tag })) || [];
+    }
+    setSourceEditState((current) => ({ sourceId: selectedSource.id,
+      base: sourceDirty && current.sourceId === selectedSource.id && current.base ? current.base : selectedSource,
+      form: { ...(sourceDirty && current.sourceId === selectedSource.id ? current.form : makeSourceEditForm(selectedSource)), ...patch },
+    }));
+  }
+  function discardSourceEdits() {
+    if (selectedSource) setSourceEditState({ sourceId: selectedSource.id, base: selectedSource, form: makeSourceEditForm(selectedSource) });
+  }
+  useEffect(() => {
+    if (!sourceDirty && !imageUploading) return;
+    const entryUrl = window.location.href;
+    const warn = (event: BeforeUnloadEvent) => { if (!leaveApprovedRef.current) { event.preventDefault(); event.returnValue = ""; } };
+    const interceptHistory = () => {
+      const destination = window.location.href;
+      if (destination === entryUrl || leaveApprovedRef.current) return;
+      window.history.pushState(null, "", entryUrl);
+      window.dispatchEvent(new PopStateEvent("popstate"));
+      if (!editorLockRef.current) setPendingEditAction(() => () => { window.location.href = destination; });
+    };
+    const interceptLink = (event: MouseEvent) => {
+      const link = event.target instanceof Element ? event.target.closest<HTMLAnchorElement>("a[href]") : null;
+      if (!link || link.target === "_blank" || event.ctrlKey || event.metaKey || link.origin !== window.location.origin || link.href === window.location.href) return;
+      event.preventDefault(); event.stopPropagation();
+      if (!editorLockRef.current) setPendingEditAction(() => () => { window.location.href = link.href; });
+    };
+    window.addEventListener("beforeunload", warn); document.addEventListener("click", interceptLink, true);
+    window.addEventListener("popstate", interceptHistory);
+    return () => { window.removeEventListener("beforeunload", warn); document.removeEventListener("click", interceptLink, true); window.removeEventListener("popstate", interceptHistory); };
+  }, [sourceDirty, imageUploading]);
+  async function uploadSourceImages(files: File[], index?: number) {
+    if (!selectedSource || editorLockRef.current || !files.length) return;
+    leaveApprovedRef.current = false;
+    const source = selectedSource; const startingForm = sourceEdit;
+    const base = sourceEditState.sourceId === source.id && sourceDirty ? sourceEditState.base || source : source;
+    setSourceEditState({ sourceId: source.id, base, form: startingForm });
+    editorLockRef.current = true; setImageUploading(true); setMessage("");
+    let nextImages = [...startingForm.images];
+    try {
+      for (const file of files) {
+        const form = new FormData(); form.append("id", source.id); form.append("file", file);
+        const res = await fetch("/api/content/items/images", { method: "POST", body: form });
+        const data = await res.json() as { imageUrl?: string; error?: string };
+        if (!res.ok || !data.imageUrl) throw new Error(data.error || "图片上传失败");
+        if (index === undefined) nextImages = [...nextImages, data.imageUrl]; else nextImages[index] = data.imageUrl;
+        setSourceEditState({ sourceId: source.id, base, form: { ...startingForm, images: [...nextImages], visualTags: index === undefined ? startingForm.visualTags : startingForm.visualTags.filter((tag) => tag.id !== `image-${index + 1}`) } });
+      }
+      setMessage("图片已上传，保存修改后生效。");
+    } catch (error) { setMessage(error instanceof Error ? error.message : "图片上传失败"); }
+    finally { editorLockRef.current = false; setImageUploading(false); }
+  }
+
+  const sourcePreviewImages = useMemo(() => {
+    if (!selectedSource) return [];
+    const displayed = mergeDownloadedAndRemoteImages(selectedSource.downloadedImages, selectedSource.images);
+    return sourceEdit.images.map((url) => displayed[selectedSource.images.indexOf(url)] || url);
+  }, [selectedSource, sourceEdit.images]);
+  const sourceEditVisualAssets = useMemo(() => (selectedSource ? buildEditableVisualAssets({ ...selectedSource, images: sourceEdit.images, downloadedImages: undefined }) : []), [selectedSource, sourceEdit.images]);
   const selectedSourceFrames = useMemo(() => selectBestVideoHighlightFrames(selectedSource?.videoFrames), [selectedSource]);
   const selectedSourceFrameUrls = useMemo(() => selectedSourceFrames.map((frame) => frame.url), [selectedSourceFrames]);
-  const selectedSourceVisualImages = useMemo(
-    () => (selectedSourceImages.length ? selectedSourceImages : selectedSourceFrameUrls),
-    [selectedSourceFrameUrls, selectedSourceImages],
-  );
-  const selectedSourceImagesAreFrameFallback = Boolean(
-    selectedSource &&
-      shouldUseVideoFramesAsImagePreview(selectedSource) &&
-      selectedSourceFrameUrls.length &&
-      sameStringList(selectedSourceImages, selectedSourceFrameUrls),
-  );
   const projectStats = useMemo(() => buildProjectStats(activeProject), [activeProject]);
   const latestPoolRun = useMemo(() => simpleRuns.find((run) => run.input.sourceMode === "pool") || null, [simpleRuns]);
   const contentTagFilterKey = poolContentTagFilters.join("\u0000");
@@ -582,7 +664,7 @@ export default function ContentDeskPage() {
       setDeskTotal(data.total || 0);
       setDeskNextCursor(data.nextCursor);
       setDeskHasMore(Boolean(data.hasMore));
-      setSelectedSourceId((current) => {
+      setSelectedSourceIdRaw((current) => {
         if (!reset) return current || nextSources[0]?.id || "";
         return nextSources.some((item) => item.id === current) ? current : nextSources[0]?.id || "";
       });
@@ -1022,14 +1104,16 @@ export default function ContentDeskPage() {
   }
 
   async function saveSourceEdits() {
-    if (!selectedSource) return;
+    if (!selectedSource || editorLockRef.current) return false;
+    editorLockRef.current = true;
     setBusy("source");
     try {
+      const base = makeSourceEditForm(sourceEditState.sourceId === selectedSource.id ? sourceEditState.base || selectedSource : selectedSource);
       const patch: Partial<NormalizedSourceItem> = {
-        title: sourceEdit.title.trim(),
-        contentText: sourceEdit.contentText.trim(),
+        title: sourceEdit.title,
+        contentText: sourceEdit.contentText,
         authorName: sourceEdit.authorName.trim(),
-        sourceUrl: sourceEdit.sourceUrl.trim() || undefined,
+        sourceUrl: sourceEdit.sourceUrl.trim(),
         poolStatus: sourceEdit.poolStatus,
         mediaType: sourceEdit.mediaType,
         metrics: parseMetricForm(sourceEdit),
@@ -1045,26 +1129,39 @@ export default function ContentDeskPage() {
         },
         customTags: sourceEdit.customTags,
         visualTagging: {
-          assets: buildVisualTagPatchAssets(selectedSource, sourceEdit.visualTags),
+          assets: buildVisualTagPatchAssets({ ...selectedSource, images: sourceEdit.images, downloadedImages: undefined }, sourceEdit.visualTags),
           model: selectedSource.visualTagging?.model,
           taggedAt: selectedSource.visualTagging?.taggedAt,
           status: "success",
           error: selectedSource.visualTagging?.error,
         },
       };
+      if (JSON.stringify(sourceEdit.images) !== JSON.stringify(base.images)) patch.images = sourceEdit.images;
+      for (const key of ["title", "contentText", "authorName", "sourceUrl", "poolStatus", "mediaType"] as const) {
+        if (sourceEdit[key] === base[key]) delete patch[key];
+      }
+      if (JSON.stringify(parseMetricForm(sourceEdit)) === JSON.stringify(parseMetricForm(base))) delete patch.metrics;
+      if (JSON.stringify(sourceEdit.contentTags) === JSON.stringify(base.contentTags)) delete patch.contentTagging;
+      if (JSON.stringify(sourceEdit.customTags) === JSON.stringify(base.customTags)) delete patch.customTags;
+      if (JSON.stringify(sourceEdit.visualTags) === JSON.stringify(base.visualTags)) delete patch.visualTagging;
       const res = await fetch("/api/content/items", {
         method: "PATCH",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ id: selectedSource.id, patch }),
+        body: JSON.stringify({ id: selectedSource.id, patch, manualEdit: true }),
       });
       const data = (await res.json()) as { item?: NormalizedSourceItem; error?: string };
       if (!res.ok || !data.item) throw new Error(data.error || "样本保存失败");
-      setSourceEditState({ sourceId: data.item.id, form: makeSourceEditForm(data.item) });
+      const saved = { ...selectedSource, ...data.item };
+      setSourceEditState({ sourceId: saved.id, base: saved, form: makeSourceEditForm(saved) });
+      setDeskSources((items) => items.map((item) => item.id === saved.id ? saved : item));
       await refreshContentDesk();
       setMessage("样本已保存。");
+      return true;
     } catch (error) {
       setMessage(error instanceof Error ? error.message : "样本保存失败");
+      return false;
     } finally {
+      editorLockRef.current = false;
       setBusy(null);
     }
   }
@@ -1104,7 +1201,7 @@ export default function ContentDeskPage() {
       const data = (await res.json()) as { item?: NormalizedSourceItem; project?: ContentPoolProjectSummary; error?: string };
       if (!res.ok || !data.item) throw new Error(data.error || "新增样本失败");
       setManualSource({ title: "", contentText: "", sourceUrl: "", imageUrls: "", videoUrl: "" });
-      setSelectedSourceId(data.item.id);
+      setSelectedSourceIdRaw(data.item.id);
       await refreshContentDesk();
       setMessage("已新增内容池样本。");
     } catch (error) {
@@ -1122,7 +1219,8 @@ export default function ContentDeskPage() {
       const res = await fetch(`/api/content/items?id=${encodeURIComponent(selectedSource.id)}`, { method: "DELETE" });
       const data = (await res.json()) as { error?: string };
       if (!res.ok) throw new Error(data.error || "删除样本失败");
-      setSelectedSourceId("");
+      setSourceEditState({ sourceId: "", form: makeEmptySourceEditForm() });
+      setSelectedSourceIdRaw("");
       setSelectedContentItemIds((current) => current.filter((id) => id !== selectedSource.id));
       setSelectedItemOwners((current) => {
         const next = new Map(current);
@@ -1177,6 +1275,10 @@ export default function ContentDeskPage() {
       });
       const data = (await res.json()) as { error?: string };
       if (!res.ok) throw new Error(data.error || "批量删除失败");
+      if (selectedSource && selectedContentItemIds.includes(selectedSource.id)) {
+        setSourceEditState({ sourceId: "", form: makeEmptySourceEditForm() });
+        setSelectedSourceIdRaw("");
+      }
       setSelectedContentItemIds([]);
       setSelectedItemOwners(new Map());
       await refreshContentDesk();
@@ -1788,7 +1890,7 @@ export default function ContentDeskPage() {
               <BatchActionBar
                 selectedCount={selectedContentItemIds.length}
                 totalCount={deskTotal}
-                busy={Boolean(busy)}
+                busy={Boolean(busy) || imageUploading}
                 title="内容池批量管理"
                 onSelectVisible={selectVisibleContentItems}
                 onClear={clearContentItemSelection}
@@ -1799,7 +1901,7 @@ export default function ContentDeskPage() {
                   { label: "移回默认库", onClick: moveSelectedToDefault },
                   { label: "加标签", onClick: () => setBatchTagDialog("add") },
                   { label: "移除标签", onClick: () => setBatchTagDialog("remove") },
-                  { label: "二次创作", onClick: startPoolSecondaryCreation },
+                  { label: "二次创作", onClick: () => guardSourceAction(() => void startPoolSecondaryCreation()) },
                   { label: "标记已分析", onClick: () => updateSelectedContentItemStatus("analyzed") },
                   { label: "标记已审查", onClick: () => updateSelectedContentItemStatus("approved") },
                   { label: "删除已选", danger: true, onClick: deleteSelectedContentItems },
@@ -1870,6 +1972,13 @@ export default function ContentDeskPage() {
           <aside className="content-desk-pane content-desk-detail glass ops-panel thin-scrollbar">
             {selectedSource ? (
               <div className="mx-auto max-w-3xl">
+                <ContentSourceEditor title={sourceEdit.title} contentText={sourceEdit.contentText} images={sourceEdit.images}
+                  previewImages={sourcePreviewImages}
+                  busy={Boolean(busy) || imageUploading} dirty={sourceDirty} onChange={changeSourceForm}
+                  onUpload={(files, index) => void uploadSourceImages(files, index)}
+                  onPreview={(index) => openImageGallery(sourcePreviewImages, index, sourceEdit.title || "样本图片")}
+                  onSave={() => void saveSourceEdits()} onDiscard={discardSourceEdits} />
+
                 <div className="mb-4 grid grid-cols-2 gap-3 sm:grid-cols-3">
                   <Metric label={getPrimaryReachMetric(selectedSource).label} value={getPrimaryReachMetric(selectedSource).value} />
                   <Metric label="点赞" value={selectedSource.metrics.likes || 0} />
@@ -1910,14 +2019,6 @@ export default function ContentDeskPage() {
                     onCache={() => cacheSelectedContentItemMedia([selectedSource.id])}
                     onForceVideoRefresh={() => cacheSelectedContentItemMedia([selectedSource.id], { forceVideoRefresh: true })}
                   />
-                  <button className="group w-full rounded-[8px] border border-transparent p-3 text-left transition hover:border-white/10 hover:bg-white/[0.035]" type="button" onClick={() => openSourcePreview(selectedSource)}>
-                    <h2 className="text-xl font-black leading-tight text-white sm:text-2xl">{selectedSource.title || "无标题"}</h2>
-                    <p className="mt-4 whitespace-pre-wrap text-sm leading-7 text-white/70">{selectedSource.contentText}</p>
-                    <span className="mt-3 inline-flex items-center gap-1.5 text-xs font-semibold text-[var(--cyan)] opacity-80">
-                      <Maximize2 className="h-3.5 w-3.5" />
-                      点击预览全文
-                    </span>
-                  </button>
                   <div className="mt-4 flex flex-wrap gap-2">
                     {selectedSource.sourceUrl ? (
                       <a className="soft-button inline-flex h-9 items-center gap-2 px-3 text-xs" href={selectedSource.sourceUrl} target="_blank" rel="noreferrer">
@@ -1944,7 +2045,7 @@ export default function ContentDeskPage() {
                       <video className="aspect-video w-full bg-black object-contain" controls preload="metadata" src={getDisplayVideoUrl(selectedSource)} />
                     </div>
                   ) : null}
-                  {selectedSourceFrames.length && !selectedSourceImagesAreFrameFallback ? (
+                  {selectedSourceFrames.length ? (
                     <div className="mt-5">
                       <div className="flex items-center justify-between gap-3">
                         <p className="inline-flex items-center gap-2 text-xs font-semibold text-white/62">
@@ -1968,55 +2069,23 @@ export default function ContentDeskPage() {
                       </div>
                     </div>
                   ) : null}
-                  <div className="mt-5 flex items-center justify-between gap-3">
-                    <p className="text-xs font-semibold text-white/62">{selectedSourceImagesAreFrameFallback ? "视频帧预览" : "图片预览"}</p>
-                    {selectedSourceVisualImages.length ? <span className="status-badge text-[11px] text-white/45">共 {selectedSourceVisualImages.length} 张</span> : null}
-                  </div>
-                  <div className="mt-2 grid grid-cols-2 gap-2 sm:grid-cols-3">
-                    {(selectedSourceVisualImages.length ? selectedSourceVisualImages : [0, 1, 2]).map((item, index) => (
-                      <button
-                        key={typeof item === "string" ? item : index}
-                        className="media-tile preview-ratio group"
-                        type="button"
-                        onClick={() =>
-                          typeof item === "string"
-                            ? openImageGallery(selectedSourceVisualImages, index, `${selectedSourceImagesAreFrameFallback ? "视频帧" : "样本图片"} ${index + 1}`, selectedSource.title || selectedSource.contentText)
-                            : undefined
-                        }
-                      >
-                        {typeof item === "string" ? (
-                          // eslint-disable-next-line @next/next/no-img-element
-                          <img alt="" className="h-full w-full object-cover transition duration-300 group-hover:scale-[1.03]" referrerPolicy="no-referrer" src={toDisplayImageSrc(item)} />
-                        ) : (
-                          <div className="grid h-full place-items-center text-xs text-white/35">素材位 {index + 1}</div>
-                        )}
-                      </button>
-                    ))}
-                  </div>
+
                 </div>
 
+                <fieldset disabled={Boolean(busy) || imageUploading}>
                 <SourceManagementCard
                   form={sourceEdit}
                   visualAssets={sourceEditVisualAssets}
                   manualForm={manualSource}
                   platform={platform}
-                  busy={busy === "source"}
-                  onFormChange={(patch) =>
-                    selectedSource
-                      ? setSourceEditState((current) => ({
-                          sourceId: selectedSource.id,
-                          form: {
-                            ...(current.sourceId === selectedSource.id ? current.form : makeSourceEditForm(selectedSource)),
-                            ...patch,
-                          },
-                        }))
-                      : undefined
-                  }
+                  busy={Boolean(busy) || imageUploading}
+                  onFormChange={changeSourceForm}
                   onManualFormChange={(patch) => setManualSource((current) => ({ ...current, ...patch }))}
                   onSave={saveSourceEdits}
                   onDelete={deleteSelectedSource}
-                  onCreateManual={createManualSourceItem}
+                  onCreateManual={() => guardSourceAction(() => void createManualSourceItem())}
                 />
+                </fieldset>
 
                 <PoolSecondaryCard
                   selectedCount={selectedContentItemIds.length}
@@ -2033,7 +2102,7 @@ export default function ContentDeskPage() {
                   onDirectOriginalReferenceChange={setPoolDirectOriginalReference}
                   onIncludeSourceVideoChange={setPoolIncludeSourceVideo}
                   onEnableVideoTranscriptionChange={setPoolEnableVideoTranscription}
-                  onStart={startPoolSecondaryCreation}
+                  onStart={() => guardSourceAction(() => void startPoolSecondaryCreation())}
                 />
               </div>
             ) : (
@@ -2047,6 +2116,10 @@ export default function ContentDeskPage() {
           <span>{config ? `TikHub ${config.tikhubConfigured ? "已配置" : "未配置"} · GPT ${config.openaiConfigured ? "已配置" : "未配置"}` : "配置读取中"}</span>
         </footer>
       </div>
+      {pendingEditAction ? <ContentSourceEditGuard busy={Boolean(busy) || imageUploading}
+        onCancel={() => setPendingEditAction(null)}
+        onDiscard={() => { leaveApprovedRef.current = true; discardSourceEdits(); setPendingEditAction(null); pendingEditAction(); }}
+        onSave={async () => { if (await saveSourceEdits()) { leaveApprovedRef.current = true; setPendingEditAction(null); pendingEditAction(); } }} /> : null}
       <PreviewDialog
         preview={preview}
         onClose={() => setPreview(null)}
@@ -2409,14 +2482,10 @@ function SourceManagementCard({
   return (
     <div className="content-cluster mt-4">
       <div className="flex items-center justify-between gap-3">
-        <PanelTitle icon={<Tag className="h-4 w-4" />} title="样本编辑" />
+        <PanelTitle icon={<Tag className="h-4 w-4" />} title="样本管理" />
         <span className="status-badge text-[11px] text-white/55">增删改</span>
       </div>
       <div className="mt-4 grid gap-3 md:grid-cols-2">
-        <label>
-          <FieldLabel label="标题" />
-          <input className="field" value={form.title} onChange={(event) => onFormChange({ title: event.target.value })} />
-        </label>
         <label>
           <FieldLabel label="作者" />
           <input className="field" value={form.authorName} onChange={(event) => onFormChange({ authorName: event.target.value })} />
@@ -2443,10 +2512,6 @@ function SourceManagementCard({
       <label className="mt-3 block">
         <FieldLabel label="原文链接" />
         <input className="field" value={form.sourceUrl} onChange={(event) => onFormChange({ sourceUrl: event.target.value })} />
-      </label>
-      <label className="mt-3 block">
-        <FieldLabel label="正文全文" />
-        <textarea className="field mt-2 min-h-36 resize-none leading-7" value={form.contentText} onChange={(event) => onFormChange({ contentText: event.target.value })} />
       </label>
 
       <div className="mt-4">
@@ -2823,6 +2888,7 @@ function buildVisualTagPatchAssets(item: NormalizedSourceItem, formTags: SourceE
 
 function makeEmptySourceEditForm(): SourceEditForm {
   return {
+    images: [],
     title: "",
     contentText: "",
     authorName: "",
@@ -2844,6 +2910,7 @@ function makeEmptySourceEditForm(): SourceEditForm {
 
 function makeSourceEditForm(item: NormalizedSourceItem): SourceEditForm {
   return {
+    images: [...item.images],
     title: item.title || "",
     contentText: item.contentText || "",
     authorName: item.authorName || "",
@@ -2953,10 +3020,6 @@ function getDisplayVideoUrl(item: NormalizedSourceItem) {
 
 function shouldUseVideoFramesAsImagePreview(item: NormalizedSourceItem) {
   return Boolean((item.mediaType === "video" || item.mediaType === "mixed" || item.videoUrl || item.downloadedVideoUrl) && item.videoFrames?.length);
-}
-
-function sameStringList(a: string[], b: string[]) {
-  return a.length === b.length && a.every((item, index) => item === b[index]);
 }
 
 function toDisplayImageSrc(url?: string) {
