@@ -8,8 +8,9 @@ This file is an on-demand history library. Do not read it during default startup
 <!-- TRELLIS-LATEST-START -->
 2026-11-03 content-pool performance: P0 library row-level operations, P1 desk
 pagination/raw stripping, and P1d row-level content-project writes are committed
-as `ebfc7da` and active on 3001 (slot `.next-local-a`, loopback/LAN `/content`
-200, `/api/version` SHA match). Full baseline (0 lint errors/16 warnings),
+as `ebfc7da`; activation from clean HEAD succeeded on 3001 (slot `.next-local-b`,
+loopback/LAN `/content` 200; active SHA in `/api/version`). Full baseline
+(0 lint errors/16 warnings),
 TypeScript, build, isolated browser check, real PostgreSQL read-only timing
 (desk 960 ms, summary 898 ms, 4,692 items, 66 KB page) and temporary-schema SQL
 smoke pass. Remaining: authenticated create/add/desk/ingest/batch timings. P2

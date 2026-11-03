@@ -58,8 +58,8 @@ Do not deploy a dirty worktree, branch name, abbreviated SHA, local runtime rows
 - 2026-11-03 Content-pool performance: baseline (0 errors/16 warnings), types,
   build, isolated 45678 browser and desk/performance checks, and PostgreSQL
   read-only desk 960ms / summary 898ms (4,692 items, 66 KB, no `raw`) pass.
-  Committed `ebfc7da`; active on 3001 with matching `/api/version` SHA and
-  loopback/LAN `/content` 200. Manual authenticated timing remains.
+  Committed and active on 3001 with matching `/api/version` SHA and loopback/LAN
+  `/content` 200. Manual authenticated timing remains.
 
 - 2026-11-02 Content-pool libraries: SQLite, browser, types, lint, build and
   baseline pass; PostgreSQL review remains.

@@ -122,7 +122,7 @@
   ```
 - [x] Real PostgreSQL read-only desk/summary timing: desk 960 ms, summary 898 ms, total 4,692, no `raw`, 66 KB page.
 - [x] Temporary-schema PostgreSQL SQL smoke: GIN lookup, owner-scoped `FOR UPDATE`, normalized-query conflict and light desk scan.
-- [x] Commit `ebfc7da` and activate 3001 from clean HEAD with `npm run local:lan` (slot `.next-local-a`; `/api/version` SHA match, loopback/LAN `/content` 200).
+- [x] Commit `ebfc7da` and activate 3001 from clean HEAD with `npm run local:lan` (final slot `.next-local-b`; `/api/version` SHA match, loopback/LAN `/content` 200).
 - [ ] Record authenticated manual timing on 3001.
 
 ## Review gates
