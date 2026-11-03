@@ -4,11 +4,12 @@ Last updated: 2026-11-03
 
 ## One-Line Status
 
-Feishu repairs and audit verified; LAN identity comes from `/api/version` and the activation receipt; live publish acceptance remains.
+Feishu deep review reproduced eight risk scenarios offline; application fixes pending. LAN identity remains in `/api/version`.
 
 ## Current Focus
 
-- Feishu publish owner recovery: review/queue preserve author; stale records replaced; attachments throttled/retried. Audit snapshot: owner mismatches 0, last terminal retry attachment-limited, two latest jobs running/queued. Baseline passes; live publish acceptance remains. Task `11-03-feishu-publish-owner-recovery/audit-2026-11-03.md`.
+- Local startup recovery: port 3001 was absent; restart rejected three uncommitted Feishu audit artifacts, with no application source diff. Audit probe and full baseline pass. Commit/clean-tree LAN activation is in progress; unexpected process-exit cause remains unconfirmed. Task `11-03-local-startup-recovery`.
+- Feishu publishing: eight offline-reproduced risks include media skipping/omission, edit overwrite, path escape, deleted-post revival and record/lease persistence. Application unchanged; fixes and live acceptance remain. Evidence: `11-03-feishu-publish-owner-recovery/code-review-2026-11-03.md`.
 - Content-pool performance: row-scoped library/item writes; paginated desk/summary/ids with `raw` stripped; baseline, types, build, browser and PG timing pass (desk 960ms, summary 898ms). Committed and active on LAN; authenticated 3001 timing remains.
 - Content-pool libraries: owner-scoped rail with subsets, default library, tags and Canvas filters; checks pass, PostgreSQL review remains.
 - Review filter dialog: the advanced-filter modal and its sticky action bar now use opaque `--panel-solid` instead of translucent `--surface-raised`, so editor/media content no longer shows through in the creator dark theme. Baseline passed; verified on the active LAN candidate with computed background `rgb(19, 29, 27)` and a dark-theme screenshot. Committed `505c9b9`; included in the active LAN candidate.
