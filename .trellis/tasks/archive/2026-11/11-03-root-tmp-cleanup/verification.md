@@ -24,3 +24,15 @@ The one-off preparation and native PowerShell removal scripts are task evidence,
 ## Offline baseline
 
 Documented command used with `TRELLIS_SMOKE_PORT=45678`; log: ignored `test-artifacts/tmp-cleanup-20261103/baseline.log`. Exit 0 with `Baseline verification passed.`; isolated HTTP smoke and SQLite checks passed. No 3001 restart was performed.
+
+## User follow-up: OSS, schedule and simple-material files
+
+User asked about remaining screenshot entries. A second pass removed 82 root files matching `.tmp-oss-*`, `.tmp-schedule*` and `.tmp-simple-material-*` after verifying no tracked-file or running-process references. All six old OSS PID files referred to exited processes. Maintained storage helpers are in `scripts/storage/`; durable migration state and backup receipts remain under `data/` and `test-artifacts/`.
+
+- 1.67 MiB removed; 0.23 MiB recovery ZIP; net reclaimed 1.43 MiB.
+- Ignored recovery archive: `test-artifacts/tmp-cleanup-20261103-oss-followup/recovery.zip`, with adjacent manifest and result receipts.
+- Every ZIP member's byte length and SHA-256 matched the original before deletion.
+- Both `.tmp-storage-inventory*.json` files were retained and their hashes unchanged.
+- Service commit `93501a29f1cbe08e05340b55f351c2e1564e454c` and PID 3516 remained unchanged. No helpers were executed, no service restarted and no cloud data modified.
+- Cumulative root cleanup: 253 removed, 46 retained.
+- Follow-up baseline initially caught the previous cleanup status line putting typical Trellis context 185 bytes over budget; shortened only that line. Re-run passed with exit 0 (`Baseline verification passed.`), including build, TypeScript, isolated HTTP smoke and SQLite checks. Log: ignored `test-artifacts/tmp-cleanup-20261103-oss-followup/baseline.log`. Live `/review` also returned HTTP 200.
