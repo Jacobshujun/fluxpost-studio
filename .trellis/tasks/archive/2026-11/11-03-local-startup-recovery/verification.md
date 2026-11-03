@@ -28,5 +28,23 @@ baseline stopped the application.
 
 ## Activation
 
-Pending clean-tree commit and LAN activation. Do not treat the passing baseline
-as proof of a running service or a fix for the original unexpected exit.
+- Commit `5d1d0c4e1513d09d9709a27a0d7962a7d709f276` preserved the audit artifacts
+  and recovery evidence. `git status --porcelain` was empty before activation.
+- `npm run local:lan` built `.next-local-a` and passed release identity and the
+  existing HTTP smoke. Log: `test-artifacts/local-startup-recovery-activation-20261103.log`.
+- After the activation command exited, port 3001 still listened on `0.0.0.0`.
+  `/api/version`, Git HEAD, state receipt and the slot manifest all matched.
+- `/`, `/review` and `/content` returned HTTP 200 on loopback and the machine's
+  LAN address. This does not establish reachability from another device.
+- The installed desktop LAN launcher with `-NoBrowser -NoPause` took its
+  "application already running" path and returned exit code 0.
+
+Final task archival changes only documentation. After committing the archive,
+reactivate from clean HEAD so the running candidate also includes that evidence;
+store the final activation output in
+`test-artifacts/local-startup-recovery-final-activation-20261103.log`. The ignored
+candidate receipt and `/api/version` identify the final running SHA.
+
+This resolves the startup rejection and restores service. It does not prove or
+fix the original unexpected exit cause. No application/launcher code or live
+configuration was changed, and no publishing retry was submitted manually.

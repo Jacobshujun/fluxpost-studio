@@ -4,11 +4,11 @@ Last updated: 2026-11-03
 
 ## One-Line Status
 
-Feishu deep review reproduced eight risk scenarios offline; application fixes pending. LAN identity remains in `/api/version`.
+Local startup restored after committing audit artifacts; LAN checks pass. Feishu review fixes remain pending; active identity is in `/api/version`.
 
 ## Current Focus
 
-- Local startup recovery: port 3001 was absent; restart rejected three uncommitted Feishu audit artifacts, with no application source diff. Audit probe and full baseline pass. Commit/clean-tree LAN activation is in progress; unexpected process-exit cause remains unconfirmed. Task `11-03-local-startup-recovery`.
+- Local startup restored: three uncommitted Feishu audit artifacts caused the restart rejection. Artifacts preserved/committed; full baseline, clean-tree LAN activation, loopback/LAN pages and desktop launcher pass. Application source unchanged; original exit cause unconfirmed (no matching Windows error or retained server output). Evidence: `archive/2026-11/11-03-local-startup-recovery/verification.md`.
 - Feishu publishing: eight offline-reproduced risks include media skipping/omission, edit overwrite, path escape, deleted-post revival and record/lease persistence. Application unchanged; fixes and live acceptance remain. Evidence: `11-03-feishu-publish-owner-recovery/code-review-2026-11-03.md`.
 - Content-pool performance: row-scoped library/item writes; paginated desk/summary/ids with `raw` stripped; baseline, types, build, browser and PG timing pass (desk 960ms, summary 898ms). Committed and active on LAN; authenticated 3001 timing remains.
 - Content-pool libraries: owner-scoped rail with subsets, default library, tags and Canvas filters; checks pass, PostgreSQL review remains.

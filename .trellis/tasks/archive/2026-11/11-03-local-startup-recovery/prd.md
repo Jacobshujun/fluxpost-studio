@@ -17,11 +17,11 @@ unexpected exit and `Candidate worktree must be clean before restart` error.
 
 ## Acceptance
 
-- The reviewed audit probe and full deterministic baseline pass.
-- The worktree is clean before the existing `npm run local:lan` activation.
-- Port 3001 listens on the LAN; version identity, state and build marker agree.
-- Loopback/LAN HTTP checks and the desktop launcher's existing-instance path pass.
-- The listener remains available after the activation command has returned.
+- [x] The reviewed audit probe and full deterministic baseline pass.
+- [x] The worktree is clean before the existing `npm run local:lan` activation.
+- [x] Port 3001 listens on the LAN; version identity, state and build marker agree.
+- [x] Loopback/LAN HTTP checks and the desktop launcher's existing-instance path pass.
+- [x] The listener remains available after the activation command has returned.
 
 ## Initial Evidence
 
