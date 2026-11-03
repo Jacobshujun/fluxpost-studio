@@ -4,7 +4,7 @@ Last updated: 2026-11-03
 
 ## One-Line Status
 
-LAN: Feishu owner-recovery active on 3001; `/review` and `/content` 200; SHA in `/api/version`.
+LAN: Feishu owner-recovery `58f48b1` active on 3001; `/review` and `/content` 200; SHA in `/api/version`.
 
 ## Current Focus
 

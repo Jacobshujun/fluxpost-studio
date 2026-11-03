@@ -14,11 +14,12 @@ and returns the generated post with its original author, aligns the runtime copy
 keeps the author in review side effects, and replaces a stale Base record on
 `record-upsert` `800030302` by creating a new record from the same patch. Nine
 existing owner mismatches were repaired to 0. Targeted checks, TypeScript, lint
-(0 errors/16 warnings) and the full baseline pass. Committed `cb8b3d0`; LAN activation from clean
-HEAD `52e1c6d` built slot `.next-local-b` on `0.0.0.0:3001`; `/api/version`
-matches on loopback and LAN, and `/review`/`/content` return 200. Next:
-operator-approved re-publish of
-the affected post to create a replacement record and upload its four images.
+(0 errors/16 warnings) and the full baseline pass. Committed `cb8b3d0`. A later re-publish created records but hit
+`800050609` (120 attachments per 60 s); attachment writes now reserve a
+process-wide 120/60 s window and retry three times with a 65 s delay
+(`58f48b1`). LAN slot `.next-local-a` serves `0.0.0.0:3001`; `/api/version`
+matches on loopback and LAN and `/review` returns 200. Next:
+operator-approved re-publish of the affected post.
 Evidence: task `11-03-feishu-publish-owner-recovery`.
 
 2026-11-03 content-pool performance: P0 library row-level operations, P1 desk

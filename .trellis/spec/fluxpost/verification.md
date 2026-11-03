@@ -57,7 +57,7 @@ Do not deploy a dirty worktree, branch name, abbreviated SHA, local runtime rows
 
 - 2026-11-03 Feishu publish owner recovery: targeted checks and the full
   baseline pass (0 errors/16 warnings, TypeScript, smoke); owner mismatches
-  repaired to 0; LAN active. Task `11-03-feishu-publish-owner-recovery`.
+  repaired to 0; LAN `58f48b1` active. Task `11-03-feishu-publish-owner-recovery`.
 
 - 2026-11-03 Content-pool performance: baseline (0 errors/16 warnings), types,
   build, isolated 45678 browser and desk/performance checks, and PostgreSQL
