@@ -36,3 +36,13 @@ User asked about remaining screenshot entries. A second pass removed 82 root fil
 - Service commit `93501a29f1cbe08e05340b55f351c2e1564e454c` and PID 3516 remained unchanged. No helpers were executed, no service restarted and no cloud data modified.
 - Cumulative root cleanup: 253 removed, 46 retained.
 - Follow-up baseline initially caught the previous cleanup status line putting typical Trellis context 185 bytes over budget; shortened only that line. Re-run passed with exit 0 (`Baseline verification passed.`), including build, TypeScript, isolated HTTP smoke and SQLite checks. Log: ignored `test-artifacts/tmp-cleanup-20261103-oss-followup/baseline.log`. Live `/review` also returned HTTP 200.
+
+## User screenshot follow-up: remaining root temporary files
+
+User requested cleanup of the remaining screenshot entries. Removed 44 root entries (43 files and `.tmp-dcd-write/`, containing 17 files). Combined contents were 1.82 MiB; the verified ignored ZIP is 0.15 MiB and net reclamation is 1.67 MiB. Archive: `test-artifacts/tmp-cleanup-20261103-final/recovery.zip`; manifest/results: adjacent ignored files.
+
+All archive members were hashed and compared with their originals before deletion. No tracked or actively referenced files were selected. Retained the two storage inventory manifests required by the migration tooling. Final root state: 2 `.tmp-*` files, both inventories; no `.tmp-*` directories. Cumulative from the original inventory: 297/299 entries removed; 2 retained.
+
+The initial follow-up PowerShell pass completed deletion and integrity/service checks, then hit a precedence error while calculating its summary. The remaining-entry count expression has been corrected; the archived one-off script and results manifest describe the cleanup. Port 3001 remains PID 3516 on commit `93501a29f1cbe08e05340b55f351c2e1564e454c`. No provider calls, cloud changes, app restart or runtime data changes occurred.
+
+The baseline initially caught the temporary status line putting typical context 39 bytes over budget; shortening that line returned the budget to 69.99 KB / 70.00 KB. Final run passed with exit 0 (`Baseline verification passed.`), including build, TypeScript, isolated HTTP smoke and SQLite checks. Log: ignored `test-artifacts/tmp-cleanup-20261103-final/baseline.log`.

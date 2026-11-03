@@ -1,5 +1,6 @@
 """One-off local recovery archive; does not delete anything or call providers."""
 
+import argparse
 import datetime
 import hashlib
 import json
@@ -8,9 +9,14 @@ import re
 import urllib.request
 import zipfile
 
-root = pathlib.Path(__file__).resolve().parents[3]
+arguments = argparse.ArgumentParser()
+arguments.add_argument('--remaining', action='store_true')
+options = arguments.parse_args()
+root = next(parent for parent in pathlib.Path(__file__).resolve().parents
+            if (parent / 'AGENTS.md').is_file() and (parent / '.git').exists())
 assert (root / 'AGENTS.md').is_file()
-out = root / 'test-artifacts' / 'tmp-cleanup-20261103'
+out = root / 'test-artifacts' / ('tmp-cleanup-20261103-final' if options.remaining
+                                else 'tmp-cleanup-20261103')
 out.mkdir(parents=True, exist_ok=False)
 cutoff = datetime.datetime(2026, 10, 27)
 keep = re.compile(
@@ -20,7 +26,9 @@ keep = re.compile(
 entries = sorted(root.glob('.tmp-*'))
 selected, retained, members = [], [], []
 for item in entries:
-    if keep.match(item.name) or datetime.datetime.fromtimestamp(item.stat().st_mtime) >= cutoff:
+    preserve = (item.name.startswith('.tmp-storage-inventory') if options.remaining
+                else keep.match(item.name) or datetime.datetime.fromtimestamp(item.stat().st_mtime) >= cutoff)
+    if preserve:
         retained.append(item.name)
         continue
     assert item.resolve().parent == root and item.name.startswith('.tmp-')

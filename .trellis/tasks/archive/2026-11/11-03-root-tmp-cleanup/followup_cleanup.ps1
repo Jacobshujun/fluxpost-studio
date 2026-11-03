@@ -67,7 +67,7 @@ $result = [PSCustomObject]@{
     RemovedFiles=$records.Count; RemovedMiB=[math]::Round($bytes/1MB,2)
     ArchiveMiB=[math]::Round((Get-Item -LiteralPath $zipPath).Length/1MB,2)
     NetReclaimedMiB=[math]::Round(($bytes-(Get-Item -LiteralPath $zipPath).Length)/1MB,2)
-    RemainingRootItems=@(Get-ChildItem -LiteralPath $workspace -Force -Filter '.tmp-*').Count
+    RemainingRootItems=@((Get-ChildItem -LiteralPath $workspace -Force -Filter '.tmp-*')).Count
     PreservedInventories=$inventories.Count; ServiceCommit=$versionAfter.commit; ServicePID=$listenerAfter
 }
 $result | ConvertTo-Json | Set-Content -LiteralPath (Join-Path $out 'result.json') -Encoding UTF8

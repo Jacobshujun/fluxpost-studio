@@ -1,6 +1,9 @@
+param([switch]$Remaining)
 $ErrorActionPreference = 'Stop'
-$workspace = (Resolve-Path -LiteralPath (Join-Path $PSScriptRoot '../../..')).Path
-$manifestPath = Join-Path $workspace 'test-artifacts/tmp-cleanup-20261103/manifest.json'
+$workspace = 'D:\FluxPost\social-content-studio'
+if ((Resolve-Path -LiteralPath '.').Path -ne $workspace) { throw 'Run from primary workspace' }
+$manifestRelativePath = if ($Remaining) { 'test-artifacts/tmp-cleanup-20261103-final/manifest.json' } else { 'test-artifacts/tmp-cleanup-20261103/manifest.json' }
+$manifestPath = Join-Path $workspace $manifestRelativePath
 $manifest = Get-Content -LiteralPath $manifestPath -Raw | ConvertFrom-Json
 if ($manifest.root -ne $workspace) { throw 'Manifest workspace mismatch' }
 $archivePath = (Resolve-Path -LiteralPath $manifest.archive).Path
