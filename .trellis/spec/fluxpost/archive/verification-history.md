@@ -457,6 +457,8 @@ The baseline verifies:
 
 ### Moved from recent verification 2026-11-03
 
+- 2026-10-28 Wonder repair: baseline domains pass before 17 existing data-script lint errors; focused lint/types/build/config/SQLite/HTTP and six Wonder plus two GPT browser cases pass. Explicitly authorized LAN activation of clean `3f71997` passed build/identity/loopback/LAN HTTP/Canvas checks. No manual paid replay. Evidence: archived wonder-image-repair task.
+
 - 2026-10-30 ESLint scope: excluded `data/**` operator artifacts only. Lint passes
   with 0 errors/16 source warnings; ESLint API assertions confirm source/config
   and maintained scripts remain checked with the require-import rule at error.

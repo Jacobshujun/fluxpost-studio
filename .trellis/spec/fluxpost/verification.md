@@ -57,8 +57,9 @@ Do not deploy a dirty worktree, branch name, abbreviated SHA, local runtime rows
 
 - 2026-11-03 Content-pool performance: baseline (0 errors/16 warnings), types,
   build, isolated 45678 browser and desk/performance checks, and PostgreSQL
-  read-only desk 960ms / summary 898ms (4,692 items, 66 KB, no `raw`) pass;
-  200-item owner lookup 1.38s. Manual authenticated 3001 timing remains.
+  read-only desk 960ms / summary 898ms (4,692 items, 66 KB, no `raw`) pass.
+  Committed `ebfc7da`; active on 3001 with matching `/api/version` SHA and
+  loopback/LAN `/content` 200. Manual authenticated timing remains.
 
 - 2026-11-02 Content-pool libraries: SQLite, browser, types, lint, build and
   baseline pass; PostgreSQL review remains.
@@ -90,8 +91,6 @@ Do not deploy a dirty worktree, branch name, abbreviated SHA, local runtime rows
   `test-artifacts/review-usability-*-final.log`,
   `test-artifacts/review-usability-*-fixes*.log`,
   `test-artifacts/review-usability-baseline-final-audit.log`.
-
-- 2026-10-28 Wonder repair: baseline domains pass before 17 existing data-script lint errors; focused lint/types/build/config/SQLite/HTTP and six Wonder plus two GPT browser cases pass. Explicitly authorized LAN activation of clean `3f71997` passed build/identity/loopback/LAN HTTP/Canvas checks. No manual paid replay. Evidence: archived wonder-image-repair task.
 
 Prior text-reasoning and local-library acceptance entries are preserved in
 `archive/verification-history.md` (2026-10-28 context-budget archive). Current
