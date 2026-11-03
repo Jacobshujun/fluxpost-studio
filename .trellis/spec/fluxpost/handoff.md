@@ -6,6 +6,20 @@ This file is an on-demand history library. Do not read it during default startup
 
 ## 最近一条
 <!-- TRELLIS-LATEST-START -->
+2026-11-03 Feishu publish owner recovery: jobs `feishu-publish-1793684841877-9018c98e`
+and `feishu-publish-1793685525729-1ef79c85` failed with `Generated post not found`
+because queue persistence returned the runtime copy, which an admin edit had
+re-owned, and the later generated write failed the access check. The fix saves
+and returns the generated post with its original author, aligns the runtime copy,
+keeps the author in review side effects, and replaces a stale Base record on
+`record-upsert` `800030302` by creating a new record from the same patch. Nine
+existing owner mismatches were repaired to 0. Targeted checks, TypeScript, lint
+(0 errors/16 warnings) and the full baseline pass. Committed `cb8b3d0`; `npm run
+local` activated slot `.next-local-a` on 3001, `/api/version` reports the full
+SHA, and `/review`/`/content` return 200. Next: operator-approved re-publish of
+the affected post to create a replacement record and upload its four images.
+Evidence: task `11-03-feishu-publish-owner-recovery`.
+
 2026-11-03 content-pool performance: P0 library row-level operations, P1 desk
 pagination/raw stripping, and P1d row-level content-project writes are committed
 as `ebfc7da`; activation from clean HEAD succeeded on 3001 (slot `.next-local-b`,

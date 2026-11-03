@@ -42,7 +42,11 @@ into `runtime_posts.data_json` for the mismatched rows only. Idempotent.
 
 ## Activation
 
-Pending.
+- Committed `cb8b3d0dc49774fa48296889f3d8331919100c84`.
+- `npm run local` built the inactive slot `.next-local-a` and replaced PID 18092.
+- Local smoke passed; `/api/version` reports
+  `cb8b3d0dc49774fa48296889f3d8331919100c84`; `/review` and `/content` return 200.
+- Slot `.next-local-a`, launcher PID 31476, listener PID 40596.
 
 ## Re-Publish
 

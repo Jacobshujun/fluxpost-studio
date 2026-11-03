@@ -4,10 +4,11 @@ Last updated: 2026-11-03
 
 ## One-Line Status
 
-LAN: content-pool performance candidate active on 3001; desk/library writes are row-scoped and browser payloads omit `raw`. Loopback and LAN `/content` return 200; active SHA comes from `/api/version`.
+LAN: Feishu publish owner-recovery candidate `cb8b3d0` active on 3001; queue persistence preserves the generated-post author and stale Base record IDs are replaced. `/review` and `/content` return 200; active SHA comes from `/api/version`.
 
 ## Current Focus
 
+- Feishu publish owner recovery: queue persistence now saves and returns the generated post with its original author, review side effects no longer re-own another member's runtime post, and `record-upsert` `800030302` creates a replacement record from the same patch. Nine existing owner mismatches were repaired to 0; targeted checks, TypeScript, lint (0 errors/16 warnings) and the full baseline pass. Committed `cb8b3d0`, activated on 3001 (`/api/version` matches, `/review` and `/content` 200). Re-publish acceptance remains. Evidence: task `11-03-feishu-publish-owner-recovery`.
 - Content-pool performance: row-scoped library/item writes; paginated desk/summary/ids with `raw` stripped; baseline, types, build, browser and PG timing pass (desk 960ms, summary 898ms). Committed and active on LAN; authenticated 3001 timing remains.
 - Content-pool libraries: owner-scoped rail with subsets, default library, tags and Canvas filters; checks pass, PostgreSQL review remains.
 - Review filter dialog: the advanced-filter modal and its sticky action bar now use opaque `--panel-solid` instead of translucent `--surface-raised`, so editor/media content no longer shows through in the creator dark theme. Baseline passed; verified on the active LAN candidate with computed background `rgb(19, 29, 27)` and a dark-theme screenshot. Committed `505c9b9`; included in the active LAN candidate.
