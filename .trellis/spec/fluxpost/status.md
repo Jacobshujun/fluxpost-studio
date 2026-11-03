@@ -4,7 +4,7 @@ Last updated: 2026-11-03
 
 ## One-Line Status
 
-Bounded local crash diagnostics verified on LAN. Historical exit-134 trigger remains unproven; active identity is in `/api/version`.
+November updates: `docs/releases/2026-11-03-github-sync.md`; baseline passes. Runtime identity: `/api/version`.
 
 ## Current Focus
 
