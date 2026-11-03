@@ -32,7 +32,7 @@ def make_item(item_id, title, tags):
         "authorName": "作者", "title": title, "contentText": f"{title} 正文", "images": [], "mediaUrls": [],
         "downloadedImages": [], "videoFrames": [], "customTags": tags, "poolStatus": "new", "hotScore": 50,
         "crawledAt": NOW, "firstSeenAt": NOW, "lastSeenAt": NOW, "usedCount": 0,
-        "metrics": {"views": 100, "likes": 10}, "raw": {},
+        "metrics": {"views": 100, "likes": 10},
     }
 
 
@@ -51,6 +51,70 @@ def make_project():
     }
 
 
+def project_summary(project):
+    return {key: value for key, value in project.items() if key != "items"}
+
+
+def collection_ids_for(item_id, memberships, library, descendants, collections):
+    item_collections = {membership["collectionId"] for membership in memberships if membership["itemId"] == item_id}
+    if library == "all":
+        return True
+    if library == "default":
+        return not item_collections
+    selected = {library}
+    if descendants != "0":
+        if library == "lib-root":
+            selected.add("lib-child")
+    return bool(item_collections & selected)
+
+
+def desk_response(params, project, memberships):
+    library = params.get("library", ["all"])[0]
+    descendants = params.get("descendants", ["1"])[0]
+    items = [
+        {**item, "projectId": project["id"], "projectName": project["query"]}
+        for item in project["items"]
+        if collection_ids_for(item["id"], memberships, library, descendants, [ROOT, CHILD])
+    ]
+    limit = int(params.get("limit", ["40"])[0] or 40)
+    page_items = items[:limit]
+    page_ids = {item["id"] for item in page_items}
+    page_memberships = [membership for membership in memberships if membership["itemId"] in page_ids]
+    return {
+        "items": page_items,
+        "memberships": page_memberships,
+        "total": len(items),
+        "hasMore": len(items) > len(page_items),
+        "nextCursor": None,
+    }
+
+
+def summary_response(params, project, memberships, collections, tags):
+    library = params.get("library", ["all"])[0]
+    descendants = params.get("descendants", ["1"])[0]
+    counts = {collection["id"]: 0 for collection in collections}
+    default_count = 0
+    for item in project["items"]:
+        item_collections = {membership["collectionId"] for membership in memberships if membership["itemId"] == item["id"]}
+        if not item_collections:
+            default_count += 1
+        for collection_id in item_collections:
+            counts[collection_id] = counts.get(collection_id, 0) + 1
+    scoped_items = [
+        item for item in project["items"]
+        if collection_ids_for(item["id"], memberships, library, descendants, collections)
+    ]
+    summary = project_summary(project)
+    return {
+        "projects": [summary],
+        "activeProject": summary,
+        "collections": [{**collection, "itemCount": counts.get(collection["id"], 0)} for collection in collections],
+        "libraryCounts": {"all": len(project["items"]), "default": default_count, "byCollection": counts},
+        "libraryStats": {"total": len(scoped_items), "analyzed": 0, "rewritten": 0},
+        "tags": [dict(tag) for tag in tags],
+    }
+
+
 def run_case(browser, width, height):
     context = browser.new_context(viewport={"width": width, "height": height})
     page = context.new_page()
@@ -62,18 +126,6 @@ def run_case(browser, width, height):
     errors = []
     page.on("pageerror", lambda error: errors.append(str(error)))
     page.on("dialog", lambda dialog: (errors.append(f"Unexpected browser dialog: {dialog.message}"), dialog.dismiss()))
-
-    def snapshot():
-        counts = {}
-        for membership in memberships:
-            counts[membership["collectionId"]] = counts.get(membership["collectionId"], 0) + 1
-        return {
-            "projects": [make_project()],
-            "activeProject": make_project(),
-            "collections": [{**collection, "itemCount": counts.get(collection["id"], 0)} for collection in collections],
-            "memberships": memberships,
-            "tags": tags,
-        }
 
     def handle_collection_batch(body):
         calls.append(body)
@@ -103,12 +155,18 @@ def run_case(browser, width, height):
         path = urlparse(request.url).path
         method = request.method
         params = parse_qs(urlparse(request.url).query)
-        if path == "/api/content-pool":
-            route.fulfill(json=snapshot())
+        project = make_project()
+        if path == "/api/content-pool/desk":
+            route.fulfill(json=desk_response(params, project, memberships))
+        elif path == "/api/content-pool/desk/summary":
+            route.fulfill(json=summary_response(params, project, memberships, collections, tags))
+        elif path == "/api/content-pool/desk/ids":
+            response = desk_response(params, project, memberships)
+            route.fulfill(json={"items": [{"id": item["id"], "ownerUserId": item["ownerUserId"]} for item in response["items"]]})
         elif path == "/api/content-pool/tags" and method == "GET":
             route.fulfill(json={"tags": tags})
         elif path == "/api/content-pool/collections" and method == "GET":
-            route.fulfill(json={"collections": snapshot()["collections"]})
+            route.fulfill(json={"collections": [{**collection, "itemCount": 0} for collection in collections]})
         elif path == "/api/content-pool/collections" and method == "POST":
             body = request.post_data_json
             calls.append(body)
@@ -118,7 +176,7 @@ def run_case(browser, width, height):
                 collection["parentId"] = body["parentId"]
                 collection["relativePath"] = f"{parent['relativePath']}/{body['name']}" if parent else body["name"]
             collections.append(collection)
-            route.fulfill(json={"collection": collection})
+            route.fulfill(json={"collection": collection, "collections": [{**item, "itemCount": 0} for item in collections]})
         elif path == "/api/content-pool/collections/batch":
             route.fulfill(json=handle_collection_batch(request.post_data_json))
         elif re.fullmatch(r"/api/content-pool/collections/[^/]+", path):
@@ -130,11 +188,11 @@ def run_case(browser, width, height):
                 if collection:
                     collection["name"] = body.get("name", collection["name"])
                     collection["relativePath"] = collection["name"]
-                route.fulfill(json={"collection": collection})
+                route.fulfill(json={"collection": collection, "collections": [{**item, "itemCount": 0} for item in collections]})
             else:
                 collections[:] = [item for item in collections if item["id"] != collection_id]
                 memberships[:] = [item for item in memberships if item["collectionId"] != collection_id]
-                route.fulfill(json={"deleted": True, "collectionId": collection_id})
+                route.fulfill(json={"deleted": True, "collectionId": collection_id, "collections": [{**item, "itemCount": 0} for item in collections]})
         elif path == "/api/content-pool/tags/manage":
             body = request.post_data_json
             calls.append(body)
@@ -201,6 +259,14 @@ def run_case(browser, width, height):
     sidebar.get_by_role("button", name=re.compile(r"^测试库")).click()
     expect(page.locator(".content-desk-source-card")).to_have_count(1)
 
+    sidebar.get_by_role("button", name="删除“测试库”").click()
+    delete_dialog = page.locator('dialog[aria-label="删除内容库"]')
+    expect(delete_dialog).to_be_visible()
+    delete_dialog.get_by_role("button", name="确认删除", exact=True).click()
+    expect(sidebar.get_by_role("button", name=re.compile(r"^测试库"))).to_have_count(0)
+    expect(page.locator(".content-desk-source-card")).to_have_count(4)
+    expect(sidebar.get_by_role("button", name=re.compile(r"^默认库")).locator("small")).to_have_text("1")
+
     sidebar.get_by_role("button", name="管理").click()
     tag_dialog = page.locator('dialog[aria-label="管理自定义标签"]')
     expect(tag_dialog).to_be_visible()
@@ -223,8 +289,12 @@ def run_mobile_case(browser):
 
     def mobile_handler(route):
         path = urlparse(route.request.url).path
-        if path == "/api/content-pool":
-            route.fulfill(json=snapshot_for_mobile())
+        params = parse_qs(urlparse(route.request.url).query)
+        project = make_project()
+        if path == "/api/content-pool/desk":
+            route.fulfill(json=desk_response(params, project, MEMBERSHIPS))
+        elif path == "/api/content-pool/desk/summary":
+            route.fulfill(json=summary_response(params, project, MEMBERSHIPS, [dict(ROOT), dict(CHILD)], TAGS))
         elif path == "/api/workspace/settings":
             route.fulfill(json={"settings": {"simpleRunMediaSettings": {"generateImages": False, "useComfyUiKlein": False, "directOriginalReference": False, "includeSourceVideo": False, "enableVideoTranscription": False}, "platformCrawlSettings": {}, "updatedAt": NOW}})
         elif path == "/api/config":
@@ -245,11 +315,6 @@ def run_mobile_case(browser):
     assert not errors, f"Mobile page errors: {errors}"
     assert page.evaluate("document.documentElement.scrollWidth <= window.innerWidth + 1"), "Mobile layout must not overflow horizontally."
     context.close()
-
-
-def snapshot_for_mobile():
-    project = make_project()
-    return {"projects": [project], "activeProject": project, "collections": [dict(ROOT), dict(CHILD)], "memberships": [dict(item) for item in MEMBERSHIPS], "tags": [dict(item) for item in TAGS]}
 
 
 with sync_playwright() as playwright:

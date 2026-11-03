@@ -1,5 +1,13 @@
 import { NextResponse } from "next/server";
-import { createSourceItem, deleteSourceItem, getContentPoolSnapshot, updateSourceItem } from "@/lib/content-pool";
+import {
+  contentPoolItemWithoutRaw,
+  contentPoolProjectSummary,
+  createSourceItem,
+  deleteSourceItem,
+  getContentPoolSnapshot,
+  stripContentPoolSnapshotRaw,
+  updateSourceItem,
+} from "@/lib/content-pool";
 import { requireContentPoolCollectionWriteTarget } from "@/lib/content-pool-collections";
 import { isWorkspaceSignInError, requireWorkspaceAccount } from "@/lib/workspace-accounts";
 import type { NormalizedSourceItem } from "@/lib/types";
@@ -12,7 +20,7 @@ export async function GET(request: Request) {
     const url = new URL(request.url);
     const query = url.searchParams.get("query") || undefined;
     const snapshot = await getContentPoolSnapshot(query, account);
-    return NextResponse.json(snapshot);
+    return NextResponse.json(stripContentPoolSnapshotRaw(snapshot));
   } catch (error) {
     return NextResponse.json(
       { error: error instanceof Error ? error.message : "Failed to read content items" },
@@ -30,7 +38,10 @@ export async function POST(request: Request) {
     const collectionId = typeof body.collectionId === "string" ? body.collectionId.trim() : "";
     if (collectionId) await requireContentPoolCollectionWriteTarget(account, collectionId);
     const result = await createSourceItem(body.query.trim(), body.item, account, { collectionId: collectionId || undefined });
-    return NextResponse.json(result);
+    return NextResponse.json({
+      item: contentPoolItemWithoutRaw(result.item),
+      project: contentPoolProjectSummary(result.project),
+    });
   } catch (error) {
     return NextResponse.json(
       { error: error instanceof Error ? error.message : "Failed to create content item" },
@@ -45,7 +56,7 @@ export async function PATCH(request: Request) {
     const body = (await request.json()) as { id?: string; patch?: Partial<NormalizedSourceItem> };
     if (!body.id) return NextResponse.json({ error: "Item id is required" }, { status: 400 });
     const item = await updateSourceItem(body.id, body.patch || {}, account);
-    return NextResponse.json({ item });
+    return NextResponse.json({ item: contentPoolItemWithoutRaw(item) });
   } catch (error) {
     return NextResponse.json(
       { error: error instanceof Error ? error.message : "Failed to update content item" },

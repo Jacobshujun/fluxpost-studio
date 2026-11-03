@@ -2,6 +2,7 @@ import { NextResponse } from "next/server";
 import {
   ContentPoolCollectionValidationError,
   deleteContentPoolCollection,
+  listContentPoolCollections,
   updateContentPoolCollection,
 } from "@/lib/content-pool-collections";
 import { ContentPoolTagValidationError } from "@/lib/content-pool-tags";
@@ -15,7 +16,7 @@ export async function PATCH(request: Request, context: { params: Promise<{ colle
     const { collectionId } = await context.params;
     const body = (await request.json()) as { name?: unknown; parentId?: unknown };
     const collection = await updateContentPoolCollection(account, collectionId, body);
-    return NextResponse.json({ collection });
+    return NextResponse.json({ collection, collections: await listContentPoolCollections(account) });
   } catch (error) {
     return errorResponse(error);
   }
@@ -25,7 +26,8 @@ export async function DELETE(request: Request, context: { params: Promise<{ coll
   try {
     const account = await requireWorkspaceAccount(request);
     const { collectionId } = await context.params;
-    return NextResponse.json(await deleteContentPoolCollection(account, collectionId));
+    const result = await deleteContentPoolCollection(account, collectionId);
+    return NextResponse.json({ ...result, collections: await listContentPoolCollections(account) });
   } catch (error) {
     return errorResponse(error);
   }

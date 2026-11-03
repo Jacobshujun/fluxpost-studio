@@ -1127,6 +1127,157 @@ export async function mutateAllSourceProjectsInDb(mutate: (project: ContentProje
   return changed;
 }
 
+export async function readContentProjectsForItemIdsFromDb(itemIds: string[]): Promise<ContentProject[]> {
+  const ids = Array.from(new Set(itemIds.map((id) => id.trim()).filter(Boolean)));
+  if (!ids.length) return [];
+  await ensureDatabaseReady();
+  const projectIds = await findContentProjectIdsForItemIdsFromDb(ids);
+  return readContentProjectsByIdsFromDb(projectIds);
+}
+
+export async function mutateContentProjectsForItemIdsInDb(
+  itemIds: string[],
+  scope: { ownerUserId?: string } | undefined,
+  mutate: (project: ContentProject) => ContentProject | undefined,
+): Promise<number> {
+  const ids = Array.from(new Set(itemIds.map((id) => id.trim()).filter(Boolean)));
+  if (!ids.length) return 0;
+  const projectIds = await findContentProjectIdsForItemIdsFromDb(ids);
+  if (!projectIds.length) return 0;
+  const ownerUserId = scope?.ownerUserId;
+  let changed = 0;
+
+  await ensureDatabaseReady();
+  if (getDatabaseBackend() === "postgres") {
+    const client = await getPostgresPool().connect();
+    try {
+      await client.query("BEGIN");
+      const rows = await client.query<{ id: string; data_json: unknown }>(
+        `SELECT id, data_json FROM content_projects
+         WHERE id = ANY($1::text[])${ownerUserId ? " AND (data_json->>'ownerUserId' = $2 OR data_json->>'ownerUserId' IS NULL)" : ""}
+         ORDER BY id FOR UPDATE`,
+        ownerUserId ? [projectIds, ownerUserId] : [projectIds],
+      );
+      for (const row of rows.rows) {
+        const next = mutate(fromJson<ContentProject>(row.data_json));
+        if (!next) continue;
+        await client.query(
+          "UPDATE content_projects SET query=$1, updated_at=$2, last_crawled_at=$3, data_json=$4::jsonb WHERE id=$5",
+          [next.query, next.updatedAt, next.lastCrawledAt || null, toJson(next), row.id],
+        );
+        changed += 1;
+      }
+      await client.query("COMMIT");
+    } catch (error) {
+      await client.query("ROLLBACK");
+      throw error;
+    } finally {
+      client.release();
+    }
+    return changed;
+  }
+
+  const db = getSqliteDatabase();
+  runSqliteTransaction(db, () => {
+    const placeholders = projectIds.map(() => "?").join(",");
+    const rows = db.prepare(
+      `SELECT id, data_json FROM content_projects WHERE id IN (${placeholders})${ownerUserId ? " AND (json_extract(data_json,'$.ownerUserId') = ? OR json_extract(data_json,'$.ownerUserId') IS NULL)" : ""} ORDER BY id`,
+    ).all(...(ownerUserId ? [...projectIds, ownerUserId] : projectIds)) as Array<{ id: string; data_json: unknown }>;
+    for (const row of rows) {
+      const next = mutate(fromJson<ContentProject>(row.data_json));
+      if (!next) continue;
+      db.prepare("UPDATE content_projects SET query=?, updated_at=?, last_crawled_at=?, data_json=? WHERE id=?")
+        .run(next.query, next.updatedAt, next.lastCrawledAt || null, toJson(next), row.id);
+      changed += 1;
+    }
+  });
+  return changed;
+}
+
+export async function mutateContentProjectByNormalizedQueryInDb(
+  normalizedQuery: string,
+  create: () => ContentProject,
+  mutate: (project: ContentProject) => ContentProject,
+): Promise<ContentProject> {
+  await ensureDatabaseReady();
+  if (getDatabaseBackend() === "postgres") {
+    const client = await getPostgresPool().connect();
+    try {
+      await client.query("BEGIN");
+      let next = await mutateContentProjectByNormalizedQueryPostgres(client, normalizedQuery, mutate);
+      if (!next) {
+        next = mutate(create());
+        const inserted = await client.query(
+          `INSERT INTO content_projects (id, normalized_query, query, created_at, updated_at, last_crawled_at, data_json)
+           VALUES ($1, $2, $3, $4, $5, $6, $7::jsonb)
+           ON CONFLICT DO NOTHING
+           RETURNING id`,
+          [next.id, next.normalizedQuery, next.query, next.createdAt, next.updatedAt, next.lastCrawledAt || null, toJson(next)],
+        );
+        if (!inserted.rowCount) {
+          next = await mutateContentProjectByNormalizedQueryPostgres(client, normalizedQuery, mutate);
+          if (!next) throw new Error("Content project could not be created.");
+        }
+      }
+      await client.query("COMMIT");
+      return next;
+    } catch (error) {
+      await client.query("ROLLBACK");
+      throw error;
+    } finally {
+      client.release();
+    }
+  }
+
+  const db = getSqliteDatabase();
+  let next: ContentProject | undefined;
+  runSqliteTransaction(db, () => {
+    const row = db.prepare("SELECT id, data_json FROM content_projects WHERE normalized_query = ?").get(normalizedQuery) as { id: string; data_json: unknown } | undefined;
+    if (row) {
+      next = mutate(fromJson<ContentProject>(row.data_json));
+      updateContentProjectByRowIdSqlite(db, row.id, next);
+      return;
+    }
+    next = mutate(create());
+    const inserted = db.prepare(
+      `INSERT INTO content_projects (id, normalized_query, query, created_at, updated_at, last_crawled_at, data_json)
+       VALUES (?, ?, ?, ?, ?, ?, ?)
+       ON CONFLICT DO NOTHING`,
+    ).run(next.id, next.normalizedQuery, next.query, next.createdAt, next.updatedAt, next.lastCrawledAt || null, toJson(next)) as { changes?: number };
+    if (Number(inserted.changes || 0) > 0) return;
+    const winner = db.prepare("SELECT id, data_json FROM content_projects WHERE normalized_query = ?").get(normalizedQuery) as { id: string; data_json: unknown } | undefined;
+    if (!winner) throw new Error("Content project could not be created.");
+    next = mutate(fromJson<ContentProject>(winner.data_json));
+    updateContentProjectByRowIdSqlite(db, winner.id, next);
+  });
+  if (!next) throw new Error("Content project could not be mutated.");
+  return next;
+}
+
+async function mutateContentProjectByNormalizedQueryPostgres(
+  client: PoolClient,
+  normalizedQuery: string,
+  mutate: (project: ContentProject) => ContentProject,
+): Promise<ContentProject | undefined> {
+  const result = await client.query<{ id: string; data_json: unknown }>(
+    "SELECT id, data_json FROM content_projects WHERE normalized_query = $1 FOR UPDATE",
+    [normalizedQuery],
+  );
+  const row = result.rows[0];
+  if (!row) return undefined;
+  const next = mutate(fromJson<ContentProject>(row.data_json));
+  await client.query(
+    "UPDATE content_projects SET query=$1, updated_at=$2, last_crawled_at=$3, data_json=$4::jsonb WHERE id=$5",
+    [next.query, next.updatedAt, next.lastCrawledAt || null, toJson(next), row.id],
+  );
+  return next;
+}
+
+function updateContentProjectByRowIdSqlite(db: SqliteDatabase, rowId: string, project: ContentProject) {
+  db.prepare("UPDATE content_projects SET query=?, updated_at=?, last_crawled_at=?, data_json=? WHERE id=?")
+    .run(project.query, project.updatedAt, project.lastCrawledAt || null, toJson(project), rowId);
+}
+
 export async function listContentPoolCollectionsFromDb(): Promise<ContentPoolCollection[]> {
   await ensureDatabaseReady();
   const rows = getDatabaseBackend() === "postgres"
@@ -1214,6 +1365,226 @@ export async function listContentPoolCollectionItemsFromDb(): Promise<ContentPoo
        ORDER BY i.created_at ASC, i.item_id ASC`,
     ).all() as Array<{ collection_id: string; owner_user_id: string; item_id: string }>;
   return rows.map((row) => ({ collectionId: row.collection_id, ownerUserId: row.owner_user_id, itemId: row.item_id }));
+}
+
+export type ContentPoolItemOwnerRef = {
+  id: string;
+  ownerUserId?: string;
+};
+
+export async function getContentPoolItemOwnersByIdsFromDb(ids: string[]): Promise<ContentPoolItemOwnerRef[]> {
+  await ensureDatabaseReady();
+  const wanted = Array.from(new Set(ids.map((id) => id.trim()).filter(Boolean)));
+  if (!wanted.length) return [];
+
+  const projectIds = await findContentProjectIdsForItemIdsFromDb(wanted);
+  if (!projectIds.length) return [];
+
+  const projects = await readContentProjectsByIdsFromDb(projectIds);
+  const wantedSet = new Set(wanted);
+  const seen = new Set<string>();
+  const owners: ContentPoolItemOwnerRef[] = [];
+  for (const project of [...projects].sort((left, right) => right.updatedAt.localeCompare(left.updatedAt))) {
+    for (const item of project.items) {
+      if (!item?.id || !wantedSet.has(item.id) || seen.has(item.id)) continue;
+      seen.add(item.id);
+      owners.push({ id: item.id, ownerUserId: item.ownerUserId });
+    }
+  }
+  return owners;
+}
+
+export async function listContentPoolCollectionItemsForItemIdsFromDb(itemIds: string[]): Promise<ContentPoolCollectionMembership[]> {
+  await ensureDatabaseReady();
+  const ids = Array.from(new Set(itemIds.map((id) => id.trim()).filter(Boolean)));
+  if (!ids.length) return [];
+
+  if (getDatabaseBackend() === "postgres") {
+    const rows = (await getPostgresPool().query<{ collection_id: string; owner_user_id: string; item_id: string }>(
+      `SELECT i.collection_id, c.owner_user_id, i.item_id
+       FROM content_pool_collection_items i
+       INNER JOIN content_pool_collections c ON c.id = i.collection_id
+       WHERE i.item_id = ANY($1::text[])
+       ORDER BY i.created_at ASC, i.item_id ASC`,
+      [ids],
+    )).rows;
+    return rows.map((row) => ({ collectionId: row.collection_id, ownerUserId: row.owner_user_id, itemId: row.item_id }));
+  }
+
+  const db = getSqliteDatabase();
+  const memberships: ContentPoolCollectionMembership[] = [];
+  for (const chunk of chunkValues(ids, 500)) {
+    const placeholders = chunk.map(() => "?").join(",");
+    const rows = db.prepare(
+      `SELECT i.collection_id, c.owner_user_id, i.item_id
+       FROM content_pool_collection_items i
+       INNER JOIN content_pool_collections c ON c.id = i.collection_id
+       WHERE i.item_id IN (${placeholders})
+       ORDER BY i.created_at ASC, i.item_id ASC`,
+    ).all(...chunk) as Array<{ collection_id: string; owner_user_id: string; item_id: string }>;
+    memberships.push(...rows.map((row) => ({ collectionId: row.collection_id, ownerUserId: row.owner_user_id, itemId: row.item_id })));
+  }
+  return memberships;
+}
+
+export async function countContentPoolCollectionItemsByCollectionFromDb(): Promise<Array<{ collectionId: string; count: number }>> {
+  await ensureDatabaseReady();
+  const rows = getDatabaseBackend() === "postgres"
+    ? (await getPostgresPool().query<{ collection_id: string; count: number | string }>(
+      "SELECT collection_id, count(*)::int AS count FROM content_pool_collection_items GROUP BY collection_id",
+    )).rows
+    : getSqliteDatabase().prepare(
+      "SELECT collection_id, COUNT(*) AS count FROM content_pool_collection_items GROUP BY collection_id",
+    ).all() as Array<{ collection_id: string; count: number | string }>;
+  return rows.map((row) => ({ collectionId: row.collection_id, count: Number(row.count || 0) }));
+}
+
+async function findContentProjectIdsForItemIdsFromDb(itemIds: string[]): Promise<string[]> {
+  if (getDatabaseBackend() === "postgres") {
+    const concurrency = Math.max(1, Math.min(20, Math.trunc(Number(process.env.DATABASE_POOL_MAX || 10)) || 10));
+    const groups = await mapWithConcurrency(itemIds, concurrency, async (itemId) => {
+      const result = await getPostgresPool().query<{ id: string }>(
+        "SELECT id FROM content_projects WHERE data_json @> $1::jsonb",
+        [JSON.stringify({ items: [{ id: itemId }] })],
+      );
+      return result.rows.map((row) => row.id);
+    });
+    return Array.from(new Set(groups.flat()));
+  }
+
+  const db = getSqliteDatabase();
+  const projectIds = new Set<string>();
+  for (const itemId of itemIds) {
+    const rows = db.prepare(
+      `SELECT id FROM content_projects
+       WHERE EXISTS (SELECT 1 FROM json_each(content_projects.data_json, '$.items') WHERE json_extract(value, '$.id') = ?)`,
+    ).all(itemId) as Array<{ id: string }>;
+    for (const row of rows) projectIds.add(row.id);
+  }
+  return [...projectIds];
+}
+
+async function readContentProjectsByIdsFromDb(ids: string[]): Promise<ContentProject[]> {
+  if (!ids.length) return [];
+  const rows = getDatabaseBackend() === "postgres"
+    ? (await getPostgresPool().query<JsonRow>("SELECT data_json FROM content_projects WHERE id = ANY($1::text[])", [ids])).rows
+    : getSqliteDatabase().prepare(
+      `SELECT data_json FROM content_projects WHERE id IN (${ids.map(() => "?").join(",")})`,
+    ).all(...ids) as JsonRow[];
+  return rows.map((row) => fromJson<ContentProject>(row.data_json));
+}
+
+async function mapWithConcurrency<T, R>(items: T[], limit: number, worker: (item: T) => Promise<R>): Promise<R[]> {
+  const results = new Array<R>(items.length);
+  let nextIndex = 0;
+  let failure: unknown;
+  const runners = Array.from({ length: Math.min(limit, items.length) }, async () => {
+    while (true) {
+      const index = nextIndex;
+      nextIndex += 1;
+      if (index >= items.length) return;
+      try {
+        results[index] = await worker(items[index]);
+      } catch (error) {
+        failure = error;
+        return;
+      }
+    }
+  });
+  await Promise.all(runners);
+  if (failure) throw failure;
+  return results;
+}
+
+function chunkValues<T>(values: T[], size: number): T[][] {
+  const chunks: T[][] = [];
+  for (let index = 0; index < values.length; index += size) chunks.push(values.slice(index, index + size));
+  return chunks;
+}
+
+export type ContentPoolDeskLightRow = {
+  projectId: string;
+  projectName: string;
+  projectUpdatedAt: string;
+  projectLastCrawledAt?: string;
+  ownerUserId?: string;
+  normalizedQuery: string;
+  createdAt: string;
+  item: unknown;
+};
+
+export async function readContentPoolDeskRowsFromDb(ownerUserId?: string): Promise<ContentPoolDeskLightRow[]> {
+  await ensureDatabaseReady();
+  if (getDatabaseBackend() === "postgres") {
+    const sql = `WITH projects AS MATERIALIZED (
+        SELECT p.id, p.query, p.updated_at, p.last_crawled_at, p.normalized_query, p.created_at,
+               p.data_json->>'ownerUserId' AS owner_user_id, p.data_json
+        FROM content_projects p
+        ${ownerUserId ? "WHERE p.data_json->>'ownerUserId' = $1" : ""}
+      )
+      SELECT p.id AS project_id, p.query AS project_name, p.updated_at AS project_updated_at,
+             p.last_crawled_at AS project_last_crawled_at, p.owner_user_id,
+             p.normalized_query, p.created_at, item - 'raw' AS item
+      FROM projects p
+      CROSS JOIN LATERAL jsonb_array_elements(COALESCE(p.data_json->'items','[]'::jsonb)) item`;
+    const rows = (await getPostgresPool().query(sql, ownerUserId ? [ownerUserId] : [])).rows as Array<{
+      project_id: string;
+      project_name: string;
+      project_updated_at: unknown;
+      project_last_crawled_at: unknown;
+      owner_user_id?: string | null;
+      normalized_query: string;
+      created_at: unknown;
+      item: unknown;
+    }>;
+    return rows.map((row) => ({
+      projectId: row.project_id,
+      projectName: row.project_name,
+      projectUpdatedAt: toIsoTimestamp(row.project_updated_at),
+      projectLastCrawledAt: row.project_last_crawled_at ? toIsoTimestamp(row.project_last_crawled_at) : undefined,
+      ownerUserId: row.owner_user_id || undefined,
+      normalizedQuery: row.normalized_query,
+      createdAt: toIsoTimestamp(row.created_at),
+      item: fromJson<unknown>(row.item),
+    }));
+  }
+
+  const db = getSqliteDatabase();
+  const sql = `WITH projects AS (
+      SELECT p.id, p.query, p.updated_at, p.last_crawled_at, p.normalized_query, p.created_at,
+             json_extract(p.data_json,'$.ownerUserId') AS owner_user_id, p.data_json
+      FROM content_projects p
+      ${ownerUserId ? "WHERE json_extract(p.data_json,'$.ownerUserId') = ?" : ""}
+    )
+    SELECT p.id AS project_id, p.query AS project_name, p.updated_at AS project_updated_at,
+           p.last_crawled_at AS project_last_crawled_at, p.owner_user_id,
+           p.normalized_query, p.created_at, json_remove(item.value,'$.raw') AS item
+    FROM projects p, json_each(p.data_json, '$.items') item`;
+  const rows = db.prepare(sql).all(...(ownerUserId ? [ownerUserId] : [])) as Array<{
+    project_id: string;
+    project_name: string;
+    project_updated_at: string;
+    project_last_crawled_at?: string | null;
+    owner_user_id?: string | null;
+    normalized_query: string;
+    created_at: string;
+    item: unknown;
+  }>;
+  return rows.map((row) => ({
+    projectId: row.project_id,
+    projectName: row.project_name,
+    projectUpdatedAt: row.project_updated_at,
+    projectLastCrawledAt: row.project_last_crawled_at || undefined,
+    ownerUserId: row.owner_user_id || undefined,
+    normalizedQuery: row.normalized_query,
+    createdAt: row.created_at,
+    item: fromJson<unknown>(row.item),
+  }));
+}
+
+function toIsoTimestamp(value: unknown) {
+  if (value instanceof Date) return value.toISOString();
+  return String(value || "");
 }
 
 export async function applyContentPoolCollectionMembershipChangesFromDb(input: {

@@ -454,3 +454,11 @@ The baseline verifies:
 - Runtime identity/secrecy, manifest-derived activation identity, candidate-only local startup, loopback/LAN bindings, and parity command contracts.
 - `npm run lint`, `npx --no-install tsc --noEmit`, and `npm run build`.
 - Isolated production HTTP smoke and SQLite store validation.
+
+### Moved from recent verification 2026-11-03
+
+- 2026-10-30 ESLint scope: excluded `data/**` operator artifacts only. Lint passes
+  with 0 errors/16 source warnings; ESLint API assertions confirm source/config
+  and maintained scripts remain checked with the require-import rule at error.
+  Full baseline passes, including types/build/config sync/HTTP smoke on 45678 and
+  SQLite checks. LAN unchanged. Local log: `test-artifacts/lint-scope-baseline-20261030.log`.

@@ -27,10 +27,12 @@ const types = read("src/lib/types.ts");
 const simpleRoute = read("src/app/api/simple/runs/route.ts");
 const simpleRuns = read("src/lib/simple-runs.ts");
 
-assertContains(contentPage, /fetch\(`?\/api\/content-pool/, "/content should read the owner-scoped content pool API.");
+assertContains(contentPage, /fetch\(`\/api\/content-pool\/desk\?/, "/content should read the paginated owner-scoped content-pool desk API.");
+assertContains(contentPage, /fetch\(`\/api\/content-pool\/desk\/summary\?/, "/content should load sidebar counts and stats from the desk summary API.");
 assertContains(contentPage, /ContentPoolCustomTagPicker/, "/content should reuse the shared custom-tag picker.");
 assertContains(contentPage, /poolContentTagFilters[\s\S]*poolCustomTagFilters/, "/content should keep content-category and custom-tag filters distinct.");
-assertContains(contentPage, /matchesAllContentPoolCustomTags/, "/content custom-tag filtering should use the shared AND matcher.");
+assertContains(contentPage, /params\.set\("customTag", tag\)/, "/content should send custom-tag filters to the desk API.");
+assertContains(read("src/lib/content-pool.ts"), /matchesAllContentPoolCustomTags/, "Server-side content-pool custom-tag filtering should use the shared AND matcher.");
 assertContains(contentPage, /fetch\("\/api\/content-pool\/tags"/, "/content should update selected custom tags through the authenticated tag API.");
 assertContains(contentPage, /customTags:\s*sourceEdit\.customTags/, "single-item edits should persist custom tags without changing content categories.");
 assertContains(contentPage, /加入库\/子集[\s\S]*加标签[\s\S]*移除标签/, "/content should expose library membership and batch tag add/remove controls.");
@@ -42,7 +44,7 @@ assertContains(contentPage, /ContentPoolCollectionPicker/, "/content should add 
 assertContains(contentPage, /ContentPoolTagManagerDialog/, "/content should expose the tag manager dialog.");
 assertContains(contentPage, /fetch\("\/api\/content-pool\/collections",/, "/content should create content libraries through the authenticated collections API.");
 assertContains(contentPage, /fetch\("\/api\/content-pool\/collections\/batch",/, "/content should update item membership through the authenticated batch API.");
-assertContains(contentPage, /contentPoolCollectionDescendantIds/, "/content should support include-descendants library views.");
+assertContains(contentPage, /params\.set\("descendants", includeDescendantsParam\)/, "/content should request include-descendants library views from the desk API.");
 assertContains(contentPage, /采集到[\s\S]*ingestCollectionId/, "/content should choose an ingest target library.");
 assertContains(contentPage, /collectionId:\s*ingestCollectionId/, "crawl, link import and manual creation should forward the selected library target.");
 assertContains(contentPage, /fetch\("\/api\/crawl\/jobs"/, "/content should keep keyword crawl entry.");

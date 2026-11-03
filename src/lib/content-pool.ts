@@ -5,13 +5,17 @@ import {
   listContentPoolCollectionItemsFromDb,
   listContentPoolCollectionsFromDb,
   listContentPoolTagsFromDb,
-  readContentProjectsFromDb,
-  writeContentProjectsToDb,
+  mutateContentProjectByNormalizedQueryInDb,
+  mutateContentProjectsForItemIdsInDb,
   mutateSourceProjectsInDb,
+  readContentPoolDeskRowsFromDb,
+  readContentProjectsForItemIdsFromDb,
+  readContentProjectsFromDb,
+  type ContentPoolDeskLightRow,
 } from "./database";
 import { buildMediaCacheStatus } from "./media-cache-status";
-import { applyContentPoolCustomTagChanges, ContentPoolTagValidationError, contentPoolCustomTagKey, contentPoolTagColor, normalizeContentPoolCustomTags } from "./content-pool-tags";
-import { contentPoolTagColorMap, requireContentPoolCollectionWriteTarget } from "./content-pool-collections";
+import { applyContentPoolCustomTagChanges, ContentPoolTagValidationError, contentPoolCustomTagKey, contentPoolTagColor, matchesAllContentPoolCustomTags, normalizeContentPoolCustomTags } from "./content-pool-tags";
+import { ContentPoolCollectionValidationError, contentPoolTagColorMap, requireContentPoolCollectionWriteTarget } from "./content-pool-collections";
 import { updateSourceContentTags, updateSourceVisualTags } from "./source-tagging";
 import { enrichSourceTimestamps } from "./source-timestamps";
 import { extractDouyinCarouselImageUrls } from "./douyin-media";
@@ -25,14 +29,20 @@ import {
   scopeWorkspaceOwner,
   type WorkspaceAccessActor,
 } from "./workspace-ownership";
-import type { ContentPoolCollection, ContentPoolCollectionMembership, ContentPoolSnapshot, ContentPoolTagBatchResult, ContentPoolTagSuggestion, ContentPoolTag, ContentProject, GeneratedPost, NormalizedSourceItem, Platform, SourceUsageStatus, ViralAnalysis } from "./types";
+import type { ContentPoolCollection, ContentPoolCollectionMembership, ContentPoolDeskFilter, ContentPoolDeskItem, ContentPoolDeskItemRef, ContentPoolDeskPage, ContentPoolDeskSummary, ContentPoolProjectSummary, ContentPoolSnapshot, ContentPoolTagBatchResult, ContentPoolTagSuggestion, ContentPoolTag, ContentProject, GeneratedPost, NormalizedSourceItem, Platform, SourceUsageStatus, ViralAnalysis } from "./types";
 import type { ContentPoolSelectionFilter } from "./types";
 import {
+  CONTENT_POOL_DESK_IDS_MAX_LIMIT,
+  CONTENT_POOL_DESK_MAX_LIMIT,
+  CONTENT_POOL_DESK_PAGE_LIMIT,
   contentPoolCollectionDescendantIds,
   contentPoolSelectionCollections,
   contentPoolSelectionProjects,
+  decodeContentPoolDeskCursor,
+  encodeContentPoolDeskCursor,
   filterProjectsByCollection,
   freezeContentPoolSelectionItemsByIds,
+  normalizeContentPoolDeskFilter,
   normalizeContentPoolSelectionFilter,
   paginateContentPoolSelection,
   selectContentPoolItems,
@@ -78,10 +88,431 @@ export async function getContentPoolSnapshot(query?: string, account?: Workspace
   return { projects, activeProject, collections: collectionViews, memberships: visibleMemberships, tags };
 }
 
+export function stripContentPoolItemsRaw(items: NormalizedSourceItem[]) {
+  return items.map(contentPoolItemWithoutRaw);
+}
+
+export function contentPoolProjectSummary(project: ContentProject): ContentPoolProjectSummary {
+  const { items, ...summary } = project;
+  void items;
+  return summary;
+}
+
+export function stripContentPoolSnapshotRaw(snapshot: ContentPoolSnapshot) {
+  const stripProject = (project: ContentProject) => ({
+    ...project,
+    items: project.items.map(contentPoolItemWithoutRaw),
+  });
+  return {
+    ...snapshot,
+    projects: snapshot.projects.map(stripProject),
+    activeProject: snapshot.activeProject ? stripProject(snapshot.activeProject) : undefined,
+  };
+}
+
+type ContentPoolDeskEntry = {
+  row: ContentPoolDeskLightRow;
+  item: NormalizedSourceItem;
+};
+
+type ContentPoolMembershipIndex = {
+  owned: Map<string, Set<string>>;
+  bare: Map<string, Set<string>>;
+};
+
+const emptyContentPoolCollectionIds = new Set<string>();
+
+export async function getContentPoolDesk(
+  account: WorkspaceAccessActor,
+  input: Partial<ContentPoolDeskFilter> = {},
+  cursor?: string,
+  requestedLimit?: number,
+): Promise<ContentPoolDeskPage> {
+  const filter = normalizeContentPoolDeskFilter(input);
+  const context = await loadContentPoolDeskContext(account, filter);
+  const filtered = filterContentPoolDeskEntries(context.scoped, filter);
+  const sorted = sortContentPoolDeskEntries(filtered, filter.sort);
+  const limit = clampDeskLimit(requestedLimit, CONTENT_POOL_DESK_PAGE_LIMIT, CONTENT_POOL_DESK_MAX_LIMIT);
+  const decodedCursor = cursor ? decodeContentPoolDeskCursor(cursor) : undefined;
+  const validCursor = decodedCursor && decodedCursor.sort === filter.sort ? decodedCursor : undefined;
+  const start = validCursor ? findContentPoolDeskStart(sorted, validCursor) : 0;
+  const pageEntries = sorted.slice(start, start + limit);
+  const items = pageEntries.map(normalizeContentPoolDeskEntry)
+    .filter((item): item is ContentPoolDeskItem => Boolean(item));
+  const last = pageEntries.at(-1);
+  const hasMore = start + pageEntries.length < sorted.length;
+  return {
+    items,
+    memberships: membershipsForContentPoolDeskItems(context.memberships, context.visibleCollectionIds, items),
+    total: sorted.length,
+    hasMore,
+    nextCursor: hasMore && last
+      ? encodeContentPoolDeskCursor({
+        sort: filter.sort,
+        sortValue: contentPoolDeskSortValue(last.item, filter.sort),
+        projectId: last.row.projectId,
+        itemId: last.item.id,
+      })
+      : undefined,
+  };
+}
+
+export async function getContentPoolDeskSummary(
+  account: WorkspaceAccessActor,
+  input: { library?: string; includeDescendants?: boolean; query?: string } = {},
+): Promise<ContentPoolDeskSummary> {
+  const filter = normalizeContentPoolDeskFilter(input);
+  const [context, tagRows] = await Promise.all([
+    loadContentPoolDeskContext(account, filter),
+    listContentPoolTagsFromDb(),
+  ]);
+  const projects = buildContentPoolDeskProjectSummaries(context.entries);
+  const matchedProject = filter.query
+    ? projects.find((project) => project.normalizedQuery === normalizeProjectKey(filter.query, project.ownerUserId)
+      || normalizeQuery(project.query) === normalizeQuery(filter.query))
+    : undefined;
+  const activeProject = matchedProject || projects[0];
+  const scoped = context.scoped;
+  const byCollection = countContentPoolDeskMemberships(context.entries, context.memberships, context.visibleCollectionIds);
+  const collections = [...context.visibleCollections]
+    .map((collection) => ({
+      ...collection,
+      itemCount: byCollection[collection.id] || 0,
+      canEdit: canAccessWorkspaceOwner(account, collection.ownerUserId),
+    }))
+    .sort((left, right) => (left.relativePath || left.name).localeCompare(right.relativePath || right.name, "zh-CN")
+      || left.id.localeCompare(right.id));
+  return {
+    projects,
+    activeProject,
+    collections,
+    libraryCounts: {
+      all: context.entries.length,
+      default: context.entries.filter((entry) => contentPoolItemCollectionIds(context.membershipIndex, entry.item).size === 0).length,
+      byCollection,
+    },
+    libraryStats: {
+      total: scoped.length,
+      analyzed: scoped.filter((entry) => Boolean(entry.item.analysis)).length,
+      rewritten: scoped.filter((entry) => ["rewritten", "approved", "published"].includes(entry.item.poolStatus || "new")).length,
+    },
+    tags: buildContentPoolDeskTagSuggestions(context.entries, tagRows, isWorkspaceAdmin(account) ? undefined : account.id),
+  };
+}
+
+export async function getContentPoolDeskIds(
+  account: WorkspaceAccessActor,
+  input: Partial<ContentPoolDeskFilter> = {},
+  requestedLimit = CONTENT_POOL_DESK_IDS_MAX_LIMIT,
+): Promise<ContentPoolDeskItemRef[]> {
+  const filter = normalizeContentPoolDeskFilter(input);
+  const context = await loadContentPoolDeskContext(account, filter);
+  const filtered = filterContentPoolDeskEntries(context.scoped, filter);
+  const sorted = sortContentPoolDeskEntries(filtered, filter.sort);
+  const limit = clampDeskLimit(requestedLimit, CONTENT_POOL_DESK_IDS_MAX_LIMIT, CONTENT_POOL_DESK_IDS_MAX_LIMIT);
+  return sorted.slice(0, limit).map((entry) => ({ id: entry.item.id, ownerUserId: entry.item.ownerUserId }));
+}
+
+async function loadContentPoolDeskContext(account: WorkspaceAccessActor, filter: ContentPoolDeskFilter) {
+  const [rows, collections, memberships] = await Promise.all([
+    readContentPoolDeskRowsFromDb(isWorkspaceAdmin(account) ? undefined : account.id),
+    listContentPoolCollectionsFromDb(),
+    listContentPoolCollectionItemsFromDb(),
+  ]);
+  const visibleCollections = collections.filter((collection) => canAccessWorkspaceOwner(account, collection.ownerUserId));
+  const visibleCollectionIds = new Set(visibleCollections.map((collection) => collection.id));
+  const collectionIds = resolveContentPoolDeskCollectionIds(account, filter, collections);
+  const membershipIndex = buildContentPoolMembershipIndex(memberships, visibleCollectionIds);
+  const entries = dedupeContentPoolDeskRows(rows);
+  const scoped = filterContentPoolDeskEntriesByLibrary(entries, membershipIndex, filter, collectionIds);
+  return { rows, collections, memberships, visibleCollections, visibleCollectionIds, collectionIds, membershipIndex, entries, scoped };
+}
+
+function resolveContentPoolDeskCollectionIds(account: WorkspaceAccessActor, filter: ContentPoolDeskFilter, collections: ContentPoolCollection[]) {
+  if (filter.library === "all" || filter.library === "default") return [];
+  const root = collections.find((collection) => collection.id === filter.library);
+  if (!root || !canAccessWorkspaceOwner(account, root.ownerUserId)) {
+    throw new ContentPoolCollectionValidationError("内容库不存在或无权访问。");
+  }
+  const ids = [root.id];
+  if (filter.includeDescendants) {
+    for (const id of contentPoolCollectionDescendantIds(collections, root.id)) {
+      const collection = collections.find((candidate) => candidate.id === id);
+      if (collection && canAccessWorkspaceOwner(account, collection.ownerUserId)) ids.push(id);
+    }
+  }
+  return ids;
+}
+
+function dedupeContentPoolDeskRows(rows: ContentPoolDeskLightRow[]): ContentPoolDeskEntry[] {
+  const sorted = [...rows].sort((left, right) => right.projectUpdatedAt.localeCompare(left.projectUpdatedAt)
+    || left.projectId.localeCompare(right.projectId));
+  const seen = new Set<string>();
+  const entries: ContentPoolDeskEntry[] = [];
+  for (const row of sorted) {
+    const item = row.item as NormalizedSourceItem | undefined;
+    if (!item?.id || seen.has(item.id)) continue;
+    seen.add(item.id);
+    entries.push({ row, item });
+  }
+  return entries;
+}
+
+function buildContentPoolMembershipIndex(
+  memberships: ContentPoolCollectionMembership[],
+  visibleCollectionIds: Set<string>,
+): ContentPoolMembershipIndex {
+  const owned = new Map<string, Set<string>>();
+  const bare = new Map<string, Set<string>>();
+  for (const membership of memberships) {
+    if (!visibleCollectionIds.has(membership.collectionId)) continue;
+    addContentPoolCollectionId(owned, `${membership.ownerUserId}\u0000${membership.itemId}`, membership.collectionId);
+    addContentPoolCollectionId(bare, membership.itemId, membership.collectionId);
+  }
+  return { owned, bare };
+}
+
+function addContentPoolCollectionId(index: Map<string, Set<string>>, key: string, collectionId: string) {
+  const current = index.get(key);
+  if (current) current.add(collectionId);
+  else index.set(key, new Set([collectionId]));
+}
+
+function contentPoolItemCollectionIds(index: ContentPoolMembershipIndex, item: NormalizedSourceItem) {
+  return (item.ownerUserId
+    ? index.owned.get(`${item.ownerUserId}\u0000${item.id}`)
+    : index.bare.get(item.id)) || emptyContentPoolCollectionIds;
+}
+
+function filterContentPoolDeskEntriesByLibrary(
+  entries: ContentPoolDeskEntry[],
+  index: ContentPoolMembershipIndex,
+  filter: ContentPoolDeskFilter,
+  collectionIds: string[],
+) {
+  if (filter.library === "all") return entries;
+  if (filter.library === "default") {
+    return entries.filter((entry) => contentPoolItemCollectionIds(index, entry.item).size === 0);
+  }
+  const selected = new Set(collectionIds);
+  return entries.filter((entry) => [...contentPoolItemCollectionIds(index, entry.item)].some((id) => selected.has(id)));
+}
+
+function filterContentPoolDeskEntries(entries: ContentPoolDeskEntry[], filter: ContentPoolDeskFilter) {
+  const query = filter.query.normalize("NFKC").trim().toLocaleLowerCase();
+  return entries.filter((entry) => {
+    const item = entry.item;
+    if (filter.projectId && entry.row.projectId !== filter.projectId) return false;
+    if (filter.statuses.length && !filter.statuses.includes(item.poolStatus || "new")) return false;
+    if (filter.platforms.length && !filter.platforms.includes(item.platform)) return false;
+    const mediaType = normalizeContentPoolDeskMediaType(item.mediaType);
+    if (filter.mediaTypes.length && !filter.mediaTypes.includes(mediaType)) return false;
+    const contentTags = item.contentTagging?.tags || [];
+    if (filter.contentTags.length && !filter.contentTags.every((tag) => contentTags.includes(tag))) return false;
+    if (!matchesAllContentPoolCustomTags(item.customTags, filter.customTags)) return false;
+    if (query) {
+      const customTags = normalizeContentPoolCustomTags(item.customTags);
+      const matched = [item.title, item.contentText, item.authorName, item.sourceId, ...customTags]
+        .some((value) => String(value || "").normalize("NFKC").toLocaleLowerCase().includes(query));
+      if (!matched) return false;
+    }
+    return true;
+  });
+}
+
+function sortContentPoolDeskEntries(entries: ContentPoolDeskEntry[], sort: ContentPoolDeskFilter["sort"]) {
+  return entries
+    .map((entry, index) => ({ entry, index }))
+    .sort((left, right) => compareContentPoolDeskEntries(left.entry, right.entry, sort) || left.index - right.index)
+    .map(({ entry }) => entry);
+}
+
+function compareContentPoolDeskEntries(left: ContentPoolDeskEntry, right: ContentPoolDeskEntry, sort: ContentPoolDeskFilter["sort"]) {
+  const primary = compareContentPoolDeskValues(
+    contentPoolDeskSortValue(left.item, sort),
+    contentPoolDeskSortValue(right.item, sort),
+  );
+  if (primary) return sort.endsWith("_asc") ? primary : -primary;
+  const hot = contentPoolDeskHotScore(right.item) - contentPoolDeskHotScore(left.item);
+  if (hot) return hot;
+  return left.row.projectId.localeCompare(right.row.projectId) || left.item.id.localeCompare(right.item.id);
+}
+
+function compareContentPoolDeskValues(left: string | number, right: string | number) {
+  if (typeof left === "number" && typeof right === "number") return left - right;
+  return String(left).localeCompare(String(right));
+}
+
+function contentPoolDeskSortValue(item: NormalizedSourceItem, sort: ContentPoolDeskFilter["sort"]): string | number {
+  switch (sort) {
+    case "published_desc":
+      return item.publishedAt || "";
+    case "published_asc":
+      return item.publishedAt || "9999-12-31T23:59:59.999Z";
+    case "crawled_desc":
+      return contentPoolDeskCrawlTime(item) || "";
+    case "crawled_asc":
+      return contentPoolDeskCrawlTime(item) || "9999-12-31T23:59:59.999Z";
+    case "engagement_desc":
+      return calculateContentPoolDeskEngagementRate(item);
+    case "hot_desc":
+    default:
+      return contentPoolDeskHotScore(item);
+  }
+}
+
+function contentPoolDeskCrawlTime(item: NormalizedSourceItem) {
+  return item.lastSeenAt || item.crawledAt || item.firstSeenAt;
+}
+
+function contentPoolDeskHotScore(item: NormalizedSourceItem) {
+  return typeof item.hotScore === "number" && Number.isFinite(item.hotScore) ? item.hotScore : calculateHotScore(item);
+}
+
+function calculateContentPoolDeskEngagementRate(item: NormalizedSourceItem) {
+  const reach = item.metrics.plays || item.metrics.views || item.metrics.reads || 0;
+  if (!reach) return 0;
+  return ((item.metrics.likes || 0) + (item.metrics.collects || 0) + (item.metrics.comments || 0) + (item.metrics.shares || 0)) / reach;
+}
+
+function normalizeContentPoolDeskMediaType(value?: NormalizedSourceItem["mediaType"]): "video" | "image" | "text" | "mixed" | "unknown" {
+  return value === "video" || value === "image" || value === "text" || value === "mixed" ? value : "unknown";
+}
+
+function findContentPoolDeskStart(entries: ContentPoolDeskEntry[], cursor: { sort: ContentPoolDeskFilter["sort"]; sortValue: string | number; projectId: string; itemId: string }) {
+  const index = entries.findIndex((entry) => entry.row.projectId === cursor.projectId && entry.item.id === cursor.itemId);
+  if (index >= 0) return index + 1;
+  const next = entries.findIndex((entry) => compareContentPoolDeskEntryToCursor(entry, cursor) > 0);
+  return next >= 0 ? next : entries.length;
+}
+
+function compareContentPoolDeskEntryToCursor(
+  entry: ContentPoolDeskEntry,
+  cursor: { sort: ContentPoolDeskFilter["sort"]; sortValue: string | number; projectId: string; itemId: string },
+) {
+  const primary = compareContentPoolDeskValues(contentPoolDeskSortValue(entry.item, cursor.sort), cursor.sortValue);
+  const directed = cursor.sort.endsWith("_asc") ? primary : -primary;
+  if (directed) return directed;
+  return entry.row.projectId.localeCompare(cursor.projectId) || entry.item.id.localeCompare(cursor.itemId);
+}
+
+function normalizeContentPoolDeskEntry(entry: ContentPoolDeskEntry): ContentPoolDeskItem | undefined {
+  const observedAt = entry.row.projectLastCrawledAt || entry.row.projectUpdatedAt || new Date().toISOString();
+  const normalized = normalizeContentPoolItemForRead(entry.item, observedAt);
+  if (!isValidSourceItem(normalized)) return undefined;
+  return { ...contentPoolItemWithoutRaw(normalized), projectId: entry.row.projectId, projectName: entry.row.projectName };
+}
+
+export function contentPoolItemWithoutRaw(item: NormalizedSourceItem): Omit<NormalizedSourceItem, "raw"> {
+  const { raw, ...rest } = item;
+  void raw;
+  return rest;
+}
+
+function membershipsForContentPoolDeskItems(
+  memberships: ContentPoolCollectionMembership[],
+  visibleCollectionIds: Set<string>,
+  items: ContentPoolDeskItem[],
+) {
+  const ownedKeys = new Set<string>();
+  const bareIds = new Set<string>();
+  for (const item of items) {
+    if (item.ownerUserId) ownedKeys.add(`${item.ownerUserId}\u0000${item.id}`);
+    else bareIds.add(item.id);
+  }
+  return memberships.filter((membership) => visibleCollectionIds.has(membership.collectionId)
+    && (ownedKeys.has(`${membership.ownerUserId}\u0000${membership.itemId}`) || bareIds.has(membership.itemId)));
+}
+
+function buildContentPoolDeskProjectSummaries(entries: ContentPoolDeskEntry[]): ContentPoolProjectSummary[] {
+  const groups = new Map<string, { row: ContentPoolDeskLightRow; items: NormalizedSourceItem[] }>();
+  for (const entry of entries) {
+    const group = groups.get(entry.row.projectId);
+    if (group) group.items.push(entry.item);
+    else groups.set(entry.row.projectId, { row: entry.row, items: [entry.item] });
+  }
+  return [...groups.values()]
+    .map(({ row, items }) => {
+      const platforms: Partial<Record<Platform, number>> = {};
+      for (const item of items) platforms[item.platform] = (platforms[item.platform] || 0) + 1;
+      return {
+        id: row.projectId,
+        ownerUserId: row.ownerUserId,
+        ownerDisplayName: undefined,
+        query: row.projectName,
+        normalizedQuery: row.normalizedQuery,
+        createdAt: row.createdAt,
+        updatedAt: row.projectUpdatedAt,
+        lastCrawledAt: row.projectLastCrawledAt,
+        totalItems: items.length,
+        newItems: items.filter((item) => (item.poolStatus || "new") === "new").length,
+        analyzedItems: items.filter((item) => Boolean(item.analysis)).length,
+        rewrittenItems: items.filter((item) => item.poolStatus === "rewritten").length,
+        approvedItems: items.filter((item) => item.poolStatus === "approved").length,
+        publishedItems: items.filter((item) => item.poolStatus === "published").length,
+        platforms,
+      };
+    })
+    .sort((left, right) => right.updatedAt.localeCompare(left.updatedAt) || left.id.localeCompare(right.id));
+}
+
+function countContentPoolDeskMemberships(
+  entries: ContentPoolDeskEntry[],
+  memberships: ContentPoolCollectionMembership[],
+  visibleCollectionIds: Set<string>,
+) {
+  const ownedKeys = new Set<string>();
+  const bareIds = new Set<string>();
+  for (const entry of entries) {
+    if (entry.item.ownerUserId) ownedKeys.add(`${entry.item.ownerUserId}\u0000${entry.item.id}`);
+    else bareIds.add(entry.item.id);
+  }
+  const counts: Record<string, number> = {};
+  const seen = new Set<string>();
+  for (const membership of memberships) {
+    if (!visibleCollectionIds.has(membership.collectionId)) continue;
+    const key = `${membership.collectionId}\u0000${membership.ownerUserId}\u0000${membership.itemId}`;
+    if (seen.has(key)) continue;
+    if (!ownedKeys.has(`${membership.ownerUserId}\u0000${membership.itemId}`) && !bareIds.has(membership.itemId)) continue;
+    seen.add(key);
+    counts[membership.collectionId] = (counts[membership.collectionId] || 0) + 1;
+  }
+  return counts;
+}
+
+function buildContentPoolDeskTagSuggestions(
+  entries: ContentPoolDeskEntry[],
+  tagRows: ContentPoolTag[],
+  ownerUserId?: string,
+): ContentPoolTagSuggestion[] {
+  const colors = contentPoolTagColorMap(tagRows, ownerUserId);
+  const counts = new Map<string, ContentPoolTagSuggestion>();
+  for (const entry of entries) {
+    for (const label of normalizeContentPoolCustomTags(entry.item.customTags)) {
+      const key = contentPoolCustomTagKey(label);
+      const current = counts.get(key);
+      counts.set(key, current
+        ? { ...current, count: current.count + 1 }
+        : { key, label, color: colors.get(key) || contentPoolTagColor(key), count: 1 });
+    }
+  }
+  return [...counts.values()]
+    .sort((left, right) => right.count - left.count || left.label.localeCompare(right.label, "zh-CN"))
+    .slice(0, 100);
+}
+
+function clampDeskLimit(value: number | undefined, fallback: number, max: number) {
+  const parsed = Number(value);
+  if (!Number.isFinite(parsed) || parsed <= 0) return fallback;
+  return Math.min(max, Math.max(1, Math.trunc(parsed)));
+}
+
 export async function getSourceItemsByIds(sourceItemIds: string[], account?: WorkspaceAccessActor) {
   if (!sourceItemIds.length) return [];
-  const pool = await readPool();
-  const projects = filterWorkspaceOwnedRecords(pool.projects.map(refreshProjectStats), account);
+  const projects = filterWorkspaceOwnedRecords(
+    (await readContentProjectsForItemIdsFromDb(sourceItemIds)).map(refreshProjectStats),
+    account,
+  );
   const itemsById = new Map<string, NormalizedSourceItem>();
   projects.forEach((project) => {
     project.items.forEach((item) => {
@@ -117,9 +548,8 @@ export async function batchUpdateSourceItemCustomTags(
   const selectedIds = new Set(ids);
   const handledIds = new Set<string>();
   const result: ContentPoolTagBatchResult = { items: [], failures: [] };
-  const pool = await readPool();
   const now = new Date().toISOString();
-  pool.projects = pool.projects.map((project) => {
+  await mutateContentProjectsForItemIdsInDb(ids, contentPoolMutationScope(account), (project) => {
     let changed = false;
     const items = project.items.map((item) => {
       if (!selectedIds.has(item.id) || handledIds.has(item.id)) return item;
@@ -136,12 +566,11 @@ export async function batchUpdateSourceItemCustomTags(
         return item;
       }
     });
-    return changed ? refreshProjectStats({ ...project, items, updatedAt: now }) : project;
+    return changed ? refreshProjectStats({ ...project, items, updatedAt: now }) : undefined;
   });
   ids.filter((id) => !handledIds.has(id)).forEach((itemId) => {
     result.failures.push({ itemId, error: "Content item not found or is not editable." });
   });
-  if (result.items.length) await writePool(pool);
   return result;
 }
 
@@ -181,8 +610,11 @@ export async function freezeContentPoolItemsByIds(
   snapshotAt = new Date().toISOString(),
 ) {
   const ids = makeUniqueIds(sourceItemIds);
-  const pool = await readPool();
-  const projects = filterWorkspaceOwnedRecords(pool.projects.map(refreshProjectStats), account);
+  if (!ids.length) return freezeContentPoolSelectionItemsByIds([], ids, snapshotAt);
+  const projects = filterWorkspaceOwnedRecords(
+    (await readContentProjectsForItemIdsFromDb(ids)).map(refreshProjectStats),
+    account,
+  );
   const all = selectContentPoolItems(projects);
   return freezeContentPoolSelectionItemsByIds(all, ids, snapshotAt);
 }
@@ -194,91 +626,93 @@ export async function ingestCrawlItems(
   options: { collectionId?: string } = {},
 ) {
   if (options.collectionId && account) await requireContentPoolCollectionWriteTarget(account, options.collectionId);
-  const pool = await readPool();
   const now = new Date().toISOString();
   const owner = account ? scopeWorkspaceOwner(account) : undefined;
   const normalizedQuery = normalizeProjectKey(query, owner?.ownerUserId);
-  const project = ensureProject(pool, query, normalizedQuery, now, owner);
+  const project = await mutateContentProjectByNormalizedQueryInDb(
+    normalizedQuery,
+    () => createContentProject(query, normalizedQuery, now, owner),
+    (current) => {
+      current.query = query;
+      current.updatedAt = now;
+      current.lastCrawledAt = now;
+      if (owner) Object.assign(current, owner);
 
-  project.query = query;
-  project.updatedAt = now;
-  project.lastCrawledAt = now;
-  if (owner) Object.assign(project, owner);
-
-  const existing = new Map(project.items.map((item) => [item.id, item]));
-  for (const item of items) {
-    const enrichedItem = applyWorkspaceOwner(enrichSourceTimestamps(item, now), account, item);
-    const previous = existing.get(enrichedItem.id);
-    if (previous) {
-      const downloadedImages = enrichedItem.downloadedImages?.length ? enrichedItem.downloadedImages : previous.downloadedImages;
-      const downloadedVideoUrl = enrichedItem.downloadedVideoUrl || previous.downloadedVideoUrl;
-      const videoFrames = normalizeVideoFrames(enrichedItem.videoFrames?.length ? enrichedItem.videoFrames : previous.videoFrames);
-      const downloadErrors = mergeStringArrays(previous.downloadErrors, enrichedItem.downloadErrors);
-      const contentTagging = shouldKeepManualContentTagging(previous)
-        ? previous.contentTagging
-        : chooseContentTagging(enrichedItem, previous);
-      const visualTagging = shouldKeepManualVisualTagging(previous)
-        ? previous.visualTagging
-        : chooseVisualTagging(enrichedItem, previous);
-      const nextItem: NormalizedSourceItem = {
-        ...previous,
-        ...enrichedItem,
-        downloadedImages,
-        downloadedVideoUrl,
-        videoFrames,
-        productionPlan: undefined,
-        downloadErrors: downloadErrors.length ? downloadErrors : undefined,
-        mediaUrls: replaceVideoFrameUrlsInMediaUrls(
-          mergeStringArrays(
-            previous.mediaUrls,
-            enrichedItem.mediaUrls,
+      const existing = new Map(current.items.map((item) => [item.id, item]));
+      for (const item of items) {
+        const enrichedItem = applyWorkspaceOwner(enrichSourceTimestamps(item, now), account, item);
+        const previous = existing.get(enrichedItem.id);
+        if (previous) {
+          const downloadedImages = enrichedItem.downloadedImages?.length ? enrichedItem.downloadedImages : previous.downloadedImages;
+          const downloadedVideoUrl = enrichedItem.downloadedVideoUrl || previous.downloadedVideoUrl;
+          const videoFrames = normalizeVideoFrames(enrichedItem.videoFrames?.length ? enrichedItem.videoFrames : previous.videoFrames);
+          const downloadErrors = mergeStringArrays(previous.downloadErrors, enrichedItem.downloadErrors);
+          const contentTagging = shouldKeepManualContentTagging(previous)
+            ? previous.contentTagging
+            : chooseContentTagging(enrichedItem, previous);
+          const visualTagging = shouldKeepManualVisualTagging(previous)
+            ? previous.visualTagging
+            : chooseVisualTagging(enrichedItem, previous);
+          const nextItem: NormalizedSourceItem = {
+            ...previous,
+            ...enrichedItem,
             downloadedImages,
-            downloadedVideoUrl ? [downloadedVideoUrl] : undefined,
-          ),
-          videoFrames,
-        ),
-        poolStatus: previous.poolStatus || "new",
-        hotScore: calculateHotScore(enrichedItem),
-        crawledAt: now,
-        publishedAt: enrichedItem.publishedAt || previous.publishedAt,
-        publishedLabel: enrichedItem.publishedLabel || previous.publishedLabel,
-        firstSeenAt: previous.firstSeenAt || enrichedItem.firstSeenAt || now,
-        lastSeenAt: now,
-        usedCount: previous.usedCount || 0,
-        analysis: previous.analysis || analyzeSourceItem(enrichedItem),
-        contentTagging,
-        customTags: normalizeContentPoolCustomTags(previous.customTags),
-        visualTagging,
-      };
-      existing.set(enrichedItem.id, {
-        ...nextItem,
-        mediaCache: buildMediaCacheStatus(nextItem, now),
-      });
-    } else {
-      const videoFrames = normalizeVideoFrames(enrichedItem.videoFrames);
-      const nextItem: NormalizedSourceItem = {
-        ...enrichedItem,
-        customTags: normalizeContentPoolCustomTags(enrichedItem.customTags),
-        videoFrames,
-        mediaUrls: replaceVideoFrameUrlsInMediaUrls(enrichedItem.mediaUrls, videoFrames),
-        poolStatus: "new",
-        hotScore: calculateHotScore(enrichedItem),
-        crawledAt: now,
-        firstSeenAt: enrichedItem.firstSeenAt || now,
-        lastSeenAt: now,
-        usedCount: 0,
-        analysis: analyzeSourceItem(enrichedItem),
-      };
-      existing.set(enrichedItem.id, {
-        ...nextItem,
-        mediaCache: buildMediaCacheStatus(nextItem, now),
-      });
-    }
-  }
+            downloadedVideoUrl,
+            videoFrames,
+            productionPlan: undefined,
+            downloadErrors: downloadErrors.length ? downloadErrors : undefined,
+            mediaUrls: replaceVideoFrameUrlsInMediaUrls(
+              mergeStringArrays(
+                previous.mediaUrls,
+                enrichedItem.mediaUrls,
+                downloadedImages,
+                downloadedVideoUrl ? [downloadedVideoUrl] : undefined,
+              ),
+              videoFrames,
+            ),
+            poolStatus: previous.poolStatus || "new",
+            hotScore: calculateHotScore(enrichedItem),
+            crawledAt: now,
+            publishedAt: enrichedItem.publishedAt || previous.publishedAt,
+            publishedLabel: enrichedItem.publishedLabel || previous.publishedLabel,
+            firstSeenAt: previous.firstSeenAt || enrichedItem.firstSeenAt || now,
+            lastSeenAt: now,
+            usedCount: previous.usedCount || 0,
+            analysis: previous.analysis || analyzeSourceItem(enrichedItem),
+            contentTagging,
+            customTags: normalizeContentPoolCustomTags(previous.customTags),
+            visualTagging,
+          };
+          existing.set(enrichedItem.id, {
+            ...nextItem,
+            mediaCache: buildMediaCacheStatus(nextItem, now),
+          });
+        } else {
+          const videoFrames = normalizeVideoFrames(enrichedItem.videoFrames);
+          const nextItem: NormalizedSourceItem = {
+            ...enrichedItem,
+            customTags: normalizeContentPoolCustomTags(enrichedItem.customTags),
+            videoFrames,
+            mediaUrls: replaceVideoFrameUrlsInMediaUrls(enrichedItem.mediaUrls, videoFrames),
+            poolStatus: "new",
+            hotScore: calculateHotScore(enrichedItem),
+            crawledAt: now,
+            firstSeenAt: enrichedItem.firstSeenAt || now,
+            lastSeenAt: now,
+            usedCount: 0,
+            analysis: analyzeSourceItem(enrichedItem),
+          };
+          existing.set(enrichedItem.id, {
+            ...nextItem,
+            mediaCache: buildMediaCacheStatus(nextItem, now),
+          });
+        }
+      }
 
-  project.items = Array.from(existing.values()).sort((a, b) => (b.hotScore || 0) - (a.hotScore || 0));
-  Object.assign(project, refreshProjectStats(project));
-  await writePool(pool);
+      current.items = Array.from(existing.values()).sort((a, b) => (b.hotScore || 0) - (a.hotScore || 0));
+      return refreshProjectStats(current);
+    },
+  );
   if (options.collectionId) {
     await applyContentPoolCollectionMembershipChangesFromDb({
       additions: items.map((item) => ({ collectionId: options.collectionId as string, itemId: item.id })),
@@ -295,52 +729,60 @@ export async function createSourceItem(query: string, item: Omit<NormalizedSourc
   poolStatus?: SourceUsageStatus;
 }, account?: WorkspaceAccessActor, options: { collectionId?: string } = {}) {
   if (options.collectionId && account) await requireContentPoolCollectionWriteTarget(account, options.collectionId);
-  const pool = await readPool();
   const now = new Date().toISOString();
   const owner = account ? scopeWorkspaceOwner(account) : undefined;
   const normalizedQuery = normalizeProjectKey(query, owner?.ownerUserId);
-  const project = ensureProject(pool, query, normalizedQuery, now, owner);
-  const sourceId = item.sourceId || `manual-${Date.now()}`;
-  const videoFrames = normalizeVideoFrames(item.videoFrames);
-  const sourceItem: NormalizedSourceItem = {
-    ...item,
-    ...owner,
-    id: item.id || `${item.platform}-${sourceId}`,
-    sourceId,
-    customTags: normalizeContentPoolCustomTags(item.customTags),
-    images: normalizeContentImageUrls(item.images || []),
-    videoFrames,
-    mediaUrls: replaceVideoFrameUrlsInMediaUrls(
-      mergeStringArrays(
-        item.mediaUrls,
-        item.images,
-        item.videoUrl ? [item.videoUrl] : undefined,
-        item.sourceUrl ? [item.sourceUrl] : undefined,
-      ),
-      videoFrames,
-    ),
-    poolStatus: item.poolStatus || "new",
-    crawledAt: now,
-    firstSeenAt: now,
-    lastSeenAt: now,
-    usedCount: 0,
-    raw: item.raw || { manual: true },
-    metrics: item.metrics || {},
-  };
-  const enrichedItem = {
-    ...sourceItem,
-    hotScore: calculateHotScore(sourceItem),
-    analysis: analyzeSourceItem(sourceItem),
-  };
+  let createdItem: NormalizedSourceItem | undefined;
+  const project = await mutateContentProjectByNormalizedQueryInDb(
+    normalizedQuery,
+    () => createContentProject(query, normalizedQuery, now, owner),
+    (current) => {
+      const sourceId = item.sourceId || `manual-${Date.now()}`;
+      const videoFrames = normalizeVideoFrames(item.videoFrames);
+      const sourceItem: NormalizedSourceItem = {
+        ...item,
+        ...owner,
+        id: item.id || `${item.platform}-${sourceId}`,
+        sourceId,
+        customTags: normalizeContentPoolCustomTags(item.customTags),
+        images: normalizeContentImageUrls(item.images || []),
+        videoFrames,
+        mediaUrls: replaceVideoFrameUrlsInMediaUrls(
+          mergeStringArrays(
+            item.mediaUrls,
+            item.images,
+            item.videoUrl ? [item.videoUrl] : undefined,
+            item.sourceUrl ? [item.sourceUrl] : undefined,
+          ),
+          videoFrames,
+        ),
+        poolStatus: item.poolStatus || "new",
+        crawledAt: now,
+        firstSeenAt: now,
+        lastSeenAt: now,
+        usedCount: 0,
+        raw: item.raw || { manual: true },
+        metrics: item.metrics || {},
+      };
+      const enrichedItem = {
+        ...sourceItem,
+        hotScore: calculateHotScore(sourceItem),
+        analysis: analyzeSourceItem(sourceItem),
+      };
 
-  const nextItem = {
-    ...enrichedItem,
-    mediaCache: buildMediaCacheStatus(enrichedItem, now),
-  };
+      const nextItem = {
+        ...enrichedItem,
+        mediaCache: buildMediaCacheStatus(enrichedItem, now),
+      };
+      createdItem = nextItem;
 
-  project.items = [nextItem, ...project.items.filter((existing) => existing.id !== enrichedItem.id)];
-  Object.assign(project, refreshProjectStats({ ...project, ...owner, updatedAt: now }));
-  await writePool(pool);
+      current.items = [nextItem, ...current.items.filter((existing) => existing.id !== enrichedItem.id)];
+      if (owner) Object.assign(current, owner);
+      return refreshProjectStats({ ...current, ...owner, updatedAt: now });
+    },
+  );
+  if (!createdItem) throw new Error("Content item could not be created.");
+  const nextItem = createdItem;
   if (options.collectionId) {
     await applyContentPoolCollectionMembershipChangesFromDb({
       additions: [{ collectionId: options.collectionId, itemId: nextItem.id }],
@@ -352,11 +794,10 @@ export async function createSourceItem(query: string, item: Omit<NormalizedSourc
 }
 
 export async function updateSourceItem(sourceItemId: string, patch: Partial<NormalizedSourceItem>, account?: WorkspaceAccessActor) {
-  const pool = await readPool();
   const now = new Date().toISOString();
   let updatedItem: NormalizedSourceItem | undefined;
 
-  pool.projects = pool.projects.map((project) => {
+  await mutateContentProjectsForItemIdsInDb([sourceItemId], contentPoolMutationScope(account), (project) => {
     let changed = false;
     const items = project.items.map((item) => {
       if (item.id !== sourceItemId) return item;
@@ -403,34 +844,31 @@ export async function updateSourceItem(sourceItemId: string, patch: Partial<Norm
       updatedItem = recalculated;
       return recalculated;
     });
-    return changed ? refreshProjectStats({ ...project, items, updatedAt: now }) : project;
+    return changed ? refreshProjectStats({ ...project, items, updatedAt: now }) : undefined;
   });
 
   if (!updatedItem) throw new Error("Content item not found");
-  await writePool(pool);
   return updatedItem;
 }
 
 export async function deleteSourceItem(sourceItemId: string, account?: WorkspaceAccessActor) {
-  const pool = await readPool();
   const now = new Date().toISOString();
   let deleted = false;
   const deletedItems: Array<{ ownerUserId?: string; itemId: string }> = [];
 
-  pool.projects = pool.projects.map((project) => {
+  await mutateContentProjectsForItemIdsInDb([sourceItemId], contentPoolMutationScope(account), (project) => {
     const nextItems = project.items.filter((item) => {
       if (item.id !== sourceItemId) return true;
       if (!canMutateWorkspaceContent(account, item)) return true;
       deletedItems.push({ ownerUserId: item.ownerUserId, itemId: item.id });
       return false;
     });
-    if (nextItems.length === project.items.length) return project;
+    if (nextItems.length === project.items.length) return undefined;
     deleted = true;
     return refreshProjectStats({ ...project, items: nextItems, updatedAt: now });
   });
 
   if (!deleted) throw new Error("Content item not found");
-  await writePool(pool);
   await deleteContentPoolCollectionItemsForItemsFromDb(deletedItems);
 }
 
@@ -439,10 +877,9 @@ export async function batchUpdateSourceItemStatus(sourceItemIds: string[], poolS
   const selectedIds = new Set(ids);
   const foundIds = new Set<string>();
   const updatedItems = new Map<string, NormalizedSourceItem>();
-  const pool = await readPool();
   const now = new Date().toISOString();
 
-  pool.projects = pool.projects.map((project) => {
+  await mutateContentProjectsForItemIdsInDb(ids, contentPoolMutationScope(account), (project) => {
     let changed = false;
     const items = project.items.map((item) => {
       if (!selectedIds.has(item.id) || !canMutateWorkspaceContent(account, item)) return item;
@@ -458,10 +895,9 @@ export async function batchUpdateSourceItemStatus(sourceItemIds: string[], poolS
       updatedItems.set(nextItem.id, nextItem);
       return nextItem;
     });
-    return changed ? refreshProjectStats({ ...project, items, updatedAt: now }) : project;
+    return changed ? refreshProjectStats({ ...project, items, updatedAt: now }) : undefined;
   });
 
-  if (foundIds.size) await writePool(pool);
   return {
     items: Array.from(updatedItems.values()),
     updatedCount: foundIds.size,
@@ -474,10 +910,9 @@ export async function batchDeleteSourceItems(sourceItemIds: string[], account?: 
   const selectedIds = new Set(ids);
   const foundIds = new Set<string>();
   const deletedItems: Array<{ ownerUserId?: string; itemId: string }> = [];
-  const pool = await readPool();
   const now = new Date().toISOString();
 
-  pool.projects = pool.projects.map((project) => {
+  await mutateContentProjectsForItemIdsInDb(ids, contentPoolMutationScope(account), (project) => {
     const nextItems = project.items.filter((item) => {
       const shouldDelete = selectedIds.has(item.id) && canMutateWorkspaceContent(account, item);
       if (shouldDelete) {
@@ -486,14 +921,11 @@ export async function batchDeleteSourceItems(sourceItemIds: string[], account?: 
       }
       return !shouldDelete;
     });
-    if (nextItems.length === project.items.length) return project;
+    if (nextItems.length === project.items.length) return undefined;
     return refreshProjectStats({ ...project, items: nextItems, updatedAt: now });
   });
 
-  if (foundIds.size) {
-    await writePool(pool);
-    await deleteContentPoolCollectionItemsForItemsFromDb(deletedItems);
-  }
+  if (foundIds.size) await deleteContentPoolCollectionItemsForItemsFromDb(deletedItems);
   return {
     deletedCount: foundIds.size,
     notFoundIds: ids.filter((id) => !foundIds.has(id)),
@@ -593,40 +1025,42 @@ export function analyzeSourceItem(item: NormalizedSourceItem): ViralAnalysis {
   };
 }
 
+function normalizeContentPoolItemForRead(item: NormalizedSourceItem, observedAt: string): NormalizedSourceItem {
+  const enrichedItem = enrichSourceTimestamps(item, observedAt);
+  const storedImages = normalizeContentImageUrls(enrichedItem.images || []);
+  const rawDouyinImages = enrichedItem.platform === "douyin" ? extractDouyinCarouselImageUrls(enrichedItem.raw) : [];
+  const images = rawDouyinImages.length ? rawDouyinImages : storedImages;
+  const rawImageRepairApplied =
+    rawDouyinImages.length > 0 && rawDouyinImages.join("\n") !== storedImages.join("\n");
+  const downloadedImages = rawImageRepairApplied ? undefined : filterAlignedDownloadedImages(enrichedItem.downloadedImages, images);
+  const cleanDownloadedImageSet = new Set(downloadedImages || []);
+  const droppedDownloadedImageSet = new Set((enrichedItem.downloadedImages || []).filter((url) => !cleanDownloadedImageSet.has(url)));
+  const videoFrames = normalizeVideoFrames(enrichedItem.videoFrames);
+  const normalizedItem: NormalizedSourceItem = {
+    ...enrichedItem,
+    images,
+    downloadedImages,
+    videoFrames,
+    mediaUrls: replaceVideoFrameUrlsInMediaUrls(
+      mergeStringArrays(
+        enrichedItem.mediaUrls?.filter((url) => !isLikelyNonContentImageUrl(url) && !droppedDownloadedImageSet.has(url)),
+        downloadedImages,
+        images,
+      ),
+      videoFrames,
+    ),
+    productionPlan: undefined,
+  };
+  return {
+    ...normalizedItem,
+    mediaCache: buildMediaCacheStatus(normalizedItem),
+  };
+}
+
 function refreshProjectStats(project: ContentProject): ContentProject {
   const platforms: Partial<Record<Platform, number>> = {};
   const observedAt = project.lastCrawledAt || project.updatedAt || new Date().toISOString();
-  const items = project.items.map((item) => {
-    const enrichedItem = enrichSourceTimestamps(item, observedAt);
-    const storedImages = normalizeContentImageUrls(enrichedItem.images || []);
-    const rawDouyinImages = enrichedItem.platform === "douyin" ? extractDouyinCarouselImageUrls(enrichedItem.raw) : [];
-    const images = rawDouyinImages.length ? rawDouyinImages : storedImages;
-    const rawImageRepairApplied =
-      rawDouyinImages.length > 0 && rawDouyinImages.join("\n") !== storedImages.join("\n");
-    const downloadedImages = rawImageRepairApplied ? undefined : filterAlignedDownloadedImages(enrichedItem.downloadedImages, images);
-    const cleanDownloadedImageSet = new Set(downloadedImages || []);
-    const droppedDownloadedImageSet = new Set((enrichedItem.downloadedImages || []).filter((url) => !cleanDownloadedImageSet.has(url)));
-    const videoFrames = normalizeVideoFrames(enrichedItem.videoFrames);
-    const normalizedItem: NormalizedSourceItem = {
-      ...enrichedItem,
-      images,
-      downloadedImages,
-      videoFrames,
-      mediaUrls: replaceVideoFrameUrlsInMediaUrls(
-        mergeStringArrays(
-          enrichedItem.mediaUrls?.filter((url) => !isLikelyNonContentImageUrl(url) && !droppedDownloadedImageSet.has(url)),
-          downloadedImages,
-          images,
-        ),
-        videoFrames,
-      ),
-      productionPlan: undefined,
-    };
-    return {
-      ...normalizedItem,
-      mediaCache: buildMediaCacheStatus(normalizedItem),
-    };
-  }).filter(isValidSourceItem);
+  const items = project.items.map((item) => normalizeContentPoolItemForRead(item, observedAt)).filter(isValidSourceItem);
   const countByStatus = (status: SourceUsageStatus) => items.filter((item) => item.poolStatus === status).length;
   items.forEach((item) => {
     platforms[item.platform] = (platforms[item.platform] || 0) + 1;
@@ -644,31 +1078,24 @@ function refreshProjectStats(project: ContentProject): ContentProject {
   };
 }
 
-function ensureProject(pool: StoredContentPool, query: string, normalizedQuery: string, now: string, owner?: { ownerUserId: string; ownerDisplayName: string }) {
-  let project = pool.projects.find((item) => item.normalizedQuery === normalizedQuery);
-
-  if (!project) {
-    project = {
-      id: `project-${normalizedQuery || Date.now()}`,
-      ...owner,
-      query,
-      normalizedQuery,
-      createdAt: now,
-      updatedAt: now,
-      lastCrawledAt: now,
-      totalItems: 0,
-      newItems: 0,
-      analyzedItems: 0,
-      rewrittenItems: 0,
-      approvedItems: 0,
-      publishedItems: 0,
-      platforms: {},
-      items: [],
-    };
-    pool.projects.push(project);
-  }
-
-  return project;
+function createContentProject(query: string, normalizedQuery: string, now: string, owner?: { ownerUserId: string; ownerDisplayName: string }): ContentProject {
+  return {
+    id: `project-${normalizedQuery || Date.now()}`,
+    ...owner,
+    query,
+    normalizedQuery,
+    createdAt: now,
+    updatedAt: now,
+    lastCrawledAt: now,
+    totalItems: 0,
+    newItems: 0,
+    analyzedItems: 0,
+    rewrittenItems: 0,
+    approvedItems: 0,
+    publishedItems: 0,
+    platforms: {},
+    items: [],
+  };
 }
 
 function isValidSourceItem(item: NormalizedSourceItem) {
@@ -680,6 +1107,10 @@ function isValidSourceItem(item: NormalizedSourceItem) {
 function canMutateWorkspaceContent(account: WorkspaceAccessActor | undefined, item: NormalizedSourceItem) {
   if (!account) return true;
   return canAccessWorkspaceOwner(account, item.ownerUserId);
+}
+
+function contentPoolMutationScope(account: WorkspaceAccessActor | undefined) {
+  return account && !isWorkspaceAdmin(account) ? { ownerUserId: account.id } : undefined;
 }
 
 function normalizeQuery(value: string) {
@@ -781,10 +1212,6 @@ function contentPoolMembershipItemExists(
 
 async function readPool(): Promise<StoredContentPool> {
   return { projects: await readContentProjectsFromDb() };
-}
-
-async function writePool(pool: StoredContentPool) {
-  await writeContentProjectsToDb(pool.projects);
 }
 
 function rankStatus(status?: SourceUsageStatus) {

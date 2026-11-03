@@ -1,7 +1,7 @@
 "use client";
 
 import Link from "next/link";
-import { useCallback, useEffect, useMemo, useState, useSyncExternalStore, type ReactNode } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState, useSyncExternalStore, type ReactNode } from "react";
 import {
   BarChart3,
   Camera,
@@ -33,8 +33,7 @@ import {
   X,
 } from "lucide-react";
 import { ContentPoolCustomTagPicker } from "@/components/content-pool-custom-tag-picker";
-import { contentPoolCustomTagKey, matchesAllContentPoolCustomTags } from "@/lib/content-pool-tags";
-import { contentPoolCollectionDescendantIds } from "@/lib/content-pool-selection";
+import { contentPoolCustomTagKey } from "@/lib/content-pool-tags";
 import { getStoredTheme, setStoredTheme, subscribeTheme, type ThemeMode } from "@/lib/theme";
 import { enumCodec, listCodec, optionalStringCodec, useUrlQueryState } from "@/lib/use-url-query-state";
 import { toRemoteImagePreviewSrc } from "@/lib/media-preview";
@@ -55,9 +54,12 @@ import {
   type ConfigStatus,
   type ContentPoolCollection,
   type ContentPoolCollectionMembership,
+  type ContentPoolDeskItemRef,
+  type ContentPoolDeskPage,
+  type ContentPoolDeskSummary,
+  type ContentPoolProjectSummary,
   type ContentPoolTagBatchResult,
   type ContentPoolTagSuggestion,
-  type ContentProject,
   type ContentTag,
   type CrawlJob,
   type CrawlPlatform,
@@ -77,6 +79,11 @@ import {
 type PoolStatusFilter = SourceUsageStatus | "all";
 type PoolPlatformFilter = Platform | "all";
 type PoolSortMode = "hot_desc" | "published_desc" | "published_asc" | "crawled_desc" | "crawled_asc" | "engagement_desc";
+
+type ContentPoolDeskSource = NormalizedSourceItem & {
+  projectId: string;
+  projectName: string;
+};
 type CrawlInputMode = "keyword" | "links";
 type LinkImportPlatform = SourceLinkPlatform | "auto";
 type BusyState = "load" | "crawl" | "source" | "batch" | "secondary" | "settings" | null;
@@ -120,8 +127,8 @@ type LinkImportSummary = {
 
 type LinkImportResponse = {
   query?: string;
-  items?: NormalizedSourceItem[];
-  project?: ContentProject;
+  items?: Array<Omit<NormalizedSourceItem, "raw">>;
+  project?: ContentPoolProjectSummary;
   results?: LinkImportResult[];
   summary?: LinkImportSummary;
   error?: string;
@@ -293,11 +300,20 @@ const poolSortOptions: Array<{ label: string; value: PoolSortMode }> = [
 export default function ContentDeskPage() {
   const theme = useSyncExternalStore(subscribeTheme, getStoredTheme, () => "professional" as ThemeMode);
   const [config, setConfig] = useState<ConfigStatus | null>(null);
-  const [projects, setProjects] = useState<ContentProject[]>([]);
-  const [activeProject, setActiveProject] = useState<ContentProject | null>(null);
-  const [sources, setSources] = useState<NormalizedSourceItem[]>([]);
+  const [projects, setProjects] = useState<ContentPoolProjectSummary[]>([]);
+  const [activeProject, setActiveProject] = useState<ContentPoolProjectSummary | null>(null);
+  const [deskSources, setDeskSources] = useState<ContentPoolDeskSource[]>([]);
+  const [deskTotal, setDeskTotal] = useState(0);
+  const [deskNextCursor, setDeskNextCursor] = useState<string | undefined>();
+  const [deskHasMore, setDeskHasMore] = useState(false);
+  const [deskLoading, setDeskLoading] = useState(false);
+  const [deskSummary, setDeskSummary] = useState<Pick<ContentPoolDeskSummary, "libraryCounts" | "libraryStats"> | null>(null);
+  const deskAbortRef = useRef<AbortController | null>(null);
+  const deskSummaryAbortRef = useRef<AbortController | null>(null);
+  const deskSummaryQueryInitializedRef = useRef(false);
   const [selectedSourceId, setSelectedSourceId] = useUrlQueryState("sourceId", "", optionalStringCodec());
   const [selectedContentItemIds, setSelectedContentItemIds] = useState<string[]>([]);
+  const [selectedItemOwners, setSelectedItemOwners] = useState<Map<string, string | undefined>>(() => new Map());
   const [crawlInputMode, setCrawlInputMode] = useUrlQueryState<CrawlInputMode>("mode", "keyword", crawlInputModeCodec);
   const [platform, setPlatform] = useUrlQueryState<CrawlPlatform>("crawlPlatform", "xiaohongshu", crawlPlatformCodec);
   const [linkImportPlatform, setLinkImportPlatform] = useState<LinkImportPlatform>("auto");
@@ -326,6 +342,7 @@ export default function ContentDeskPage() {
   const [poolPlatformFilter, setPoolPlatformFilter] = useUrlQueryState<PoolPlatformFilter>("poolPlatform", "all", poolPlatformCodec);
   const [poolSort, setPoolSort] = useUrlQueryState<PoolSortMode>("poolSort", "hot_desc", poolSortCodec);
   const [poolSearch, setPoolSearch] = useUrlQueryState("poolQ", "", optionalStringCodec());
+  const [debouncedPoolSearch, setDebouncedPoolSearch] = useState(poolSearch);
   const [poolContentTagFilters, setPoolContentTagFilters] = useUrlQueryState<ContentTag[]>("contentTag", [], listCodec() as unknown as import("@/lib/use-url-query-state").UrlQueryCodec<ContentTag[]>);
   const [poolCustomTagFilters, setPoolCustomTagFilters] = useUrlQueryState("customTag", [], listCodec());
   const [libraryParam, setLibraryParam] = useUrlQueryState("library", "all", optionalStringCodec("all"));
@@ -390,70 +407,15 @@ export default function ContentDeskPage() {
       : membershipIndex.bare.get(item.id);
     return collectionIds || [];
   }, [membershipIndex]);
-  const libraryCollectionIds = useMemo(() => {
-    if (libraryView.kind !== "collection") return new Set<string>();
-    const ids = new Set([libraryView.id]);
-    if (includeDescendants) {
-      for (const id of contentPoolCollectionDescendantIds(collections, libraryView.id)) ids.add(id);
-    }
-    return ids;
-  }, [collections, includeDescendants, libraryView]);
-  const libraryScopedSources = useMemo(() => {
-    if (libraryView.kind === "all") return sources;
-    if (libraryView.kind === "default") return sources.filter((item) => getItemCollectionIds(item).length === 0);
-    return sources.filter((item) => getItemCollectionIds(item).some((id) => libraryCollectionIds.has(id)));
-  }, [getItemCollectionIds, libraryCollectionIds, libraryView, sources]);
-  const libraryCounts = useMemo(() => {
-    const byCollection: Record<string, number> = {};
-    let defaultCount = 0;
-    for (const item of sources) {
-      const collectionIds = Array.from(new Set(getItemCollectionIds(item)));
-      if (!collectionIds.length) {
-        defaultCount += 1;
-        continue;
-      }
-      for (const id of collectionIds) byCollection[id] = (byCollection[id] || 0) + 1;
-    }
-    return { all: sources.length, default: defaultCount, byCollection };
-  }, [getItemCollectionIds, sources]);
-  const libraryScopedStats = useMemo(() => ({
-    total: libraryScopedSources.length,
-    analyzed: libraryScopedSources.filter((item) => item.analysis).length,
-    rewritten: libraryScopedSources.filter((item) => item.poolStatus === "rewritten" || item.poolStatus === "approved" || item.poolStatus === "published").length,
-  }), [libraryScopedSources]);
-  const itemProjectIds = useMemo(() => {
-    const map = new Map<string, string>();
-    for (const project of projects) {
-      for (const item of project.items) if (!map.has(item.id)) map.set(item.id, project.id);
-    }
-    return map;
-  }, [projects]);
-  const visibleSources = useMemo(() => {
-    const normalizedSearch = poolSearch.normalize("NFKC").trim().toLocaleLowerCase();
-    const filtered = libraryScopedSources.filter((item) => {
-      const statusMatched = poolStatusFilter === "all" || (item.poolStatus || "new") === poolStatusFilter;
-      const platformMatched = poolPlatformFilter === "all" || item.platform === poolPlatformFilter;
-      const projectMatched = poolProjectFilter === "all" || itemProjectIds.get(item.id) === poolProjectFilter;
-      const contentTags = getContentTags(item);
-      const contentTagsMatched = poolContentTagFilters.every((tag) => contentTags.includes(tag));
-      const customTagsMatched = matchesAllContentPoolCustomTags(item.customTags, poolCustomTagFilters);
-      const searchMatched = !normalizedSearch || [item.title, item.contentText, item.authorName, item.sourceId, ...(item.customTags || [])]
-        .some((value) => String(value || "").normalize("NFKC").toLocaleLowerCase().includes(normalizedSearch));
-      return statusMatched && platformMatched && projectMatched && contentTagsMatched && customTagsMatched && searchMatched;
-    });
-    return sortSources(filtered, poolSort);
-  }, [itemProjectIds, libraryScopedSources, poolContentTagFilters, poolCustomTagFilters, poolPlatformFilter, poolProjectFilter, poolSearch, poolSort, poolStatusFilter]);
+  const libraryCounts = deskSummary?.libraryCounts || { all: 0, default: 0, byCollection: {} };
+  const libraryScopedStats = deskSummary?.libraryStats || { total: 0, analyzed: 0, rewritten: 0 };
+  const visibleSources = deskSources;
   const libraryTitle = useMemo(() => {
     if (libraryView.kind === "all") return "全部内容";
     if (libraryView.kind === "default") return "默认库";
     const collection = collections.find((item) => item.id === libraryView.id);
     return collection?.relativePath || collection?.name || "内容库";
   }, [collections, libraryView]);
-
-  const selectedContentItems = useMemo(
-    () => visibleSources.filter((item) => selectedContentItemIds.includes(item.id)),
-    [selectedContentItemIds, visibleSources],
-  );
 
   const selectedSource = useMemo(
     () => visibleSources.find((item) => item.id === selectedSourceId) || visibleSources[0] || null,
@@ -486,9 +448,28 @@ export default function ContentDeskPage() {
   );
   const projectStats = useMemo(() => buildProjectStats(activeProject), [activeProject]);
   const latestPoolRun = useMemo(() => simpleRuns.find((run) => run.input.sourceMode === "pool") || null, [simpleRuns]);
+  const contentTagFilterKey = poolContentTagFilters.join("\u0000");
+  const customTagFilterKey = poolCustomTagFilters.join("\u0000");
   useEffect(() => {
     document.documentElement.dataset.theme = theme;
   }, [theme]);
+
+  useEffect(() => {
+    const timer = window.setTimeout(() => setDebouncedPoolSearch(poolSearch), 280);
+    return () => window.clearTimeout(timer);
+  }, [poolSearch]);
+
+  useEffect(() => {
+    if (!queryHydrated) return;
+    void loadContentDesk({ reset: true });
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [queryHydrated, libraryParam, includeDescendantsParam, debouncedPoolSearch, poolStatusFilter, poolPlatformFilter, poolProjectFilter, contentTagFilterKey, customTagFilterKey, poolSort]);
+
+  useEffect(() => {
+    if (!queryHydrated) return;
+    void loadContentDeskSummary();
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [queryHydrated, libraryParam, includeDescendantsParam]);
 
   useEffect(() => {
     if (!queryHydrated) return;
@@ -513,7 +494,7 @@ export default function ContentDeskPage() {
   async function loadInitialData() {
     setBusy("load");
     try {
-      await Promise.all([loadConfig(), loadWorkspaceSettings(), loadContentPool(), loadSimpleRuns(), loadExecutionLogs()]);
+      await Promise.all([loadConfig(), loadWorkspaceSettings(), loadSimpleRuns(), loadExecutionLogs()]);
     } finally {
       setBusy(null);
     }
@@ -550,34 +531,123 @@ export default function ContentDeskPage() {
     setPoolEnableVideoTranscription(mediaSettings.enableVideoTranscription);
   }
 
-  async function loadContentPool(nextQuery = query) {
+  function buildContentDeskParams(limit = 40) {
+    const params = new URLSearchParams();
+    params.set("library", libraryParam);
+    params.set("descendants", includeDescendantsParam);
+    params.set("limit", String(limit));
+    const search = debouncedPoolSearch.trim();
+    if (search) params.set("q", search);
+    if (poolStatusFilter !== "all") params.set("status", poolStatusFilter);
+    if (poolPlatformFilter !== "all") params.set("platform", poolPlatformFilter);
+    if (poolProjectFilter !== "all") params.set("projectId", poolProjectFilter);
+    for (const tag of poolContentTagFilters) params.set("contentTag", tag);
+    for (const tag of poolCustomTagFilters) params.set("customTag", tag);
+    params.set("sort", poolSort);
+    return params;
+  }
+
+  async function loadContentDesk(options: { reset?: boolean } = {}) {
+    const reset = options.reset !== false;
+    if (!reset && (!deskNextCursor || !deskHasMore || deskLoading)) return;
+    deskAbortRef.current?.abort();
+    const controller = new AbortController();
+    deskAbortRef.current = controller;
+    setDeskLoading(true);
+    try {
+      const params = buildContentDeskParams();
+      if (!reset && deskNextCursor) params.set("cursor", deskNextCursor);
+      const res = await fetch(`/api/content-pool/desk?${params.toString()}`, { signal: controller.signal });
+      const data = (await res.json()) as ContentPoolDeskPage & { error?: string };
+      if (!res.ok) throw new Error(data.error || "内容池读取失败");
+      if (deskAbortRef.current !== controller) return;
+      const nextSources = (data.items || []).map((item) => ({ ...item, raw: undefined } as ContentPoolDeskSource));
+      setDeskSources((current) => {
+        if (reset) return nextSources;
+        const merged = new Map(current.map((item) => [item.id, item]));
+        for (const item of nextSources) merged.set(item.id, item);
+        return [...merged.values()];
+      });
+      setMemberships((current) => {
+        const merged = new Map(current.map((membership) => [
+          `${membership.collectionId}\u0000${membership.ownerUserId}\u0000${membership.itemId}`,
+          membership,
+        ]));
+        if (reset) merged.clear();
+        for (const membership of data.memberships || []) {
+          merged.set(`${membership.collectionId}\u0000${membership.ownerUserId}\u0000${membership.itemId}`, membership);
+        }
+        return [...merged.values()];
+      });
+      setDeskTotal(data.total || 0);
+      setDeskNextCursor(data.nextCursor);
+      setDeskHasMore(Boolean(data.hasMore));
+      setSelectedSourceId((current) => {
+        if (!reset) return current || nextSources[0]?.id || "";
+        return nextSources.some((item) => item.id === current) ? current : nextSources[0]?.id || "";
+      });
+    } catch (error) {
+      if (!(error instanceof DOMException && error.name === "AbortError")) {
+        setMessage(error instanceof Error ? error.message : "内容池读取失败");
+      }
+    } finally {
+      if (deskAbortRef.current === controller) setDeskLoading(false);
+    }
+  }
+
+  async function loadContentDeskSummary(nextQuery = query) {
+    deskSummaryAbortRef.current?.abort();
+    const controller = new AbortController();
+    deskSummaryAbortRef.current = controller;
     try {
       const params = new URLSearchParams();
+      params.set("library", libraryParam);
+      params.set("descendants", includeDescendantsParam);
       if (nextQuery.trim()) params.set("query", nextQuery.trim());
-      const res = await fetch(`/api/content-pool?${params.toString()}`);
-      const data = (await res.json()) as {
-        projects?: ContentProject[];
-        activeProject?: ContentProject;
-        collections?: ContentPoolCollection[];
-        memberships?: ContentPoolCollectionMembership[];
-        tags?: ContentPoolTagSuggestion[];
-        error?: string;
-      };
-      if (!res.ok) throw new Error(data.error || "内容池读取失败");
-      const nextProject = data.activeProject || null;
-      const nextProjects = data.projects || [];
-      const mergedSources = mergeContentPoolSources(nextProjects);
-      setProjects(nextProjects);
-      setActiveProject(nextProject);
+      const res = await fetch(`/api/content-pool/desk/summary?${params.toString()}`, { signal: controller.signal });
+      const data = (await res.json()) as ContentPoolDeskSummary & { error?: string };
+      if (!res.ok) throw new Error(data.error || "内容池统计读取失败");
+      if (deskSummaryAbortRef.current !== controller) return;
       setCollections(data.collections || []);
-      setMemberships(data.memberships || []);
+      setProjects(data.projects || []);
+      setActiveProject(data.activeProject || null);
       setPoolTags(data.tags || []);
-      setSources(mergedSources);
-      if (nextProject && !nextQuery.trim()) setQuery(nextProject.query);
-      setSelectedSourceId((current) => (mergedSources.some((item) => item.id === current) ? current : mergedSources[0]?.id || ""));
-      setSelectedContentItemIds((current) => current.filter((id) => mergedSources.some((item) => item.id === id)));
+      setDeskSummary({ libraryCounts: data.libraryCounts, libraryStats: data.libraryStats });
+      if (!deskSummaryQueryInitializedRef.current) {
+        deskSummaryQueryInitializedRef.current = true;
+        if (!nextQuery.trim() && data.activeProject?.query) setQuery(data.activeProject.query);
+      }
     } catch (error) {
-      setMessage(error instanceof Error ? error.message : "内容池读取失败");
+      if (!(error instanceof DOMException && error.name === "AbortError")) {
+        setMessage(error instanceof Error ? error.message : "内容池统计读取失败");
+      }
+    }
+  }
+
+  async function refreshContentDesk(options: { reset?: boolean; query?: string } = {}) {
+    if (options.query !== undefined) setQuery(options.query);
+    await Promise.all([
+      loadContentDesk({ reset: options.reset !== false }),
+      loadContentDeskSummary(options.query ?? query),
+    ]);
+  }
+
+  async function loadMoreContentDesk() {
+    await loadContentDesk({ reset: false });
+  }
+
+  async function selectVisibleContentItems() {
+    const params = buildContentDeskParams(200);
+    try {
+      const res = await fetch(`/api/content-pool/desk/ids?${params.toString()}`);
+      const data = (await res.json()) as { items?: ContentPoolDeskItemRef[]; error?: string };
+      if (!res.ok) throw new Error(data.error || "内容池全选失败");
+      const items = data.items || [];
+      setSelectedContentItemIds(items.map((item) => item.id));
+      setSelectedItemOwners(new Map(items.map((item) => [item.id, item.ownerUserId])));
+      setBatchTagFailures([]);
+    } catch (error) {
+      setMessage(error instanceof Error ? error.message : "内容池全选失败");
     }
   }
 
@@ -585,6 +655,7 @@ export default function ContentDeskPage() {
     setLibraryParam(view.kind === "all" ? "all" : view.kind === "default" ? "default" : view.id);
     setLibraryRailOpen(false);
     setSelectedContentItemIds([]);
+    setSelectedItemOwners(new Map());
     setBatchTagFailures([]);
     setIngestCollectionOverride(null);
   }
@@ -610,24 +681,36 @@ export default function ContentDeskPage() {
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ name, parentId: collectionDialog.parentId }),
       });
-    const data = (await response.json()) as { error?: string; collection?: ContentPoolCollection };
+    const data = (await response.json()) as {
+      error?: string;
+      collection?: ContentPoolCollection;
+      collections?: ContentPoolCollection[];
+    };
     if (!response.ok || !data.collection) throw new Error(data.error || "内容库保存失败");
     const wasRename = collectionDialog.mode === "rename";
     setCollectionDialog(null);
-    await loadContentPool(activeProject?.query || query);
+    if (data.collections) setCollections(data.collections);
+    else setCollections((current) => mergeCollectionList(current, data.collection as ContentPoolCollection));
     setMessage(wasRename ? "内容库已重命名。" : "内容库已创建。");
   }
 
   async function deleteCollection(collection: ContentPoolCollection) {
     const response = await fetch(`/api/content-pool/collections/${encodeURIComponent(collection.id)}`, { method: "DELETE" });
-    const data = (await response.json()) as { error?: string };
+    const data = (await response.json()) as { error?: string; collections?: ContentPoolCollection[] };
     if (!response.ok) throw new Error(data.error || "内容库删除失败");
-    const removedIds = new Set([collection.id, ...contentPoolCollectionDescendantIds(collections, collection.id)]);
-    if (libraryView.kind === "collection" && removedIds.has(libraryView.id)) setLibraryParam("all");
-    if (ingestCollectionId && removedIds.has(ingestCollectionId)) setIngestCollectionOverride(null);
+    if (data.collections) setCollections(data.collections);
+    else setCollections((current) => current.filter((candidate) => candidate.id !== collection.id));
+    setMemberships((current) => current.filter((membership) => membership.collectionId !== collection.id));
+    const deletedActiveLibrary = libraryView.kind === "collection" && libraryView.id === collection.id;
+    if (deletedActiveLibrary) setLibraryParam("all");
+    if (ingestCollectionId === collection.id) setIngestCollectionOverride(null);
     setSelectedContentItemIds([]);
+    setSelectedItemOwners(new Map());
     setDeleteCollectionTarget(null);
-    await loadContentPool(activeProject?.query || query);
+    if (!deletedActiveLibrary) {
+      void loadContentDesk({ reset: true });
+      void loadContentDeskSummary(activeProject?.query || query);
+    }
     setMessage("内容库已删除，条目不删除。");
   }
 
@@ -655,9 +738,25 @@ export default function ContentDeskPage() {
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify(body),
       });
-      const data = (await response.json()) as { error?: string; failures?: Array<{ itemId: string; error: string }> };
+      const data = (await response.json()) as {
+        error?: string;
+        failures?: Array<{ itemId: string; error: string }>;
+        memberships?: ContentPoolCollectionMembership[];
+        collection?: ContentPoolCollection;
+      };
       if (!response.ok) throw new Error(data.error || "内容库归属更新失败");
-      await loadContentPool(activeProject?.query || query);
+      const itemIds = Array.isArray(body.itemIds) ? body.itemIds.filter((id): id is string => typeof id === "string") : [];
+      const ownersById = new Map(deskSources.map((item) => [item.id, item.ownerUserId]));
+      for (const itemId of itemIds) {
+        if (!ownersById.has(itemId) && selectedItemOwners.has(itemId)) ownersById.set(itemId, selectedItemOwners.get(itemId));
+      }
+      setMemberships((current) => mergeAffectedMemberships(current, itemIds, ownersById, data.memberships || []));
+      if (data.collection) {
+        const created = data.collection;
+        setCollections((current) => mergeCollectionList(current, created));
+      }
+      if (libraryView.kind !== "all") void loadContentDesk({ reset: true });
+      void loadContentDeskSummary(activeProject?.query || query);
       setMessage(data.failures?.length ? `内容库归属已更新，失败 ${data.failures.length} 条。` : "内容库归属已更新。");
       return data;
     } finally {
@@ -850,7 +949,7 @@ export default function ContentDeskPage() {
           collectionId: ingestCollectionId || undefined,
         }),
       });
-      const data = (await res.json()) as CrawlJob & { error?: string; project?: ContentProject };
+      const data = (await res.json()) as CrawlJob & { error?: string; project?: ContentPoolProjectSummary };
       if (!res.ok) throw new Error(data.error || "采集失败");
       setCrawlProgress({
         title: "关键词采集",
@@ -861,7 +960,7 @@ export default function ContentDeskPage() {
         total: targetCount,
         completed: data.items?.length || 0,
       });
-      await loadContentPool(query);
+      await refreshContentDesk();
       await loadExecutionLogs();
       setMessage(`采集完成：${data.items?.length || 0} 条样本。`);
     } catch (error) {
@@ -911,7 +1010,7 @@ export default function ContentDeskPage() {
         value: 100,
         status: "success",
       });
-      await loadContentPool(data.query || query);
+      await refreshContentDesk({ query: data.query || query });
       await loadExecutionLogs();
       setMessage(`链接导入完成：${data.summary?.imported || data.items?.length || 0} 条样本。`);
     } catch (error) {
@@ -961,7 +1060,7 @@ export default function ContentDeskPage() {
       const data = (await res.json()) as { item?: NormalizedSourceItem; error?: string };
       if (!res.ok || !data.item) throw new Error(data.error || "样本保存失败");
       setSourceEditState({ sourceId: data.item.id, form: makeSourceEditForm(data.item) });
-      await loadContentPool(query);
+      await refreshContentDesk();
       setMessage("样本已保存。");
     } catch (error) {
       setMessage(error instanceof Error ? error.message : "样本保存失败");
@@ -1002,11 +1101,11 @@ export default function ContentDeskPage() {
           },
         }),
       });
-      const data = (await res.json()) as { item?: NormalizedSourceItem; project?: ContentProject; error?: string };
+      const data = (await res.json()) as { item?: NormalizedSourceItem; project?: ContentPoolProjectSummary; error?: string };
       if (!res.ok || !data.item) throw new Error(data.error || "新增样本失败");
       setManualSource({ title: "", contentText: "", sourceUrl: "", imageUrls: "", videoUrl: "" });
       setSelectedSourceId(data.item.id);
-      await loadContentPool(query);
+      await refreshContentDesk();
       setMessage("已新增内容池样本。");
     } catch (error) {
       setMessage(error instanceof Error ? error.message : "新增样本失败");
@@ -1024,7 +1123,13 @@ export default function ContentDeskPage() {
       const data = (await res.json()) as { error?: string };
       if (!res.ok) throw new Error(data.error || "删除样本失败");
       setSelectedSourceId("");
-      await loadContentPool(query);
+      setSelectedContentItemIds((current) => current.filter((id) => id !== selectedSource.id));
+      setSelectedItemOwners((current) => {
+        const next = new Map(current);
+        next.delete(selectedSource.id);
+        return next;
+      });
+      await refreshContentDesk();
       setMessage("样本已删除。");
     } catch (error) {
       setMessage(error instanceof Error ? error.message : "删除样本失败");
@@ -1048,7 +1153,7 @@ export default function ContentDeskPage() {
       const data = (await res.json()) as { error?: string };
       if (!res.ok) throw new Error(data.error || "批量更新失败");
       setSelectedContentItemIds([]);
-      await loadContentPool(query);
+      await refreshContentDesk();
       setMessage(`已将 ${selectedContentItemIds.length} 条样本标记为${formatPoolStatus(status)}。`);
     } catch (error) {
       setMessage(error instanceof Error ? error.message : "批量更新失败");
@@ -1073,7 +1178,8 @@ export default function ContentDeskPage() {
       const data = (await res.json()) as { error?: string };
       if (!res.ok) throw new Error(data.error || "批量删除失败");
       setSelectedContentItemIds([]);
-      await loadContentPool(query);
+      setSelectedItemOwners(new Map());
+      await refreshContentDesk();
       setMessage("已删除选中样本。");
     } catch (error) {
       setMessage(error instanceof Error ? error.message : "批量删除失败");
@@ -1096,7 +1202,7 @@ export default function ContentDeskPage() {
       const data = (await res.json()) as ContentPoolTagBatchResult & { error?: string };
       if (!res.ok) throw new Error(data.error || "批量标签更新失败");
       setBatchTagFailures(data.failures);
-      await loadContentPool(activeProject?.query || query);
+      await refreshContentDesk({ query: activeProject?.query || query });
       setMessage(`标签操作完成：已更新 ${data.items.length} 条，失败 ${data.failures.length} 条。`);
     } catch (error) {
       const message = error instanceof Error ? error.message : "批量标签更新失败";
@@ -1121,7 +1227,7 @@ export default function ContentDeskPage() {
       });
       const data = (await res.json()) as { updatedCount?: number; localImages?: number; localVideos?: number; videoFrames?: number; error?: string };
       if (!res.ok) throw new Error(data.error || "素材补全失败");
-      await loadContentPool(query);
+      await refreshContentDesk();
       setMessage(`素材补全完成：${data.updatedCount || 0} 条，已缓存图片 ${data.localImages || 0} 张，已缓存视频 ${data.localVideos || 0} 个，关键帧 ${data.videoFrames || 0} 张。`);
     } catch (error) {
       setMessage(error instanceof Error ? error.message : "素材补全失败");
@@ -1183,17 +1289,22 @@ export default function ContentDeskPage() {
   }
 
   function toggleContentItemSelection(sourceItemId: string) {
-    setSelectedContentItemIds((current) =>
-      current.includes(sourceItemId) ? current.filter((id) => id !== sourceItemId) : [...current, sourceItemId],
-    );
-  }
-
-  function selectVisibleContentItems() {
-    setSelectedContentItemIds(visibleSources.slice(0, 200).map((item) => item.id));
+    const selected = selectedContentItemIds.includes(sourceItemId);
+    setSelectedContentItemIds((current) => selected ? current.filter((id) => id !== sourceItemId) : [...current, sourceItemId]);
+    setSelectedItemOwners((current) => {
+      const next = new Map(current);
+      if (selected) {
+        next.delete(sourceItemId);
+      } else {
+        next.set(sourceItemId, deskSources.find((item) => item.id === sourceItemId)?.ownerUserId);
+      }
+      return next;
+    });
   }
 
   function clearContentItemSelection() {
     setSelectedContentItemIds([]);
+    setSelectedItemOwners(new Map());
     setBatchTagFailures([]);
   }
 
@@ -1274,7 +1385,7 @@ export default function ContentDeskPage() {
             <button
               className="soft-button inline-flex h-10 items-center justify-center gap-2 px-3 text-xs font-black"
               type="button"
-              onClick={() => loadContentPool(query)}
+              onClick={() => void refreshContentDesk()}
               disabled={Boolean(busy)}
             >
               {busy === "load" ? <Loader2 className="h-4 w-4 animate-spin" /> : <RefreshCw className="h-4 w-4" />}
@@ -1285,7 +1396,7 @@ export default function ContentDeskPage() {
 
         <section className="content-desk-metrics">
           <Metric label="内容样本" value={libraryScopedStats.total} />
-          <Metric label="当前筛选" value={visibleSources.length} />
+          <Metric label="当前筛选" value={deskTotal} />
           <Metric label="已分析" value={libraryScopedStats.analyzed} />
           <Metric label="已仿写" value={libraryScopedStats.rewritten} />
           <Metric label="已选择" value={selectedContentItemIds.length} />
@@ -1575,7 +1686,7 @@ export default function ContentDeskPage() {
               </div>
               <div className="mt-3 grid grid-cols-2 gap-2">
                 <PoolMetric label="内容池" value={projectStats.total} />
-                <PoolMetric label="当前筛选" value={visibleSources.length} />
+                <PoolMetric label="当前筛选" value={deskTotal} />
                 <PoolMetric label="已仿写" value={projectStats.rewritten} />
                 <PoolMetric label="已分析" value={projectStats.analyzed} />
               </div>
@@ -1589,7 +1700,7 @@ export default function ContentDeskPage() {
                       const project = projects.find((item) => item.normalizedQuery === event.target.value);
                       if (!project) return;
                       setQuery(project.query);
-                      void loadContentPool(project.query);
+                      void loadContentDeskSummary(project.query);
                     }}
                   >
                     {projects.map((item) => (
@@ -1610,7 +1721,7 @@ export default function ContentDeskPage() {
               <div className="content-pool-library-scope">
                 <div className="min-w-0">
                   <strong>{libraryTitle}</strong>
-                  <small>{libraryScopedSources.length} 条内容</small>
+                  <small>{libraryScopedStats.total} 条内容</small>
                 </div>
                 {libraryView.kind === "collection" ? (
                   <label className="content-pool-descendants-toggle">
@@ -1676,7 +1787,7 @@ export default function ContentDeskPage() {
               {(poolSearch || poolStatusFilter !== "all" || poolPlatformFilter !== "all" || poolProjectFilter !== "all" || poolContentTagFilters.length || poolCustomTagFilters.length) ? <button className="content-pool-clear-filters" type="button" onClick={clearPoolFilters}><X className="h-3.5 w-3.5" />清除筛选</button> : null}
               <BatchActionBar
                 selectedCount={selectedContentItemIds.length}
-                totalCount={visibleSources.length}
+                totalCount={deskTotal}
                 busy={Boolean(busy)}
                 title="内容池批量管理"
                 onSelectVisible={selectVisibleContentItems}
@@ -1742,8 +1853,17 @@ export default function ContentDeskPage() {
                   </article>
                 ))
               ) : (
-                <EmptyState title={sources.length ? "当前筛选无样本" : "暂无样本"} icon={<Search className="h-5 w-5" />} />
+                <EmptyState title={libraryScopedStats.total ? "当前筛选无样本" : "暂无样本"} icon={<Search className="h-5 w-5" />} />
               )}
+              {deskHasMore ? (
+                <div className="mt-3 flex justify-center">
+                  <button className="soft-button" type="button" disabled={deskLoading} onClick={() => void loadMoreContentDesk()}>
+                    {deskLoading ? "加载中…" : "加载更多"}
+                  </button>
+                </div>
+              ) : deskSources.length ? (
+                <p className="mt-3 text-center text-[11px] text-white/40">已加载全部</p>
+              ) : null}
             </div>
           </section>
 
@@ -1899,7 +2019,7 @@ export default function ContentDeskPage() {
                 />
 
                 <PoolSecondaryCard
-                  selectedCount={selectedContentItems.length}
+                  selectedCount={selectedContentItemIds.length}
                   busy={busy === "secondary"}
                   latestRun={latestPoolRun}
                   settings={workspaceSettings}
@@ -1977,7 +2097,7 @@ export default function ContentDeskPage() {
         <ContentPoolTagManagerDialog
           tags={poolTags}
           onClose={() => setTagManagerOpen(false)}
-          onChanged={async () => { await loadContentPool(activeProject?.query || query); }}
+          onChanged={async () => { await refreshContentDesk({ query: activeProject?.query || query }); }}
         />
       ) : null}
     </main>
@@ -2771,69 +2891,41 @@ function splitLines(value: string) {
   return value.split(/\r?\n/).map((item) => item.trim()).filter(Boolean);
 }
 
-function mergeContentPoolSources(projects: ContentProject[]) {
-  const seen = new Set<string>();
-  const items: NormalizedSourceItem[] = [];
-  for (const project of [...projects].sort((left, right) => right.updatedAt.localeCompare(left.updatedAt))) {
-    for (const item of project.items) {
-      if (seen.has(item.id)) continue;
-      seen.add(item.id);
-      items.push(item);
-    }
-  }
-  return items;
+function mergeCollectionList(current: ContentPoolCollection[], next: ContentPoolCollection) {
+  const merged = current.some((collection) => collection.id === next.id)
+    ? current.map((collection) => collection.id === next.id ? next : collection)
+    : [...current, next];
+  return [...merged].sort((left, right) => (left.relativePath || left.name).localeCompare(right.relativePath || right.name, "zh-CN") || left.id.localeCompare(right.id));
 }
 
-function buildProjectStats(project: ContentProject | null) {
+function mergeAffectedMemberships(
+  current: ContentPoolCollectionMembership[],
+  itemIds: string[],
+  ownersById: Map<string, string | undefined>,
+  nextMemberships: ContentPoolCollectionMembership[],
+) {
+  const ownedKeys = new Set<string>();
+  const bareIds = new Set<string>();
+  for (const itemId of itemIds) {
+    const ownerUserId = ownersById.get(itemId);
+    if (ownerUserId) ownedKeys.add(`${ownerUserId}\u0000${itemId}`);
+    else bareIds.add(itemId);
+  }
+  const remaining = current.filter((membership) => !ownedKeys.has(`${membership.ownerUserId}\u0000${membership.itemId}`)
+    && !bareIds.has(membership.itemId));
+  const merged = new Map<string, ContentPoolCollectionMembership>();
+  for (const membership of [...remaining, ...nextMemberships]) {
+    merged.set(`${membership.collectionId}\u0000${membership.ownerUserId}\u0000${membership.itemId}`, membership);
+  }
+  return [...merged.values()];
+}
+
+function buildProjectStats(project: ContentPoolProjectSummary | null) {
   return {
     total: project?.totalItems || 0,
     analyzed: project?.analyzedItems || 0,
     rewritten: (project?.rewrittenItems || 0) + (project?.approvedItems || 0) + (project?.publishedItems || 0),
   };
-}
-
-function sortSources(items: NormalizedSourceItem[], sortMode: PoolSortMode) {
-  return items
-    .map((item, index) => ({ item, index }))
-    .sort((a, b) => compareSources(a.item, b.item, sortMode) || a.index - b.index)
-    .map(({ item }) => item);
-}
-
-function compareSources(a: NormalizedSourceItem, b: NormalizedSourceItem, sortMode: PoolSortMode) {
-  switch (sortMode) {
-    case "published_desc":
-      return compareSourceTimes(a.publishedAt, b.publishedAt, "desc") || compareHotScore(b, a);
-    case "published_asc":
-      return compareSourceTimes(a.publishedAt, b.publishedAt, "asc") || compareHotScore(b, a);
-    case "crawled_desc":
-      return compareSourceTimes(getCrawlTime(a), getCrawlTime(b), "desc") || compareHotScore(b, a);
-    case "crawled_asc":
-      return compareSourceTimes(getCrawlTime(a), getCrawlTime(b), "asc") || compareHotScore(b, a);
-    case "engagement_desc":
-      return calculateEngagementRate(b) - calculateEngagementRate(a) || compareHotScore(b, a);
-    case "hot_desc":
-    default:
-      return compareHotScore(b, a);
-  }
-}
-
-function compareHotScore(a: NormalizedSourceItem, b: NormalizedSourceItem) {
-  return (a.hotScore || calculateQualityScore(a)) - (b.hotScore || calculateQualityScore(b));
-}
-
-function compareSourceTimes(aValue: string | undefined, bValue: string | undefined, direction: "asc" | "desc") {
-  const aTime = getSourceTimeMs(aValue);
-  const bTime = getSourceTimeMs(bValue);
-  if (!aTime && !bTime) return 0;
-  if (!aTime) return 1;
-  if (!bTime) return -1;
-  return direction === "desc" ? bTime - aTime : aTime - bTime;
-}
-
-function getSourceTimeMs(value?: string) {
-  if (!value) return 0;
-  const time = Date.parse(value);
-  return Number.isFinite(time) ? time : 0;
 }
 
 function getCrawlTime(item: NormalizedSourceItem) {

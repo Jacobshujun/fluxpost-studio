@@ -1,6 +1,9 @@
 import type {
   ContentPoolCollection,
   ContentPoolCollectionMembership,
+  ContentPoolDeskCursor,
+  ContentPoolDeskFilter,
+  ContentPoolDeskSort,
   ContentPoolSelectionCollection,
   ContentPoolSelectionFilter,
   ContentPoolSelectionItem,
@@ -17,6 +20,50 @@ import { matchesAllContentPoolCustomTags, normalizeContentPoolCustomTags } from 
 
 export const CONTENT_POOL_SELECTION_PAGE_LIMIT = 40;
 export const CONTENT_POOL_SELECTION_MAX_LIMIT = 100;
+export const CONTENT_POOL_DESK_PAGE_LIMIT = 40;
+export const CONTENT_POOL_DESK_MAX_LIMIT = 100;
+export const CONTENT_POOL_DESK_IDS_MAX_LIMIT = 200;
+
+const contentPoolDeskSortValues: ContentPoolDeskSort[] = ["hot_desc", "published_desc", "published_asc", "crawled_desc", "crawled_asc", "engagement_desc"];
+
+export function normalizeContentPoolDeskFilter(input: Partial<ContentPoolDeskFilter> = {}): ContentPoolDeskFilter {
+  const sort = contentPoolDeskSortValues.includes(input.sort as ContentPoolDeskSort)
+    ? input.sort as ContentPoolDeskSort
+    : "hot_desc";
+  return {
+    library: cleanString(input.library) || "all",
+    includeDescendants: input.includeDescendants !== false,
+    query: cleanString(input.query),
+    statuses: uniqueValues(input.statuses),
+    platforms: uniqueValues(input.platforms),
+    mediaTypes: uniqueValues(input.mediaTypes),
+    contentTags: uniqueValues(input.contentTags),
+    customTags: normalizeContentPoolCustomTags(input.customTags),
+    projectId: cleanString(input.projectId) || undefined,
+    sort,
+  };
+}
+
+export function encodeContentPoolDeskCursor(cursor: ContentPoolDeskCursor) {
+  return Buffer.from(JSON.stringify(cursor), "utf8").toString("base64url");
+}
+
+export function decodeContentPoolDeskCursor(cursor: string): ContentPoolDeskCursor | undefined {
+  try {
+    const value = JSON.parse(Buffer.from(cursor, "base64url").toString("utf8")) as Partial<ContentPoolDeskCursor>;
+    if (!contentPoolDeskSortValues.includes(value.sort as ContentPoolDeskSort)) return undefined;
+    if (typeof value.sortValue !== "number" && typeof value.sortValue !== "string") return undefined;
+    if (!cleanString(value.projectId) || !cleanString(value.itemId)) return undefined;
+    return {
+      sort: value.sort as ContentPoolDeskSort,
+      sortValue: value.sortValue,
+      projectId: cleanString(value.projectId),
+      itemId: cleanString(value.itemId),
+    };
+  } catch {
+    return undefined;
+  }
+}
 
 type ContentPoolSelectionCursor = {
   sort: ContentPoolSelectionSort;

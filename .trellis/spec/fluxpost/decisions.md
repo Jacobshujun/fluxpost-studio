@@ -496,6 +496,20 @@ ownerUserId: account.id
 - Wrong: `updateGeneratedPost(id, { imageUrls, canvasImageBatch })` or `disabled={post.canvasImageBatch?.status === "partial"}`.
 - Correct: update reviewable media only, keep partial details on Canvas artifacts/runs, and let existing publish-mode validation decide availability.
 
+## Scenario: Content-pool desk pagination without an item table
+
+### Decision
+
+- Read owner-scoped project metadata once in `projects AS MATERIALIZED`, expand items with `CROSS JOIN LATERAL jsonb_array_elements(COALESCE(p.data_json->'items','[]'::jsonb))`, strip `raw` with `item - 'raw'`, and do dedupe/filter/sort/keyset pagination in Node.
+- Do not push item-level predicates or window functions into SQL before the P2 `content_pool_items` table exists.
+- Hot content-item writes target only containing projects; whole-pool reads remain only for snapshot compatibility, tag suggestions, and Canvas selection.
+
+### Evidence
+
+- PostgreSQL 18 local data: 88 projects, 5,104 items, 222 MB JSON, 878 MB GIN.
+- Repeating `data_json->>'ownerUserId'` after lateral expansion detoasted the project JSON per item row and produced 63 s desk queries even with a materialized owner CTE.
+- Light-row scan returns 5,115 rows / ~46 MB in ~1.0 s; Node desk ~960 ms and summary ~898 ms end to end on real PostgreSQL. Page response is 66 KB for 5 items with no `raw`.
+
 ## Pending Decisions
 
 - Subtask-level durable simple workflow, image-provider task replay, and Feishu per-post idempotency mapping for safe publish-stage replay: 待确认.

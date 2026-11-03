@@ -1,15 +1,17 @@
 import { randomUUID } from "node:crypto";
 import {
   applyContentPoolCollectionMembershipChangesFromDb,
+  countContentPoolCollectionItemsByCollectionFromDb,
   deleteContentPoolCollectionFromDb,
   deleteContentPoolTagFromDb,
-  listContentPoolCollectionItemsFromDb,
+  getContentPoolItemOwnersByIdsFromDb,
+  listContentPoolCollectionItemsForItemIdsFromDb,
   listContentPoolCollectionsFromDb,
   listContentPoolTagsFromDb,
   mutateAllSourceProjectsInDb,
-  readContentProjectsFromDb,
   saveContentPoolCollectionToDb,
   saveContentPoolTagToDb,
+  type ContentPoolItemOwnerRef,
 } from "./database";
 import { contentPoolCollectionDescendantIds } from "./content-pool-selection";
 import { contentPoolCustomTagKey, normalizeContentPoolCustomTags, normalizeContentPoolTagColor } from "./content-pool-tags";
@@ -21,8 +23,6 @@ import type {
   ContentPoolCollectionBatchResult,
   ContentPoolTag,
   ContentPoolTagColor,
-  ContentProject,
-  NormalizedSourceItem,
 } from "./types";
 
 const contentPoolCollectionNameLimit = 120;
@@ -41,12 +41,11 @@ export function normalizeContentPoolCollectionName(value: unknown) {
 }
 
 export async function listContentPoolCollections(account: WorkspaceAccessActor): Promise<ContentPoolCollection[]> {
-  const [collections, memberships] = await Promise.all([
+  const [collections, groupedCounts] = await Promise.all([
     listContentPoolCollectionsFromDb(),
-    listContentPoolCollectionItemsFromDb(),
+    countContentPoolCollectionItemsByCollectionFromDb(),
   ]);
-  const counts = new Map<string, number>();
-  for (const membership of memberships) counts.set(membership.collectionId, (counts.get(membership.collectionId) || 0) + 1);
+  const counts = new Map(groupedCounts.map((entry) => [entry.collectionId, entry.count]));
   return collections
     .filter((collection) => canAccessWorkspaceOwner(account, collection.ownerUserId))
     .map((collection) => ({
@@ -156,19 +155,19 @@ export async function updateContentPoolCollectionItems(
 ): Promise<ContentPoolCollectionBatchResult> {
   const itemIds = uniqueStrings(request.itemIds);
   if (!itemIds.length) throw new ContentPoolCollectionValidationError("请选择至少一条内容。");
-  const [projects, collections, currentMemberships] = await Promise.all([
-    readContentProjectsFromDb(),
+  const [itemOwners, collections, currentMemberships] = await Promise.all([
+    getContentPoolItemOwnersByIdsFromDb(itemIds),
     listContentPoolCollectionsFromDb(),
-    listContentPoolCollectionItemsFromDb(),
+    listContentPoolCollectionItemsForItemIdsFromDb(itemIds),
   ]);
-  const itemLookup = buildContentPoolItemLookup(projects);
+  const itemLookup = new Map(itemOwners.map((item) => [item.id, item]));
   const collectionById = new Map(collections.map((collection) => [collection.id, collection]));
   const failures: ContentPoolCollectionBatchFailure[] = [];
   const unchangedItemIds: string[] = [];
   const additions: Array<{ collectionId: string; itemId: string }> = [];
   const removals: Array<{ collectionId: string; itemId: string }> = [];
   const currentKeys = new Set(currentMemberships.map((membership) => membershipKey(membership.collectionId, membership.itemId)));
-  const itemMatchesCollection = (item: NormalizedSourceItem, collection: ContentPoolCollection) => !item.ownerUserId || item.ownerUserId === collection.ownerUserId;
+  const itemMatchesCollection = (item: ContentPoolItemOwnerRef, collection: ContentPoolCollection) => !item.ownerUserId || item.ownerUserId === collection.ownerUserId;
   const requireCollection = (collectionId: string) => {
     const collection = collectionById.get(collectionId);
     if (!collection || !canAccessWorkspaceOwner(account, collection.ownerUserId)) {
@@ -297,8 +296,7 @@ export async function updateContentPoolCollectionItems(
   if (additions.length || removals.length) {
     await applyContentPoolCollectionMembershipChangesFromDb({ additions, removals, clearItems: [], createdAt: new Date().toISOString() });
   }
-  const affectedItemIds = new Set(itemIds);
-  const memberships = (await listContentPoolCollectionItemsFromDb()).filter((membership) => affectedItemIds.has(membership.itemId));
+  const memberships = await listContentPoolCollectionItemsForItemIdsFromDb(itemIds);
   return {
     action: request.action,
     collection: createdCollection ? collectionView(createdCollection, account) : undefined,
@@ -474,15 +472,7 @@ function compareCollections(left: ContentPoolCollection, right: ContentPoolColle
   return (left.relativePath || left.name).localeCompare(right.relativePath || right.name, "zh-CN") || left.id.localeCompare(right.id);
 }
 
-function buildContentPoolItemLookup(projects: ContentProject[]) {
-  const lookup = new Map<string, NormalizedSourceItem>();
-  for (const project of [...projects].sort((left, right) => right.updatedAt.localeCompare(left.updatedAt))) {
-    for (const item of project.items) if (!lookup.has(item.id)) lookup.set(item.id, item);
-  }
-  return lookup;
-}
-
-function canMutateContentPoolItem(account: WorkspaceAccessActor, item: NormalizedSourceItem) {
+function canMutateContentPoolItem(account: WorkspaceAccessActor, item: ContentPoolItemOwnerRef) {
   return canAccessWorkspaceOwner(account, item.ownerUserId);
 }
 

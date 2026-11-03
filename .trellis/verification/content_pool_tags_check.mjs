@@ -35,7 +35,8 @@ try {
     /if \(!canMutateWorkspaceContent\(account, item\)\) return item;\s*handledIds\.add\(item\.id\);/,
     "an unauthorized duplicate id must not hide a later owner-editable item",
   );
-  assert.match(contentPoolSource, /if \(result\.items\.length\) await writePool\(pool\)/, "batch tags should write the pool once after partial processing");
+  assert.match(contentPoolSource, /await mutateContentProjectsForItemIdsInDb\(ids, contentPoolMutationScope\(account\),[\s\S]*result\.items\.push/, "batch tags should mutate only projects containing the selected items");
+  assert.doesNotMatch(contentPoolSource, /writePool\(|writeContentProjectsToDb/, "tag mutations must not rewrite the whole content pool");
   assert.match(contentPoolSource, /customTags:\s*normalizeContentPoolCustomTags\(previous\.customTags\)/, "recrawl must preserve manual custom tags");
   assert.match(routeSource, /requireWorkspaceAccount\(request\)/);
   assert.match(routeSource, /ContentPoolTagValidationError \? 400 : 500/, "tag API should distinguish invalid input from server failures");

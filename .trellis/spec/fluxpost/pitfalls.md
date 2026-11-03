@@ -191,6 +191,12 @@ Last updated: 2026-07-20
 - Do not solve an anonymous GET failure by changing the whole Bucket ACL. The production contract requires object-level `public-read`; keep `TOS_ENABLED=false` until the admin probe passes.
 - Reconciliation uploads retained bytes but intentionally does not replay or mark the original crawl/generation/import task successful. An operator must review and retry the business workflow after storage recovery.
 
+## Content-Pool Pitfalls
+
+- `content_projects.data_json` is ~222 MB across 88 rows. Never expose `raw` to the browser or read/write the whole table on hot paths; use the desk light-row reader or item-scoped helpers.
+- PostgreSQL re-detosted the project JSON per item row when item predicates or window functions followed LATERAL expansion, producing 63-second desk queries. Extract project metadata in a `MATERIALIZED` CTE, strip `raw` once, and do dedupe/filter/sort/keyset pagination in Node until the P2 item table exists.
+- Item IDs may repeat across owners or projects. Key membership merges by `(ownerUserId, itemId)` and keep newest-project-wins for item lookups.
+
 ## Verification Pitfalls
 
 - Do not invent `npm test`; no `test` script exists in `package.json`.

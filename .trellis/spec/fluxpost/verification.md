@@ -1,6 +1,6 @@
 # Verification
 
-Last updated: 2026-11-02
+Last updated: 2026-11-03
 
 ## Baseline Command
 
@@ -55,6 +55,11 @@ Do not deploy a dirty worktree, branch name, abbreviated SHA, local runtime rows
 
 ## Recent Verification
 
+- 2026-11-03 Content-pool performance: baseline (0 errors/16 warnings), types,
+  build, isolated 45678 browser and desk/performance checks, and PostgreSQL
+  read-only desk 960ms / summary 898ms (4,692 items, 66 KB, no `raw`) pass;
+  200-item owner lookup 1.38s. Manual authenticated 3001 timing remains.
+
 - 2026-11-02 Content-pool libraries: SQLite, browser, types, lint, build and
   baseline pass; PostgreSQL review remains.
 
@@ -85,12 +90,6 @@ Do not deploy a dirty worktree, branch name, abbreviated SHA, local runtime rows
   `test-artifacts/review-usability-*-final.log`,
   `test-artifacts/review-usability-*-fixes*.log`,
   `test-artifacts/review-usability-baseline-final-audit.log`.
-
-- 2026-10-30 ESLint scope: excluded `data/**` operator artifacts only. Lint passes
-  with 0 errors/16 source warnings; ESLint API assertions confirm source/config
-  and maintained scripts remain checked with the require-import rule at error.
-  Full baseline passes, including types/build/config sync/HTTP smoke on 45678 and
-  SQLite checks. LAN unchanged. Local log: `test-artifacts/lint-scope-baseline-20261030.log`.
 
 - 2026-10-28 Wonder repair: baseline domains pass before 17 existing data-script lint errors; focused lint/types/build/config/SQLite/HTTP and six Wonder plus two GPT browser cases pass. Explicitly authorized LAN activation of clean `3f71997` passed build/identity/loopback/LAN HTTP/Canvas checks. No manual paid replay. Evidence: archived wonder-image-repair task.
 

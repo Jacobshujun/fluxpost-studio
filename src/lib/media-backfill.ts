@@ -1,8 +1,8 @@
-import { readContentProjectsFromDb, writeContentProjectsToDb } from "./database";
+import { mutateContentProjectsForItemIdsInDb, readContentProjectsForItemIdsFromDb } from "./database";
 import { cacheCrawledMedia } from "./media-cache";
 import { buildMediaCacheStatus } from "./media-cache-status";
 import { replaceVideoFrameUrlsInMediaUrls, selectBestVideoHighlightFrames } from "./video-frame-policy";
-import { canAccessWorkspaceOwner, type WorkspaceAccessActor } from "./workspace-ownership";
+import { canAccessWorkspaceOwner, isWorkspaceAdmin, type WorkspaceAccessActor } from "./workspace-ownership";
 import type { NormalizedSourceItem } from "./types";
 
 export type BackfillSourceItemMediaOptions = {
@@ -19,7 +19,8 @@ export async function backfillSourceItemMedia(
   const ids = makeUniqueIds(sourceItemIds);
   const selectedIds = new Set(ids);
   const foundIds = new Set<string>();
-  const projects = await readContentProjectsFromDb();
+  const projects = await readContentProjectsForItemIdsFromDb(ids);
+  const scope = account && !isWorkspaceAdmin(account) ? { ownerUserId: account.id } : undefined;
   const now = new Date().toISOString();
   const itemsToCache: NormalizedSourceItem[] = [];
 
@@ -55,50 +56,18 @@ export async function backfillSourceItemMedia(
   const cachedById = new Map(cachedItems.map((item) => [item.id, item]));
   const updatedItems = new Map<string, NormalizedSourceItem>();
 
-  const nextProjects = projects.map((project) => {
+  await mutateContentProjectsForItemIdsInDb(ids, scope, (project) => {
     let changed = false;
     const items = project.items.map((item) => {
       const cachedItem = cachedById.get(item.id);
-      if (!cachedItem) return item;
+      if (!cachedItem || !canMutateWorkspaceContent(account, item)) return item;
       changed = true;
-
-      const downloadedImages = cachedItem.downloadedImages?.length
-        ? cachedItem.downloadedImages
-        : item.downloadedImages;
-      const downloadedVideoUrl = cachedItem.downloadedVideoUrl || item.downloadedVideoUrl;
-      const selectedVideoFrames = selectBestVideoHighlightFrames(cachedItem.videoFrames?.length ? cachedItem.videoFrames : item.videoFrames);
-      const videoFrames = selectedVideoFrames.length ? selectedVideoFrames : undefined;
-      const videoTranscript = cachedItem.videoTranscript || item.videoTranscript;
-      const nextItem: NormalizedSourceItem = {
-        ...item,
-        contentText: cachedItem.contentText || item.contentText,
-        downloadedImages,
-        downloadedVideoUrl,
-        videoFrames,
-        videoTranscript,
-        downloadErrors: cachedItem.downloadErrors,
-        mediaUrls: replaceVideoFrameUrlsInMediaUrls(
-          mergeStringArrays(
-            item.mediaUrls,
-            cachedItem.mediaUrls,
-            downloadedImages,
-            downloadedVideoUrl ? [downloadedVideoUrl] : undefined,
-          ),
-          videoFrames,
-        ),
-        lastSeenAt: item.lastSeenAt || now,
-      };
-      const withStatus = {
-        ...nextItem,
-        mediaCache: buildMediaCacheStatus(nextItem, now),
-      };
+      const withStatus = applyCachedMedia(item, cachedItem, now);
       updatedItems.set(withStatus.id, withStatus);
       return withStatus;
     });
-    return changed ? { ...project, items, updatedAt: now } : project;
+    return changed ? { ...project, items, updatedAt: now } : undefined;
   });
-
-  if (updatedItems.size) await writeContentProjectsToDb(nextProjects);
 
   const updated = Array.from(updatedItems.values());
   return {
@@ -112,6 +81,39 @@ export async function backfillSourceItemMedia(
     localVideos: updated.filter((item) => item.mediaCache?.localVideo).length,
     videoFrames: updated.reduce((sum, item) => sum + (item.mediaCache?.frameCount || 0), 0),
     errorCount: updated.reduce((sum, item) => sum + (item.mediaCache?.errorCount || 0), 0),
+  };
+}
+
+function applyCachedMedia(item: NormalizedSourceItem, cachedItem: NormalizedSourceItem, now: string) {
+  const downloadedImages = cachedItem.downloadedImages?.length
+    ? cachedItem.downloadedImages
+    : item.downloadedImages;
+  const downloadedVideoUrl = cachedItem.downloadedVideoUrl || item.downloadedVideoUrl;
+  const selectedVideoFrames = selectBestVideoHighlightFrames(cachedItem.videoFrames?.length ? cachedItem.videoFrames : item.videoFrames);
+  const videoFrames = selectedVideoFrames.length ? selectedVideoFrames : undefined;
+  const videoTranscript = cachedItem.videoTranscript || item.videoTranscript;
+  const nextItem: NormalizedSourceItem = {
+    ...item,
+    contentText: cachedItem.contentText || item.contentText,
+    downloadedImages,
+    downloadedVideoUrl,
+    videoFrames,
+    videoTranscript,
+    downloadErrors: cachedItem.downloadErrors,
+    mediaUrls: replaceVideoFrameUrlsInMediaUrls(
+      mergeStringArrays(
+        item.mediaUrls,
+        cachedItem.mediaUrls,
+        downloadedImages,
+        downloadedVideoUrl ? [downloadedVideoUrl] : undefined,
+      ),
+      videoFrames,
+    ),
+    lastSeenAt: item.lastSeenAt || now,
+  };
+  return {
+    ...nextItem,
+    mediaCache: buildMediaCacheStatus(nextItem, now),
   };
 }
 

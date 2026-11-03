@@ -49,15 +49,47 @@ assertContains(
 );
 
 assertContains(
-  contentPool,
-  /await writePool\(pool\);\s*if \(options\.collectionId\)[\s\S]*applyContentPoolCollectionMembershipChangesFromDb/,
-  "crawl ingestion should keep project upserts separate from membership writes.",
+  database,
+  /export async function mutateContentProjectByNormalizedQueryInDb\([\s\S]*SELECT id, data_json FROM content_projects WHERE normalized_query = \$1 FOR UPDATE/,
+  "ingest/create should lock and update only the project selected by normalized_query.",
 );
 
 assertContains(
-  contentPool,
-  /await writePool\(pool\);\s*await deleteContentPoolCollectionItemsForItemsFromDb\(deletedItems\)/,
-  "deleting a content item should clean its library memberships after the project write.",
+  database,
+  /export async function mutateContentProjectsForItemIdsInDb\([\s\S]*SELECT id, data_json FROM content_projects[\s\S]*FOR UPDATE/,
+  "batch item writes should lock only projects that contain the selected item ids.",
 );
+
+assertContains(
+  database,
+  /export async function readContentProjectsForItemIdsFromDb\([\s\S]*findContentProjectIdsForItemIdsFromDb\(ids\)[\s\S]*readContentProjectsByIdsFromDb\(projectIds\)/,
+  "item-id reads should resolve projects by indexed item lookup before loading rows.",
+);
+
+const ingest = contentPool.slice(
+  contentPool.indexOf("export async function ingestCrawlItems"),
+  contentPool.indexOf("export async function createSourceItem"),
+);
+assertContains(ingest, /mutateContentProjectByNormalizedQueryInDb\(/, "Crawl ingestion should upsert only the target project.");
+assertNotContains(ingest, /writePool\(|writeContentProjectsToDb|readContentProjectsFromDb/, "Crawl ingestion should not read or write the whole content pool.");
+
+const updateItem = contentPool.slice(
+  contentPool.indexOf("export async function updateSourceItem"),
+  contentPool.indexOf("export async function deleteSourceItem"),
+);
+assertContains(updateItem, /mutateContentProjectsForItemIdsInDb\(/, "Single-item edits should mutate only containing projects.");
+assertNotContains(updateItem, /writePool\(|writeContentProjectsToDb|readContentProjectsFromDb/, "Single-item edits should not read or write the whole content pool.");
+
+const deleteItem = contentPool.slice(
+  contentPool.indexOf("export async function deleteSourceItem"),
+  contentPool.indexOf("export async function batchUpdateSourceItemStatus"),
+);
+assertContains(deleteItem, /mutateContentProjectsForItemIdsInDb\([\s\S]*deleteContentPoolCollectionItemsForItemsFromDb\(deletedItems\)/, "Deleting a content item should clean its library memberships after the row-level project write.");
+assertNotContains(deleteItem, /writePool\(|writeContentProjectsToDb|readContentProjectsFromDb/, "Single-item deletion should not read or write the whole content pool.");
+
+const mediaBackfill = read("src/lib/media-backfill.ts");
+assertContains(mediaBackfill, /readContentProjectsForItemIdsFromDb\(ids\)/, "Media backfill should load only projects containing selected items.");
+assertContains(mediaBackfill, /mutateContentProjectsForItemIdsInDb\(ids, scope,/, "Media backfill should write only projects containing selected items.");
+assertNotContains(mediaBackfill, /writeContentProjectsToDb|readContentProjectsFromDb/, "Media backfill should not read or write the whole content pool.");
 
 console.log("Content projects row-level mutation check passed.");

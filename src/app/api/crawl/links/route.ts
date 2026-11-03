@@ -1,6 +1,7 @@
 import { NextResponse } from "next/server";
 import { compactError, recordExecutionLog } from "@/lib/activity-log";
 import { getContentSafetyPolicy, normalizeContentSafetyPolicySnapshot } from "@/lib/content-safety-policy";
+import { contentPoolProjectSummary, stripContentPoolItemsRaw } from "@/lib/content-pool";
 import { requireContentPoolCollectionWriteTarget } from "@/lib/content-pool-collections";
 import { importSourceLinks } from "@/lib/source-link-import";
 import { isWorkspaceSignInError, requireWorkspaceAccount } from "@/lib/workspace-accounts";
@@ -26,7 +27,11 @@ export async function POST(request: Request) {
     if (collectionId) await requireContentPoolCollectionWriteTarget(account, collectionId);
     const contentSafetyPolicy = normalizeContentSafetyPolicySnapshot(await getContentSafetyPolicy());
     const result = await importSourceLinks({ ...input, collectionId: collectionId || undefined, owner: account, contentSafetyPolicy });
-    return NextResponse.json(result);
+    return NextResponse.json({
+      ...result,
+      items: stripContentPoolItemsRaw(result.items),
+      project: result.project ? contentPoolProjectSummary(result.project) : undefined,
+    });
   } catch (error) {
     await recordExecutionLog({
       scope: "crawl/links",

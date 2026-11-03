@@ -23,7 +23,7 @@ export async function POST(request: Request) {
     const account = await requireWorkspaceAccount(request);
     const body = (await request.json()) as { name?: unknown; parentId?: unknown };
     const collection = await createContentPoolCollection(account, { name: body.name, parentId: body.parentId });
-    return NextResponse.json({ collection });
+    return NextResponse.json({ collection, collections: await listContentPoolCollections(account) });
   } catch (error) {
     return errorResponse(error);
   }

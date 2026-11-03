@@ -1,6 +1,6 @@
 import { NextResponse } from "next/server";
 import { compactError, recordExecutionLog } from "@/lib/activity-log";
-import { ingestCrawlItems } from "@/lib/content-pool";
+import { contentPoolProjectSummary, ingestCrawlItems, stripContentPoolItemsRaw } from "@/lib/content-pool";
 import { requireContentPoolCollectionWriteTarget } from "@/lib/content-pool-collections";
 import { getContentSafetyPolicy, normalizeContentSafetyPolicySnapshot } from "@/lib/content-safety-policy";
 import { filterUnsafeSourceItems } from "@/lib/source-safety";
@@ -22,7 +22,10 @@ type CrawlJobRequest = Partial<CrawlInput> & {
 export async function GET(request: Request) {
   try {
     const account = await requireWorkspaceAccount(request);
-    return NextResponse.json({ jobs: await listJobs(account) });
+    const jobs = await listJobs(account);
+    return NextResponse.json({
+      jobs: jobs.map((job) => ({ ...job, items: stripContentPoolItemsRaw(job.items) })),
+    });
   } catch (error) {
     return NextResponse.json(
       { error: error instanceof Error ? error.message : "Failed to list crawl jobs" },
@@ -131,7 +134,11 @@ export async function POST(request: Request) {
           videoFrames: extractedFrameCount,
         },
       });
-      return NextResponse.json({ ...updated, project });
+      return NextResponse.json({
+        ...updated,
+        items: stripContentPoolItemsRaw(updated.items),
+        project: contentPoolProjectSummary(project),
+      });
     } catch (error) {
       const message = error instanceof Error ? error.message : "Unknown crawler error";
       const isMissingTikHubKey = message.includes("TIKHUB_API_KEY");
@@ -156,7 +163,11 @@ export async function POST(request: Request) {
           returnedItems: updated.items.length,
         },
       });
-      return NextResponse.json({ ...updated, project }, { status: isMissingTikHubKey ? 200 : 502 });
+      return NextResponse.json({
+        ...updated,
+        items: stripContentPoolItemsRaw(updated.items),
+        project: project ? contentPoolProjectSummary(project) : undefined,
+      }, { status: isMissingTikHubKey ? 200 : 502 });
     }
   } catch (error) {
     const message = error instanceof Error ? error.message : "Invalid request";

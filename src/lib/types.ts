@@ -588,6 +588,73 @@ export type ContentPoolSnapshot = {
   tags: ContentPoolTagSuggestion[];
 };
 
+export type ContentPoolDeskSort = "hot_desc" | "published_desc" | "published_asc" | "crawled_desc" | "crawled_asc" | "engagement_desc";
+
+export type ContentPoolDeskCursor = {
+  sort: ContentPoolDeskSort;
+  sortValue: string | number;
+  projectId: string;
+  itemId: string;
+};
+
+export type ContentPoolDeskItem = Omit<NormalizedSourceItem, "raw"> & {
+  projectId: string;
+  projectName: string;
+};
+
+export type ContentPoolProjectSummary = {
+  id: string;
+  ownerUserId?: string;
+  ownerDisplayName?: string;
+  query: string;
+  normalizedQuery: string;
+  createdAt: string;
+  updatedAt: string;
+  lastCrawledAt?: string;
+  totalItems: number;
+  newItems: number;
+  analyzedItems: number;
+  rewrittenItems: number;
+  approvedItems: number;
+  publishedItems: number;
+  platforms: Partial<Record<Platform, number>>;
+};
+
+export type ContentPoolDeskPage = {
+  items: ContentPoolDeskItem[];
+  memberships: ContentPoolCollectionMembership[];
+  total: number;
+  nextCursor?: string;
+  hasMore: boolean;
+};
+
+export type ContentPoolDeskSummary = {
+  projects: ContentPoolProjectSummary[];
+  activeProject?: ContentPoolProjectSummary;
+  collections: ContentPoolCollection[];
+  libraryCounts: { all: number; default: number; byCollection: Record<string, number> };
+  libraryStats: { total: number; analyzed: number; rewritten: number };
+  tags: ContentPoolTagSuggestion[];
+};
+
+export type ContentPoolDeskItemRef = {
+  id: string;
+  ownerUserId?: string;
+};
+
+export type ContentPoolDeskFilter = {
+  library: string;
+  includeDescendants: boolean;
+  query: string;
+  statuses: SourceUsageStatus[];
+  platforms: Platform[];
+  mediaTypes: SourceMediaType[];
+  contentTags: ContentTag[];
+  customTags: string[];
+  projectId?: string;
+  sort: ContentPoolDeskSort;
+};
+
 export type SourceMediaType = NonNullable<NormalizedSourceItem["mediaType"]>;
 
 export type ContentPoolSelectionSort = "hot-desc" | "published-desc" | "crawled-desc";
