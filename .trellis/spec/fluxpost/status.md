@@ -4,11 +4,11 @@ Last updated: 2026-11-03
 
 ## One-Line Status
 
-Bounded local crash diagnostics implemented; activation deferred for running jobs. Historical exit-134 trigger remains unproven.
+Bounded local crash diagnostics verified on LAN. Historical exit-134 trigger remains unproven; active identity is in `/api/version`.
 
 ## Current Focus
 
-- Local diagnostics: logs <=100 MiB; reports <=3 / 7 days / 30 MiB. Focused/baseline/Windows launch checks pass. Running jobs defer activation; 3001 unchanged. Contract: `local_diagnostics.md`; evidence: `archive/2026-11/11-03-local-crash-logging/verification.md`.
+- Local diagnostics: logs <=100 MiB; reports <=3 / 7 days / 30 MiB. Baseline/Windows checks pass. User requested LAN cutover; managed startup, identity, diagnostic flags/receipt and loopback/LAN pages pass. Contract: `local_diagnostics.md`; evidence: `archive/2026-11/11-03-local-crash-logging/verification.md`.
 - Crashes: exit 134 at ~16:38 and ~16:43; fatal trigger unproven. Evidence: `archive/2026-11/11-03-local-crash-diagnosis/verification.md`.
 - Feishu publishing: eight offline-reproduced risks include media skipping/omission, edit overwrite, path escape, deleted-post revival and record/lease persistence. Application unchanged; fixes and live acceptance remain. Evidence: `11-03-feishu-publish-owner-recovery/code-review-2026-11-03.md`.
 - Content-pool performance: row-scoped library/item writes; paginated desk/summary/ids with `raw` stripped; baseline, types, build, browser and PG timing pass (desk 960ms, summary 898ms). Committed and active on LAN; authenticated 3001 timing remains.

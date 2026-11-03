@@ -53,3 +53,21 @@ gain report flags until restarted; do not claim logging is already active.
 
 Historical abort causes remain pending confirmation; this change improves the
 next incident's evidence and is not a proven fix for the two past exits.
+
+## Authorized LAN cutover
+
+The user subsequently requested committing and updating LAN. `npm run local:lan`
+from clean HEAD `5b6c68ca721207a78b0d45d4f6590b8a05d4b666` passed its production
+build, diagnostics preflight, inactive-slot activation, exact identity and HTTP
+smoke. Log: `test-artifacts/local-crash-logging-lan-activation-20261103.log`.
+The independent supervisor PID 10056 and server PID 9984 survived launcher exit;
+the receipt identifies that SHA/slot and reports `running` without a diagnostic
+error. The actual child command includes fatal/uncaught report generation and
+environment/network exclusion. Supervisor stderr is empty.
+
+Loopback and this machine's LAN address returned 200 for `/`, `/review` and
+`/content`; this does not prove access from another physical device. Commit this
+acceptance record, then activate clean final HEAD so code, docs and runtime
+identity match. Final activation output belongs in
+`test-artifacts/local-crash-logging-lan-final-20261103.log`; final PIDs/SHA live
+in the ignored receipts and `/api/version`.
