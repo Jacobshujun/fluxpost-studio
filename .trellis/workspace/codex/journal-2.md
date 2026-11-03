@@ -740,3 +740,36 @@ Fixed drag ordering regression from the gallery layout change: the per-image fie
 ### Next Steps
 
 - None - task complete
+
+
+## Session 81: Content pool manual editor
+
+**Date**: 2026-11-03
+**Task**: Content pool manual editor
+**Branch**: `local`
+
+### Summary
+
+Implemented staged source title/body and complete image editing. Protected manual fields across recrawl/raw repair and revision-scoped image caching; preserved labels and Canvas snapshots. Full baseline, isolated route/cache checks, six three-theme browser cases, library regression and 45 review layouts passed. Local candidate activation follows the managed LAN launcher; runtime SHA is authoritative at /api/version. Authenticated operator review remains.
+
+### Main Changes
+
+(Add details)
+
+### Git Commits
+
+| Hash | Message |
+|------|---------|
+| `c47b797` | (see git log) |
+
+### Testing
+
+- [OK] (Add test results)
+
+### Status
+
+[OK] **Completed**
+
+### Next Steps
+
+- None - task complete
