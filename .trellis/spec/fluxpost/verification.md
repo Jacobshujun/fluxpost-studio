@@ -55,14 +55,9 @@ Do not deploy a dirty worktree, branch name, abbreviated SHA, local runtime rows
 
 ## Recent Verification
 
-- 2026-11-03 Feishu publish owner recovery: targeted queue/resume, workspace,
-  body-policy checks and the full baseline pass (0 lint errors/16 warnings,
-  TypeScript noEmit, HTTP smoke). Nine `generated_posts`/`runtime_posts` owner
-  mismatches repaired to 0. Committed `cb8b3d0`; LAN activation from clean
-  HEAD `52e1c6d` built slot `.next-local-b` on `0.0.0.0:3001`; smoke passed,
-  `/api/version` reports the full SHA on loopback and LAN, and
-  `/review`/`/content` return 200. Real re-publish acceptance remains.
-  Evidence: task `11-03-feishu-publish-owner-recovery`.
+- 2026-11-03 Feishu publish owner recovery: targeted checks and the full
+  baseline pass (0 errors/16 warnings, TypeScript, smoke); owner mismatches
+  repaired to 0; LAN active. Task `11-03-feishu-publish-owner-recovery`.
 
 - 2026-11-03 Content-pool performance: baseline (0 errors/16 warnings), types,
   build, isolated 45678 browser and desk/performance checks, and PostgreSQL

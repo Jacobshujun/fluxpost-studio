@@ -162,6 +162,12 @@ type FeishuPublishChunkProgress = {
 
 const maxFeishuAttachmentImageBytes = 30 * 1024 * 1024;
 const feishuAttachmentStagingRoot = path.join(process.cwd(), "data", "feishu-outbox");
+const feishuAttachmentRateLimitPerWindow = 120;
+const feishuAttachmentRateWindowMs = 60_000;
+const feishuAttachmentRateRetryDelayMs = 65_000;
+const feishuAttachmentUploadMaxAttempts = 3;
+const feishuAttachmentRateSlots: number[] = [];
+let feishuAttachmentRateReservation: Promise<void> = Promise.resolve();
 
 export async function publishPostsToFeishu(posts: GeneratedPost[], options: PublishPostsToFeishuOptions = {}) {
   const publishMode = normalizeFeishuPublishMode(options.publishMode);
@@ -871,6 +877,39 @@ function validateBitableFieldMapForPublishMode(fieldMap: Record<string, string>,
   return "";
 }
 
+function reserveFeishuAttachmentSlots(fileCount: number) {
+  const reservation = feishuAttachmentRateReservation.then(async () => {
+    const count = Math.max(0, Math.min(fileCount, feishuAttachmentRateLimitPerWindow));
+    while (true) {
+      const now = Date.now();
+      while (feishuAttachmentRateSlots.length && now - feishuAttachmentRateSlots[0] >= feishuAttachmentRateWindowMs) {
+        feishuAttachmentRateSlots.shift();
+      }
+      if (feishuAttachmentRateSlots.length + count <= feishuAttachmentRateLimitPerWindow) {
+        for (let index = 0; index < count; index += 1) feishuAttachmentRateSlots.push(now);
+        return;
+      }
+      const waitMs = feishuAttachmentRateWindowMs - (now - feishuAttachmentRateSlots[0]) + 50;
+      await delayFeishuAttachment(waitMs);
+    }
+  });
+  feishuAttachmentRateReservation = reservation.catch(() => undefined);
+  return reservation;
+}
+
+function delayFeishuAttachment(ms: number) {
+  return new Promise<void>((resolve) => setTimeout(resolve, ms));
+}
+
+function isFeishuAttachmentRateLimitError(error: unknown) {
+  const text = [
+    compactCliError(error),
+    getCliOutput(error, "stdout"),
+    getCliOutput(error, "stderr"),
+  ].filter(Boolean).join("\n");
+  return /"code"\s*:\s*800050609\b/.test(text) || /Attachment write rate limit exceeded/i.test(text);
+}
+
 async function uploadGeneratedMediaToFeishu(
   posts: GeneratedPost[],
   recordMappings: FeishuRecordMapping[],
@@ -952,36 +991,43 @@ async function uploadGeneratedMediaToFeishu(
       ...files.flatMap((file) => ["--file", file]),
     ];
 
-      try {
-        const result = await runFeishuCli(args, {
-        timeout: 300_000,
-        maxBuffer: 1024 * 1024 * 8,
-        env: buildCliEnv(process.env),
-      });
-        return {
-        upload: {
-          postId: post.id,
-          recordId,
-          fileCount: files.length,
-          status: "uploaded" as const,
-          stdout: result.stdout,
-          stderr: result.stderr,
-        },
-        failure: null,
-      };
-      } catch (error) {
-        return {
+      let lastError: unknown = new Error(`Feishu attachment upload failed for ${files.length} file(s).`);
+      for (let attempt = 1; attempt <= feishuAttachmentUploadMaxAttempts; attempt += 1) {
+        await reserveFeishuAttachmentSlots(files.length);
+        try {
+          const result = await runFeishuCli(args, {
+            timeout: 300_000,
+            maxBuffer: 1024 * 1024 * 8,
+            env: buildCliEnv(process.env),
+          });
+          return {
+            upload: {
+              postId: post.id,
+              recordId,
+              fileCount: files.length,
+              status: "uploaded" as const,
+              stdout: result.stdout,
+              stderr: result.stderr,
+            },
+            failure: null,
+          };
+        } catch (error) {
+          lastError = error;
+          if (!isFeishuAttachmentRateLimitError(error) || attempt >= feishuAttachmentUploadMaxAttempts) break;
+          await delayFeishuAttachment(feishuAttachmentRateRetryDelayMs);
+        }
+      }
+      return {
         upload: null,
         failure: {
           postId: post.id,
           recordId,
           fileCount: files.length,
-          error: compactCliError(error),
-          stdout: getCliOutput(error, "stdout"),
-          stderr: getCliOutput(error, "stderr"),
+          error: compactCliError(lastError),
+          stdout: getCliOutput(lastError, "stdout"),
+          stderr: getCliOutput(lastError, "stderr"),
         },
-        };
-      }
+      };
     } finally {
       await prepared.cleanup();
     }

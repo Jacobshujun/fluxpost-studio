@@ -52,6 +52,18 @@ into `runtime_posts.data_json` for the mismatched rows only. Idempotent.
   `/api/version` reports `52e1c6d55cbafb04fbd173575057926988fed242` on loopback
   and LAN; LAN `/review` and `/content` return 200.
 
+## Attachment Rate Limit (2026-11-03)
+
+- Jobs `feishu-publish-1793686526317-18e69b07` (3 files) and
+  `feishu-publish-1793686801921-2101cf32` (6 files) created and verified their
+  Base records but failed attachment upload with `800050609`
+  (`120 attachments per 60 seconds`).
+- `uploadGeneratedMediaToFeishu` now reserves slots in a process-wide 120-file
+  / 60-second rolling window and retries a rate-limit failure up to three
+  attempts with a 65-second delay.
+- The resume check asserts the window constant, the reservation helper and the
+  `800050609` matcher.
+
 ## Re-Publish
 
 Pending operator approval.

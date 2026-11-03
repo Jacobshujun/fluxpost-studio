@@ -34,8 +34,11 @@ owner mismatches on 2026-11-03.
   create a replacement record from the same patch and persist its new ID.
 - R4: Existing generated/runtime owner divergences must be repaired from the
   generated post, with before/after evidence.
-- R5: Do not change publishing modes, chaptering, validation rules, attachment
-  limits, or notification content.
+- R5: Do not change publishing modes, chaptering, validation rules or
+  notification content.
+- R6: Attachment uploads must respect Feishu's per-Base limit of 120
+  attachments per 60 seconds. A rate-limit response (`800050609`) must be
+  retried with backoff instead of failing the job immediately.
 
 ## Acceptance Criteria
 
@@ -55,6 +58,5 @@ owner mismatches on 2026-11-03.
 
 ## Out Of Scope
 
-- Attachment rate limiting/backoff for very large batches (separate follow-up).
 - Deleting or deduplicating Base records already created.
 - Changing reviewer permissions or workspace roles.

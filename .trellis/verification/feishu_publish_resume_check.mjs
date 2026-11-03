@@ -59,6 +59,9 @@ assertContains(feishu, /mapping\.recordId\s*=\s*replacementResult\.recordId[\s\S
 assertReplacementCreateOmitsPersistedRecordId(feishu);
 assertContains(feishu, /isMissingFeishuRecordError\(error\)[\s\S]*createFeishuRecordFromPatch\(patchPath\)/, "A stale persisted record ID must be replaced when record-upsert reports not_found.");
 assertContains(feishu, /isMissingFeishuRecordError[\s\S]*"code"\\s\*:\\s\*800030302/, "Stale record recovery must match Feishu's record not_found error code.");
+assertContains(feishu, /feishuAttachmentRateLimitPerWindow\s*=\s*120/, "Attachment uploads must use Feishu's 120-per-window limit.");
+assertContains(feishu, /reserveFeishuAttachmentSlots/, "Attachment uploads must reserve slots in the per-Base rate window.");
+assertContains(feishu, /isFeishuAttachmentRateLimitError[\s\S]*800050609/, "Attachment uploads must retry Feishu's attachment rate-limit error.");
 assertContains(feishu, /recordFailures\.length\s*\|\|\s*externalPreflightFailures\.length[\s\S]*\("record_failed" as const\)/, "Record and validation failures must return record_failed instead of published.");
 assertContains(feishu, /recordFailures\.length\s*\|\|\s*externalPreflightFailures\.length[\s\S]*attachmentFailures\.length[\s\S]*\("attachment_failed" as const\)/, "Record failures must take priority while attachment failures still return attachment_failed.");
 assertContains(feishu, /postStates/, "Feishu publish must return postStates for persistence.");

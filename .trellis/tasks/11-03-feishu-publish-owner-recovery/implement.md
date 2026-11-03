@@ -22,6 +22,13 @@
 - [ ] Update runtime owner fields from generated owner.
 - [ ] Re-run the mismatch query and confirm 0 rows.
 
+## 3b. Attachment Rate Limit
+
+- [ ] Add a process-wide rolling-window reservation for attachment uploads
+  (120 files / 60 s).
+- [ ] Retry `800050609` up to three attempts with a 65 s delay.
+- [ ] Assert the limiter and rate-limit matcher in the Feishu resume check.
+
 ## 4. Verification
 
 - [ ] `node .trellis/verification/feishu_publish_queue_check.mjs`
