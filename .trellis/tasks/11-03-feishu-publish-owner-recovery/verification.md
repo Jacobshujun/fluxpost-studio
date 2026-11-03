@@ -47,6 +47,10 @@ into `runtime_posts.data_json` for the mismatched rows only. Idempotent.
 - Local smoke passed; `/api/version` reports
   `cb8b3d0dc49774fa48296889f3d8331919100c84`; `/review` and `/content` return 200.
 - Slot `.next-local-a`, launcher PID 31476, listener PID 40596.
+- LAN activation from clean HEAD `52e1c6d`: slot `.next-local-b`, listener
+  `0.0.0.0:3001` (launcher PID 9716, listener PID 33288), smoke passed;
+  `/api/version` reports `52e1c6d55cbafb04fbd173575057926988fed242` on loopback
+  and LAN; LAN `/review` and `/content` return 200.
 
 ## Re-Publish
 
