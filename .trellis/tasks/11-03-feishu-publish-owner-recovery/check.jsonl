@@ -1,0 +1,3 @@
+{"file": ".trellis/spec/fluxpost/verification.md", "reason": "Baseline and targeted Feishu verification commands."}
+{"file": ".trellis/spec/fluxpost/pitfalls.md", "reason": "Regression traps for ownership rewrites and stale Feishu record IDs."}
+{"file": ".trellis/spec/fluxpost/decisions.md", "reason": "Ownership contract to re-check after the fix."}

@@ -54,9 +54,11 @@ assertNotContains(
 assertContains(feishu, /"\+record-get"/, "Feishu publish must read records back after field writes.");
 assertContains(feishu, /verifyFeishuRecordFields/, "Feishu publish must verify read-back fields before reporting success.");
 assertContains(feishu, /failure\.reason === "not_found"/, "Missing persisted record IDs must be replaced instead of retried forever.");
-assertContains(feishu, /createdRecordIds[\s\S]*mapping\.recordId\s*=\s*createdRecordIds\[0\]/, "Replacement creation must update the persisted post mapping.");
-assertContains(feishu, /mapping\.recordId\s*=\s*createdRecordIds\[0\][\s\S]*mapping\.created\s*=\s*true/, "Replacement mappings must be persisted as newly created records.");
+assertContains(feishu, /mapping\.recordId\s*=\s*replacement\.recordId[\s\S]*mapping\.created\s*=\s*true/, "A stale record fallback must update the persisted post mapping.");
+assertContains(feishu, /mapping\.recordId\s*=\s*replacementResult\.recordId[\s\S]*mapping\.created\s*=\s*true/, "Replacement mappings must be persisted as newly created records.");
 assertReplacementCreateOmitsPersistedRecordId(feishu);
+assertContains(feishu, /isMissingFeishuRecordError\(error\)[\s\S]*createFeishuRecordFromPatch\(patchPath\)/, "A stale persisted record ID must be replaced when record-upsert reports not_found.");
+assertContains(feishu, /isMissingFeishuRecordError[\s\S]*"code"\\s\*:\\s\*800030302/, "Stale record recovery must match Feishu's record not_found error code.");
 assertContains(feishu, /recordFailures\.length\s*\|\|\s*externalPreflightFailures\.length[\s\S]*\("record_failed" as const\)/, "Record and validation failures must return record_failed instead of published.");
 assertContains(feishu, /recordFailures\.length\s*\|\|\s*externalPreflightFailures\.length[\s\S]*attachmentFailures\.length[\s\S]*\("attachment_failed" as const\)/, "Record failures must take priority while attachment failures still return attachment_failed.");
 assertContains(feishu, /postStates/, "Feishu publish must return postStates for persistence.");
@@ -69,6 +71,8 @@ assertContains(feishu, /Feishu attachment upload incomplete/, "Incomplete attach
 assertContains(route, /enqueueFeishuPublishJob/, "Manual publish route must enqueue Feishu publish jobs.");
 assertContains(simpleRuns, /enqueueFeishuPublishJob\(persistedApprovedPosts/, "Simple-run publish must enqueue normalized persisted posts.");
 assertContains(queue, /feishuStateByPostId/, "Feishu queue worker must persist returned Feishu post states.");
+assertContains(queue, /async function persistOnePost\(post: GeneratedPost\)[\s\S]*?return savedPost;[\s\S]*?\n\}/, "Feishu publish persistence must return the generated post, not the runtime owner snapshot.");
+assertContains(queue, /async function persistRecoveredPostsSerially[\s\S]*?return savedPost;[\s\S]*?\n\}/, "Recovered media persistence must return the generated post, not the runtime owner snapshot.");
 assertContains(queue, /publishStatus === "attachment_failed"/, "Feishu queue worker must reflect attachment_failed in simple-run publish state.");
 assertContains(queue, /publishStatus === "record_failed"/, "Feishu queue worker must reflect record_failed in simple-run publish state.");
 assertContains(reviewPage, /postStates\?:\s*Array<\{ postId: string; feishu: FeishuPostPublishState \}>/, "Review publish response type must include postStates.");
@@ -79,8 +83,8 @@ verifyRecordReadBack(loadTypescriptCommonJs("src/lib/feishu-record-verification.
 console.log("Feishu publish resume check passed.");
 
 function assertReplacementCreateOmitsPersistedRecordId(source) {
-  const start = source.indexOf("const replacementResult = await runFeishuCli");
-  const end = source.indexOf("const createdRecordIds = parseCreatedRecordIds", start);
+  const start = source.indexOf("async function createFeishuRecordFromPatch");
+  const end = source.indexOf("\nasync function ", start + 1);
   if (start < 0 || end < 0) throw new Error("Missing-record recovery must invoke a dedicated replacement create command.");
   if (source.slice(start, end).includes('"--record-id"')) {
     throw new Error("Replacement creation must not send the missing persisted record ID.");

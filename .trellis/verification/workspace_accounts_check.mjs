@@ -13,6 +13,7 @@ const files = {
   simpleRoute: read("src/app/api/simple/runs/route.ts"),
   simpleRuns: read("src/lib/simple-runs.ts"),
   publishRoute: read("src/app/api/publish/feishu/route.ts"),
+  reviewRoute: read("src/app/api/review/route.ts"),
   publishQueue: read("src/lib/feishu-publish-queue.ts"),
   contentPool: read("src/lib/content-pool.ts"),
   generatedPosts: read("src/lib/generated-posts.ts"),
@@ -97,6 +98,11 @@ assertNotContains(files.publishQueue, /applyWorkspaceOwner\(post,\s*ownerAccess,
 assertContains(files.publishQueue, /listFeishuPublishJobs\(limit = 50,\s*account/, "Feishu publish job listing must filter by owner.");
 assertContains(files.publishQueue, /filterWorkspaceOwnedRecords\(await readFeishuPublishJobsFromDb\(limit\),\s*account\)/, "Feishu queue reads must apply owner filtering.");
 assertNotContains(files.publishRoute, /ownerUserId:\s*"local"/, "Manual Feishu publish route must not hard-code ownerUserId local.");
+assertContains(
+  files.reviewRoute,
+  /savePost\(post,\s*accessActorFromOwner\(post\.ownerUserId,\s*post\.ownerDisplayName\),\s*post\)/,
+  "Review side effects must preserve the post author instead of re-owning the runtime copy.",
+);
 
 for (const route of [
   "src/app/api/content-pool/route.ts",

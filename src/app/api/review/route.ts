@@ -8,7 +8,7 @@ import { isWorkspaceSignInError, requireWorkspaceAccount } from "@/lib/workspace
 import type { ReviewSaveRequest, ReviewPatch } from "@/lib/review-contract";
 import { reviewListItem } from "@/lib/review-posts";
 import type { GeneratedPost } from "@/lib/types";
-import type { WorkspaceAccessActor } from "@/lib/workspace-ownership";
+import { accessActorFromOwner, type WorkspaceAccessActor } from "@/lib/workspace-ownership";
 
 export const runtime = "nodejs";
 
@@ -127,7 +127,7 @@ function resolveReviewSideEffectMode(previousPost: GeneratedPost, savedPost: Gen
 }
 
 async function syncReviewSideEffects(post: GeneratedPost, account: WorkspaceAccessActor) {
-  await savePost(post, account, post);
+  await savePost(post, accessActorFromOwner(post.ownerUserId, post.ownerDisplayName), post);
   await markSourceRewritten(post.sourceItemId, post, account);
 }
 

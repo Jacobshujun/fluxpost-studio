@@ -399,9 +399,10 @@ async function persistPostsSerially(posts: GeneratedPost[]) {
 
 async function persistOnePost(post: GeneratedPost) {
   const savedPost = await saveGeneratedPost(post);
-  const runtimePost = await savePost(savedPost, undefined, savedPost);
-  await markSourceRewritten(runtimePost.sourceItemId, runtimePost);
-  return runtimePost;
+  const owner = accessActorFromOwner(savedPost.ownerUserId, savedPost.ownerDisplayName);
+  await savePost(savedPost, owner, savedPost);
+  await markSourceRewritten(savedPost.sourceItemId, savedPost, owner);
+  return savedPost;
 }
 
 async function withFeishuPublishTransientDatabaseRetry<T>(operation: () => Promise<T>): Promise<T> {
@@ -531,7 +532,9 @@ async function persistRecoveredPostsSerially(posts: GeneratedPost[]) {
   for (const post of posts) {
     persistedPosts.push(await withFeishuPublishTransientDatabaseRetry(async () => {
       const savedPost = await saveGeneratedPost(post);
-      return savePost(savedPost, undefined, savedPost);
+      const owner = accessActorFromOwner(savedPost.ownerUserId, savedPost.ownerDisplayName);
+      await savePost(savedPost, owner, savedPost);
+      return savedPost;
     }));
   }
   return persistedPosts;

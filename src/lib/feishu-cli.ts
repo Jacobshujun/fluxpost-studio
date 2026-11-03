@@ -600,6 +600,38 @@ async function writeAndVerifyGeneratedFieldsToFeishu(
           failure: null,
         } satisfies FeishuRecordWriteResult;
       } catch (error) {
+        if (isMissingFeishuRecordError(error)) {
+          try {
+            const replacement = await createFeishuRecordFromPatch(patchPath);
+            mapping.recordId = replacement.recordId;
+            mapping.created = true;
+            return {
+              post,
+              mapping,
+              recordId: replacement.recordId,
+              fields,
+              patchPath,
+              stdout: replacement.stdout,
+              stderr: replacement.stderr,
+              failure: null,
+            } satisfies FeishuRecordWriteResult;
+          } catch (replacementError) {
+            return {
+              post,
+              recordId,
+              fields,
+              stdout: getCliOutput(replacementError, "stdout") || "",
+              stderr: getCliOutput(replacementError, "stderr") || "",
+              failure: {
+                postId: post.id,
+                recordId,
+                error: compactCliError(replacementError),
+                stdout: getCliOutput(replacementError, "stdout"),
+                stderr: getCliOutput(replacementError, "stderr"),
+              } satisfies FeishuRecordFailure,
+            } satisfies FeishuRecordWriteResult;
+          }
+        }
         return {
           post,
           recordId,
@@ -647,31 +679,9 @@ async function writeAndVerifyGeneratedFieldsToFeishu(
         concurrencyConfig.feishuAttachment,
         async ({ write }) => {
           try {
-            const replacementResult = await runFeishuCli(
-              [
-                "base",
-                "+record-upsert",
-                "--as",
-                "bot",
-                "--base-token",
-                appConfig.feishuBitableAppToken,
-                "--table-id",
-                appConfig.feishuBitableTableId,
-                "--json",
-                `@${toCliRelativePath(write.patchPath)}`,
-              ],
-              {
-                timeout: 120_000,
-                maxBuffer: 1024 * 1024 * 8,
-                env: buildCliEnv(process.env),
-              },
-            );
-            const createdRecordIds = parseCreatedRecordIds(replacementResult.stdout);
-            if (!createdRecordIds[0]) {
-              throw new Error("Feishu replacement record creation did not return a record ID.");
-            }
+            const replacementResult = await createFeishuRecordFromPatch(write.patchPath);
             const mapping = write.mapping;
-            mapping.recordId = createdRecordIds[0];
+            mapping.recordId = replacementResult.recordId;
             mapping.created = true;
             return {
               write: {
@@ -734,6 +744,33 @@ async function writeAndVerifyGeneratedFieldsToFeishu(
     );
   }
   return { failures, stdout, stderr };
+}
+
+async function createFeishuRecordFromPatch(patchPath: string) {
+  const result = await runFeishuCli(
+    [
+      "base",
+      "+record-upsert",
+      "--as",
+      "bot",
+      "--base-token",
+      appConfig.feishuBitableAppToken,
+      "--table-id",
+      appConfig.feishuBitableTableId,
+      "--json",
+      `@${toCliRelativePath(patchPath)}`,
+    ],
+    {
+      timeout: 120_000,
+      maxBuffer: 1024 * 1024 * 8,
+      env: buildCliEnv(process.env),
+    },
+  );
+  const recordId = parseCreatedRecordIds(result.stdout)[0];
+  if (!recordId) {
+    throw new Error("Feishu replacement record creation did not return a record ID.");
+  }
+  return { recordId, stdout: result.stdout, stderr: result.stderr };
 }
 
 async function readBackGeneratedFieldsFromFeishu(writes: FeishuRecordWriteSuccess[]) {
@@ -1360,6 +1397,15 @@ function buildNotificationIdempotencyKey(posts: GeneratedPost[], context?: Feish
 
 function compactCliError(error: unknown) {
   return error instanceof Error ? sanitizeCliText(error.message) : "Feishu notification failed with an unknown CLI error.";
+}
+
+function isMissingFeishuRecordError(error: unknown) {
+  const text = [
+    compactCliError(error),
+    getCliOutput(error, "stdout"),
+    getCliOutput(error, "stderr"),
+  ].filter(Boolean).join("\n");
+  return /"code"\s*:\s*800030302\b/.test(text) && /not_found/i.test(text);
 }
 
 function getCliOutput(error: unknown, key: "stdout" | "stderr") {

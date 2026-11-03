@@ -1,0 +1,3 @@
+{"file": ".trellis/spec/fluxpost/decisions.md", "reason": "Queue owner and generated-post owner are separate; enqueue/persist must preserve the post author."}
+{"file": ".trellis/spec/fluxpost/pitfalls.md", "reason": "Known trap: rewriting generated-post ownership to the queue owner causes Generated post not found."}
+{"file": ".trellis/spec/fluxpost/architecture_rules.md", "reason": "Feishu queue, review route and workspace ownership module boundaries."}

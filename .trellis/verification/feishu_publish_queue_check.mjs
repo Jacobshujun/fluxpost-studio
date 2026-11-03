@@ -64,7 +64,7 @@ assertContains(queue, /claimNextFeishuPublishQueueItem\(workerId,\s*feishuPublis
 assertContains(queue, /heartbeatFeishuPublishQueueItem\(runningJob\.id,\s*workerId,\s*feishuPublishQueueLockMs\)/, "Feishu queue worker must heartbeat leases.");
 assertContains(queue, /feishuStateByPostId/, "Feishu queue worker must persist returned per-post Feishu state.");
 assertContains(queue, /saveGeneratedPost\(post\)/, "Feishu queue worker must persist generated posts.");
-assertContains(queue, /markSourceRewritten\(runtimePost\.sourceItemId,\s*runtimePost\)/, "Feishu queue worker must update source usage state from the normalized persisted post.");
+assertContains(queue, /markSourceRewritten\(savedPost\.sourceItemId,\s*savedPost,\s*owner\)/, "Feishu queue worker must update source usage state from the normalized generated post.");
 assertContains(queue, /syncSimpleRunPublishJob/, "Feishu queue worker must update simple-run publish state.");
 assertContains(queue, /const publishPosts = normalizePosts\(posts\)/, "Feishu queue enqueue must snapshot posts without synchronous preparation.");
 assertContains(queue, /findEquivalentQueuedJob\(ownerUserId,\s*postIds,\s*publishMode\)/, "Feishu queue dedupe must include the selected mode.");
@@ -76,7 +76,7 @@ assertContains(queue, /validatePostsForFeishuPublish[\s\S]*if \(!isFinishedBodyP
 assertContains(queue, /validateTextPostsForFeishuPublish[\s\S]*if \(!isFinishedBodyPolicyCompliant\(post\)\)[\s\S]*finishedBodyValidationFailure/, "Text publishing must reject governed over-limit bodies.");
 const mediaValidation = queue.match(/function validateMediaPostsForFeishuPublish[\s\S]*?\n\}/)?.[0] || "";
 assertNotContains(mediaValidation, /isFinishedBodyPolicyCompliant/, "Media publishing must remain exempt from body-length validation.");
-assertContains(queue, /const savedPost = await saveGeneratedPost\(post\);[\s\S]*const runtimePost = await savePost\(savedPost, undefined, savedPost\);[\s\S]*markSourceRewritten\(runtimePost\.sourceItemId, runtimePost\)/, "Feishu persistence must reuse one normalized post across stores and source status.");
+assertContains(queue, /const savedPost = await saveGeneratedPost\(post\);[\s\S]*const owner = accessActorFromOwner\(savedPost\.ownerUserId, savedPost\.ownerDisplayName\);[\s\S]*await savePost\(savedPost, owner, savedPost\);[\s\S]*markSourceRewritten\(savedPost\.sourceItemId, savedPost, owner\);[\s\S]*return savedPost;/, "Feishu persistence must reuse one normalized post across stores, preserve its owner, and return it for source status.");
 assertContains(queue, /onChunkComplete:[\s\S]*persistPostsSerially\(changedPosts\)[\s\S]*saveFeishuPublishJobToDb/, "Each Feishu chunk must persist post state and durable progress.");
 assertContains(queue, /completedChunks:\s*job\.progress\?\.completedChunks\s*\|\|\s*0/, "Terminal progress must retain completed chunks instead of treating planned chunks as completed.");
 assertContains(queue, /retrySafe:\s*Boolean\(failure\.recordId\)/, "Known record ids must be retry-safe while unknown create outcomes remain unsafe.");
