@@ -51,16 +51,30 @@ replayed. Database scan latency still grows with history.
 
 Before activation all six checked queue domains had zero live running leases
 and zero recently queued jobs; no recent nonterminal simple runs were found.
-Old PID 4680 subsequently was found exited at 11:18:56 Asia/Shanghai, exit 134.
+Old PID 4680 was found exited at 11:18:56 Asia/Shanghai, exit 134.
 Retained report `report.20261104.111855.4680.0.001.json` confirms another OOM:
 4,288,938,496 heap bytes used, limit 4,496,293,888. This was still unmodified
 `52d761b`, before activating this repair. Exact fatal request remains unknown.
 
 ## Local activation
 
-Pending managed LAN activation from the verified clean commit. Preserve the
-ignored candidate receipt and native diagnostic receipt as runtime identity
-evidence, then verify 3001 binding, SHA, effective startup flag and HTTP health.
+Managed `npm run local:lan` activation passed from clean verified code commit
+`514bf408c10c753a90e5a22e33acc9a645619dfc`, slot `.next-local-b`, listener
+PID 30848 started 11:33:55 Asia/Shanghai. Built from the primary worktree;
+candidate health/identity and the launcher's full HTTP smoke passed.
+At 11:34–11:35, `/api/version`, slot marker, candidate receipt and diagnostics
+receipt match the commit; diagnostics status is running. The listener binds
+`0.0.0.0:3001`; its actual process command contains
+`--max-old-space-size=8192`. `/canvas`, `/review`, `/content` return 200 on
+loopback and the physical default-gateway LAN interface; LAN version is 200.
+Initial working set ~246 MiB is an OS metric, not a V8 heap measurement.
+
+Ignored evidence: `test-artifacts/canvas-history-activation.log`,
+`canvas-history-activation-evidence.json`, `.fluxpost-local-candidate.json`
+and `data/local-diagnostics/current-run.json`. Later documentation/archive
+commits do not change running source; no second restart for bookkeeping.
+Authenticated operator workflows and long-duration runtime observation are
+not replaced by the isolated regression and read-only SQL checks.
 
 ## Prevention review
 
