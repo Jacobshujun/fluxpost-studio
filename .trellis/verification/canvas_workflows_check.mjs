@@ -619,7 +619,7 @@ try {
     "resolveCanvasRunPlan", "findNode", "canReachNode", "runPlannedNode", "runBypassedNode", "resolveBypassOutputs", "bypassFailureMessage", "mergeArtifacts", "mergeCanvasImageBatchSummaries", "collectInputs", "missingRequiredInput", "saveTerminalNodeRun",
   ], "({ resolveCanvasRunPlan, runPlannedNode, resolveBypassOutputs, mergeArtifacts })", {
     getCanvasBypassRouting, getCanvasNodeDefinition, getCanvasNodeExecutionMode, buildCanvasRunPlan,
-    listCanvasSuccessfulNodeRunsForWorkflowFromDb: async () => [],
+    iterateCanvasSuccessfulNodeRunsForNodeFromDb: async function* () {},
     canAccessWorkspaceOwner: () => true,
     resolveCanvasLiteralOutputs: (node) => node.id === modeSource.id ? { text: { kind: "text", value: node.config.text } } : undefined,
     getCanvasRequiredInputPorts: require(path.join(temp, "registry.js")).getCanvasRequiredInputPorts,
@@ -897,8 +897,8 @@ const runs = read("src/lib/canvas/runs.ts");
 requireText(runs, ["structuredClone(workflow.graph)", "runMode", "isolated", "inputFingerprint", "reusedFrom", "bypassed", "disabled", "Missing required input", "cancelRequestedAt", "collectDescendants", "previousNodeRun", "resumableNodeRun", "onProviderTaskUpdate", "providerTaskRoute", "result.providerTaskId || nodeRun.providerTaskId", "finalRun.status === \"running\"", "requeueCanvasRunQueueItem(finalRun.id, 30_000)", "setTimeout(ensureCanvasRunWorker, 30_000)", "requeueExpiredCanvasRunQueueItemsWithProviderTasks", "listCanvasRunHistory", "listCanvasNodeRunsForWorkflowFromDb", "listCanvasRunsForWorkflowFromDb", "latestNodeAttempts", "listCanvasSuccessfulNodeRunsForWorkflowFromDb", "latestSuccessfulNodeRuns", "workflowRevision", "nodeConfig", "concurrencyConfig.canvasRun", "activeWorkers", "storedQueueState.activeWorkers ??= 0"], "DAG scheduler and latest-attempt/latest-success projections");
 assert.match(runs, /ownerUserId: account\.id,[\s\S]*ownerDisplayName: account\.displayName \|\| account\.id/, "manual Canvas runs must belong to the authenticated launcher");
 assert.match(runs, /action: "启动画布运行"[\s\S]*workflowOwnerUserId: workflow\.ownerUserId[\s\S]*executionOwnerUserId: account\.id/, "manual Canvas launch logs must retain workflow and execution identities");
-assert.match(runs, /listCanvasSuccessfulNodeRunsForWorkflowFromDb\(workflowId\)[\s\S]*canAccessWorkspaceOwner\(account, candidate\.run\.ownerUserId\)/, "isolated runs must not reuse inaccessible users' Canvas outputs");
-assert.match(runs, /listCanvasNodeRunsForWorkflowFromDb\(workflowId\)[\s\S]*canAccessWorkspaceOwner\(account, run\.ownerUserId\)/, "Canvas history projections must filter inaccessible users' runs");
+assert.match(runs, /iterateCanvasSuccessfulNodeRunsForNodeFromDb\(workflowId, nodeId, account\)[\s\S]*canAccessWorkspaceOwner\(account, item\.run\.ownerUserId\)/, "isolated runs must not reuse inaccessible users' Canvas outputs");
+assert.match(runs, /listCanvasNodeRunsForWorkflowFromDb\(workflowId, account\)[\s\S]*canAccessWorkspaceOwner\(account, run\.ownerUserId\)/, "Canvas history projections must filter inaccessible users' runs");
 const withCompetitorWorkbookReadiness = compileFunctions(
   runs,
   ["withCompetitorWorkbookReadiness", "hasFrozenCompetitorWorkbookTestInput"],

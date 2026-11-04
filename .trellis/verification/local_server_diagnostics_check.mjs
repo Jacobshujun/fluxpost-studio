@@ -66,9 +66,16 @@ try {
 
   // Real Node uncaught-exception report in an isolated child: no server, providers or heap dump.
   const args = serverArguments(root, temporaryRoot, "127.0.0.1", 3001);
+  assert(args.includes("--max-old-space-size=8192"));
+  const heapProbe = spawnSync(process.execPath, [...args.slice(0, 6), "--input-type=module", "-e",
+    "import v8 from 'node:v8'; console.log(v8.getHeapStatistics().heap_size_limit);"], {
+    encoding: "utf8", timeout: 15000,
+  });
+  assert.equal(heapProbe.status, 0, heapProbe.stderr);
+  assert(Number(heapProbe.stdout) >= 8192 * 1024 * 1024, "managed child must have at least 8 GiB heap allowance");
   assert(!args.some((value) => /heapsnapshot|heap-prof|inspect|report-on-signal/.test(value)));
   writeFileSync(fixture, "throw new Error('diagnostic-fixture');");
-  const failed = spawnSync(process.execPath, [...args.slice(0, 5), fixture], {
+  const failed = spawnSync(process.execPath, [...args.slice(0, 6), fixture], {
     cwd: temporaryRoot, env: { ...process.env, FLUXPOST_REPORT_SECRET_FIXTURE: "not-in-report-22a" },
     encoding: "utf8", timeout: 15000,
   });

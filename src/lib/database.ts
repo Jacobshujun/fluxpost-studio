@@ -1,3 +1,5 @@
+import { canvasHistoryPageSize, canvasHistoryQuery, type CanvasHistoryCursor } from "./canvas/history-query";
+import type { WorkspaceAccessActor } from "./workspace-ownership";
 import { libraryColorSchemaSql } from "./library-color-schema";
 import { hexToLab, libraryColorVersion, libraryColorMinCoverage, libraryColorDistance } from "./library-color";
 import { existsSync, mkdirSync, readFileSync } from "node:fs";
@@ -3890,66 +3892,37 @@ export async function listCanvasRunsForWorkflowFromDb(workflowId: string, limit 
   return rows.map((row) => fromJson<CanvasRun>(row.data_json));
 }
 
-export async function listCanvasNodeRunsForWorkflowFromDb(workflowId: string) {
+async function readCanvasHistorySelection(input: Parameters<typeof canvasHistoryQuery>[1]) {
   await ensureDatabaseReady();
-  type NodeRunRow = { node_run_json: unknown; run_json: unknown };
-  if (getDatabaseBackend() === "postgres") {
-    const result = await getPostgresPool().query<NodeRunRow>(
-      `SELECT node_runs.data_json AS node_run_json, canvas_runs.data_json AS run_json
-       FROM canvas_node_runs AS node_runs
-       JOIN canvas_runs ON canvas_runs.id = node_runs.run_id
-       WHERE canvas_runs.workflow_id = $1
-       ORDER BY node_runs.updated_at DESC, canvas_runs.created_at DESC, node_runs.attempt DESC`,
-      [workflowId],
-    );
-    return result.rows.map((row) => ({
-      run: fromJson<CanvasRun>(row.run_json),
-      nodeRun: fromJson<CanvasNodeRun>(row.node_run_json),
-    }));
-  }
-  const rows = getSqliteDatabase().prepare(
-    `SELECT node_runs.data_json AS node_run_json, canvas_runs.data_json AS run_json
-     FROM canvas_node_runs AS node_runs
-     JOIN canvas_runs ON canvas_runs.id = node_runs.run_id
-     WHERE canvas_runs.workflow_id = ?
-     ORDER BY node_runs.updated_at DESC, canvas_runs.created_at DESC, node_runs.attempt DESC`,
-  ).all(workflowId) as NodeRunRow[];
+  const postgres = getDatabaseBackend() === "postgres";
+  const { sql, values } = canvasHistoryQuery(postgres, input);
+  type HistoryRow = { node_run_json: unknown; run_json: unknown };
+  const rows = postgres
+    ? (await getPostgresPool().query<HistoryRow>(sql, values)).rows
+    : getSqliteDatabase().prepare(sql).all(...values) as HistoryRow[];
   return rows.map((row) => ({
     run: fromJson<CanvasRun>(row.run_json),
     nodeRun: fromJson<CanvasNodeRun>(row.node_run_json),
   }));
 }
 
-export async function listCanvasSuccessfulNodeRunsForWorkflowFromDb(workflowId: string) {
-  await ensureDatabaseReady();
-  type SuccessfulNodeRunRow = { node_run_json: unknown; run_json: unknown };
-  if (getDatabaseBackend() === "postgres") {
-    const result = await getPostgresPool().query<SuccessfulNodeRunRow>(
-      `SELECT node_runs.data_json AS node_run_json, canvas_runs.data_json AS run_json
-       FROM canvas_node_runs AS node_runs
-       JOIN canvas_runs ON canvas_runs.id = node_runs.run_id
-       WHERE canvas_runs.workflow_id = $1
-         AND node_runs.status IN ('completed', 'partial', 'reused', 'bypassed')
-       ORDER BY canvas_runs.created_at DESC, node_runs.attempt DESC`,
-      [workflowId],
-    );
-    return result.rows.map((row) => ({
-      run: fromJson<CanvasRun>(row.run_json),
-      nodeRun: fromJson<CanvasNodeRun>(row.node_run_json),
-    }));
+export async function listCanvasNodeRunsForWorkflowFromDb(workflowId: string, account: WorkspaceAccessActor) {
+  return readCanvasHistorySelection({ workflowId, account, selection: "attempt" });
+}
+
+export async function listCanvasSuccessfulNodeRunsForWorkflowFromDb(workflowId: string, account: WorkspaceAccessActor) {
+  return readCanvasHistorySelection({ workflowId, account, selection: "success" });
+}
+
+export async function* iterateCanvasSuccessfulNodeRunsForNodeFromDb(workflowId: string, nodeId: string, account: WorkspaceAccessActor) {
+  let cursor: CanvasHistoryCursor | undefined;
+  while (true) {
+    const page = await readCanvasHistorySelection({ workflowId, nodeId, account, selection: "reuse", cursor });
+    for (const candidate of page) yield candidate;
+    if (page.length < canvasHistoryPageSize) return;
+    const last = page[page.length - 1];
+    cursor = { createdAt: last.run.createdAt, attempt: last.nodeRun.attempt, id: last.nodeRun.id };
   }
-  const rows = getSqliteDatabase().prepare(
-    `SELECT node_runs.data_json AS node_run_json, canvas_runs.data_json AS run_json
-     FROM canvas_node_runs AS node_runs
-     JOIN canvas_runs ON canvas_runs.id = node_runs.run_id
-     WHERE canvas_runs.workflow_id = ?
-       AND node_runs.status IN ('completed', 'partial', 'reused', 'bypassed')
-     ORDER BY canvas_runs.created_at DESC, node_runs.attempt DESC`,
-  ).all(workflowId) as SuccessfulNodeRunRow[];
-  return rows.map((row) => ({
-    run: fromJson<CanvasRun>(row.run_json),
-    nodeRun: fromJson<CanvasNodeRun>(row.node_run_json),
-  }));
 }
 
 export async function getCanvasRunFromDb(runId: string) {

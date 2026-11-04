@@ -13,6 +13,7 @@ import {
   listCanvasRunsForWorkflowFromDb,
   listCanvasRunsFromDb,
   listCanvasSuccessfulNodeRunsForWorkflowFromDb,
+  iterateCanvasSuccessfulNodeRunsForNodeFromDb,
   requeueExpiredCanvasRunQueueItemsWithProviderTasks,
   requeueCanvasRunQueueItem,
   saveCanvasNodeRunToDb,
@@ -136,15 +137,6 @@ async function resolveCanvasRunPlan(
   if (targets.length !== 1) throw new Error("Isolated canvas execution requires exactly one target node.");
 
   const targetId = targets[0];
-  const candidatesByNode = new Map<string, Array<{ run: CanvasRun; nodeRun: CanvasNodeRun }>>();
-  for (const candidate of await listCanvasSuccessfulNodeRunsForWorkflowFromDb(workflowId)) {
-    if (candidate.run.iterationContext) continue;
-    if (!canAccessWorkspaceOwner(account, candidate.run.ownerUserId)) continue;
-    const candidates = candidatesByNode.get(candidate.nodeRun.nodeId) || [];
-    candidates.push(candidate);
-    candidatesByNode.set(candidate.nodeRun.nodeId, candidates);
-  }
-
   const outputs = new Map<string, Record<string, CanvasArtifact>>();
   const steps: CanvasRunPlanStep[] = [];
   const blockers: CanvasRunPlan["blockers"] = [];
@@ -194,9 +186,14 @@ async function resolveCanvasRunPlan(
       continue;
     }
 
-    const candidate = (candidatesByNode.get(nodeId) || []).find((item) =>
-      isReusableCandidate(graph, node, inputs, item.run, item.nodeRun),
-    );
+    let candidate: { run: CanvasRun; nodeRun: CanvasNodeRun } | undefined;
+    for await (const item of iterateCanvasSuccessfulNodeRunsForNodeFromDb(workflowId, nodeId, account)) {
+      if (!canAccessWorkspaceOwner(account, item.run.ownerUserId)) continue;
+      if (isReusableCandidate(graph, node, inputs, item.run, item.nodeRun)) {
+        candidate = item;
+        break;
+      }
+    }
     if (!candidate) {
       const message = `${definition.label} has no compatible successful result for isolated execution.`;
       steps.push({ nodeId, action: "blocked", message });
@@ -422,7 +419,7 @@ export async function listCanvasRunHistory(account: WorkspaceAccessActor, workfl
   const latestNodeAttempts = new Map<string, CanvasLatestNodeAttempt>();
   const latestSuccessfulNodeRuns = new Map<string, CanvasLatestSuccessfulNodeRun>();
   if (workflowId) {
-    for (const { run, nodeRun } of await listCanvasNodeRunsForWorkflowFromDb(workflowId)) {
+    for (const { run, nodeRun } of await listCanvasNodeRunsForWorkflowFromDb(workflowId, account)) {
       if (!canAccessWorkspaceOwner(account, run.ownerUserId)) continue;
       if (latestNodeAttempts.has(nodeRun.nodeId)) continue;
       const projection = projectCanvasNodeRun(run, nodeRun);
@@ -430,7 +427,7 @@ export async function listCanvasRunHistory(account: WorkspaceAccessActor, workfl
     }
   }
   const durableResults = workflowId
-    ? (await listCanvasSuccessfulNodeRunsForWorkflowFromDb(workflowId))
+    ? (await listCanvasSuccessfulNodeRunsForWorkflowFromDb(workflowId, account))
       .filter(({ run }) => canAccessWorkspaceOwner(account, run.ownerUserId))
     : (await Promise.all(runs.map(async (run) => (await listCanvasNodeRunsFromDb(run.id))
       .filter((nodeRun) => isOutputStatus(nodeRun.status))

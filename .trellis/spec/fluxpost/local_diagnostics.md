@@ -19,6 +19,10 @@ remain unexplained without their destroyed fatal output.
 - Supervisor directly spawns the existing Next CLI using the current Node,
   environment, slot, SHA, working directory and host/port. Normal workers remain
   enabled. No automatic restarts, task replay, inspector or heap snapshots.
+- Managed local Next child uses `--max-old-space-size=8192` (8 GiB old-space),
+  authorized after the Nov 4 OOM reports. This is a ceiling, not preallocation
+  or a total-process RSS cap. Builds, other Node processes and remote production
+  are unaffected; both local activation and rollback use this allowance.
 - Ignored `data/local-diagnostics/logs/` contains timestamped stdout/stderr and
   lifecycle segments: each <=10 MiB; <=10 files, <=100 MiB total. Rotation occurs
   on output, including single oversized chunks and quiet repeated startups.
