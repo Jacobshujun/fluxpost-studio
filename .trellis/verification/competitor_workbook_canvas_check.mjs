@@ -24,7 +24,7 @@ const inspectRoute = read("src/app/api/canvas/competitor-workbook/route.ts");
 const scheduleResponse = read("src/lib/canvas/schedule-response.ts");
 const runRoute = read("src/app/api/canvas/runs/route.ts");
 const runDetailRoute = read("src/app/api/canvas/runs/[id]/route.ts");
-const page = read("src/app/canvas/page.tsx");
+const page = (read("src/app/canvas/page.tsx") + "\n" + read("src/components/canvas-schedule/shared.tsx"));
 
 assert.match(inspectRoute, /requireWorkspaceAccount\(request\)/);
 assert.match(inspectRoute, /isWorkspaceAdmin\(account\)/);

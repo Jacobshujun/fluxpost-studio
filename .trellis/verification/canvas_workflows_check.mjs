@@ -1274,7 +1274,7 @@ for (const route of [
   requireText(read(route), ["requireWorkspaceAccount"], route);
 }
 
-const page = read("src/app/canvas/page.tsx").replace("panOnDrag={true}", "panOnDrag={isMobile}");
+const page = (read("src/app/canvas/page.tsx") + "\n" + read("src/components/canvas-schedule/shared.tsx")).replace("panOnDrag={true}", "panOnDrag={isMobile}");
 requireText(page, [
   "createWorkflowSaveCoordinator",
   "workflowSaving",

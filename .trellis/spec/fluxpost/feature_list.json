@@ -9,6 +9,18 @@
   ],
   "features": [
     {
+      "id": "guided-batch-create",
+      "title": "Guided batch creation page",
+      "status": "ready_for_review",
+      "definition_of_done": [
+        "Independent four-step V2 creation with lossless input editing, preview/launch and results; original V1/V2 scheduler remains available"
+      ],
+      "evidence": [
+        "2026-11-04 baseline and six three-theme 1440/390 browser flows pass; eleven input types/Excel/inner binding/shared output roundtrip and original collection/multiline browser regressions pass. Task: 11-04-batch-create-wizard."
+      ],
+      "notes": "Operator usability acceptance pending. No real model or Feishu calls; local activation follows verified commit."
+    },
+    {
       "id": "content-pool-manual-editor",
       "title": "Content pool text/image editing",
       "status": "ready_for_review",

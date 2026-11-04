@@ -22,7 +22,7 @@ const canvasTypes = read("src/lib/canvas/types.ts");
 const registrySource = read("src/lib/canvas/registry.ts");
 const schedulerSource = read("src/lib/canvas/scheduler.ts");
 const schedulerV2Source = read("src/lib/canvas/scheduler-v2.ts");
-const pageSource = read("src/app/canvas/page.tsx");
+const pageSource = (read("src/app/canvas/page.tsx") + "\n" + read("src/components/canvas-schedule/shared.tsx"));
 const contentPoolSource = read("src/lib/content-pool.ts");
 
 assert.match(selectionSource, /export function normalizeContentPoolSelectionFilter/);

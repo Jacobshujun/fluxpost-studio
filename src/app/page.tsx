@@ -694,6 +694,7 @@ export default function Home() {
               <HeaderLink href="/original" icon={<Sparkles className="h-4 w-4" />} label="批量原创" />
               <HeaderLink href="/review" icon={<ExternalLink className="h-4 w-4" />} label="内容审查台" />
               <HeaderLink href="/distribution-check" icon={<ShieldCheck className="h-4 w-4" />} label="是否分发" />
+              <HeaderLink href="/batch-create" icon={<Sparkles className="h-4 w-4" />} label="批量创作" />
               <HeaderLink href="/canvas" icon={<Network className="h-4 w-4" />} label="无限画布" />
               {currentAccount.role === "admin" ? <HeaderLink href="/config" icon={<Settings className="h-4 w-4" />} label="高级配置" /> : null}
               <ConfigChip label="TikHub" ok={Boolean(config?.tikhubConfigured)} />

@@ -1859,7 +1859,7 @@ try {
   assert.match(detailRoute, /action === "retry-shared"[\s\S]*mainTaskId is required[\s\S]*retryCanvasScheduleV2SharedTask/);
   assert.match(detailRoute, /action === "retry-all"[\s\S]*retryCanvasScheduleFailedTasks/);
   assert.match(detailRoute, /action === "retry-content"[\s\S]*retryCanvasScheduleContentTask/);
-  const page = read("src/app/canvas/page.tsx");
+  const page = (read("src/app/canvas/page.tsx") + "\n" + read("src/components/canvas-schedule/shared.tsx"));
   const css = read("src/app/globals.css");
   for (const snippet of ["CanvasScheduleCenter", "CanvasScheduleV2Editor", "CanvasScheduleParameterEditor", "ScheduleV2RuntimeTree", "节点名称", "人物场景预设", "ScheduleAssetFilterEditor", "多个标签，AND", "条件随机", "条件匹配", "批次内随机去重", "随机抽取", "固定个数", "随机范围", "每个主任务随机抽取", "确认并启动", "接受新增候选图", "onBlur={commitLabel}", "onSchedulerRoleChange", "insertSchedulerSkeleton", "Switch 输入", "画布绑定", "onSaveBindings", "saveQueueRef.current = saveQueueRef.current.then", "current?.id === schedule.id ? current.revision : schedule.revision"]) {
     assert.ok(page.includes(snippet), `Canvas UI is missing ${snippet}`);

@@ -8,6 +8,7 @@ November updates: `docs/releases/2026-11-03-github-sync.md`; baseline passes. Ru
 
 ## Current Focus
 
+- Guided batch creation: `/batch-create` four-step V2 wizard and results reuse existing schedules; original V1/V2 center retained. Baseline, six three-theme desktop/mobile flows, all-input roundtrip and original collection/text browser regressions pass. Task: `11-04-batch-create-wizard`; operator usability acceptance pending.
 - Content-pool editor: manual text/images and recrawl/cache protection; baseline/browser checks pass. Contract: `content_pool_editing.md`; task `11-03-content-pool-editor`; operator acceptance pending.
 - Temp files: 297/299 removed; two inventories kept.
 - Local diagnostics: logs <=100 MiB; reports <=3 / 7 days / 30 MiB. Baseline/Windows checks pass. User requested LAN cutover; managed startup, identity, diagnostic flags/receipt and loopback/LAN pages pass. Contract: `local_diagnostics.md`; evidence: `archive/2026-11/11-03-local-crash-logging/verification.md`.
