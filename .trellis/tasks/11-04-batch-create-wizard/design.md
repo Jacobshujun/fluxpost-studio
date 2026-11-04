@@ -1,2 +1,0 @@
-﻿# Design system
-Reuse existing globals.css theme tokens, system typography and lucide icons. Four-step navigation, central form and right summary at desktop; single column with collapsible summary at narrow widths. Form labels and body text 14px or larger in the guided surface, controls at least 40px tall. Keep advanced configuration in native details sections and visible nondefault summaries. No generated imagery is needed for this operational interface.
