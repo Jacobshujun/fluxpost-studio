@@ -333,6 +333,7 @@ function loadConfig(platform, values = {}, persisted = "") {
         if (name === "./database") return { getDatabaseRuntimeStatus: () => ({}) };
         if (name === "./feishu-table-id") return load("src/lib/feishu-table-id.ts");
         if (name === "./image-providers/contracts") return load("src/lib/image-providers/contracts.ts");
+        if (name === "../image-size-options") return load("src/lib/image-size-options.ts");
         return nativeRequire(name);
       },
     }, { filename: relative });

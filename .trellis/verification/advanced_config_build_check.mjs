@@ -107,7 +107,7 @@ function evaluate(source) {
       if (dependency.includes('"node:fs"')) return fakeFs;
       if (dependency.includes('"node:path"')) return { default: path };
       if (dependency.includes('"getDatabaseRuntimeStatus"')) return { getDatabaseRuntimeStatus: () => ({}) };
-      if (dependency.includes('"selectObjectStorageConfig"') || dependency.includes('"normalizeGeminiModel"') || dependency.includes('"normalizeFeishuTableId"') || dependency.includes('"resolveImageProviderProfile"') || dependency.includes('"normalizeToApisRequestFormat"') || dependency.includes('"normalizeTextReasoningEffort"')) {
+      if (dependency.includes('"selectObjectStorageConfig"') || dependency.includes('"normalizeGeminiModel"') || dependency.includes('"normalizeFeishuTableId"') || dependency.includes('"resolveImageProviderProfile"') || dependency.includes('"normalizeToApisRequestFormat"') || dependency.includes('"normalizeTextReasoningEffort"') || dependency.includes('"isImageGenerationSize"')) {
         return evaluate(dependency).exports;
       }
       throw new Error(`Unexpected config dependency ${id}; extend the isolated adapter explicitly.`);

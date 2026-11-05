@@ -8,7 +8,6 @@ export type ToApisImageSize = {
 
 export const toApisImageRatios = ["1:1", "3:2", "2:3", "4:3", "3:4", "5:4", "4:5", "16:9", "9:16", "2:1", "1:2", "21:9", "9:21"] as const;
 export const toApisImageResolutions = ["1k", "2k", "4k"] as const;
-export const toApis4kImageRatios = ["16:9", "9:16", "2:1", "1:2", "21:9", "9:21"] as const;
 export const maxToApisReferenceImages = 16;
 export const maxToApisImageOutputs = 10;
 
@@ -106,10 +105,7 @@ export function buildToApisGenerationBody(input: {
       reference_images: referenceImages,
     };
   }
-  // The older-model adapter retains its historical contract; never apply it to 2.5 or generic controls.
-  if (dimensions.resolution === "4k" && !toApis4kImageRatios.includes(dimensions.size as (typeof toApis4kImageRatios)[number])) {
-    throw new ImageProviderError(`应用参数校验：模型 ${input.model}，4K ${dimensions.size}：ToAPIs legacy image adapter 不支持该比例；请确认服务商请求格式。`, { category: "input", retryable: false, failoverAllowed: false });
-  }
+  // Preserve legacy request fields; the provider decides which ratio/tier pairs it supports.
   const count = validateIntegerRange(input.count ?? 1, 1, maxToApisImageOutputs, "ToAPIs image count");
   const quality = validateChoice(input.quality || "medium", ["low", "medium", "high", "xhigh", "max"], "ToAPIs image quality");
   const outputFormat = validateChoice(input.outputFormat || "png", ["png", "jpeg"], "ToAPIs output format") as ToApisImageOutputFormat;

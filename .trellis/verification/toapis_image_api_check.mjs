@@ -6,7 +6,9 @@ import { createRequire } from "node:module";
 const require = createRequire(import.meta.url);
 const ts = require("typescript");
 const projectRoot = process.cwd();
-const contracts = loadTypescriptCommonJs("src/lib/image-providers/contracts.ts");
+const contracts = loadTypescriptCommonJs("src/lib/image-providers/contracts.ts", {
+  "../image-size-options": loadTypescriptCommonJs("src/lib/image-size-options.ts"),
+});
 const contract = loadTypescriptCommonJs("src/lib/toapis-image-api.ts", { "./types": {}, "./image-providers/contracts": contracts });
 const imageGeneration = read("src/lib/image-generation.ts");
 const config = read("src/lib/config.ts");
@@ -49,13 +51,17 @@ for (const resolution of ["1k", "2k"]) {
     assertDeepEqual(contract.validateToApisDimensions(ratio, resolution), { size: ratio, resolution }, `${resolution} must support ${ratio}.`);
   }
 }
-for (const ratio of contract.toApis4kImageRatios) {
+for (const ratio of contract.toApisImageRatios) {
   assertDeepEqual(contract.validateToApisDimensions(ratio, "4k"), { size: ratio, resolution: "4k" }, `4K must support ${ratio}.`);
+  assertDeepEqual(contract.buildToApisGenerationBody({ model: "gpt-image-2", requestFormat: "legacy", prompt: "legacy", ratio, resolution: "4k", quality: "high", count: 2, outputFormat: "jpeg", outputCompression: 72, referenceImages: ["https://fixture.invalid/ref.png"] }), {
+    model: "gpt-image-2", prompt: "legacy", n: 2, size: ratio, resolution: "4k", quality: "high", output_format: "jpeg", output_compression: 72, response_format: "url", image_urls: ["https://fixture.invalid/ref.png"],
+  }, "All listed legacy 4K ratios must submit unchanged historical fields; provider decides support.");
 }
 for (const ratio of ["1:1", "4:3", "3:4"]) {
   assertDeepEqual(contract.validateToApisDimensions(ratio, "4k"), { size: ratio, resolution: "4k" }, "Generic dimensions must permit 4K square and 4:3 ratios.");
 }
-assertThrows(() => contract.buildToApisGenerationBody({ model: "gpt-image-2", requestFormat: "legacy", prompt: "legacy", ratio: "1:1", resolution: "4k" }), /legacy image adapter/, "Historical restrictions belong only to explicit legacy requests.");
+assertThrows(() => contract.buildToApisGenerationBody({ model: "gpt-image-2", requestFormat: "legacy", prompt: "legacy", ratio: "0:3", resolution: "4k" }), /ratio is invalid/, "Malformed ratios must still fail locally.");
+assertThrows(() => contract.buildToApisGenerationBody({ model: "gpt-image-2", requestFormat: "legacy", prompt: "legacy", ratio: "2:3", resolution: "8k" }), /resolution is invalid/, "Unknown tiers must still fail locally.");
 
 for (const model of ["gpt-image-2.5-flare", "gpt-image-2.5-sunburst"]) {
   for (const ratio of ["1:1", "4:3", "3:4"]) {

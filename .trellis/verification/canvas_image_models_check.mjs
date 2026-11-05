@@ -12,7 +12,7 @@ function load(file, dependencies = {}) {
   return loaded.exports;
 }
 const models = load("src/lib/image-model-options.ts");
-const contracts = load("src/lib/image-providers/contracts.ts");
+const contracts = load("src/lib/image-providers/contracts.ts", { "../image-size-options": load("src/lib/image-size-options.ts") });
 const toApis = load("src/lib/toapis-image-api.ts", { "./image-providers/contracts": contracts });
 const dimensions = load("src/lib/gpt-image-dimensions.ts", { "./toapis-image-api": toApis });
 const source = readFileSync("src/lib/image-generation.ts", "utf8");
@@ -80,6 +80,18 @@ await assert.rejects(runtime.requestSingleToApisImagesApiForRoute("primary", "ol
 assert.equal(requests.at(-1).body.model, "default-model", "A missing node model retains the route default");
 for (const format of ["ratio", "pixels"]) {
   assert.equal(toApis.buildToApisGenerationBody({ model: "gpt-image-2", requestFormat: format, prompt: "fixture", requestedSize: size, ratio: "4:3", resolution: "4k" }).size, format === "pixels" ? size : "4:3", "Even an old model ID cannot override explicit format");
+}
+for (const values of [[], ["https://fixture.invalid/reference.png"]]) {
+  const before = requests.length;
+  await assert.rejects(runtime.requestSingleStandardImagesApiWithRetry("legacy fixture", 1, Date.now(), {
+    model: "gpt-image-2", toApisRequestFormat: "legacy", size: dimensions.pixelSizeForRatio("2:3", "4k"),
+    ratio: "2:3", resolution: "4k", quality: "medium", outputFormat: "jpeg", outputCompression: 72,
+  }, { values, files: [] }, "images/generations", { returnPendingAfterAcceptance: true }), (error) => error === pending);
+  assert.equal(requests.length, before + 1, "Legacy 2:3/4K must reach submission once, without changing adapters");
+  assert.deepEqual(requests.at(-1).body, {
+    model: "gpt-image-2", prompt: "legacy fixture", n: 1, size: "2:3", resolution: "4k", quality: "medium",
+    output_format: "jpeg", output_compression: 72, response_format: "url", ...(values.length ? { image_urls: values } : {}),
+  });
 }
 responseStatus = 400;
 responsePayload = { error: { code: "unsupported_size", message: `Model gpt-image-2.5-flare-vip rejects 3312x2480; key=${secret}; Authorization=Bearer sk-hidden-secret` } };

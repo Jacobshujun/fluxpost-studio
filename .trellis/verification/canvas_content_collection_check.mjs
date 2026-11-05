@@ -94,7 +94,9 @@ try {
   modules["../activity-log"] = { recordExecutionLog: async () => undefined };
   modules["../openai"] = { callOpenAIForVisionText: async (_instruction, urls) => { visionCalls.push(urls); return `vision:${urls.join(",")}`; } };
   modules["../image-transport"] = { isImageNetworkUnavailableError: () => false };
-  modules["../image-providers/contracts"] = loadMocked("src/lib/image-providers/contracts.ts", {});
+  modules["../image-providers/contracts"] = loadMocked("src/lib/image-providers/contracts.ts", {
+    "../image-size-options": loadMocked("src/lib/image-size-options.ts", {}),
+  });
   modules["../image-generation"] = { generateCanvasGptImages: async (_prompt, _count, references) => {
     imageCalls.push(references);
     if (references.includes(failedImage)) throw new Error("mock image failure");

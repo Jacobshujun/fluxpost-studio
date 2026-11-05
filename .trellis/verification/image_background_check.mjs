@@ -2,10 +2,10 @@ import assert from "node:assert/strict";
 import { readFileSync } from "node:fs";
 import ts from "typescript";
 
-const contracts = load("src/lib/image-providers/contracts.ts");
+const sizes = load("src/lib/image-size-options.ts");
+const contracts = load("src/lib/image-providers/contracts.ts", { "../image-size-options": sizes });
 const models = load("src/lib/image-model-options.ts");
 const toApis = load("src/lib/toapis-image-api.ts", { "./image-providers/contracts": contracts });
-const sizes = load("src/lib/image-size-options.ts");
 const source = readFileSync("src/lib/image-generation.ts", "utf8");
 const ast = ts.createSourceFile("image-generation.ts", source, ts.ScriptTarget.Latest, true);
 const names = [

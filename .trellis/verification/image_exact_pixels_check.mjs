@@ -4,7 +4,9 @@ import path from "node:path";
 import sharp from "sharp";
 import ts from "typescript";
 
-const contracts = loadModule("src/lib/image-providers/contracts.ts");
+const contracts = loadModule("src/lib/image-providers/contracts.ts", {
+  "../image-size-options": loadModule("src/lib/image-size-options.ts"),
+});
 const toApis = loadModule("src/lib/toapis-image-api.ts", { "./image-providers/contracts": contracts });
 const source = readFileSync("src/lib/image-generation.ts", "utf8");
 const ast = ts.createSourceFile("image-generation.ts", source, ts.ScriptTarget.Latest, true);
@@ -13,7 +15,7 @@ const names = [
   "materializeGeneratedImageUrls", "downloadGeneratedImageUrl", "callImagesApiInPool",
   "requestSingleToApisImagesApiForRoute", "isImageTaskSourceFallbackError",
   "isImageProviderCapabilityError", "isImageTaskTimeoutError", "callResponsesImageToolInPool",
-  "buildImageSizeConstrainedPrompt", "buildStandardImagesApiRequest", "buildStandardImagesGenerationBody",
+  "buildImageSizeConstrainedPrompt", "buildStandardImagesApiRequest", "buildStandardImagesGenerationBody", "buildOpenAiJsonRequest",
 ];
 const declarations = names.map((name) => {
   const declaration = ast.statements.find((statement) => ts.isFunctionDeclaration(statement) && statement.name?.text === name);
@@ -105,7 +107,23 @@ const multipart = await standard.api.buildStandardImagesApiRequest("primary", "f
 ], true, true);
 assert.equal(multipart.body.get("size"), "1200x1600");
 assert.equal(contracts.buildOpenAiJsonGenerationBody({ model: "fixture", prompt: "fixture", size: "1024x1536" }).size, "1024x1536");
-assert.throws(() => contracts.buildOpenAiJsonGenerationBody({ model: "fixture", prompt: "fixture", size: "1200x1600" }), /does not support/);
+const dimensions = loadModule("src/lib/gpt-image-dimensions.ts", { "./toapis-image-api": toApis });
+for (const size of ["1200x1600", dimensions.pixelSizeForRatio("3:4", "2k"), dimensions.pixelSizeForRatio("2:3", "4k")]) {
+  for (const route of ["primary", "backup"]) {
+    const options = { size, quality: "medium", model: "gpt-image-2.5-sunburst" };
+    const generation = await standard.api.buildOpenAiJsonRequest(route, "fixture", 1, options, [], true);
+    assert.deepEqual(JSON.parse(generation.body), { model: options.model, prompt: "fixture", n: 1, size, quality: "medium" });
+    const edit = await standard.api.buildOpenAiJsonRequest(route, "fixture", 1, options, [{ filePath: "fixture.png", fileName: "fixture.png", mimeType: "image/png" }], true);
+    assert.equal(edit.body.get("size"), size);
+    assert.equal(edit.body.get("model"), options.model);
+    assert.equal(edit.body.getAll("image[]").length, 1);
+    assert.deepEqual(Buffer.from(await edit.body.get("image[]").arrayBuffer()), matchingPng);
+    for (const field of ["stream", "response_format", "input_fidelity"]) assert.equal(edit.body.has(field), false);
+  }
+}
+for (const size of ["2:3", "0x2048", "8193x2048"]) {
+  await assert.rejects(standard.api.buildOpenAiJsonRequest("primary", "fixture", 1, { size }, [], true), (error) => error.category === "input");
+}
 console.log("Exact image pixel contract and mocked persistence checks passed.");
 
 async function fixture(width, height, format) {
@@ -118,6 +136,7 @@ function harness(buffer, profile = "openai_sse", model = "fixture") {
     sharp, path, Buffer, process, FormData, Blob,
     ImageProviderError: contracts.ImageProviderError,
     IMAGE_PROVIDER_CAPABILITIES: contracts.IMAGE_PROVIDER_CAPABILITIES,
+    buildOpenAiJsonGenerationBody: contracts.buildOpenAiJsonGenerationBody,
     resolveToApisImageSize: toApis.resolveToApisImageSize,
     buildToApisGenerationBody: toApis.buildToApisGenerationBody,
     compactError: (error) => error instanceof Error ? error.message : String(error),

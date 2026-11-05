@@ -2,10 +2,10 @@ import assert from "node:assert/strict";
 import { readFileSync } from "node:fs";
 import ts from "typescript";
 
-const contracts = load("src/lib/image-providers/contracts.ts");
+const imageSizes = load("src/lib/image-size-options.ts");
+const contracts = load("src/lib/image-providers/contracts.ts", { "../image-size-options": imageSizes });
 const toApis = load("src/lib/toapis-image-api.ts", { "./image-providers/contracts": contracts });
 const dimensions = load("src/lib/gpt-image-dimensions.ts", { "./toapis-image-api": toApis });
-const imageSizes = load("src/lib/image-size-options.ts");
 const types = load("src/lib/types.ts");
 const models = load("src/lib/image-model-options.ts");
 let stored = JSON.stringify({ imageSize: "1200x1600" });

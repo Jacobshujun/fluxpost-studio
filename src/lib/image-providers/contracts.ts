@@ -1,4 +1,5 @@
 import type { ImageGenerationBackground } from "../types";
+import { isImageGenerationSize, normalizeImageGenerationSize } from "../image-size-options";
 
 export const IMAGE_PROVIDER_PROFILES = ["openai_json", "openai_sse", "toapis_async"] as const;
 
@@ -82,8 +83,6 @@ export function resolveImageProviderProfile(input: {
   return isToApis ? "toapis_async" : "openai_sse";
 }
 
-const openAiJsonSizes = new Set(["auto", "1024x1024", "1024x1536", "1536x1024"]);
-
 export function validateImageBackground(background: unknown, outputFormat?: string): ImageGenerationBackground | undefined {
   if (background === undefined) return undefined;
   if (background !== "auto" && background !== "transparent" && background !== "opaque") {
@@ -111,14 +110,14 @@ export function buildOpenAiJsonGenerationBody(input: {
     model: input.model,
     prompt: input.prompt,
     n: input.count || 1,
-    size: input.size,
+    size: normalizeImageGenerationSize(input.size),
     ...(input.quality ? { quality: input.quality } : {}),
   };
 }
 
 export function assertOpenAiJsonSize(size: string) {
-  if (!openAiJsonSizes.has(size)) {
-    throw new ImageProviderError(`OpenAI JSON profile does not support image size ${size}.`, {
+  if (!isImageGenerationSize(size)) {
+    throw new ImageProviderError("图片尺寸无效，请使用 auto 或宽高均在 64–8192 范围内的整数像素尺寸。", {
       category: "input",
       retryable: false,
       failoverAllowed: false,

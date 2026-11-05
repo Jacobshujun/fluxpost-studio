@@ -552,7 +552,7 @@ return url;
 ### 3. Contracts
 
 - Ordinary 2.5 flare/sunburst JSON: `model`, `prompt`, `n:1`, ratio `size`, `resolution`, fixed `quality:high`, URL `reference_images`, optional `background:transparent`. No output-format/compression/response-format fields; returned bytes are preserved. Format/compression selections have no provider effect. Invalid counts fail before upload without retry/failover. Source: https://docs.toapis.com/docs/cn/api-reference/images/gpt-image-2.5/generation (2026-09-14). VIP/Official are separate.
-- Older ToAPIs models retain n=1..10, output fields, image_urls and six-ratio 4K restrictions only within their adapter.
+- Older ToAPIs models retain n=1..10, output fields and image_urls. Every listed ratio may submit at 4K; provider refusals remain explicit errors.
 - The current ToAPIs adapter accepts explicit ratio/tier or `auto`, not exact pixels. Exact-pixel requests, including historical `1200x1600`, fail with a non-retryable input error before reference upload/submission; never silently map pixels to a tier. Do not enable native pixel fields without confirmed provider-contract evidence.
 - `WorkspacePromptSettings`/`SimpleRun` persist imageRatio/imageResolution/imageSize. Canvas/simple allow every listed ratio at 4K without substitution. `pixelSizeForRatio` projects tiers to aligned pixels: square 4K=2880x2880, 16:9=3840x2160; edges divisible by 16, max edge 3840, max area 8,294,400. No local resize. ToAPIs receives ratio/tier. Legacy pixels and frozen resume values stay unchanged.
 - Exact-pixel image outputs from JSON, SSE and Responses paths are checked from returned bytes before runtime-media persistence. Mismatches expose expected/actual dimensions and fail without resizing, source fallback or another provider request. Explicit ratio/tier requests do not promise exact pixels; accepted legacy tasks may resume but their exact-pixel outputs must still pass validation.
@@ -616,12 +616,13 @@ await fetch("/images/generations", {
 - `OPENAI_IMAGE_API_PROFILE` and `OPENAI_IMAGE_BACKUP_API_PROFILE` independently select each route; `OPENAI_IMAGE_BACKUP_MODEL` falls back to `OPENAI_IMAGE_MODEL`.
 - Without a new profile, legacy `OPENAI_IMAGE_API_DIALECT` maps `openai -> openai_sse`, `toapis -> toapis_async`, and `auto` resolves each route hostname independently.
 - `openai_json` uses non-stream `/images/generations` JSON or `/images/edits` multipart and omits `stream`, `response_format`, and `input_fidelity`. `openai_sse` preserves deployed SSE behavior. `toapis_async` preserves its task/upload/status contract.
+- JSON pixel sizes reuse `image-size-options.ts`: `auto` or integer edges 64–8192, normalized before submission. No fixed size allow-list or implicit downgrade; providers decide model/size support. ToAPIs legacy/ratio/pixels field contracts remain independent.
 - Normal generation persists base64/temporary URL outputs through runtime media. The manual probe verifies bytes, uses only a fixed generated fixture, and removes local/TOS health artifacts.
 
 ### 4. Validation & Error Matrix
 
 - Unknown profile or route -> explicit config/API error before provider submission.
-- Content safety, invalid image/input, or unsupported official JSON size -> hard error without route failover.
+- Content safety, invalid image/input, or upstream unsupported size -> hard error without route failover.
 - Auth/network/gateway failure before acceptance may fail over for default callers. Explicit node model/format overrides never fail over; HTTP capability refusals are hard errors.
 - Asynchronous task id accepted -> polling retries the same id; terminal/timeout/protocol failure must not fail over or resubmit.
 - Missing sign-in/admin role on probe -> `401`/`403`; saving config never runs a probe.

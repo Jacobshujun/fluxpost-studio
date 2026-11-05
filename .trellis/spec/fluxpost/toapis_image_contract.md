@@ -48,6 +48,7 @@ Canvas GPT image V2 supports optional `image_1` through `image_16`, one edge per
 | Blank explicit ID | Reject save and execution; missing field alone means default |
 | Simple invalid output format, non-integer/out-of-range compression, transparent JPEG | Reject before settings write |
 | Upstream unsupported size/model | Preserve bounded code/message with upstream label; no downgrade/failover |
+| Legacy 2:3 + 4k (and every listed ratio) | Submit unchanged legacy ratio/tier, output and reference fields; provider decides support |
 | Official 3:4 + 4k with calculated pixels | Submit pixel size, omit resolution |
 | Official exact size | Preserve pixels; check exact returned dimensions before persistence |
 | count other than 1 | Input error; no retry/failover |

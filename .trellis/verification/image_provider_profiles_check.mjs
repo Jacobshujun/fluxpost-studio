@@ -7,7 +7,8 @@ import { createRequire } from "node:module";
 const projectRoot = process.cwd();
 const require = createRequire(import.meta.url);
 const ts = require("typescript");
-const contracts = loadTypescriptCommonJs("src/lib/image-providers/contracts.ts");
+const imageSizes = loadTypescriptCommonJs("src/lib/image-size-options.ts");
+const contracts = loadTypescriptCommonJs("src/lib/image-providers/contracts.ts", { "../image-size-options": imageSizes });
 
 assert.deepEqual(contracts.IMAGE_PROVIDER_PROFILES, ["openai_json", "openai_sse", "toapis_async"]);
 assert.deepEqual(contracts.IMAGE_PROVIDER_CAPABILITIES.toapis_async, {
@@ -71,10 +72,14 @@ assert.deepEqual(generationBody, {
 assert.equal("stream" in generationBody, false);
 assert.equal("response_format" in generationBody, false);
 assert.equal("input_fidelity" in generationBody, false);
-assert.throws(
-  () => contracts.buildOpenAiJsonGenerationBody({ model: "gpt-image-2", prompt: "probe", size: "1200x1600" }),
-  /does not support image size 1200x1600/,
-);
+for (const size of ["auto", "64x64", "1200x1600", "1536x2048", "2336x3520", "8192x8192"]) {
+  assert.equal(contracts.buildOpenAiJsonGenerationBody({ model: "gpt-image-2.5-sunburst", prompt: "probe", size }).size, size);
+}
+assert.equal(contracts.buildOpenAiJsonGenerationBody({ model: "fixture", prompt: "probe", size: " 1536 × 2048 " }).size, "1536x2048");
+for (const size of ["", "3:4", "2k", "0x2048", "63x2048", "8193x2048", "1536x-2048", "1536.5x2048", "NaNx2048"]) {
+  assert.throws(() => contracts.buildOpenAiJsonGenerationBody({ model: "fixture", prompt: "probe", size }), (error) =>
+    error instanceof contracts.ImageProviderError && error.category === "input" && !error.retryable && !error.failoverAllowed);
+}
 
 assert.deepEqual(
   contracts.parseOpenAiJsonImageResponse(

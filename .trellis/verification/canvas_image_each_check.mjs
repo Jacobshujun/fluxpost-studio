@@ -14,12 +14,19 @@ const queueSource = read("src/lib/feishu-publish-queue.ts");
 const nativeRequire = createRequire(import.meta.url);
 const contractModule = { exports: {} };
 const modelModule = { exports: {} };
+const imageSizeModule = { exports: {} };
+new Function("module", "exports", ts.transpileModule(read("src/lib/image-size-options.ts"), {
+  compilerOptions: { module: ts.ModuleKind.CommonJS, target: ts.ScriptTarget.ES2022 },
+}).outputText)(imageSizeModule, imageSizeModule.exports);
 new Function("module", "exports", ts.transpileModule(read("src/lib/image-model-options.ts"), {
   compilerOptions: { module: ts.ModuleKind.CommonJS, target: ts.ScriptTarget.ES2022 },
 }).outputText)(modelModule, modelModule.exports);
-new Function("module", "exports", ts.transpileModule(read("src/lib/image-providers/contracts.ts"), {
+new Function("module", "exports", "require", ts.transpileModule(read("src/lib/image-providers/contracts.ts"), {
   compilerOptions: { module: ts.ModuleKind.CommonJS, target: ts.ScriptTarget.ES2022 },
-}).outputText)(contractModule, contractModule.exports);
+}).outputText)(contractModule, contractModule.exports, (name) => {
+  assert.equal(name, "../image-size-options");
+  return imageSizeModule.exports;
+});
 
 for (const snippet of [
   'type: "model.gpt-image-each"',
