@@ -773,3 +773,37 @@ Implemented staged source title/body and complete image editing. Protected manua
 ### Next Steps
 
 - None - task complete
+
+
+## Session 82: Batch favorites verified and LAN release authorized
+
+**Date**: 2026-11-05
+**Task**: Batch favorites verified and LAN release authorized
+**Branch**: `local`
+
+### Summary
+
+Personal schedule favorites, aliases/notes, scoped summary search/paging and reuse implemented; SQLite/PostgreSQL plus six-theme/viewport wizard and favorites browser cases passed. Full release baseline repeated 2026-11-05. User authorized clean-HEAD LAN update; npm run local:lan activation output and receipts identify final runtime. No remote push or external provider writes.
+
+### Main Changes
+
+(Add details)
+
+### Git Commits
+
+| Hash | Message |
+|------|---------|
+| `707442c` | (see git log) |
+| `2ce5d32` | (see git log) |
+
+### Testing
+
+- [OK] (Add test results)
+
+### Status
+
+[OK] **Completed**
+
+### Next Steps
+
+- None - task complete
