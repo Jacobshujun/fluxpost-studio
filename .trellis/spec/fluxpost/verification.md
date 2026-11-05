@@ -1,6 +1,6 @@
 # Verification
 
-Last updated: 2026-11-04
+Last updated: 2026-11-05
 
 ## Baseline Command
 
@@ -35,6 +35,9 @@ isolated SQLite scope/queries and image-order persistence), extends
 `python .trellis/verification/review_usability_browser_check.py`. Browser checks
 require worker-disabled loopback `BROWSER_BASE_URL`, reject 3001 and intercept
 all API/media requests. Existing review performance/browser regressions remain.
+
+Review memory: same isolated browser setup, command
+`python .trellis/verification/review_filter_memory_browser_check.py`.
 
 Default checks never call paid models, production services, or real Feishu writes.
 
@@ -80,22 +83,11 @@ Do not deploy a dirty worktree, branch name, abbreviated SHA, local runtime rows
 - 2026-11-02 Content-pool libraries: SQLite, browser, types, lint, build and
   baseline pass; PostgreSQL review remains.
 
-- 2026-11-02 Review gallery drag regression: the image fieldset disables only
-  under the media lock, and regenerate joins up/down/delete as disabled during
-  drag. Headed Chrome real-mouse drag, the 45-case three-theme suite and the
-  153-step baseline pass. Logs: `test-artifacts/review-gallery-drag-*.log`.
+- 2026-11-05 Review memory: offline/calendar, six theme/viewport memory flows and
+  45-layout/interaction regressions pass. Task: `11-05-review-filter-memory`.
 
-- 2026-11-02 Review image preview 3:4: image tiles use 3:4 (video 4:3),
-  the first-image `16 / 9` hero is removed, the 112px desktop grid keeps four
-  portrait images visible at 1440x900, and badge/tools geometry is verified for
-  image and video tiles. Full baseline (0 lint errors/16 warnings), 45
-  three-theme layout cases, video/series/scrollbar/interaction checks and two
-  performance runs pass. Committed `0428b64` and activated on LAN; `/review`
-  returns 200 on loopback and LAN. Logs: `test-artifacts/review-ratio-*.log`.
-
-
-Prior text-reasoning and local-library acceptance entries are preserved in
-`archive/verification-history.md` (2026-10-28 context-budget archive). Current
+Prior review layout, text-reasoning and library evidence:
+`archive/verification-history.md`. Current
 OSS evidence: `.trellis/tasks/archive/2026-10/10-28-oss-acceptance-local-cutover/verification.md`.
 
 ## Missing Coverage

@@ -20,7 +20,7 @@ function description(group: ReviewGroup): string {
   return `(${group.children.map((child) => "children" in child ? description(child) : `${label(child.field)} ${label(child.op)} ${conditionValue(child)}${child.end ? ` 至 ${child.end}` : ""}`).join(group.match === "all" ? " 且 " : " 或 ")})`;
 }
 
-export function ReviewFilterPanel({ filters, error, metadata, onApply }: { filters: ReviewFilters; error?: string; metadata: ReviewMetadata; onApply: (value: ReviewFilters) => void }) {
+export function ReviewFilterPanel({ filters, error, metadata, onApply, memoryNotice, restored }: { filters: ReviewFilters; error?: string; metadata: ReviewMetadata; onApply: (value: ReviewFilters) => void; memoryNotice?: string; restored?: boolean }) {
   const dialog = useRef<HTMLDialogElement>(null);
   const [draft, setDraft] = useState(filters);
   const [validation, setValidation] = useState("");
@@ -36,6 +36,7 @@ export function ReviewFilterPanel({ filters, error, metadata, onApply }: { filte
       <button className="soft-button" type="button" onClick={() => onApply(emptyReviewFilters())}>清除筛选</button>
     </div>
     <div className="review-filter-summary" aria-label="已应用条件">
+      {memoryNotice ? <p role="status">{memoryNotice}</p> : restored ? <span role="status">已恢复上次筛选</span> : null}
       {error ? <p role="alert">{error}</p> : filters.groups.length ? filters.groups.map((group, index) => <button key={index} className="filter-chip" title={`${description(group)}；点击移除`} onClick={() => onApply({ ...filters, groups: filters.groups.filter((_, i) => i !== index) })}>{description(group)} ×</button>) : <span>全部状态 · 全部时间</span>}
       <span>搜索与条件：全部满足（AND）</span>
     </div>

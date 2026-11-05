@@ -9,6 +9,18 @@
   ],
   "features": [
     {
+      "id": "review-filter-memory",
+      "title": "Review filter memory",
+      "status": "ready_for_review",
+      "definition_of_done": [
+        "Per-account restore before queries; clear/date/URL/deep-link isolation and storage errors"
+      ],
+      "evidence": [
+        "2026-11-05 offline, six memory browser flows and 45-layout regressions pass: 11-05-review-filter-memory."
+      ],
+      "notes": "Operator acceptance pending; browser-origin only."
+    },
+    {
       "id": "guided-batch-create",
       "title": "Guided batch creation page",
       "status": "ready_for_review",

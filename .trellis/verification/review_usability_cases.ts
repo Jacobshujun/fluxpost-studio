@@ -3,6 +3,7 @@ import { parseReviewFilters, emptyReviewFilters, reviewTimeBounds, calendarDay, 
 import { insertAt, ordinaryImagePrompts, reorderReviewImages } from "../../src/lib/review-image-order";
 import type { GeneratedPost, XhsCard } from "../../src/lib/types";
 import type { ReviewListPage, ReviewMetadata } from "../../src/lib/review-contract";
+import { hasReviewUrlFilters, readReviewFilterMemory, reviewFilterMemoryKey, serializeReviewFilterMemory, writeReviewFilterMemory } from "../../src/lib/review-filter-memory";
 
 export function pureReviewCases() {
   const now = "2024-02-29T16:00:00.000Z"; // March 1 in Beijing.
@@ -22,6 +23,30 @@ export function pureReviewCases() {
   assert.throws(() => bounds("lastDays", "0"));
   assert.throws(() => reviewTimeBounds({ field: "updatedAt", op: "between", value: "2024-03-01", end: "2024-02-29" }, now));
   const base = emptyReviewFilters();
+  const memory = new Map<string, string>();
+  const storage = { getItem: (key: string) => memory.get(key) ?? null, setItem: (key: string, value: string) => { memory.set(key, value); }, removeItem: (key: string) => { memory.delete(key); } };
+  const saved: ReviewFilters = { ...base, search: { field: "vehicle", value: "G7" }, groups: [{ match: "all", children: [{ field: "updatedAt", op: "preset", value: "today" }] }], asOf: now };
+  assert.equal(writeReviewFilterMemory(storage, "A", saved), "");
+  assert.deepEqual(readReviewFilterMemory(storage, "A").filters, JSON.parse(serializeReviewFilterMemory(saved)));
+  assert.equal(readReviewFilterMemory(storage, "B").filters, undefined);
+  assert.ok(!serializeReviewFilterMemory(saved).includes("asOf"));
+  const condition = readReviewFilterMemory(storage, "A").filters!.groups[0].children[0] as ReviewCondition;
+  assert.notEqual(reviewTimeBounds(condition, "2026-11-05T15:59:59Z").since, reviewTimeBounds(condition, "2026-11-05T16:00:00Z").since);
+  const rolling = { ...condition, value: "7d" };
+  assert.notEqual(reviewTimeBounds(rolling, "2026-11-05T15:59:59Z").since, reviewTimeBounds(rolling, "2026-11-05T16:00:00Z").since);
+  writeReviewFilterMemory(storage, "A", base);
+  assert.deepEqual(readReviewFilterMemory(storage, "A").filters, base);
+  for (const raw of ["{", JSON.stringify({ ...base, version: 99 }), JSON.stringify({ ...base, groups: [{ match: "all", children: [] }] })]) {
+    storage.setItem(reviewFilterMemoryKey("A"), raw);
+    assert.match(readReviewFilterMemory(storage, "A").notice, /损坏/);
+    assert.equal(storage.getItem(reviewFilterMemoryKey("A")), null);
+  }
+  const denied = () => { throw new Error("Storage blocked"); };
+  assert.match(readReviewFilterMemory({ ...storage, getItem: denied }, "A").notice, /无法记住/);
+  assert.match(writeReviewFilterMemory({ ...storage, setItem: denied }, "A", base), /无法记住/);
+  assert.throws(() => serializeReviewFilterMemory({ ...base, version: 2 } as unknown as ReviewFilters));
+  assert.ok(hasReviewUrlFilters(new URLSearchParams("q=")));
+  assert.ok(!hasReviewUrlFilters(new URLSearchParams("postId=one&sourceBatchId=batch")));
   const roundtrip = (value: unknown) => parseReviewFilters(JSON.stringify(value));
   const leaf = { field: "body", op: "notContains", value: "test-drive" };
   assert.equal(roundtrip({ ...base, groups: [{ match: "all", children: Array(50).fill(leaf) }] }).groups[0].children.length, 50);

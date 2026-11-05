@@ -27,6 +27,24 @@ read `created_at`, not JSON. Relative query clocks freeze across pagination and
 save-refresh; refresh/re-entry/application recomputes. Cursors carry the clock
 for clients that omit `asOf`. Invalid new URLs never trigger unfiltered fetching.
 
+### Browser filter memory
+
+Applied search and advanced filters persist per account and browser origin in
+`fluxpost:review-filters:v1:<accountId>`. The existing session API resolves identity
+before list/detail/metadata loading. Explicit new/legacy URL filters take priority
+over memory; invalid URLs retain validation errors. Dedicated batch/post entries
+neither restore nor overwrite ordinary memory. An ordinary entry's custom history
+marker survives auto-selected postId and reload; a newly opened post link lacks
+that marker. Atomic URL commands retain only this custom metadata and let Next.js
+copy its own history fields: passing `__NA` back bypasses router synchronization.
+
+Only valid applied filters persist, without `asOf`, selection, pagination or editor
+data. Cancel saves nothing; clear saves explicit empty V1 filters. Relative dates
+are evaluated at initialized entry/refresh and remain frozen across pagination.
+Corrupt memory is removed with a visible notice; storage or session failures show
+an explicit notice while URL-based filtering stays usable. No cross-origin/device
+sync or server preference schema. Empty results expose a clear-filter command.
+
 ## Image Order
 
 Ordinary `imagePrompts?: string[]` is a shared ReviewPatch field aligned with

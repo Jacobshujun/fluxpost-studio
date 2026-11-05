@@ -8,6 +8,7 @@ November updates: `docs/releases/2026-11-03-github-sync.md`; baseline passes. Ru
 
 ## Current Focus
 
+- Review filter memory: offline/six browser flows/45-layout pass. Contract: `review_desk.md`; task `11-05-review-filter-memory`. Operator acceptance pending.
 - Nov 4 afternoon interruption: FRP confirms local 3001 refusal by 17:29:21; desktop launcher recovered same `48a5ccc` at 17:40. Old supervisor/server disappeared without exit/fatal records; external tree termination is a hypothesis, exact cause pending confirmation. Baseline and loopback/LAN health pass. Evidence: `archive/2026-11/11-04-local-afternoon-exit/findings.md`.
 - Batch creation: four-step V2 plus original V1/V2; personal favorites/aliases/notes, SQL search/paging and copy-to-edit. Wizard evidence: archived `11-04-batch-create-wizard`; favorites: `11-04-batch-task-favorites`. Operator acceptance pending. LAN release identity: `/api/version`.
 - Content-pool editor: manual text/images and recrawl/cache protection; baseline/browser checks pass. Contract: `content_pool_editing.md`; task `11-03-content-pool-editor`; operator acceptance pending.

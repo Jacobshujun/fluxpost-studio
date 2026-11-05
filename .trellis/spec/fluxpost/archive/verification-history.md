@@ -1,5 +1,18 @@
 # Verification
 
+- 2026-11-02 Review gallery drag regression: the image fieldset disables only
+  under the media lock, and regenerate joins up/down/delete as disabled during
+  drag. Headed Chrome real-mouse drag, the 45-case three-theme suite and the
+  153-step baseline pass. Logs: `test-artifacts/review-gallery-drag-*.log`.
+
+- 2026-11-02 Review image preview 3:4: image tiles use 3:4 (video 4:3),
+  the first-image `16 / 9` hero is removed, the 112px desktop grid keeps four
+  portrait images visible at 1440x900, and badge/tools geometry is verified for
+  image and video tiles. Full baseline (0 lint errors/16 warnings), 45
+  three-theme layout cases, video/series/scrollbar/interaction checks and two
+  performance runs pass. Committed `0428b64` and activated on LAN; `/review`
+  returns 200 on loopback and LAN. Logs: `test-artifacts/review-ratio-*.log`.
+
 - 2026-08-27: Canvas launcher attribution across execution/schedule/derived runs/posts/review passed owner-filtered history, indexed writes, lint, build, HTTP, and offline baseline checks.
 
 - 2026-08-27: Content-pool custom tags passed owner-scoped suggestions, AND filters, partial batch operations, shared Canvas filtering, build, SQLite, baseline, and 1440/390 browser checks.

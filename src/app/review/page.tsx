@@ -5,6 +5,8 @@ import { insertAt, ordinaryImagePrompts, reorderReviewImages } from "@/lib/revie
 import { ReviewFilterPanel } from "./review-filter-panel";
 import { emptyReviewFilters, reviewFiltersFromUrl, type ReviewFilters } from "@/lib/review-filters";
 import { useReviewData } from "./use-review-data";
+import { useReviewFilterMemory } from "./use-review-filter-memory";
+import { reviewFilterHistoryMetadata, reviewFilterUrlKeys } from "@/lib/review-filter-memory";
 import { changedReviewFields, reviewThumbnailUrl, type ReviewListItem } from "@/lib/review-contract";
 import Image from "next/image";
 import { memo, useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState, useSyncExternalStore } from "react";
@@ -119,11 +121,12 @@ const platformLabels: Record<Platform, string> = {
 };
 
 export default function ReviewPage() {
-  const [urlParams, updateUrl, hydrated] = useUrlQueryParams();
+  const [urlParams, updateUrl, hydrated] = useUrlQueryParams(reviewFilterHistoryMetadata);
   const selectedPostId = urlParams.get("postId") || "";
   const sourceBatchId = urlParams.get("sourceBatchId") || "";
   const setSelectedPostId = useCallback((id: string) => updateUrl((params) => { if (id) params.set("postId", id); else params.delete("postId"); }, true), [updateUrl]);
-  const filterUrlKey = JSON.stringify(["filters", "status", "time", "q", "author", "platform", "since", "until"].map((key) => [key, urlParams.get(key)]));
+  const filterUrlKey = JSON.stringify(reviewFilterUrlKeys.map((key) => [key, urlParams.get(key)]));
+  const filterMemory = useReviewFilterMemory(hydrated, filterUrlKey, updateUrl);
   const [timeRevision, setTimeRevision] = useState(0);
   const filterState = useMemo(() => {
     const params = new URLSearchParams();
@@ -131,7 +134,9 @@ export default function ReviewPage() {
     try { return { filters: reviewFiltersFromUrl(params), error: "" }; }
     catch (error) { return { filters: emptyReviewFilters(), error: error instanceof Error ? error.message : "筛选无效" }; }
   }, [filterUrlKey]);
-  const structuredFilters = useMemo(() => JSON.stringify({ ...filterState.filters, asOf: new Date(Math.max(timeRevision, Date.now())).toISOString() }), [filterState, timeRevision]);
+  const structuredFilters = useMemo(() => filterMemory.ready
+    ? JSON.stringify({ ...filterState.filters, asOf: new Date(Math.max(timeRevision, Date.now())).toISOString() })
+    : "", [filterState, timeRevision, filterMemory.ready]);
   function applyFilters(value: ReviewFilters, replace = false) {
     updateUrl((params) => {
       for (const key of ["status", "time", "q", "author", "platform", "since", "until"]) params.delete(key);
@@ -156,7 +161,7 @@ export default function ReviewPage() {
   const [feishuVehicleOptionsMessage, setFeishuVehicleOptionsMessage] = useState("");
   const theme = useSyncExternalStore(subscribeTheme, getStoredTheme, () => "professional" as ThemeMode);
 
-  const review = useReviewData({ q: filterState.filters.search.value, sourceBatchId, structured: structuredFilters, invalid: Boolean(filterState.error) }, selectedPostId, setSelectedPostId, hydrated, setMessage);
+  const review = useReviewData({ q: filterState.filters.search.value, sourceBatchId, structured: structuredFilters, invalid: Boolean(filterState.error) }, selectedPostId, setSelectedPostId, hydrated && filterMemory.ready, setMessage);
   const { posts: filteredPosts, draft, setDraft, selectedPostIds, setSelectedPostIds, selectedPosts, toggleSelection, selectVisible, persistedPost } = review;
   const { summary } = review.metadata;
   const loadPosts = review.refresh;
@@ -784,7 +789,7 @@ export default function ReviewPage() {
 
         <section className="review-workspace">
           <aside className="review-sidebar glass ops-panel">
-            <div className="review-filter-stack">
+            <fieldset className="review-filter-stack min-w-0" disabled={!filterMemory.ready} aria-busy={!filterMemory.ready}>
               <div className="review-search-row">
                 <select className="field" aria-label="搜索字段" value={filterState.filters.search.field} onChange={(event) => applyFilters({ ...filterState.filters, search: { ...filterState.filters.search, field: event.target.value as ReviewFilters["search"]["field"] } })}>
                   <option value="all">全部文本</option><option value="title">标题</option><option value="body">正文</option><option value="vehicle">车型（精准）</option>
@@ -792,8 +797,8 @@ export default function ReviewPage() {
                 <input className="field search-field h-10" aria-label="搜索稿件" list={filterState.filters.search.field === "vehicle" ? "review-vehicle-candidates" : undefined} value={filterState.filters.search.value} onChange={(event) => applyFilters({ ...filterState.filters, search: { ...filterState.filters.search, value: event.target.value } }, true)} placeholder="搜索稿件" />
                 <datalist id="review-vehicle-candidates">{review.metadata.vehicles?.map((vehicle) => <option key={vehicle} value={vehicle} />)}</datalist>
               </div>
-              <ReviewFilterPanel filters={filterState.filters} error={filterState.error} metadata={review.metadata} onApply={applyFilters} />
-            </div>
+              <ReviewFilterPanel filters={filterState.filters} error={filterState.error} metadata={review.metadata} onApply={applyFilters} memoryNotice={filterMemory.notice} restored={filterMemory.restored} />
+            </fieldset>
             <div className="batch-action-bar mt-3">
               <div className="min-w-0">
                 <p className="truncate text-xs font-black">批量审查</p>
@@ -808,7 +813,7 @@ export default function ReviewPage() {
                 </button>
               </div>
             </div>
-            <ReviewPostList posts={filterState.error ? [] : filteredPosts} selectedPostId={selectedPostId} selectedPostIds={selectedPostIds} selectPost={selectPost} toggleSelection={toggleSelection} loading={review.loading} />
+            <ReviewPostList posts={filterState.error ? [] : filteredPosts} selectedPostId={selectedPostId} selectedPostIds={selectedPostIds} selectPost={selectPost} toggleSelection={toggleSelection} loading={review.loading} onClear={() => applyFilters(emptyReviewFilters())} invalid={Boolean(filterState.error)} />
             <div className="flex shrink-0 items-center justify-between gap-2 pt-2">
               <button className="soft-button px-3 py-2 text-xs" onClick={review.previousPage} disabled={review.loading || review.pageNumber === 1}>上一页</button>
               <span className="text-xs" aria-live="polite">第 {review.pageNumber} 页{review.loading ? " · 加载中" : ""}</span>
@@ -1403,8 +1408,9 @@ function appendQueryParam(url: string, key: string, value: string) {
   return `${url}${separator}${encodeURIComponent(key)}=${encodeURIComponent(value)}`;
 }
 
-const ReviewPostList = memo(function ReviewPostList({ posts, selectedPostId, selectedPostIds, selectPost, toggleSelection, loading }: {
+const ReviewPostList = memo(function ReviewPostList({ posts, selectedPostId, selectedPostIds, selectPost, toggleSelection, loading, onClear, invalid }: {
   posts: ReviewListItem[]; selectedPostId: string; selectedPostIds: string[]; selectPost: (post: ReviewListItem) => void; toggleSelection: (id: string) => void; loading: boolean;
+  onClear: () => void; invalid: boolean;
 }) { return (            <div className="review-list thin-scrollbar" aria-busy={loading}>
               {posts.length ? (
                 posts.map((post) => (
@@ -1431,7 +1437,9 @@ const ReviewPostList = memo(function ReviewPostList({ posts, selectedPostId, sel
                   </article>
                 ))
               ) : (
-                <div className="empty-state min-h-0 p-4 text-xs text-[var(--text-muted)]">当前筛选没有生成稿</div>
+                <div className="empty-state min-h-0 p-4 text-xs text-[var(--text-muted)]">
+                  {loading ? "正在加载稿件…" : <><span>{invalid ? "请修正筛选条件后重试" : "当前筛选下暂无稿件"}</span><button className="soft-button px-3 py-2" type="button" onClick={onClear}>清除筛选</button></>}
+                </div>
               )}
             </div>); });
 

@@ -92,7 +92,7 @@ const subscribeQueryParams = (notify: () => void) => {
 const querySnapshot = () => window.location.search;
 const serverQuerySnapshot = () => "";
 
-export function useUrlQueryParams(): [URLSearchParams, (update: (params: URLSearchParams) => void, replace?: boolean) => void, boolean] {
+export function useUrlQueryParams(historyMetadata?: () => Record<string, unknown> | null): [URLSearchParams, (update: (params: URLSearchParams) => void, replace?: boolean) => void, boolean] {
   const query = useSyncExternalStore(subscribeQueryParams, querySnapshot, serverQuerySnapshot);
   const params = useMemo(() => new URLSearchParams(query), [query]);
   const [hydrated, setHydrated] = useState(false);
@@ -107,9 +107,10 @@ export function useUrlQueryParams(): [URLSearchParams, (update: (params: URLSear
     const query = next.toString();
     if (query === new URLSearchParams(window.location.search).toString()) return;
     const url = `${window.location.pathname}${query ? `?${query}` : ""}${window.location.hash}`;
-    if (replace) window.history.replaceState(null, "", url);
-    else window.history.pushState(null, "", url);
+    const state = historyMetadata?.() ?? null;
+    if (replace) window.history.replaceState(state, "", url);
+    else window.history.pushState(state, "", url);
     window.dispatchEvent(new PopStateEvent("popstate"));
-  }, []);
+  }, [historyMetadata]);
   return [params, update, hydrated];
 }
