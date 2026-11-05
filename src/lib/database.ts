@@ -1,3 +1,6 @@
+import { canvasScheduleFavoriteSchemaSql } from "./canvas/schedule-favorite-schema";
+import { canvasScheduleListSql } from "./canvas/schedule-list-query";
+import type { CanvasScheduleFavorite, CanvasScheduleListQuery, CanvasScheduleListResult, CanvasScheduleSummary } from "./canvas/types";
 import { canvasHistoryPageSize, canvasHistoryQuery, type CanvasHistoryCursor } from "./canvas/history-query";
 import type { WorkspaceAccessActor } from "./workspace-ownership";
 import { libraryColorSchemaSql } from "./library-color-schema";
@@ -3664,6 +3667,69 @@ export async function getCanvasDirectorySnapshotFromDb(snapshotId: string, owner
   return row ? fromJson<CanvasDirectorySnapshot>(row.data_json) : undefined;
 }
 
+export async function queryCanvasScheduleSummariesFromDb(actor: WorkspaceAccessActor, query: CanvasScheduleListQuery): Promise<CanvasScheduleListResult> {
+  await ensureDatabaseReady();
+  const postgres = getDatabaseBackend() === "postgres";
+  const sql = canvasScheduleListSql(actor, query, postgres);
+  type SummaryRow = {
+    id: string; name: string; workflow_id: string; status: CanvasSchedule["status"]; updated_at: string | Date;
+    schemaVersion: string | number | null; totalMainTasks: string | number | null; totalChildTasks: string | number | null;
+    totalContentTasks: string | number | null; totalImageTasks: string | number | null;
+    workflow_name: string | null; alias: string | null; note: string | null;
+    favorite_created_at: string | null; favorite_updated_at: string | null;
+  };
+  let rows: SummaryRow[];
+  let total: number;
+  if (postgres) {
+    const [count, list] = await Promise.all([
+      getPostgresPool().query<{ total: string }>(sql.countSql, sql.countValues),
+      getPostgresPool().query<SummaryRow>(sql.listSql, sql.values),
+    ]);
+    total = Number(count.rows[0].total);
+    rows = list.rows;
+  } else {
+    total = Number((getSqliteDatabase().prepare(sql.countSql).get(...sql.countValues) as { total: number }).total);
+    rows = getSqliteDatabase().prepare(sql.listSql).all(...sql.values) as SummaryRow[];
+  }
+  const schedules: CanvasScheduleSummary[] = rows.map((row) => ({
+    id: row.id, name: row.name, workflowId: row.workflow_id, status: row.status,
+    updatedAt: row.updated_at instanceof Date ? row.updated_at.toISOString() : row.updated_at,
+    schemaVersion: Number(row.schemaVersion) === 2 ? 2 : 1,
+    totalMainTasks: Number(row.totalMainTasks || 0), totalChildTasks: Number(row.totalChildTasks || 0),
+    totalContentTasks: Number(row.totalContentTasks || 0), totalImageTasks: Number(row.totalImageTasks || 0),
+    workflowName: row.workflow_name ?? undefined, workflowAvailable: row.workflow_name !== null,
+    favorite: row.alias === null ? null : {
+      alias: row.alias, note: row.note!, createdAt: row.favorite_created_at!, updatedAt: row.favorite_updated_at!,
+    },
+  }));
+  return { schedules, total, limit: query.limit, offset: query.offset };
+}
+
+export async function putCanvasScheduleFavoriteInDb(actorId: string, scheduleId: string, alias: string, note: string): Promise<CanvasScheduleFavorite> {
+  await ensureDatabaseReady();
+  const now = new Date().toISOString();
+  const postgres = getDatabaseBackend() === "postgres";
+  const marks = Array.from({ length: 6 }, (_, i) => postgres ? `$${i + 1}` : "?").join(",");
+  const sql = `INSERT INTO canvas_schedule_favorites (owner_user_id, schedule_id, alias, note, created_at, updated_at)
+    VALUES (${marks}) ON CONFLICT (owner_user_id, schedule_id) DO UPDATE SET
+    alias=excluded.alias, note=excluded.note, updated_at=excluded.updated_at
+    RETURNING alias, note, created_at, updated_at`;
+  const values = [actorId, scheduleId, alias, note, now, now];
+  type Row = { alias: string; note: string; created_at: string; updated_at: string };
+  const row = postgres ? (await getPostgresPool().query<Row>(sql, values)).rows[0]
+    : getSqliteDatabase().prepare(sql).get(...values) as Row;
+  return { alias: row.alias, note: row.note, createdAt: row.created_at, updatedAt: row.updated_at };
+}
+
+export async function deleteCanvasScheduleFavoriteFromDb(actorId: string, scheduleId: string) {
+  await ensureDatabaseReady();
+  if (getDatabaseBackend() === "postgres") {
+    await getPostgresPool().query("DELETE FROM canvas_schedule_favorites WHERE owner_user_id=$1 AND schedule_id=$2", [actorId, scheduleId]);
+  } else {
+    getSqliteDatabase().prepare("DELETE FROM canvas_schedule_favorites WHERE owner_user_id=? AND schedule_id=?").run(actorId, scheduleId);
+  }
+}
+
 export async function listCanvasSchedulesFromDb(limit = 100) {
   await ensureDatabaseReady();
   if (getDatabaseBackend() === "postgres") {
@@ -4897,6 +4963,7 @@ function createSqliteSchema(db: SqliteDatabase) {
     );
     CREATE INDEX IF NOT EXISTS idx_canvas_schedules_owner_updated ON canvas_schedules(owner_user_id, updated_at DESC);
     CREATE INDEX IF NOT EXISTS idx_canvas_schedules_status_updated ON canvas_schedules(status, updated_at ASC);
+    ${canvasScheduleFavoriteSchemaSql}
 
     CREATE TABLE IF NOT EXISTS canvas_runs (
       id TEXT PRIMARY KEY,
@@ -5442,6 +5509,7 @@ const postgresSchemaSql = `
   );
   CREATE INDEX IF NOT EXISTS idx_canvas_schedules_owner_updated ON canvas_schedules(owner_user_id, updated_at DESC);
   CREATE INDEX IF NOT EXISTS idx_canvas_schedules_status_updated ON canvas_schedules(status, updated_at ASC);
+    ${canvasScheduleFavoriteSchemaSql}
 
   CREATE TABLE IF NOT EXISTS canvas_runs (
     id TEXT PRIMARY KEY,

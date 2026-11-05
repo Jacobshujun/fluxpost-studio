@@ -10,6 +10,7 @@ const npmCommand = process.platform === "win32" ? "npm.cmd" : "npm";
 const npxCommand = process.platform === "win32" ? "npx.cmd" : "npx";
 
 const nodeChecks = [
+    ["Canvas schedule favorites and paged search", "canvas_schedule_favorites_check.mjs"],
   ["Guided batch creation contracts", "batch_create_check.mjs"],
   ["Canvas bounded history and reuse", "canvas_history_memory_check.mjs"],
   ["Local OSS cutover CLI safety", "storage_cutover_cli_check.mjs"],

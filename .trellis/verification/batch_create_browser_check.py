@@ -4,7 +4,7 @@ import copy
 import json
 import os
 from pathlib import Path
-from urllib.parse import urlparse
+from urllib.parse import urlparse, parse_qs
 
 from playwright.async_api import async_playwright, expect
 
@@ -29,6 +29,27 @@ def new_schedule(identifier="task"):
             "definition": {"parameters": [], "expansion": {"main": "cartesian", "child": "cartesian"},
                            "sharedOutputs": [], "aggregationPolicy": "all",
                            "childResult": {"nodeId": "text", "outputPort": "text", "artifactKind": "text"}}}
+
+
+def summary_result(tasks, favorites, url, workflows=None):
+    params = parse_qs(urlparse(url).query)
+    workflows = workflows if workflows is not None else [WORKFLOW]
+    items = []
+    for task in tasks:
+        flow = next((flow for flow in workflows if flow["id"] == task["workflowId"]), None)
+        favorite = favorites.get(task["id"])
+        q = params.get("q", [""])[0].lower()
+        if q and q not in " ".join([task["name"], flow["name"] if flow else "", favorite["alias"] if favorite else "", favorite["note"] if favorite else ""]).lower():
+            continue
+        if params.get("favorite") == ["true"] and not favorite:
+            continue
+        if params.get("workflowId") and params["workflowId"][0] != task["workflowId"]:
+            continue
+        item = {key: task.get(key, 0) for key in ["id", "name", "workflowId", "schemaVersion", "status", "updatedAt", "totalMainTasks", "totalChildTasks", "totalContentTasks", "totalImageTasks"]}
+        item.update(favorite=favorite, workflowAvailable=bool(flow), workflowName=flow["name"] if flow else None)
+        items.append(item)
+    limit, offset = int(params.get("limit", [50])[0]), int(params.get("offset", [0])[0])
+    return {"schedules": items[offset:offset + limit], "total": len(items), "limit": limit, "offset": offset}
 
 
 async def check(browser, theme, width):
@@ -62,7 +83,9 @@ async def check(browser, theme, width):
                 state["schedules"]["task"] = new_schedule()
                 payload = {"schedule": state["schedules"]["task"]}
             else:
-                payload = {"schedules": list(state["schedules"].values())}
+                payload = summary_result(state["schedules"].values(), {}, request.url) if "view=summary" in request.url else {"schedules": list(state["schedules"].values())}
+        elif path.endswith("/favorite"):
+            payload = {"favorite": None}
         elif path.startswith("/api/canvas/schedules/"):
             identifier = path.split("/")[-1]
             task = state["schedules"][identifier]
@@ -180,13 +203,13 @@ async def check(browser, theme, width):
     await expect(page.locator(".batch-error")).to_contain_text("其他页面更新")
     assert state["schedules"]["copy"]["name"] != "冲突不能覆盖"
     page.once("dialog", lambda dialog: dialog.dismiss())
-    await page.get_by_role("button", name="选择工作流", exact=False).first.click()
+    await page.get_by_role("button", name="选择配置", exact=False).first.click()
     await expect(page.get_by_label("任务名称")).to_have_value("冲突不能覆盖")
     page.once("dialog", lambda dialog: dialog.accept())
     await page.get_by_role("button", name="重新加载任务", exact=True).click()
     state["conflict"] = False
     await page.get_by_role("button", name="任务记录", exact=False).click()
-    await page.get_by_role("button", name="旧版调度保留", exact=False).click()
+    await page.locator("article.batch-saved-task").filter(has_text="旧版调度保留").get_by_role("button", name="查看原任务").click()
     await expect(page.get_by_text("旧版任务保留在原调度模块中", exact=False)).to_be_visible()
     link = page.get_by_role("link", name="在原调度打开", exact=False)
     assert "scheduleId=legacy" in await link.get_attribute("href")
@@ -262,7 +285,7 @@ async def roundtrip_all_inputs(browser):
         if path == "/api/canvas/workflows":
             payload = {"workflows": [workflow]}
         elif path == "/api/canvas/schedules":
-            payload = {"schedules": [task]}
+            payload = summary_result([task], {}, route.request.url) if "view=summary" in route.request.url else {"schedules": [task]}
         elif path == "/api/canvas/schedules/roundtrip":
             if route.request.method == "PATCH":
                 body = route.request.post_data_json

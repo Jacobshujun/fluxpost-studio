@@ -13,10 +13,11 @@
       "title": "Guided batch creation page",
       "status": "ready_for_review",
       "definition_of_done": [
-        "Independent four-step V2 creation with lossless input editing, preview/launch and results; original V1/V2 scheduler remains available"
+        "Four-step V2 creation with lossless inputs, preview/launch/results and original V1/V2 scheduler; personal favorites with aliases/notes and scoped search/paging/copy"
       ],
       "evidence": [
-        "2026-11-04 baseline and six three-theme 1440/390 browser flows pass; eleven input types/Excel/inner binding/shared output roundtrip and original collection/multiline browser regressions pass. Task: 11-04-batch-create-wizard."
+        "2026-11-04 wizard baseline, six three-theme desktop/mobile flows and eleven-input/Excel/inner/shared roundtrip pass: archived 11-04-batch-create-wizard.",
+        "Favorites SQLite/PG 160-row scope/search/API checks and six three-theme desktop/mobile browser flows pass: 11-04-batch-task-favorites."
       ],
       "notes": "Operator usability acceptance pending. No real model or Feishu calls; local activation follows verified commit."
     },

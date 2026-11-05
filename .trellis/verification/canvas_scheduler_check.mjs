@@ -1347,6 +1347,42 @@ try {
   const duplicatedRandomParameter = duplicatedLegacyV2.definition.parameters.find((parameter) => parameter.id === "angle");
   assert.deepEqual(duplicatedRandomParameter.sampleCount, { mode: "exact", value: 2 }, "new V2 copies must normalize legacy randomCount");
   assert.equal("randomCount" in duplicatedRandomParameter, false, "new V2 copies must persist only sampleCount");
+  // Bookmark reuse goes through the real duplicate action, not a second copier.
+  storedSchedule = { ...legacyReady, definition: {
+    ...structuredClone(duplicatedLegacyV2.definition),
+    sharedOutputs: [{ nodeId: "shared", outputPort: "images", artifactKind: "images" }],
+    parameters: [...structuredClone(duplicatedLegacyV2.definition.parameters), {
+      id: "bookmark-text", name: "Prompt", scope: "main", valueType: "text", expansion: "each",
+      binding: { nodeId: "region", innerNodeId: "inner", fieldKey: "text" },
+      source: { mode: "manual-list", values: ["Latest saved prompt\n\nBody"], listSeparator: "delimiter" },
+    }, {
+      id: "bookmark-directory", name: "Directory", scope: "main", valueType: "directory-group", expansion: "each",
+      binding: { nodeId: "directory", fieldKey: "groups" },
+      source: { mode: "manual-list", values: [{ id: "group", snapshotId: "snapshot", images: [{ url: "/fixture.jpg" }], audios: [], videos: [] }] },
+    }, {
+      id: "bookmark-workbook", name: "Workbook", scope: "main", valueType: "copy", expansion: "each",
+      binding: { nodeId: "copy", fieldKey: "entryId" },
+      source: { mode: "competitor-workbook", field: "card", worksheet: "Sheet", rowStart: 2, rowEnd: 4, snapshot: { id: "workbook", rows: [] } },
+    }],
+  } };
+  const reusedBookmark = await scheduler.duplicateCanvasSchedule(storedSchedule.id, account);
+  assert.equal(reusedBookmark.status, "draft");
+  assert.equal(reusedBookmark.revision, 1);
+  assert.equal(reusedBookmark.previewRevision, undefined);
+  assert.equal(reusedBookmark.workflowSnapshot, undefined);
+  assert.deepEqual(reusedBookmark.mainTasks, []);
+  assert.equal(reusedBookmark.totalMainTasks, 0);
+  assert.equal(reusedBookmark.totalChildTasks, 0);
+  const prompt = reusedBookmark.definition.parameters.find((parameter) => parameter.id === "bookmark-text");
+  assert.deepEqual(prompt.binding, { nodeId: "region", innerNodeId: "inner", fieldKey: "text" });
+  assert.equal(prompt.source.values[0], "Latest saved prompt\n\nBody");
+  assert.deepEqual(reusedBookmark.definition.sharedOutputs, storedSchedule.definition.sharedOutputs);
+  storedSchedule = reusedBookmark;
+  const savedConfiguration = structuredClone(storedSchedule.definition);
+  const reusedAgain = await scheduler.duplicateCanvasSchedule(storedSchedule.id, account);
+  assert.deepEqual(reusedAgain.definition, savedConfiguration, "advanced inputs and frozen selections round-trip through duplicate");
+  reusedAgain.definition.parameters.find((parameter) => parameter.id === "bookmark-text").source.values[0] = "Edited new copy";
+  assert.deepEqual(storedSchedule.definition, savedConfiguration, "editing a duplicate cannot mutate its bookmarked source");
   storedSchedule = {
     ...randomPreview,
     status: "draft",

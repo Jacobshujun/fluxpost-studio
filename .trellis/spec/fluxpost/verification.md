@@ -1,6 +1,6 @@
 # Verification
 
-Last updated: 2026-11-03
+Last updated: 2026-11-04
 
 ## Baseline Command
 
@@ -37,6 +37,9 @@ require worker-disabled loopback `BROWSER_BASE_URL`, reject 3001 and intercept
 all API/media requests. Existing review performance/browser regressions remain.
 
 Default checks never call paid models, production services, or real Feishu writes.
+
+Batch favorites: baseline includes `canvas_schedule_favorites_check.mjs`;
+isolated browser/PG commands: `batch_task_favorites.md`.
 
 `local_server_diagnostics_check.mjs` verifies bounded logs/reports, child exit
 capture, native report privacy, I/O failure continuation and Windows detached

@@ -1,4 +1,5 @@
 "use client";
+import { ScheduleFavoriteControl } from "@/components/canvas-schedule/FavoriteControl";
 import { LibraryColorFilter, LibraryPalette } from "@/components/library-colors";
 import Link from "next/link";
 import Image from "next/image";
@@ -4429,10 +4430,12 @@ function CanvasScheduleCenter({ workflow, graph, onSaveBindings, onPreview, onCl
 
   async function removeSchedule() {
     const schedule = selectedRef.current;
-    if (!schedule || !window.confirm(`删除“${schedule.name}”？`)) return;
+    if (!schedule) return;
     setBusy(true);
     setError("");
     try {
+      const { favorite } = await api<{ favorite: unknown }>(`/api/canvas/schedules/${encodeURIComponent(schedule.id)}/favorite`);
+      if (!window.confirm(`删除“${schedule.name}”？${favorite ? "\n此任务已收藏，删除任务也会移除收藏。" : ""}`)) return;
       await api(`/api/canvas/schedules/${schedule.id}`, { method: "DELETE" });
       selectedRef.current = undefined;
       setSelected(undefined);
@@ -4490,11 +4493,12 @@ function CanvasScheduleCenter({ workflow, graph, onSaveBindings, onPreview, onCl
       </header>
       <div className="canvas-schedule-toolbar">
         <button type="button" onClick={() => void createSchedule()} disabled={busy}><Plus />新建任务</button>
-        {selected ? <button type="button" onClick={() => void scheduleAction("duplicate")} disabled={busy}><CopyPlus />复制为新任务</button> : null}
+        {selected ? <button type="button" onClick={() => void scheduleAction("duplicate", {}, true)} disabled={busy}><CopyPlus />复制为新任务</button> : null}
         {selected && selected.schemaVersion !== 2 && editable ? <button type="button" onClick={() => void scheduleAction("convert-v2")} disabled={busy}><GitBranch />转换为灵活调度</button> : null}
         {selected && editable ? <button className="danger" type="button" onClick={() => void removeSchedule()} disabled={busy}><Trash2 />删除</button> : null}
         <span>{editSequence ? "保存中" : "已保存"}</span>
       </div>
+      {selected ? <ScheduleFavoriteControl key={selected.id} scheduleId={selected.id} disabled={busy} /> : null}
       {error ? <div className="canvas-task-error"><AlertTriangle />{error}</div> : null}
       <div className="canvas-schedule-body">
         <nav className="canvas-schedule-list" aria-label="批量任务列表">

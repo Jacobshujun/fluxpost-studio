@@ -993,3 +993,35 @@ export type CanvasSchedule = {
   completedAt?: string;
   taskConcurrency?: number;
 };
+
+export type CanvasScheduleFavorite = {
+  alias: string;
+  note: string;
+  createdAt: string;
+  updatedAt: string;
+};
+
+export type CanvasScheduleSummary = Pick<CanvasSchedule,
+  "id" | "name" | "workflowId" | "schemaVersion" | "status" | "updatedAt" |
+  "totalMainTasks" | "totalChildTasks" | "totalContentTasks" | "totalImageTasks"
+> & {
+  workflowName?: string;
+  workflowAvailable: boolean;
+  favorite: CanvasScheduleFavorite | null;
+};
+
+export type CanvasScheduleListQuery = {
+  q?: string;
+  workflowId?: string;
+  favorite?: boolean;
+  scheduleId?: string;
+  limit: number;
+  offset: number;
+};
+
+export type CanvasScheduleListResult = {
+  schedules: CanvasScheduleSummary[];
+  total: number;
+  limit: number;
+  offset: number;
+};

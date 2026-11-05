@@ -2,12 +2,18 @@ import { NextResponse } from "next/server";
 import { createCanvasSchedule, kickCanvasSchedulerWorker, listCanvasSchedules } from "@/lib/canvas/scheduler";
 import { isWorkspaceSignInError, requireWorkspaceAccount } from "@/lib/workspace-accounts";
 import { canvasScheduleResponse } from "@/lib/canvas/schedule-response";
+import { queryCanvasScheduleSummariesFromDb } from "@/lib/database";
+import { CanvasScheduleFavoriteError, parseCanvasScheduleListQuery } from "@/lib/canvas/schedule-favorites";
 
 export const runtime = "nodejs";
 
 export async function GET(request: Request) {
   try {
     const account = await requireWorkspaceAccount(request);
+    const params = new URL(request.url).searchParams;
+    if (params.get("view") === "summary") {
+      return NextResponse.json(await queryCanvasScheduleSummariesFromDb(account, parseCanvasScheduleListQuery(params)));
+    }
     kickCanvasSchedulerWorker();
     return NextResponse.json({ schedules: (await listCanvasSchedules(account)).map(canvasScheduleResponse) });
   } catch (error) {
@@ -31,6 +37,6 @@ export async function POST(request: Request) {
 function scheduleError(error: unknown, status = 500) {
   return NextResponse.json(
     { error: error instanceof Error ? error.message : "Canvas schedule request failed." },
-    { status: isWorkspaceSignInError(error) ? 401 : status },
+    { status: isWorkspaceSignInError(error) ? 401 : error instanceof CanvasScheduleFavoriteError ? error.status : status },
   );
 }

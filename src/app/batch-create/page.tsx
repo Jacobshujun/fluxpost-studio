@@ -2,6 +2,7 @@
 
 import Link from "next/link";
 import Image from "next/image";
+import { useRouter } from "next/navigation";
 import { useCallback, useEffect, useRef, useState } from "react";
 import { ArrowLeft, ArrowRight, Check, ExternalLink, Layers3, LoaderCircle, Play, Plus, RefreshCw, Save, Search, X } from "lucide-react";
 import {
@@ -12,18 +13,21 @@ import {
 import { getCanvasBatchBindings } from "@/lib/canvas/registry";
 import { getCanvasIterationOutputPorts } from "@/lib/canvas/iteration";
 import { batchCanvasHref, batchInputIssues, batchOutputIssue, editBatchDraft } from "@/lib/canvas/batch-create";
-import type { CanvasArtifact, CanvasSchedule, CanvasScheduleV2Definition, CanvasWorkflow } from "@/lib/canvas/types";
+import type { CanvasArtifact, CanvasSchedule, CanvasScheduleV2Definition, CanvasScheduleSummary, CanvasScheduleListResult, CanvasScheduleFavorite, CanvasWorkflow } from "@/lib/canvas/types";
+import { ScheduleFavoriteControl } from "@/components/canvas-schedule/FavoriteControl";
+import { ScheduleList } from "./ScheduleList";
 import { DefinitionEditor } from "./DefinitionEditor";
 import "./batch-create.css";
 
-const steps = ["选择工作流", "填写内容与素材", "设置生成方式", "预览并开始"];
+const steps = ["选择配置", "填写内容与素材", "设置生成方式", "预览并开始"];
 const activeStates = ["queued", "running", "paused"];
 const editableStates = ["draft", "ready"];
-const time = (value: string) => new Date(value).toLocaleString("zh-CN", { timeZone: "Asia/Shanghai", month: "2-digit", day: "2-digit", hour: "2-digit", minute: "2-digit" });
 
 export default function BatchCreatePage() {
+  const router = useRouter();
   const [workflows, setWorkflows] = useState<CanvasWorkflow[]>([]);
-  const [schedules, setSchedules] = useState<CanvasSchedule[]>([]);
+  const [listVersion, setListVersion] = useState(0);
+  const [source, setSource] = useState<"favorites" | "workflow">("workflow");
   const [workflowId, setWorkflowId] = useState("");
   const [selected, setSelected] = useState<CanvasSchedule>();
   const [tab, setTab] = useState<"new" | "records">("new");
@@ -47,7 +51,7 @@ export default function BatchCreatePage() {
   const adopt = useCallback((value: CanvasSchedule) => {
     selectedRef.current = value;
     setSelected(value);
-    setSchedules((current) => [value, ...current.filter((item) => item.id !== value.id)].sort((a, b) => b.updatedAt.localeCompare(a.updatedAt)));
+
   }, []);
 
   function syncUrl(value?: CanvasSchedule, nextWorkflowId = "") {
@@ -63,10 +67,10 @@ export default function BatchCreatePage() {
     async function initialize() {
       try {
         const [workflowData, scheduleData] = await Promise.all([
-          api<{ workflows: CanvasWorkflow[] }>("/api/canvas/workflows"), api<{ schedules: CanvasSchedule[] }>("/api/canvas/schedules"),
+          api<{ workflows: CanvasWorkflow[] }>("/api/canvas/workflows"), api<CanvasScheduleListResult>("/api/canvas/schedules?view=summary&favorite=true&limit=1"),
         ]);
         if (disposed) return;
-        setWorkflows(workflowData.workflows); setSchedules(scheduleData.schedules);
+        setWorkflows(workflowData.workflows); setSource(scheduleData.total > 0 ? "favorites" : "workflow");
         const params = new URLSearchParams(window.location.search);
         const id = params.get("scheduleId");
         const requestedWorkflow = params.get("workflowId");
@@ -77,7 +81,7 @@ export default function BatchCreatePage() {
           setTab(detail.schedule.schemaVersion === 2 && editableStates.includes(detail.schedule.status) ? "new" : "records"); setStep(1);
         } else if (requestedWorkflow) {
           if (!workflowData.workflows.some((item) => item.id === requestedWorkflow)) throw new Error("指定工作流不存在或无权访问，请重新选择。");
-          setWorkflowId(requestedWorkflow);
+          setWorkflowId(requestedWorkflow); setSource("workflow");
         }
       } catch (cause) { if (!disposed) setError(errorMessage(cause)); }
       finally { if (!disposed) setLoading(false); }
@@ -127,7 +131,7 @@ export default function BatchCreatePage() {
     if (busyRef.current) return;
     busyRef.current = true; selectionEpoch.current += 1; setBusy(true); setError(""); setNotice("");
     try { await job(); } catch (cause) { setError(errorMessage(cause)); }
-    finally { busyRef.current = false; setBusy(false); }
+    finally { busyRef.current = false; setBusy(false); setListVersion((value) => value + 1); }
   }
 
   async function persist() {
@@ -150,10 +154,14 @@ export default function BatchCreatePage() {
 
   function confirmDiscard() { return !dirtyRef.current || window.confirm("有未保存的修改，确定放弃这些修改吗？"); }
 
-  function startNew() {
+  async function startNew() {
     if (busyRef.current || !confirmDiscard()) return;
-    selectionEpoch.current += 1; selectedRef.current = undefined; setSelected(undefined);
-    setDirtyState(false); setTab("new"); setStep(0); setError(""); setNotice(""); syncUrl(undefined, workflowId);
+    await perform(async () => {
+      const favorites = await api<CanvasScheduleListResult>("/api/canvas/schedules?view=summary&favorite=true&limit=1");
+      selectedRef.current = undefined; setSelected(undefined);
+      setSource(favorites.total > 0 ? "favorites" : "workflow");
+      setDirtyState(false); setTab("new"); setStep(0); syncUrl();
+    });
   }
 
   async function openSchedule(id: string) {
@@ -194,36 +202,48 @@ export default function BatchCreatePage() {
       if (actionName === "cancel" && !window.confirm("取消后将停止安排未开始的内容，确定取消这项任务吗？")) return;
       const data = await api<{ schedule: CanvasSchedule }>(`/api/canvas/schedules/${encodeURIComponent(current.id)}`, { method: "PATCH", body: JSON.stringify({ action: actionName, revision: current.revision, previewRevision: current.previewRevision, ...payload }) });
       adopt(mergeCanvasScheduleWorkbookPaths(data.schedule, current)); setDirtyState(false); syncUrl(data.schedule);
-      if (actionName === "duplicate") { setStep(1); setTab("new"); } else if (actionName === "launch") setTab("records");
+      if (actionName === "duplicate") { setWorkflowId(data.schedule.workflowId); setStep(1); setTab("new"); } else if (actionName === "launch") setTab("records");
     });
   }
 
   async function remove() {
-    if (!selected || !window.confirm(`确定删除“${selected.name}”吗？`)) return;
+    if (!selected) return;
     await perform(async () => {
+      const { favorite } = await api<{ favorite: CanvasScheduleFavorite | null }>(`/api/canvas/schedules/${encodeURIComponent(selected.id)}/favorite`);
+      if (!window.confirm(`确定删除“${selected.name}”吗？${favorite ? "\n此任务已收藏，删除任务也会移除收藏。" : ""}`)) return;
       await api(`/api/canvas/schedules/${encodeURIComponent(selected.id)}`, { method: "DELETE" });
-      setSchedules((current) => current.filter((item) => item.id !== selected.id)); selectedRef.current = undefined; setSelected(undefined); setDirtyState(false); syncUrl();
+      selectedRef.current = undefined; setSelected(undefined); setDirtyState(false); syncUrl();
+    });
+  }
+
+  async function duplicateSaved(item: CanvasScheduleSummary) {
+    await perform(async () => {
+      if (dirtyRef.current) await persist();
+      const data = await api<{ schedule: CanvasSchedule }>(`/api/canvas/schedules/${encodeURIComponent(item.id)}`, { method: "PATCH", body: JSON.stringify({ action: "duplicate" }) });
+      if (data.schedule.schemaVersion !== 2) { setDirtyState(false); router.push(batchCanvasHref(data.schedule.workflowId, data.schedule.id)); return; }
+      adopt(data.schedule); setDirtyState(false); setWorkflowId(data.schedule.workflowId); syncUrl(data.schedule);
+      setStep(1); setTab("new");
     });
   }
 
   const inputIssues = selected?.definition && graph ? batchInputIssues(selected.definition, graph) : [];
   return <main className="batch-page">
     <header className="batch-header"><div className="batch-brand"><Layers3 /><div><h1>批量创作</h1><p>选好流程，安排素材，一起生成。</p></div></div><nav aria-label="页面导航"><Link href="/">返回工作台</Link><Link href={workflow ? batchCanvasHref(workflow.id, selected?.id) : "/canvas"}>原批量调度 <ExternalLink /></Link></nav></header>
-    <div className="batch-tabs" role="group" aria-label="工作区"><button type="button" aria-pressed={tab === "new"} disabled={busy} onClick={() => { if (selected && !editable) startNew(); else setTab("new"); }}>新建任务</button><button type="button" aria-pressed={tab === "records"} disabled={busy} onClick={() => setTab("records")}>任务记录 <span>{schedules.length}</span></button></div>
+    <div className="batch-tabs" role="group" aria-label="工作区"><button type="button" aria-pressed={tab === "new"} disabled={busy} onClick={() => { if (selected && !editable) startNew(); else setTab("new"); }}>新建任务</button><button type="button" aria-pressed={tab === "records"} disabled={busy} onClick={() => setTab("records")}>任务记录</button></div>
     {error ? <div className="batch-error" role="alert"><strong>暂时无法完成操作</strong><p>{error}</p><div className="batch-actions">{selected ? <button type="button" disabled={busy} onClick={() => void openSchedule(selected.id)}>重新加载任务</button> : <button type="button" onClick={() => window.location.reload()}>重新加载页面</button>}{selected && editable ? <button type="button" disabled={busy} onClick={() => setStep(1)}>检查内容与素材</button> : null}<Link href="/">返回工作台登录或检查配置</Link></div></div> : null}
     {loading ? <div className="batch-loading" role="status"><LoaderCircle />正在读取工作流与任务…</div> : tab === "new" ? <>
       <nav className="batch-steps" aria-label="创建步骤">{steps.map((label, index) => <button type="button" key={label} aria-current={step === index ? "step" : undefined} disabled={busy || index > step || (index > 0 && !selected)} onClick={() => index === 0 && selected ? startNew() : setStep(index)}><span>{index < step ? <Check /> : index + 1}</span>{label}</button>)}</nav>
       <div className="batch-layout"><section className="batch-main" aria-labelledby="batch-step-title"><div className="batch-section-heading"><div><p className="batch-kicker">步骤 {step + 1} / 4</p><h2 id="batch-step-title" tabIndex={-1}>{steps[step]}</h2></div>{selected ? <button type="button" disabled={busy} onClick={() => void perform(async () => { await persist(); })}><Save />保存草稿</button> : null}</div>
         <fieldset disabled={busy} className="batch-form">
-          {step === 0 ? <><label className="batch-search"><Search /><input aria-label="搜索工作流" placeholder="搜索工作流名称" value={query} onChange={(event) => setQuery(event.target.value)} /></label><div className="batch-workflows">{workflows.filter((item) => item.name.toLowerCase().includes(query.toLowerCase())).map((item) => <label className={`batch-workflow ${workflowId === item.id ? "is-selected" : ""}`} key={item.id}><input type="radio" name="workflow" value={item.id} checked={workflowId === item.id} onChange={() => { setWorkflowId(item.id); syncUrl(undefined, item.id); }} /><span><strong>{item.name}</strong><small>可填写：{Array.from(new Set(getCanvasBatchBindings(item.graph).map((binding) => binding.field.label))).join("、") || "沿用固定配置"}</small><small>可输出：{item.graph.nodes.flatMap((node) => getCanvasIterationOutputPorts(node).filter((port) => ["text", "images", "videos"].includes(port.kind)).map((port) => `${canvasNodeDisplayName(node)} · ${port.label}`)).join("、") || "尚未配置输出"}</small></span></label>)}</div>{!workflows.length ? <div className="batch-empty"><h3>先准备一个工作流</h3><p>在画布中搭建并保存处理流程，再回到这里安排批量内容。</p><Link href="/canvas">打开画布 <ArrowRight /></Link></div> : null}</> : !selected || !workflow || !graph ? <p role="alert">此任务的工作流已删除或无权访问，请返回第一步。</p> : selected.schemaVersion !== 2 ? <p>这是一项旧版调度。<Link href={batchCanvasHref(selected.workflowId, selected.id)}>在原模块打开</Link></p> : <>
+          {step === 0 ? <><div className="batch-source-tabs" role="group" aria-label="新建方式"><button type="button" aria-pressed={source === "favorites"} onClick={() => setSource("favorites")}>从收藏复用</button><button type="button" aria-pressed={source === "workflow"} onClick={() => setSource("workflow")}>从工作流新建</button></div>{source === "favorites" ? <ScheduleList favoritesOnly workflows={workflows} version={listVersion} busy={busy} onOpen={(id) => void openSchedule(id)} onDuplicate={(item) => void duplicateSaved(item)} onChange={() => setListVersion((value) => value + 1)} /> : <><label className="batch-search"><Search /><input aria-label="搜索工作流" placeholder="搜索工作流名称" value={query} onChange={(event) => setQuery(event.target.value)} /></label><div className="batch-workflows">{workflows.filter((item) => item.name.toLowerCase().includes(query.toLowerCase())).map((item) => <label className={`batch-workflow ${workflowId === item.id ? "is-selected" : ""}`} key={item.id}><input type="radio" name="workflow" value={item.id} checked={workflowId === item.id} onChange={() => { setWorkflowId(item.id); syncUrl(undefined, item.id); }} /><span><strong>{item.name}</strong><small>可填写：{Array.from(new Set(getCanvasBatchBindings(item.graph).map((binding) => binding.field.label))).join("、") || "沿用固定配置"}</small><small>可输出：{item.graph.nodes.flatMap((node) => getCanvasIterationOutputPorts(node).filter((port) => ["text", "images", "videos"].includes(port.kind)).map((port) => `${canvasNodeDisplayName(node)} · ${port.label}`)).join("、") || "尚未配置输出"}</small></span></label>)}</div>{!workflows.length ? <div className="batch-empty"><h3>先准备一个工作流</h3><p>在画布中搭建并保存处理流程，再回到这里安排批量内容。</p><Link href="/canvas">打开画布 <ArrowRight /></Link></div> : null}<p className="batch-hint">常用配置可以在任务记录中收藏，下次直接复制并替换内容。</p></>}</> : !selected || !workflow || !graph ? <p role="alert">此任务的工作流已删除或无权访问，请返回第一步。</p> : selected.schemaVersion !== 2 ? <p>这是一项旧版调度。<Link href={batchCanvasHref(selected.workflowId, selected.id)}>在原模块打开</Link></p> : <>
             <label className="batch-task-name"><span>任务名称</span><input maxLength={100} value={selected.name} onChange={(event) => edit({ name: event.target.value })} /></label>
             {step === 1 || step === 2 ? <DefinitionEditor schedule={selected} graph={graph} stage={step === 1 ? "inputs" : "generation"} busy={busy} onChange={(definition) => edit({ definition })} onPreview={setPreview} /> : <><div className="batch-preview-heading"><h3>{selected.totalMainTasks ?? 0} 组内容，共 {selected.totalChildTasks ?? 0} 个结果</h3><p>以下数量与分配来自实际预览。检查后再开始生成。</p></div>{selected.error ? <p role="alert">{selected.error}</p> : null}<ScheduleV2Preview schedule={selected} onPreview={setPreview} /></>}
           </>}
         </fieldset>
-        <footer className="batch-footer"><div><span role="status">{busy ? "正在处理…" : dirty ? "有未保存的修改" : notice || (selected ? "已保存" : "选择已保存的工作流")}</span></div><div className="batch-actions">{step > 0 ? <button type="button" disabled={busy} onClick={() => step === 1 ? startNew() : setStep(step - 1)}><ArrowLeft />上一步</button> : null}{step === 3 ? <><button type="button" disabled={busy} onClick={() => void next()}><RefreshCw />重新预览</button><button className="batch-primary" type="button" disabled={busy || dirty || selected?.status !== "ready" || !selected.previewRevision} onClick={() => void action("launch")}><Play />开始生成</button></> : <button className="batch-primary" type="button" disabled={busy || (step === 0 ? !workflowId : !editable || !workflow)} onClick={() => void next()}>{busy ? <LoaderCircle /> : null}{step === 2 ? "预览生成内容" : "下一步"}<ArrowRight /></button>}</div></footer>
+        {step > 0 || source === "workflow" ? <footer className="batch-footer"><div><span role="status">{busy ? "正在处理…" : dirty ? "有未保存的修改" : notice || (selected ? "已保存" : "选择已保存的工作流")}</span></div><div className="batch-actions">{step > 0 ? <button type="button" disabled={busy} onClick={() => step === 1 ? startNew() : setStep(step - 1)}><ArrowLeft />上一步</button> : null}{step === 3 ? <><button type="button" disabled={busy} onClick={() => void next()}><RefreshCw />重新预览</button><button className="batch-primary" type="button" disabled={busy || dirty || selected?.status !== "ready" || !selected.previewRevision} onClick={() => void action("launch")}><Play />开始生成</button></> : <button className="batch-primary" type="button" disabled={busy || (step === 0 ? source !== "workflow" || !workflowId : !editable || !workflow)} onClick={() => void next()}>{busy ? <LoaderCircle /> : null}{step === 2 ? "预览生成内容" : "下一步"}<ArrowRight /></button>}</div></footer> : null}
       </section><aside className="batch-summary"><details ref={summaryRef}><summary>本次任务</summary><dl><dt>工作流</dt><dd>{workflow?.name || "尚未选择"}</dd><dt>内容与素材</dt><dd>{selected?.definition?.parameters.length ?? 0} 项</dd><dt>实际生成数量</dt><dd>{selected?.previewRevision ? `${selected.totalMainTasks} 组 / ${selected.totalChildTasks} 个结果` : "预览后确认"}</dd></dl>{inputIssues.length ? <p>{inputIssues.length} 项内容需要补充</p> : null}{selected?.definition?.parameters.map((item) => <p key={item.id}><strong>{item.name}</strong><br />{item.scope === "main" ? "每组内容" : "组内结果"} · {({ fixed: "固定使用", each: "逐项生成", random: "随机选取" })[item.expansion]}</p>)}{workflow ? <Link href={batchCanvasHref(workflow.id)}>去画布编辑工作流 <ExternalLink /></Link> : null}<p className="batch-hint">配置只影响本次任务。生成前可以返回任一步修改。</p></details></aside></div>
-    </> : <div className="batch-record-layout"><aside className="batch-records"><div className="batch-actions"><h2>任务记录</h2><button type="button" disabled={busy} onClick={startNew}><Plus />新建</button><button type="button" disabled={busy} aria-label="刷新任务记录" onClick={() => void perform(async () => { const data = await api<{ schedules: CanvasSchedule[] }>("/api/canvas/schedules"); setSchedules(data.schedules); })}><RefreshCw /></button></div>{schedules.map((item) => <button className={`batch-record ${selected?.id === item.id ? "is-selected" : ""}`} type="button" key={item.id} disabled={busy} onClick={() => void openSchedule(item.id)}><strong>{item.name}</strong><span>{workflows.find((flow) => flow.id === item.workflowId)?.name || "工作流不可用"}</span><small>{canvasScheduleStatusLabel(item.status)} · {item.schemaVersion === 2 ? `${(item.mainTasks || []).filter((main) => ["completed", "partial"].includes(main.status)).length}/${item.totalMainTasks ?? 0} 组完成` : `${item.totalContentTasks} 篇`}</small><small>{time(item.updatedAt)}</small></button>)}{!schedules.length ? <p className="batch-empty">还没有任务。新建后可以在这里查看进度和成果。</p> : null}</aside>
-      <section className="batch-main">{selected ? <><div className="batch-section-heading"><div><p className="batch-kicker">{canvasScheduleStatusLabel(selected.status)}</p><h2>{selected.name}</h2></div><button type="button" disabled={busy} onClick={() => void openSchedule(selected.id)}><RefreshCw />刷新</button></div><div className="batch-actions"><Link href={batchCanvasHref(selected.workflowId, selected.id)}>在原调度打开 <ExternalLink /></Link>{selected.schemaVersion === 2 ? <button type="button" disabled={busy} onClick={() => void action("duplicate")}>复制为新任务</button> : null}{!activeStates.includes(selected.status) ? <button type="button" disabled={busy} onClick={() => void remove()}>删除任务</button> : null}{editable ? <button type="button" disabled={busy} onClick={() => { setTab("new"); setStep(1); }}>继续编辑</button> : null}</div>{selected.error ? <p className="batch-field-error">{selected.error}</p> : null}{selected.schemaVersion === 2 ? <><BatchResults schedule={selected} busy={busy} onAction={(name, payload) => void action(name, payload)} /><details className="batch-advanced"><summary>执行详情与单项重试</summary><ScheduleV2RuntimeTree schedule={selected} busy={busy} onAction={(name, payload) => void action(name, payload)} /></details></> : <p className="batch-empty">旧版任务保留在原调度模块中，可从上方入口查看和操作。</p>}</> : <p className="batch-empty">选择一项任务，查看进度和生成结果。</p>}</section>
+    </> : <div className="batch-record-layout"><aside className="batch-records"><div className="batch-actions"><h2>任务记录</h2><button type="button" disabled={busy} onClick={startNew}><Plus />新建</button></div><ScheduleList workflows={workflows} version={listVersion} selectedId={selected?.id} busy={busy} onOpen={(id) => void openSchedule(id)} onDuplicate={(item) => void duplicateSaved(item)} onChange={() => setListVersion((value) => value + 1)} /></aside>
+      <section className="batch-main">{selected ? <><div className="batch-section-heading"><div><p className="batch-kicker">{canvasScheduleStatusLabel(selected.status)}</p><h2>{selected.name}</h2></div><button type="button" disabled={busy} onClick={() => void openSchedule(selected.id)}><RefreshCw />刷新</button></div><ScheduleFavoriteControl key={selected.id} scheduleId={selected.id} disabled={busy} onChange={() => setListVersion((value) => value + 1)} /><div className="batch-actions"><Link href={batchCanvasHref(selected.workflowId, selected.id)}>在原调度打开 <ExternalLink /></Link>{selected.schemaVersion === 2 ? <button type="button" disabled={busy || !workflow} onClick={() => void action("duplicate")}>复制为新任务</button> : null}{!activeStates.includes(selected.status) ? <button type="button" disabled={busy} onClick={() => void remove()}>删除任务</button> : null}{editable ? <button type="button" disabled={busy} onClick={() => { setTab("new"); setStep(1); }}>继续编辑</button> : null}</div>{selected.error ? <p className="batch-field-error">{selected.error}</p> : null}{selected.schemaVersion === 2 ? <><BatchResults schedule={selected} busy={busy} onAction={(name, payload) => void action(name, payload)} /><details className="batch-advanced"><summary>执行详情与单项重试</summary><ScheduleV2RuntimeTree schedule={selected} busy={busy} onAction={(name, payload) => void action(name, payload)} /></details></> : <p className="batch-empty">旧版任务保留在原调度模块中，可从上方入口查看和操作。</p>}</> : <p className="batch-empty">选择一项任务，查看进度和生成结果。</p>}</section>
     </div>}
     {preview ? <div className="batch-image-overlay" role="dialog" aria-modal="true" aria-label="素材预览" onKeyDown={(event) => { if (event.key === "Escape") setPreview(null); }}><button type="button" autoFocus aria-label="关闭预览" onClick={() => setPreview(null)}><X /></button>{preview.kind === "image" ? <Image src={preview.url} alt="所选素材" width={1200} height={900} unoptimized /> : null}</div> : null}
   </main>;
