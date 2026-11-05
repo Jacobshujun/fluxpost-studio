@@ -906,3 +906,36 @@ Read-only diagnosis found 8 fresh Canvas worker leases with 33 recent queued run
 ### Next Steps
 
 - None - task complete
+
+
+## Session 86: Independent local runtime and 24 GiB heap
+
+**Date**: 2026-11-05
+**Task**: Independent local runtime and 24 GiB heap
+**Branch**: `local`
+
+### Summary
+
+Reproduced editor Job closure killing supervisor/server; native suspended breakaway now verifies independence before execution and preflights before listener replacement. Added real Job closure/rejection/no-Job/argv regression and 24 GiB V8 probe. Full baseline passed, clean committed LAN activation passed; live Job ownership confirms editor independence, normal supervisor-owned libuv Job, and loopback/LAN pages/identity. Historical incident attribution remains qualified; no repeated restart for documentation.
+
+### Main Changes
+
+(Add details)
+
+### Git Commits
+
+| Hash | Message |
+|------|---------|
+| `498682c` | (see git log) |
+
+### Testing
+
+- [OK] (Add test results)
+
+### Status
+
+[OK] **Completed**
+
+### Next Steps
+
+- None - task complete
