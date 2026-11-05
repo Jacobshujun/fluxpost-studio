@@ -62,3 +62,15 @@ The runtime currently reports primary `openai_json`, backup `toapis_async`,
 and default `gpt-image-2.5-sunburst-official`. Those settings were not changed.
 Earlier successful live model tests used `gpt-image-2.5-sunburst`, not the
 Official suffix; explicit node selection is needed to reproduce that probe.
+
+## Authorized LAN activation follow-up
+
+After the deferred activation was explained, the operator explicitly requested
+"提交，更新到lan" on 2026-11-05. The implementation is already committed as
+`67f17bc`; subsequent archive/journal commits contain that repair. Use the
+canonical `npm run local:lan` from the clean primary worktree to activate
+current HEAD at 0.0.0.0:3001. The command builds the inactive candidate slot,
+verifies release identity/HTTP behavior, and restores the previous candidate
+if activation fails. The ignored `.fluxpost-local-candidate.json` receipt and
+live `/api/version` identify the final activated full SHA. This authorization
+supersedes the earlier decision to defer activation due to active tasks.
