@@ -840,3 +840,36 @@ Implemented account-scoped browser filter memory with URL and deep-link isolatio
 ### Next Steps
 
 - None - task complete
+
+
+## Session 84: Image size validation and provider compatibility
+
+**Date**: 2026-11-05
+**Task**: Image size validation and provider compatibility
+**Branch**: `local`
+
+### Summary
+
+Removed JSON fixed-size and ToAPIs legacy 4K ratio blocks; preserved protocol payloads and basic validation. Full baseline/build pass. Earlier explicit live 3:4/2K tests passed. Runtime 3001 activation deferred because read-only preflight found active/queued image and Canvas tasks; after tasks finish run npm run local:lan from clean primary worktree.
+
+### Main Changes
+
+(Add details)
+
+### Git Commits
+
+| Hash | Message |
+|------|---------|
+| `67f17bc` | (see git log) |
+
+### Testing
+
+- [OK] (Add test results)
+
+### Status
+
+[OK] **Completed**
+
+### Next Steps
+
+- None - task complete
