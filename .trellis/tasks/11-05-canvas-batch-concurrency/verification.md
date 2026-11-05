@@ -55,3 +55,13 @@ Activation must use clean committed primary worktree `npm run local:lan`.
 Do not imply a restart of active synchronous image calls is interruption-free.
 Final candidate identity is recorded by `/api/version` and the ignored local
 activation receipt; task code completion alone is not runtime activation.
+
+At 15:10:56 Asia/Shanghai a subsequent read-only query found zero fresh
+Canvas running leases and zero ready Canvas queue entries. Immediate
+follow-up across Canvas/image/simple/Feishu/original queues also found zero
+fresh running leases. Historical image/simple queued rows remain and were
+not modified. This provided an idle execution window to apply the local LAN
+update using the existing session's local-update authorization, without
+deliberately interrupting known active synchronous requests. Code commit:
+`67a4545`. The standard LAN command and final HTTP/identity checks determine
+activation success; no remote production deployment is involved.
