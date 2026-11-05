@@ -16,6 +16,6 @@ investigation; earlier explicit request raises the local Node heap to 24 GiB.
 - [x] Actual launcher survives containing Job closure; diagnostics still capture child exit.
 - [x] Disallowed breakaway fails explicitly; arguments/environment/paths preserved.
 - [x] Real V8 heap probe confirms 24 GiB without allocating that amount.
-- [ ] Full baseline passes; clean committed LAN activation and identity pass.
+- [x] Full baseline passes; clean committed LAN activation and identity pass.
 
 No automatic restart, job replay, cache purge, paid test or remote deployment.

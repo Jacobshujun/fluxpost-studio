@@ -30,6 +30,9 @@ remain unexplained without their destroyed fatal output.
   fallback to an editor-dependent process. Candidate and rollback share this
   path. Parent environment/cwd/argv are preserved without serializing secrets;
   only NUL standard input/output and the stderr log handle are inherited.
+- Independence is checked before resume. Node/libuv can subsequently create
+  its own Job for the supervisor/children; runtime acceptance must distinguish
+  that self-owned Job from editor-owned Jobs, rather than reject all Jobs.
 - Managed local Next child uses `--max-old-space-size=24576` (24 GiB old-space),
   explicitly requested Nov 5. This is a ceiling, not preallocation
   or a total-process RSS cap. Builds, other Node processes and remote production

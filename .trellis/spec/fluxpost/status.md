@@ -4,11 +4,11 @@ Last updated: 2026-11-05
 
 ## One-Line Status
 
-Independent startup/24-GiB heap: activation pending.
+Independent startup/24-GiB heap active on LAN `498682c`.
 
 ## Current Focus
 
-- Nov 5 startup: Job independence/24-GiB heap and baseline pass; activation pending. Task: `11-05-local-independent-runtime`. Diagnosis: `archive/local-process-lifetime-2026-11-05.md`.
+- Nov 5 startup: Job independence/24-GiB heap, baseline and LAN activation pass. Evidence: `archive/2026-11/11-05-local-independent-runtime/verification.md`.
 - Canvas workers: 32/default, 100/cap verified; LAN identity: `/api/version`.
 - Review filter memory: offline/six browser flows/45-layout pass. Contract: `review_desk.md`; task `11-05-review-filter-memory`. Operator acceptance pending.
 - Nov 4 afternoon exit remains unattributed; recovery verified. Evidence: `archive/2026-11/11-04-local-afternoon-exit/findings.md`.

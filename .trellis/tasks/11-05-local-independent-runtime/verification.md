@@ -52,6 +52,26 @@ the fixture now suppresses progress only, preserving errors and exit checks.
 
 ## Activation
 
-Pending verified commit and managed LAN startup. No real provider task was
-submitted by tests, no database/user data was changed, and no remote deploy
-was performed.
+Clean committed `498682c4c6ab731940f25dd5326dfd0bbdceb806` activated through
+`npm run local:lan` at 21:43:55, slot `.next-local-a`. Supervisor PID 19216 /
+server PID 19672; active receipt, slot marker and `/api/version` match. Actual
+server argv contains `--max-old-space-size=24576`; supervisor stderr is empty.
+Launcher health/smoke and separate loopback/physical-LAN `/canvas`, `/review`,
+`/content`, `/batch-create` checks pass (200), with identical version identity.
+
+Live ownership verification examined 12 Job handles owned by current VS Code/
+Codex processes: neither runtime process belongs to those Jobs. The only
+matching runtime-owned Job is owned by the supervisor and contains itself
+plus its server child. This is normal Node/libuv behavior after resuming:
+`uv__init_global_job_handle` creates its own kill-on-close Job, assigns itself,
+and manages its children. The first live check incorrectly treated membership
+in any Job as failure; targeted ownership checks and the upstream Node source
+resolved that distinction without changing or restarting the live service.
+Source: https://raw.githubusercontent.com/nodejs/node/v24.12.0/deps/uv/src/win/process.c
+
+Ignored evidence: `test-artifacts/local-independent-activation-20261105.log`
+and `test-artifacts/local-independent-live-evidence-20261105.json`.
+No manual provider task was submitted, no runtime data/schema repair was
+performed, and no remote deploy occurred. Normal application workers are
+enabled after authorized startup. Subsequent documentation/archive commits
+do not change running source and do not trigger another restart.
