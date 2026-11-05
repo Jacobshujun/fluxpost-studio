@@ -8,11 +8,13 @@ November updates: `docs/releases/2026-11-03-github-sync.md`; baseline passes. Ru
 
 ## Current Focus
 
+- Nov 4 afternoon interruption: FRP confirms local 3001 refusal by 17:29:21; desktop launcher recovered same `48a5ccc` at 17:40. Old supervisor/server disappeared without exit/fatal records; external tree termination is a hypothesis, exact cause pending confirmation. Baseline and loopback/LAN health pass. Evidence: `archive/2026-11/11-04-local-afternoon-exit/findings.md`.
+
 - Guided batch creation: `/batch-create` four-step V2 wizard and results reuse existing schedules; original V1/V2 center retained. Baseline, six three-theme desktop/mobile flows, all-input roundtrip and original collection/text browser regressions pass. Task: `11-04-batch-create-wizard`; operator usability acceptance pending.
 - Content-pool editor: manual text/images and recrawl/cache protection; baseline/browser checks pass. Contract: `content_pool_editing.md`; task `11-03-content-pool-editor`; operator acceptance pending.
 - Temp files: 297/299 removed; two inventories kept.
 - Local diagnostics: logs <=100 MiB; reports <=3 / 7 days / 30 MiB. Baseline/Windows checks pass. User requested LAN cutover; managed startup, identity, diagnostic flags/receipt and loopback/LAN pages pass. Contract: `local_diagnostics.md`; evidence: `archive/2026-11/11-03-local-crash-logging/verification.md`.
-- Nov 4 OOM repair active on LAN `514bf40`: local heap 8 GiB; Canvas SQL history returns 25 rows/~440 KiB instead of 171k/~3.49 GiB; reuse pages 32. SQLite/PG scale, baseline, heap flag and loopback/LAN health pass. Contract: `canvas_history.md`; evidence: `archive/2026-11/11-04-canvas-history-memory/verification.md`. Exact past fatal request unproven.
+- Nov 4 OOM repair included in LAN `48a5ccc` (repair `514bf40`): local heap 8 GiB; Canvas SQL history returns 25 rows/~440 KiB instead of 171k/~3.49 GiB; reuse pages 32. SQLite/PG scale, baseline, heap flag and loopback/LAN health pass. Contract: `canvas_history.md`; evidence: `archive/2026-11/11-04-canvas-history-memory/verification.md`. Exact past fatal request unproven.
 - Feishu publishing: eight offline-reproduced risks include media skipping/omission, edit overwrite, path escape, deleted-post revival and record/lease persistence. Application unchanged; fixes and live acceptance remain. Evidence: `11-03-feishu-publish-owner-recovery/code-review-2026-11-03.md`.
 - Content-pool performance: row-scoped library/item writes; paginated desk/summary/ids with `raw` stripped; baseline, types, build, browser and PG timing pass (desk 960ms, summary 898ms). Committed and active on LAN; authenticated 3001 timing remains.
 - Content-pool libraries: owner-scoped rail with subsets, default library, tags and Canvas filters; checks pass, PostgreSQL review remains.
