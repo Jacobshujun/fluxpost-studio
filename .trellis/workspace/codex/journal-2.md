@@ -873,3 +873,36 @@ Removed JSON fixed-size and ToAPIs legacy 4K ratio blocks; preserved protocol pa
 ### Next Steps
 
 - None - task complete
+
+
+## Session 85: Canvas batch worker concurrency
+
+**Date**: 2026-11-05
+**Task**: Canvas batch worker concurrency
+**Branch**: `local`
+
+### Summary
+
+Read-only diagnosis found 8 fresh Canvas worker leases with 33 recent queued runs despite image cap 100. Raised Canvas default to 32 and configurable cap to 100; preserved operator lower values, image/resource pools and queue/provider semantics. Full baseline/build pass. Waited until no fresh active leases in Canvas/image/simple/Feishu/original queues before canonical LAN activation; final identity in /api/version and local receipt. Historical stale statuses were not mutated.
+
+### Main Changes
+
+(Add details)
+
+### Git Commits
+
+| Hash | Message |
+|------|---------|
+| `67a4545` | (see git log) |
+
+### Testing
+
+- [OK] (Add test results)
+
+### Status
+
+[OK] **Completed**
+
+### Next Steps
+
+- None - task complete
