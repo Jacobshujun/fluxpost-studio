@@ -32,6 +32,7 @@ Last updated: 2026-07-20
 - Durable Feishu publish queue schema, save/list/claim/heartbeat helpers, and PostgreSQL `FOR UPDATE SKIP LOCKED` queue claiming belong in `src/lib/database.ts`; Feishu publish queue orchestration belongs in `src/lib/feishu-publish-queue.ts`.
 - Durable distribution-check job schema, save/list/claim/heartbeat helpers, and PostgreSQL `FOR UPDATE SKIP LOCKED` queue claiming belong in `src/lib/database.ts`; distribution-check worker orchestration belongs in `src/lib/distribution-check.ts`.
 - Application-level concurrency limits and shared provider pools belong in `src/lib/concurrency.ts`.
+- Canvas consumers default to 32, configurable 1–100 via `WORKER_CANVAS_RUN_CONCURRENCY`; image requests remain pooled at 100. Each run may contain multiple nodes; consumer count is not a provider throughput guarantee. Configuration takes effect on process startup.
 - PostgreSQL schema files belong in `db/migrations/`; SQLite-to-PostgreSQL copy scripts belong in `scripts/db/`.
 - Text generation belongs in `src/lib/openai.ts`.
 - Image generation belongs in `src/lib/image-generation.ts`.

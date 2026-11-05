@@ -2,6 +2,7 @@ import { readFileSync } from "node:fs";
 import path from "node:path";
 import assert from "node:assert/strict";
 import ts from "typescript";
+import vm from "node:vm";
 
 const projectRoot = process.cwd();
 
@@ -58,7 +59,7 @@ assertContains(
   "Feishu attachment pool must default to 3 and cap at 10.",
 );
 assertContains(concurrency, /production:\s*readConcurrencyEnv\("WORKER_PRODUCTION_CONCURRENCY",\s*30,\s*50\)/, "Production pool must default to 30 and cap at 50.");
-assertContains(concurrency, /canvasRun:\s*readConcurrencyEnv\("WORKER_CANVAS_RUN_CONCURRENCY",\s*8,\s*20\)/, "Canvas run workers must have bounded concurrency.");
+assertContains(concurrency, /canvasRun:\s*readConcurrencyEnv\("WORKER_CANVAS_RUN_CONCURRENCY",\s*32,\s*100\)/, "Canvas run workers must default to 32 and cap at 100.");
 assertContains(concurrency, /distributionRecord:\s*readConcurrencyEnv\("WORKER_DISTRIBUTION_RECORD_CONCURRENCY",\s*2,\s*10\)/, "Distribution record pool must default to 2 and cap at 10.");
 assertContains(concurrency, /distributionGpt:\s*readConcurrencyEnv\("WORKER_DISTRIBUTION_GPT_CONCURRENCY",\s*6,\s*15\)/, "Distribution GPT pool must be isolated from main generation.");
 assertContains(concurrency, /distributionFeishuRead:\s*readConcurrencyEnv\("WORKER_DISTRIBUTION_FEISHU_READ_CONCURRENCY",\s*2,\s*10\)/, "Distribution Feishu read pool must stay conservative.");
@@ -104,6 +105,31 @@ assertContains(canvasRuns, /activeWorkers/, "Canvas queue worker state must trac
 console.log("Concurrency pool integration check passed.");
 
 const compiled = ts.transpileModule(concurrency, { compilerOptions: { module: ts.ModuleKind.CommonJS, target: ts.ScriptTarget.ES2022 } }).outputText;
+for (const [value, expected] of [[undefined, 32], ["", 32], ["invalid", 32], ["Infinity", 32], ["1", 1], ["8", 8], ["32", 32], ["64", 64], ["100", 100], ["200", 100], ["0", 1], ["-5", 1], ["20.9", 20]]) {
+  const instance = { exports: {} };
+  vm.runInNewContext(compiled, { module: instance, exports: instance.exports, process: { env: value === undefined ? {} : { WORKER_CANVAS_RUN_CONCURRENCY: value } } });
+  assert.equal(instance.exports.concurrencyConfig.canvasRun, expected, `Canvas configuration ${value}`);
+  assert.equal(instance.exports.concurrencyConfig.image, 100, "Image pool remains unchanged");
+  const ast = ts.createSourceFile("runs.ts", canvasRuns, ts.ScriptTarget.Latest, true);
+  const declaration = ast.statements.find(item => ts.isFunctionDeclaration(item) && item.name?.text === "ensureCanvasRunWorker");
+  const workerCode = ts.transpileModule(declaration.getText(ast), { compilerOptions: { target: ts.ScriptTarget.ES2022 } }).outputText.replace(/^export /m, "");
+  const queueState = { activeWorkers: Math.min(3, expected), sequence: 0 };
+  const existing = queueState.activeWorkers;
+  const callbacks = [];
+  const workerIds = [];
+  const ensure = new Function("concurrencyConfig", "queueState", "setTimeout", "drainCanvasRuns", "process", `${workerCode}\nreturn ensureCanvasRunWorker;`)(
+    instance.exports.concurrencyConfig, queueState, callback => callbacks.push(callback), async workerId => { workerIds.push(workerId); }, { pid: 1 },
+  );
+  ensure();
+  ensure();
+  assert.equal(queueState.activeWorkers, expected);
+  assert.equal(callbacks.length, expected - existing, "Repeated kicks must not over-spawn workers");
+  for (const callback of callbacks) callback();
+  await Promise.resolve();
+  await Promise.resolve();
+  assert.equal(queueState.activeWorkers, existing, "Settled workers release their slots");
+  assert.equal(new Set(workerIds).size, callbacks.length, "Workers have independent lease identities");
+}
 const loaded = { exports: {} };
 Function("module", "exports", compiled)(loaded, loaded.exports);
 const { runWithConcurrencyPool, getConcurrencySnapshot } = loaded.exports;
