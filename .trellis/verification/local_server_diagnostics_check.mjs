@@ -66,13 +66,13 @@ try {
 
   // Real Node uncaught-exception report in an isolated child: no server, providers or heap dump.
   const args = serverArguments(root, temporaryRoot, "127.0.0.1", 3001);
-  assert(args.includes("--max-old-space-size=8192"));
+  assert(args.includes("--max-old-space-size=24576"));
   const heapProbe = spawnSync(process.execPath, [...args.slice(0, 6), "--input-type=module", "-e",
     "import v8 from 'node:v8'; console.log(v8.getHeapStatistics().heap_size_limit);"], {
     encoding: "utf8", timeout: 15000,
   });
   assert.equal(heapProbe.status, 0, heapProbe.stderr);
-  assert(Number(heapProbe.stdout) >= 8192 * 1024 * 1024, "managed child must have at least 8 GiB heap allowance");
+  assert(Number(heapProbe.stdout) >= 24576 * 1024 * 1024, "managed child must have at least 24 GiB heap allowance");
   assert(!args.some((value) => /heapsnapshot|heap-prof|inspect|report-on-signal/.test(value)));
   writeFileSync(fixture, "throw new Error('diagnostic-fixture');");
   const failed = spawnSync(process.execPath, [...args.slice(0, 6), fixture], {
@@ -131,6 +131,7 @@ try {
     const quote = (text) => `'${text.replaceAll("'", "''")}'`;
     const psFile = path.join(temporaryRoot, "launch-fixture.ps1");
     writeFileSync(psFile, `$ErrorActionPreference='Stop'
+      . ${quote(path.resolve('scripts/local/independent-process.ps1'))}
       $controllerRoot=${quote(psRoot)}
       $projectRoot=$controllerRoot
       $slotNames=@('.next-local-a','.next-local-b')
@@ -153,6 +154,100 @@ try {
     assert.equal(detachedReceipt.slot, ".next-local-b");
     assert(logText(path.join(psDiagnostics, "logs")).includes("detached-child-finished"));
     assert.equal(readFileSync(path.join(psDiagnostics, "supervisor.stderr.log"), "utf8"), "");
+
+    // Keep the supervised child alive until AFTER its launcher's kill-on-close
+    // Job has been closed. Shell-exit-only coverage cannot catch this regression.
+    const releaseFile = path.join(psRoot, "finish-child");
+    writeFileSync(fixture, `import {existsSync} from 'node:fs';
+      console.log('job-child-running');
+      const deadline = setTimeout(() => process.exit(9), 12000);
+      const timer = setInterval(() => {
+        if (existsSync(${JSON.stringify(releaseFile)})) {
+          clearInterval(timer); clearTimeout(deadline);
+          console.error('job-child-finished');
+        }
+      }, 50);`);
+    const independentHelper = path.resolve("scripts/local/independent-process.ps1");
+    const argvFixture = ["", "with spaces", 'a"b', "trailing\\", "before\\\"quote", "中文路径", "literal $() ` ; &"];
+    const argvScript = path.join(psRoot, "argv-probe.mjs");
+    const argvOutput = path.join(psRoot, "argv.json");
+    writeFileSync(argvScript, `import {writeFileSync} from 'node:fs';
+      writeFileSync(${JSON.stringify(argvOutput)}, JSON.stringify({args:process.argv.slice(2),cwd:process.cwd(),value:process.env.FLUXPOST_JOB_FIXTURE}));
+      console.error('independent-stderr');`);
+    const jobLauncher = `${readFileSync(psFile, "utf8")}
+      [IO.File]::WriteAllText((Join-Path $projectRoot 'launcher-ready'), [string]$server.Id)
+      Start-Sleep -Seconds 20`;
+    const deniedLauncher = `$ErrorActionPreference='Stop'
+      . ${quote(independentHelper)}
+      try {
+        Test-IndependentNode -WorkingDirectory ${quote(psRoot)} -DiagnosticsRoot ${quote(psDiagnostics)}
+        [IO.File]::WriteAllText(${quote(path.join(psRoot, "denied-result"))}, 'UNEXPECTED SUCCESS')
+      } catch {
+        [IO.File]::WriteAllText(${quote(path.join(psRoot, "denied-result"))}, $_.Exception.Message)
+      }`;
+    const outsideJobProbe = `$ErrorActionPreference='Stop'
+      $ProgressPreference='SilentlyContinue'
+      . ${quote(independentHelper)}
+      Test-IndependentNode -WorkingDirectory ${quote(psRoot)} -DiagnosticsRoot ${quote(psDiagnostics)}`;
+    const jobTestFile = path.join(temporaryRoot, "job-lifetime.ps1");
+    writeFileSync(jobTestFile, `\uFEFF$ErrorActionPreference='Stop'
+      Add-Type -Path ${quote(path.resolve(".trellis/verification/windows_job_fixture.cs"))}
+      . ${quote(independentHelper)}
+      function Wait-File([string]$file) {
+        $deadline=[DateTime]::UtcNow.AddSeconds(10)
+        while (-not (Test-Path -LiteralPath $file)) {
+          if ([DateTime]::UtcNow -gt $deadline) { throw 'Fixture readiness timed out' }
+          Start-Sleep -Milliseconds 50
+        }
+      }
+      $job=New-Object WindowsJobFixture($true)
+      try {
+        $launcher=$job.Start((Join-Path $PSHOME 'powershell.exe'), '${Buffer.from(jobLauncher, "utf16le").toString("base64")}', ${quote(psRoot)})
+        Wait-File ${quote(path.join(psRoot, "launcher-ready"))}
+        $receipt=Get-Content -LiteralPath ${quote(path.join(psDiagnostics, "current-run.json"))} -Raw | ConvertFrom-Json
+        $supervisor=Get-Process -Id $receipt.supervisorPid
+        $child=Get-Process -Id $receipt.serverPid
+        $job.Dispose()
+        Start-Sleep -Milliseconds 200
+        if (Get-Process -Id $launcher -ErrorAction SilentlyContinue) { throw 'Fixture Job did not terminate launcher' }
+        $supervisor.Refresh(); $child.Refresh()
+        if ($supervisor.HasExited -or $child.HasExited) { throw 'Server died with launcher Job' }
+        [IO.File]::WriteAllText(${quote(releaseFile)}, 'finish')
+        if (-not $supervisor.WaitForExit(5000)) { throw 'Supervisor did not record child completion' }
+      } finally { $job.Dispose(); [IO.File]::WriteAllText(${quote(releaseFile)}, 'finish') }
+      $denied=New-Object WindowsJobFixture($false)
+      try {
+        $null=$denied.Start((Join-Path $PSHOME 'powershell.exe'), '${Buffer.from(deniedLauncher, "utf16le").toString("base64")}', ${quote(psRoot)})
+        Wait-File ${quote(path.join(psRoot, "denied-result"))}
+        $failure=Get-Content -LiteralPath ${quote(path.join(psRoot, "denied-result"))} -Raw -Encoding UTF8
+        if ($failure -notmatch 'Cannot start independent local process') { throw ('Wrong restrictive Job result: '+$failure) }
+      } finally { $denied.Dispose() }
+      $env:FLUXPOST_JOB_FIXTURE='inherited-in-memory'
+      $argvProbe=Start-IndependentNode -NodeArguments @(${[argvScript, ...argvFixture].map(quote).join(",")}) -WorkingDirectory ${quote(psRoot)} -RedirectStandardError ${quote(path.join(psRoot, "argv.stderr"))}
+      if (-not $argvProbe.WaitForExit(5000) -or $argvProbe.ExitCode -ne 0) { throw 'Argument probe failed' }
+      $outsideJob=[FluxPost.Local.IndependentProcess]::Start((Join-Path $PSHOME 'powershell.exe'),
+        @('-NoProfile','-NonInteractive','-EncodedCommand','${Buffer.from(outsideJobProbe, "utf16le").toString("base64")}'),
+        ${quote(psRoot)}, ${quote(path.join(psRoot, "outside-job.stderr"))})
+      if (-not $outsideJob.WaitForExit(10000) -or $outsideJob.ExitCode -ne 0) { throw 'Non-Job launch/preflight failed' }
+    `);
+    const jobTest = spawnSync("powershell.exe", ["-NoProfile", "-NonInteractive", "-ExecutionPolicy", "Bypass", "-File", jobTestFile], {
+      encoding: "utf8", timeout: 30000,
+    });
+    assert.equal(jobTest.status, 0, jobTest.stderr || jobTest.stdout);
+    const afterJobClose = JSON.parse(readFileSync(path.join(psDiagnostics, "current-run.json"), "utf8"));
+    assert.equal(afterJobClose.status, "exited");
+    assert.equal(afterJobClose.exitCode, 0);
+    assert.equal(afterJobClose.commit, "2".repeat(40));
+    assert(logText(path.join(psDiagnostics, "logs")).includes("job-child-finished"));
+    assert.equal(readFileSync(path.join(psDiagnostics, "supervisor.stderr.log"), "utf8"), "");
+    const argvResult = JSON.parse(readFileSync(argvOutput, "utf8"));
+    assert.deepEqual(argvResult.args, argvFixture);
+    assert.equal(argvResult.cwd, psRoot);
+    assert.equal(argvResult.value, "inherited-in-memory");
+    assert.match(readFileSync(path.join(psRoot, "argv.stderr"), "utf8"), /independent-stderr/);
+    assert.equal(readFileSync(path.join(psRoot, "outside-job.stderr"), "utf8"), "");
+    assert(!readdirSync(psDiagnostics).some((name) => name.startsWith("launch-probe-")));
+    console.log("Windows Job closure survival, restrictive Job rejection, argv/environment/cwd and stderr passed.");
   }
   console.log("Bounded rotation, quiet starts, report age/count/bytes, real exit-134 capture, native report privacy, preflight and runtime I/O failure passed.");
 } finally {

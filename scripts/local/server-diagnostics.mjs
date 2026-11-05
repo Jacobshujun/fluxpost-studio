@@ -89,7 +89,7 @@ export function serverArguments(root, projectRoot, host, port) {
   return [
     "--report-on-fatalerror", "--report-uncaught-exception", "--report-exclude-env", "--report-exclude-network",
     `--report-directory=${path.join(root, "reports")}`,
-    "--max-old-space-size=8192",
+    "--max-old-space-size=24576",
     path.join(projectRoot, "node_modules/next/dist/bin/next"), "start", "-H", host, "-p", String(port),
   ];
 }

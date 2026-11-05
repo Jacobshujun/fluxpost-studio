@@ -25,6 +25,7 @@ if (-not [StringComparer]::OrdinalIgnoreCase.Equals($projectRoot.TrimEnd("\", "/
   throw "Local candidate must run from the primary Git worktree: $primaryProjectRoot"
 }
 Set-Location $projectRoot
+. (Join-Path $controllerRoot 'scripts\local\independent-process.ps1')
 
 $ReleaseSha = (& git.exe -C $projectRoot rev-parse HEAD).Trim()
 if ($LASTEXITCODE -ne 0 -or $ReleaseSha -notmatch '^[0-9a-f]{40}$') {
@@ -164,13 +165,10 @@ function Start-CandidateServer {
   Write-Host "== Start Next production server from $Slot on ${HostName}:$Port"
   $diagnosticsScript = Join-Path $controllerRoot "scripts\local\server-diagnostics.mjs"
   $diagnosticsErrorPath = Join-Path $projectRoot "data\local-diagnostics\supervisor.stderr.log"
-  $server = Start-Process `
-    -FilePath (Get-Command node.exe -ErrorAction Stop).Source `
-    -ArgumentList @(('"' + $diagnosticsScript + '"'), $HostName, "$Port") `
+  $server = Start-IndependentNode `
+    -NodeArguments @($diagnosticsScript, $HostName, "$Port") `
     -WorkingDirectory $projectRoot `
-    -WindowStyle Hidden `
-    -RedirectStandardError $diagnosticsErrorPath `
-    -PassThru
+    -RedirectStandardError $diagnosticsErrorPath
 
   $healthUrl = "http://127.0.0.1:$Port/api/config"
   $ready = $false
@@ -237,6 +235,7 @@ $listenerStopped = $false
 if ($LASTEXITCODE -ne 0) {
   throw "Diagnostics preflight failed; the current local app is still running"
 }
+Test-IndependentNode -WorkingDirectory $projectRoot -DiagnosticsRoot (Join-Path $projectRoot 'data\local-diagnostics')
 try {
   Write-Host "== Replace existing server on port $Port"
   Stop-PortListener -Port $Port
