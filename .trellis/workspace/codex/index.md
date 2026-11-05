@@ -8,7 +8,7 @@
 
 <!-- @@@auto:current-status -->
 - **Active File**: `journal-2.md`
-- **Total Sessions**: 82
+- **Total Sessions**: 83
 - **Last Active**: 2026-11-05
 <!-- @@@/auto:current-status -->
 
@@ -19,7 +19,7 @@
 <!-- @@@auto:active-documents -->
 | File | Lines | Status |
 |------|-------|--------|
-| `journal-2.md` | ~809 | Active |
+| `journal-2.md` | ~842 | Active |
 | `journal-1.md` | ~1967 | Archived |
 <!-- @@@/auto:active-documents -->
 
@@ -30,6 +30,7 @@
 <!-- @@@auto:session-history -->
 | # | Date | Title | Commits | Branch |
 |---|------|-------|---------|--------|
+| 83 | 2026-11-05 | Review filter browser memory | `4fc6863` | `local` |
 | 82 | 2026-11-05 | Batch favorites verified and LAN release authorized | `707442c`, `2ce5d32` | `local` |
 | 81 | 2026-11-03 | Content pool manual editor | `c47b797` | `local` |
 | 80 | 2026-11-02 | Review gallery drag regression fix and LAN release | `725271b`, `f145798` | `local` |

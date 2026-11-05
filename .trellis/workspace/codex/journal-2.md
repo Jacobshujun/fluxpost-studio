@@ -807,3 +807,36 @@ Personal schedule favorites, aliases/notes, scoped summary search/paging and reu
 ### Next Steps
 
 - None - task complete
+
+
+## Session 83: Review filter browser memory
+
+**Date**: 2026-11-05
+**Task**: Review filter browser memory
+**Branch**: `local`
+
+### Summary
+
+Implemented account-scoped browser filter memory with URL and deep-link isolation, visible storage failures and initialization gating. Full baseline, six memory flows, 45 review layouts/interactions and desktop/mobile performance pass. Local LAN activation follows clean verified HEAD.
+
+### Main Changes
+
+(Add details)
+
+### Git Commits
+
+| Hash | Message |
+|------|---------|
+| `4fc6863` | (see git log) |
+
+### Testing
+
+- [OK] (Add test results)
+
+### Status
+
+[OK] **Completed**
+
+### Next Steps
+
+- None - task complete
