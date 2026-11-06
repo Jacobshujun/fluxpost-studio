@@ -1,4 +1,4 @@
-import type { ContentPoolSelectionFilter, ContentTag, GeneratedPost, Platform, SourceMediaType, SourceUsageStatus } from "../types";
+import type { LibraryAssetSort, ContentPoolSelectionFilter, ContentTag, GeneratedPost, Platform, SourceMediaType, SourceUsageStatus } from "../types";
 import type { CompetitorWorkbookCardSnapshot, CompetitorWorkbookRowSnapshot, CompetitorWorkbookSnapshot } from "../competitor-workbook";
 import type { ImageProcessingReport } from "./image-process-contract";
 import type { ComposeInputBinding, LayerComposeConfig } from "./layer-compose-contract";
@@ -729,6 +729,8 @@ export type CanvasScheduleLeafStatus = Exclude<CanvasScheduleTaskStatus, "partia
 export type CanvasScheduleResultSummary = { produced: number; failed: number };
 
 export type CanvasScheduleAssetFilter = {
+  sort?: LibraryAssetSort;
+  randomSeed?: string;
   color?: string;
   mode: "manual" | "random";
   assetIds: string[];

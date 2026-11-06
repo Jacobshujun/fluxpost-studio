@@ -451,9 +451,8 @@
         "Default checks cover graph, API, persistence, providers, media, subtitles, scheduler, desktop, and mobile contracts without live writes"
       ],
       "evidence": [
-        "2026-08-26 content-pool filtering, cursor paging, immutable batch snapshots, 200-item limits, build, baseline, and mocked desktop/mobile browser checks passed.",
-        "2026-08-27 normal content-pool nodes and V2 schedule parameters shared custom-tag suggestions, AND filters, customTag URLs, result labels, and desktop/mobile overflow checks.",
-        "2026-09-16 node model presets/custom IDs, explicit ToAPIs formats, VIP 4K/4:3, redacted refusals, SQLite persistence and 1440px/390px browser checks pass with the full offline baseline. Evidence: archived canvas-image-model-routing task."
+        "2026-11-06 library sorting/filter isolation: SQLite/PG, six browser flows and regressions/baseline pass; 11-06-canvas-library-sorting, unified_library.md.",
+        "Prior content-pool/model-routing verification: archive/verification-history.md."
       ],
       "notes": "Live provider/Feishu runs and an authenticated multi-user PostgreSQL launcher-attribution walkthrough remain."
     },

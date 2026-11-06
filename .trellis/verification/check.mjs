@@ -45,6 +45,7 @@ const nodeChecks = [
   ["Library thumbnail cache check", "library_thumbnails_check.mjs"],
   ["Vehicle library check", "vehicle_library_check.mjs"],
   ["Unified library runtime check", "unified_library_runtime_check.mjs"],
+  ["Library ordering and selected snapshots", "library_order_check.mjs"],
   ["Compact-only workspace check", "compact_only_workspace_check.mjs"],
   ["Advanced config admin boundary check", "advanced_config_check.mjs"],
   ["Text reasoning effort contract check", "text_reasoning_effort_check.mjs"],

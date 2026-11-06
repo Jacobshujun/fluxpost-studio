@@ -1,4 +1,7 @@
 "use client";
+import { LibraryOrderControl, useLibraryOrdering } from "@/components/library-order";
+import { canvasLibraryOrder } from "@/lib/library-asset-order";
+import type { LibraryAssetOrder } from "@/lib/types";
 import { LibraryColorFilter, LibraryPalette } from "@/components/library-colors";
 import Link from "next/link";
 import Image from "next/image";
@@ -659,8 +662,15 @@ export function ScheduleAssetFilterEditor({ title, filter, count, onCountChange,
   const selectionAnchorIdRef = useRef<string | undefined>(undefined);
   const searchCommitTimerRef = useRef<ReturnType<typeof setTimeout> | undefined>(undefined);
   const tagsText = filter.tags.join(", ");
-  const queryString = useMemo(() => {
-    const params = new URLSearchParams({ limit: "24" });
+  const order = canvasLibraryOrder(filter.sort, filter.randomSeed);
+  const { sort, randomSeed } = order;
+  const { reorder, ordering, orderError } = useLibraryOrdering(JSON.stringify(filter));
+  const applySelection = (assetIds: string[], nextOrder: LibraryAssetOrder = order) => {
+    void reorder(assetIds, nextOrder, (ordered) => onChange({ ...filterRef.current, ...nextOrder, assetIds: ordered }));
+  };
+  const queryString = (() => {
+    const params = new URLSearchParams({ limit: "24", sort });
+    if (randomSeed) params.set("randomSeed", randomSeed);
     if (filter.search.trim()) params.set("search", filter.search.trim());
     if (filter.color) params.set("color", filter.color);
     if (filter.collectionId) params.set("collectionId", filter.collectionId);
@@ -668,7 +678,7 @@ export function ScheduleAssetFilterEditor({ title, filter, count, onCountChange,
     if (filter.smartFolderId) params.set("smartFolderId", filter.smartFolderId);
     splitScheduleTags(tagsText).forEach((tag) => params.append("tag", tag));
     return params.toString();
-  }, [filter.color, filter.collectionId, filter.includeDescendants, filter.search, filter.smartFolderId, tagsText]);
+  })();
   const queryStringRef = useRef(queryString);
   const filterRef = useRef(filter);
   const searchDraft = searchDraftState.source === filter.search ? searchDraftState.value : filter.search;
@@ -798,7 +808,7 @@ export function ScheduleAssetFilterEditor({ title, filter, count, onCountChange,
     setSelectedAllQuery("");
     if (singleSelection) {
       selectionAnchorIdRef.current = assetId;
-      onChange({ ...filter, assetIds: filter.assetIds.includes(assetId) ? [] : [assetId] });
+      applySelection(filter.assetIds.includes(assetId) ? [] : [assetId]);
       return;
     }
     const selectedIds = new Set(filter.assetIds);
@@ -806,13 +816,13 @@ export function ScheduleAssetFilterEditor({ title, filter, count, onCountChange,
       const anchorId = selectionAnchorIdRef.current;
       const next = selectIdRange(data.assets.map((asset) => asset.id), selectedIds, anchorId, assetId, event.ctrlKey || event.metaKey);
       if (!anchorId || !data.assets.some((asset) => asset.id === anchorId)) selectionAnchorIdRef.current = assetId;
-      onChange({ ...filter, assetIds: [...next] });
+      applySelection([...next]);
       return;
     }
     selectionAnchorIdRef.current = assetId;
     if (selectedIds.has(assetId)) selectedIds.delete(assetId);
     else selectedIds.add(assetId);
-    onChange({ ...filter, assetIds: [...selectedIds] });
+    applySelection([...selectedIds]);
   };
 
   const openPreview = (asset: LibraryAsset, index: number) => onPreview({
@@ -833,6 +843,8 @@ export function ScheduleAssetFilterEditor({ title, filter, count, onCountChange,
         : `已加载 ${data.assets.length} / 匹配 ${data.total} 张${filter.mode === "manual" ? ` · 已选 ${filter.assetIds.length} 张` : ""}`;
 
   return <div className="canvas-schedule-assets">
+    <fieldset className="canvas-library-picker-fields" disabled={ordering}>
+    <LibraryOrderControl order={order} onChange={(next) => applySelection(filter.assetIds, next)} />
     <div className="canvas-schedule-assets-head"><strong>{title}</strong><div className="canvas-task-filters"><button type="button" aria-pressed={filter.mode === "manual"} onClick={() => onChange({ ...filter, mode: "manual" })}>手动选择</button><button type="button" aria-pressed={filter.mode === "random"} onClick={() => onChange({ ...filter, mode: "random" })}>{filterMatchLabel ? "条件匹配" : "条件随机"}</button></div></div>
     <div className="canvas-schedule-filter-row">
       <label><Search /><input value={searchDraft} onChange={(event) => updateSearchDraft(event.target.value)} onKeyDown={(event) => { if (event.key === "Enter") { event.preventDefault(); commitSearch(searchDraft); } }} placeholder="关键字" /></label>
@@ -860,7 +872,9 @@ export function ScheduleAssetFilterEditor({ title, filter, count, onCountChange,
       </article>)}</div> : null}
       {data.nextCursor ? <div className="canvas-schedule-asset-load-more"><button type="button" onClick={() => void loadMore()} disabled={busy || loadingMore || selectingAll}>{loadingMore ? <LoaderCircle className="animate-spin" /> : <ArrowDown />}{loadingMore ? "正在加载下一页..." : "加载更多"}</button></div> : null}
     </div>
-    {error ? <p className="canvas-picker-error">{error}</p> : null}
+    </fieldset>
+    {ordering ? <p role="status">正在排序已选图片…</p> : null}
+    {error || orderError ? <p className="canvas-picker-error">{orderError || error}</p> : null}
   </div>;
 }
 
@@ -1248,7 +1262,7 @@ export function collectCanvasGraphAncestors(graph: CanvasGraph, targetId: string
 }
 
 export function emptyScheduleFilter(): CanvasScheduleAssetFilter {
-  return { mode: "manual", assetIds: [], search: "", tags: [] };
+  return { mode: "manual", assetIds: [], search: "", tags: [], sort: "updated-newest" };
 }
 
 export function mergeCanvasScheduleWorkbookPaths(response: CanvasSchedule, local: CanvasSchedule) {

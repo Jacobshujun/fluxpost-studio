@@ -477,3 +477,6 @@ The baseline verifies:
   and maintained scripts remain checked with the require-import rule at error.
   Full baseline passes, including types/build/config sync/HTTP smoke on 45678 and
   SQLite checks. LAN unchanged. Local log: `test-artifacts/lint-scope-baseline-20261030.log`.
+
+- 2026-11-02 Content-pool libraries: SQLite, browser, types, lint, build and baseline pass; PostgreSQL review remains.
+- Canvas feature evidence archived 2026-11-06: 2026-08-26 content-pool filtering, cursor paging, immutable batch snapshots, 200-item limits, build, baseline, and mocked desktop/mobile browser checks passed. 2026-08-27 normal content-pool nodes and V2 schedule parameters shared custom-tag suggestions, AND filters, customTag URLs, result labels, and desktop/mobile overflow checks. 2026-09-16 node model presets/custom IDs, explicit ToAPIs formats, VIP 4K/4:3, redacted refusals, SQLite persistence and 1440px/390px browser checks passed with the full offline baseline; archived canvas-image-model-routing task.

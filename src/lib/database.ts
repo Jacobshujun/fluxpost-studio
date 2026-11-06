@@ -1,3 +1,4 @@
+import { libraryAssetOrderDescending, normalizeLibraryRandomSeed } from "./library-asset-order";
 import { canvasScheduleFavoriteSchemaSql } from "./canvas/schedule-favorite-schema";
 import { canvasScheduleListSql } from "./canvas/schedule-list-query";
 import type { CanvasScheduleFavorite, CanvasScheduleListQuery, CanvasScheduleListResult, CanvasScheduleSummary } from "./canvas/types";
@@ -37,7 +38,7 @@ import type {
 } from "./types";
 import { normalizeFeishuPublishMode } from "./feishu-publish-mode";
 import { getLibraryUnifiedTagsForAsset } from "./library-tags";
-import type { LibraryAssetFilters, LibraryListSort } from "./types";
+import type { LibraryAssetFilters, LibraryAssetSort } from "./types";
 
 type SqliteStatement = {
   all: (...params: unknown[]) => unknown[];
@@ -46,6 +47,7 @@ type SqliteStatement = {
 };
 
 type SqliteDatabase = {
+  function: (name: string, options: { deterministic: boolean }, fn: (value: string) => string) => void;
   close: () => void;
   exec: (sql: string) => unknown;
   prepare: (sql: string) => SqliteStatement;
@@ -305,7 +307,9 @@ export async function queryLibraryAssetsFromDb(input: LibraryDatabaseQuery) {
   const countSql = `${compiled.cte} SELECT COUNT(*) count FROM library_assets a WHERE ${compiled.where.join(" AND ")}`;
   const countValues = [...compiled.params.values];
   const cursorWhere = [...compiled.where];
-  addLibraryCursorPredicate(cursorWhere, compiled.params, input.filters.sort || "newest", input.cursor);
+  const sort = input.filters.sort || "newest";
+  const sortColumn = librarySortColumn(input.filters, compiled.params);
+  addLibraryCursorPredicate(cursorWhere, compiled.params, sort, sortColumn, input.cursor);
   const limit = Math.max(1, Math.min(100, Math.floor(input.filters.limit || 60)));
   const limitPlaceholder = compiled.params.add(limit + 1);
   const collectionProjection = postgres
@@ -314,7 +318,7 @@ export async function queryLibraryAssetsFromDb(input: LibraryDatabaseQuery) {
   const favoriteProjection = `EXISTS (SELECT 1 FROM library_asset_favorites fav WHERE fav.asset_id=a.id AND fav.owner_user_id=${compiled.params.add(input.actorId)}) favorite`;
   const listSql = `${compiled.cte} SELECT a.data_json, ${collectionProjection}, ${favoriteProjection}
     FROM library_assets a WHERE ${cursorWhere.join(" AND ")}
-    ORDER BY ${libraryOrderSql(input.filters.sort || "newest", postgres)} LIMIT ${limitPlaceholder}`;
+    ORDER BY ${libraryOrderSql(sort, sortColumn)} LIMIT ${limitPlaceholder}`;
 
   let total: number | undefined;
   let rows: Array<JsonRow & { collection_ids: string[] | string; favorite: boolean | number }>;
@@ -348,7 +352,7 @@ export async function queryLibraryAssetsFromDb(input: LibraryDatabaseQuery) {
   };
 }
 
-export async function queryLibraryAssetIdsFromDb(input: LibraryDatabaseQuery, excludedAssetIds: string[] = []) {
+export async function queryLibraryAssetIdsFromDb(input: LibraryDatabaseQuery, excludedAssetIds: string[] = [], includedAssetIds?: string[]) {
   await ensureDatabaseReady();
   const postgres = getDatabaseBackend() === "postgres";
   const compiled = compileLibraryAssetQuery(input, postgres);
@@ -356,7 +360,12 @@ export async function queryLibraryAssetIdsFromDb(input: LibraryDatabaseQuery, ex
     const placeholders = excludedAssetIds.map((id) => compiled.params.add(id));
     compiled.where.push(`a.id NOT IN (${placeholders.join(",")})`);
   }
-  const sql = `${compiled.cte} SELECT a.id FROM library_assets a WHERE ${compiled.where.join(" AND ")} ORDER BY ${libraryOrderSql(input.filters.sort || "newest", postgres)}`;
+  if (includedAssetIds) {
+    if (!includedAssetIds.length) return [];
+    compiled.where.push(`a.id IN (${includedAssetIds.map((id) => compiled.params.add(id)).join(",")})`);
+  }
+  const sortColumn = librarySortColumn(input.filters, compiled.params);
+  const sql = `${compiled.cte} SELECT a.id FROM library_assets a WHERE ${compiled.where.join(" AND ")} ORDER BY ${libraryOrderSql(input.filters.sort || "newest", sortColumn)}`;
   if (postgres) return (await getPostgresPool().query<{ id: string }>(sql, compiled.params.values)).rows.map((row) => row.id);
   return (getSqliteDatabase().prepare(sql).all(...compiled.params.values) as Array<{ id: string }>).map((row) => row.id);
 }
@@ -512,20 +521,27 @@ function libraryOwnerSortColumn(postgres: boolean) {
     : "LOWER(COALESCE(json_extract(a.data_json, '$.ownerDisplayName'), a.owner_user_id))";
 }
 
-function libraryOrderSql(sort: LibraryListSort, postgres: boolean) {
-  if (sort === "oldest") return "a.created_at ASC, a.id ASC";
-  if (sort === "name-asc") return "LOWER(a.name) ASC, a.id ASC";
-  if (sort === "name-desc") return "LOWER(a.name) DESC, a.id DESC";
-  if (sort === "owner-asc") return `${libraryOwnerSortColumn(postgres)} ASC, a.id ASC`;
-  if (sort === "owner-desc") return `${libraryOwnerSortColumn(postgres)} DESC, a.id DESC`;
-  return "a.created_at DESC, a.id DESC";
+function librarySortColumn(filters: LibraryAssetFilters, params: LibrarySqlParams) {
+  const sort = filters.sort || "newest";
+  if (sort === "random") {
+    const seed = normalizeLibraryRandomSeed(filters.randomSeed, sort);
+    return `md5(${params.add(seed + ":")} || a.id)`;
+  }
+  if (sort.startsWith("updated-")) return "a.updated_at";
+  if (sort.startsWith("name-")) return "LOWER(a.name)";
+  if (sort.startsWith("owner-")) return libraryOwnerSortColumn(params.postgres);
+  return "a.created_at";
 }
 
-function addLibraryCursorPredicate(where: string[], params: LibrarySqlParams, sort: LibraryListSort, cursor?: LibraryDatabaseCursor) {
+function libraryOrderSql(sort: LibraryAssetSort, column: string) {
+  const direction = libraryAssetOrderDescending(sort) ? "DESC" : "ASC";
+  return `${column} ${direction}, a.id ${direction}`;
+}
+
+function addLibraryCursorPredicate(where: string[], params: LibrarySqlParams, sort: LibraryAssetSort, column: string, cursor?: LibraryDatabaseCursor) {
   if (!cursor) return;
-  const column = sort.startsWith("name") ? "LOWER(a.name)" : sort.startsWith("owner") ? libraryOwnerSortColumn(params.postgres) : "a.created_at";
-  const descending = sort === "newest" || sort === "name-desc" || sort === "owner-desc";
-  const value = params.add(sort === "newest" || sort === "oldest" ? cursor.value : cursor.value.toLocaleLowerCase());
+  const descending = libraryAssetOrderDescending(sort);
+  const value = params.add(cursor.value);
   const id = params.add(cursor.id);
   where.push(`(${column} ${descending ? "<" : ">"} ${value} OR (${column}=${value} AND a.id ${descending ? "<" : ">"} ${id}))`);
 }
@@ -4419,6 +4435,7 @@ function getSqliteDatabase() {
   mkdirSync(dataDir, { recursive: true });
   const { DatabaseSync } = getNodeSqlite();
   sqliteDatabase = new DatabaseSync(sqliteStorePath);
+  sqliteDatabase.function("md5", { deterministic: true }, (value) => createHash("md5").update(value).digest("hex"));
   configureSqliteDatabase(sqliteDatabase);
   prepareUnifiedLibrarySqliteColumns(sqliteDatabase);
   createSqliteSchema(sqliteDatabase);

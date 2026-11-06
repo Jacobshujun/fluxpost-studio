@@ -62,7 +62,9 @@ try {
   const schedulerModule = { exports: {} };
   const emptyAsync = async () => undefined;
   writeFileSync(path.join(temp, "library-color.js"), ts.transpileModule(read("src/lib/library-color.ts"), { compilerOptions: { module: ts.ModuleKind.CommonJS, target: ts.ScriptTarget.ES2022 } }).outputText);
+  for (const name of ["library-sort", "library-asset-order"]) writeFileSync(path.join(temp, `${name}.js`), ts.transpileModule(read(`src/lib/${name}.ts`), { compilerOptions: { module: ts.ModuleKind.CommonJS, target: ts.ScriptTarget.ES2022 } }).outputText);
   const stubs = {
+    "../library-asset-order": require(path.join(temp, "library-asset-order.js")),
     "../library-color": require(path.join(temp, "library-color.js")),
     "../activity-log": {
       recordExecutionLog: async (entry) => { executionLogs.push(structuredClone(entry)); },
@@ -898,7 +900,7 @@ try {
   assert.deepEqual(launchedRuns.map((run) => run.graph.nodes.find((node) => node.id === "region-a").iteration.graph.nodes[0].config.text), ["first", "second"], "launch must inject frozen inner values, not current draft values");
   assert.equal(workflowRecord.graph.nodes.find((node) => node.id === "region-a").iteration.graph.nodes[0].config.text, "Later draft edit");
   storedSchedule = structuredClone(nestedPreview);
-  for (const scope of [{ smartFolderId: "smart-favorites", color: "#3876C7" }, { collectionId: "collection-1", includeDescendants: false, color: "#D43C3C" }]) {
+  for (const scope of [{ smartFolderId: "smart-favorites", color: "#3876C7", sort: "random", randomSeed: "schedule-fixture" }, { collectionId: "collection-1", includeDescendants: false, color: "#D43C3C", sort: "updated-oldest" }]) {
     const filter = { mode: "random", assetIds: [], search: "car", tags: ["exterior"], ...scope };
     const definition = { ...v2Definition, parameters: [{
       ...v2Definition.parameters[0], source: { mode: "library-filter", filter },
@@ -911,6 +913,9 @@ try {
       assert.deepEqual(JSON.parse(JSON.stringify(result.definition.parameters[0].source.filter)), filter,
         "scheduler save, storage and reload must retain smart-folder IDs and explicit descendant scope");
     }
+    await scheduler.resolveScheduleAssetPool(account, filter);
+    assert.equal(libraryQueries.at(-1).sort, scope.sort);
+    assert.equal(libraryQueries.at(-1).randomSeed, scope.randomSeed);
   }
   await scheduler.resolveScheduleAssetPool(account, { mode: "random", assetIds: [], search: "", tags: [], color: "#3876C7" });
   assert.equal(libraryQueries.at(-1).color, "#3876C7", "preflight must use the saved color filter");
@@ -1912,7 +1917,7 @@ try {
     assert.ok(page.includes(snippet), `Canvas scheduler image source UI is missing ${snippet}`);
   }
   assert.ok(!page.includes("IntersectionObserver"), "scheduler image pagination must require an explicit load-more command");
-  assert.match(page, /new URLSearchParams\(\{ limit: "24" \}\)/, "scheduler image pages must be capped at 24 assets");
+  assert.match(page, /new URLSearchParams\(\{ limit: "24", sort \}\)/, "scheduler image pages must be capped at 24 assets");
   assert.match(page, /setTimeout\(\(\) => commitSearch\(value\), 350\)/, "scheduler keyword input must debounce definition updates for 350 ms");
   assert.match(page, /event\.key === "Enter"[\s\S]*commitSearch\(searchDraft\)/, "Enter must commit the scheduler keyword immediately");
   assert.match(page, /<CanvasScheduleV2Editor[\s\S]*key=\{selected\.id\}/, "switching schedules must remount V2 filter drafts and cancel pending search commits");

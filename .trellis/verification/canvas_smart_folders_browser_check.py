@@ -63,6 +63,8 @@ async def check(browser, width):
         elif url.path == "/api/library/navigation":
             payload = dict(collections=[dict(id="ordinary", name="普通图集", relativePath="普通图集")],
                            smartFolders=[dict(id="favorites", name="智能收藏")], counts=dict(all=3, uncategorized=0, favorites=2))
+        elif url.path == "/api/library/assets/order":
+            payload = dict(assetIds=request.post_data_json["assetIds"])
         elif url.path == "/api/library/assets":
             query = parse_qs(url.query)
             queries.append(query)
@@ -91,7 +93,8 @@ async def check(browser, width):
     await expect(scope.locator('option[value="smart:favorites"]')).to_have_count(1)
     await scope.select_option("smart:favorites")
     await expect(picker.locator(".canvas-picker-results label")).to_have_count(1)
-    await picker.locator('.canvas-picker-results input[type="checkbox"]').check()
+    await picker.locator('.canvas-picker-results input[type="checkbox"]').click()
+    await expect(picker.locator('.canvas-picker-results input[type="checkbox"]')).to_be_checked()
     await picker.get_by_role("button", name="加载更多", exact=True).click()
     await expect(picker.locator(".canvas-picker-results label")).to_have_count(2)
     assert queries[-1].get("smartFolderId") == ["favorites"] and queries[-1].get("cursor") == ["smart-next"]

@@ -1,4 +1,8 @@
 "use client";
+
+import { LibraryOrderControl, useLibraryOrdering } from "@/components/library-order";
+import { canvasLibraryOrder } from "@/lib/library-asset-order";
+import type { LibraryAssetOrder } from "@/lib/types";
 import { ScheduleFavoriteControl } from "@/components/canvas-schedule/FavoriteControl";
 import { LibraryColorFilter, LibraryPalette } from "@/components/library-colors";
 import Link from "next/link";
@@ -1631,7 +1635,7 @@ export default function CanvasPage() {
           event.preventDefault();
           openQuickAdd(event.clientX, event.clientY);
         }} onPointerMove={(event) => { canvasPointerRef.current = lastCanvasPointerRef.current = { x: event.clientX, y: event.clientY }; }} onPointerLeave={() => { canvasPointerRef.current = null; }}>
-          {activeWorkflow ? <CanvasNodeInteractionContext.Provider value={nodeInteraction}><ReactFlow<FlowNode, FlowEdge>
+          {activeWorkflow ? <CanvasNodeInteractionContext.Provider key={activeWorkflow.id} value={nodeInteraction}><ReactFlow<FlowNode, FlowEdge>
             nodes={displayedNodes}
             edges={displayedEdges}
             nodeTypes={nodeTypes}
@@ -1695,6 +1699,7 @@ export default function CanvasPage() {
             <CanvasIterationResults key={`${activeRun?.run.id}:${selectedCanvasNode.id}`} runId={activeRun?.run.id} nodeId={selectedCanvasNode.id} metadata={latestAttempts(activeRun?.nodeRuns || []).get(selectedCanvasNode.id)?.internalMetadata?.iteration} locked={activeRun?.run.batchContext?.phase === "shared" && activeRun.run.status === "completed"} onRefreshRun={() => { if (activeRun) void refreshRun(activeRun.run.id); }} />
           </div> : null}
           <NodeInspector
+            key={`${activeWorkflow?.id}:${selectedCanvasNode.id}`}
             node={selectedCanvasNode}
             onChange={updateSelectedConfig}
             onPatch={updateSelectedConfigPatch}
@@ -3072,7 +3077,7 @@ function CanvasNodeFields({ node, onChange, onPatch, onPreviewImage }: {
       const value = field.key === "background" ? node.config.background ?? "auto" : node.config[field.key];
       const options = field.options;
       if (field.kind === "content-pool-picker") return <ContentPoolSnapshotPicker key={field.key} node={node} onPatch={onPatch} onPreviewImage={onPreviewImage} />;
-      if (field.kind === "library-image-picker") return <LibraryImageSnapshotPicker key={field.key} node={node} onPatch={onPatch} onPreviewImage={onPreviewImage} />;
+      if (field.kind === "library-image-picker") return <LibraryImageSnapshotPicker key={`${node.id}:${field.key}`} node={node} onPatch={onPatch} onPreviewImage={onPreviewImage} />;
       if (field.kind === "copy-library-picker") return <CopyLibrarySnapshotPicker key={field.key} node={node} onPatch={onPatch} />;
       return <label key={field.key} className={field.kind === "boolean" ? "canvas-inspector-toggle" : undefined}><span>{field.label}</span>
         {field.kind === "textarea" || field.kind === "url-list" ? <textarea value={field.kind === "url-list" && Array.isArray(value) ? value.join("\n") : String(value || "")} placeholder={field.placeholder} onChange={(event) => onChange(field.key, field.kind === "url-list" ? event.target.value.split(/\r?\n/).map((item) => item.trim()).filter(Boolean) : event.target.value)} />
@@ -3992,11 +3997,17 @@ function LibraryImageSnapshotPicker({ node, onPatch, onPreviewImage }: {
 }) {
   const [data, setData] = useState<LibraryAssetPage>({ assets: [], total: 0 });
   const [navigation, setNavigation] = useState<LibraryNavigation>({ collections: [], smartFolders: [], counts: { all: 0, uncategorized: 0, favorites: 0 } });
-  const [search, setSearch] = useState("");
-  const [tag, setTag] = useState("");
-  const [color, setColor] = useState<string>();
-  const [collectionId, setCollectionId] = useState("");
-  const [smartFolderId, setSmartFolderId] = useState("");
+  const search = String(node.config.librarySearch || "");
+  const tag = String(node.config.libraryTag || "");
+  const color = typeof node.config.libraryColor === "string" ? node.config.libraryColor : undefined;
+  const collectionId = String(node.config.libraryCollectionId || "");
+  const smartFolderId = String(node.config.librarySmartFolderId || "");
+  const order = canvasLibraryOrder(node.config.librarySort, node.config.libraryRandomSeed);
+  const { sort, randomSeed } = order;
+  const setSearch = (value: string) => onPatch({ librarySearch: value });
+  const setTag = (value: string) => onPatch({ libraryTag: value });
+  const setColor = (value: string | undefined) => onPatch({ libraryColor: value });
+  const { reorder, ordering, orderError } = useLibraryOrdering(JSON.stringify([node.id, node.config]));
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState("");
   const [loadingMore, setLoadingMore] = useState(false);
@@ -4008,7 +4019,7 @@ function LibraryImageSnapshotPicker({ node, onPatch, onPreviewImage }: {
   const names = configStringList(node.config.assetNames);
   const urls = configStringList(node.config.urls);
   const hasQuery = Boolean(color || search.trim() || tag.trim() || collectionId || smartFolderId);
-  const queryKey = JSON.stringify([search.trim(), tag.trim(), collectionId, smartFolderId, color]);
+  const queryKey = JSON.stringify([search.trim(), tag.trim(), collectionId, smartFolderId, color, sort, randomSeed]);
   const queryKeyRef = useRef(queryKey);
   useLayoutEffect(() => {
     queryKeyRef.current = queryKey;
@@ -4026,6 +4037,9 @@ function LibraryImageSnapshotPicker({ node, onPatch, onPreviewImage }: {
     }
     return navigationRequestRef.current;
   }, [navigationLoaded]);
+  useEffect(() => {
+    if (collectionId || smartFolderId) void ensureNavigation();
+  }, [collectionId, smartFolderId, ensureNavigation]);
   const load = useCallback(async () => {
     const generation = ++requestGenerationRef.current;
     requestControllerRef.current?.abort();
@@ -4040,7 +4054,8 @@ function LibraryImageSnapshotPicker({ node, onPatch, onPreviewImage }: {
     setBusy(true);
     setLoadingMore(false);
     setError("");
-    const params = new URLSearchParams({ limit: "24", count: "0" });
+    const params = new URLSearchParams({ limit: "24", count: "0", sort });
+    if (randomSeed) params.set("randomSeed", randomSeed);
     if (color) params.set("color", color);
     if (search.trim()) params.set("search", search.trim());
     if (tag.trim()) params.set("tag", tag.trim());
@@ -4054,15 +4069,16 @@ function LibraryImageSnapshotPicker({ node, onPatch, onPreviewImage }: {
     } finally {
       if (generation === requestGenerationRef.current) setBusy(false);
     }
-  }, [color, collectionId, hasQuery, search, smartFolderId, tag, queryKey]);
+  }, [color, collectionId, hasQuery, search, smartFolderId, tag, queryKey, sort, randomSeed]);
   const loadMore = useCallback(async () => {
     if (!hasQuery || busy || !data.nextCursor || loadingMore) return;
     const generation = requestGenerationRef.current;
     const key = queryKey;
     setLoadingMore(true);
     try {
-      const params = new URLSearchParams({ limit: "24", count: "0", cursor: data.nextCursor });
-      if (color) params.set("color", color);
+      const params = new URLSearchParams({ limit: "24", count: "0", sort, cursor: data.nextCursor });
+      if (randomSeed) params.set("randomSeed", randomSeed);
+    if (color) params.set("color", color);
     if (search.trim()) params.set("search", search.trim());
       if (tag.trim()) params.set("tag", tag.trim());
       if (collectionId) params.set("collectionId", collectionId);
@@ -4074,26 +4090,34 @@ function LibraryImageSnapshotPicker({ node, onPatch, onPreviewImage }: {
     } finally {
       if (generation === requestGenerationRef.current && queryKeyRef.current === key) setLoadingMore(false);
     }
-  }, [busy, color, collectionId, data.nextCursor, hasQuery, loadingMore, search, smartFolderId, tag, queryKey]);
+  }, [busy, color, collectionId, data.nextCursor, hasQuery, loadingMore, search, smartFolderId, tag, queryKey, sort, randomSeed]);
   useEffect(() => {
     const timer = setTimeout(() => void load(), 250);
     return () => clearTimeout(timer);
   }, [load]);
   const patchSelection = (nextIds: string[], nextNames: string[], nextUrls: string[]) => onPatch({ assetIds: nextIds, assetNames: nextNames, urls: nextUrls, snapshotAt: new Date().toISOString() });
+  const sortSelection = (nextIds: string[], nextNames: string[], nextUrls: string[], nextOrder: LibraryAssetOrder = order) => {
+    const snapshots = new Map(nextIds.map((id, index) => [id, { name: nextNames[index], url: nextUrls[index] }]));
+    void reorder(nextIds, nextOrder, (ordered) => onPatch({
+      librarySort: nextOrder.sort, libraryRandomSeed: nextOrder.randomSeed,
+      assetIds: ordered, assetNames: ordered.map((id) => snapshots.get(id)!.name), urls: ordered.map((id) => snapshots.get(id)!.url),
+      snapshotAt: new Date().toISOString(),
+    }));
+  };
   const toggle = (asset: LibraryAsset) => {
     const index = ids.indexOf(asset.id);
     if (index >= 0) {
-      patchSelection(ids.filter((_, itemIndex) => itemIndex !== index), names.filter((_, itemIndex) => itemIndex !== index), urls.filter((_, itemIndex) => itemIndex !== index));
+      sortSelection(ids.filter((_, itemIndex) => itemIndex !== index), names.filter((_, itemIndex) => itemIndex !== index), urls.filter((_, itemIndex) => itemIndex !== index));
       return;
     }
     if (ids.length >= 30) {
       setError("素材库图片节点最多选择 30 张图片。");
       return;
     }
-    patchSelection([...ids, asset.id], [...names, asset.name], [...urls, asset.publicUrl]);
+    sortSelection([...ids, asset.id], [...names, asset.name], [...urls, asset.publicUrl]);
   };
   const move = (from: number, to: number) => patchSelection(moveListItem(ids, from, to), moveListItem(names, from, to), moveListItem(urls, from, to));
-  const remove = (index: number) => patchSelection(ids.filter((_, itemIndex) => itemIndex !== index), names.filter((_, itemIndex) => itemIndex !== index), urls.filter((_, itemIndex) => itemIndex !== index));
+  const remove = (index: number) => sortSelection(ids.filter((_, itemIndex) => itemIndex !== index), names.filter((_, itemIndex) => itemIndex !== index), urls.filter((_, itemIndex) => itemIndex !== index));
   const refresh = async () => {
     setBusy(true);
     setError("");
@@ -4107,12 +4131,13 @@ function LibraryImageSnapshotPicker({ node, onPatch, onPreviewImage }: {
     }
   };
   return <div className="canvas-snapshot-picker" onFocusCapture={() => void ensureNavigation()}>
+    <fieldset className="canvas-library-picker-fields" disabled={ordering}>
+    <LibraryOrderControl order={order} onChange={(next) => sortSelection(ids, names, urls, next)} />
     <div className="canvas-picker-heading"><span>素材库图片</span><small>{ids.length}/30</small><button type="button" onClick={() => void refresh()} disabled={busy || !ids.length} title="刷新所选素材"><RotateCcw className={busy ? "animate-spin" : ""} /></button></div>
     <label className="canvas-picker-search"><Search /><input value={search} onChange={(event) => setSearch(event.target.value)} placeholder="搜索图片" /></label>
     <div className="canvas-picker-filters"><input value={tag} onChange={(event) => setTag(event.target.value)} placeholder="标签" /><select aria-label="图集或智能文件夹" value={smartFolderId ? `smart:${smartFolderId}` : collectionId ? `collection:${collectionId}` : ""} onChange={(event) => {
       const [kind, id] = event.target.value.split(":");
-      setCollectionId(kind === "collection" ? id : "");
-      setSmartFolderId(kind === "smart" ? id : "");
+      onPatch({ libraryCollectionId: kind === "collection" ? id : "", librarySmartFolderId: kind === "smart" ? id : "" });
     }}><option value="">全部图集</option><optgroup label="图集">{navigation.collections.map((collection) => <option key={collection.id} value={`collection:${collection.id}`}>{collection.relativePath || collection.name}</option>)}</optgroup><optgroup label="智能文件夹">{navigation.smartFolders.map((folder) => <option key={folder.id} value={`smart:${folder.id}`}>{folder.name}</option>)}</optgroup></select></div>
     <LibraryColorFilter color={color} onChange={setColor} hint />
     {ids.length ? <div className="canvas-picker-selected">{urls.map((url, index) => <div key={`${ids[index]}-${index}`}>
@@ -4128,7 +4153,9 @@ function LibraryImageSnapshotPicker({ node, onPatch, onPreviewImage }: {
     <div className="canvas-picker-results" aria-busy={busy}>{data.assets.map((asset) => <div key={asset.id}><label><input type="checkbox" disabled={busy} checked={ids.includes(asset.id)} onChange={() => toggle(asset)} /><span><Image src={`/api/library/assets/${encodeURIComponent(asset.id)}/thumbnail?variant=square&version=2`} alt="" width={96} height={96} unoptimized loading="lazy" decoding="async" onError={() => setError(`缩略图读取失败：${asset.name}`)} /></span><small>{asset.name}</small></label><LibraryPalette palette={asset.palette} disabled={busy} onColor={setColor} /></div>)}</div>
     {data.nextCursor ? <button type="button" className="canvas-picker-load-more" onClick={() => void loadMore()} disabled={busy || loadingMore}>{loadingMore ? "正在加载..." : "加载更多"}</button> : null}
     {data.total !== undefined && data.total > data.assets.length ? <small className="canvas-picker-limit">显示前 {data.assets.length} / {data.total} 张，请使用搜索或筛选缩小范围。</small> : null}
-    {error ? <p className="canvas-picker-error">{error}</p> : null}
+    </fieldset>
+    {ordering ? <p role="status">正在排序已选图片…</p> : null}
+    {error || orderError ? <p className="canvas-picker-error">{orderError || error}</p> : null}
   </div>;
 }
 

@@ -1,3 +1,4 @@
+import { normalizeLibraryAssetSort, normalizeLibraryRandomSeed, libraryAssetOrderDescending } from "./library-asset-order";
 import { createHash, randomUUID } from "node:crypto";
 import path from "node:path";
 import {
@@ -31,7 +32,7 @@ import {
   normalizeLibraryManualOverrides,
   normalizeStringList,
 } from "./library-tags";
-import { compareLibraryText, libraryListSortDirection, normalizeLibraryListSort } from "./library-sort";
+import { compareLibraryText } from "./library-sort";
 import { libraryThumbnailVersion } from "./library-thumbnails";
 import { deleteRuntimeMediaObject, persistLibraryObject } from "./runtime-media-storage";
 import type {
@@ -42,6 +43,7 @@ import type {
   LibraryCollection,
   LibraryCollectionBatchRequest,
   LibraryCollectionBatchResult,
+  LibraryAssetSort,
   LibraryListSort,
   LibraryManualTagOverrides,
   LibraryNavigation,
@@ -108,8 +110,21 @@ export async function listLibraryAssets(account: WorkspaceAccessActor, filters: 
   return {
     assets,
     ...(result.total === undefined ? {} : { total: result.total }),
-    nextCursor: result.hasMore && assets.length ? encodeCursor(assets[assets.length - 1], sort, signature) : undefined,
+    nextCursor: result.hasMore && assets.length ? encodeCursor(assets[assets.length - 1], sort, signature, normalized.randomSeed) : undefined,
   };
+}
+
+export async function orderLibraryAssetIds(account: WorkspaceAccessActor, value: unknown) {
+  if (!value || typeof value !== "object" || Array.isArray(value)) throw new Error("排序参数必须是对象");
+  const input = value as Record<string, unknown>;
+  if (!Array.isArray(input.assetIds) || input.assetIds.length > 10000) throw new Error("素材 ID 列表最多支持 10000 项");
+  if (input.assetIds.some((id) => typeof id !== "string" || !id.trim())) throw new Error("无效的素材 ID");
+  const ids = normalizeIdArray(input.assetIds, "asset");
+  const sort = normalizeLibraryAssetSort(input.sort);
+  const randomSeed = normalizeLibraryRandomSeed(input.randomSeed, sort);
+  const ordered = await queryLibraryAssetIdsFromDb({ actorId: account.id, isAdmin: isWorkspaceAdmin(account), filters: { sort, randomSeed } }, [], ids);
+  if (ordered.length !== ids.length) throw new Error("所选素材已删除或无权访问，已保留原选择");
+  return ordered;
 }
 
 export async function listLibraryNavigation(account: WorkspaceAccessActor): Promise<LibraryNavigation> {
@@ -514,7 +529,7 @@ export function parseLibraryAssetFilters(url: URL): LibraryAssetFilters {
     minWidth: optionalNumber(url.searchParams.get("minWidth")), maxWidth: optionalNumber(url.searchParams.get("maxWidth")),
     minHeight: optionalNumber(url.searchParams.get("minHeight")), maxHeight: optionalNumber(url.searchParams.get("maxHeight")),
     minByteSize: optionalNumber(url.searchParams.get("minByteSize")), maxByteSize: optionalNumber(url.searchParams.get("maxByteSize")),
-    sort: normalizeLibraryListSort(url.searchParams.get("sort")), addedFrom, addedBefore,
+    sort: normalizeLibraryAssetSort(url.searchParams.get("sort")), randomSeed: url.searchParams.get("randomSeed") || undefined, addedFrom, addedBefore,
   });
 }
 
@@ -537,7 +552,7 @@ export function parseLibrarySelection(value: unknown): LibrarySelection {
 }
 
 export function compareAssets(left: LibraryAsset, right: LibraryAsset, sort: LibraryListSort = "newest") {
-  const direction = libraryListSortDirection(sort);
+  const direction = libraryAssetOrderDescending(sort) ? -1 : 1;
   const leftValue = assetSortValue(left, sort);
   const rightValue = assetSortValue(right, sort);
   const value = sort === "newest" || sort === "oldest" ? leftValue.localeCompare(rightValue) : compareLibraryText(leftValue, rightValue);
@@ -632,7 +647,8 @@ function normalizeLibraryAssetFilters(filters: LibraryAssetFilters): LibraryAsse
   return {
     ...filters,
     limit: Math.max(1, Math.min(pageLimitMax, Math.floor(filters.limit || 60))),
-    sort: normalizeLibraryListSort(filters.sort),
+    sort: normalizeLibraryAssetSort(filters.sort),
+    randomSeed: normalizeLibraryRandomSeed(filters.randomSeed, normalizeLibraryAssetSort(filters.sort)),
     search: filters.search?.trim().slice(0, 200) || undefined,
     color: normalizeLibraryColor(filters.color),
     collectionId: filters.collectionId?.trim() || undefined,
@@ -643,14 +659,14 @@ function normalizeLibraryAssetFilters(filters: LibraryAssetFilters): LibraryAsse
   };
 }
 
-type LibraryAssetCursor = { version: 3; sort: LibraryListSort; signature: string; value: string; id: string };
+type LibraryAssetCursor = { version: 3; sort: LibraryAssetSort; signature: string; value: string; id: string };
 
-function encodeCursor(asset: LibraryAsset, sort: LibraryListSort, signature: string) {
-  const cursor: LibraryAssetCursor = { version: 3, sort, signature, value: assetSortValue(asset, sort), id: asset.id };
+function encodeCursor(asset: LibraryAsset, sort: LibraryAssetSort, signature: string, randomSeed?: string) {
+  const cursor: LibraryAssetCursor = { version: 3, sort, signature, value: assetSortValue(asset, sort, randomSeed), id: asset.id };
   return Buffer.from(JSON.stringify(cursor)).toString("base64url");
 }
 
-function decodeCursor(value: string | undefined, sort: LibraryListSort, signature: string): LibraryDatabaseCursor | undefined {
+function decodeCursor(value: string | undefined, sort: LibraryAssetSort, signature: string): LibraryDatabaseCursor | undefined {
   if (!value) return undefined;
   try {
     const decoded = JSON.parse(Buffer.from(value, "base64url").toString("utf8")) as Partial<LibraryAssetCursor>;
@@ -718,7 +734,9 @@ async function refreshCollectionDescendantPaths(collections: LibraryCollection[]
   }
 }
 
-function assetSortValue(asset: LibraryAsset, sort: LibraryListSort) {
+function assetSortValue(asset: LibraryAsset, sort: LibraryAssetSort, randomSeed?: string) {
+  if (sort === "random") return createHash("md5").update(`${normalizeLibraryRandomSeed(randomSeed, sort)}:${asset.id}`).digest("hex");
+  if (sort.startsWith("updated-")) return asset.updatedAt;
   if (sort === "newest" || sort === "oldest") return asset.createdAt;
   if (sort === "name-asc" || sort === "name-desc") return asset.name.toLocaleLowerCase();
   return asset.ownerDisplayName.toLocaleLowerCase();

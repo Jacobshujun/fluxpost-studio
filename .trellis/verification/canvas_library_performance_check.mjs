@@ -10,7 +10,7 @@ const database = read("src/lib/database.ts");
 const library = read("src/lib/library-assets.ts");
 const thumbnailRoute = read("src/app/api/library/assets/[id]/thumbnail/route.ts");
 
-assert(page.includes('new URLSearchParams({ limit: "24", count: "0" })'), "Canvas library picker must request a bounded count-free page.");
+assert(page.includes('new URLSearchParams({ limit: "24", count: "0", sort })'), "Canvas library picker must request a bounded count-free page.");
 assert(page.includes("const hasQuery = Boolean(color || search.trim() || tag.trim() || collectionId || smartFolderId)"), "Canvas library picker must stay idle until a filter or smart folder is entered.");
 assert(!page.includes("generatedFilters") && !page.includes("appendGeneratedLibraryFilters"), "Retired generated-image filters must not remain in the Canvas picker.");
 assert(page.includes("!hasQuery ? <div className=\"canvas-picker-empty\""), "Canvas library picker must explain how to start an unfiltered search.");

@@ -1321,6 +1321,10 @@ export type LibraryListSort =
   | "owner-asc"
   | "owner-desc";
 
+export type LibraryAssetSort = LibraryListSort | "updated-newest" | "updated-oldest" | "random";
+
+export type LibraryAssetOrder = { sort: LibraryAssetSort; randomSeed?: string };
+
 export type CopyLibraryEntry = {
   id: string;
   ownerUserId: string;
@@ -1522,7 +1526,8 @@ export type LibraryAssetFilters = {
   maxHeight?: number;
   minByteSize?: number;
   maxByteSize?: number;
-  sort?: LibraryListSort;
+  sort?: LibraryAssetSort;
+  randomSeed?: string;
   addedFrom?: string;
   addedBefore?: string;
 };

@@ -1,6 +1,18 @@
 # Unified Library
 
-Last updated: 2026-10-14
+Last updated: 2026-11-06
+
+## Canvas And Schedule Ordering
+
+- Canvas library pickers and V1/V2/shared schedule asset pickers default to `updated-newest`; options also include `updated-oldest`, `newest`, `oldest`, `name-asc`, `name-desc`, and seeded `random`. Other list consumers retain the created-newest default. Times refer to library metadata, not original filesystem timestamps.
+- `LibraryAssetSort` extends asset ordering only. `GET /api/library/assets` accepts `sort` and `randomSeed`; random keys are MD5(seed + ':' + asset ID), identical in PostgreSQL and a deterministic SQLite function. SQL sorts the whole authorized set before keyset paging; cursor signatures bind sort, seed and filters.
+- `POST /api/library/assets/order` authenticates and accepts `{ assetIds, sort, randomSeed? }`, returns `{ assetIds }` sorted with the same SQL order, and rejects inaccessible/deleted IDs atomically. Maximum 10,000 input IDs; duplicate IDs are normalized. No material writes or full-library download.
+- Node settings use primitive `librarySearch`, `libraryTag`, `libraryColor`, `libraryCollectionId`, `librarySmartFolderId`, `librarySort`, and `libraryRandomSeed` config fields so existing flat graph serialization, export and clipboard preserve them. Never keep these only in inspector component state. Key the picker by node and the containing UI by workflow identity.
+- Existing selected IDs/names/URLs are frozen together: explicit sort/reshuffle or selection changes reorder their tuples; paging/opening does not reorder or refresh snapshots. Manual moves persist. Failed ordering preserves selection/settings and shows the error. Requests are invalidated on owning config change or unmount.
+- Saved collection/smart-folder scopes load navigation on restore so their labels appear; an empty legacy picker remains idle until interaction. A seed persists until explicit reshuffle; HTTP LAN clients use `crypto.getRandomValues`, not secure-context-only `randomUUID`.
+- Schedule filters persist `sort`/`randomSeed` through normalization, save/reload/copy and conditional pool resolution. Manual ID ordering is frozen as supplied; sampling mode/count semantics remain independent of display ordering.
+- Image iteration still disallows `input.library-images`; this change does not expand its node allow-list.
+- Verification: baseline `library_order_check.mjs` covers seven sorts, global paging/selection, cursor binding, permissions/API and graph/clipboard roundtrip. Opt-in loopback PostgreSQL uses connection-local TEMP tables: `node --env-file=.env.local --import tsx -e "process.env.LIBRARY_ORDER_POSTGRES='1'; import('./.trellis/verification/library_order_runtime_check.ts')"`. Browser: `python .trellis/verification/library_order_browser_check.py` on worker-disabled loopback `BROWSER_BASE_URL` (rejects 3001), three themes at 1440/390; existing smart-folder/color regressions remain required.
 
 ## Scenario: Unified, Query-Driven Image Assets
 

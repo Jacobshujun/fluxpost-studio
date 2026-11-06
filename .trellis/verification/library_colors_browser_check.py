@@ -52,6 +52,7 @@ async def check(browser, width, theme):
         elif path == "/api/config": data = dict(status={})
         elif path == "/api/library/navigation": data = dict(collections=[], smartFolders=[], counts=dict(all=70, favorites=0, uncategorized=70))
         elif path == "/api/library/tags": data = dict(tags=[])
+        elif path == "/api/library/assets/order": data = dict(assetIds=req.post_data_json["assetIds"])
         elif path == "/api/library/colors/jobs":
             if req.method == "POST":
                 assert req.post_data_json["mode"] in ("missing", "failed")
@@ -75,6 +76,7 @@ async def check(browser, width, theme):
             data = dict(workflow=workflow)
         elif path == "/api/canvas/runs": data = dict(runs=[], latestNodeAttempts=[], latestSuccessfulNodeRuns=[])
         elif path == "/api/canvas/schedules": data = dict(schedules=list(schedules.values()))
+        elif path.endswith("/favorite"): data = dict(favorite=None)
         elif path.startswith("/api/canvas/schedules/"):
             sid = path.split("/")[-1]
             if req.method == "PATCH": schedules[sid].update(req.post_data_json); saves.append(req.post_data_json)
@@ -126,7 +128,8 @@ async def check(browser, width, theme):
     inspector = page.locator(".canvas-inspector")
     await inspector.get_by_role("button", name="筛选红色", exact=True).click()
     await expect(inspector.locator('.canvas-picker-results input[type=checkbox]')).to_have_count(24)
-    await inspector.locator('.canvas-picker-results input[type=checkbox]').first.check()
+    await inspector.locator('.canvas-picker-results input[type=checkbox]').first.click()
+    await expect(inspector.locator('.canvas-picker-results input[type=checkbox]').first).to_be_checked()
     await inspector.get_by_role("button", name="筛选蓝色", exact=True).click()
     await expect(inspector.locator('.canvas-picker-results input[type=checkbox]')).to_have_count(24)
     await expect(inspector.locator('.canvas-picker-results label small').first).to_have_text("Image 1")

@@ -1,3 +1,4 @@
+import { canvasLibraryOrder } from "../library-asset-order";
 import { normalizeLibraryColor } from "../library-color";
 import { createHash, randomUUID } from "node:crypto";
 import {
@@ -1697,6 +1698,7 @@ async function resolveScheduleAssetPool(account: WorkspaceAccessActor, filter: C
     const page = await listLibraryAssets(account, {
       limit: 100,
       cursor,
+      ...canvasLibraryOrder(filter.sort, filter.randomSeed),
       ...(filter.mode === "random" ? {
         search: filter.search,
         color: filter.color,
@@ -2002,6 +2004,7 @@ function stripBatchRuntime(batch: CanvasScheduleBatch): CanvasScheduleBatch {
 
 function normalizeAssetFilter(value: CanvasScheduleAssetFilter | undefined): CanvasScheduleAssetFilter {
   return {
+    ...canvasLibraryOrder(value?.sort, value?.randomSeed),
     mode: value?.mode === "random" ? "random" : "manual",
     assetIds: uniqueStrings(value?.assetIds || []).slice(0, maxImageTasks),
     search: String(value?.search || "").trim().slice(0, 120),
