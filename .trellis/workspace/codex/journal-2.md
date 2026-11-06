@@ -939,3 +939,36 @@ Reproduced editor Job closure killing supervisor/server; native suspended breaka
 ### Next Steps
 
 - None - task complete
+
+
+## Session 87: Canvas library ordering and filter isolation
+
+**Date**: 2026-11-06
+**Task**: Canvas library ordering and filter isolation
+**Branch**: `local`
+
+### Summary
+
+Implemented seven SQL asset sorts and stable random order, atomic selected-snapshot reordering, persistent node-local filters and V1/V2 schedule settings. SQLite/loopback PostgreSQL TEMP-only, six sorting browser flows, smart-folder/color regressions and final full baseline pass (0 errors/16 existing warnings). Local LAN activation follows these clean commits; no remote deployment or live provider calls.
+
+### Main Changes
+
+(Add details)
+
+### Git Commits
+
+| Hash | Message |
+|------|---------|
+| `25a51d2` | (see git log) |
+
+### Testing
+
+- [OK] (Add test results)
+
+### Status
+
+[OK] **Completed**
+
+### Next Steps
+
+- None - task complete

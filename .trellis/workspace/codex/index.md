@@ -8,8 +8,8 @@
 
 <!-- @@@auto:current-status -->
 - **Active File**: `journal-2.md`
-- **Total Sessions**: 86
-- **Last Active**: 2026-11-05
+- **Total Sessions**: 87
+- **Last Active**: 2026-11-06
 <!-- @@@/auto:current-status -->
 
 ---
@@ -19,7 +19,7 @@
 <!-- @@@auto:active-documents -->
 | File | Lines | Status |
 |------|-------|--------|
-| `journal-2.md` | ~941 | Active |
+| `journal-2.md` | ~974 | Active |
 | `journal-1.md` | ~1967 | Archived |
 <!-- @@@/auto:active-documents -->
 
@@ -30,6 +30,7 @@
 <!-- @@@auto:session-history -->
 | # | Date | Title | Commits | Branch |
 |---|------|-------|---------|--------|
+| 87 | 2026-11-06 | Canvas library ordering and filter isolation | `25a51d2` | `local` |
 | 86 | 2026-11-05 | Independent local runtime and 24 GiB heap | `498682c` | `local` |
 | 85 | 2026-11-05 | Canvas batch worker concurrency | `67a4545` | `local` |
 | 84 | 2026-11-05 | Image size validation and provider compatibility | `67f17bc` | `local` |
