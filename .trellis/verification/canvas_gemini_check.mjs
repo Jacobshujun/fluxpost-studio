@@ -198,6 +198,7 @@ try {
   const executorImports = Object.fromEntries([...executorSource.matchAll(/from "([^"\n]+)"/g)].map((match) => [match[1], {}]));
   executorImports["../gemini"] = load("src/lib/gemini.ts");
   executorImports["./node-utils"] = load("src/lib/canvas/node-utils.ts");
+  executorImports["./registry"] = registry;
   Function("require", "module", "exports", ts.transpileModule(executorSource, { compilerOptions: { module: ts.ModuleKind.CommonJS, target: ts.ScriptTarget.ES2022, esModuleInterop: true } }).outputText)(
     (name) => name.startsWith("node:") ? require(name) : executorImports[name], executorModule, executorModule.exports);
   const context = { node, account, runId: "fixture-run", inputs: {

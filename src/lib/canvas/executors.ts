@@ -18,7 +18,7 @@ import { CanvasMediaNeedsConfigError, extractCanvasVideoFrames, reconstructCanva
 import { revalidateCanvasDirectoryGroup } from "./directory-snapshots";
 import { canvasVisionPresets, concatenateCanvasText, parseCanvasImageSelection, renderCanvasPromptTemplate, splitCanvasText } from "./node-utils";
 import { pixelSizeForRatio } from "../gpt-image-dimensions";
-import { canvasGptImageReferencePortIds, normalizeUrlList, orderedCanvasGptImageInputs, resolveCanvasWonderImageReferences } from "./registry";
+import { canvasGptImageReferencePortIds, canvasTextConcatenatePortIds, normalizeUrlList, orderedCanvasGptImageInputs, resolveCanvasWonderImageReferences } from "./registry";
 import { CANVAS_SAVE_IMAGE_MAX_ITEMS } from "./save-images";
 import { saveCanvasImagesToFolder } from "./local-image-save";
 import { processCanvasImages } from "./image-process";
@@ -325,7 +325,7 @@ async function executePromptTemplate({ node, inputs }: CanvasNodeExecutionContex
 }
 
 async function executeTextConcatenate({ node, inputs }: CanvasNodeExecutionContext) {
-  const values = ["text_a", "text_b", "text_c", "text_d"].flatMap((port) => textValues(inputs[port]));
+  const values = canvasTextConcatenatePortIds.flatMap((port) => textValues(inputs[port]));
   const value = concatenateCanvasText(node.config, values);
   return { outputs: { text: { kind: "text" as const, value } } };
 }

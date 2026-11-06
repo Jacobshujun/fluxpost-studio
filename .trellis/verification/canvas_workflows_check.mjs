@@ -86,7 +86,7 @@ try {
     writeFileSync(path.join(temp, `${name}.js`), output, "utf8");
   }
   const require = createRequire(import.meta.url);
-  const { canvasNodeDefinitions, createCanvasNode, getCanvasBypassRouting, getCanvasNodeDefinition, getCanvasNodeExecutionMode, getCanvasVisibleInputPorts, upgradeCanvasGraph, upgradeCanvasNode, validateCanvasNodeConfig, normalizeUrlList } = require(path.join(temp, "registry.js"));
+  const { canvasTextConcatenatePortIds, canvasNodeDefinitions, createCanvasNode, getCanvasBypassRouting, getCanvasNodeDefinition, getCanvasNodeExecutionMode, getCanvasVisibleInputPorts, upgradeCanvasGraph, upgradeCanvasNode, validateCanvasNodeConfig, normalizeUrlList } = require(path.join(temp, "registry.js"));
   const { validateCanvasGraph, validateCanvasGraphForPersistence, buildCanvasRunPlan } = require(path.join(temp, "graph.js"));
   const { createCanvasClipboardPayload, instantiateCanvasClipboardPayload, parseCanvasClipboardPayload, prepareCanvasClipboardPaste } = require(path.join(temp, "clipboard.js"));
   const { createCanvasWorkflowFile, parseCanvasWorkflowFile, canvasWorkflowFileName, CANVAS_WORKFLOW_FILE_MAX_BYTES } = require(path.join(temp, "workflow-file.js"));
@@ -305,16 +305,11 @@ try {
     type: "utility.text-concatenate",
     version: 1,
     label: "文本拼接",
-    description: "按顺序用指定分隔符合并最多四路文本。",
+    description: "按接口编号拼接最多 16 路文本，连接后自动展开下一路。",
     category: "utility",
     icon: "Combine",
     color: "#16a34a",
-    inputs: [
-      { id: "text_a", label: "文本 A", kind: "text" },
-      { id: "text_b", label: "文本 B", kind: "text" },
-      { id: "text_c", label: "文本 C", kind: "text" },
-      { id: "text_d", label: "文本 D", kind: "text" },
-    ],
+    inputs: Array.from("abcdefghijklmnop", (letter, index) => ({ id: `text_${letter}`, label: `文本 ${index + 1}`, kind: "text" })),
     outputs: [{ id: "text", label: "文字", kind: "text" }],
     fields: [
       { key: "delimiter", label: "分隔符", kind: "text", placeholder: "例如：\\n" },
@@ -369,7 +364,7 @@ try {
     "input.content-pool": { inputs: [], outputs: ["title:text", "body:text", "source:text", "images:images", "videos:videos"] },
     "input.library-images": { inputs: [], outputs: ["images:images"] },
     "utility.prompt-template": { inputs: ["values:text"], outputs: ["text:text"] },
-    "utility.text-concatenate": { inputs: ["text_a:text", "text_b:text", "text_c:text", "text_d:text"], outputs: ["text:text"] },
+    "utility.text-concatenate": { inputs: Array.from("abcdefghijklmnop", (letter) => `text_${letter}:text`), outputs: ["text:text"] },
     "utility.text-split": { inputs: ["text:text"], outputs: ["head:text", "tail:text"] },
     "model.gpt-vision": { inputs: ["images:images", "instruction:text"], outputs: ["text:text"] },
     "utility.image-select": { inputs: ["images:images"], outputs: ["images:images"] },
@@ -481,6 +476,20 @@ try {
     viewport: { x: 0, y: 0, zoom: 1 },
   };
   assert.equal(validateCanvasGraph(concatenateGraph).valid, true, "text concatenate must participate in typed graph validation");
+  const visibleText = (connected = []) => getCanvasVisibleInputPorts(concatenateNode, connected).map((port) => port.id);
+  assert.deepEqual(visibleText(), ["text_a"]);
+  assert.deepEqual(visibleText(["text_a"]), ["text_a", "text_b"]);
+  assert.deepEqual(visibleText(["text_d"]), ["text_a", "text_b", "text_c", "text_d", "text_e"], "sparse legacy connections keep their IDs and reveal the next input");
+  assert.equal(visibleText(["text_o"]).length, 16);
+  assert.equal(visibleText(["text_p"]).length, 16, "the final input must not create a seventeenth handle");
+  assert.deepEqual(visibleText(["text_b"]), ["text_a", "text_b", "text_c"], "removing the last connection collapses unused trailing ports");
+  const expandedGraph = { ...concatenateGraph, edges: Array.from("abcdefghijklmnop", (letter) => ({
+    id: `concat-${letter}`, source: "text", sourcePort: "text", target: "concatenate", targetPort: `text_${letter}`,
+  })) };
+  assert.equal(validateCanvasGraph(expandedGraph).valid, true);
+  assert.deepEqual(upgradeCanvasGraph(expandedGraph).edges, expandedGraph.edges);
+  const expandedClipboard = createCanvasClipboardPayload(expandedGraph.nodes, expandedGraph.edges, ["text", "concatenate"]);
+  assert.equal(parseCanvasClipboardPayload(JSON.stringify(expandedClipboard))?.edges.length, 16);
   const concatenateClipboard = createCanvasClipboardPayload(concatenateGraph.nodes, concatenateGraph.edges, ["text", "concatenate"]);
   assert.equal(parseCanvasClipboardPayload(JSON.stringify(concatenateClipboard))?.nodes.find((node) => node.type === "utility.text-concatenate")?.config.clean_whitespace, true, "text concatenate config must round-trip through clipboard validation");
   assert.deepEqual(CANVAS_NODE_SIZE_LIMITS, { minWidth: 190, minHeight: 120, maxWidth: 720, maxHeight: 900 }, "node resizing bounds must stay shared across persistence and UI");
@@ -823,7 +832,7 @@ try {
     executorSource,
     ["executeTextConcatenate", "textValues"],
     "executeTextConcatenate",
-    { concatenateCanvasText: nodeUtils.concatenateCanvasText },
+    { concatenateCanvasText: nodeUtils.concatenateCanvasText, canvasTextConcatenatePortIds },
   );
   assert.deepEqual((await executeTextConcatenate({
     node: { type: "utility.text-concatenate", version: 1, config: { delimiter: "\\n", clean_whitespace: true } },
@@ -837,6 +846,14 @@ try {
     node: { type: "utility.text-concatenate", version: 1, config: { delimiter: ", ", clean_whitespace: false } },
     inputs: {},
   })).outputs, { text: { kind: "text", value: "" } }, "executor must succeed with no connected inputs");
+  assert.deepEqual((await executeTextConcatenate({
+    node: concatenateNode,
+    inputs: Object.fromEntries(Array.from("ponmlkjihgfedcba", (letter) => [`text_${letter}`, [{ kind: "text", value: ` ${letter} ` }]])),
+  })).outputs, { text: { kind: "text", value: Array.from("abcdefghijklmnop").join("\n") } }, "all sixteen inputs execute in port order regardless of insertion order");
+  assert.deepEqual((await executeTextConcatenate({
+    node: concatenateNode,
+    inputs: { text_p: [{ kind: "text", value: " last " }], text_e: [{ kind: "text", value: "   " }], text_a: [{ kind: "text", value: " first " }] },
+  })).outputs, { text: { kind: "text", value: "first\nlast" } }, "sparse new inputs preserve empty filtering and trimming");
   const executeTextSplit = compileFunctions(
     executorSource,
     ["executeTextSplit", "textValues"],

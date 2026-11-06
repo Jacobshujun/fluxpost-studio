@@ -4,10 +4,11 @@ Last updated: 2026-11-06
 
 ## One-Line Status
 
-Canvas library sorting and node-local filter persistence verified; local release identity: `/api/version`.
+Canvas text concatenation now expands to 16 ordered inputs; baseline/browser verified. Local release identity: `/api/version`.
 
 ## Current Focus
 
+- Nov 6 text concatenation: GPT-style progressive inputs (1–16), stable legacy A-D handles, ordered execution and six theme/viewport browser checks pass. Evidence: `archive/2026-11/11-06-canvas-text-concatenate/verification.md`. Operator acceptance pending.
 - Nov 6 library sorting/filter isolation: SQLite/PG, six browser flows and regressions pass. Contract: `unified_library.md`; evidence: `11-06-canvas-library-sorting`. Operator acceptance pending.
 - Nov 5 startup: Job independence/24-GiB heap, baseline and LAN activation pass. Evidence: `archive/2026-11/11-05-local-independent-runtime/verification.md`.
 - Canvas workers: 32/default, 100/cap verified; LAN identity: `/api/version`.

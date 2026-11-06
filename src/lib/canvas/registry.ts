@@ -18,6 +18,8 @@ import { buildWonderImageRequest, validateWonderEndpoint, WONDER_IMAGE_DEFAULT_E
 
 export const canvasGptImageReferencePortIds = Array.from({ length: 16 }, (_, index) => `image_${index + 1}`);
 export const canvasWonderImageReferencePortIds = canvasGptImageReferencePortIds.slice(0, WONDER_IMAGE_MAX_REFERENCES);
+// Preserve the original A–D handle IDs so saved graphs keep their connections.
+export const canvasTextConcatenatePortIds = Array.from({ length: 16 }, (_, index) => `text_${String.fromCharCode(97 + index)}`);
 
 const canvasNodeDefinitionVersions: CanvasNodeDefinition[] = [
   {
@@ -575,16 +577,11 @@ const canvasNodeDefinitionVersions: CanvasNodeDefinition[] = [
     type: "utility.text-concatenate",
     version: 1,
     label: "文本拼接",
-    description: "按顺序用指定分隔符合并最多四路文本。",
+    description: "按接口编号拼接最多 16 路文本，连接后自动展开下一路。",
     category: "utility",
     icon: "Combine",
     color: "#16a34a",
-    inputs: [
-      { id: "text_a", label: "文本 A", kind: "text" },
-      { id: "text_b", label: "文本 B", kind: "text" },
-      { id: "text_c", label: "文本 C", kind: "text" },
-      { id: "text_d", label: "文本 D", kind: "text" },
-    ],
+    inputs: canvasTextConcatenatePortIds.map((id, index): CanvasPortDefinition => ({ id, label: `文本 ${index + 1}`, kind: "text" })),
     outputs: [{ id: "text", label: "文字", kind: "text" }],
     fields: [
       { key: "delimiter", label: "分隔符", kind: "text", placeholder: "例如：\\n" },
@@ -826,12 +823,13 @@ export function resolveCanvasWonderImageReferences(node: CanvasNode, inputs: Rec
 
 export function getCanvasVisibleInputPorts(node: CanvasNode, connectedPortIds: Iterable<string> = []): CanvasPortDefinition[] {
   const inputs = getCanvasNodeDefinition(node.type, node.version)?.inputs || [];
-  if (node.type !== "model.wonder-image" && node.type !== "utility.image-iterate" && (node.type !== "model.gpt-image" || node.version < 2)) return inputs;
-  const referencePortIds = node.type === "model.wonder-image" ? canvasWonderImageReferencePortIds : canvasGptImageReferencePortIds;
+  if (node.type !== "utility.text-concatenate" && node.type !== "model.wonder-image" && node.type !== "utility.image-iterate" && (node.type !== "model.gpt-image" || node.version < 2)) return inputs;
+  const referencePortIds = node.type === "utility.text-concatenate" ? canvasTextConcatenatePortIds
+    : node.type === "model.wonder-image" ? canvasWonderImageReferencePortIds : canvasGptImageReferencePortIds;
   const connected = new Set(connectedPortIds);
   const lastConnected = referencePortIds.findLastIndex((id) => connected.has(id));
   const visible = new Set(referencePortIds.slice(0, Math.min(lastConnected + 2, referencePortIds.length)));
-  return inputs.filter((port) => port.id === "references" ? connected.has(port.id) : !canvasGptImageReferencePortIds.includes(port.id) || visible.has(port.id));
+  return inputs.filter((port) => port.id === "references" ? connected.has(port.id) : !referencePortIds.includes(port.id) || visible.has(port.id));
 }
 
 export function getCanvasBypassRouting(node: CanvasNode, availablePortIds: Iterable<string>): {

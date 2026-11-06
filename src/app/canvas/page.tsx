@@ -15,7 +15,7 @@ import { BaseEdge, Background, BackgroundVariant, Controls, Handle, MiniMap, Nod
 import { AlertTriangle, ArrowDown, ArrowUp, BookOpenText, Captions, CheckCircle2, ChevronLeft, ChevronRight, Clapperboard, ClipboardPaste, Combine, Copy, CopyPlus, Download, FileDown, FileText, FileUp, FileVideo2, GalleryHorizontalEnd, ExternalLink, GitBranch, Home, Image as ImageIcon, Images, Layers3, ListChecks, LoaderCircle, Maximize2, Menu, EllipsisVertical, Eye, History, PanelLeftClose, PanelLeftOpen, PanelRight, PanelsTopLeft, Play, Plus, RefreshCw, RotateCcw, Save, Sheet, Search, Scissors, Send, Sparkles, Square, Trash2, Type, Upload, Video, WandSparkles, X, ZoomIn, ZoomOut } from "lucide-react";
 import { createContext, memo, useCallback, useContext, useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
 import { CANVAS_CLIPBOARD_MIME, createCanvasClipboardPayload, parseCanvasClipboardPayload, prepareCanvasClipboardPaste, type CanvasClipboardPayload } from "@/lib/canvas/clipboard";
-import { canvasNodeDefinitions, createCanvasNode, getCanvasNodeDefinition, getCanvasNodeExecutionMode, getCanvasVisibleInputPorts } from "@/lib/canvas/registry";
+import { canvasNodeDefinitions, canvasTextConcatenatePortIds, createCanvasNode, getCanvasNodeDefinition, getCanvasNodeExecutionMode, getCanvasVisibleInputPorts } from "@/lib/canvas/registry";
 import { pixelSizeForRatio } from "@/lib/gpt-image-dimensions";
 import { toApisImageRatios, toApisImageResolutions } from "@/lib/toapis-image-api";
 import { ImageModelSelector } from "@/components/image-model-selector";
@@ -2468,6 +2468,7 @@ function CanvasTextConcatenateControls({
     onKeyUp={(event) => event.stopPropagation()}
     onWheel={(event) => event.stopPropagation()}
   >
+    <small>按编号顺序拼接，接线后自动增加输入，最多 {canvasTextConcatenatePortIds.length} 路。</small>
     <label><span>分隔符</span><input
       aria-label="文本拼接分隔符"
       value={String(node.config.delimiter ?? "")}
