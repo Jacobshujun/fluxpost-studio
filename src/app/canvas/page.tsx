@@ -1,5 +1,7 @@
 "use client";
 
+import { ImagePreview } from "@/components/image-preview";
+import { ResizablePreviewPanel } from "@/components/resizable-preview-panel";
 import { LibraryOrderControl, useLibraryOrdering } from "@/components/library-order";
 import { canvasLibraryOrder } from "@/lib/library-asset-order";
 import type { LibraryAssetOrder } from "@/lib/types";
@@ -12,7 +14,7 @@ import { CanvasLayerComposeControls } from "./CanvasLayerCompose";
 import { resolveComposeEditorSources } from "@/lib/canvas/layer-compose-inputs";
 import type { ComposeSource } from "@/lib/canvas/layer-compose-contract";
 import { BaseEdge, Background, BackgroundVariant, Controls, Handle, MiniMap, NodeResizer, Position, ReactFlow, addEdge, applyEdgeChanges, applyNodeChanges, getBezierPath, useUpdateNodeInternals, useNodeConnections, type Connection, type Edge, type EdgeChange, type EdgeProps, type FinalConnectionState, type Node, type NodeChange, type NodeProps, type OnConnectStartParams, type ReactFlowInstance, type Viewport } from "@xyflow/react";
-import { AlertTriangle, ArrowDown, ArrowUp, BookOpenText, Captions, CheckCircle2, ChevronLeft, ChevronRight, Clapperboard, ClipboardPaste, Combine, Copy, CopyPlus, Download, FileDown, FileText, FileUp, FileVideo2, GalleryHorizontalEnd, ExternalLink, GitBranch, Home, Image as ImageIcon, Images, Layers3, ListChecks, LoaderCircle, Maximize2, Menu, EllipsisVertical, Eye, History, PanelLeftClose, PanelLeftOpen, PanelRight, PanelsTopLeft, Play, Plus, RefreshCw, RotateCcw, Save, Sheet, Search, Scissors, Send, Sparkles, Square, Trash2, Type, Upload, Video, WandSparkles, X, ZoomIn, ZoomOut } from "lucide-react";
+import { AlertTriangle, ArrowDown, ArrowUp, BookOpenText, Captions, CheckCircle2, ChevronLeft, ChevronRight, Clapperboard, ClipboardPaste, Combine, Copy, CopyPlus, Download, FileDown, FileText, FileUp, FileVideo2, GalleryHorizontalEnd, ExternalLink, GitBranch, Home, Image as ImageIcon, Images, Layers3, ListChecks, LoaderCircle, Maximize2, Menu, EllipsisVertical, Eye, History, PanelLeftClose, PanelLeftOpen, PanelRight, PanelsTopLeft, Play, Plus, RefreshCw, RotateCcw, Save, Sheet, Search, Scissors, Send, Sparkles, Square, Trash2, Type, Upload, Video, WandSparkles, X } from "lucide-react";
 import { createContext, memo, useCallback, useContext, useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
 import { CANVAS_CLIPBOARD_MIME, createCanvasClipboardPayload, parseCanvasClipboardPayload, prepareCanvasClipboardPaste, type CanvasClipboardPayload } from "@/lib/canvas/clipboard";
 import { canvasNodeDefinitions, canvasTextConcatenatePortIds, createCanvasNode, getCanvasNodeDefinition, getCanvasNodeExecutionMode, getCanvasVisibleInputPorts } from "@/lib/canvas/registry";
@@ -1670,7 +1672,7 @@ export default function CanvasPage() {
             nodesDraggable={!isMobile}
             nodesConnectable={!isMobile}
             elementsSelectable
-            deleteKeyCode={isMobile || iterationEditorId || selectedGroupId ? null : ["Backspace", "Delete"]}
+            deleteKeyCode={isMobile || iterationEditorId || preview || selectedGroupId ? null : ["Backspace", "Delete"]}
             fitView={fitViewOnLoad}
             colorMode={flowColorMode}
           >
@@ -1942,7 +1944,7 @@ const CanvasFlowNode = memo(function CanvasFlowNode({ data, selected }: NodeProp
     {visibleImageUrls.length ? <div className={`canvas-node-image-grid is-count-${visibleImageUrls.length}`}>
       {visibleImageUrls.map((url, index) => <button className="nodrag nopan nowheel" type="button" key={`${url}-${index}`} onClick={(event) => {
         event.stopPropagation();
-        interaction?.onPreview({ kind: "image", url: imageUrls[index] || url, index });
+        interaction?.onPreview({ kind: "image", url: imageUrls[index] || url, index, sequence: imageUrls.map((imageUrl, imageIndex) => ({ id: `${node.id}-${imageIndex}`, url: imageUrl })) });
       }} aria-label={`在节点中预览图片 ${index + 1}`} title="预览图片">
         <Image src={url} alt="" fill sizes="220px" unoptimized loading="lazy" draggable={false} referrerPolicy="no-referrer" />
         {index === 3 && imageUrls.length > 4 ? <span>+{imageUrls.length - 4}</span> : null}
@@ -2830,10 +2832,11 @@ function CanvasResultImageGallery({ items, ratio, resolution, onPreview }: {
   onPreview: (preview: NonNullable<PreviewState>) => void;
 }) {
   const [dimensions, setDimensions] = useState<Record<string, { width: number; height: number }>>({});
+  const sequence = items.map((item, index) => ({ id: `${index}-${item.url}`, url: item.url, width: item.width, height: item.height }));
   return <div className="canvas-node-result-gallery">
     {items.map((item, index) => {
       const actual = dimensions[item.url] || (item.width && item.height ? { width: item.width, height: item.height } : undefined);
-      return <button type="button" key={`${item.url}-${index}`} style={{ aspectRatio: cssAspectRatio(ratio) }} onClick={() => onPreview({ kind: "image", url: item.url, index, width: actual?.width, height: actual?.height })} aria-label={`预览生成图片 ${index + 1}`} title="预览图片">
+      return <button type="button" key={`${item.url}-${index}`} style={{ aspectRatio: cssAspectRatio(ratio) }} onClick={() => onPreview({ kind: "image", url: item.url, index, width: actual?.width, height: actual?.height, sequence })} aria-label={`预览生成图片 ${index + 1}`} title="预览图片">
       <Image src={item.url} alt="" fill sizes="220px" unoptimized draggable={false} referrerPolicy="no-referrer" onLoad={(event) => {
         const width = event.currentTarget.naturalWidth;
         const height = event.currentTarget.naturalHeight;
@@ -4844,17 +4847,14 @@ function usePreviewDialogLifecycle(closeButtonRef: React.RefObject<HTMLButtonEle
   }, [closeButtonRef, onClose]);
 }
 
-const imagePreviewMinZoom = 0.5;
-
-const imagePreviewMaxZoom = 4;
-
-const imagePreviewZoomStep = 0.25;
-
 function CanvasImagePreviewDialog({ preview, onClose }: { preview: Extract<NonNullable<PreviewState>, { kind: "image" }>; onClose: () => void }) {
   const sequence = preview.sequence?.length ? preview.sequence : [{ id: `${preview.url}-${preview.index}`, url: preview.url, width: preview.width, height: preview.height }];
   const [activeIndex, setActiveIndex] = useState(() => Math.min(Math.max(0, preview.index), sequence.length - 1));
   const closeButtonRef = useRef<HTMLButtonElement | null>(null);
   const active = sequence[activeIndex] || sequence[0];
+  const [loadedSize, setLoadedSize] = useState<{ id: string; url: string; width: number; height: number } | null>(null);
+  const naturalSize = loadedSize?.id === active.id && loadedSize.url === active.url ? loadedSize : active;
+  const displayIndex = preview.sequence?.length ? activeIndex : preview.index;
 
   useEffect(() => {
     const previousFocus = document.activeElement instanceof HTMLElement ? document.activeElement : null;
@@ -4881,154 +4881,25 @@ function CanvasImagePreviewDialog({ preview, onClose }: { preview: Extract<NonNu
     };
   }, [onClose, sequence.length]);
 
-  return <div className="canvas-image-viewer-backdrop" onMouseDown={(event) => event.target === event.currentTarget && onClose()}>
-    <section className="canvas-image-viewer" role="dialog" aria-modal="true" aria-labelledby="canvas-image-viewer-title">
-      <CanvasImagePreviewBody key={active.id} item={active} index={preview.sequence?.length ? activeIndex : preview.index} total={preview.sequence?.length ? sequence.length : 1} closeButtonRef={closeButtonRef} onClose={onClose} />
-      {sequence.length > 1 ? <>
-        <button className="canvas-image-viewer-sequence-button is-previous" type="button" onClick={() => setActiveIndex((current) => current - 1)} disabled={activeIndex === 0} aria-label="上一张图片" title="上一张"><ChevronLeft /></button>
-        <button className="canvas-image-viewer-sequence-button is-next" type="button" onClick={() => setActiveIndex((current) => current + 1)} disabled={activeIndex === sequence.length - 1} aria-label="下一张图片" title="下一张"><ChevronRight /></button>
-      </> : null}
-    </section>
-  </div>;
-}
-
-function CanvasImagePreviewBody({ item, index, total, closeButtonRef, onClose }: {
-  item: { id: string; url: string; width?: number; height?: number };
-  index: number;
-  total: number;
-  closeButtonRef: React.RefObject<HTMLButtonElement | null>;
-  onClose: () => void;
-}) {
-  const stageRef = useRef<HTMLDivElement | null>(null);
-  const panRef = useRef<{ pointerId: number; x: number; y: number; scrollLeft: number; scrollTop: number } | null>(null);
-  const zoomRef = useRef(1);
-  const zoomAnchorRef = useRef<{
-    x: number;
-    y: number;
-    scrollLeft: number;
-    scrollTop: number;
-    scrollWidth: number;
-    scrollHeight: number;
-  } | null>(null);
-  const [zoom, setZoom] = useState(1);
-  const [isPanning, setIsPanning] = useState(false);
-  const [naturalSize, setNaturalSize] = useState(item.width && item.height ? { width: item.width, height: item.height } : undefined);
-  const updateZoom = useCallback((next: number | ((current: number) => number)) => {
-    const current = zoomRef.current;
-    const value = typeof next === "function" ? next(current) : next;
-    const clamped = Math.min(imagePreviewMaxZoom, Math.max(imagePreviewMinZoom, value));
-    if (clamped === current) return current;
-    zoomRef.current = clamped;
-    setZoom(clamped);
-    return clamped;
-  }, []);
-
-  useLayoutEffect(() => {
-    const stage = stageRef.current;
-    const anchor = zoomAnchorRef.current;
-    if (!stage || !anchor) return;
-    zoomAnchorRef.current = null;
-    stage.scrollLeft = (anchor.scrollLeft + anchor.x) * (stage.scrollWidth / anchor.scrollWidth) - anchor.x;
-    stage.scrollTop = (anchor.scrollTop + anchor.y) * (stage.scrollHeight / anchor.scrollHeight) - anchor.y;
-  }, [zoom]);
-
-  useEffect(() => {
-    const stage = stageRef.current;
-    if (!stage) return;
-    const handleWheel = (event: WheelEvent) => {
-      event.preventDefault();
-      const current = zoomRef.current;
-      const next = Math.min(imagePreviewMaxZoom, Math.max(
-        imagePreviewMinZoom,
-        current + (event.deltaY < 0 ? imagePreviewZoomStep : -imagePreviewZoomStep),
-      ));
-      if (next === current) return;
-      const bounds = stage.getBoundingClientRect();
-      zoomAnchorRef.current = {
-        x: event.clientX - bounds.left,
-        y: event.clientY - bounds.top,
-        scrollLeft: stage.scrollLeft,
-        scrollTop: stage.scrollTop,
-        scrollWidth: stage.scrollWidth,
-        scrollHeight: stage.scrollHeight,
-      };
-      updateZoom(next);
-    };
-    stage.addEventListener("wheel", handleWheel, { passive: false });
-    return () => stage.removeEventListener("wheel", handleWheel);
-  }, [updateZoom]);
-
-  const zoomPercent = Math.round(zoom * 100);
-  const canvasSize = `${Math.max(100, zoomPercent)}%`;
-  const imageLimit = `${92 / Math.max(1, zoom)}%`;
-  const finishPan = (event: React.PointerEvent<HTMLDivElement>) => {
-    if (panRef.current?.pointerId !== event.pointerId) return;
-    panRef.current = null;
-    if (event.currentTarget.hasPointerCapture(event.pointerId)) event.currentTarget.releasePointerCapture(event.pointerId);
-    setIsPanning(false);
-  };
-
-  return <>
+  return <div className="canvas-image-viewer-backdrop nodrag nopan nowheel" role="dialog" aria-modal="true" aria-labelledby="canvas-image-viewer-title"
+    onPointerDown={(event) => event.stopPropagation()} onWheel={(event) => event.stopPropagation()}
+    onMouseDown={(event) => { event.stopPropagation(); if (event.target === event.currentTarget) onClose(); }}>
+    <ResizablePreviewPanel className="canvas-image-viewer" initialWidth={1120}>
       <header>
-        <div><ImageIcon /><strong id="canvas-image-viewer-title">图片 {index + 1}{total > 1 ? ` / ${total}` : ""}</strong>{naturalSize ? <small>{naturalSize.width}×{naturalSize.height}</small> : null}</div>
+        <div><ImageIcon /><strong id="canvas-image-viewer-title">图片 {displayIndex + 1}{sequence.length > 1 ? ` / ${sequence.length}` : ""}</strong>{naturalSize.width && naturalSize.height ? <small>{naturalSize.width}×{naturalSize.height}</small> : null}</div>
         <button ref={closeButtonRef} type="button" onClick={onClose} aria-label="关闭图片预览" title="关闭"><X /></button>
       </header>
-      <div
-        ref={stageRef}
-        className={`canvas-image-viewer-stage${zoom > 1 ? " is-pannable" : ""}${isPanning ? " is-panning" : ""}`}
-        onPointerDown={(event) => {
-          if (event.pointerType !== "mouse" || event.button !== 0 || zoom <= 1) return;
-          panRef.current = {
-            pointerId: event.pointerId,
-            x: event.clientX,
-            y: event.clientY,
-            scrollLeft: event.currentTarget.scrollLeft,
-            scrollTop: event.currentTarget.scrollTop,
-          };
-          event.currentTarget.setPointerCapture(event.pointerId);
-          setIsPanning(true);
-          event.preventDefault();
-        }}
-        onPointerMove={(event) => {
-          const pan = panRef.current;
-          if (!pan || pan.pointerId !== event.pointerId) return;
-          event.currentTarget.scrollLeft = pan.scrollLeft - (event.clientX - pan.x);
-          event.currentTarget.scrollTop = pan.scrollTop - (event.clientY - pan.y);
-        }}
-        onPointerUp={finishPan}
-        onPointerCancel={finishPan}
-        onLostPointerCapture={finishPan}
-        onMouseDown={(event) => {
-          if (event.button === 1) event.preventDefault();
-        }}
-      >
-        <div className="canvas-image-viewer-canvas" style={{ width: canvasSize, height: canvasSize }}>
-          {/* eslint-disable-next-line @next/next/no-img-element */}
-          <img
-            className="canvas-image-viewer-image"
-            src={item.url}
-            alt={`图片 ${index + 1} 预览`}
-            width={item.width}
-            height={item.height}
-            draggable={false}
-            referrerPolicy="no-referrer"
-            onLoad={(event) => {
-              const width = event.currentTarget.naturalWidth;
-              const height = event.currentTarget.naturalHeight;
-              if (width && height) setNaturalSize({ width, height });
-            }}
-            style={{ maxWidth: imageLimit, maxHeight: imageLimit, transform: `scale(${zoom})` }}
-          />
-        </div>
-      </div>
+      <ImagePreview key={`${active.id}-${active.url}-${activeIndex}`} src={active.url} onNaturalSize={(size) => setLoadedSize({ id: active.id, url: active.url, ...size })} />
       <footer>
-        <button type="button" onClick={() => updateZoom((current) => current - imagePreviewZoomStep)} disabled={zoom <= imagePreviewMinZoom} aria-label="缩小图片" title="缩小"><ZoomOut /></button>
-        <output aria-live="polite">{zoomPercent}%</output>
-        <button type="button" onClick={() => updateZoom((current) => current + imagePreviewZoomStep)} disabled={zoom >= imagePreviewMaxZoom} aria-label="放大图片" title="放大"><ZoomIn /></button>
-        <button type="button" onClick={() => updateZoom(1)} disabled={zoom === 1} aria-label="重置图片缩放" title="重置缩放"><RotateCcw /></button>
-        <a href={item.url} target="_blank" rel="noreferrer" aria-label="打开原图" title="打开原图"><ExternalLink /></a>
+        {sequence.length > 1 ? <>
+          <button className="canvas-image-viewer-sequence-button" type="button" onClick={() => setActiveIndex((current) => current - 1)} disabled={activeIndex === 0} aria-label="上一张图片" title="上一张"><ChevronLeft /></button>
+          <span>{activeIndex + 1} / {sequence.length}</span>
+          <button className="canvas-image-viewer-sequence-button" type="button" onClick={() => setActiveIndex((current) => current + 1)} disabled={activeIndex === sequence.length - 1} aria-label="下一张图片" title="下一张"><ChevronRight /></button>
+        </> : null}
+        <a href={active.url} target="_blank" rel="noreferrer" aria-label="打开原图" title="打开原图"><ExternalLink /></a>
       </footer>
-  </>;
+    </ResizablePreviewPanel>
+  </div>;
 }
 
 function ToolbarButton({ label, ariaLabel, icon, onClick, disabled, danger, ariaKeyShortcuts }: { label: string; ariaLabel?: string; icon: React.ReactNode; onClick: () => void; disabled?: boolean; danger?: boolean; ariaKeyShortcuts?: string }) {

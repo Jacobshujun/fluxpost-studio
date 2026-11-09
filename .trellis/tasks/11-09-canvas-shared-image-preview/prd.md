@@ -1,0 +1,5 @@
+# Unify Canvas image previews
+
+Use the existing ImagePreview and ResizablePreviewPanel for Canvas image nodes and every existing CanvasImagePreviewDialog caller, including sequences and iteration dialogs. Default complete image fit, actual pixel percentages, original 100%, wheel zoom, bounded pan and eight-edge resizing match content/review. Preserve image order, arrow-key navigation, Escape/backdrop close, focus return, dimension metadata and original link. Navigation retains panel size but resets image view. No canvas pan/zoom/node mutation from preview interactions. Keep video/text viewers unchanged.
+
+Implementation: replace the page-local zoom/pan implementation with the shared components. Scope Canvas header/footer styles away from shared toolbar and place navigation in the footer. Optional shared image load callback retains actual dimension metadata. Test real Canvas node openings and geometry across themes/screens, sequences/keyboard/focus/background isolation; run existing Canvas image-process regression, shared content/review suite and full baseline. Commit, archive and activate clean HEAD on LAN 3001; no remote deployment.

@@ -4,7 +4,7 @@ Last updated: 2026-11-09
 
 ## One-Line Status
 
-Image fit/resize repair passes baseline and 18 browser cases: `11-09-image-preview-sizing`. Runtime: `/api/version`.
+Canvas previews unified: `11-09-canvas-shared-image-preview` baseline/browser evidence. Runtime: `/api/version`.
 
 ## Current Focus
 

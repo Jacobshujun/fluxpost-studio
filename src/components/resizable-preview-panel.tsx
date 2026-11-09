@@ -38,7 +38,10 @@ export function ResizablePreviewPanel({ className, initialWidth, children }: { c
     if (event.currentTarget.hasPointerCapture(event.pointerId)) event.currentTarget.releasePointerCapture(event.pointerId);
   }
 
-  return <div className={`${className} resizable-preview-panel`} style={rect ?? { visibility: "hidden" }}>
+  return <div className={`${className} resizable-preview-panel`} style={rect ?? {
+    left: "50%", top: "50%", transform: "translate(-50%, -50%)",
+    width: `min(${initialWidth}px, calc(100vw - 28px))`, height: "min(900px, calc(100dvh - 28px))",
+  }}>
     {children}
     {directions.map((direction) => <div key={direction} className={`preview-resize-handle preview-resize-${direction}`} aria-label={`调整预览窗口${names[direction]}`} data-resize={direction}
       onPointerDown={(event) => {

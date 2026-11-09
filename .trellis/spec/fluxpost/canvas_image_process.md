@@ -51,3 +51,19 @@ and disabled controls at 1440/390px. Shared controls remain Canvas-compatible.
 - Bad: 1 KB target below minimum-quality output fails explicitly; do not silently shrink dimensions or return the source as success.
 - `canvas_image_process_check.mjs`: real encoders, orientation, alpha, dimensions, budgets, targets, ordered batches/cache/ownership, download byte sniffing, graph round-trip/bypass/iteration/scheduler and executor batch identity.
 - `canvas_image_process_browser_check.py`: intercepted APIs at 1440px/390px, conditional inline/inspector controls, keyboard isolation, save/reload, stale results, desktop pointer connection and image preview. Requires worker-disabled loopback smoke server; rejects 3001.
+
+### Canvas image preview
+
+All CanvasImagePreviewDialog callers use shared ImagePreview and
+ResizablePreviewPanel; fit/pixel zoom/pan/resize follow `content_pool_editing.md`.
+Result galleries pass index-qualified image identities and the ordered sequence;
+duplicate URLs remain distinct slots. Navigation resets image view, not the panel.
+Keep dimension metadata, original link, arrow navigation, Escape/backdrop close
+and focus return. Navigation controls occupy their own footer, not image space.
+The backdrop isolates wheel/pointer events. Disable React Flow's deleteKeyCode
+while preview is open: guarding only the page shortcut handler still allows
+React Flow to delete selected nodes behind the modal. The shared panel must be
+visible in its initial centered CSS layout so close-button focus can succeed
+before rectangle measurement finishes; restore the opener when dismissed.
+`image_preview_browser_check.py` exercises actual Canvas result-node entry, full
+image geometry, resizing, keyboard order/focus and unchanged background graph.

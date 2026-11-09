@@ -10,7 +10,7 @@ const clamp = (value: number, limit: number) => Math.max(-limit, Math.min(limit,
 
 // Callers key this component by image identity: image changes reset the view,
 // while the surrounding resizable panel keeps its rectangle.
-export function ImagePreview({ src }: { src: string }) {
+export function ImagePreview({ src, onNaturalSize }: { src: string; onNaturalSize?: (size: Size) => void }) {
   const stageRef = useRef<HTMLDivElement>(null);
   const viewRef = useRef<View>(fitted);
   const pan = useRef<{ pointerId: number; x: number; y: number; start: View } | null>(null);
@@ -98,7 +98,11 @@ export function ImagePreview({ src }: { src: string }) {
       {failed ? <span role="alert">图片加载失败</span> : null}
       {/* eslint-disable-next-line @next/next/no-img-element */}
       <img src={src} alt="图片预览" referrerPolicy="no-referrer" draggable={false}
-        onLoad={(event) => setNatural({ width: event.currentTarget.naturalWidth, height: event.currentTarget.naturalHeight })}
+        onLoad={(event) => {
+          const dimensions = { width: event.currentTarget.naturalWidth, height: event.currentTarget.naturalHeight };
+          setNatural(dimensions);
+          onNaturalSize?.(dimensions);
+        }}
         onError={() => setFailed(true)}
         style={{ visibility: ready ? "visible" : "hidden", width: (natural?.width ?? 0) * visible.scale, height: (natural?.height ?? 0) * visible.scale, transform: `translate(-50%, -50%) translate(${visible.x}px, ${visible.y}px)` }} />
     </div>

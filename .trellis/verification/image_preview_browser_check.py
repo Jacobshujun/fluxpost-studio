@@ -27,7 +27,7 @@ def png(width, height):
 IMAGES = [png(*size) for size in SIZES]
 
 
-async def setup(browser, route_name, theme, width, height):
+async def setup(browser, route_name, theme, width, height, input_node=False):
     page = await browser.new_page(viewport={'width': width, 'height': height})
     await page.add_init_script(f"localStorage.setItem('fluxpost-theme', {json.dumps(theme)})")
     errors = []
@@ -36,9 +36,26 @@ async def setup(browser, route_name, theme, width, height):
     sample = dict(id='s-0', sourceId='s-0', ownerUserId='owner', platform='xiaohongshu', title='Preview fixture', contentText='Fixture body', images=urls, mediaUrls=[], metrics={}, raw=None, sourceUrl='https://example.test/source', poolStatus='new', projectId='p', projectName='Project', customTags=[])
     review = post(0)
     review.update(imageUrls=urls, imagePrompts=['fixture'] * len(urls))
+    now = '2026-11-09T00:00:00.000Z'
+    if route_name == 'canvas' and not input_node:
+        urls.append(urls[0])
+    node = dict(id='preview', type='input.images' if input_node else 'utility.image-preview', version=1, config=dict(urls=urls) if input_node else {}, executionMode='enabled', position=dict(x=40, y=40))
+    workflow = dict(id='preview-fixture', name='Preview fixture', revision=1, ownerUserId='owner', ownerDisplayName='Fixture', isTemplate=False, createdAt=now, updatedAt=now,
+                    graph=dict(viewport=dict(x=0, y=0, zoom=1), nodes=[node], edges=[]))
+    node_run = dict(id='node-run', runId='run', nodeId='preview', nodeType=node['type'], attempt=1, status='completed', inputs={},
+                    outputs={'images': dict(kind='images', items=[dict(url=url) for url in urls])}, startedAt=now, finishedAt=now, createdAt=now, updatedAt=now)
+    latest = dict(runId='run', workflowRevision=1, runCreatedAt=now, nodeVersion=1, nodeConfig=node['config'], nodeRun=node_run)
 
     async def handler(route):
         path = urlparse(route.request.url).path
+        if route_name == 'canvas' and path == '/api/canvas/workflows/preview-fixture' and route.request.method == 'PATCH':
+            payload = route.request.post_data_json
+            assert payload['graph']['nodes'] == workflow['graph']['nodes'], ('Preview must not edit Canvas nodes', payload['graph']['nodes'], workflow['graph']['nodes'])
+            assert payload['graph']['edges'] == [], 'Preview must not edit Canvas edges'
+            workflow.update(payload)
+            workflow['revision'] += 1
+            await route.fulfill(json=dict(workflow=workflow))
+            return
         assert route.request.method == 'GET', f'Unexpected mutation: {path}'
         if path.startswith('/generated/') or path.endswith('/thumbnail'):
             if path.endswith('broken.png'):
@@ -46,6 +63,14 @@ async def setup(browser, route_name, theme, width, height):
             else:
                 index = int(path.split('preview-')[1].split('.')[0]) if 'preview-' in path else 0
                 await route.fulfill(content_type='image/png', body=IMAGES[index])
+        elif path == '/api/canvas/workflows':
+            await route.fulfill(json=dict(workflows=[workflow]))
+        elif path == '/api/canvas/workflows/preview-fixture':
+            await route.fulfill(json=dict(workflow=workflow))
+        elif path == '/api/canvas/runs':
+            await route.fulfill(json=dict(runs=[], latestNodeAttempts=[latest], latestSuccessfulNodeRuns=[latest]))
+        elif path == '/api/canvas/schedules':
+            await route.fulfill(json=dict(schedules=[]))
         elif path == '/api/content-pool/desk':
             await route.fulfill(json=dict(items=[sample], memberships=[], total=1, hasMore=False, nextCursor=None))
         elif path == '/api/content-pool/desk/summary':
@@ -69,14 +94,22 @@ async def setup(browser, route_name, theme, width, height):
 
     await page.route('**/api/**', handler)
     await page.route('**/generated/**', handler)
-    await page.goto(BASE + '/' + route_name, wait_until='networkidle')
+    await page.goto(BASE + '/' + route_name + ('?workflowId=preview-fixture' if route_name == 'canvas' else ''), wait_until='networkidle')
+    if route_name == 'canvas':
+        await page.locator('.react-flow__controls-fitview').click()
+        await expect(page.get_by_role('button', name='在节点中预览图片 1' if input_node else '预览生成图片 1', exact=True)).to_be_in_viewport()
+        await page.wait_for_function("!document.querySelector('.canvas-message .is-dirty')")
 
     async def open_preview():
         if route_name == 'content':
             await page.get_by_role('button', name='预览配图 1', exact=True).click()
+        elif route_name == 'canvas':
+            await page.get_by_role('button', name='在节点中预览图片 1' if input_node else '预览生成图片 1', exact=True).click()
         else:
             await page.get_by_role('button', name='大图预览', exact=True).click()
         await expect(page.get_by_label('图片缩放预览')).to_be_visible()
+        if route_name == 'canvas':
+            await expect(page.get_by_role('button', name='关闭图片预览')).to_be_focused()
 
     await open_preview()
     return page, errors, open_preview
@@ -106,7 +139,8 @@ async def assert_fit(page, size):
     assert i['x']+i['width'] <= s['x']+s['width']+.5 and i['y']+i['height'] <= s['y']+s['height']+.5, g
     reported = float((await page.get_by_label('图片缩放比例').inner_text()).rstrip('%'))
     assert abs(reported - scale*100) <= .051, (reported, scale)
-    for label in ['适应窗口', '原图 100%', '下一张']:
+    next_label = '下一张图片' if await page.locator('.canvas-image-viewer').count() else '下一张'
+    for label in ['适应窗口', '原图 100%', next_label]:
         b = await page.get_by_role('button', name=label, exact=True).bounding_box()
         assert b and b['y'] >= 14 and b['y']+b['height'] <= page.viewport_size['height']-13, (label, b)
 
@@ -124,8 +158,13 @@ async def drag_handle(page, direction, dx, dy):
 async def case(browser, route_name, theme, width, height):
     page, errors, open_preview = await setup(browser, route_name, theme, width, height)
     panel = page.locator('.resizable-preview-panel')
+    next_label = '下一张图片' if route_name == 'canvas' else '下一张'
+    canvas_transform = await page.locator('.react-flow__viewport').get_attribute('style') if route_name == 'canvas' else None
     for index, size in enumerate(SIZES):
         await assert_fit(page, size)
+        if route_name == 'canvas':
+            await expect(panel.locator('header small')).to_have_text(f'{size[0]}×{size[1]}')
+            await expect(page.get_by_role('link', name='打开原图')).to_have_attribute('href', f'/generated/preview-{index}.png')
         if index == 0:
             await page.screenshot(path=str(ART / f'{route_name}-{theme}-{width}-{height}.png'))
             # At a long image's minimum scale, wheel-down must keep fit mode,
@@ -167,12 +206,32 @@ async def case(browser, route_name, theme, width, height):
         await page.get_by_role('button', name='适应窗口', exact=True).click()
         await assert_fit(page, size)
         old_rect = await panel.bounding_box()
-        await page.get_by_role('button', name='下一张', exact=True).click()
+        await page.get_by_role('button', name=next_label, exact=True).click()
         assert await panel.bounding_box() == old_rect
     await expect(page.get_by_role('alert').filter(has_text='图片加载失败')).to_be_visible()
     await expect(page.get_by_role('button', name='原图 100%', exact=True)).to_be_disabled()
+    if route_name == 'canvas':
+        await page.keyboard.press('ArrowRight')
+        await expect(page.locator('#canvas-image-viewer-title')).to_have_text('图片 7 / 7')
+        await assert_fit(page, SIZES[0])
+        await expect(page.get_by_role('button', name='下一张图片')).to_be_disabled()
+        await page.keyboard.press('ArrowRight')
+        await expect(page.locator('#canvas-image-viewer-title')).to_have_text('图片 7 / 7')
     await page.keyboard.press('Escape'); await open_preview()
     await assert_fit(page, SIZES[0])
+    if route_name == 'canvas':
+        await expect(page.get_by_role('button', name='上一张图片')).to_be_disabled()
+        await page.keyboard.press('ArrowLeft')
+        await assert_fit(page, SIZES[0])
+        await page.keyboard.press('ArrowRight')
+        await assert_fit(page, SIZES[1])
+        await page.keyboard.press('ArrowLeft')
+        await assert_fit(page, SIZES[0])
+        # Canvas shortcuts must not delete/move nodes behind the modal.
+        for key in ('Delete', 'Backspace'):
+            await page.keyboard.press(key)
+            await expect(page.locator('.react-flow__node[data-id="preview"]')).to_have_count(1)
+        assert await page.locator('.react-flow__viewport').get_attribute('style') == canvas_transform
 
     if width >= 640:
         # Shrink each edge first, so all eight directions can move even at max height.
@@ -209,6 +268,12 @@ async def case(browser, route_name, theme, width, height):
         await assert_fit(page, SIZES[0])
     else:
         assert await page.locator('.preview-resize-handle:visible').count() == 0
+    if route_name == 'canvas':
+        await page.keyboard.press('Escape')
+        await expect(page.get_by_role('button', name='预览生成图片 1', exact=True)).to_be_focused()
+        await open_preview()
+        await page.mouse.click(2, 2)
+        await expect(page.locator('.canvas-image-viewer')).to_have_count(0)
     assert not errors, errors
     await page.close()
     print(json.dumps(dict(route=route_name, theme=theme, width=width, height=height, result='passed')), flush=True)
@@ -219,11 +284,13 @@ async def main():
     async with async_playwright() as pw:
         browser = await pw.chromium.launch(channel='chrome', headless=True)
         try:
-            for route_name in ('content', 'review'):
+            for route_name in ('content', 'review', 'canvas'):
                 for theme in ('professional', 'editorial', 'creator'):
                     for width, height in ((1440, 900), (1280, 480), (390, 844)):
                         await case(browser, route_name, theme, width, height)
             await review_compatibility(browser)
+            for width in (1440, 390):
+                await canvas_input_compatibility(browser, width)
         finally:
             await browser.close()
 
@@ -262,6 +329,28 @@ async def review_compatibility(browser):
     assert not errors, errors
     await page.close()
     print('Review native video, thumbnail entry, upload lock and preview deletion passed.', flush=True)
+
+
+async def canvas_input_compatibility(browser, width):
+    page, errors, _ = await setup(browser, 'canvas', 'professional', width, 900, input_node=True)
+    await assert_fit(page, SIZES[0])
+    await page.keyboard.press('Escape')
+    # Opening the fourth visible thumbnail starts at its original sequence slot.
+    await page.get_by_role('button', name='在节点中预览图片 4', exact=True).click()
+    await expect(page.locator('#canvas-image-viewer-title')).to_have_text('图片 4 / 6')
+    await assert_fit(page, SIZES[3])
+    await page.keyboard.press('ArrowRight')
+    await assert_fit(page, SIZES[4])
+    await page.keyboard.press('ArrowRight')
+    await expect(page.get_by_role('alert').filter(has_text='图片加载失败')).to_be_visible()
+    await expect(page.get_by_role('button', name='下一张图片')).to_be_disabled()
+    await page.keyboard.press('ArrowRight')
+    await expect(page.locator('#canvas-image-viewer-title')).to_have_text('图片 6 / 6')
+    await page.keyboard.press('Escape')
+    await expect(page.get_by_role('button', name='在节点中预览图片 4', exact=True)).to_be_focused()
+    assert not errors, errors
+    await page.close()
+    print(f'Canvas input images {width}: selected slot, hidden images and end boundary passed.', flush=True)
 
 
 if __name__ == '__main__':
