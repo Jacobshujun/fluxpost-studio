@@ -2,7 +2,8 @@
 
 import Link from "next/link";
 import { ContentSourceEditor, ContentSourceEditGuard } from "./content-source-editor";
-import { ContentImagePreview } from "./content-image-preview";
+import { ImagePreview } from "@/components/image-preview";
+import { ResizablePreviewPanel } from "@/components/resizable-preview-panel";
 import { applyManualSourceImages } from "@/lib/content-pool-edit";
 import { useCallback, useEffect, useMemo, useRef, useState, useSyncExternalStore, type ReactNode, type SetStateAction } from "react";
 import {
@@ -2787,7 +2788,7 @@ function PreviewDialog({ preview, onClose, onNavigate }: { preview: PreviewState
   const imageUrl = imageUrls[imageIndex];
   return (
     <div className="preview-backdrop" role="dialog" aria-modal="true">
-      <div className="preview-modal">
+      <ResizablePreviewPanel className="preview-modal" initialWidth={960}>
         <div className="preview-modal-header">
           <div className="min-w-0">
             <p className="truncate text-sm font-black text-white">{preview.title}</p>
@@ -2797,10 +2798,10 @@ function PreviewDialog({ preview, onClose, onNavigate }: { preview: PreviewState
             <X className="h-4 w-4" />
           </button>
         </div>
-        <div className="preview-modal-body thin-scrollbar">
+        <div className={`preview-modal-body thin-scrollbar${imageUrl ? " has-image-preview" : ""}`}>
           {imageUrl ? (
             <div className="preview-image-stage">
-              <ContentImagePreview key={`${imageIndex}-${imageUrl}`} src={toDisplayImageSrc(imageUrl)} />
+              <ImagePreview key={`${imageIndex}-${imageUrl}`} src={toDisplayImageSrc(imageUrl)} />
               {imageUrls.length > 1 ? (
                 <div className="mt-3 flex items-center justify-center gap-2">
                   <button className="soft-button h-9 px-3 text-xs" type="button" onClick={() => onNavigate(imageIndex - 1)}>上一张</button>
@@ -2810,22 +2811,24 @@ function PreviewDialog({ preview, onClose, onNavigate }: { preview: PreviewState
               ) : null}
             </div>
           ) : null}
-          {preview.videoUrls?.map((url) => (
-            <video key={url} className="mt-3 aspect-video w-full rounded-[8px] bg-black object-contain" controls preload="metadata" src={url} />
-          ))}
-          {preview.text ? <p className="mt-4 whitespace-pre-wrap text-sm leading-7 text-white/72">{preview.text}</p> : null}
-          {preview.links?.length ? (
-            <div className="mt-4 flex flex-wrap gap-2">
-              {preview.links.map((url, index) => (
-                <a key={`${url}-${index}`} className="soft-button inline-flex h-9 items-center gap-2 px-3 text-xs" href={url} target="_blank" rel="noreferrer">
-                  <ExternalLink className="h-3.5 w-3.5" />
-                  链接 {index + 1}
-                </a>
-              ))}
-            </div>
-          ) : null}
+          {preview.videoUrls?.length || preview.text || preview.links?.length ? <div className="preview-supplemental thin-scrollbar">
+            {preview.videoUrls?.map((url) => (
+              <video key={url} className="mt-3 aspect-video w-full rounded-[8px] bg-black object-contain" controls preload="metadata" src={url} />
+            ))}
+            {preview.text ? <p className="mt-4 whitespace-pre-wrap text-sm leading-7 text-white/72">{preview.text}</p> : null}
+            {preview.links?.length ? (
+              <div className="mt-4 flex flex-wrap gap-2">
+                {preview.links.map((url, index) => (
+                  <a key={`${url}-${index}`} className="soft-button inline-flex h-9 items-center gap-2 px-3 text-xs" href={url} target="_blank" rel="noreferrer">
+                    <ExternalLink className="h-3.5 w-3.5" />
+                    链接 {index + 1}
+                  </a>
+                ))}
+              </div>
+            ) : null}
+          </div> : null}
         </div>
-      </div>
+      </ResizablePreviewPanel>
     </div>
   );
 }

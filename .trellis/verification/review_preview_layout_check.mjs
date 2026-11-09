@@ -16,7 +16,7 @@ const globals = read("src/app/globals.css");
 
 assertContains(
   reviewPage,
-  /<div className="review-preview-backdrop" role="dialog" aria-modal="true">[\s\S]*<div className="review-preview-panel">[\s\S]*<div className="review-preview-stage">[\s\S]*<video src=\{url\} controls preload="metadata" \/>[\s\S]*<img alt="" src=\{toDisplayImageSrc\(url\)\}/,
+  /<div className="review-preview-backdrop" role="dialog" aria-modal="true">[\s\S]*<ResizablePreviewPanel className="review-preview-panel"[\s\S]*<div className="review-preview-stage">[\s\S]*<video src=\{url\} controls preload="metadata" \/>[\s\S]*<ImagePreview key=\{[^\r\n]+src=\{toDisplayImageSrc\(url\)\}/,
   "Review page should render clicked images and videos inside the preview dialog stage.",
 );
 
@@ -58,8 +58,8 @@ assertContains(
 
 assertContains(
   globals,
-  /\.review-preview-stage img,\s*\.review-preview-stage video\s*\{[\s\S]*display:\s*block;[\s\S]*width:\s*100%;[\s\S]*height:\s*100%;[\s\S]*min-width:\s*0;[\s\S]*min-height:\s*0;[\s\S]*object-fit:\s*contain;/,
-  "Review preview media should fill the stage box and use object-fit: contain so large media are scaled down instead of clipped.",
+  /\.image-preview\s*\{[^}]*grid-template-rows:\s*minmax\(0,\s*1fr\) auto;[^}]*min-height:\s*0;/,
+  "Shared image preview should reserve a bounded image track independently from its controls; real image fit is verified in image_preview_browser_check.py.",
 );
 
 assertContains(

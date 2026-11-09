@@ -4,7 +4,7 @@ Last updated: 2026-11-09
 
 ## One-Line Status
 
-Content image import/preview repair passes baseline and six browser cases: `11-09-content-image-interactions`. Runtime: `/api/version`.
+Image fit/resize repair passes baseline and 18 browser cases: `11-09-image-preview-sizing`. Runtime: `/api/version`.
 
 ## Current Focus
 

@@ -1,6 +1,8 @@
 "use client";
 
 import Link from "next/link";
+import { ImagePreview } from "@/components/image-preview";
+import { ResizablePreviewPanel } from "@/components/resizable-preview-panel";
 import { insertAt, ordinaryImagePrompts, reorderReviewImages } from "@/lib/review-image-order";
 import { ReviewFilterPanel } from "./review-filter-panel";
 import { emptyReviewFilters, reviewFiltersFromUrl, type ReviewFilters } from "@/lib/review-filters";
@@ -1117,7 +1119,7 @@ function PreviewDialog({
   const disableImageAction = busy || Boolean(imageBusyKey) || mediaLocked;
   return (
     <div className="review-preview-backdrop" role="dialog" aria-modal="true">
-      <div className="review-preview-panel">
+      <ResizablePreviewPanel className="review-preview-panel" initialWidth={1120}>
         <div className="flex items-center justify-between gap-3">
           <div className="min-w-0">
             <p className="truncate text-sm font-black">{preview.post.title || "最终配图"}</p>
@@ -1133,8 +1135,7 @@ function PreviewDialog({
           {kind === "video" && url ? (
             <video src={url} controls preload="metadata" />
           ) : url ? (
-            // eslint-disable-next-line @next/next/no-img-element
-            <img alt="" src={toDisplayImageSrc(url)} referrerPolicy="no-referrer" />
+            <ImagePreview key={`${preview.post.id}-${index}-${url}`} src={toDisplayImageSrc(url)} />
           ) : null}
         </div>
         <div className="review-preview-actions">
@@ -1159,7 +1160,7 @@ function PreviewDialog({
             {kind === "video" ? "删除视频" : "删除图片"}
           </button>
         </div>
-      </div>
+      </ResizablePreviewPanel>
     </div>
   );
 }

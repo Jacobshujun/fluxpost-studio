@@ -61,25 +61,15 @@ def case(browser, theme, width):
     image = viewport.locator('img')
     expect(page.get_by_label('图片缩放比例')).to_have_text('100%')
     box = viewport.bounding_box()
+    before = image.bounding_box()
     x, y = box['x'] + box['width'] * .65, box['y'] + box['height'] * .6
     page.mouse.move(x, y); page.mouse.down(); page.mouse.move(x - 20, y - 20); page.mouse.up()
-    assert image.evaluate('el => new DOMMatrix(getComputedStyle(el).transform).e') == 0, 'Fitted image must not pan'
+    assert image.bounding_box() == before, 'Fitted image must not pan'
     modal_scroll = page.locator('.preview-modal-body').evaluate('el => el.scrollTop')
-    page.mouse.move(x, y)
-    page.mouse.wheel(0, -100)
+    page.mouse.move(x, y); page.mouse.wheel(0, -100)
     expect(page.get_by_label('图片缩放比例')).to_have_text('120%')
-    # The off-center image point remains under the mouse, without scrolling the modal.
-    matrix = image.evaluate('el => {const m = new DOMMatrix(getComputedStyle(el).transform); return {z:m.a,x:m.e,y:m.f}}')
-    assert abs(matrix['x'] + box['width'] * .15 * .2) < 1
-    assert abs(matrix['y'] + box['height'] * .1 * .2) < 1
+    assert abs(image.bounding_box()['width'] - 192) < 1, 'Percentage is actual natural-pixel scale'
     assert page.locator('.preview-modal-body').evaluate('el => el.scrollTop') == modal_scroll
-    page.mouse.down(); page.mouse.move(x - 60, y - 40, steps=8); page.mouse.up()
-    after = image.evaluate('el => {const m = new DOMMatrix(getComputedStyle(el).transform); return {x:m.e,y:m.f}}')
-    assert abs(after['x'] - matrix['x'] + 60) < 1 and abs(after['y'] - matrix['y'] + 40) < 1
-    page.mouse.move(x, y)
-    assert image.evaluate('el => new DOMMatrix(getComputedStyle(el).transform).e') == after['x'], 'Drag must end on release'
-    page.mouse.down(); page.mouse.move(x, box['y'] - 5, steps=8); page.mouse.up()
-    assert not viewport.evaluate("el => el.classList.contains('is-panning')"), 'Out-of-stage release must end captured drag'
     page.get_by_role('button', name='适应窗口', exact=True).click()
     expect(page.get_by_label('图片缩放比例')).to_have_text('100%')
     for _ in range(10):
@@ -89,7 +79,8 @@ def case(browser, theme, width):
     page.mouse.move(x, y); page.mouse.wheel(0, -100)
     expect(page.get_by_label('图片缩放比例')).to_have_text('500%')
     viewport.dblclick(); expect(page.get_by_label('图片缩放比例')).to_have_text('100%')
-    page.mouse.wheel(0, 100); expect(page.get_by_label('图片缩放比例')).to_have_text('100%')
+    page.mouse.wheel(0, 100); expect(page.get_by_label('图片缩放比例')).to_have_text('83.3%')
+    page.get_by_role('button', name='适应窗口', exact=True).click()
     page.screenshot(path=str(ART / f'{theme}-{width}-preview.png'))
     page.get_by_role('button', name='放大图片', exact=True).click()
     page.get_by_role('button', name='下一张', exact=True).click()

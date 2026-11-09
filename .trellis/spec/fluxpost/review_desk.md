@@ -110,6 +110,12 @@ and `draggable="true"`.
 
 ## Layout And Checks
 
+Image dialogs share the fitted pixel-scale viewer and eight-direction resizable
+panel with content pool; see `content_pool_editing.md` for the preview contract.
+Keep delete/regenerate locks and callbacks in the review page; video controls stay
+native. `image_preview_browser_check.py` verifies both page entry points with real
+large-image dimensions, captured mouse interaction and viewport boundaries.
+
 Wide >=1600: three columns and the batch column replaces the drawer trigger;
 960-1599: list/editor with batch drawer; narrow/short viewports allow page
 scrolling. Preserve three themes, collapsed AI editing and independent-scroll
