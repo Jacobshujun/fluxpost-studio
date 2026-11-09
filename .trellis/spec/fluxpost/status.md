@@ -1,21 +1,21 @@
 # FluxPost Current Status
 
-Last updated: 2026-11-06
+Last updated: 2026-11-09
 
 ## One-Line Status
 
-Canvas text concatenation now expands to 16 ordered inputs; baseline/browser verified. Local release identity: `/api/version`.
+Content image import/preview repair passes baseline and six browser cases: `11-09-content-image-interactions`. Runtime: `/api/version`.
 
 ## Current Focus
 
-- Nov 6 text concatenation: GPT-style progressive inputs (1–16), stable legacy A-D handles, ordered execution and six theme/viewport browser checks pass. Evidence: `archive/2026-11/11-06-canvas-text-concatenate/verification.md`. Operator acceptance pending.
+- Nov 6 text concatenation: 16 progressive inputs; baseline/six browser cases pass. Evidence: `archive/2026-11/11-06-canvas-text-concatenate/verification.md`. Operator acceptance pending.
 - Nov 6 library sorting/filter isolation: SQLite/PG, six browser flows and regressions pass. Contract: `unified_library.md`; evidence: `11-06-canvas-library-sorting`. Operator acceptance pending.
 - Nov 5 startup: Job independence/24-GiB heap, baseline and LAN activation pass. Evidence: `archive/2026-11/11-05-local-independent-runtime/verification.md`.
 - Canvas workers: 32/default, 100/cap verified; LAN identity: `/api/version`.
 - Review filter memory: offline/six browser flows/45-layout pass. Contract: `review_desk.md`; task `11-05-review-filter-memory`. Operator acceptance pending.
 - Nov 4 afternoon exit remains unattributed; recovery verified. Evidence: `archive/2026-11/11-04-local-afternoon-exit/findings.md`.
 - Batch creation: four-step V2 plus original V1/V2; personal favorites/aliases/notes, SQL search/paging and copy-to-edit. Wizard evidence: archived `11-04-batch-create-wizard`; favorites: `11-04-batch-task-favorites`. Operator acceptance pending. LAN release identity: `/api/version`.
-- Content-pool editor: manual text/images and recrawl/cache protection; baseline/browser checks pass. Contract: `content_pool_editing.md`; task `11-03-content-pool-editor`; operator acceptance pending.
+- Content editor Nov 9: work-area drop/paste and wheel zoom/drag pass baseline/six browser cases. Contract: `content_pool_editing.md`. Operator acceptance pending.
 - Temp files: 297/299 removed; two inventories kept.
 - Local diagnostics: logs <=100 MiB; reports <=3 / 7 days / 30 MiB. Baseline/Windows and authorized LAN startup/identity/flags/receipt/HTTP pass. Contract: `local_diagnostics.md`; evidence: `archive/2026-11/11-03-local-crash-logging/verification.md`.
 - Nov 4 OOM repair `514bf40`: Canvas SQL history returns 25 rows/~440 KiB instead of 171k/~3.49 GiB; reuse pages 32. SQLite/PG scale and baseline pass. Contract: `canvas_history.md`; evidence: `archive/2026-11/11-04-canvas-history-memory/verification.md`. Heap contract now in `local_diagnostics.md`; exact past fatal request unproven.
@@ -23,7 +23,7 @@ Canvas text concatenation now expands to 16 ordered inputs; baseline/browser ver
 - Content-pool performance: row-scoped writes, paged desk/summary/ids without `raw`; baseline/types/build/browser/PG pass (desk 960ms, summary 898ms). Active on LAN; authenticated 3001 timing pending.
 - Content-pool libraries: owner-scoped rail with subsets, default library, tags and Canvas filters; checks pass, PostgreSQL review remains.
 - Review fixes active on LAN: opaque dialog `505c9b9`, drag `725271b`, 3:4 images/4:3 videos `0428b64`; baseline/browser pass. Evidence: archived `11-02-review-gallery-drag-regression`, `11-02-review-image-preview-3-4` tasks.
-- Review responsive/order/Beijing-time checks passed offline/PG/browser/LAN: archived `10-30-review-desk-usability`.
+- Review layout/order/time verified: archived `10-30-review-desk-usability`.
 - Iteration batch and universal modes active on LAN; six mode/six group browser cases and impossible-route errors pass. Archives: `canvas-iteration-batch-params`, `canvas-universal-modes`.
 - Wonder Image existing-media reuse was accepted on LAN `ec0cd9f`; real Yike/model acceptance is pending.
 - Generated library retired: 22,255 index assets and three tables removed without a cleanup backup. Ordinary assets remain: 2,301; nonempty collections: 24; memberships: 2,230; labels: 5,302.

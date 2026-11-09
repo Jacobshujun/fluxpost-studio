@@ -2,16 +2,24 @@
 import base64
 import json
 import os
+import struct
+import zlib
 from pathlib import Path
 from urllib.parse import urlparse, parse_qs
 from playwright.sync_api import sync_playwright, expect
 BASE = os.environ.get('FLUXPOST_BROWSER_BASE_URL', 'http://127.0.0.1:45678')
 assert urlparse(BASE).hostname in ('localhost', '127.0.0.1') and urlparse(BASE).port != 3001
-PNG = base64.b64decode('iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mP8/x8AAwMCAO+aWZkAAAAASUVORK5CYII=')
+def png_chunk(kind, data):
+    return struct.pack('!I', len(data)) + kind + data + struct.pack('!I', zlib.crc32(kind + data))
+
+pixels = b''.join(b'\0' + b''.join(bytes((30 + x, 70 + y, 150)) for x in range(160)) for y in range(180))
+PNG = b'\x89PNG\r\n\x1a\n' + png_chunk(b'IHDR', struct.pack('!2I5B', 160, 180, 8, 2, 0, 0, 0)) + png_chunk(b'IDAT', zlib.compress(pixels)) + png_chunk(b'IEND', b'')
 ART = Path('test-artifacts/content-editor'); ART.mkdir(parents=True, exist_ok=True)
+DROP_FILE = ART / 'drop-fixture.png'; DROP_FILE.write_bytes(PNG)
 
 def case(browser, theme, width):
     context = browser.new_context(viewport={'width': width, 'height': 900})
+    context.grant_permissions(['clipboard-read', 'clipboard-write'])
     context.add_init_script(f"localStorage.setItem('fluxpost-theme', {json.dumps(theme)})")
     page = context.new_page()
     errors = []; page.on('pageerror', lambda e: errors.append(str(e)))
@@ -49,6 +57,43 @@ def case(browser, theme, width):
     expect(editor).to_be_visible(); expect(editor.locator('article')).to_have_count(15)
     expect(editor.get_by_label('标题', exact=True)).to_have_value('Sample 0')
     editor.get_by_role('button', name='预览配图 1', exact=True).click()
+    viewport = page.get_by_label('图片缩放预览')
+    image = viewport.locator('img')
+    expect(page.get_by_label('图片缩放比例')).to_have_text('100%')
+    box = viewport.bounding_box()
+    x, y = box['x'] + box['width'] * .65, box['y'] + box['height'] * .6
+    page.mouse.move(x, y); page.mouse.down(); page.mouse.move(x - 20, y - 20); page.mouse.up()
+    assert image.evaluate('el => new DOMMatrix(getComputedStyle(el).transform).e') == 0, 'Fitted image must not pan'
+    modal_scroll = page.locator('.preview-modal-body').evaluate('el => el.scrollTop')
+    page.mouse.move(x, y)
+    page.mouse.wheel(0, -100)
+    expect(page.get_by_label('图片缩放比例')).to_have_text('120%')
+    # The off-center image point remains under the mouse, without scrolling the modal.
+    matrix = image.evaluate('el => {const m = new DOMMatrix(getComputedStyle(el).transform); return {z:m.a,x:m.e,y:m.f}}')
+    assert abs(matrix['x'] + box['width'] * .15 * .2) < 1
+    assert abs(matrix['y'] + box['height'] * .1 * .2) < 1
+    assert page.locator('.preview-modal-body').evaluate('el => el.scrollTop') == modal_scroll
+    page.mouse.down(); page.mouse.move(x - 60, y - 40, steps=8); page.mouse.up()
+    after = image.evaluate('el => {const m = new DOMMatrix(getComputedStyle(el).transform); return {x:m.e,y:m.f}}')
+    assert abs(after['x'] - matrix['x'] + 60) < 1 and abs(after['y'] - matrix['y'] + 40) < 1
+    page.mouse.move(x, y)
+    assert image.evaluate('el => new DOMMatrix(getComputedStyle(el).transform).e') == after['x'], 'Drag must end on release'
+    page.mouse.down(); page.mouse.move(x, box['y'] - 5, steps=8); page.mouse.up()
+    assert not viewport.evaluate("el => el.classList.contains('is-panning')"), 'Out-of-stage release must end captured drag'
+    page.get_by_role('button', name='适应窗口', exact=True).click()
+    expect(page.get_by_label('图片缩放比例')).to_have_text('100%')
+    for _ in range(10):
+        if page.get_by_role('button', name='放大图片', exact=True).is_enabled():
+            page.get_by_role('button', name='放大图片', exact=True).click()
+    expect(page.get_by_label('图片缩放比例')).to_have_text('500%')
+    page.mouse.move(x, y); page.mouse.wheel(0, -100)
+    expect(page.get_by_label('图片缩放比例')).to_have_text('500%')
+    viewport.dblclick(); expect(page.get_by_label('图片缩放比例')).to_have_text('100%')
+    page.mouse.wheel(0, 100); expect(page.get_by_label('图片缩放比例')).to_have_text('100%')
+    page.screenshot(path=str(ART / f'{theme}-{width}-preview.png'))
+    page.get_by_role('button', name='放大图片', exact=True).click()
+    page.get_by_role('button', name='下一张', exact=True).click()
+    expect(page.get_by_label('图片缩放比例')).to_have_text('100%')
     page.keyboard.press('Escape')
     editor.get_by_label('标题', exact=True).fill('Edited title')
     editor.get_by_label('正文', exact=True).fill('Body edited\n' + '中' * 1200)
@@ -70,6 +115,39 @@ def case(browser, theme, width):
     expect(editor.locator('article')).to_have_count(17)
     page.get_by_label('粘贴或拖入图片').evaluate("el => { const dt = new DataTransfer(); dt.items.add(new File(['fixture'], 'drop.png', {type:'image/png'})); el.dispatchEvent(new DragEvent('drop', {dataTransfer:dt, bubbles:true})); }")
     expect(editor.locator('article')).to_have_count(18)
+    # Real OS clipboard + keyboard while title/body owns focus (not a dispatched paste).
+    png_base64 = base64.b64encode(PNG).decode()
+    page.evaluate("""async data => {
+      const blob = await (await fetch('data:image/png;base64,' + data)).blob();
+      await navigator.clipboard.write([new ClipboardItem({'image/png':blob})]);
+    }""", png_base64)
+    for field in ('标题', '正文'):
+        count = editor.locator('article').count()
+        value = editor.get_by_label(field, exact=True).input_value()
+        editor.get_by_label(field, exact=True).focus(); page.keyboard.press('Control+V')
+        expect(editor.locator('article')).to_have_count(count + 1)
+        expect(editor.get_by_label(field, exact=True)).to_have_value(value)
+        editor.get_by_role('button', name=f'删除配图 {count + 1}', exact=True).click()
+    # Files dropped over the textarea must be consumed before native text-drop behavior.
+    body = editor.get_by_label('正文', exact=True); body.scroll_into_view_if_needed()
+    drop_box = body.bounding_box()
+    cdp = context.new_cdp_session(page)
+    for event_type in ('dragEnter', 'dragOver', 'drop'):
+        cdp.send('Input.dispatchDragEvent', {'type':event_type, 'x':drop_box['x'] + 20, 'y':drop_box['y'] + 20,
+            'data':{'items':[], 'files':[str(DROP_FILE.resolve())], 'dragOperationsMask':1}})
+    cdp.detach()
+    expect(editor.locator('article')).to_have_count(19)
+    editor.get_by_role('button', name='删除配图 19', exact=True).click()
+    # Replacement must not bubble into append; ordinary text paste stays native.
+    replacements = state['upload']
+    editor.locator('.content-source-replace').first.focus(); page.keyboard.press('Control+V')
+    expect(editor.locator('article img').first).to_have_attribute('src', f'/generated/upload-{replacements + 1}.png')
+    expect(editor.locator('article')).to_have_count(18)
+    assert state['upload'] == replacements + 1
+    page.evaluate("navigator.clipboard.writeText(' pasted text')")
+    editor.get_by_label('标题', exact=True).focus(); page.keyboard.press('End'); page.keyboard.press('Control+V')
+    expect(editor.get_by_label('标题', exact=True)).to_have_value('Edited title pasted text')
+    editor.get_by_label('标题', exact=True).fill('Edited title')
     editor.get_by_role('button', name='删除配图 2', exact=True).click(); expect(editor.locator('article')).to_have_count(17)
     assert not state['patches'], 'Uploads and gallery changes must remain staged'
     page.locator('.content-desk-source-card').nth(1).locator('button').first.click()
@@ -124,6 +202,9 @@ def case(browser, theme, width):
     state['hold_upload'] = True
     editor.get_by_label('新增图片', exact=True).set_input_files({'name':'held.png', 'mimeType':'image/png', 'buffer':PNG})
     expect(editor.get_by_label('标题', exact=True)).to_be_disabled()
+    pending = state['pending_upload']
+    editor.evaluate("el => { const dt = new DataTransfer(); dt.items.add(new File(['fixture'], 'busy.png', {type:'image/png'})); el.dispatchEvent(new ClipboardEvent('paste', {clipboardData:dt, bubbles:true})); el.dispatchEvent(new DragEvent('drop', {dataTransfer:dt, bubbles:true})); }")
+    assert state['pending_upload'] is pending, 'Busy imports must not issue another upload'
     page.locator('.content-desk-source-card').nth(1).locator('button').first.click()
     expect(editor.get_by_label('标题', exact=True)).to_have_value('Edited title')
     assert state['pending_upload'] is not None

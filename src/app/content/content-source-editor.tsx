@@ -21,7 +21,23 @@ export function ContentSourceEditor({ title, contentText, images, previewImages,
     next.splice(to, 0, next.splice(from, 1)[0]);
     onChange({ images: next });
   }
-  return <section className="content-cluster content-source-editor" aria-label="图文编辑">
+  return <section className="content-cluster content-source-editor" aria-label="图文编辑" tabIndex={0}
+    onPaste={(event) => {
+      const files = Array.from(event.clipboardData.files);
+      if (!files.length) return;
+      event.preventDefault();
+      if (!busy) onUpload(files);
+    }}
+    onDragOverCapture={(event) => {
+      if (!event.dataTransfer.types.includes("Files")) return;
+      event.preventDefault();
+      event.dataTransfer.dropEffect = busy ? "none" : "copy";
+    }}
+    onDropCapture={(event) => {
+      if (!event.dataTransfer.types.includes("Files")) return;
+      event.preventDefault(); event.stopPropagation();
+      if (!busy && event.dataTransfer.files.length) onUpload(Array.from(event.dataTransfer.files));
+    }}>
     <div className="content-source-editor-heading">
       <h2 className="text-base font-black">图文编辑</h2>
       <span role="status" className="text-xs text-white/55">{busy ? "正在处理…" : dirty ? "有未保存修改" : "已保存"}</span>
@@ -38,10 +54,7 @@ export function ContentSourceEditor({ title, contentText, images, previewImages,
         <textarea aria-label="正文" className="field mt-2 min-h-48 leading-7" value={contentText} onChange={(event) => onChange({ contentText: event.target.value })} />
       </label>
       <div className="mt-4 flex items-center justify-between text-xs"><span className="font-bold">配图</span><span>{images.length} 张</span></div>
-      <div className="content-source-gallery" onDragOver={(event) => event.preventDefault()} onDrop={(event) => {
-        event.preventDefault();
-        if (!busy && event.dataTransfer.files.length) onUpload(Array.from(event.dataTransfer.files));
-      }}>
+      <div className="content-source-gallery">
         {images.map((url, index) => <article key={`${url}-${index}`} className={`review-gallery-tile ${drag === index ? "opacity-50" : ""}`}
           onDragOver={(event) => event.preventDefault()} onDrop={(event) => {
             if (dragIndex.current === null) return;
@@ -50,7 +63,7 @@ export function ContentSourceEditor({ title, contentText, images, previewImages,
           }}>
           <button type="button" className="review-gallery-preview" aria-label={`预览配图 ${index + 1}`} onClick={() => onPreview(index)}>
             {/* eslint-disable-next-line @next/next/no-img-element */}
-            <img alt={`配图 ${index + 1}`} src={toRemoteImagePreviewSrc(previewImages[index])} referrerPolicy="no-referrer" loading="lazy" />
+            <img alt={`配图 ${index + 1}`} src={toRemoteImagePreviewSrc(previewImages[index])} referrerPolicy="no-referrer" loading="lazy" draggable={false} />
             <span className="review-gallery-index">{index + 1}</span>
           </button>
           <div className="content-source-image-tools">
@@ -62,16 +75,15 @@ export function ContentSourceEditor({ title, contentText, images, previewImages,
             <button type="button" className="review-gallery-tool review-gallery-tool-danger" aria-label={`删除配图 ${index + 1}`} disabled={busy || drag !== null} onClick={() => onChange({ images: images.filter((_, at) => at !== index) })}><Trash2 size={14} /></button>
           </div>
           <label className="content-source-replace" tabIndex={busy ? -1 : 0} onPaste={(event) => {
-            const files = Array.from(event.clipboardData.files); if (!busy && files.length) { event.preventDefault(); onUpload(files.slice(0, 1), index); }
+            const files = Array.from(event.clipboardData.files);
+            if (files.length) { event.preventDefault(); event.stopPropagation(); if (!busy) onUpload(files.slice(0, 1), index); }
           }}><Upload size={14} />替换图片
             <input className="sr-only" type="file" accept="image/*" aria-label={`替换配图 ${index + 1}`} disabled={busy || drag !== null} onChange={(event) => {
               const file = event.target.files?.[0]; event.target.value = ""; if (file) onUpload([file], index);
             }} />
           </label>
         </article>)}
-        <div className="content-source-add" tabIndex={busy ? -1 : 0} aria-label="粘贴或拖入图片" onPaste={(event) => {
-          if (!busy && event.clipboardData.files.length) { event.preventDefault(); onUpload(Array.from(event.clipboardData.files)); }
-        }}>
+        <div className="content-source-add" tabIndex={busy ? -1 : 0} aria-label="粘贴或拖入图片">
           <label className="cursor-pointer flex flex-col items-center gap-2"><Plus size={24} /><span>新增图片</span>
             <input className="sr-only" type="file" accept="image/*" multiple aria-label="新增图片" onChange={(event) => {
               const files = Array.from(event.target.files || []); event.target.value = ""; if (files.length) onUpload(files);

@@ -2,6 +2,7 @@
 
 import Link from "next/link";
 import { ContentSourceEditor, ContentSourceEditGuard } from "./content-source-editor";
+import { ContentImagePreview } from "./content-image-preview";
 import { applyManualSourceImages } from "@/lib/content-pool-edit";
 import { useCallback, useEffect, useMemo, useRef, useState, useSyncExternalStore, type ReactNode, type SetStateAction } from "react";
 import {
@@ -2799,8 +2800,7 @@ function PreviewDialog({ preview, onClose, onNavigate }: { preview: PreviewState
         <div className="preview-modal-body thin-scrollbar">
           {imageUrl ? (
             <div className="preview-image-stage">
-              {/* eslint-disable-next-line @next/next/no-img-element */}
-              <img alt="" className="max-h-[62vh] w-full object-contain" referrerPolicy="no-referrer" src={toDisplayImageSrc(imageUrl)} />
+              <ContentImagePreview key={`${imageIndex}-${imageUrl}`} src={toDisplayImageSrc(imageUrl)} />
               {imageUrls.length > 1 ? (
                 <div className="mt-3 flex items-center justify-center gap-2">
                   <button className="soft-button h-9 px-3 text-xs" type="button" onClick={() => onNavigate(imageIndex - 1)}>上一张</button>

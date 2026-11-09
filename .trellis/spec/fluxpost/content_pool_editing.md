@@ -18,6 +18,8 @@ Applies to source text/images in `/content`, their uploads, recrawl merges, cach
 - Image changes clear old downloaded-image references, rebuild image/video/frame media URLs, and remap tags by image identity. Tags moved beyond the nine-image tag panel survive. Replacement drops the old image's tag.
 - Manual-image cache paths include the SHA-256 prefix of the ordered URL list, avoiding stale positional cache reuse. A cache result with a stale image list cannot replace the newer source. Manual body text survives transcript backfill.
 - Canvas pool snapshots merge partial downloads with the remaining manually ordered remote images. The editor shows all images; videos/frames stay separate.
+- File drops are captured across the editor, including text fields; clipboard files bubble from title/body/gallery to one upload handler. Replacement paste stops propagation. Text-only paste stays native; busy imports are consumed without uploading. Gallery image dragging is disabled; reorder uses the explicit handle.
+- Content previews use pointer-anchored non-passive wheel zoom (1–5x), captured primary-mouse pan, reset and image-identity remounts. Wheel input does not scroll the modal; release/cancel/lost capture ends pan.
 
 ## Validation / Errors
 
@@ -31,7 +33,7 @@ Good: reorder 15 images, save, refresh/recrawl/cache and retain order and labels
 
 `content_pool_editor_check.mjs` uses isolated SQLite/accounts, route calls, local upload files and loopback image responses. It covers identity, raw, recrawl, long text, full snapshots, labels, empty lists, upload auth/errors and cache bytes. It is in the baseline.
 
-`content_pool_editor_browser_check.py` intercepts APIs/media on a worker-disabled loopback test server, rejects 3001, and covers three themes at 1440/390, real drag, paste/drop/upload, replacement/delete, save/reload, failures, switch guards, filters and pagination. Existing content-library and review browser suites remain regressions.
+`content_pool_editor_browser_check.py` intercepts APIs/media on a worker-disabled loopback test server, rejects 3001, and covers three themes at 1440/390, real gallery drag, keyboard image/text paste, native Chromium file drop over the body, replacement without duplicate append, zoom anchoring/clamps/reset/navigation, captured pan, save/reload, failures, busy/switch guards, filters and pagination. Existing content-library and review browser suites remain regressions.
 
 ## Wrong / Correct
 
