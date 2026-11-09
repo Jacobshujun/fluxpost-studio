@@ -6,6 +6,7 @@ import { LibraryOrderControl, useLibraryOrdering } from "@/components/library-or
 import { canvasLibraryOrder } from "@/lib/library-asset-order";
 import type { LibraryAssetOrder } from "@/lib/types";
 import { ScheduleFavoriteControl } from "@/components/canvas-schedule/FavoriteControl";
+import type { CanvasScheduleListResult, CanvasScheduleSummary } from "@/lib/canvas/types";
 import { LibraryColorFilter, LibraryPalette } from "@/components/library-colors";
 import Link from "next/link";
 import Image from "next/image";
@@ -4268,7 +4269,9 @@ function CanvasScheduleCenter({ workflow, graph, onSaveBindings, onPreview, onCl
   onClose: () => void;
   onOpenRuns: () => void;
 }) {
-  const [schedules, setSchedules] = useState<CanvasSchedule[]>([]);
+  const [schedules, setSchedules] = useState<CanvasScheduleSummary[]>([]);
+  const [schedulePage, setSchedulePage] = useState({ offset: 0, total: 0 });
+  const historyRequestRef = useRef<AbortController | undefined>(undefined);
   const [selected, setSelected] = useState<CanvasSchedule>();
   const [busy, setBusy] = useState(false);
   const [bindingBusy, setBindingBusy] = useState(false);
@@ -4284,61 +4287,32 @@ function CanvasScheduleCenter({ workflow, graph, onSaveBindings, onPreview, onCl
   const adoptSchedule = useCallback((schedule: CanvasSchedule, resetEdits = true) => {
     selectedRef.current = schedule;
     setSelected(schedule);
-    setSchedules((current) => [schedule, ...current.filter((item) => item.id !== schedule.id)]
-      .sort((left, right) => right.updatedAt.localeCompare(left.updatedAt)));
+    setSchedules((current) => current.map((item) => item.id === schedule.id ? {
+      ...item, name: schedule.name, status: schedule.status, updatedAt: schedule.updatedAt,
+      schemaVersion: schedule.schemaVersion, totalMainTasks: schedule.totalMainTasks,
+      totalChildTasks: schedule.totalChildTasks, totalContentTasks: schedule.totalContentTasks,
+      totalImageTasks: schedule.totalImageTasks,
+    } : item));
     if (resetEdits) {
       editSequenceRef.current = 0;
       setEditSequence(0);
     }
   }, []);
 
-  const load = useCallback(async (preferredId?: string) => {
-    setBusy(true);
-    setError("");
-    try {
-      const data = await api<{ schedules: CanvasSchedule[] }>("/api/canvas/schedules");
-      const workflowSchedules = data.schedules.filter((item) => item.workflowId === workflow.id);
-      setSchedules(workflowSchedules);
-      const currentId = preferredId || selectedRef.current?.id || initialScheduleId;
-      const next = workflowSchedules.find((item) => item.id === currentId) || workflowSchedules[0];
-      if (next) {
-        const detail = await api<{ schedule: CanvasSchedule }>(`/api/canvas/schedules/${encodeURIComponent(next.id)}`);
-        const resolved = detail.schedule;
-        setSchedules((current) => [resolved, ...current.filter((item) => item.id !== resolved.id)]
-          .sort((left, right) => right.updatedAt.localeCompare(left.updatedAt)));
-        selectedRef.current = resolved;
-        setSelected(resolved);
-      } else {
-        selectedRef.current = undefined;
-        setSelected(undefined);
-      }
-      editSequenceRef.current = 0;
-      setEditSequence(0);
-    } catch (loadError) {
-      setError(errorMessage(loadError));
-    } finally {
-      setBusy(false);
-    }
-  }, [workflow.id, initialScheduleId]);
-
   useEffect(() => {
-    const timer = setTimeout(() => void load(), 0);
-    return () => clearTimeout(timer);
-  }, [load]);
-
-  useEffect(() => {
-    if (!selected || !["queued", "running", "paused"].includes(selected.status)) return;
+    if (busy || !selected || !["queued", "running", "paused"].includes(selected.status)) return;
     const scheduleId = selected.id;
+    const controller = new AbortController();
     const timer = setInterval(async () => {
       try {
-        const data = await api<{ schedule: CanvasSchedule }>(`/api/canvas/schedules/${scheduleId}`);
-        adoptSchedule(data.schedule);
+        const data = await api<{ schedule: CanvasSchedule }>(`/api/canvas/schedules/${scheduleId}`, { signal: controller.signal });
+        if (!controller.signal.aborted && selectedRef.current?.id === scheduleId) adoptSchedule(data.schedule);
       } catch (pollError) {
-        setError(errorMessage(pollError));
+        if (!controller.signal.aborted) setError(errorMessage(pollError));
       }
     }, 2_000);
-    return () => clearInterval(timer);
-  }, [adoptSchedule, selected]);
+    return () => { controller.abort(); clearInterval(timer); };
+  }, [adoptSchedule, busy, selected]);
 
   const patchSelected = useCallback((updater: (schedule: CanvasSchedule) => CanvasSchedule) => {
     setSelected((current) => {
@@ -4367,7 +4341,7 @@ function CanvasScheduleCenter({ workflow, graph, onSaveBindings, onPreview, onCl
           body: JSON.stringify({ action: "save", revision, name: schedule.name, batches: schedule.batches, definition: schedule.definition }),
         });
         data.schedule = mergeCanvasScheduleWorkbookPaths(data.schedule, schedule);
-        if (editSequenceRef.current === sequence) {
+        if (selectedRef.current?.id === schedule.id && editSequenceRef.current === sequence) {
           adoptSchedule(data.schedule);
           resolveSave(data.schedule);
           return;
@@ -4388,6 +4362,59 @@ function CanvasScheduleCenter({ workflow, graph, onSaveBindings, onPreview, onCl
     return result;
   }, [adoptSchedule]);
 
+  const flushDraft = useCallback(async () => {
+    await saveQueueRef.current;
+    const current = selectedRef.current;
+    if (current && editSequenceRef.current) await persistDraft(current, editSequenceRef.current);
+  }, [persistDraft]);
+
+  const load = useCallback(async (preferredId?: string, offset = 0, refreshList = true) => {
+    historyRequestRef.current?.abort();
+    const controller = new AbortController();
+    historyRequestRef.current = controller;
+    const { signal } = controller;
+    setBusy(true);
+    setError("");
+    try {
+      await flushDraft();
+      if (signal.aborted) return;
+      let nextId = preferredId;
+      if (refreshList) {
+        const params = new URLSearchParams({ view: "summary", workflowId: workflow.id, limit: "50", offset: String(offset) });
+        let page = await api<CanvasScheduleListResult>(`/api/canvas/schedules?${params}`, { signal });
+        if (signal.aborted) return;
+        if (offset > 0 && offset >= page.total) {
+          params.set("offset", String(Math.max(0, Math.ceil(page.total / 50) - 1) * 50));
+          page = await api<CanvasScheduleListResult>(`/api/canvas/schedules?${params}`, { signal });
+        }
+        if (signal.aborted) return;
+        setSchedules(page.schedules);
+        setSchedulePage({ offset: page.offset, total: page.total });
+        nextId ||= page.schedules[0]?.id;
+      }
+      if (nextId) {
+        const { schedule } = await api<{ schedule: CanvasSchedule }>(`/api/canvas/schedules/${encodeURIComponent(nextId)}`, { signal });
+        if (signal.aborted) return;
+        if (schedule.workflowId !== workflow.id) throw new Error("此任务不属于当前工作流。");
+        adoptSchedule(schedule);
+      } else {
+        selectedRef.current = undefined;
+        setSelected(undefined);
+        editSequenceRef.current = 0;
+        setEditSequence(0);
+      }
+    } catch (loadError) {
+      if (!signal.aborted) setError(errorMessage(loadError));
+    } finally {
+      if (!signal.aborted) setBusy(false);
+    }
+  }, [adoptSchedule, flushDraft, workflow.id]);
+
+  useEffect(() => {
+    const timer = setTimeout(() => void load(initialScheduleId), 0);
+    return () => { clearTimeout(timer); historyRequestRef.current?.abort(); };
+  }, [initialScheduleId, load]);
+
   useEffect(() => {
     if (!selected || !editSequence || !["draft", "ready"].includes(selected.status) || busy) return;
     const snapshot = selected;
@@ -4402,11 +4429,13 @@ function CanvasScheduleCenter({ workflow, graph, onSaveBindings, onPreview, onCl
     setBusy(true);
     setError("");
     try {
+      await flushDraft();
       const data = await api<{ schedule: CanvasSchedule }>("/api/canvas/schedules", {
         method: "POST",
         body: JSON.stringify({ workflowId: workflow.id }),
       });
       adoptSchedule(data.schedule);
+      await load(data.schedule.id);
     } catch (createError) {
       setError(errorMessage(createError));
     } finally {
@@ -4452,6 +4481,7 @@ function CanvasScheduleCenter({ workflow, graph, onSaveBindings, onPreview, onCl
         body: JSON.stringify({ action, revision: schedule.revision, ...payload }),
       });
       adoptSchedule(data.schedule);
+      if (action === "duplicate") await load(data.schedule.id);
     } catch (actionError) {
       setError(errorMessage(actionError));
     } finally {
@@ -4467,10 +4497,13 @@ function CanvasScheduleCenter({ workflow, graph, onSaveBindings, onPreview, onCl
     try {
       const { favorite } = await api<{ favorite: unknown }>(`/api/canvas/schedules/${encodeURIComponent(schedule.id)}/favorite`);
       if (!window.confirm(`删除“${schedule.name}”？${favorite ? "\n此任务已收藏，删除任务也会移除收藏。" : ""}`)) return;
+      await saveQueueRef.current;
       await api(`/api/canvas/schedules/${schedule.id}`, { method: "DELETE" });
       selectedRef.current = undefined;
       setSelected(undefined);
-      await load();
+      editSequenceRef.current = 0;
+      setEditSequence(0);
+      await load(undefined, schedulePage.offset);
     } catch (deleteError) {
       setError(errorMessage(deleteError));
     } finally {
@@ -4518,7 +4551,7 @@ function CanvasScheduleCenter({ workflow, graph, onSaveBindings, onPreview, onCl
         <div><ListChecks /><span><strong>批量调度</strong><small>{workflow.name} · r{workflow.revision}</small></span></div>
         <div>
           <button className="canvas-center-tab" type="button" onClick={onOpenRuns}><History /><span>任务中心</span></button>
-          <button type="button" onClick={() => void load(selected?.id)} disabled={busy} aria-label="刷新调度" title="刷新"><RefreshCw className={busy ? "animate-spin" : ""} /></button>
+          <button type="button" onClick={() => void load(selected?.id, schedulePage.offset)} disabled={busy} aria-label="刷新调度" title="刷新"><RefreshCw className={busy ? "animate-spin" : ""} /></button>
           <button type="button" onClick={onClose} aria-label="关闭批量调度" title="关闭"><X /></button>
         </div>
       </header>
@@ -4533,14 +4566,21 @@ function CanvasScheduleCenter({ workflow, graph, onSaveBindings, onPreview, onCl
       {error ? <div className="canvas-task-error"><AlertTriangle />{error}</div> : null}
       <div className="canvas-schedule-body">
         <nav className="canvas-schedule-list" aria-label="批量任务列表">
-          {schedules.map((schedule) => <button type="button" key={schedule.id} className={selected?.id === schedule.id ? "is-selected" : ""} onClick={() => adoptSchedule(schedule)}>
+          <div className="canvas-schedule-pagination">
+            <span role="status">{busy ? "正在加载…" : `共 ${schedulePage.total} 项 · 第 ${Math.floor(schedulePage.offset / 50) + 1} 页`}</span>
+            <div>
+              <button type="button" disabled={busy || schedulePage.offset === 0} onClick={() => void load(undefined, schedulePage.offset - 50)}>上一页</button>
+              <button type="button" disabled={busy || schedulePage.offset + 50 >= schedulePage.total} onClick={() => void load(undefined, schedulePage.offset + 50)}>下一页</button>
+            </div>
+          </div>
+          {schedules.map((schedule) => <button type="button" key={schedule.id} disabled={busy} className={selected?.id === schedule.id ? "is-selected" : ""} onClick={() => void load(schedule.id, schedulePage.offset, false)}>
             <StatusIcon status={schedule.status} />
             <span><strong>{schedule.name}</strong><small>{schedule.schemaVersion === 2 ? `${schedule.totalMainTasks || 0} 个任务组 · ${schedule.totalChildTasks || 0} 个结果项` : `${schedule.totalContentTasks} 篇 · ${schedule.totalImageTasks} 个图片结果`} · {formatCanvasRunTime(schedule.updatedAt)}</small></span>
             <em>{canvasScheduleStatusLabel(schedule.status)}</em>
           </button>)}
-          {!schedules.length && !busy ? <div className="canvas-task-empty"><ListChecks /><span>当前还没有批量任务</span></div> : null}
+          {!schedules.length && !busy && !error ? <div className="canvas-task-empty"><ListChecks /><span>当前还没有批量任务</span></div> : null}
         </nav>
-        <section className="canvas-schedule-editor">
+        <section className="canvas-schedule-editor" inert={busy}>
           {selected?.schemaVersion !== 2 ? <section className="canvas-scheduler-bindings" aria-label="画布绑定">
             <header>
               <span><strong>画布绑定</strong><small>为当前工作流指定批量调度使用的节点</small></span>

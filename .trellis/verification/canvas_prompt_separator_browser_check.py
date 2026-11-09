@@ -5,6 +5,7 @@ from pathlib import Path
 from urllib.parse import urlparse
 
 from playwright.async_api import async_playwright, expect
+from batch_create_browser_check import summary_result
 
 
 BASE_URL = os.environ.get("BROWSER_BASE_URL", "http://127.0.0.1:45678")
@@ -45,7 +46,7 @@ async def check(browser, width):
             payload = {"workflow": workflow}
         elif path == "/api/canvas/schedules":
             assert request.method == "GET"
-            payload = {"schedules": [schedule]}
+            payload = summary_result([schedule], {}, request.url, [workflow])
         elif path == "/api/canvas/schedules/prompt-schedule":
             if request.method == "PATCH":
                 body = request.post_data_json

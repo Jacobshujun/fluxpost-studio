@@ -4,10 +4,11 @@ Last updated: 2026-11-09
 
 ## One-Line Status
 
-Canvas previews unified: `11-09-canvas-shared-image-preview` baseline/browser evidence. Runtime: `/api/version`.
+Canvas history fix verified; LAN identity: `/api/version`.
 
 ## Current Focus
 
+- Canvas history: `11-09-canvas-schedule-history-fix`; baseline/browser pass.
 - Nov 6 text concatenation: 16 progressive inputs; baseline/six browser cases pass. Evidence: `archive/2026-11/11-06-canvas-text-concatenate/verification.md`. Operator acceptance pending.
 - Nov 6 library sorting/filter isolation: SQLite/PG, six browser flows and regressions pass. Contract: `unified_library.md`; evidence: `11-06-canvas-library-sorting`. Operator acceptance pending.
 - Nov 5 startup: Job independence/24-GiB heap, baseline and LAN activation pass. Evidence: `archive/2026-11/11-05-local-independent-runtime/verification.md`.

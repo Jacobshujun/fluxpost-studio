@@ -47,8 +47,10 @@ function readValue<T>(key: string, codec: UrlQueryCodec<T>): T {
 
 function writeValue<T>(key: string, value: T, codec: UrlQueryCodec<T>, pathname: string, replace: ReturnType<typeof useRouter>["replace"]) {
   const params = new URLSearchParams(window.location.search);
-  params.delete(key);
   const values = codec.serialize(value, key);
+  const currentValues = params.getAll(key);
+  if (currentValues.length === values.length && currentValues.every((entry, index) => entry === values[index])) return;
+  params.delete(key);
   values.forEach((item) => params.append(key, item));
   const query = params.toString();
   const current = window.location.search.replace(/^\?/, "");

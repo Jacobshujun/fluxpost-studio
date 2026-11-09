@@ -6,6 +6,7 @@ import os
 from pathlib import Path
 from urllib.parse import parse_qs, urlparse
 from playwright.async_api import async_playwright, expect
+from batch_create_browser_check import summary_result
 
 BASE = os.environ.get("BROWSER_BASE_URL", "http://127.0.0.1:45678")
 assert urlparse(BASE).hostname in ("localhost", "127.0.0.1") and urlparse(BASE).port != 3001
@@ -75,7 +76,7 @@ async def check(browser, width, theme):
             if req.method == "PATCH": workflow = {**workflow, **req.post_data_json, "revision": workflow["revision"]+1}; saves.append(req.post_data_json)
             data = dict(workflow=workflow)
         elif path == "/api/canvas/runs": data = dict(runs=[], latestNodeAttempts=[], latestSuccessfulNodeRuns=[])
-        elif path == "/api/canvas/schedules": data = dict(schedules=list(schedules.values()))
+        elif path == "/api/canvas/schedules": data = summary_result(schedules.values(), {}, req.url, [workflow])
         elif path.endswith("/favorite"): data = dict(favorite=None)
         elif path.startswith("/api/canvas/schedules/"):
             sid = path.split("/")[-1]
@@ -153,6 +154,7 @@ async def check(browser, width, theme):
     center = page.get_by_role("dialog", name="Canvas 批量调度", exact=True)
     for sid, name in [("v1", "Version One"), ("v2", "Version Two")]:
         await center.locator(".canvas-schedule-list").get_by_role("button").filter(has_text=name).click()
+        await expect(center.get_by_label("批量任务名称", exact=True)).to_have_value(name)
         picker = center.locator(".canvas-schedule-assets").first
         await expect(picker.get_by_role("button", name="筛选蓝色", exact=True)).to_be_visible()
         await picker.get_by_role("button", name="筛选蓝色", exact=True).click()

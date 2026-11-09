@@ -7,6 +7,7 @@ from pathlib import Path
 from urllib.parse import urlparse
 
 from playwright.async_api import async_playwright, expect
+from batch_create_browser_check import summary_result
 
 
 BASE_URL = os.environ.get("BROWSER_BASE_URL", "http://127.0.0.1:45678")
@@ -192,7 +193,7 @@ async def check(browser, width):
                                            "sharedOutputs": [], "childResult": {"nodeId": "after", "outputPort": "text", "artifactKind": "text"}, "aggregationPolicy": "all"}}
                 payload = {"schedule": schedule}
             else:
-                payload = {"schedules": [schedule] if schedule else []}
+                payload = summary_result([schedule] if schedule else [], {}, request.url, [workflow])
         elif parsed.path == "/api/canvas/schedules/schedule":
             if request.method == "PATCH":
                 assert body["action"] == "save", "Only in-memory draft saves are permitted"

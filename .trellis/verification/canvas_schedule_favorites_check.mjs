@@ -161,6 +161,33 @@ try {
   assert.equal(await db.deleteCanvasScheduleFromDb("task-0", actor.id), true);
   assert.equal((await list(adminActor, { favorite: true })).total, 0, "source deletion cascades all related bookmarks");
   await assert.rejects(domain.getCanvasScheduleFavoriteSummary(actor, "task-0"), (error) => error.status === 404);
+  // A whole workflow can be older than the global 100-row window, with multiple pages of its own.
+  const oldTime = "2026-10-22T04:00:00.000Z";
+  await execute(`INSERT INTO canvas_workflows VALUES (${marks(8)})`, ["old-flow", actor.id, "Old workflow", 1, false, oldTime, oldTime, "{}"]);
+  for (let i = 0; i < 121; i++) {
+    const data = { id: `old-${i}`, name: `Old ${i}`, schemaVersion: i % 2 ? 1 : 2, totalContentTasks: 1, totalImageTasks: 1 };
+    await execute(`INSERT INTO canvas_schedules VALUES (${marks(8)})`, [data.id, i === 120 ? other.id : actor.id,
+      "old-flow", "completed", 1, oldTime, new Date(Date.parse(oldTime) + i * 1000).toISOString(), JSON.stringify(data)]);
+  }
+  const legacySql = "SELECT workflow_id FROM canvas_schedules ORDER BY updated_at DESC LIMIT 100";
+  const legacyRows = postgres ? (await pool.query(legacySql)).rows : sqlite.prepare(legacySql).all();
+  assert(legacyRows.every((row) => row.workflow_id !== "old-flow"), "fixture reproduces the empty legacy modal");
+  const historicalIds = [];
+  for (const offset of [0, 50, 100]) {
+    const response = await listRoute.GET(new Request(`http://localhost/api/canvas/schedules?view=summary&workflowId=old-flow&limit=50&offset=${offset}`));
+    assert.equal(response.status, 200);
+    const page = await response.json();
+    assert.equal(page.total, 120);
+    assert.equal(page.offset, offset);
+    assert(page.schedules.every((item) => item.workflowId === "old-flow"));
+    historicalIds.push(...page.schedules.map((item) => item.id));
+  }
+  assert.equal(new Set(historicalIds).size, 120, "all old records remain reachable across pages");
+  assert(historicalIds.includes("old-0"));
+  assert.equal((await list(adminActor, { workflowId: "old-flow" })).total, 121);
+  assert.equal((await list(other, { workflowId: "old-flow" })).total, 1);
+  assert.equal((await list(actor, { workflowId: "unknown" })).total, 0);
+  console.log("Canvas old-workflow history: global cutoff reproduced, scoped API pagination and unchanged ownership passed.");
   console.log(`Schedule favorites (${postgres ? "PostgreSQL" : "SQLite"}): 160-row scoped search/pagination, literal search, lightweight projections, personal/admin isolation, validation, persistence, revision independence and deletion passed.`);
 } finally {
   sqlite?.close();
