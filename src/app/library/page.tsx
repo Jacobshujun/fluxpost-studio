@@ -3,7 +3,7 @@
 import Link from "next/link";
 import { LibraryColorAnalysis, LibraryColorFilter, LibraryPalette } from "@/components/library-colors";
 import { ArrowLeft, Check, ChevronDown, ChevronLeft, ChevronRight, Folder, FolderInput, FolderPlus, Heart, Image as ImageIcon, Images, LoaderCircle, MoreHorizontal, Pencil, Plus, RefreshCw, Search, SlidersHorizontal, Sparkles, Tag, Trash2, Upload, UsersRound, X, ZoomIn, ZoomOut } from "lucide-react";
-import { useCallback, useEffect, useMemo, useRef, useState, useSyncExternalStore, type DragEvent, type ReactNode } from "react";
+import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState, useSyncExternalStore, type DragEvent, type ReactNode } from "react";
 import { applyLibraryTagChanges, getLibraryUnifiedTagsForAsset, libraryAngleLabels, libraryAngleOptions, libraryImageTypeLabels, libraryImageTypes, mergeLibraryTagProfile } from "@/lib/library-tags";
 import { isEditableSelectionTarget } from "@/lib/list-selection";
 import { getStoredTheme, subscribeTheme, type ThemeMode } from "@/lib/theme";
@@ -362,10 +362,17 @@ type ViewerProps = {
 };
 function Viewer(props: ViewerProps) {
   const [requestedId, setRequestedId] = useState(props.assetId);
-  const [asset, setAsset] = useState<LibraryAsset>();
+  const [displayed, setDisplayed] = useState<{ asset: LibraryAsset; image: HTMLImageElement }>();
+  const asset = displayed?.asset;
+  const displayedId = asset?.id;
   const [error, setError] = useState("");
   const [retry, setRetry] = useState(0);
+  const [writing, setWriting] = useState(false);
+  const [details, setDetails] = useState(false);
   const guard = useRef<((go: () => void) => void) | null>(null);
+  const keyboard = useRef<((event: React.KeyboardEvent<HTMLDialogElement>) => void) | null>(null);
+  const registerGuard = useCallback((handler: typeof guard.current) => { guard.current = handler; }, []);
+  const registerKeyboard = useCallback((handler: typeof keyboard.current) => { keyboard.current = handler; }, []);
   useEffect(() => {
     if (props.assetId === requestedId) return;
     const go = () => setRequestedId(props.assetId);
@@ -374,30 +381,55 @@ function Viewer(props: ViewerProps) {
   useEffect(() => {
     // Synchronize the open viewer with external browser history, including close.
     // eslint-disable-next-line react-hooks/set-state-in-effect
-    if (!requestedId) { setAsset(undefined); setError(""); return; }
+    if (!requestedId) { setDisplayed(undefined); setError(""); setDetails(false); return; }
     const controller = new AbortController(); setError("");
-    void api<{ asset: LibraryAsset }>(`/api/library/assets/${encodeURIComponent(requestedId)}`, { signal: controller.signal }).then((result) => { if (!controller.signal.aborted) setAsset(result.asset); }).catch((error) => { if (!controller.signal.aborted) setError(errorMessage(error)); });
-    return () => controller.abort();
-  }, [requestedId, retry]);
+    if (requestedId === displayedId) return;
+    let image: HTMLImageElement | undefined;
+    let committed = false;
+    let phase = "图片详情读取失败";
+    void api<{ asset: LibraryAsset }>(`/api/library/assets/${encodeURIComponent(requestedId)}`, { signal: controller.signal }).then(async (result) => {
+      if (controller.signal.aborted) return;
+      phase = "原图加载失败";
+      image = new window.Image();
+      image.src = result.asset.publicUrl;
+      await image.decode();
+      if (controller.signal.aborted) return;
+      committed = true;
+      setDisplayed({ asset: result.asset, image });
+    }).catch((error) => { if (!controller.signal.aborted) setError(`${phase}：${errorMessage(error)}`); });
+    return () => { controller.abort(); if (image && !committed) image.removeAttribute("src"); };
+  }, [requestedId, retry, displayedId]);
   if (!requestedId && !asset) return null;
-  const close = () => { setRequestedId(""); setAsset(undefined); props.onNavigate(""); };
-  if (!asset || asset.id !== requestedId) return <Dialog title="图片查看" onClose={close}>{error ? <><p role="alert" className={styles.pickerError}>{error}</p><button onClick={() => setRetry((value) => value + 1)}>重试详情</button></> : <p><LoaderCircle className={styles.spin} />正在读取图片详情</p>}</Dialog>;
-  return <ViewerEditor key={asset.id} {...props} asset={asset} onAsset={setAsset} registerGuard={(handler) => { guard.current = handler; }} onClose={close} onCancelTransition={() => props.onNavigate(asset.id, true)} />;
+  const close = () => { setRequestedId(""); setDisplayed(undefined); setDetails(false); props.onNavigate(""); };
+  const switching = !asset || asset.id !== requestedId;
+  return <Dialog title="图片查看" className={styles.viewer} busy={writing} onClose={() => { if (guard.current) guard.current(close); else close(); }} onKeyDown={(event) => keyboard.current?.(event)}>
+    {displayed ? <ViewerEditor key={displayed.asset.id} {...props} asset={displayed.asset} image={displayed.image} switching={switching} writing={writing} setWriting={setWriting} details={details} setDetails={setDetails}
+      onAsset={(next) => setDisplayed((current) => current && current.asset.id === next.id ? { ...current, asset: next } : current)} registerGuard={registerGuard} registerKeyboard={registerKeyboard} onClose={close} onCancelTransition={() => props.onNavigate(displayed.asset.id, true)} /> : null}
+    {switching || error ? <div className={styles.viewerLoading} aria-live="polite">
+      {error ? <><span role="alert">{error}</span><button onClick={() => setRetry((value) => value + 1)}>重试加载</button></> : <span role="status"><LoaderCircle className={styles.spin} />{asset ? "正在切换图片…" : "正在加载图片…"}</span>}
+      {asset ? <button onClick={() => { setError(""); setRequestedId(asset.id); props.onNavigate(asset.id, true); }}>取消切换</button> : null}
+    </div> : null}
+  </Dialog>;
 }
 
-function ViewerEditor({ asset, onAsset, registerGuard, onClose, onCancelTransition, ...props }: ViewerProps & { asset: LibraryAsset; onAsset: (asset: LibraryAsset) => void; registerGuard: (handler: ((go: () => void) => void) | null) => void; onClose: () => void; onCancelTransition: () => void }) {
+function ViewerEditor({ asset, image, switching, writing, setWriting, details, setDetails, onAsset, registerGuard, registerKeyboard, onClose, onCancelTransition, ...props }: ViewerProps & {
+  asset: LibraryAsset; image: HTMLImageElement; switching: boolean;
+  writing: boolean; setWriting: (value: boolean) => void; details: boolean; setDetails: (value: boolean) => void;
+  onAsset: (asset: LibraryAsset) => void; registerGuard: (handler: ((go: () => void) => void) | null) => void;
+  registerKeyboard: (handler: ((event: React.KeyboardEvent<HTMLDialogElement>) => void) | null) => void;
+  onClose: () => void; onCancelTransition: () => void;
+}) {
   const initialDraft = () => ({ name: asset.name, note: asset.note || "", visibility: asset.visibility, manualOverrides: asset.manualOverrides });
   const [draft, setDraft] = useState(initialDraft);
-  const [busy, setBusy] = useState(false);
+  const busy = writing || switching;
+  const setBusy = setWriting;
   const [error, setError] = useState("");
-  const [details, setDetails] = useState(false);
   const [pending, setPending] = useState<{ go: () => void }>();
   const [zoom, setZoom] = useState<number | null>(null);
-  const [natural, setNatural] = useState<{ width: number; height: number }>();
-  const [imageError, setImageError] = useState(false);
-  const [imageRetry, setImageRetry] = useState(0);
+  const natural = useMemo(() => ({ width: image.naturalWidth, height: image.naturalHeight }), [image]);
   const [stageSize, setStageSize] = useState({ width: 1, height: 1 });
   const stageRef = useRef<HTMLDivElement>(null);
+  const surfaceRef = useRef<HTMLDivElement>(null);
   const pan = useRef<{ x: number; y: number; left: number; top: number } | null>(null);
   const anchor = useRef<{ x: number; y: number; left: number; top: number; width: number; height: number } | null>(null);
   const zoomRef = useRef<number | null>(null);
@@ -414,10 +446,27 @@ function ViewerEditor({ asset, onAsset, registerGuard, onClose, onCancelTransiti
     catch (error) { setError(errorMessage(error)); throw error; }
     finally { setBusy(false); }
   }
-  const request = useCallback((go: () => void) => { if (busy) return; if (dirty) setPending({ go }); else go(); }, [busy, dirty, setPending]);
-  useEffect(() => { registerGuard(request); return () => registerGuard(null); }, [request, registerGuard]);
-  useEffect(() => {
+  const request = useCallback((go: () => void) => { if (writing) return; if (dirty) setPending({ go }); else go(); }, [writing, dirty, setPending]);
+  useLayoutEffect(() => { registerGuard(request); return () => registerGuard(null); }, [request, registerGuard]);
+  // Attach the decoded element itself. A second <img src> can briefly be empty,
+  // even after preloading, when the browser starts that element's load lifecycle.
+  useLayoutEffect(() => {
+    surfaceRef.current?.append(image);
+    return () => image.remove();
+  }, [image]);
+  useLayoutEffect(() => {
+    const element = surfaceRef.current?.querySelector("img");
+    if (!element) return;
+    element.alt = asset.name;
+    element.draggable = false;
+    element.style.width = `${natural.width * scale}px`;
+    element.style.height = `${natural.height * scale}px`;
+  }, [image, asset.name, natural, scale]);
+  useLayoutEffect(() => {
     const stage = stageRef.current; if (!stage) return;
+    setStageSize({ width: stage.clientWidth, height: stage.clientHeight });
+    const dialog = stage.closest("dialog");
+    if (dialog?.open && !dialog.contains(document.activeElement)) dialog.focus({ preventScroll: true });
     const observer = new ResizeObserver(([entry]) => setStageSize({ width: entry.contentRect.width, height: entry.contentRect.height }));
     observer.observe(stage); return () => observer.disconnect();
   }, []);
@@ -455,20 +504,21 @@ function ViewerEditor({ asset, onAsset, registerGuard, onClose, onCancelTransiti
     try { setDraft({ ...draft, manualOverrides: applyLibraryTagChanges({ effectiveTags: mergeDraftTags(asset, draft.manualOverrides), manualOverrides: draft.manualOverrides }, change) }); setError(""); }
     catch (error) { setError(errorMessage(error)); }
   }
-  return <><Dialog title="图片查看" onClose={() => request(onClose)} busy={busy} className={styles.viewer} onKeyDown={(event) => {
+  useLayoutEffect(() => {
+    registerKeyboard((event) => {
     if (event.defaultPrevented || event.nativeEvent.isComposing || event.ctrlKey || event.metaKey || event.altKey || event.shiftKey || isEditableSelectionTarget(event.target) || pending || busy) return;
     if (event.key === "ArrowLeft" || event.key === "ArrowRight") { event.preventDefault(); void move(event.key === "ArrowRight" ? 1 : -1); }
     else if (event.key === "Delete" && asset.canEdit && !event.repeat) { event.preventDefault(); request(() => props.onDelete(asset, onClose)); }
-  }}>
-    <div className={styles.viewerHeading}><strong>{asset.name}</strong><span>{index < 0 ? "独立素材" : `${index + 1} / ${props.assets.length}${props.hasMore ? "+" : ""}`}</span><button aria-expanded={details} onClick={() => setDetails((value) => !value)}>图片详情</button></div>
+    });
+    return () => registerKeyboard(null);
+  });
+  return <>
+    <div className={styles.viewerHeading}><strong>{asset.name}</strong><span>{index < 0 ? "独立素材" : `${index + 1} / ${props.assets.length}${props.hasMore ? "+" : ""}`}</span><button aria-expanded={details} onClick={() => setDetails(!details)}>图片详情</button></div>
     <LibraryPalette palette={asset.palette} disabled={busy} onColor={(color) => request(() => props.onColor(color))} />
     <div className={styles.viewerBody}>
       <div className={styles.viewerVisual}><div className={styles.zoomTools}><button disabled={!natural || busy} aria-label="缩小" onClick={() => changeZoom(Math.max(0.05, scale / 1.25))}><ZoomOut /></button><span>{Math.round(scale * 100)}%</span><button disabled={!natural || busy} aria-label="放大" onClick={() => changeZoom(Math.min(4, scale * 1.25))}><ZoomIn /></button><button disabled={!natural || busy} onClick={() => changeZoom(1)}>实际尺寸</button><button disabled={!natural || busy} onClick={() => changeZoom(null)}>复位</button></div>
         <div className={styles.imageStage} ref={stageRef} onPointerDown={(event) => { if (event.button !== 0 && event.button !== 1) return; event.preventDefault(); const stage = event.currentTarget; stage.setPointerCapture(event.pointerId); pan.current = { x: event.clientX, y: event.clientY, left: stage.scrollLeft, top: stage.scrollTop }; }} onPointerMove={(event) => { if (!pan.current) return; event.currentTarget.scrollLeft = pan.current.left - event.clientX + pan.current.x; event.currentTarget.scrollTop = pan.current.top - event.clientY + pan.current.y; }} onPointerUp={() => { pan.current = null; }} onPointerCancel={() => { pan.current = null; }}>
-          <div className={styles.imageSurface} style={natural ? { width: Math.max(stageSize.width, natural.width * scale + 32), height: Math.max(stageSize.height, natural.height * scale + 32) } : undefined}>
-            <img key={imageRetry} src={asset.publicUrl} alt={asset.name} draggable={false} style={natural ? { width: natural.width * scale, height: natural.height * scale } : { maxWidth: "100%", maxHeight: "100%" }} onLoad={(event) => { setNatural({ width: event.currentTarget.naturalWidth, height: event.currentTarget.naturalHeight }); setImageError(false); }} onError={() => setImageError(true)} />
-            {imageError ? <div role="alert" className={styles.imageFailure}>原图加载失败<button onClick={() => { setImageError(false); setImageRetry((value) => value + 1); }}>重试原图</button></div> : !natural ? <span className={styles.imageFailure}><LoaderCircle className={styles.spin} />加载原图</span> : null}
-          </div>
+          <div className={styles.imageSurface} ref={surfaceRef} style={{ width: Math.max(stageSize.width, natural.width * scale + 32), height: Math.max(stageSize.height, natural.height * scale + 32) }} />
         </div>
         <div className={styles.viewerNavigation}><button aria-label="上一张" disabled={busy || index <= 0 || props.loadingMore} onClick={() => void move(-1)}><ChevronLeft />上一张</button><button aria-label="下一张" disabled={busy || props.loadingMore || index < 0 || (index === props.assets.length - 1 && !props.hasMore)} onClick={() => void move(1)}>{props.loadingMore ? <LoaderCircle className={styles.spin} /> : <ChevronRight />}下一张</button></div>
         <div className={styles.previewRail}>{props.assets.slice(Math.max(0, index - 5), Math.max(0, index) + 6).map((item) => <button key={item.id} disabled={busy} aria-label={`查看 ${item.name}`} className={item.id === asset.id ? styles.previewCurrent : ""} onClick={() => request(() => props.onNavigate(item.id))}><img src={item.thumbnailUrl} alt="" loading="lazy" /></button>)}</div>
@@ -484,7 +534,7 @@ function ViewerEditor({ asset, onAsset, registerGuard, onClose, onCancelTransiti
         <div className={styles.viewerEditActions}><button disabled={busy} onClick={() => void action(() => props.onFavorite(asset))}><Heart />{asset.favorite ? "取消收藏" : "收藏"}</button>{asset.canEdit ? <><button className={styles.primary} disabled={busy || !dirty || !draft.name.trim()} onClick={() => void save().catch(() => undefined)}><Check />保存</button><button className={styles.danger} disabled={busy} onClick={() => request(() => props.onDelete(asset, onClose))}>永久删除</button></> : <span>元数据只读</span>}</div>
       </aside>
     </div>{error ? <p role="alert" className={styles.viewerError}>{error}</p> : null}
-  </Dialog>{pending ? <Dialog title="尚有未保存修改" busy={busy} onClose={() => { setPending(undefined); onCancelTransition(); }}><p>保存修改后继续，或放弃本次修改。</p>{error ? <p className={styles.pickerError} role="alert">{error}</p> : null}<footer><button disabled={busy} onClick={() => { setPending(undefined); onCancelTransition(); }}>继续编辑</button><button disabled={busy} onClick={() => { const go = pending.go; setDraft(initialDraft()); setPending(undefined); go(); }}>放弃修改</button><button className={styles.primary} disabled={busy || !draft.name.trim()} onClick={() => { const go = pending.go; void save().then(() => { setPending(undefined); go(); }).catch(() => undefined); }}>保存后继续</button></footer></Dialog> : null}</>;
+  {pending ? <Dialog title="尚有未保存修改" busy={busy} onClose={() => { setPending(undefined); onCancelTransition(); }}><p>保存修改后继续，或放弃本次修改。</p>{error ? <p className={styles.pickerError} role="alert">{error}</p> : null}<footer><button disabled={busy} onClick={() => { setPending(undefined); onCancelTransition(); }}>继续编辑</button><button disabled={busy} onClick={() => { const go = pending.go; setDraft(initialDraft()); setPending(undefined); go(); }}>放弃修改</button><button className={styles.primary} disabled={busy || !draft.name.trim()} onClick={() => { const go = pending.go; void save().then(() => { setPending(undefined); go(); }).catch(() => undefined); }}>保存后继续</button></footer></Dialog> : null}</>;
 }
 
 function Dialog({ title, children, onClose, busy = false, className = "", onKeyDown }: { title: string; children: ReactNode; onClose: () => void; busy?: boolean; className?: string; onKeyDown?: (event: React.KeyboardEvent<HTMLDialogElement>) => void }) {

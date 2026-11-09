@@ -1,6 +1,6 @@
 # Unified Library
 
-Last updated: 2026-11-06
+Last updated: 2026-11-09
 
 ## Canvas And Schedule Ordering
 
@@ -115,6 +115,8 @@ Image-only `/library` UX uses existing APIs and permission rules. No schema chan
 - Date-only ranges start at Beijing midnight, with `addedBefore` exclusive at the next day's midnight. Advanced edits apply atomically; search debounces 300ms. Filter changes clear selection with notice.
 - List and cursor writes require the current generation and live normalized query. Detail requests abort on ID change. Viewer stops at final boundaries, retains the image on cursor failure, and resets transforms on asset change.
 - Dirty metadata prompts save/discard before switch/close; save failure keeps draft. Shared read-only assets may still be favorited and organized into manageable collections.
+- Viewer owns one persistent native dialog. Requested asset and displayed asset remain separate until detail and original decoding succeed; loading/errors retain the old image and metadata, with explicit retry/cancel. Mutations are disabled during transitions. Abort guards reject late detail/decode responses, including after close/history navigation.
+- Attach the decoded HTMLImageElement itself to the editor's empty image surface in a layout effect; creating a second image with the same URL can still produce an empty frame. The surface is React-owned, its image child is managed exclusively by the effect and removed on cleanup. Asset-keyed editors reset drafts/transforms inside the stable shell; stage measurement runs before paint. Shell focus and mobile details visibility survive navigation.
 - Imports snapshot file/collection/visibility, run serially, retain every receipt for this page session, retry only on explicit action and cancel only queued work. Permanent delete snapshots selection and requires app confirmation; editable controls suppress Delete shortcuts.
 
 ### 4. Validation & Error Matrix
@@ -206,3 +208,7 @@ filtersToQuery({ vehicleModels: [model], includeDescendants: false, limit: 60 })
 ## Image color previews and filtering
 
 See [library_colors.md](./library_colors.md) for pixel extraction, independent indexed palette storage, explicit durable historical analysis, SQL/cursor contracts and Canvas integration.
+
+## Preview transition regression
+
+`python .trellis/verification/library_preview_browser_check.py` uses worker-disabled loopback `BROWSER_BASE_URL` (default 45678, rejects 3001), intercepted APIs/media and no external requests. Six theme/viewport cases sample every animation frame for dialog identity/geometry and decoded-image presence while holding details and originals independently. Also covers detail/original failures, retry/cancel, stale responses/history/close, initial failure, draft save/discard/cancel and save failure, keyboard focus, natural-size/fit and mobile details preservation. Retain `library_collection_batch_browser_check.py` and `library_colors_browser_check.py` regressions.

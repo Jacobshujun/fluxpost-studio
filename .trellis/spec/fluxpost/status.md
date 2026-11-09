@@ -4,11 +4,12 @@ Last updated: 2026-11-09
 
 ## One-Line Status
 
-Canvas history fix verified; LAN identity: `/api/version`.
+Gallery preview fixed; LAN identity: `/api/version`.
 
 ## Current Focus
 
-- Canvas history: `11-09-canvas-schedule-history-fix`; baseline/browser pass.
+- Gallery preview: checks pass; `11-09-gallery-preview-stable`.
+- Canvas history: `11-09-canvas-schedule-history-fix` verified.
 - Nov 6 text concatenation: 16 progressive inputs; baseline/six browser cases pass. Evidence: `archive/2026-11/11-06-canvas-text-concatenate/verification.md`. Operator acceptance pending.
 - Nov 6 library sorting/filter isolation: SQLite/PG, six browser flows and regressions pass. Contract: `unified_library.md`; evidence: `11-06-canvas-library-sorting`. Operator acceptance pending.
 - Nov 5 startup: Job independence/24-GiB heap, baseline and LAN activation pass. Evidence: `archive/2026-11/11-05-local-independent-runtime/verification.md`.
@@ -17,7 +18,6 @@ Canvas history fix verified; LAN identity: `/api/version`.
 - Nov 4 afternoon exit remains unattributed; recovery verified. Evidence: `archive/2026-11/11-04-local-afternoon-exit/findings.md`.
 - Batch creation: four-step V2 plus original V1/V2; personal favorites/aliases/notes, SQL search/paging and copy-to-edit. Wizard evidence: archived `11-04-batch-create-wizard`; favorites: `11-04-batch-task-favorites`. Operator acceptance pending. LAN release identity: `/api/version`.
 - Content editor Nov 9: work-area drop/paste and wheel zoom/drag pass baseline/six browser cases. Contract: `content_pool_editing.md`. Operator acceptance pending.
-- Temp files: 297/299 removed; two inventories kept.
 - Local diagnostics: logs <=100 MiB; reports <=3 / 7 days / 30 MiB. Baseline/Windows and authorized LAN startup/identity/flags/receipt/HTTP pass. Contract: `local_diagnostics.md`; evidence: `archive/2026-11/11-03-local-crash-logging/verification.md`.
 - Nov 4 OOM repair `514bf40`: Canvas SQL history returns 25 rows/~440 KiB instead of 171k/~3.49 GiB; reuse pages 32. SQLite/PG scale and baseline pass. Contract: `canvas_history.md`; evidence: `archive/2026-11/11-04-canvas-history-memory/verification.md`. Heap contract now in `local_diagnostics.md`; exact past fatal request unproven.
 - Feishu: eight reproduced risks (media omission, edit overwrite, path escape, deleted-post revival, record/lease persistence); fixes/live acceptance pending. Evidence: `11-03-feishu-publish-owner-recovery/code-review-2026-11-03.md`.
