@@ -8,6 +8,7 @@ Switch Any verified; operator acceptance pending. Runtime identity: `/api/versio
 
 ## Current Focus
 
+- High-resolution image processing: 100 MP input / full 8K output checks and baseline pass; local activation pending. Contract: `canvas_image_process.md`; task `11-10-high-resolution-image-processing`.
 - Switch Any: baseline/six browser cases pass; operator acceptance pending. Evidence: `archive/2026-11/11-10-canvas-switch-any/verification.md`; contract `canvas_switch_any.md`.
 - Gallery preview: checks pass; `11-09-gallery-preview-stable`.
 - Canvas history: `11-09-canvas-schedule-history-fix` verified.
@@ -39,7 +40,7 @@ OSS evidence: `.trellis/tasks/archive/2026-10/10-28-oss-acceptance-local-cutover
 
 ## Risks And Unknowns
 
-- Nov 10 batch-reference diagnosis: vehicle preprocessing rejects >40 MP originals; failed connected optional GPT image inputs can be omitted while generation continues. Baseline passes; evidence and repair directions: `archive/2026-11/11-10-batch-reference-image-investigation/findings.md`. No application repair or provider replay performed.
+- Nov 10 missing-reference diagnosis: high-resolution preprocessing repaired in `11-10-high-resolution-image-processing`; failed connected optional GPT inputs can still be omitted while generation continues (separate repair). Historical evidence: `archive/2026-11/11-10-batch-reference-image-investigation/findings.md`. No provider replay performed.
 - Desk scans ~46 MB light rows (~0.9 s); item edits rewrite project JSON. Below ~150 ms needs P2.
 - Latest Wonder report: ImportMedia `MediaAlreadyExist`. LAN ID reuse repair preserves GetMedia readiness and Overwrite=false; no manual live replay. See archived wonder-existing-media task; earlier auth cause unproven.
 - ESLint excludes local `data/` artifacts; lint passes with 0 errors/16 source warnings. Full baseline passes (2026-10-30); source rules and LAN unchanged.

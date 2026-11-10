@@ -16,7 +16,7 @@ Outputs rebuild name, MIME, dimensions and SHA; never retain source localPath or
 
 ## Validation and failure
 
-Static JPEG/PNG/WebP only; 1–20 items, 30 MiB per input, 40M decoded/output pixels, output edge <=8192. Animated/corrupt/oversized media and impossible targets fail the entire node with the item ordinal; no partial downstream artifact. Original media is never overwritten.
+Static JPEG/PNG/WebP only; 1–20 items, 30 MiB per input, 100M decoded input pixels, output edge <=8192 (up to 8192 x 8192 / 67,108,864 pixels). Input decoding and output geometry have separate budgets: 6K/8K sources can retain their original dimensions, while larger accepted inputs require an explicitly selected resize mode to fit the output budget. Input pixel validation occurs before resizing, so inputs over 100M pixels remain rejected even when a small output is selected. Never resize silently. Animated/corrupt/oversized media and impossible targets fail the entire node with the item ordinal; no partial downstream artifact. Original media is never overwritten.
 
 Sharp/libvips exposes animated WebP pages but not APNG animation in metadata. Check PNG chunks for `acTL` explicitly rather than silently processing its first frame; the real-byte contract check includes both formats.
 

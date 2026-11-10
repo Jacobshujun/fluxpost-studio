@@ -130,9 +130,29 @@ try {
   const apng = Buffer.concat([transparent.subarray(0, 33), animationControl, transparent.subarray(33)]);
   await assert.rejects(processor.encodeCanvasImage(apng, config()), /动画/);
   await assert.rejects(processor.encodeCanvasImage(Buffer.alloc(contract.IMAGE_PROCESS_LIMITS.bytes + 1), config()), /30 MB/);
-  await assert.rejects(processor.encodeCanvasImage(transparent, config({ resizeMode: "custom", width: 8192, height: 8192, fit: "cover" })), /4000 万/);
-  const oversized = await sharp({ create: { width: 6400, height: 6400, channels: 3, background: "white" } }).png().toBuffer();
-  await assert.rejects(processor.encodeCanvasImage(oversized, config()), /pixel limit/);
+  // Real 8K sources must support original-resolution compression, including square images.
+  for (const [width, height] of [[8192, 5464], [8192, 8192]]) {
+    const original = await sharp({ create: { width, height, channels: 3, background: "white" } }).jpeg().toBuffer();
+    const result = await processor.encodeCanvasImage(original, config());
+    const metadata = await sharp(result.buffer).metadata();
+    assert.deepEqual([result.sourceWidth, result.sourceHeight, result.width, result.height], [width, height, width, height]);
+    assert.deepEqual([metadata.format, metadata.width, metadata.height], ["jpeg", width, height]);
+  }
+  // Input and output budgets differ: above-8K input can be resized, never silently shrunk.
+  const largeSource = await sharp({ create: { width: 10000, height: 8000, channels: 3, background: "white" } }).jpeg().toBuffer();
+  await assert.rejects(processor.encodeCanvasImage(largeSource, config()), /8192.*缩放/);
+  const resizedLarge = await processor.encodeCanvasImage(largeSource, config({ resizeMode: "longest", longestEdge: 2160 }));
+  const resizedMetadata = await sharp(resizedLarge.buffer).metadata();
+  assert.deepEqual([resizedLarge.sourceWidth, resizedLarge.sourceHeight], [10000, 8000]);
+  assert.deepEqual([resizedMetadata.width, resizedMetadata.height], [2160, 1728]);
+  await assert.rejects(processor.encodeCanvasImage(largeSource, config({ resizeMode: "percent", scalePercent: 100 })), /8192.*缩放/);
+  const largeSourceFile = path.join(temp, "large-source.jpg"); writeFileSync(largeSourceFile, largeSource); sources.set("large-source", largeSourceFile);
+  const [processedLarge] = await processor.processCanvasImages([{ url: "large-source", name: "large-source.jpg" }], { resizeMode: "longest", longestEdge: 2160 }, "owner");
+  assert.deepEqual([processedLarge.width, processedLarge.height], [2160, 1728]);
+  assert.deepEqual([processedLarge.imageProcessing.sourceWidth, processedLarge.imageProcessing.sourceHeight], [10000, 8000]);
+  assert.equal(hash(readFileSync(largeSourceFile)), hash(largeSource), "High-resolution source bytes remain unchanged");
+  const overBudget = await sharp({ create: { width: 10001, height: 10000, channels: 3, background: "white" } }).png().toBuffer();
+  await assert.rejects(processor.encodeCanvasImage(overBudget, config({ resizeMode: "longest", longestEdge: 2160 })), /pixel limit/);
   assert.throws(() => config({ quality: 0 })); assert.throws(() => config({ compressionMode: "size", minQuality: 91 }));
   assert.throws(() => config({ format: "jpeg", background: "transparent" }));
   assert.equal(contract.imageProcessConfigKey({}), contract.imageProcessConfigKey({ width: 19, scalePercent: 33 }));

@@ -16,7 +16,7 @@ function isAnimatedPng(buffer) {
 async function encodeCanvasImage(buffer, config, IMAGE_PROCESS_LIMITS) {
     if (!buffer.length || buffer.length > IMAGE_PROCESS_LIMITS.bytes)
         throw new Error("图片为空或超过 30 MB。");
-    const options = { limitInputPixels: IMAGE_PROCESS_LIMITS.pixels, failOn: "warning" };
+    const options = { limitInputPixels: IMAGE_PROCESS_LIMITS.inputPixels, failOn: "warning" };
     const metadata = await sharp(buffer, options).metadata();
     if (!["jpeg", "png", "webp"].includes(metadata.format || ""))
         throw new Error("仅支持静态 JPEG、PNG、WebP 图片。");
@@ -44,8 +44,8 @@ async function encodeCanvasImage(buffer, config, IMAGE_PROCESS_LIMITS) {
             height = Math.max(1, Math.round(sourceHeight * scale));
         }
     }
-    if (Math.max(width, height) > IMAGE_PROCESS_LIMITS.edge || width * height > IMAGE_PROCESS_LIMITS.pixels)
-        throw new Error("输出超过 8192 像素边长或 4000 万像素，请调整分辨率。");
+    if (Math.max(width, height) > IMAGE_PROCESS_LIMITS.edge || width * height > IMAGE_PROCESS_LIMITS.outputPixels)
+        throw new Error(`输出边长不能超过 ${IMAGE_PROCESS_LIMITS.edge} 像素，请选择缩放模式或降低输出尺寸。`);
     let pipeline = sharp(buffer, options).autoOrient().toColourspace("srgb");
     if (config.format === "jpeg")
         pipeline = pipeline.flatten({ background: config.background });

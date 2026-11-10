@@ -1,6 +1,10 @@
 import type { CanvasNodeConfig } from "./types";
 
-export const IMAGE_PROCESS_LIMITS = { items: 20, bytes: 30 * 1024 * 1024, pixels: 40_000_000, edge: 8192 } as const;
+const maxOutputEdge = 8192;
+export const IMAGE_PROCESS_LIMITS = {
+  items: 20, bytes: 30 * 1024 * 1024,
+  inputPixels: 100_000_000, outputPixels: maxOutputEdge * maxOutputEdge, edge: maxOutputEdge,
+} as const;
 export type ImageProcessConfig = {
   format: "jpeg" | "png" | "webp";
   compressionMode: "quality" | "percent" | "size";
