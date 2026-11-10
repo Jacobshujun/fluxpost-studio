@@ -20,6 +20,7 @@ This layer is the project-specific operating memory migrated from the previous H
 | [verification.md](./verification.md) | Baseline and manual verification commands. |
 | [local_diagnostics.md](./local_diagnostics.md) | Bounded local server logs, fatal reports, retention and launcher contracts. |
 | [canvas_history.md](./canvas_history.md) | SQL latest-node history, bounded old-result reuse and memory regression checks. |
+| [canvas_switch_any.md](./canvas_switch_any.md) | Dynamic mixed-type selection, numeric-text index and runtime type checks. |
 | [batch_task_favorites.md](./batch_task_favorites.md) | Personal schedule favorites, SQL summary search/paging and copy flow. |
 | [review_desk.md](./review_desk.md) | Review filters, Beijing dates, image/card ordering and responsive layout. |
 | [content_pool_editing.md](./content_pool_editing.md) | Staged source edits, uploads, manual-field protection and cache ordering. |

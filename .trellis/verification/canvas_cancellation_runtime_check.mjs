@@ -1,3 +1,4 @@
+import { loadCanvasContract } from "./canvas-test-modules.mjs";
 import assert from "node:assert/strict";
 import { readFileSync } from "node:fs";
 import { createRequire } from "node:module";
@@ -75,6 +76,8 @@ const database = {
   requeueExpiredCanvasRunQueueItemsWithProviderTasks: async () => {},
 };
 const runtime = load("src/lib/canvas/runs.ts", {
+  "./input-validation": loadCanvasContract("src/lib/canvas/input-validation.ts"),
+  "./switch-any": loadCanvasContract("src/lib/canvas/switch-any.ts"),
   "../database": database,
   "../activity-log": { recordExecutionLog: async () => {} },
   "../workspace-ownership": { canAccessWorkspaceOwner: (actor, owner) => actor.id === owner },

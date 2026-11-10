@@ -77,7 +77,7 @@ try {
   writeFileSync(path.join(temp, "toapis-image-api.js"), `exports.toApisImageResolutions=['1k','2k','4k']; exports.toApisImageRatios = ${JSON.stringify(["1:1", "3:2", "2:3", "4:3", "3:4", "5:4", "4:5", "16:9", "9:16", "2:1", "1:2", "21:9", "9:21"])}; exports.toApis4kImageRatios = ${JSON.stringify(["16:9", "9:16", "2:1", "1:2", "21:9", "9:21"])};`, "utf8");
   writeFileSync(path.join(temp, "feishu-publish-mode.js"), "exports.feishuPublishModeOptions=[{value:'full',label:'完整写入'},{value:'text',label:'仅标题与正文'},{value:'media',label:'仅图片与视频'}];exports.normalizeFeishuPublishMode=(value)=>value===undefined?'full':['full','text','media'].includes(value)?value:(()=>{throw new Error('invalid mode')})();", "utf8");
   writeFileSync(path.join(temp, "wonder-image-contract.js"), ts.transpileModule(read("src/lib/wonder-image-contract.ts"), { compilerOptions: { module: ts.ModuleKind.CommonJS, target: ts.ScriptTarget.ES2022 } }).outputText);
-  for (const name of ["layer-compose-contract", "image-process-contract", "types", "node-utils", "source-video-contract", "video-loader", "content-collection", "save-images", "seedance-references", "subtitle-style", "subtitle-editor", "registry", "graph", "iteration", "serialization", "clipboard", "workflow-file", "editor-commands"]) {
+  for (const name of ["layer-compose-contract", "image-process-contract", "types", "node-utils", "source-video-contract", "video-loader", "content-collection", "save-images", "seedance-references", "subtitle-style", "subtitle-editor", "switch-any", "input-validation", "registry", "graph", "iteration", "serialization", "clipboard", "workflow-file", "editor-commands"]) {
     const source = read(`src/lib/canvas/${name}.ts`).replace('"../toapis-image-api"', '"./toapis-image-api"').replace('"../feishu-publish-mode"', '"./feishu-publish-mode"').replace('"../image-model-options"', '"./image-model-options"').replace('"../wonder-image-contract"', '"./wonder-image-contract"');
     const output = ts.transpileModule(source, {
       compilerOptions: { module: ts.ModuleKind.CommonJS, target: ts.ScriptTarget.ES2022 },
@@ -354,7 +354,7 @@ try {
     assert.equal(areCanvasPortKindsCompatible(kind, "any"), true, `${kind} output must connect to an any input`);
     assert.equal(areCanvasPortKindsCompatible(kind, kind), true, `${kind} must retain exact compatibility`);
   }
-  assert.equal(areCanvasPortKindsCompatible("any", "text"), false, "wildcard outputs must not connect to typed inputs");
+  assert.equal(areCanvasPortKindsCompatible("any", "text"), true, "polymorphic outputs defer concrete type checking to runtime");
   assert.equal(areCanvasPortKindsCompatible("images", "visual"), true, "image outputs must connect to visual inputs");
   assert.equal(areCanvasPortKindsCompatible("videos", "visual"), true, "video outputs must connect to visual inputs");
   assert.equal(areCanvasPortKindsCompatible("text", "visual"), false, "text outputs must not connect to visual inputs");
@@ -628,6 +628,8 @@ try {
     "resolveCanvasRunPlan", "findNode", "canReachNode", "runPlannedNode", "runBypassedNode", "resolveBypassOutputs", "bypassFailureMessage", "mergeArtifacts", "mergeCanvasImageBatchSummaries", "collectInputs", "missingRequiredInput", "saveTerminalNodeRun",
   ], "({ resolveCanvasRunPlan, runPlannedNode, resolveBypassOutputs, mergeArtifacts })", {
     getCanvasBypassRouting, getCanvasNodeDefinition, getCanvasNodeExecutionMode, buildCanvasRunPlan,
+    canvasInputTypeError: require(path.join(temp, "input-validation.js")).canvasInputTypeError,
+    resolveCanvasSwitchValue: require(path.join(temp, "switch-any.js")).resolveCanvasSwitchValue,
     iterateCanvasSuccessfulNodeRunsForNodeFromDb: async function* () {},
     canAccessWorkspaceOwner: () => true,
     resolveCanvasLiteralOutputs: (node) => node.id === modeSource.id ? { text: { kind: "text", value: node.config.text } } : undefined,

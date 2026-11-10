@@ -44,7 +44,8 @@ function validateCanvasGraphWithMode(graph: CanvasGraph, validateExecution: bool
       && (node.type === "input.images" || node.type === "input.library-images");
     const schedulerBoundCopyInput = node.schedulerRole === "copy-input" && node.type === "input.copy-library";
     if (validateExecution && executionMode === "enabled" && !schedulerBoundImageInput && !schedulerBoundCopyInput && !node.frozenOutputs) {
-      errors.push(...validateCanvasNodeConfig(node.type, node.config || {}, node.version));
+      const externallyIndexed = node.type === "utility.switch-any" && graph.edges.some((edge) => edge.target === node.id && edge.targetPort === "index");
+      errors.push(...validateCanvasNodeConfig(node.type, externallyIndexed ? { ...node.config, index: 0 } : node.config || {}, node.version));
     }
     if (!Number.isFinite(node.position?.x) || !Number.isFinite(node.position?.y)) errors.push(`Node ${node.id} has an invalid position.`);
     if (node.size !== undefined && !isCanvasNodeSize(node.size)) {
@@ -129,7 +130,7 @@ export function buildCanvasRunPlan(graph: CanvasGraph, targetNodeIds?: string[])
     const bypassRouting = executionMode === "bypass" ? getCanvasBypassRouting(node, availablePortIds) : undefined;
     if (bypassRouting?.error) return { nodeId, action: "blocked" as const, message: bypassRouting.error };
     const requiredInputs = node.frozenOutputs && executionMode !== "bypass" ? [] : getCanvasRequiredInputPorts(node, graph.edges.filter((edge) =>
-      edge.target === nodeId && availableOutputs.has(`${edge.source}:${edge.sourcePort}`),
+      edge.target === nodeId && (node.type === "utility.switch-any" || availableOutputs.has(`${edge.source}:${edge.sourcePort}`)),
     ).map((edge) => edge.targetPort));
     const missingInput = requiredInputs.find((input) => !graph.edges.some((edge) =>
       edge.target === nodeId

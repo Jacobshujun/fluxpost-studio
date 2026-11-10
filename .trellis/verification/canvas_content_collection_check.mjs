@@ -1,3 +1,4 @@
+import { loadCanvasContract } from "./canvas-test-modules.mjs";
 import assert from "node:assert/strict";
 import { createRequire } from "node:module";
 import { mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
@@ -23,7 +24,7 @@ try {
   writeFileSync(path.join(temp, "toapis-image-api.js"), "exports.toApisImageResolutions=['1k','2k','4k'];exports.toApisImageRatios=['1:1'];exports.toApis4kImageRatios=['16:9'];");
   writeFileSync(path.join(temp, "feishu-publish-mode.js"), "exports.feishuPublishModeOptions=[{value:'full',label:'full'}];exports.normalizeFeishuPublishMode=(value)=>value||'full';");
   writeFileSync(path.join(temp, "wonder-image-contract.js"), ts.transpileModule(read("src/lib/wonder-image-contract.ts"), { compilerOptions: { module: ts.ModuleKind.CommonJS, target: ts.ScriptTarget.ES2022 } }).outputText);
-  for (const name of ["layer-compose-contract", "image-process-contract", "types", "node-utils", "source-video-contract", "video-loader", "content-collection", "content-collection-schedule", "save-images", "seedance-references", "subtitle-style", "subtitle-editor", "registry", "graph", "iteration", "serialization", "workflow-file", "scheduler-v2"]) {
+  for (const name of ["layer-compose-contract", "image-process-contract", "types", "node-utils", "source-video-contract", "video-loader", "content-collection", "content-collection-schedule", "save-images", "seedance-references", "subtitle-style", "subtitle-editor", "switch-any", "input-validation", "registry", "graph", "iteration", "serialization", "workflow-file", "scheduler-v2"]) {
     writeFileSync(path.join(temp, "image-model-options.js"), ts.transpileModule(read("src/lib/image-model-options.ts"), { compilerOptions: { module: ts.ModuleKind.CommonJS, target: ts.ScriptTarget.ES2022 } }).outputText);
     const source = read(`src/lib/canvas/${name}.ts`).replace('"../toapis-image-api"', '"./toapis-image-api"').replace('"../feishu-publish-mode"', '"./feishu-publish-mode"').replace('"../image-model-options"', '"./image-model-options"').replace('"../wonder-image-contract"', '"./wonder-image-contract"');
     writeFileSync(path.join(temp, `${name}.js`), transpile(source));
@@ -87,6 +88,7 @@ try {
   let failedImage;
   modules["../gpt-image-dimensions"] = { pixelSizeForRatio: () => "1024x1024" };
   modules["./registry"] = registry;
+  modules["./input-validation"] = loadCanvasContract("src/lib/canvas/input-validation.ts");
   modules["./node-utils"] = require(path.join(temp, "node-utils.js"));
   modules["./content-collection-service"] = service;
   modules["../concurrency"] = { mapWithConcurrency: async (items, _limit, action) => Promise.all(items.map(action)) };

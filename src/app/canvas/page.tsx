@@ -19,6 +19,7 @@ import { AlertTriangle, ArrowDown, ArrowUp, BookOpenText, Captions, CheckCircle2
 import { createContext, memo, useCallback, useContext, useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
 import { CANVAS_CLIPBOARD_MIME, createCanvasClipboardPayload, parseCanvasClipboardPayload, prepareCanvasClipboardPaste, type CanvasClipboardPayload } from "@/lib/canvas/clipboard";
 import { canvasNodeDefinitions, canvasTextConcatenatePortIds, createCanvasNode, getCanvasNodeDefinition, getCanvasNodeExecutionMode, getCanvasVisibleInputPorts } from "@/lib/canvas/registry";
+import { parseCanvasSwitchIndex } from "@/lib/canvas/switch-any";
 import { pixelSizeForRatio } from "@/lib/gpt-image-dimensions";
 import { toApisImageRatios, toApisImageResolutions } from "@/lib/toapis-image-api";
 import { ImageModelSelector } from "@/components/image-model-selector";
@@ -1961,7 +1962,11 @@ const CanvasFlowNode = memo(function CanvasFlowNode({ data, selected }: NodeProp
     {node.type === "compose.social-post" ? <CanvasCompositionNodeResult nodeRun={nodeRun} latestSuccessful={latestSuccessful} /> : null}
     </div>
     <div className="canvas-node-ports">
-      {portRows.map(({ input, output }, index) => <div className="canvas-port-row" key={`${input?.id || "none"}-${output?.id || "none"}-${index}`}>
+      {portRows.map(({ input, output }, index) => node.type === "utility.switch-any" && input?.id === "index" ? <div className="canvas-port canvas-port-input canvas-switch-index-row" key="index">
+        <Handle type="target" position={Position.Left} id="index" />
+        <span>index</span>
+        <CanvasSwitchIndexControl node={node} connected={connections.some((connection) => connection.targetHandle === "index")} onChange={(value) => interaction?.onConfigChange(node.id, "index", value)} />
+      </div> : <div className="canvas-port-row" key={`${input?.id || "none"}-${output?.id || "none"}-${index}`}>
         {input ? <div className="canvas-port canvas-port-input"><Handle type="target" position={Position.Left} id={input.id} /><span>{input.label}</span></div> : <span />}
         {output ? <div className="canvas-port canvas-port-output"><span>{output.label}</span><Handle type="source" position={Position.Right} id={output.id} /></div> : <span />}
       </div>)}
@@ -1969,13 +1974,30 @@ const CanvasFlowNode = memo(function CanvasFlowNode({ data, selected }: NodeProp
   </div>;
 });
 
+function CanvasSwitchIndexControl({ node, connected, onChange }: { node: CanvasNode; connected: boolean; onChange: (value: string | number) => void }) {
+  const value = node.config.index;
+  const valid = parseCanvasSwitchIndex(value) !== undefined;
+  return <div className="canvas-switch-index-controls nodrag nopan nowheel"
+    title={connected ? "采用上游数字文本；断开后恢复手动 index" : "从 0 开始选择 value 编号"}
+    onPointerDown={(event) => event.stopPropagation()} onClick={(event) => event.stopPropagation()}
+    onDoubleClick={(event) => event.stopPropagation()} onKeyDown={(event) => event.stopPropagation()}
+    onKeyUp={(event) => event.stopPropagation()} onWheel={(event) => event.stopPropagation()}>
+    <button type="button" aria-label="减小 index" disabled={connected || !valid || Number(value) === 0} onClick={() => onChange(Number(value) - 1)}>−</button>
+    <input aria-label="Switch Any index" type="number" min={0} max={CANVAS_GRAPH_LIMITS.maxEdges} step={1}
+      disabled={connected} value={String(value ?? "")} aria-invalid={!connected && !valid}
+      onChange={(event) => onChange(/^\d+$/.test(event.target.value) ? Number(event.target.value) : event.target.value)} />
+    <button type="button" aria-label="增大 index" disabled={connected || !valid || Number(value) === CANVAS_GRAPH_LIMITS.maxEdges} onClick={() => onChange(Number(value) + 1)}>+</button>
+    {connected ? <small>上游控制</small> : null}
+  </div>;
+}
+
 function CanvasIterationOutputSelectors({ node, onChange }: { node: CanvasNode; onChange: (iteration: CanvasIterationDefinition) => void }) {
   const iteration = node.iteration;
   if (!iteration) return <p role="alert">区域缺少内层流程，请检查工作流文件。</p>;
   return <div className="canvas-iteration-outputs">
     {(["text", "images"] as const).map((kind) => {
       const candidates = iteration.graph.nodes.flatMap((inner) => getCanvasIterationOutputPorts(inner)
-        .filter((port) => port.kind === kind)
+        .filter((port) => port.kind === kind || port.kind === "any")
         .map((port) => ({ nodeId: inner.id, outputPort: port.id, label: `${inner.label || getCanvasNodeDefinition(inner.type, inner.version)?.label} · ${port.label}` })));
       const selected = iteration.outputs[kind];
       const value = selected ? JSON.stringify([selected.nodeId, selected.outputPort]) : "";
@@ -3067,6 +3089,7 @@ function CanvasNodeFields({ node, onChange, onPatch, onPreviewImage }: {
 }) {
   const definition = getCanvasNodeDefinition(node.type, node.version);
   if (!definition) return null;
+  if (node.type === "utility.switch-any") return <p className="canvas-switch-inspector-hint">在节点底部调整 index（从 0 开始），或连接一条数字文本。连接后采用上游值。</p>;
   if (node.type === "utility.save-images") return <>{definition.fields.map((field) => <CanvasSaveImageTextField
     key={`${node.id}:${field.key}`} label={field.label} value={String(node.config[field.key] ?? "")} placeholder={field.placeholder}
     onChange={(value) => onChange(field.key, value)} />)}</>;
@@ -5222,7 +5245,7 @@ function quickAddChoices(connection: QuickAddConnection | undefined, edges: Flow
     if (definition.type === "input.iteration-item") return [];
     if (!connection) return [{ definition }];
     const ports = connection.handleType === "source"
-      ? definition.type === "model.gpt-image" || definition.type === "model.wonder-image" ? getCanvasVisibleInputPorts(createCanvasNode(definition.type, "input-preview", { x: 0, y: 0 })) : definition.inputs
+      ? definition.type === "model.gpt-image" || definition.type === "model.wonder-image" || definition.type === "utility.switch-any" ? getCanvasVisibleInputPorts(createCanvasNode(definition.type, "input-preview", { x: 0, y: 0 })) : definition.inputs
       : definition.type === "utility.image-iterate" ? getCanvasIterationOutputPorts(createCanvasNode(definition.type, "iteration-preview", { x: 0, y: 0 })) : definition.outputs;
     return ports.filter((port) => isQuickAddPortCompatible(connection, port)).map((port) => ({ definition, port }));
   });
@@ -5543,6 +5566,7 @@ function iconForNode(type: CanvasNodeType) {
   if (type === "utility.prompt-template") return <FileText {...props} />;
   if (type === "utility.text-concatenate") return <Combine {...props} />;
   if (type === "utility.prompt-switch") return <GitBranch {...props} />;
+  if (type === "utility.switch-any") return <GitBranch {...props} />;
   if (type === "utility.text-split") return <Scissors {...props} />;
   if (type === "utility.image-select") return <ImageIcon {...props} />;
   if (type === "utility.image-transform") return <Maximize2 {...props} />;

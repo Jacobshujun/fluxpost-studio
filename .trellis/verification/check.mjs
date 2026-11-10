@@ -10,6 +10,7 @@ const npmCommand = process.platform === "win32" ? "npm.cmd" : "npm";
 const npxCommand = process.platform === "win32" ? "npx.cmd" : "npx";
 
 const nodeChecks = [
+  ["Canvas Switch Any selection and runtime types", "canvas_switch_any_check.mjs"],
     ["Canvas schedule favorites and paged search", "canvas_schedule_favorites_check.mjs"],
   ["Guided batch creation contracts", "batch_create_check.mjs"],
   ["Canvas bounded history and reuse", "canvas_history_memory_check.mjs"],

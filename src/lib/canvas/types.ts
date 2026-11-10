@@ -7,7 +7,8 @@ export type CanvasArtifactKind = "text" | "images" | "audios" | "videos" | "soci
 export type CanvasPortKind = CanvasArtifactKind | "any" | "visual";
 
 export function areCanvasPortKindsCompatible(outputKind: CanvasPortKind, inputKind: CanvasPortKind) {
-  if (outputKind === "any" || outputKind === "visual") return false;
+  if (outputKind === "visual") return false;
+  if (outputKind === "any") return true;
   return inputKind === "any"
     || outputKind === inputKind
     || (inputKind === "visual" && (outputKind === "images" || outputKind === "videos"));
@@ -332,6 +333,7 @@ export type CanvasNodeType =
   | "utility.video-subtitles"
   | "utility.prompt-template"
   | "utility.text-concatenate"
+  | "utility.switch-any"
   | "utility.prompt-switch"
   | "utility.text-split"
   | "utility.image-select"

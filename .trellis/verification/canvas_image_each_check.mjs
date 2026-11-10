@@ -1,3 +1,4 @@
+import { loadCanvasContract } from "./canvas-test-modules.mjs";
 import assert from "node:assert/strict";
 import { createRequire } from "node:module";
 import { readFileSync } from "node:fs";
@@ -56,6 +57,7 @@ new Function("module", "exports", ts.transpileModule(read("src/lib/canvas/layer-
   compilerOptions: { module: ts.ModuleKind.CommonJS, target: ts.ScriptTarget.ES2022 },
 }).outputText)(layerContractModule, layerContractModule.exports);
 const registryStubs = {
+  "./switch-any": loadCanvasContract("src/lib/canvas/switch-any.ts"),
   "./layer-compose-contract": layerContractModule.exports,
   "../image-model-options": modelModule.exports,
   "../gpt-image-dimensions": { pixelSizeForRatio: () => "1024x1024" },
@@ -164,6 +166,7 @@ const stubs = {
   "./media-tools": { CanvasMediaNeedsConfigError: class extends Error {}, extractCanvasVideoFrames: noopAsync, reconstructCanvasVideo: noopAsync, transformCanvasImages: noopAsync },
   "./node-utils": { canvasVisionPresets: {}, concatenateCanvasText: () => "", parseCanvasImageSelection: () => [], renderCanvasPromptTemplate: () => "", splitCanvasText: () => ({ tail: "" }) },
   "./registry": registryModule.exports,
+  "./input-validation": loadCanvasContract("src/lib/canvas/input-validation.ts"),
   "./save-images": { CANVAS_SAVE_IMAGE_MAX_ITEMS: 30 },
   "./source-video-contract": { canvasSourceVideoSnapshotFromConfig: () => undefined, isCanvasSourceVideoSnapshotCurrent: () => false },
   "./subtitle-style": { canvasSubtitleStyleFromConfig: () => ({}) },

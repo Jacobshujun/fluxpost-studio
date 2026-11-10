@@ -452,7 +452,7 @@
       ],
       "evidence": [
         "2026-11-06 library sorting/filter isolation: SQLite/PG, six browser flows and regressions/baseline pass; 11-06-canvas-library-sorting, unified_library.md.",
-        "Prior content-pool/model-routing verification: archive/verification-history.md."
+        "2026-11-10 Switch Any baseline/six browser cases pass; operator acceptance pending. Contract: canvas_switch_any.md; prior history: archive/verification-history.md."
       ],
       "notes": "Live provider/Feishu runs and an authenticated multi-user PostgreSQL launcher-attribution walkthrough remain."
     },

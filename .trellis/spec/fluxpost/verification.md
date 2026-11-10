@@ -48,6 +48,9 @@ isolated browser/PG commands: `batch_task_favorites.md`.
 capture, native report privacy, I/O failure continuation and Windows detached
 launcher behavior with isolated fixtures. Contract: `local_diagnostics.md`.
 
+Switch Any: baseline includes `canvas_switch_any_check.mjs`; isolated browser
+command and numeric-text/runtime type contract: `canvas_switch_any.md`.
+
 ## Candidate Release Checks
 
 For a production candidate:

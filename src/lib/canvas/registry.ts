@@ -14,6 +14,7 @@ import { decodeCanvasSubtitleRevisionSnapshot } from "./subtitle-editor";
 import { validateCanvasVideoLoaderConfig } from "./video-loader";
 import { validateCanvasCollectionConfig } from "./content-collection";
 import { createCanvasIterationDefinition } from "./iteration";
+import { canvasSwitchValuePortIds, parseCanvasSwitchIndex } from "./switch-any";
 import { buildWonderImageRequest, validateWonderEndpoint, WONDER_IMAGE_DEFAULT_ENDPOINT, WONDER_IMAGE_DEFAULT_MODEL, WONDER_IMAGE_MAX_REFERENCES } from "../wonder-image-contract";
 
 export const canvasGptImageReferencePortIds = Array.from({ length: 16 }, (_, index) => `image_${index + 1}`);
@@ -22,6 +23,18 @@ export const canvasWonderImageReferencePortIds = canvasGptImageReferencePortIds.
 export const canvasTextConcatenatePortIds = Array.from({ length: 16 }, (_, index) => `text_${String.fromCharCode(97 + index)}`);
 
 const canvasNodeDefinitionVersions: CanvasNodeDefinition[] = [
+  {
+    type: "utility.switch-any", version: 1, label: "Switch Any（编号切换）",
+    description: "按从 0 开始的 index 原样输出一路值；index 可连接数字文本。其他上游按正常流程执行。",
+    category: "utility", icon: "GitBranch", color: "#0891b2",
+    inputs: [
+      ...canvasSwitchValuePortIds.map((id): CanvasPortDefinition => ({ id, label: id, kind: "any" })),
+      { id: "index", label: "index", kind: "text" },
+    ],
+    outputs: [{ id: "value", label: "value", kind: "any" }],
+    fields: [{ key: "index", label: "index", kind: "number", min: 0, max: canvasSwitchValuePortIds.length - 1 }],
+    defaultConfig: { index: 0 },
+  },
   {
     type: "utility.image-iterate", version: 1, label: "逐图迭代", description: "对 1–18 张图片分别执行内部流程，按原顺序汇总结果。",
     category: "utility", icon: "Repeat", color: "#0f9f7f",
@@ -823,6 +836,11 @@ export function resolveCanvasWonderImageReferences(node: CanvasNode, inputs: Rec
 
 export function getCanvasVisibleInputPorts(node: CanvasNode, connectedPortIds: Iterable<string> = []): CanvasPortDefinition[] {
   const inputs = getCanvasNodeDefinition(node.type, node.version)?.inputs || [];
+  if (node.type === "utility.switch-any") {
+    const connected = new Set(connectedPortIds);
+    const lastConnected = canvasSwitchValuePortIds.findLastIndex((id) => connected.has(id));
+    return [...inputs.slice(0, Math.min(lastConnected + 2, canvasSwitchValuePortIds.length)), inputs[inputs.length - 1]];
+  }
   if (node.type !== "utility.text-concatenate" && node.type !== "model.wonder-image" && node.type !== "utility.image-iterate" && (node.type !== "model.gpt-image" || node.version < 2)) return inputs;
   const referencePortIds = node.type === "utility.text-concatenate" ? canvasTextConcatenatePortIds
     : node.type === "model.wonder-image" ? canvasWonderImageReferencePortIds : canvasGptImageReferencePortIds;
@@ -840,6 +858,16 @@ export function getCanvasBypassRouting(node: CanvasNode, availablePortIds: Itera
   const label = `${node.label?.trim() || definition?.label || node.type} (${node.id})`;
   if (!definition) return { routes: [], error: `${label}: unknown node type.` };
   const available = new Set(availablePortIds);
+  if (node.type === "utility.switch-any") {
+    // A connected index is resolved at runtime; never merge the value inputs.
+    if (available.has("index")) return { routes: [{ inputPorts: ["index"], outputPort: "value" }] };
+    const index = parseCanvasSwitchIndex(node.config.index);
+    const inputPort = `value${index}`;
+    return {
+      routes: [{ inputPorts: [inputPort], outputPort: "value" }],
+      ...(index === undefined || !available.has(inputPort) ? { error: `${label}: index 无效或选中的 ${inputPort} 没有可用结果。` } : {}),
+    };
+  }
   if (definition.bypass) {
     let inputPorts = [definition.bypass.inputPort];
     if (node.type === "model.wonder-image" || (node.type === "model.gpt-image" && node.version >= 2)) {
@@ -872,6 +900,11 @@ export function getCanvasBypassRouting(node: CanvasNode, availablePortIds: Itera
 
 export function getCanvasRequiredInputPorts(node: CanvasNode, availablePortIds: Iterable<string>): CanvasPortDefinition[] {
   const definition = getCanvasNodeDefinition(node.type, node.version);
+  if (node.type === "utility.switch-any") {
+    const available = new Set(availablePortIds);
+    const selected = available.has("index") ? "index" : `value${parseCanvasSwitchIndex(node.config.index)}`;
+    return definition?.inputs.filter((input) => input.id === selected) || [];
+  }
   if (getCanvasNodeExecutionMode(node) === "bypass") {
     const routing = getCanvasBypassRouting(node, availablePortIds);
     // Ordered reference inputs are alternatives, not individually required ports.
@@ -1153,6 +1186,7 @@ export function validateCanvasNodeConfig(type: CanvasNodeType, config: CanvasNod
   const definition = getCanvasNodeDefinition(type, version);
   if (!definition) return [`Unknown canvas node type: ${type}`];
   const errors: string[] = [];
+  if (type === "utility.switch-any" && parseCanvasSwitchIndex(config.index) === undefined) errors.push("Switch Any: index 必须是有效的非负十进制整数。");
   if (type === "model.qwen-image") {
     if (!String(config.endpoint || "").trim()) errors.push("Qwen: 请在节点中填写请求地址。");
     if (!Number.isInteger(config.count)) errors.push("Qwen: 图片数量必须为整数。");

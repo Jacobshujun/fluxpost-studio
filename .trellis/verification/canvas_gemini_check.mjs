@@ -1,3 +1,4 @@
+import { loadCanvasContract } from "./canvas-test-modules.mjs";
 import assert from "node:assert/strict";
 import { createRequire } from "node:module";
 import { readFileSync } from "node:fs";
@@ -199,6 +200,7 @@ try {
   executorImports["../gemini"] = load("src/lib/gemini.ts");
   executorImports["./node-utils"] = load("src/lib/canvas/node-utils.ts");
   executorImports["./registry"] = registry;
+  executorImports["./input-validation"] = loadCanvasContract("src/lib/canvas/input-validation.ts");
   Function("require", "module", "exports", ts.transpileModule(executorSource, { compilerOptions: { module: ts.ModuleKind.CommonJS, target: ts.ScriptTarget.ES2022, esModuleInterop: true } }).outputText)(
     (name) => name.startsWith("node:") ? require(name) : executorImports[name], executorModule, executorModule.exports);
   const context = { node, account, runId: "fixture-run", inputs: {

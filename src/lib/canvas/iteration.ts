@@ -5,7 +5,7 @@ import type { CanvasArtifact, CanvasGraph, CanvasIterationDefinition, CanvasNode
 
 export const canvasIterationAllowedNodeTypes: readonly CanvasNodeType[] = [
   "input.iteration-item", "input.text", "input.images", "model.gpt-text", "model.gemini", "model.gpt-image", "model.qwen-image", "model.wonder-image", "model.gpt-vision",
-  "utility.prompt-template", "utility.text-concatenate", "utility.prompt-switch", "utility.text-split",
+  "utility.prompt-template", "utility.text-concatenate", "utility.switch-any", "utility.prompt-switch", "utility.text-split",
   "utility.image-select", "utility.image-transform", "utility.image-process", "utility.media-mask", "utility.image-preview", "utility.display-any",
 ];
 
@@ -88,7 +88,7 @@ export function validateCanvasIteration(node: CanvasNode, validateExecution = tr
     if (kind !== "text" && kind !== "images") { errors.push(`Unsupported iteration output: ${kind}.`); continue; }
     const selected = selector && children.find((child) => child.id === selector.nodeId);
     const port = selected && getCanvasNodeDefinition(selected.type, selected.version)?.outputs.find((output) => output.id === selector.outputPort);
-    if (!selected || !port || port.kind !== kind) errors.push(`Iteration ${kind} output must select a matching inner node port.`);
+    if (!selected || !port || (port.kind !== kind && port.kind !== "any")) errors.push(`Iteration ${kind} output must select a matching inner node port.`);
     else if (validateExecution && !node.frozenOutputs && getCanvasNodeExecutionMode(selected) === "disabled") errors.push(`Iteration ${kind} output selects disabled node ${selected.id}.`);
   }
   const budget = getCanvasGraphBudget({ nodes: [node], edges: [] });

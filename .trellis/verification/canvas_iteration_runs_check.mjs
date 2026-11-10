@@ -1,3 +1,4 @@
+import { loadCanvasContract } from "./canvas-test-modules.mjs";
 import assert from "node:assert/strict";
 import { createRequire } from "node:module";
 import { readFileSync } from "node:fs";
@@ -50,6 +51,8 @@ const registry = {
   getCanvasRequiredInputPorts: (node) => registry.getCanvasNodeDefinition(node.type).inputs.filter((port) => port.required),
 };
 const runtime = load("src/lib/canvas/runs.ts", {
+  "./input-validation": loadCanvasContract("src/lib/canvas/input-validation.ts"),
+  "./switch-any": loadCanvasContract("src/lib/canvas/switch-any.ts"),
   "./iteration": load("src/lib/canvas/iteration.ts", { "./registry": registry, "./graph": graphModule, "./types": {} }),
   "./layer-compose-contract": load("src/lib/canvas/layer-compose-contract.ts", {}),
   "../database": database, "../activity-log": {},

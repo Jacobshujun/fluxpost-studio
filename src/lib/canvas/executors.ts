@@ -1,3 +1,5 @@
+import { canvasInputTypeError } from "./input-validation";
+import { resolveCanvasSwitchValue } from "./switch-any";
 import { createHash, randomUUID } from "node:crypto";
 import { mapWithConcurrency } from "../concurrency";
 import { enqueueFeishuPublishJob, ensureFeishuPublishQueueWorker } from "../feishu-publish-queue";
@@ -115,6 +117,11 @@ const executors: Record<CanvasNode["type"], CanvasNodeExecutor> = {
   "utility.video-subtitles": executeVideoSubtitles,
   "utility.prompt-template": executePromptTemplate,
   "utility.text-concatenate": executeTextConcatenate,
+  "utility.switch-any": async ({ node, inputs }) => {
+    const selection = resolveCanvasSwitchValue(node, inputs);
+    if (selection.error !== undefined) throw new Error(selection.error);
+    return { outputs: { value: selection.artifact } };
+  },
   "utility.prompt-switch": executePromptSwitch,
   "utility.text-split": executeTextSplit,
   "utility.image-select": executeImageSelect,
@@ -136,6 +143,8 @@ const executors: Record<CanvasNode["type"], CanvasNodeExecutor> = {
 };
 
 export async function executeCanvasNode(context: CanvasNodeExecutionContext) {
+  const typeError = canvasInputTypeError(context.node, context.inputs);
+  if (typeError) throw new Error(typeError);
   return executors[context.node.type](context);
 }
 

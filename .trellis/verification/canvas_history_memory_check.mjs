@@ -117,7 +117,7 @@ try {
     createHash,
     buildCanvasRunPlan: () => ({ order: ["node", "target"], blockers: [], confirmationNodeIds: [] }),
     findNode: (nodes, id) => nodes.find((node) => node.id === id), getCanvasNodeDefinition: () => ({ label: "Fixture" }),
-    collectInputs: () => ({}), getCanvasNodeExecutionMode: () => "enabled", missingRequiredInput: () => undefined,
+    canvasInputTypeError: () => undefined, collectInputs: () => ({}), getCanvasNodeExecutionMode: () => "enabled", missingRequiredInput: () => undefined,
     resolveCanvasLiteralOutputs: () => undefined, iterateCanvasSuccessfulNodeRunsForNodeFromDb: db.iterateCanvasSuccessfulNodeRunsForNodeFromDb,
     canAccessWorkspaceOwner: (account, owner) => owner === account.id,
   });

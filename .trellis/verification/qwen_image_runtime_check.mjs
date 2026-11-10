@@ -1,3 +1,4 @@
+import { loadCanvasContract } from "./canvas-test-modules.mjs";
 import assert from "node:assert/strict";
 import { createRequire } from "node:module";
 import { readFileSync } from "node:fs";
@@ -116,6 +117,7 @@ try {
   const executorSource = readFileSync(path.join(root, "src/lib/canvas/executors.ts"), "utf8");
   const executorModule = { exports: {} };
   const imports = Object.fromEntries([...executorSource.matchAll(/from "([^"\n]+)"/g)].map((match) => [match[1], {}]));
+  imports["./input-validation"] = loadCanvasContract("src/lib/canvas/input-validation.ts");
   let executorInput;
   imports["../qwen-image"] = { generateQwenImages: async (input) => { executorInput = input; return [{ url: "/generated/fixture.png" }]; } };
   imports["./qwen-credentials"] = credentials;

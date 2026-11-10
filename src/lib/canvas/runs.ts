@@ -1,3 +1,5 @@
+import { canvasInputTypeError } from "./input-validation";
+import { resolveCanvasSwitchValue } from "./switch-any";
 import { createHash, randomUUID } from "node:crypto";
 import {
   cancelCanvasRunInDb,
@@ -144,7 +146,7 @@ async function resolveCanvasRunPlan(
     const node = findNode(graph.nodes, nodeId);
     const definition = getCanvasNodeDefinition(node.type, node.version);
     if (!definition) continue;
-    const inputs = collectInputs(graph.edges, node.id, outputs, node.type === "utility.layer-compose");
+    const inputs = collectInputs(graph.edges, node.id, outputs, node.type === "utility.layer-compose", node.type === "utility.switch-any");
     const mode = getCanvasNodeExecutionMode(node);
 
     if (mode === "disabled") {
@@ -153,7 +155,19 @@ async function resolveCanvasRunPlan(
       if (message) blockers.push({ nodeId, message });
       continue;
     }
+    const typeError = canvasInputTypeError(node, inputs);
+    if (typeError) {
+      steps.push({ nodeId, action: "blocked", message: typeError });
+      blockers.push({ nodeId, message: typeError });
+      continue;
+    }
     if (mode === "bypass") {
+      const selectionError = node.type === "utility.switch-any" ? resolveCanvasSwitchValue(node, inputs).error : undefined;
+      if (selectionError) {
+        steps.push({ nodeId, action: "blocked", message: selectionError });
+        blockers.push({ nodeId, message: selectionError });
+        continue;
+      }
       const output = resolveBypassOutputs(node, inputs);
       if (!output) {
         const message = bypassFailureMessage(node, inputs);
@@ -717,7 +731,7 @@ async function runPlannedNode(
   outputs: Map<string, Record<string, CanvasArtifact>>,
   signal?: AbortSignal,
 ) {
-  const inputs = collectInputs(run.graphSnapshot.edges, node.id, outputs, node.type === "utility.layer-compose");
+  const inputs = collectInputs(run.graphSnapshot.edges, node.id, outputs, node.type === "utility.layer-compose", node.type === "utility.switch-any");
   if (run.iterationRepairing && !run.iterationRefreshRegionIds?.length && !run.retryNodeIds?.includes(node.id)) {
     const existing = latest.get(node.id);
     if (existing) return { nodeId: node.id, nodeRun: existing };
@@ -730,6 +744,11 @@ async function runPlannedNode(
   }
   if (step.action === "blocked") {
     const nodeRun = await saveTerminalNodeRun(run, node, latest, "blocked", {}, step.message || "Canvas node was blocked during preflight.", inputs);
+    return { nodeId: node.id, nodeRun };
+  }
+  const typeError = canvasInputTypeError(node, inputs);
+  if (typeError) {
+    const nodeRun = await saveTerminalNodeRun(run, node, latest, "blocked", {}, typeError, inputs);
     return { nodeId: node.id, nodeRun };
   }
   if (step.action === "reuse") return runReusedNode(run, node, step, latest, inputs);
@@ -1012,9 +1031,10 @@ async function saveTerminalNodeRun(
   });
 }
 
-function collectInputs(edges: CanvasEdge[], targetNodeId: string, outputs: Map<string, Record<string, CanvasArtifact>>, compose = false) {
+function collectInputs(edges: CanvasEdge[], targetNodeId: string, outputs: Map<string, Record<string, CanvasArtifact>>, compose = false, switchAny = false) {
   const result: Record<string, CanvasArtifact[]> = {};
   for (const edge of edges.filter((item) => item.target === targetNodeId)) {
+    if (switchAny && edge.targetPort === "index") result.index ||= [];
     const artifact = outputs.get(edge.source)?.[edge.sourcePort];
     if (artifact) (result[edge.targetPort] ||= []).push(compose ? bindComposeInput(artifact, edge.source, edge.sourcePort) : artifact);
   }
@@ -1022,11 +1042,16 @@ function collectInputs(edges: CanvasEdge[], targetNodeId: string, outputs: Map<s
 }
 
 function missingRequiredInput(node: CanvasNode, inputs: Record<string, CanvasArtifact[]>) {
-  const requiredInputs = getCanvasRequiredInputPorts(node, Object.keys(inputs).filter((id) => inputs[id].length));
+  const requiredInputs = getCanvasRequiredInputPorts(node, Object.keys(inputs).filter((id) => inputs[id].length || (node.type === "utility.switch-any" && id === "index")));
   return requiredInputs?.find((input) => !(inputs[input.id] || []).length)?.label;
 }
 
 function resolveBypassOutputs(node: CanvasNode, inputs: Record<string, CanvasArtifact[]>): Record<string, CanvasArtifact> | undefined {
+  if (node.type === "utility.switch-any") {
+    const selection = resolveCanvasSwitchValue(node, inputs);
+    if (selection.error !== undefined) throw new Error(selection.error);
+    return { value: selection.artifact };
+  }
   const definition = getCanvasNodeDefinition(node.type, node.version);
   const bypass = definition?.bypass;
   if (!definition) return undefined;
