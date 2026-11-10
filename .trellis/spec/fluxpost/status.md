@@ -39,6 +39,7 @@ OSS evidence: `.trellis/tasks/archive/2026-10/10-28-oss-acceptance-local-cutover
 
 ## Risks And Unknowns
 
+- Nov 10 batch-reference diagnosis: vehicle preprocessing rejects >40 MP originals; failed connected optional GPT image inputs can be omitted while generation continues. Baseline passes; evidence and repair directions: `archive/2026-11/11-10-batch-reference-image-investigation/findings.md`. No application repair or provider replay performed.
 - Desk scans ~46 MB light rows (~0.9 s); item edits rewrite project JSON. Below ~150 ms needs P2.
 - Latest Wonder report: ImportMedia `MediaAlreadyExist`. LAN ID reuse repair preserves GetMedia readiness and Overwrite=false; no manual live replay. See archived wonder-existing-media task; earlier auth cause unproven.
 - ESLint excludes local `data/` artifacts; lint passes with 0 errors/16 source warnings. Full baseline passes (2026-10-30); source rules and LAN unchanged.

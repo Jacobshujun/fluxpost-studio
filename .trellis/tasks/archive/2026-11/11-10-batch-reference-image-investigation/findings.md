@@ -28,6 +28,6 @@ Repair should separately address high-resolution input handling (bounded decode 
 
 ## Verification
 
-The existing deterministic baseline passed on 2026-11-10: offline contracts, ESLint (zero errors / 16 existing warnings), TypeScript, production build, isolated HTTP smoke on port 45678, and SQLite checks. Local ignored log: `test-artifacts/reference-image-investigation-baseline.log`. No application code changed.
+The existing deterministic baseline passed on 2026-11-10: offline contracts, ESLint (zero errors / 15 warnings), TypeScript, production build, isolated HTTP smoke on port 45678, and SQLite checks. Local ignored log: `test-artifacts/reference-image-investigation-baseline.log`. No application code changed.
 
 Queries used a dedicated diagnostic connection, `BEGIN READ ONLY`, and a bounded statement timeout; no runtime task rows were changed and no provider requests were replayed. The port-3001 runtime identity matched the inspected source HEAD.
