@@ -8,4 +8,6 @@ Date: 2026-11-10 (Asia/Shanghai)
 - Encoding remains in the existing single-capacity localImage pool with cancellation and a 120-second child-process deadline. File-size limits, source assets, historical tasks, and provider dispatch are unchanged.
 - Read-only activation preflight found no live Canvas queue locks or queue/schedule updates in the previous ten minutes. Stale historical queue rows were left untouched.
 
-Local candidate activation and identity verification pending the verified implementation commit. No model/provider replay is part of this task.
+Local LAN activation passed through `npm run local:lan` from clean implementation commit `3deac1740175ca5ae53bfd4a2d86ef73b2b35d79`. The launcher HTTP smoke passed, `/api/version` matched that full SHA in candidate mode, and `/` plus `/canvas` returned HTTP 200. Ignored evidence: `test-artifacts/high-resolution-image-processing-activation.log`. Final documentation/archive commits can be activated through the same clean-tree launcher; the ignored candidate receipt and `/api/version` identify the running SHA.
+
+No model/provider replay or historical task mutation occurred.
