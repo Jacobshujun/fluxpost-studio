@@ -18,7 +18,7 @@
 - `python .trellis/verification/library_load_error_browser_check.py`: six cases pass.
 - `python .trellis/verification/library_preview_browser_check.py`: six cases pass, including continuous decoded-image/dialog geometry checks.
 - `python .trellis/verification/library_colors_browser_check.py`: six gallery/Canvas color cases pass.
-- Browser runs used a worker-disabled loopback test server on 45678, mocked APIs/media and no live provider/storage writes; helper stopped the server after each run.
+- Browser runs used a worker-disabled loopback test server on 45678, mocked APIs/media and no live provider/storage writes. The Windows helper stopped its shell but left the Next listener alive; its exact PID/command/port were verified before explicitly stopping it after the runs. Port 3001 stayed on the original PID.
 - `git diff --check` on scoped changes: pass.
 
 ## Delivery limitation
