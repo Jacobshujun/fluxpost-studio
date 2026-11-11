@@ -108,6 +108,29 @@ assertContains(registry, /node\.type === "publish\.feishu" && node\.version === 
 assertContains(executors, /normalizeFeishuPublishMode\(node\.config\.publishMode\)[\s\S]*publishMode,/, "Canvas execution must strictly decode and enqueue its configured mode.");
 assertContains(baseline, /feishu_publish_mode_check\.mjs/, "The Trellis baseline must register this check.");
 
+const fieldFunctionNames = new Set(["getPostFieldValue", "buildBitableRecordPatch", "selectBitableFieldEntries"]);
+const fieldSource = ts.createSourceFile("feishu-cli.ts", cli, ts.ScriptTarget.Latest, true);
+const fieldFunctions = fieldSource.statements
+  .filter((node) => ts.isFunctionDeclaration(node) && fieldFunctionNames.has(node.name?.text))
+  .map((node) => node.getText(fieldSource)).join("\n");
+const fieldOutput = ts.transpileModule(fieldFunctions, {
+  compilerOptions: { target: ts.ScriptTarget.ES2022 },
+}).outputText;
+const { getPostFieldValue, buildBitableRecordPatch } = vm.runInNewContext(
+  `(function(){${fieldOutput}\nreturn { getPostFieldValue, buildBitableRecordPatch };})()`,
+);
+const tagPost = { title: "Title", body: "Body", contentTags: ["车型美图", "产品体验"] };
+assertEqual(getPostFieldValue(tagPost, "contentTagsText"), "车型美图\n产品体验", "Text tag fields must receive every tag as text.");
+assertEqual(JSON.stringify(getPostFieldValue(tagPost, "contentTags")), JSON.stringify(tagPost.contentTags), "Multi-select tag fields must retain arrays.");
+assertEqual(getPostFieldValue({}, "contentTagsText"), "", "Missing tags must produce empty text.");
+const textTagMap = { title: "标题", body: "正文", contentTags: "", contentTagsText: "内容标签" };
+const fullTagPatch = buildBitableRecordPatch(tagPost, textTagMap, "full");
+assertEqual(fullTagPatch["内容标签"], "车型美图\n产品体验", "Full publishing must use the configured text tag mapping.");
+assertEqual(Object.hasOwn(fullTagPatch, ""), false, "Disabled multi-select mapping must not become a field.");
+for (const mode of ["text", "media"]) {
+  assertEqual(Object.hasOwn(buildBitableRecordPatch(tagPost, textTagMap, mode), "内容标签"), false, "Selective publishing must still exclude tag metadata.");
+}
+
 console.log("Feishu publish mode check passed.");
 
 function loadTypescriptCommonJs(relativePath) {

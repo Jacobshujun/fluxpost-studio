@@ -1,31 +1,32 @@
 # FluxPost Current Status
 
-Last updated: 2026-11-10
+Last updated: 2026-11-11
 
 ## One-Line Status
 
-Switch Any verified; operator acceptance pending. Runtime identity: `/api/version`.
+Local Feishu target verified; live publish pending. Identity: `/api/version`.
 
 ## Current Focus
 
-- High-resolution image processing: 100 MP input / full 8K output checks, baseline and LAN activation pass. Contract: `canvas_image_process.md`; evidence: `archive/2026-11/11-10-high-resolution-image-processing/verification.md`. Runtime identity: `/api/version`.
-- Switch Any: baseline/six browser cases pass; operator acceptance pending. Evidence: `archive/2026-11/11-10-canvas-switch-any/verification.md`; contract `canvas_switch_any.md`.
+- Feishu target/schema/dry-run/baseline pass; text tags supported, imports/audits preserved. Evidence: `archive/2026-11/11-11-feishu-publish-target/verification.md`.
+- High-resolution processing: 100 MP / 8K and LAN checks pass; `canvas_image_process.md`; evidence: `archive/2026-11/11-10-high-resolution-image-processing/verification.md`.
+- Switch Any: six browser cases/baseline pass; operator acceptance pending. Contract: `canvas_switch_any.md`; evidence: `archive/2026-11/11-10-canvas-switch-any/verification.md`.
 - Gallery preview: checks pass; `11-09-gallery-preview-stable`.
 - Canvas history: `11-09-canvas-schedule-history-fix` verified.
-- Text concatenation: 16 inputs verified; operator acceptance pending. Evidence: `archive/2026-11/11-06-canvas-text-concatenate/verification.md`.
-- Library sorting/filter isolation verified; operator acceptance pending. Contract: `unified_library.md`; evidence: `11-06-canvas-library-sorting`.
-- Nov 5 startup: Job independence/24-GiB heap, baseline and LAN activation pass. Evidence: `archive/2026-11/11-05-local-independent-runtime/verification.md`.
+- Text concatenation: 16 inputs verified; operator pending. Archive: `11-06-canvas-text-concatenate`.
+- Library sorting/filter isolation verified; operator pending. Contract: `unified_library.md`; task: `11-06-canvas-library-sorting`.
+- Nov 5 startup: independent Jobs/24-GiB heap, baseline/LAN pass; archive: `11-05-local-independent-runtime`.
 - Canvas workers: 32/default, 100/cap verified; LAN identity: `/api/version`.
 - Review filter memory verified; operator acceptance pending. Contract: `review_desk.md`; task `11-05-review-filter-memory`.
 - Nov 4 afternoon exit remains unattributed; recovery verified. Evidence: `archive/2026-11/11-04-local-afternoon-exit/findings.md`.
-- Batch creation: V2 wizard and V1/V2 favorites verified; archived `11-04-batch-create-wizard` and `11-04-batch-task-favorites`. Operator acceptance pending; identity: `/api/version`.
+- Batch wizard/favorites verified; operator acceptance pending. Archives: `11-04-batch-create-wizard`, `11-04-batch-task-favorites`.
 - Content editor drop/paste/zoom/drag verified; operator acceptance pending. Contract: `content_pool_editing.md`.
-- Local diagnostics: retention limits and verified startup in `local_diagnostics.md`; evidence: `archive/2026-11/11-03-local-crash-logging/verification.md`.
-- Nov 4 OOM repair `514bf40`: bounded SQL history/reuse verified on SQLite/PG. Contract: `canvas_history.md`; evidence: `archive/2026-11/11-04-canvas-history-memory/verification.md`. Heap: `local_diagnostics.md`; past fatal request unproven.
+- Diagnostics retention/startup verified: `local_diagnostics.md`; archive: `11-03-local-crash-logging`.
+- Nov 4 OOM: SQL history/reuse verified on SQLite/PG (`514bf40`, `canvas_history.md`). Prior fatal request unproven; heap: `local_diagnostics.md`.
 - Feishu: eight reproduced risks (media omission, edit overwrite, path escape, deleted-post revival, record/lease persistence); fixes/live acceptance pending. Evidence: `11-03-feishu-publish-owner-recovery/code-review-2026-11-03.md`.
-- Content-pool performance verified on LAN: desk 960ms, summary 898ms. Authenticated 3001 timing pending; details below.
-- Content-pool libraries: owner-scoped rail with subsets, default library, tags and Canvas filters; checks pass, PostgreSQL review remains.
-- Review LAN fixes: dialog `505c9b9`, drag `725271b`, image/video ratios `0428b64`; verified in archived `11-02-review-gallery-drag-regression`, `11-02-review-image-preview-3-4`.
+- Content pool LAN: desk 960ms, summary 898ms; authenticated timing pending.
+- Content libraries: owner/subsets/default/tags/Canvas filters pass; PostgreSQL review pending.
+- Review LAN: dialog/drag/ratios verified; archives: `11-02-review-gallery-drag-regression`, `11-02-review-image-preview-3-4`.
 - Review layout/order/time verified: archived `10-30-review-desk-usability`.
 - Iteration/modes verified on LAN; archives: `canvas-iteration-batch-params`, `canvas-universal-modes`.
 - Wonder Image existing-media reuse was accepted on LAN `ec0cd9f`; real Yike/model acceptance is pending.

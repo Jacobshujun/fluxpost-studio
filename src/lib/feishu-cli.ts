@@ -1734,6 +1734,8 @@ function getPostFieldValue(post: GeneratedPost, key: string) {
       return [...post.imageUrls, ...postVideoUrls(post)].join("\n");
     case "contentTags":
       return post.contentTags || [];
+    case "contentTagsText":
+      return (post.contentTags || []).join("\n");
     case "contentCreationSource":
       return formatContentCreationSource(post);
     case "vehicle":
