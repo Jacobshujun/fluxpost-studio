@@ -24,3 +24,10 @@
 ## Delivery limitation
 
 Port 3001 remains the previous candidate. At startup, the primary worktree already contained 30 unrelated modified/untracked paths (primarily Magpie search and prior analysis). These are preserved and excluded from the repair commit. `AGENTS.md` requires clean committed HEAD before local activation and forbids bypassing that guard or using sibling worktrees. Local authenticated operator acceptance and activation remain pending; no remote release was requested.
+
+## LAN delivery — 2026-11-11
+
+- User explicitly authorized committing the remaining changes and updating LAN. The remaining Magpie changes and diagnostic records were committed; the primary worktree is clean.
+- Candidate `b30d64bff4a4e467a8a56fdeee9ef389a25f50db` includes gallery repair `b35d22b`; live `/api/version` and the managed slot receipt matched the full HEAD. Listener binding is `0.0.0.0:3001`.
+- Existing `http_smoke.js` passed on both loopback and LAN. `/library` returned HTML/HTTP 200 at both addresses. No authenticated library mutation, live model/search request or remote deployment was performed.
+- This supersedes the activation limitation above. Later documentation commits use the same managed `npm run local:lan` entry; the ignored candidate receipt and `/api/version` identify the final active SHA. Authenticated operator acceptance remains separate.

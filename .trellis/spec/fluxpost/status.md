@@ -8,8 +8,8 @@ Local Feishu target verified; live publish pending. Identity: `/api/version`.
 
 ## Current Focus
 
-- Gallery hierarchy/rename: baseline/24 browser pass; LAN authorized. Evidence: `archive/2026-11/11-11-gallery-collection-hierarchy/verification.md`.
-- Magpie: baseline/browser pass; LAN authorized, key/live pending. See `magpie_web_search.md`.
+- Gallery hierarchy/rename: baseline/24 browser and LAN identity/HTTP pass. Evidence: `archive/2026-11/11-11-gallery-collection-hierarchy/verification.md`.
+- Magpie: baseline/browser and LAN identity/HTTP pass; key/live pending. See `magpie_web_search.md`.
 - Feishu target/schema/dry-run/baseline pass; text tags supported, imports/audits preserved. Evidence: `archive/2026-11/11-11-feishu-publish-target/verification.md`.
 - High-resolution processing: 100 MP / 8K and LAN checks pass; `canvas_image_process.md`; evidence: `archive/2026-11/11-10-high-resolution-image-processing/verification.md`.
 - Switch Any: six browser cases/baseline pass; operator acceptance pending. Contract: `canvas_switch_any.md`; evidence: `archive/2026-11/11-10-canvas-switch-any/verification.md`.
