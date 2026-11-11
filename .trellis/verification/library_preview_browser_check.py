@@ -4,7 +4,7 @@ import base64
 import json
 import os
 from pathlib import Path
-from urllib.parse import urlparse
+from urllib.parse import parse_qs, urlparse
 
 from playwright.async_api import async_playwright, expect
 
@@ -30,6 +30,7 @@ async def check(browser, theme, width):
     await page.add_init_script(f"localStorage.setItem('fluxpost-theme', {json.dumps(theme)})")
     assets = [make_asset(i) for i in range(1, 5)]
     assets[1].update(width=800, height=1600)
+    page_size = 4
     detail_gate, image_gate = {}, {}
     image_started = {a["id"]: asyncio.Event() for a in assets}
     requested, failures, errors, saves = [], set(), [], []
@@ -69,9 +70,26 @@ async def check(browser, theme, width):
         elif path == "/api/config":
             data = dict(status={})
         elif path == "/api/library/navigation":
-            data = dict(collections=[], smartFolders=[], counts=dict(all=4, favorites=0, uncategorized=4))
+            data = dict(collections=[], smartFolders=[], counts=dict(all=len(assets), favorites=0, uncategorized=len(assets)))
         elif path == "/api/library/assets":
-            data = dict(assets=assets, total=4, nextCursor=None)
+            cursor = parse_qs(url.query).get("cursor", [None])[0]
+            if cursor and ("page", "next") in failures:
+                await route.fulfill(status=500, json=dict(error="Page unavailable"))
+                return
+            remaining = [a for a in assets if not cursor or int(a["id"].split("-")[-1]) > int(cursor)]
+            batch = remaining[:page_size]
+            data = dict(assets=batch, total=len(assets), nextCursor=batch[-1]["id"].split("-")[-1] if len(remaining) > page_size else None)
+        elif path == "/api/library/assets/batch":
+            body = req.post_data_json
+            assert req.method == "POST" and body["action"] == "delete" and body["confirm"] is True
+            assert body["selection"]["mode"] == "ids"
+            ids = body["selection"]["assetIds"]
+            requested.append("delete:" + ",".join(ids))
+            if ("delete", ids[0]) in failures:
+                data = dict(matched=1, succeeded=0, failed=1, failures=[dict(assetId=ids[0], error="Delete unavailable")])
+            else:
+                assets[:] = [a for a in assets if a["id"] not in ids]
+                data = dict(matched=len(ids), succeeded=len(ids), failed=0, failures=[])
         elif path == "/api/library/tags":
             data = dict(tags=[])
         elif path == "/api/library/colors/jobs":
@@ -246,6 +264,65 @@ async def check(browser, theme, width):
     detail_gate["asset-2"].set()
     await page.wait_for_load_state("networkidle")
     await expect(viewer).to_have_count(0)
+
+    # Button/key deletion retains the same native dialog, including cursor pages.
+    for paged in (False, True):
+        assets[:] = [make_asset(i) for i in range(1, 5)]
+        page_size = 2 if paged else 4
+        detail_gate.clear()
+        image_gate.clear()
+        failures.clear()
+        await page.goto(BASE + "/library?asset=asset-2", wait_until="networkidle")
+        await expect(heading).to_have_text("Asset 2")
+        await viewer.evaluate("d => window.deleteDialog = d")
+        if width < 640:
+            await viewer.get_by_role("button", name="图片详情", exact=True).click()
+        confirm = page.get_by_role("dialog", name="永久删除图片", exact=True)
+        delete_count = lambda: sum(r.startswith("delete:") for r in requested)
+        before = delete_count()
+        if paged:
+            failures.add(("page", "next"))
+            await viewer.get_by_role("button", name="永久删除", exact=True).click()
+            await expect(viewer.get_by_role("alert")).to_contain_text("Page unavailable")
+            await expect(confirm).to_have_count(0)
+            assert delete_count() == before
+            failures.clear()
+        await viewer.get_by_role("button", name="永久删除", exact=True).click()
+        await expect(confirm).to_be_visible()
+        await confirm.get_by_role("button", name="取消", exact=True).click()
+        assert delete_count() == before
+        await expect(heading).to_have_text("Asset 2")
+        await viewer.locator('[class*="viewerHeading"] strong').click()
+        await page.keyboard.press("Delete")
+        failures.add(("delete", "asset-2"))
+        await confirm.get_by_role("button", name="确认删除", exact=True).click()
+        await expect(confirm.get_by_role("alert")).to_have_text("Delete unavailable")
+        await expect(heading).to_have_text("Asset 2")
+        assert await viewer.evaluate("d => d === deleteDialog && d.open")
+        failures.clear()
+        detail_gate["asset-3"] = asyncio.Event()
+        await confirm.get_by_role("button", name="确认删除", exact=True).click()
+        await expect(confirm).to_have_count(0)
+        await expect(viewer.get_by_role("status")).to_be_visible()
+        assert await viewer.evaluate("d => d === deleteDialog && d.open")
+        detail_gate["asset-3"].set()
+        await expect(heading).to_have_text("Asset 3")
+        await expect(original).to_have_attribute("alt", "Asset 3")
+        assert "asset=asset-3" in page.url
+        # Repeated keyboard deletion advances, then falls back to the previous.
+        for expected in ("Asset 4", "Front view"):
+            await page.keyboard.press("Delete")
+            await confirm.get_by_role("button", name="确认删除", exact=True).click()
+            await expect(confirm).to_have_count(0)
+            await expect(heading).to_have_text(expected)
+            assert await viewer.evaluate("d => d === deleteDialog && d.open")
+        await page.keyboard.press("Delete")
+        await confirm.get_by_role("button", name="确认删除", exact=True).click()
+        await expect(confirm).to_have_count(0)
+        await expect(viewer).to_have_count(0)
+        await expect(page.locator("article")).to_have_count(0)
+        assert "asset=" not in page.url
+        assert not assets
     assert not errors, errors
     await page.close()
     print(f"Gallery preview passed: {theme} {width}; {len(probe['frames'])} continuous frames", flush=True)

@@ -143,8 +143,13 @@ export default function LibraryPage() {
     } finally { if (pageController.current === controller) { pageRequest.current = null; setLoadingMore(false); } }
   }
 
-  async function refreshAfterWrite() {
-    try { await Promise.all([reloadAssets(), loadNavigation()]); }
+  async function refreshAfterWrite(deletedIds?: string[]) {
+    if (deletedIds) {
+      // Keep loaded cursor pages so the viewer can continue through adjacent images.
+      const deleted = new Set(deletedIds);
+      setData((current) => ({ ...current, assets: current.assets.filter((asset) => !deleted.has(asset.id)), total: current.total === undefined ? undefined : Math.max(0, current.total - deleted.size) }));
+    }
+    try { await Promise.all([deletedIds ? undefined : reloadAssets(), loadNavigation()]); }
     catch (error) { setMessage(`操作已完成，刷新失败：${errorMessage(error)}`); }
   }
   function reportResult(label: string, result: LibraryBatchResult | LibraryCollectionBatchResult | LibraryTagBatchResult) {
@@ -157,7 +162,9 @@ export default function LibraryPage() {
     if (busy) return; setBusy(true); setFailures([]);
     try {
       const result = await api<LibraryBatchResult | LibraryCollectionBatchResult>("/api/library/assets/batch", { method: "POST", headers: jsonHeaders, body: JSON.stringify({ ...body, selection: snapshot }) });
-      reportResult(label, result); await refreshAfterWrite(); return result;
+      reportResult(label, result);
+      const deletedIds = body.action === "delete" && snapshot.mode === "ids" ? snapshot.assetIds.filter((id) => !result.failures.some((failure) => failure.assetId === id)) : undefined;
+      await refreshAfterWrite(deletedIds); return result;
     } finally { setBusy(false); }
   }
   function batchCommand(body: Record<string, unknown>, label: string) { void runBatch(body, label).catch((error) => setMessage(errorMessage(error))); }
@@ -494,6 +501,18 @@ function ViewerEditor({ asset, image, switching, writing, setWriting, details, s
       request(() => { void props.onMore().then((next) => { if (next) props.onNavigate(next.id); }).catch((error) => setError(`下一页加载失败：${errorMessage(error)}，请再次点击下一张重试`)); });
     }
   }
+  async function remove() {
+    let target = index >= 0 ? props.assets[index + 1] : undefined;
+    if (index >= 0 && !target && props.hasMore) {
+      setBusy(true); setError("");
+      try { target = await props.onMore(); }
+      catch (error) { setError(errorMessage(error)); return; }
+      finally { setBusy(false); }
+    }
+    target ??= index >= 0 ? props.assets[index - 1] : undefined;
+    const targetId = target?.id;
+    props.onDelete(asset, () => { if (targetId) props.onNavigate(targetId, true); else onClose(); });
+  }
   async function action(command: () => Promise<LibraryAsset>) {
     setBusy(true); setError(""); try { onAsset(await command()); } catch (error) { setError(errorMessage(error)); } finally { setBusy(false); }
   }
@@ -505,7 +524,7 @@ function ViewerEditor({ asset, image, switching, writing, setWriting, details, s
     registerKeyboard((event) => {
     if (event.defaultPrevented || event.nativeEvent.isComposing || event.ctrlKey || event.metaKey || event.altKey || event.shiftKey || isEditableSelectionTarget(event.target) || pending || busy) return;
     if (event.key === "ArrowLeft" || event.key === "ArrowRight") { event.preventDefault(); void move(event.key === "ArrowRight" ? 1 : -1); }
-    else if (event.key === "Delete" && asset.canEdit && !event.repeat) { event.preventDefault(); request(() => props.onDelete(asset, onClose)); }
+    else if (event.key === "Delete" && asset.canEdit && !event.repeat) { event.preventDefault(); request(() => void remove()); }
     });
     return () => registerKeyboard(null);
   });
@@ -528,7 +547,7 @@ function ViewerEditor({ asset, image, switching, writing, setWriting, details, s
         <fieldset><legend>标签</legend><div className={styles.detailTags}>{displayedTags.map((tag) => <span key={tag.label}>{tag.label}{asset.canEdit ? <button disabled={busy} aria-label={`移除素材标签 ${tag.label}`} onClick={() => changeTags({ remove: [tag.label] })}><X /></button> : null}</span>)}</div>{asset.canEdit ? <TagInput value={[]} onChange={(tags) => changeTags({ add: tags })} placeholder="添加素材标签" disabled={busy} /> : null}</fieldset>
         <fieldset><legend>所属图集</legend>{asset.collectionIds.map((id) => { const collection = props.collections.find((item) => item.id === id); return <p key={id}>{collection?.relativePath || collection?.name || "无权查看的图集"}</p>; })}<p className={styles.hint}>图集归属单独保存，共享图片也可加入本人图集。</p>{props.collections.filter((item) => item.canEdit).map((collection) => <label className={styles.collectionCheck} key={collection.id}><input type="checkbox" disabled={busy} checked={asset.collectionIds.includes(collection.id)} onChange={(event) => { const checked = event.target.checked; request(() => void action(() => props.onOrganize(asset, collection.id, checked))); }} />{collection.relativePath || collection.name}</label>)}</fieldset>
         <dl className={styles.detailInfo}><dt>尺寸</dt><dd>{asset.width || "?"} × {asset.height || "?"}</dd><dt>大小</dt><dd>{formatBytes(asset.byteSize)}</dd><dt>导入时间</dt><dd>{new Date(asset.createdAt).toLocaleString("zh-CN", { timeZone: "Asia/Shanghai" })}</dd><dt>打标状态</dt><dd>{taggingLabels[asset.taggingStatus]}</dd><dt>所有者</dt><dd>{asset.ownerDisplayName}</dd></dl>
-        <div className={styles.viewerEditActions}><button disabled={busy} onClick={() => void action(() => props.onFavorite(asset))}><Heart />{asset.favorite ? "取消收藏" : "收藏"}</button>{asset.canEdit ? <><button className={styles.primary} disabled={busy || !dirty || !draft.name.trim()} onClick={() => void save().catch(() => undefined)}><Check />保存</button><button className={styles.danger} disabled={busy} onClick={() => request(() => props.onDelete(asset, onClose))}>永久删除</button></> : <span>元数据只读</span>}</div>
+        <div className={styles.viewerEditActions}><button disabled={busy} onClick={() => void action(() => props.onFavorite(asset))}><Heart />{asset.favorite ? "取消收藏" : "收藏"}</button>{asset.canEdit ? <><button className={styles.primary} disabled={busy || !dirty || !draft.name.trim()} onClick={() => void save().catch(() => undefined)}><Check />保存</button><button className={styles.danger} disabled={busy} onClick={() => request(() => void remove())}>永久删除</button></> : <span>元数据只读</span>}</div>
       </aside>
     </div>{error ? <p role="alert" className={styles.viewerError}>{error}</p> : null}
   {pending ? <Dialog title="尚有未保存修改" busy={busy} onClose={() => { setPending(undefined); onCancelTransition(); }}><p>保存修改后继续，或放弃本次修改。</p>{error ? <p className={styles.pickerError} role="alert">{error}</p> : null}<footer><button disabled={busy} onClick={() => { setPending(undefined); onCancelTransition(); }}>继续编辑</button><button disabled={busy} onClick={() => { const go = pending.go; setDraft(initialDraft()); setPending(undefined); go(); }}>放弃修改</button><button className={styles.primary} disabled={busy || !draft.name.trim()} onClick={() => { const go = pending.go; void save().then(() => { setPending(undefined); go(); }).catch(() => undefined); }}>保存后继续</button></footer></Dialog> : null}</>;

@@ -359,6 +359,9 @@ def run_case(browser, theme, width, height):
     expect(viewer).to_be_visible()
     confirm.get_by_role("button", name="确认删除", exact=True).click()
     expect(confirm).to_have_count(0)
+    expect(viewer).to_be_visible()
+    expect(viewer.locator('[class*="viewerHeading"] strong')).to_have_text("Asset 2")
+    page.keyboard.press("Escape")
     expect(viewer).to_have_count(0)
 
     # 25 receipts, supported snapshots, retry only by operator and cancellation of waiting files.
