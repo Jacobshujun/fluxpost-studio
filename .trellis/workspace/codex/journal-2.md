@@ -1005,3 +1005,37 @@ Implemented dynamic mixed-type Switch Any with strict numeric-text index and run
 ### Next Steps
 
 - None - task complete
+
+
+## Session 89: Gallery collection hierarchy and rename repair
+
+**Date**: 2026-11-11
+**Task**: Gallery collection hierarchy and rename repair
+**Branch**: `local`
+
+### Summary
+
+Fixed chronological collection rendering and team rename scope; baseline and 24 browser cases pass. Port 3001 activation pending unrelated dirty worktree. Evidence: archive/2026-11/11-11-gallery-collection-hierarchy/verification.md. Scoped archive correction retains unrelated local task records.
+
+### Main Changes
+
+Parent-ID traversal groups children with their actual parents; explicit child creation shows the intended path and expands its parent. Name-only PATCH preserves team visibility. Existing unrelated work is retained.
+
+### Git Commits
+
+| Hash | Message |
+|------|---------|
+| `b35d22b` | fix(library): render collection subtrees and preserve rename visibility |
+
+### Testing
+
+- [OK] Full deterministic baseline; lint 0 errors/15 existing warnings; TypeScript/build/HTTP/SQLite pass.
+- [OK] Four isolated gallery browser suites, each at three themes and two viewport sizes (24 cases total).
+
+### Status
+
+[OK] **Completed**
+
+### Next Steps
+
+- Activate on port 3001 only after unrelated work is resolved and the primary worktree is clean. Operator acceptance remains pending.
