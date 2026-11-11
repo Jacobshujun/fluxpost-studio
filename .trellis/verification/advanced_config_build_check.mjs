@@ -66,6 +66,8 @@ api.saveAdvancedConfigPatch({ values: {
   OSS_ENABLED: true,
   OSS_BUCKET: "fixture-bucket",
   OSS_ACCESS_KEY_SECRET: "fixture-oss-secret",
+  MAGPIE_GATEWAY_KEY: "fixture-magpie-secret",
+  MAGPIE_WEB_SEARCH_URL: "http://127.0.0.1:54321/mcp/search",
 } });
 assert.equal(worker.openaiImageUrl("images/generations"), "https://new.example/v1/images/generations");
 assert.equal(worker.openaiImageApiKey(), "fixture-new-key");
@@ -87,6 +89,8 @@ assert.equal(worker.appConfig.runtimeStorageProvider, "oss");
 assert.equal(worker.appConfig.ossEnabled, true);
 assert.equal(worker.appConfig.ossBucket, "fixture-bucket");
 assert.equal(worker.appConfig.ossAccessKeySecret, "fixture-oss-secret");
+assert.equal(worker.appConfig.magpieGatewayKey, "fixture-magpie-secret");
+assert.equal(worker.appConfig.magpieWebSearchUrl, "http://127.0.0.1:54321/mcp/search");
 const lateApi = await loadConfig(apiFactory);
 lateApi.saveAdvancedConfigPatch({ values: { OPENAI_IMAGE_BASE_URL: "https://latest.example/v1" } });
 assert.equal(worker.openaiImageUrl("images/generations"), "https://latest.example/v1/images/generations");

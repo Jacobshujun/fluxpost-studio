@@ -26,6 +26,7 @@ This layer is the project-specific operating memory migrated from the previous H
 | [content_pool_editing.md](./content_pool_editing.md) | Staged source edits, uploads, manual-field protection and cache ordering. |
 | [oss_cutover.md](./oss_cutover.md) | Local OSS CLI, transactional reference migration and recovery boundaries. |
 | [gemini.md](./gemini.md) | Canvas native Gemini text/vision, configuration and offline validation. |
+| [magpie_web_search.md](./magpie_web_search.md) | Original MCP search, secret configuration and isolated checks. |
 | [pitfalls.md](./pitfalls.md) | Known traps and integration risks. |
 | [architecture_rules.md](./architecture_rules.md) | Module, data, deployment, and Trellis boundaries. |
 | [unified_library.md](./unified_library.md) | Unified image asset, collection, smart-folder, query, migration, and performance contracts. |

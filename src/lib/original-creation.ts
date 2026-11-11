@@ -27,6 +27,7 @@ export async function buildOriginalGeneratedPost(input: {
   const vehicleKeyword = normalizeOriginalVehicleKeyword(input.vehicleKeyword) || topic || "原创";
   const json = await callOpenAIForJson(buildOriginalPrompt(originalPrompt, vehicleKeyword, input.settings), {
     webSearch: input.useWebSearch,
+    searchQuery: `${vehicleKeyword}\n${originalPrompt}`,
     logLabel: input.useWebSearch ? "准备联网生成原创图文 Prompt" : "准备生成原创图文 Prompt",
   });
   const imagePrompts = arrayOfStrings(json.imagePrompts).slice(0, maxOriginalImagePrompts);

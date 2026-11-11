@@ -1443,8 +1443,8 @@ async function runSimpleOriginalWorkflow(
       total: 1,
       message: normalizedInput.originalUseWebSearch ? "Understanding original prompt and searching the web." : "Understanding original prompt.",
     });
-    if (normalizedInput.originalUseWebSearch === true && appConfig.openaiTextEndpoint !== "responses") {
-      throw new Error("Original-mode web search requires OPENAI_TEXT_ENDPOINT=responses; Chat Completions does not support the web_search tool.");
+    if (normalizedInput.originalUseWebSearch === true && !appConfig.magpieGatewayKey) {
+      throw new Error("请先在高级配置中填写 Magpie API Key，再启用联网搜索。");
     }
     const topic = extractOriginalTopic(originalPrompt);
     run = await saveRun({

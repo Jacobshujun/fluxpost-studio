@@ -31,6 +31,7 @@ function loadTsModule(relativePath, requireMap = {}, globals = {}) {
 const policy = loadTsModule("src/lib/finished-body-policy.ts");
 const requests = [];
 const openai = loadTsModule("src/lib/openai.ts", {
+  "./magpie-web-search": {},
   "./activity-log": { compactError: (error) => String(error?.message || error), recordExecutionLog: async () => {} },
   "./config": { appConfig: { openaiApiKey: "test-key", openaiTextEndpoint: "chat", openaiTextModel: "test-model", openaiTextReasoningEffort: "default" }, openaiTextUrl: () => "https://openai.invalid/chat" },
   "./text-reasoning": loadTsModule("src/lib/text-reasoning.ts"),

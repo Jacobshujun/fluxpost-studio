@@ -110,6 +110,7 @@ const nodeChecks = [
   ["Simple link run check", "simple_link_run_check.mjs"],
   ["Simple viral run check", "simple_viral_run_check.mjs"],
   ["Simple original run check", "simple_original_run_check.mjs"],
+  ["Magpie MCP web search", "magpie_web_search_check.mjs"],
   ["Viral replication regression check", "viral_replication_regression_check.mjs"],
   ["Simple queue and Feishu chunking check", "simple_queue_check.mjs"],
   ["Simple run persistence check", "simple_run_persistence_check.mjs"],

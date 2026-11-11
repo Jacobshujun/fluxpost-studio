@@ -32,15 +32,14 @@ has(route, /resolvedSourceMode\s*=\s*body\.sourceMode === "original" \? "origina
 has(route, /sourceMode:\s*resolvedSourceMode/, "Simple run API must forward original source mode.");
 has(route, /originalPrompt:\s*body\.originalPrompt/, "Simple run API must forward originalPrompt.");
 has(route, /originalUseWebSearch:\s*body\.originalUseWebSearch === true/, "Simple run API must default original web search off.");
-has(route, /if \(body\.sourceMode === "original" && body\.originalUseWebSearch === true && appConfig\.openaiTextEndpoint !== "responses"\)[\s\S]*Original-mode web search requires OPENAI_TEXT_ENDPOINT=responses/, "Simple run API must reject unsupported original web search before enqueueing a failed run.");
+has(route, /if \(body\.sourceMode === "original" && body\.originalUseWebSearch === true && !appConfig\.magpieGatewayKey\)[\s\S]*status: 400/, "Simple run API must reject unconfigured Magpie search before enqueueing a run.");
 has(route, /\/requires\|required\|platform\/i\.test\(message\) \? 400/, "Simple run API must return 400 for unsupported original web search requests.");
 
 has(read("src/lib/config.ts"), /openaiTextEndpoint:\s*appConfig\.openaiTextEndpoint/, "Config status must return openaiTextEndpoint.");
 
 has(openai, /export async function callOpenAIForJson\(prompt: string,\s*options: JsonModelOptions = \{\}/, "OpenAI JSON helper must be reusable.");
-has(openai, /tools:\s*\[\{ type: "web_search" \}\]/, "Responses calls must use the web_search tool when requested.");
-has(openai, /tool_choice:\s*\{ type: "web_search" \}/, "Original web search should require the web_search tool.");
-has(openai, /Original-mode web search requires OPENAI_TEXT_ENDPOINT=responses/, "Chat endpoint must fail clearly for web search.");
+has(openai, /await searchMagpieWeb\(options\.searchQuery \|\| prompt\)/, "Requested search must use Magpie references before text generation.");
+if (/tools:\s*\[\{ type: "web_search"/.test(openai)) throw new Error("Text generation must not dispatch model-native search.");
 
 has(imageGeneration, /export async function generateImagesFromPromptList/, "Image generation must expose prompt-list generation.");
 has(imageGeneration, /slice\(0,\s*5\)/, "Original image prompt generation must be capped at five images.");
@@ -67,7 +66,7 @@ has(simpleRuns, /function makeOriginalStageTitles/, "Original workflow must use 
 has(simpleRuns, /tag:\s*"原创策划"/, "Original stage titles must replace AI tagging with original planning.");
 has(simpleRuns, /markOriginalWorkflowFailureStages/, "Original workflow must mark running and queued stages terminal on failure.");
 has(simpleRuns, /if \(stage\.status === "running" \|\| stage\.status === "queued"\)[\s\S]*const status(?::\s*SimpleRunStageStatus)? = stage\.status === "running" \? "error" : stage\.status === "queued" \? "skipped" : stage\.status/, "Original failure handling must not leave running or queued stages behind.");
-has(simpleRuns, /if \(normalizedInput\.originalUseWebSearch === true && appConfig\.openaiTextEndpoint !== "responses"\)/, "Original workflow must guard unsupported web search before provider calls.");
+has(simpleRuns, /if \(normalizedInput\.originalUseWebSearch === true && !appConfig\.magpieGatewayKey\)/, "Original workflow must guard unconfigured Magpie before provider calls.");
 has(simpleRuns, /const draft = await buildOriginalGeneratedPost[\s\S]*run = await setStage\(run, "tag"/, "Original image planning stage should complete after the draft returns image prompts.");
 if (/run = await setStage\(run, "tag"[\s\S]{0,500}run = await setStage\(run, "produce"[\s\S]{0,500}const draft = await buildOriginalGeneratedPost/.test(simpleRuns)) {
   throw new Error("Original workflow must not mark both tag and produce as running before draft generation.");
@@ -82,8 +81,8 @@ has(page, /sourceMode === "original" \? Boolean\(keyword\.trim\(\) && originalPr
 has(page, /keyword:\s*sourceMode === "feishu" \? "飞书导入" : keyword/, "Simple original start request must send the user vehicle keyword.");
 has(page, /<FieldLabel label="原创选题、提问或要求" \/>/, "Compact UI must render the original prompt input.");
 has(page, />联网搜索<\/CheckRow>/, "Compact UI must render the web-search switch.");
-has(page, /sourceMode === "original" && simpleOriginalUseWebSearch && config\?\.openaiTextEndpoint !== "responses"/, "Simple UI must block unsupported original web search before submitting.");
-has(page, /disabled=\{busy \|\| settingsBusy \|\| config\?\.openaiTextEndpoint !== "responses"\}/, "Compact original web-search checkbox must be disabled when unsupported.");
+has(page, /sourceMode === "original" && simpleOriginalUseWebSearch && !config\?\.webSearchAvailable/, "Simple UI must block unconfigured search before submitting.");
+has(page, /disabled=\{busy \|\| settingsBusy \|\| !config\?\.webSearchAvailable\}/, "Compact original web-search checkbox must require a configured gateway.");
 has(page, /originalPrompt:\s*sourceMode === "original" \? originalPrompt : undefined/, "Simple start request must send originalPrompt only in original mode.");
 has(page, /originalUseWebSearch:\s*sourceMode === "original" \? simpleOriginalUseWebSearch : undefined/, "Simple start request must send originalUseWebSearch only in original mode.");
 has(page, /sourceMode === "original" \? "原创 1 条"/, "Compact progress must label original runs without crawl wording.");

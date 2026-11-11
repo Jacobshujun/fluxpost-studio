@@ -164,6 +164,7 @@ for (const endpoint of ["responses", "chat"]) {
     };
     const openai = loadTsModule("src/lib/openai.ts", {
       ...common,
+      "./magpie-web-search": { searchMagpieWeb: async () => "fixture search references" },
       "./creation-controls": { formatImageTasksForPrompt: () => "" },
       "./finished-body-policy": loadTsModule("src/lib/finished-body-policy.ts"),
       "./mock-data": {},

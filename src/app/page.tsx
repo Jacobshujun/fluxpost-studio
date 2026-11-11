@@ -520,7 +520,7 @@ export default function Home() {
     if (sourceMode === "viral" && !viralUrl) return setMessage("请先输入爆款图文链接");
     if (sourceMode === "viral" && simpleGenerateImages && simpleViralImitateImages && !simpleViralMaterialAssetIds.length) return setMessage("请选择至少 1 张车型图用于图片模仿");
     if (sourceMode === "original" && !originalPrompt) return setMessage("请先输入原创选题、提问或要求");
-    if (sourceMode === "original" && simpleOriginalUseWebSearch && config?.openaiTextEndpoint !== "responses") return setMessage("当前文本接口不支持原创联网搜索");
+    if (sourceMode === "original" && simpleOriginalUseWebSearch && !config?.webSearchAvailable) return setMessage("请先在高级配置中填写 Magpie API Key");
 
     const textInstruction = workspaceSettings.textInstruction.trim();
     if (!textInstruction) return setMessage("请填写文字内容提示词");
@@ -857,7 +857,7 @@ function CompactWorkspace(props: {
 }) {
   const { sourceMode, keyword, targetCount, selectedPlatforms, linkText, linkPlatform, pageUrl, cookie, videoFrameOriginalReference, useComfyUiKlein, directOriginalReference, includeSourceVideo, enableVideoTranscription, generateImages, writeFeishu, feishuPublishMode, viralImitateImages, viralMaterialFolders, activeViralMaterialFolderId, viralMaterialCandidates, selectedViralMaterialAssetIds, linkCount, feishuTaskText, feishuTaskCount, viralUrl, originalPrompt, originalUseWebSearch, config, selectedMaterialCount, settings, runs, activeRun, busy, terminatingRunId, controllingRunId, settingsBusy } = props;
   const sourceDetail = sourceMode === "dongchedi_page" ? `懂车帝栏目 · ${targetCount} 条` : sourceMode === "links" ? `链接 ${linkCount} 条` : sourceMode === "feishu" ? `飞书 ${feishuTaskCount} 条` : sourceMode === "viral" ? "爆款仿写 1 条" : sourceMode === "original" ? "原创 1 条" : `平台 ${selectedPlatforms.length} 个`;
-  const canStart = sourceMode === "dongchedi_page" ? Boolean(keyword.trim() && pageUrl.trim()) : sourceMode === "feishu" ? feishuTaskCount > 0 : sourceMode === "links" ? Boolean(keyword.trim()) && linkCount > 0 : sourceMode === "viral" ? Boolean(keyword.trim() && viralUrl.trim()) && (!generateImages || !viralImitateImages || selectedViralMaterialAssetIds.length > 0) : sourceMode === "original" ? Boolean(keyword.trim() && originalPrompt.trim()) && (!originalUseWebSearch || config?.openaiTextEndpoint === "responses") : Boolean(keyword.trim() && selectedPlatforms.length);
+  const canStart = sourceMode === "dongchedi_page" ? Boolean(keyword.trim() && pageUrl.trim()) : sourceMode === "feishu" ? feishuTaskCount > 0 : sourceMode === "links" ? Boolean(keyword.trim()) && linkCount > 0 : sourceMode === "viral" ? Boolean(keyword.trim() && viralUrl.trim()) && (!generateImages || !viralImitateImages || selectedViralMaterialAssetIds.length > 0) : sourceMode === "original" ? Boolean(keyword.trim() && originalPrompt.trim()) && (!originalUseWebSearch || config?.webSearchAvailable === true) : Boolean(keyword.trim() && selectedPlatforms.length);
 
   return (
     <section className="simple-workspace simple-workspace-compact">
@@ -891,7 +891,7 @@ function CompactWorkspace(props: {
           ) : sourceMode === "viral" ? (
             <div className="simple-link-panel"><FieldLabel label="爆款图文链接" /><input className="field" value={viralUrl} onChange={(event) => props.onViralUrlChange(event.target.value)} disabled={busy || settingsBusy} /><CheckRow checked={viralImitateImages} disabled={busy || settingsBusy || !generateImages} onChange={props.onViralImitateImagesChange}>使用车型图库图片进行图片模仿</CheckRow>{viralImitateImages && generateImages ? <ViralMaterialPicker folders={viralMaterialFolders} activeFolderId={activeViralMaterialFolderId} candidates={viralMaterialCandidates} selectedAssetIds={selectedViralMaterialAssetIds} disabled={busy || settingsBusy} onToggleFolder={props.onToggleViralMaterialFolder} onToggleAsset={props.onToggleViralMaterialAsset} onPreview={props.onPreviewViralMaterial} onClear={props.onClearViralMaterialAssets} /> : null}</div>
           ) : (
-            <div className="simple-link-panel"><FieldLabel label="原创选题、提问或要求" /><textarea className="field simple-link-textarea" value={originalPrompt} onChange={(event) => props.onOriginalPromptChange(event.target.value)} disabled={busy || settingsBusy} /><CheckRow checked={originalUseWebSearch} disabled={busy || settingsBusy || config?.openaiTextEndpoint !== "responses"} onChange={props.onOriginalUseWebSearchChange}>联网搜索</CheckRow></div>
+            <div className="simple-link-panel"><FieldLabel label="原创选题、提问或要求" /><textarea className="field simple-link-textarea" value={originalPrompt} onChange={(event) => props.onOriginalPromptChange(event.target.value)} disabled={busy || settingsBusy} /><CheckRow checked={originalUseWebSearch} disabled={busy || settingsBusy || !config?.webSearchAvailable} onChange={props.onOriginalUseWebSearchChange}>联网搜索</CheckRow>{config && !config.webSearchAvailable ? <p className="text-xs text-white/60">请管理员在高级配置中填写 Magpie API Key 后启用联网搜索。</p> : null}</div>
           )}
 
           <div className="grid gap-2">

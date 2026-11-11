@@ -22,6 +22,7 @@
     "migrate": "node scripts/storage/migrate.mjs"
   },
   "dependencies": {
+    "@modelcontextprotocol/sdk": "1.32.2",
     "@types/pg": "^8.20.0",
     "@volcengine/tos-sdk": "2.9.1",
     "@xyflow/react": "^12.11.2",

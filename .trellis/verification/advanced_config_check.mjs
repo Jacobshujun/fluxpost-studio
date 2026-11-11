@@ -60,7 +60,40 @@ checkConfigSynchronization();
 checkVideoEncodingConfiguration();
 checkTextReasoningConfiguration();
 checkObjectStorageConfiguration();
+checkMagpieConfiguration();
 console.log("Advanced config admin boundary, cross-module synchronization and image proxy persistence checks passed.");
+
+function checkMagpieConfiguration() {
+  const runtime = loadConfig("win32");
+  const retained = runtime.config.appConfig;
+  const api = runtime.loadModule();
+  assert.equal(api.getConfigStatus().webSearchAvailable, false);
+  assert.equal(retained.magpieWebSearchUrl, "http://10.182.144.39:3425/mcp/magpie/web-search");
+  api.saveAdvancedConfigPatch({ values: {
+    MAGPIE_GATEWAY_KEY: "fixture-magpie-secret",
+    MAGPIE_WEB_SEARCH_URL: "http://127.0.0.1:54321/mcp/search",
+  } });
+  assert.equal(retained.magpieGatewayKey, "fixture-magpie-secret");
+  assert.equal(retained.magpieWebSearchUrl, "http://127.0.0.1:54321/mcp/search");
+  assert.equal(api.getConfigStatus().webSearchAvailable, true);
+  assert.equal(loadConfig("win32", {}, runtime.persisted()).config.appConfig.magpieGatewayKey, "fixture-magpie-secret");
+  const snapshot = api.getAdvancedConfigSnapshot();
+  const secret = snapshot.groups.flatMap((group) => group.fields).find((field) => field.key === "MAGPIE_GATEWAY_KEY");
+  assert.equal(secret.kind, "secret");
+  assert.equal(secret.value, undefined);
+  assert.equal(secret.configured, true);
+  assert.ok(!JSON.stringify({ snapshot, status: api.getConfigStatus() }).includes("fixture-magpie-secret"));
+  for (const url of ["invalid", "file:///tmp/search", "http://secret:password@example.test/mcp", "https://example.test/mcp?key=secret", "https://example.test/#secret"]) {
+    const before = runtime.persisted();
+    assert.throws(() => api.saveAdvancedConfigPatch({ values: { MAGPIE_WEB_SEARCH_URL: url } }));
+    assert.equal(runtime.persisted(), before);
+    assert.equal(retained.magpieWebSearchUrl, "http://127.0.0.1:54321/mcp/search");
+  }
+  api.saveAdvancedConfigPatch({ values: { MAGPIE_GATEWAY_KEY: null, MAGPIE_WEB_SEARCH_URL: null } });
+  assert.equal(retained.magpieGatewayKey, "");
+  assert.equal(api.getConfigStatus().webSearchAvailable, false);
+  assert.equal(loadConfig("win32", { MAGPIE_GATEWAY_KEY: "inherited-key" }, runtime.persisted()).config.appConfig.magpieGatewayKey, "");
+}
 
 function checkObjectStorageConfiguration() {
   const runtime = loadConfig("win32");

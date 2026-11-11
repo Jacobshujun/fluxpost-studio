@@ -68,6 +68,8 @@ function readAppConfig() {
   openaiImageApiKey: process.env.OPENAI_IMAGE_API_KEY || process.env.OPENAI_API_KEY || "",
   openaiImageBackupApiKey: process.env.OPENAI_IMAGE_BACKUP_API_KEY || "",
   openaiTextEndpoint: process.env.OPENAI_TEXT_ENDPOINT || "responses",
+  magpieGatewayKey: process.env.MAGPIE_GATEWAY_KEY?.trim() || "",
+  magpieWebSearchUrl: validateGeminiUrl(process.env.MAGPIE_WEB_SEARCH_URL?.trim() || "http://10.182.144.39:3425/mcp/magpie/web-search", "MAGPIE_WEB_SEARCH_URL"),
   openaiTextModel: process.env.OPENAI_TEXT_MODEL || "gpt-5.5",
   openaiTextReasoningEffort: normalizeTextReasoningEffort(process.env.OPENAI_TEXT_REASONING_EFFORT),
   openaiLibraryTaggingModel: process.env.OPENAI_LIBRARY_TAGGING_MODEL || process.env.OPENAI_TEXT_MODEL || "gpt-5.5",
@@ -207,6 +209,7 @@ export function getConfigStatus(): ConfigStatus {
     textModel: appConfig.openaiTextModel,
     libraryTaggingModel: appConfig.openaiLibraryTaggingModel,
     openaiTextEndpoint: appConfig.openaiTextEndpoint,
+    webSearchAvailable: Boolean(appConfig.magpieGatewayKey),
     imageModel: appConfig.openaiImageModel,
     imageProvider: appConfig.openaiImageEndpoint,
     openaiImageApiDialect: appConfig.openaiImageApiDialect,
@@ -547,7 +550,7 @@ const advancedConfigGroups: ConfigDefinitionGroup[] = [
   {
     id: "openai-text",
     title: "文本模型",
-    description: "正文生成、标签、审核和原创联网搜索使用的 OpenAI 兼容文本接口。",
+    description: "正文生成、标签和审核使用的 OpenAI 兼容文本接口。",
     fields: [
       configField("OPENAI_BASE_URL", "通用 Base URL", "文本和图片接口的通用回退地址。", "text", "openai-text", {
         read: () => process.env.OPENAI_BASE_URL || appConfig.openaiBaseUrl,
@@ -579,9 +582,22 @@ const advancedConfigGroups: ConfigDefinitionGroup[] = [
       configField("OPENAI_LIBRARY_TAGGING_MODEL", "参考图库打标模型", "仅用于参考图库的后台视觉打标；留空时使用文本模型。", "text", "openai-text", {
         read: () => appConfig.openaiLibraryTaggingModel,
       }),
-      configField("OPENAI_TEXT_ENDPOINT", "文本接口形态", "responses 支持原创联网搜索；chat 使用 chat completions。", "select", "openai-text", {
+      configField("OPENAI_TEXT_ENDPOINT", "文本接口形态", "选择 Responses 或 Chat Completions；联网搜索单独配置。", "select", "openai-text", {
         options: ["responses", "chat"],
         read: () => appConfig.openaiTextEndpoint,
+      }),
+    ],
+  },
+  {
+    id: "magpie-search",
+    title: "联网搜索",
+    description: "原创内容启用联网搜索时，使用 Magpie 检索资料后交给文本模型创作。",
+    fields: [
+      configField("MAGPIE_GATEWAY_KEY", "Magpie API Key", "联网搜索网关密钥，保存后对后续任务生效，页面不会回显。", "secret", "magpie-search", {
+        configured: () => Boolean(appConfig.magpieGatewayKey),
+      }),
+      configField("MAGPIE_WEB_SEARCH_URL", "Magpie 搜索地址", "运行应用的电脑需要能够访问此服务地址。", "text", "magpie-search", {
+        read: () => appConfig.magpieWebSearchUrl,
       }),
     ],
   },
@@ -885,6 +901,7 @@ function normalizeAdvancedConfigValue(definition: ConfigDefinition, value: Advan
 
   const text = String(value ?? "").trim();
   if (!text) return "";
+  if (definition.key === "MAGPIE_WEB_SEARCH_URL") return validateGeminiUrl(text, definition.key);
   if (definition.kind === "number") {
     const candidate = Number(text);
     if (!Number.isFinite(candidate) || candidate <= 0) throw new Error(`${definition.label} must be a positive number.`);

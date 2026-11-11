@@ -50,8 +50,8 @@ export async function POST(request: Request) {
       materialAssetIds?: string[];
       settings?: Partial<WorkspacePromptSettings>;
     };
-    if (body.sourceMode === "original" && body.originalUseWebSearch === true && appConfig.openaiTextEndpoint !== "responses") {
-      throw new Error("Original-mode web search requires OPENAI_TEXT_ENDPOINT=responses; turn off web search or switch the text endpoint before starting this run.");
+    if (body.sourceMode === "original" && body.originalUseWebSearch === true && !appConfig.magpieGatewayKey) {
+      return NextResponse.json({ error: "请先在高级配置中填写 Magpie API Key，再启用联网搜索。" }, { status: 400 });
     }
     const baseSourceMode =
       body.sourceMode === "feishu" ? "feishu" : body.sourceMode === "links" ? "links" : body.sourceMode === "pool" ? "pool" : "keyword";

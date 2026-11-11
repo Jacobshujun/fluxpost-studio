@@ -8,7 +8,8 @@ Local Feishu target verified; live publish pending. Identity: `/api/version`.
 
 ## Current Focus
 
-- Gallery hierarchy/rename repair: baseline and 24 browser cases pass; local activation waits for unrelated dirty work. Evidence: `archive/2026-11/11-11-gallery-collection-hierarchy/verification.md`.
+- Gallery hierarchy/rename: baseline/24 browser pass; LAN authorized. Evidence: `archive/2026-11/11-11-gallery-collection-hierarchy/verification.md`.
+- Magpie: baseline/browser pass; LAN authorized, key/live pending. See `magpie_web_search.md`.
 - Feishu target/schema/dry-run/baseline pass; text tags supported, imports/audits preserved. Evidence: `archive/2026-11/11-11-feishu-publish-target/verification.md`.
 - High-resolution processing: 100 MP / 8K and LAN checks pass; `canvas_image_process.md`; evidence: `archive/2026-11/11-10-high-resolution-image-processing/verification.md`.
 - Switch Any: six browser cases/baseline pass; operator acceptance pending. Contract: `canvas_switch_any.md`; evidence: `archive/2026-11/11-10-canvas-switch-any/verification.md`.
@@ -42,6 +43,7 @@ OSS evidence: `.trellis/tasks/archive/2026-10/10-28-oss-acceptance-local-cutover
 
 ## Risks And Unknowns
 
+- Nov 11 batch image diagnosis: a child parameter outside the selected GPT result's dependency path repeated identical-input text generation; aggregation retained a frozen additional vehicle photo. Both review image arrays match composition. Correction pending; no replay/mutation. Evidence: `archive/2026-11/11-11-batch-review-image-mismatch/findings.md`; baseline passed.
 - Nov 10 missing-reference diagnosis: high-resolution preprocessing repaired (contract `canvas_image_process.md`); failed connected optional GPT inputs can still be omitted while generation continues (separate repair). Historical evidence: `archive/2026-11/11-10-batch-reference-image-investigation/findings.md`. No provider replay performed.
 - Desk scans ~46 MB light rows (~0.9 s); item edits rewrite project JSON. Below ~150 ms needs P2.
 - Latest Wonder report: ImportMedia `MediaAlreadyExist`. LAN ID reuse repair preserves GetMedia readiness and Overwrite=false; no manual live replay. See archived wonder-existing-media task; earlier auth cause unproven.

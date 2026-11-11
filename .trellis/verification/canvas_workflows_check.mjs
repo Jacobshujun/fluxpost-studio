@@ -1176,6 +1176,7 @@ const makeJsonResponse = (body, ok = true, status = 200) => ({
   async text() { return JSON.stringify(body); },
 });
 const loadVisionModule = (endpoint, apiKey, requests) => loadTsModule("src/lib/openai.ts", {
+  "./magpie-web-search": {},
   "./activity-log": { compactError: (value) => String(value), recordExecutionLog: async () => undefined },
   "./config": {
     appConfig: { openaiApiKey: apiKey, openaiTextEndpoint: endpoint, openaiTextModel: "vision-test-model", openaiTextReasoningEffort: "default" },

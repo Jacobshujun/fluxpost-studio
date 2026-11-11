@@ -1647,6 +1647,7 @@ export type ConfigStatus = {
   textModel: string;
   libraryTaggingModel: string;
   openaiTextEndpoint: string;
+  webSearchAvailable: boolean;
   imageModel: string;
   imageProvider: string;
   openaiImageApiDialect: string;

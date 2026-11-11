@@ -41,6 +41,8 @@ Review memory: same isolated browser setup, command
 
 Default checks never call paid models, production services, or real Feishu writes.
 
+Magpie MCP/config/text baseline and browser contract: `magpie_web_search.md`.
+
 Batch favorites: baseline includes `canvas_schedule_favorites_check.mjs`;
 isolated browser/PG commands: `batch_task_favorites.md`.
 
@@ -68,27 +70,10 @@ Do not deploy a dirty worktree, branch name, abbreviated SHA, local runtime rows
 
 ## Recent Verification
 
-- 2026-11-06 Library sorting: SQLite/PG, six browser flows, regressions and
-  baseline pass. Evidence: `11-06-canvas-library-sorting`; contract/commands:
-  `unified_library.md`.
+- Nov 11 Magpie: baseline and 1440/390 config browser pass. Task: `11-11-magpie-web-search`.
 
-- 2026-11-03 Content-pool manual editor: full baseline (0 errors/16 existing
-  warnings), isolated SQLite/API/upload/cache contracts, six three-theme
-  1440/390 browser cases, library regression and 45 review layout cases pass.
-  Task: `11-03-content-pool-editor`; contract: `content_pool_editing.md`.
-
-- 2026-11-03 Feishu publish owner recovery: targeted checks and the full
-  baseline pass (0 errors/16 warnings, TypeScript, smoke); owner mismatches
-  repaired to 0; LAN `58f48b1` active. Task `11-03-feishu-publish-owner-recovery`.
-
-- 2026-11-03 Content-pool performance: baseline (0 errors/16 warnings), types,
-  build, isolated 45678 browser and desk/performance checks, and PostgreSQL
-  read-only desk 960ms / summary 898ms (4,692 items, 66 KB, no `raw`) pass.
-  Committed and active on 3001 with matching `/api/version` SHA and loopback/LAN
-  `/content` 200. Manual authenticated timing remains.
-
-- 2026-11-05 Review memory: offline/calendar, six theme/viewport memory flows and
-  45-layout/interaction regressions pass. Task: `11-05-review-filter-memory`.
+- Nov 3-6 editor, Feishu recovery, performance, library sorting and review memory:
+  `archive/verification-2026-11-03.md`.
 
 Prior review layout, text-reasoning and library evidence:
 `archive/verification-history.md`. Current

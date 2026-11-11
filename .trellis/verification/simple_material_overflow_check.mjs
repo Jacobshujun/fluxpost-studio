@@ -59,6 +59,7 @@ const largeInventory = Object.freeze(Array.from({ length: 24_197 }, (_, i) => `h
 for (const endpoint of ["chat", "responses"]) {
   const requests = [];
   const openai = loadTsModule("src/lib/openai.ts", {
+    "./magpie-web-search": {},
     "./activity-log": { compactError: String, recordExecutionLog: async () => undefined },
     "./config": { appConfig: { openaiApiKey: "fixture", openaiTextEndpoint: endpoint, openaiTextModel: "fixture" }, openaiTextUrl: () => "https://model.invalid" },
     "./text-reasoning": loadTsModule("src/lib/text-reasoning.ts"),

@@ -106,6 +106,9 @@ export function validateOriginalBatchInput(rawItems: unknown, rawSettings?: unkn
 
 export function getOriginalBatchPreflight(itemCount: number, settings: OriginalBatchSettings) {
   const config = getConfigStatus();
+  if (settings.webSearch && !config.webSearchAvailable) {
+    throw new OriginalBatchInputError("请先在高级配置中填写 Magpie API Key，再启用联网检索。");
+  }
   const profile = openaiImageRouteConfig("primary").profile;
   const imageOptions = resolveXhsImageOptions(profile);
   return {
@@ -117,7 +120,7 @@ export function getOriginalBatchPreflight(itemCount: number, settings: OriginalB
     providerProfile: profile,
     textConfigured: config.openaiConfigured,
     imageConfigured: config.openaiImageConfigured,
-    webSearchAvailable: appConfig.openaiTextEndpoint === "responses",
+    webSearchAvailable: config.webSearchAvailable,
   };
 }
 
@@ -126,8 +129,8 @@ export async function createOriginalBatch(
   account: Pick<WorkspaceAccount, "id" | "displayName" | "role">,
 ) {
   const validation = validateOriginalBatchInput(input.items, input.settings);
-  if (validation.settings.webSearch && appConfig.openaiTextEndpoint !== "responses") {
-    throw new OriginalBatchInputError("联网检索需要 OPENAI_TEXT_ENDPOINT=responses。");
+  if (validation.settings.webSearch && !appConfig.magpieGatewayKey) {
+    throw new OriginalBatchInputError("请先在高级配置中填写 Magpie API Key，再启用联网检索。");
   }
   const now = new Date().toISOString();
   const batchId = `original-batch-${randomUUID()}`;
@@ -367,6 +370,7 @@ async function executeOriginalBatchItem(queueItem: OriginalBatchQueueItem) {
   if (!item.plan) {
     const planJson = await callOpenAIForJson(buildOriginalPlanningPrompt({ ...item.input, settings: batch.settings }), {
       webSearch: batch.settings.webSearch,
+      searchQuery: [item.input.vehicleKeyword, item.input.topic, item.input.requirements].filter(Boolean).join("\n"),
       logLabel: `原创批次策划 ${item.ordinal + 1}`,
     });
     item = await saveOriginalBatchItemToDb({ ...item, plan: normalizeOriginalContentPlan(planJson, batch.settings), updatedAt: new Date().toISOString() });

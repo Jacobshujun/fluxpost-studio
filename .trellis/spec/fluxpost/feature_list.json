@@ -9,6 +9,14 @@
   ],
   "features": [
     {
+      "id": "magpie-web-search",
+      "title": "Magpie original search",
+      "status": "ready_for_review",
+      "definition_of_done": ["Secret config, MCP references and isolated checks"],
+      "evidence": ["Baseline/browser pass: 11-11-magpie-web-search."],
+      "notes": "LAN authorized; key/live pending."
+    },
+    {
       "id": "review-filter-memory",
       "title": "Review filter memory",
       "status": "ready_for_review",
