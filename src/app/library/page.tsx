@@ -9,7 +9,7 @@ import { isEditableSelectionTarget } from "@/lib/list-selection";
 import { getStoredTheme, subscribeTheme, type ThemeMode } from "@/lib/theme";
 import { useUrlQueryParams } from "@/lib/use-url-query-state";
 import type { LibraryAsset, LibraryAssetPage, LibraryBatchResult, LibraryCollection, LibraryCollectionBatchRequest, LibraryCollectionBatchResult, LibraryManualTagOverrides, LibraryNavigation, LibrarySelection, LibrarySmartFolder, LibrarySmartFolderCondition, LibraryTagBatchResult, LibraryTagSuggestion, LibraryVisibility } from "@/lib/types";
-import { beijingDate, dateBoundary, filterKeys, filtersToQuery, numericFilters, readLibraryFilters, readLibraryView, recentDateRange, smartOperators, taggingLabels, validateFilterRanges, type LibraryView } from "./library-ui";
+import { beijingDate, dateBoundary, filterKeys, filtersToQuery, libraryCollectionRows, numericFilters, readLibraryFilters, readLibraryView, recentDateRange, smartOperators, taggingLabels, validateFilterRanges, type LibraryView } from "./library-ui";
 import styles from "./library.module.css";
 
 type SmartDraft = Pick<LibrarySmartFolder, "name" | "visibility" | "match" | "conditions"> & { id?: string };
@@ -192,7 +192,9 @@ export default function LibraryPage() {
   }
   async function saveCollection(name: string) {
     if (!collectionForm) return;
-    await api(collectionForm.id ? `/api/library/collections/${encodeURIComponent(collectionForm.id)}` : "/api/library/collections", { method: collectionForm.id ? "PATCH" : "POST", headers: jsonHeaders, body: JSON.stringify({ name, parentId: collectionForm.parentId, visibility: "private" }) });
+    await api(collectionForm.id ? `/api/library/collections/${encodeURIComponent(collectionForm.id)}` : "/api/library/collections", { method: collectionForm.id ? "PATCH" : "POST", headers: jsonHeaders, body: JSON.stringify(collectionForm.id ? { name } : { name, parentId: collectionForm.parentId, visibility: "private" }) });
+    const parentId = collectionForm.parentId;
+    if (parentId) setCollapsed((current) => { const next = new Set(current); next.delete(parentId); return next; });
     setCollectionForm(undefined); await loadNavigation();
   }
   async function saveSmartFolder() {
@@ -250,12 +252,7 @@ export default function LibraryPage() {
     window.addEventListener("keydown", keydown); return () => window.removeEventListener("keydown", keydown);
   });
 
-  const visibleCollections = navigation.collections.filter((item) => {
-    if (collectionSearch.trim()) return `${item.name} ${item.relativePath || ""}`.toLocaleLowerCase().includes(collectionSearch.trim().toLocaleLowerCase());
-    let parent = item.parentId; const seen = new Set<string>();
-    while (parent && !seen.has(parent)) { if (collapsed.has(parent)) return false; seen.add(parent); parent = navigation.collections.find((collection) => collection.id === parent)?.parentId; }
-    return true;
-  });
+  const visibleCollections = libraryCollectionRows(navigation.collections, collapsed, collectionSearch);
   const title = viewTitle(view, navigation);
   return <main className={styles.page} onDragEnter={(event) => { if (hasFiles(event)) setDragging(true); }} onDragOver={(event) => { if (hasFiles(event)) event.preventDefault(); }} onDrop={(event) => { if (!hasFiles(event)) return; event.preventDefault(); setDragging(false); setPendingFiles([...event.dataTransfer.files]); }}>
     <header className={styles.header}><div className={styles.brand}><Link href="/" className={styles.iconButton} title="返回内容台"><ArrowLeft /></Link><div><strong>图库</strong><span>{title} · {data.total ?? 0} 张</span></div></div><div className={styles.headerActions}><button className={styles.iconButton} aria-label="刷新" onClick={() => void refreshAfterWrite()}><RefreshCw /></button><button className={styles.primary} onClick={() => fileInputRef.current?.click()}><Upload />导入</button><input ref={fileInputRef} hidden multiple type="file" onChange={(event) => { setPendingFiles([...event.target.files || []]); event.target.value = ""; }} /></div></header>
@@ -264,12 +261,12 @@ export default function LibraryPage() {
         <NavButton active={view.kind === "all"} icon={<Images />} label="全部图片" count={navigation.counts.all} onClick={() => setView({ kind: "all" })} />
         <NavButton active={view.kind === "uncategorized"} icon={<ImageIcon />} label="未分类" count={navigation.counts.uncategorized} onClick={() => setView({ kind: "uncategorized" })} />
         <NavButton active={view.kind === "favorites"} icon={<Heart />} label="收藏" count={navigation.counts.favorites} onClick={() => setView({ kind: "favorites" })} />
-        <SidebarHeading label="图集" onAdd={() => setCollectionForm({ name: "", parentId: sourceCollection?.id })} />
+        <SidebarHeading label="图集" onAdd={() => setCollectionForm({ name: "" })} />
         <label className={styles.sidebarSearch}><Search /><input aria-label="搜索图集" placeholder="搜索图集" value={collectionSearch} onChange={(event) => setCollectionSearch(event.target.value)} /></label>
-        <div className={styles.tree}>{visibleCollections.map((collection) => <div className={styles.navRow} key={collection.id} style={{ paddingLeft: 4 + collectionDepth(collection, navigation.collections) * 12 }}>
-          {navigation.collections.some((item) => item.parentId === collection.id) ? <button className={styles.collapseButton} aria-label={`${collapsed.has(collection.id) ? "展开" : "折叠"}${collection.name}`} aria-expanded={!collapsed.has(collection.id)} onClick={() => setCollapsed((current) => toggleSet(current, collection.id))}>{collapsed.has(collection.id) ? <ChevronRight /> : <ChevronDown />}</button> : null}
+        <div className={styles.tree}>{visibleCollections.map(({ collection, depth, hasChildren }) => <div className={styles.navRow} key={collection.id} style={{ paddingLeft: 4 + Math.min(depth, 8) * 12 }}>
+          {hasChildren ? <button className={styles.collapseButton} aria-label={`${!collectionSearch.trim() && collapsed.has(collection.id) ? "展开" : "折叠"}${collection.name}`} aria-expanded={!!collectionSearch.trim() || !collapsed.has(collection.id)} onClick={() => setCollapsed((current) => toggleSet(current, collection.id))}>{!collectionSearch.trim() && collapsed.has(collection.id) ? <ChevronRight /> : <ChevronDown />}</button> : null}
           <button className={view.kind === "collection" && view.id === collection.id ? styles.navActive : styles.navButton} title={collection.relativePath} onClick={() => setView({ kind: "collection", id: collection.id })}><Folder /><span>{collection.name}</span>{collection.visibility === "team" ? <UsersRound /> : null}</button>
-          {collection.canEdit ? <div className={styles.rowActions}><button title="重命名" onClick={() => setCollectionForm({ id: collection.id, name: collection.name })}><Pencil /></button><button title="删除图集" onClick={() => setConfirmation({ title: "删除图集", text: `删除“${collection.name}”只移除图集关系，图片不会删除，子图集会上移。`, run: async () => { await api(`/api/library/collections/${encodeURIComponent(collection.id)}`, { method: "DELETE" }); if (view.kind === "collection" && view.id === collection.id) setView({ kind: "all" }); await refreshAfterWrite(); } })}><Trash2 /></button></div> : null}
+          {collection.canEdit ? <div className={styles.rowActions}><button title="新建子图集" onClick={() => setCollectionForm({ name: "", parentId: collection.id })}><FolderPlus /></button><button title="重命名" onClick={() => setCollectionForm({ id: collection.id, name: collection.name })}><Pencil /></button><button title="删除图集" onClick={() => setConfirmation({ title: "删除图集", text: `删除“${collection.name}”只移除图集关系，图片不会删除，子图集会上移。`, run: async () => { await api(`/api/library/collections/${encodeURIComponent(collection.id)}`, { method: "DELETE" }); if (view.kind === "collection" && view.id === collection.id) setView({ kind: "all" }); await refreshAfterWrite(); } })}><Trash2 /></button></div> : null}
         </div>)}</div>
         <SidebarHeading label="智能文件夹" onAdd={() => setSmartDraft(newSmartDraft())} />
         <div className={styles.tree}>{navigation.smartFolders.map((folder) => <div className={styles.navRow} key={folder.id}><button className={view.kind === "smart" && view.id === folder.id ? styles.navActive : styles.navButton} onClick={() => setView({ kind: "smart", id: folder.id })}><Sparkles /><span>{folder.name}</span></button>{folder.canEdit ? <div className={styles.rowActions}><button title="编辑智能文件夹" onClick={() => setSmartDraft({ ...folder })}><Pencil /></button><button title="删除智能文件夹" onClick={() => setConfirmation({ title: "删除智能文件夹", text: `删除“${folder.name}”不会删除图片。`, run: async () => { await api(`/api/library/smart-folders/${encodeURIComponent(folder.id)}`, { method: "DELETE" }); if (view.kind === "smart" && view.id === folder.id) setView({ kind: "all" }); await refreshAfterWrite(); } })}><Trash2 /></button></div> : null}</div>)}</div>
@@ -297,7 +294,7 @@ export default function LibraryPage() {
     {hydrated ? <Viewer onColor={(color) => updateParams((next) => { next.delete("asset"); next.set("color", color); })} assetId={assetId} assets={data.assets} collections={navigation.collections} hasMore={!!data.nextCursor} loadingMore={loadingMore} onMore={loadMore} onNavigate={(id, replace) => updateParams((next) => { if (id) next.set("asset", id); else next.delete("asset"); }, replace)} onSave={patchAsset} onFavorite={toggleFavorite} onOrganize={organizeAsset} onDelete={(asset, after) => confirmDelete({ mode: "ids", assetIds: [asset.id] }, 1, after)} /> : null}
     {advanced ? <FilterDialog params={params} onClose={() => setAdvanced(false)} onApply={(draft) => { updateParams((next) => { filterKeys.filter((key) => key !== "q" && key !== "tag").forEach((key) => { next.delete(key); draft.getAll(key).forEach((value) => next.append(key, value)); }); }); setAdvanced(false); }} /> : null}
     {collectionPicker ? <CollectionPicker draft={collectionPicker} collections={navigation.collections} onClose={() => setCollectionPicker(undefined)} onSubmit={submitCollectionPicker} /> : null}
-    {collectionForm ? <NameDialog title={collectionForm.id ? "重命名图集" : "新建图集"} initial={collectionForm.name} onClose={() => setCollectionForm(undefined)} onSave={saveCollection} /> : null}
+    {collectionForm ? <NameDialog title={collectionForm.id ? "重命名图集" : collectionForm.parentId ? "新建子图集" : "新建图集"} parentPath={!collectionForm.id ? navigation.collections.find((item) => item.id === collectionForm.parentId)?.relativePath || "顶层图集" : undefined} initial={collectionForm.name} onClose={() => setCollectionForm(undefined)} onSave={saveCollection} /> : null}
     {smartDraft ? <SmartFolderDialog draft={smartDraft} collections={navigation.collections} onChange={setSmartDraft} onClose={() => setSmartDraft(undefined)} onSave={saveSmartFolder} /> : null}
     {tagAction ? <BatchTagDialog action={tagAction} onClose={() => setTagAction(undefined)} onSave={submitTags} /> : null}
     {pendingFiles?.length ? <ImportDialog files={pendingFiles} collections={navigation.collections} defaultCollection={sourceCollection?.id || ""} onClose={() => setPendingFiles(undefined)} onImport={(collectionId, visibility) => enqueue(pendingFiles, collectionId, visibility)} /> : null}
@@ -548,9 +545,9 @@ function ConfirmDialog({ title, text, onClose, onConfirm }: { title: string; tex
   return <Dialog title={title} onClose={onClose} busy={busy}><p>{text}</p>{error ? <p role="alert" className={styles.pickerError}>{error}</p> : null}<footer><button disabled={busy} onClick={onClose}>取消</button><button className={styles.danger} disabled={busy} onClick={() => { setBusy(true); setError(""); void onConfirm().catch((error) => setError(errorMessage(error))).finally(() => setBusy(false)); }}>{busy ? "处理中…" : "确认删除"}</button></footer></Dialog>;
 }
 
-function NameDialog({ title, initial, onClose, onSave }: { title: string; initial: string; onClose: () => void; onSave: (name: string) => Promise<void> }) {
+function NameDialog({ title, initial, parentPath, onClose, onSave }: { title: string; initial: string; parentPath?: string; onClose: () => void; onSave: (name: string) => Promise<void> }) {
   const [name, setName] = useState(initial); const [busy, setBusy] = useState(false); const [error, setError] = useState("");
-  return <Dialog title={title} onClose={onClose} busy={busy}><label>图集名称<input autoFocus value={name} disabled={busy} onChange={(event) => setName(event.target.value)} /></label>{error ? <p className={styles.pickerError} role="alert">{error}</p> : null}<footer><button disabled={busy} onClick={onClose}>取消</button><button className={styles.primary} disabled={busy || !name.trim()} onClick={() => { setBusy(true); void onSave(name.trim()).catch((error) => setError(errorMessage(error))).finally(() => setBusy(false)); }}>保存</button></footer></Dialog>;
+  return <Dialog title={title} onClose={onClose} busy={busy}>{parentPath ? <p className={styles.hint}>创建位置：{parentPath}</p> : null}<label>图集名称<input autoFocus value={name} disabled={busy} onChange={(event) => setName(event.target.value)} /></label>{error ? <p className={styles.pickerError} role="alert">{error}</p> : null}<footer><button disabled={busy} onClick={onClose}>取消</button><button className={styles.primary} disabled={busy || !name.trim()} onClick={() => { setBusy(true); void onSave(name.trim()).catch((error) => setError(errorMessage(error))).finally(() => setBusy(false)); }}>保存</button></footer></Dialog>;
 }
 
 function BatchTagDialog({ action, onClose, onSave }: { action: "add" | "remove"; onClose: () => void; onSave: (values: string[]) => Promise<void> }) {
@@ -594,7 +591,6 @@ function SmartValue({ condition, collections, disabled, onChange }: { condition:
 
 function NavButton({ active, icon, label, count, onClick }: { active: boolean; icon: ReactNode; label: string; count: number; onClick: () => void }) { return <button className={active ? styles.navActive : styles.navButton} onClick={onClick}>{icon}<span>{label}</span><small>{count}</small></button>; }
 function SidebarHeading({ label, onAdd }: { label: string; onAdd: () => void }) { return <div className={styles.sideHeading}><strong>{label}</strong><button title={`新建${label}`} onClick={onAdd}><Plus /></button></div>; }
-function collectionDepth(collection: LibraryCollection, collections: LibraryCollection[]) { let depth = 0, parent = collection.parentId; const seen = new Set<string>(); while (parent && !seen.has(parent)) { seen.add(parent); depth += 1; parent = collections.find((item) => item.id === parent)?.parentId; } return Math.min(depth, 8); }
 function viewTitle(view: LibraryView, navigation: LibraryNavigation) { if (view.kind === "all") return "全部图片"; if (view.kind === "uncategorized") return "未分类"; if (view.kind === "favorites") return "收藏"; if (view.kind === "collection") return navigation.collections.find((item) => item.id === view.id)?.name || "图集"; return navigation.smartFolders.find((item) => item.id === view.id)?.name || "智能文件夹"; }
 function toggleSet(current: Set<string>, value: string) { const next = new Set(current); if (next.has(value)) next.delete(value); else next.add(value); return next; }
 let conditionSequence = 0;

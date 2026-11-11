@@ -111,6 +111,8 @@ Image-only `/library` UX uses existing APIs and permission rules. No schema chan
 ### 3. Contracts
 
 - Browser `q`, `view=collection:<id>|smart:<id>|all|favorites|uncategorized`, `sort`, `descendants=0`, repeated tag/dimension values and scalar ranges survive refresh/history. Clearing filters preserves collection/sort.
+- Navigation collection rows traverse parent IDs in depth-first order, retaining the API's sibling order; chronological API order is not tree order. Missing/inaccessible parents become visible roots. Search retains accessible ancestors and reveals matching descendants independently of collapse state.
+- The heading creates a root collection; each manageable collection has an explicit child-create action and the dialog shows its target path. Successful child creation expands its parent. Rename sends only `name`, preserving parent and visibility.
 - API repeated keys are singular: `imageType`, `vehicleModel`, `vehicleColor`, `angle`, `scene`, `people`, `customTag`, `tag`, `ownerId`. `includeDescendants=false` must reach the API; tagging status is `idle|queued|running|completed|failed`.
 - Date-only ranges start at Beijing midnight, with `addedBefore` exclusive at the next day's midnight. Advanced edits apply atomically; search debounces 300ms. Filter changes clear selection with notice.
 - List and cursor writes require the current generation and live normalized query. Detail requests abort on ID change. Viewer stops at final boundaries, retains the image on cursor failure, and resets transforms on asset change.

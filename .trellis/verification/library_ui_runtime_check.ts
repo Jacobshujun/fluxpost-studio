@@ -1,5 +1,21 @@
 import assert from "node:assert/strict";
-import { dateBoundary, filtersToQuery, readLibraryFilters, recentDateRange, validateFilterRanges, smartOperators } from "../../src/app/library/library-ui";
+import { dateBoundary, filtersToQuery, libraryCollectionRows, readLibraryFilters, recentDateRange, validateFilterRanges, smartOperators } from "../../src/app/library/library-ui";
+import type { LibraryCollection } from "../../src/lib/types";
+
+const collectionFixture = (id: string, parentId?: string): LibraryCollection => ({
+  id, name: id, parentId, relativePath: parentId ? `${parentId}/${id}` : id,
+  ownerUserId: "owner", ownerDisplayName: "Owner", visibility: "private", kind: "folder",
+  createdAt: "2026-11-11T00:00:00Z", updatedAt: "2026-11-11T00:00:00Z",
+});
+// Navigation is chronological: unrelated roots precede children created later.
+const chronological = [collectionFixture("first"), collectionFixture("last"), collectionFixture("child", "first"), collectionFixture("grandchild", "child"), collectionFixture("sibling", "first")];
+const rowIds = (collapsed = new Set<string>(), search = "") => libraryCollectionRows(chronological, collapsed, search).map(({ collection, depth }) => [collection.id, depth]);
+assert.deepEqual(rowIds(), [["first", 0], ["child", 1], ["grandchild", 2], ["sibling", 1], ["last", 0]]);
+assert.deepEqual(rowIds(new Set(["first"])), [["first", 0], ["last", 0]]);
+assert.deepEqual(rowIds(new Set(["child"])), [["first", 0], ["child", 1], ["sibling", 1], ["last", 0]]);
+assert.deepEqual(rowIds(new Set(["first", "child"]), "grandchild"), [["first", 0], ["child", 1], ["grandchild", 2]]);
+assert.deepEqual(libraryCollectionRows([collectionFixture("orphan", "private-parent"), collectionFixture("nested", "orphan")], new Set(), "").map(({ collection, depth }) => [collection.id, depth]), [["orphan", 0], ["nested", 1]]);
+assert.deepEqual(libraryCollectionRows([chronological[3], chronological[2], chronological[0], chronological[1]], new Set(), "").map(({ collection }) => collection.id), ["first", "child", "grandchild", "last"]);
 
 const params = new URLSearchParams("view=collection:parent&descendants=0&tag=red&tag=night&vehicleModel=G6&vehicleColor=白色&scene=城市&angle=front&people=no&imageType=exterior&taggingStatus=completed&minWidth=1200&maxByteSize=1048576&sort=oldest");
 const filters = readLibraryFilters(params);

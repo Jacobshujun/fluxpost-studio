@@ -1,5 +1,34 @@
 import { normalizeLibraryListSort } from "@/lib/library-sort";
-import type { LibraryAssetFilters, LibraryTaggingStatus, LibrarySmartFolderCondition } from "@/lib/types";
+import type { LibraryAssetFilters, LibraryCollection, LibraryTaggingStatus, LibrarySmartFolderCondition } from "@/lib/types";
+
+export function libraryCollectionRows(collections: LibraryCollection[], collapsed: ReadonlySet<string>, search: string) {
+  const byId = new Map(collections.map((collection) => [collection.id, collection]));
+  const children = new Map<string, LibraryCollection[]>();
+  const term = search.trim().toLocaleLowerCase();
+  const matches = new Set<string>();
+  for (const collection of collections) {
+    const parentId = collection.parentId && byId.has(collection.parentId) ? collection.parentId : "";
+    const siblings = children.get(parentId) || [];
+    siblings.push(collection);
+    children.set(parentId, siblings);
+    if (term && `${collection.name} ${collection.relativePath || ""}`.toLocaleLowerCase().includes(term)) {
+      let item: LibraryCollection | undefined = collection;
+      while (item && !matches.has(item.id)) { matches.add(item.id); item = item.parentId ? byId.get(item.parentId) : undefined; }
+    }
+  }
+  const rows: Array<{ collection: LibraryCollection; depth: number; hasChildren: boolean }> = [];
+  const visited = new Set<string>();
+  function append(parentId: string, depth: number) {
+    for (const collection of children.get(parentId) || []) {
+      if (visited.has(collection.id) || (term && !matches.has(collection.id))) continue;
+      visited.add(collection.id);
+      rows.push({ collection, depth, hasChildren: children.has(collection.id) });
+      if (term || !collapsed.has(collection.id)) append(collection.id, depth + 1);
+    }
+  }
+  append("", 0);
+  return rows;
+}
 
 export type LibraryView = { kind: "all" } | { kind: "uncategorized" } | { kind: "favorites" } | { kind: "collection" | "smart"; id: string };
 export const taggingLabels: Record<LibraryTaggingStatus, string> = { idle: "未打标", queued: "排队中", running: "打标中", completed: "已完成", failed: "失败" };

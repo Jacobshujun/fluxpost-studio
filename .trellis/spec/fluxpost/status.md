@@ -8,6 +8,7 @@ Local Feishu target verified; live publish pending. Identity: `/api/version`.
 
 ## Current Focus
 
+- Gallery hierarchy/rename repair: baseline and 24 browser cases pass; local activation waits for unrelated dirty work. Evidence: `archive/2026-11/11-11-gallery-collection-hierarchy/verification.md`.
 - Feishu target/schema/dry-run/baseline pass; text tags supported, imports/audits preserved. Evidence: `archive/2026-11/11-11-feishu-publish-target/verification.md`.
 - High-resolution processing: 100 MP / 8K and LAN checks pass; `canvas_image_process.md`; evidence: `archive/2026-11/11-10-high-resolution-image-processing/verification.md`.
 - Switch Any: six browser cases/baseline pass; operator acceptance pending. Contract: `canvas_switch_any.md`; evidence: `archive/2026-11/11-10-canvas-switch-any/verification.md`.

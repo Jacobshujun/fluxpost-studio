@@ -27,6 +27,8 @@ def run_case(browser, theme, width, height):
     context.add_init_script(f"localStorage.setItem('fluxpost-theme', '{theme}')")
     page = context.new_page()
     assets = [make_asset(i) for i in range(1, 66)]
+    collections = [dict(COLLECTIONS[i]) for i in [0, 2, 1]]
+    collections[0]["visibility"] = "team"
     calls, queries, imports, unknown, errors, originals = [], [], [], [], [], []
     held_pages, held_imports = [], []
     flags = {"hold_page": False, "hold_import": False, "fail_patch": False, "fail_delete": False, "fail_import": True, "fail_collection": False, "fail_cursor": False}
@@ -60,7 +62,7 @@ def run_case(browser, theme, width, height):
         params = parse_qs(urlparse(request.url).query)
         method = request.method
         if path == "/api/library/navigation":
-            route.fulfill(json={"collections": COLLECTIONS, "smartFolders": [], "counts": {"all": len(assets), "uncategorized": sum(not a["collectionIds"] for a in assets), "favorites": sum(a["favorite"] for a in assets)}})
+            route.fulfill(json={"collections": collections, "smartFolders": [], "counts": {"all": len(assets), "uncategorized": sum(not a["collectionIds"] for a in assets), "favorites": sum(a["favorite"] for a in assets)}})
         elif path == "/api/library/colors/jobs": route.fulfill(json={"coverage": {"total": len(assets), "analyzed": 0, "failed": 0, "manageableMissing": len(assets), "manageableFailed": 0}})
         elif path == "/api/library/tags" and method == "GET": route.fulfill(json={"tags": [{"label": "red", "count": 3}]})
         elif path.endswith("/thumbnail"): route.fulfill(content_type="image/gif", body=PIXEL)
@@ -130,7 +132,21 @@ def run_case(browser, theme, width, height):
             matches = selected(body)
             for a in matches: a["manualOverrides"] = {"customTags": body.get("add", [])}; a["effectiveTags"] = {**a["aiTags"], **a["manualOverrides"]}
             route.fulfill(json={"assets": matches, "failures": []})
-        elif path.startswith("/api/library/collections") or path.startswith("/api/library/smart-folders"):
+        elif path.startswith("/api/library/collections"):
+            body = request.post_data_json
+            calls.append({"organizer": body, "method": method})
+            if body["name"] == "Fail child":
+                route.fulfill(status=400, json={"error": "Collection unavailable"}); return
+            if method == "POST":
+                parent = next((c for c in collections if c["id"] == body.get("parentId")), None)
+                collection = {**COLLECTIONS[0], **body, "id": f"created-{len(collections)}", "relativePath": f'{parent["relativePath"]}/{body["name"]}' if parent else body["name"]}
+                collections.append(collection)
+            else:
+                assert method == "PATCH" and set(body) == {"name"}, body
+                collection = next(c for c in collections if c["id"] == path.rsplit("/", 1)[-1])
+                collection.update(body)
+            route.fulfill(json={"collection": collection})
+        elif path.startswith("/api/library/smart-folders"):
             calls.append({"organizer": request.post_data_json}); route.fulfill(json={"ok": True})
         elif path == "/api/library/tagging": route.fulfill(json={"jobs": []})
         else:
@@ -396,6 +412,60 @@ def run_case(browser, theme, width, height):
     form.get_by_label("图集名称").fill("New collection")
     form.get_by_role("button", name="保存", exact=True).click()
     expect(form).to_have_count(0)
+
+    # Chronological roots-before-children responses must render actual subtrees.
+    sidebar = page.get_by_role("complementary", name="图库导航")
+    def tree_names():
+        return sidebar.locator('[class*="navRow"] > button[title]').all_text_contents()
+    assert tree_names() == ["Campaign", "Detail", "Archive", "New collection"], tree_names()
+    campaign = sidebar.locator('[class*="navRow"]').filter(has=page.get_by_role("button", name="Campaign", exact=True))
+    campaign.get_by_role("button", name="折叠Campaign", exact=True).click()
+    expect(sidebar.get_by_role("button", name="Detail", exact=True)).to_have_count(0)
+    campaign.hover()
+    campaign.get_by_title("新建子图集", exact=True).click()
+    child_form = page.get_by_role("dialog", name="新建子图集", exact=True)
+    expect(child_form.get_by_text("创建位置：Campaign", exact=True)).to_be_visible()
+    child_form.get_by_label("图集名称").fill("Fail child")
+    child_form.get_by_role("button", name="保存", exact=True).click()
+    expect(child_form.get_by_role("alert")).to_have_text("Collection unavailable")
+    expect(child_form.get_by_label("图集名称")).to_have_value("Fail child")
+    child_form.get_by_label("图集名称").fill("Created child")
+    child_form.get_by_role("button", name="保存", exact=True).click()
+    expect(child_form).to_have_count(0)
+    expect(sidebar.get_by_role("button", name="Created child", exact=True)).to_be_visible()
+    assert calls[-1]["organizer"]["parentId"] == "campaign"
+    assert tree_names() == ["Campaign", "Detail", "Created child", "Archive", "New collection"], tree_names()
+    child_row = sidebar.locator('[class*="navRow"]').filter(has=page.get_by_role("button", name="Created child", exact=True))
+    child_row.hover()
+    child_row.get_by_title("新建子图集", exact=True).click()
+    child_form.get_by_label("图集名称").fill("Created grandchild")
+    child_form.get_by_role("button", name="保存", exact=True).click()
+    expect(child_form).to_have_count(0)
+    expect(sidebar.get_by_role("button", name="Created grandchild", exact=True)).to_be_visible()
+    assert calls[-1]["organizer"]["parentId"] == next(c["id"] for c in collections if c["name"] == "Created child")
+    campaign.get_by_role("button", name="折叠Campaign", exact=True).click()
+    sidebar.get_by_label("搜索图集").fill("Created grandchild")
+    expect(sidebar.get_by_role("button", name="Campaign", exact=True)).to_be_visible()
+    expect(sidebar.get_by_role("button", name="Created child", exact=True)).to_be_visible()
+    expect(sidebar.get_by_role("button", name="Created grandchild", exact=True)).to_be_visible()
+    sidebar.get_by_label("搜索图集").fill("")
+    campaign.get_by_role("button", name="展开Campaign", exact=True).click()
+    sidebar.get_by_role("button", name="Campaign", exact=True).click()
+    page.get_by_title("新建图集", exact=True).click()
+    form.get_by_label("图集名称").fill("Independent root")
+    form.get_by_role("button", name="保存", exact=True).click()
+    expect(form).to_have_count(0)
+    assert "parentId" not in calls[-1]["organizer"]
+    campaign.hover()
+    campaign.get_by_title("重命名", exact=True).click()
+    rename = page.get_by_role("dialog", name="重命名图集", exact=True)
+    rename.get_by_label("图集名称").fill("Campaign renamed")
+    rename.get_by_role("button", name="保存", exact=True).click()
+    expect(rename).to_have_count(0)
+    assert calls[-1]["organizer"] == {"name": "Campaign renamed"}
+    assert collections[0]["visibility"] == "team"
+    page.reload(wait_until="networkidle")
+    assert tree_names() == ["Campaign renamed", "Detail", "Created child", "Created grandchild", "Archive", "New collection", "Independent root"], tree_names()
 
     # Screenshots and containment across all themes and both layouts.
     page.screenshot(path=os.path.join(tempfile.gettempdir(), f"fluxpost-gallery-{name}.png"))

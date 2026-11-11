@@ -24,7 +24,7 @@ fixture.exec(`
     relative_path TEXT, created_at TEXT NOT NULL, updated_at TEXT NOT NULL, data_json TEXT NOT NULL
   );
   CREATE INDEX idx_library_collections_owner_role ON library_collections(owner_user_id, role, parent_id, name);
-  CREATE TABLE library_collection_assets (collection_id TEXT NOT NULL, asset_id TEXT NOT NULL, created_at TEXT NOT NULL, PRIMARY KEY(collection_id, asset_id));
+  CREATE TABLE library_collection_assets (collection_id TEXT NOT NULL REFERENCES library_collections(id) ON DELETE CASCADE, asset_id TEXT NOT NULL REFERENCES library_assets(id) ON DELETE CASCADE, created_at TEXT NOT NULL, PRIMARY KEY(collection_id, asset_id));
   CREATE TABLE library_asset_labels (asset_id TEXT NOT NULL, dimension TEXT NOT NULL, value TEXT NOT NULL, source TEXT NOT NULL, confidence REAL, updated_at TEXT NOT NULL, PRIMARY KEY(asset_id, dimension, value));
   CREATE TABLE library_tagging_jobs (id TEXT PRIMARY KEY, asset_id TEXT NOT NULL, owner_user_id TEXT NOT NULL, status TEXT NOT NULL, attempts INTEGER NOT NULL, max_attempts INTEGER NOT NULL, run_after TEXT NOT NULL, locked_by TEXT, locked_until TEXT, created_at TEXT NOT NULL, updated_at TEXT NOT NULL, started_at TEXT, completed_at TEXT, error TEXT, data_json TEXT NOT NULL);
   CREATE TABLE canvas_workflows (id TEXT PRIMARY KEY, owner_user_id TEXT NOT NULL, name TEXT NOT NULL, revision INTEGER NOT NULL, is_template INTEGER NOT NULL DEFAULT 0, created_at TEXT NOT NULL, updated_at TEXT NOT NULL, data_json TEXT NOT NULL);
@@ -164,7 +164,26 @@ await library.updateLibraryAssetCollections(actor, { action: "add_to_collections
 await library.updateLibraryAssetCollections(actor, { action: "move_to_collection", selection: { mode: "ids", assetIds: ["a-2"] }, sourceCollectionId: moveSource.id, targetCollectionId: moveTarget.id });
 const alreadyTarget = await database.getLibraryAssetFromDb("a-2");
 assert(alreadyTarget && !alreadyTarget.collectionIds.includes(moveSource.id) && alreadyTarget.collectionIds.filter((id) => id === moveTarget.id).length === 1, "Existing target membership must not prevent removing the source.");
-console.log("Unified library SQLite migration and query runtime check passed.");
+const hierarchyRoot = await library.createLibraryCollection(actor, { name: "Hierarchy team", visibility: "team" });
+await library.createLibraryCollection(actor, { name: "Unrelated last root" });
+const hierarchyChild = await library.createLibraryCollection(actor, { name: "Child", parentId: hierarchyRoot.id, visibility: "team" });
+const hierarchyGrandchild = await library.createLibraryCollection(actor, { name: "Grandchild", parentId: hierarchyChild.id });
+assert(hierarchyChild.parentId === hierarchyRoot.id, "Child must belong to the requested parent, never the last-created root.");
+await library.updateLibraryCollection(actor, hierarchyRoot.id, { name: "Renamed team" });
+let hierarchy = await database.listLibraryCollectionsFromDb();
+assert(hierarchy.find((item) => item.id === hierarchyRoot.id)?.visibility === "team", "Rename changed team visibility.");
+assert(hierarchy.find((item) => item.id === hierarchyGrandchild.id)?.relativePath === "Renamed team/Child/Grandchild", "Rename failed to refresh nested paths.");
+let cycleRejected = false;
+try { await library.updateLibraryCollection(actor, hierarchyRoot.id, { parentId: hierarchyGrandchild.id }); } catch { cycleRejected = true; }
+assert(cycleRejected, "Moving into a descendant must fail.");
+await library.updateLibraryAssetCollections(actor, { action: "add_to_collections", selection: { mode: "ids", assetIds: ["a-1"] }, collectionIds: [hierarchyChild.id, hierarchyGrandchild.id] });
+await library.deleteLibraryCollection(actor, hierarchyChild.id);
+hierarchy = await database.listLibraryCollectionsFromDb();
+const survivingGrandchild = hierarchy.find((item) => item.id === hierarchyGrandchild.id);
+assert(survivingGrandchild?.parentId === hierarchyRoot.id && survivingGrandchild.relativePath === "Renamed team/Grandchild", "Deletion must reparent children and refresh their paths.");
+const survivingAsset = await database.getLibraryAssetFromDb("a-1");
+assert(survivingAsset?.collectionIds.includes(hierarchyGrandchild.id) && !survivingAsset.collectionIds.includes(hierarchyChild.id), "Collection deletion must preserve assets and surviving memberships.");
+console.log("Unified library SQLite migration, queries, hierarchy rename/delete and membership runtime check passed.");
 }
 
 function assert(condition: unknown, message: string): asserts condition { if (!condition) throw new Error(message); }
