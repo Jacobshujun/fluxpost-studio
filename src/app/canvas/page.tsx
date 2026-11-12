@@ -24,7 +24,7 @@ import { pixelSizeForRatio } from "@/lib/gpt-image-dimensions";
 import { toApisImageRatios, toApisImageResolutions } from "@/lib/toapis-image-api";
 import { ImageModelSelector } from "@/components/image-model-selector";
 import type { ToApisRequestFormat } from "@/lib/image-model-options";
-import { canvasCollectionLinks } from "@/lib/canvas/content-collection";
+import { canvasCollectionLinks, canvasCollectionSourceLabel } from "@/lib/canvas/content-collection";
 import { canvasIterationAllowedNodeTypes, getCanvasIterationOutputPorts } from "@/lib/canvas/iteration";
 import { canvasSubtitleStyleConfig, canvasSubtitleStyleFromConfig, normalizeCanvasSubtitlePresetName } from "@/lib/canvas/subtitle-style";
 import { createCanvasSchedulerSkeleton } from "@/lib/canvas/scheduler-skeleton";
@@ -281,7 +281,7 @@ export default function CanvasPage() {
     setNodes((current) => current.map((node) => {
       if (node.id !== nodeId) return node;
       const currentNode = node.data.canvasNode;
-      const nextConfig = { ...currentNode.config, [key]: value, ...(currentNode.type === "input.content-collection" && key === "links" ? { sourceLink: "" } : {}) };
+      const nextConfig = { ...currentNode.config, [key]: value, ...(currentNode.type === "input.content-collection" && (key === "links" || key === "platform") ? { sourceLink: "" } : {}) };
       const config = currentNode.type === "input.source-video" && (key === "sourceUrl" || key === "projectName")
         ? clearCanvasSourceVideoSnapshot(nextConfig)
         : nextConfig;
@@ -2959,9 +2959,9 @@ function NodeInspector({
   };
   return <div className="canvas-inspector-content">
     {node.type === "input.content-collection" ? <div className="canvas-source-video-resolver">
-      <p>单条测试：选择链接后运行此节点或运行全部。批量处理：打开批量调度，新建灵活调度，按链接自动执行下游。</p>
-      <label><span>单条测试链接（不影响批量列表）</span><select aria-label="单条测试链接" value={String(node.config.sourceLink || "")} onChange={(event) => onPatch({ sourceLink: event.target.value })}>
-        <option value="">{canvasCollectionLinks(node.config.links).length === 1 ? "使用唯一链接" : "请选择测试链接"}</option>
+      <p>单条测试：选择{canvasCollectionSourceLabel(node.config)}后运行此节点或运行全部。批量处理：打开批量调度，新建灵活调度，按{canvasCollectionSourceLabel(node.config)}自动执行下游。</p>
+      <label><span>单条测试{canvasCollectionSourceLabel(node.config)}（不影响批量列表）</span><select aria-label={`单条测试${canvasCollectionSourceLabel(node.config)}`} value={String(node.config.sourceLink || "")} onChange={(event) => onPatch({ sourceLink: event.target.value })}>
+        <option value="">{canvasCollectionLinks(node.config.links).length === 1 ? `使用唯一${canvasCollectionSourceLabel(node.config)}` : `请选择测试${canvasCollectionSourceLabel(node.config)}`}</option>
         {canvasCollectionLinks(node.config.links).map((link, index) => <option key={link} value={link}>{index + 1}. {link}</option>)}
       </select></label>
       <small>支持视觉识别、逐图重构及其他兼容下游。默认不打标；批量预演不调用采集服务，确认启动后才采集。</small>

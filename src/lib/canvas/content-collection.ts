@@ -1,6 +1,10 @@
 import type { CanvasArtifact, CanvasNode } from "./types";
 
-export const canvasCollectionPlatforms = ["auto", "wechat_channels", "xiaohongshu", "douyin", "weibo", "xiaopeng_bbs", "dongchedi"] as const;
+export const canvasCollectionPlatforms = ["auto", "wechat_channels", "xiaohongshu", "douyin", "weibo", "xiaopeng_bbs", "dongchedi", "feishu"] as const;
+
+export function canvasCollectionSourceLabel(config: CanvasNode["config"]) {
+  return config.platform === "feishu" ? "飞书编号" : "链接";
+}
 
 export function canvasCollectionLinks(value: unknown): string[] {
   const lines = typeof value === "string" ? value.split(/\r?\n/) : [];
@@ -16,9 +20,10 @@ export function canvasCollectionSourceLink(config: CanvasNode["config"]): string
 export function validateCanvasCollectionConfig(config: CanvasNode["config"]): string[] {
   const errors: string[] = [];
   const links = canvasCollectionLinks(config.links);
-  if (!canvasCollectionSourceLink(config)) errors.push(links.length > 1 ? "内容采集：请选择单条测试链接，或使用批量调度按链接运行。" : "内容采集：请输入来源链接或 ID。");
-  if (links.length > 200) errors.push("内容采集最多支持 200 条链接。");
-  if (/[\r\n]/.test(canvasCollectionSourceLink(config))) errors.push("每个内容任务只能采集一条链接。");
+  const label = canvasCollectionSourceLabel(config);
+  if (!canvasCollectionSourceLink(config)) errors.push(links.length > 1 ? `内容采集：请选择单条测试${label}，或使用批量调度按${label}运行。` : `内容采集：请输入${config.platform === "feishu" ? "飞书编号" : "来源链接或 ID"}。`);
+  if (links.length > 200) errors.push(`内容采集最多支持 200 条${label}。`);
+  if (/[\r\n]/.test(canvasCollectionSourceLink(config))) errors.push(`每个内容任务只能采集一条${label}。`);
   if (typeof config.projectName !== "string" || !config.projectName.trim() || config.projectName.trim().length > 80) errors.push("内容池项目名称须为 1–80 个字符。");
   if (!canvasCollectionPlatforms.some((platform) => platform === config.platform)) errors.push("请选择支持的采集平台。");
   return errors;

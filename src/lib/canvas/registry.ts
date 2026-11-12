@@ -154,7 +154,7 @@ const canvasNodeDefinitionVersions: CanvasNodeDefinition[] = [
     type: "input.content-collection",
     version: 1,
     label: "内容采集",
-    description: "采集链接或 ID，默认不打标；批量调度按来源独立处理。",
+    description: "采集链接、平台 ID 或飞书编号，默认不打标；批量调度按来源独立处理。",
     category: "input",
     icon: "Download",
     color: "#2563eb",
@@ -167,13 +167,14 @@ const canvasNodeDefinitionVersions: CanvasNodeDefinition[] = [
       { id: "videos", label: "视频", kind: "videos" },
     ],
     fields: [
-      { key: "links", label: "来源链接 / ID（每行一条）", kind: "textarea", placeholder: "粘贴链接；多条内容请使用批量调度" },
+      { key: "links", label: "来源链接 / ID / 飞书编号（每行一条）", kind: "textarea", placeholder: "粘贴来源；飞书编号请先选择对应平台，多条内容使用批量调度" },
       { key: "projectName", label: "内容池项目", kind: "text" },
       { key: "platform", label: "采集平台", kind: "select", options: [
         { value: "auto", label: "自动识别链接" }, { value: "xiaohongshu", label: "小红书" },
         { value: "douyin", label: "抖音" }, { value: "wechat_channels", label: "视频号" },
         { value: "weibo", label: "微博" }, { value: "xiaopeng_bbs", label: "小鹏社区" },
         { value: "dongchedi", label: "懂车帝" },
+        { value: "feishu", label: "飞书编号" },
       ] },
       { key: "automaticTagging", label: "自动打标", kind: "boolean" },
       { key: "videoFrameOriginalReference", label: "提取视频参考帧", kind: "boolean" },
@@ -1117,7 +1118,7 @@ export function getCanvasBatchBindableFields(node: Pick<CanvasNode, "type" | "ve
   const definition = getCanvasNodeDefinition(node.type, node.version);
   if (!definition) return [];
   if (node.type === "input.content-collection") {
-    return [{ key: "sourceLink", label: "采集链接", parameterTypes: ["text"], adapter: "config-value" }];
+    return [{ key: "sourceLink", label: "采集链接 / 飞书编号", parameterTypes: ["text"], adapter: "config-value" }];
   }
   if (node.type === "input.video-loader") {
     return [{ key: "videos", label: "视频队列", parameterTypes: ["video"], adapter: "video-input" }];

@@ -1,4 +1,4 @@
-import { canvasCollectionLinks } from "./content-collection";
+import { canvasCollectionLinks, canvasCollectionSourceLabel } from "./content-collection";
 import { getCanvasNodeDefinition } from "./registry";
 import { getCanvasIterationOutputPorts } from "./iteration";
 import type { CanvasGraph, CanvasScheduleV2Definition } from "./types";
@@ -29,7 +29,7 @@ export function canvasCollectionScheduleDefinition(graph: CanvasGraph): CanvasSc
   return {
     parameters: [{
       id: `collection-${source.id}`,
-      name: "来源链接",
+      name: source.config.platform === "feishu" ? canvasCollectionSourceLabel(source.config) : "来源链接",
       scope: "main",
       valueType: "text",
       source: { mode: "manual-list", values: canvasCollectionLinks(source.config.links) },

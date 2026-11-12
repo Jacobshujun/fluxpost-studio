@@ -65,10 +65,38 @@ try {
   assert.throws(() => scheduler.validateCanvasScheduleV2Definition(graph, duplicates), /重复/);
 
   const requests = [];
+  const feishuRequests = [];
+  const ingests = [];
+  const tagRequests = [];
+  let feishuFailure;
+  let feishuItemCount = 1;
+  let safetyFiltered = false;
   let failLink;
   const service = loadMocked("src/lib/canvas/content-collection-service.ts", {
     "../content-safety-policy": { getContentSafetyPolicy: async () => ({ revision: 1 }), normalizeContentSafetyPolicySnapshot: (value) => value },
     "./content-collection": contract,
+    "../feishu-content-import": {
+      normalizeFeishuTaskNumberInput: (value) => [...new Set(value.split(/[\r\n,，;；\t ]+/).filter(Boolean))],
+      importFeishuContentByTaskNumbers: async (numbers, options) => {
+        feishuRequests.push({ numbers, options });
+        return { items: feishuFailure ? [] : Array.from({ length: feishuItemCount }, () => ({
+          id: numbers[0], platform: "feishu", title: `title-${numbers[0]}`, contentText: `body-${numbers[0]}`,
+          sourceUrl: `rec-${numbers[0]}`, images: ["https://unused.example/remote.jpg"],
+          downloadedImages: [`/media/${numbers[0]}.jpg`, `/media/${numbers[0]}.jpg`],
+          downloadedVideoUrl: `/media/${numbers[0]}.mp4`,
+        })), results: [{ status: feishuFailure ? "not_found" : "imported", error: feishuFailure }] };
+      },
+    },
+    "../source-safety": { filterUnsafeSourceItems: async (items, context, policy) => {
+      assert.equal(context.scope, "canvas/content-collection");
+      assert.equal(policy.revision, 1);
+      return { items: safetyFiltered ? [] : items };
+    } },
+    "../source-tagging": {
+      markItemsAsSkippedTagging: (items) => items.map((item) => ({ ...item, taggingStatus: "skipped" })),
+      tagSourceItems: async (items) => { tagRequests.push(items); return items; },
+    },
+    "../content-pool": { ingestCrawlItems: async (query, items, actor) => { ingests.push({ query, items, actor }); } },
     "../source-link-import": { importSourceLinks: async (input) => {
       requests.push(structuredClone(input));
       assert.equal(input.links.length, 1);
@@ -79,7 +107,7 @@ try {
       return { items: [{ id: `item-${index}`, title: `title-${index}`, contentText: `body-${index}`, sourceUrl: link, images: ["https://unused.example/remote.jpg"], downloadedImages: Array.from({ length: index % 3 + 1 }, (_, imageIndex) => `/media/${index}-${imageIndex}.jpg`), downloadedVideoUrl: index === 0 ? "/media/video.mp4" : undefined }], results: [{ status: "imported" }] };
     } },
   });
-  const account = { id: "owner-a", role: "member", displayName: "Owner A" };
+  const account = { id: "owner-a", role: "operator", displayName: "Owner A" };
   const executorSource = read("src/lib/canvas/executors.ts");
   const imports = [...executorSource.matchAll(/from "([^"]+)"/g)].map((match) => match[1]);
   const modules = Object.fromEntries(imports.filter((name) => !name.startsWith("node:")).map((name) => [name, {}]));
@@ -168,6 +196,64 @@ try {
   assert.equal(graph.nodes[0].type, "input.content-collection", "frozen child graphs must not mutate the saved Canvas");
   assert.match(read("src/lib/canvas/scheduler.ts"), /createCanvasScheduleV2AggregateGraph\(createCanvasScheduleV2ChildGraph\(/);
   assert.match(read("src/lib/canvas/runs.ts"), /node\.type !== "input.content-collection"/);
+  const feishuSource = structuredClone(source);
+  feishuSource.config = { ...feishuSource.config, platform: "feishu", links: "AI00001\nAI00002\nAI00001", sourceLink: "AI00002" };
+  assert.deepEqual(contract.validateCanvasCollectionConfig(feishuSource.config), []);
+  const feishuGraph = { ...graph, nodes: [feishuSource, vision] };
+  const roundtrip = files.parseCanvasWorkflowFile(JSON.stringify(files.createCanvasWorkflowFile("Feishu", feishuGraph)));
+  assert.deepEqual(roundtrip.graph.nodes[0].config, feishuSource.config);
+  const feishuDefinition = preset.canvasCollectionScheduleDefinition(feishuGraph);
+  assert.equal(feishuDefinition.parameters[0].name, "飞书编号");
+  scheduler.validateCanvasScheduleV2Definition(feishuGraph, feishuDefinition);
+  const feishuExpansion = scheduler.expandCanvasScheduleV2(feishuDefinition.parameters, feishuDefinition);
+  assert.equal(feishuExpansion.totalMainTasks, 2);
+  const linkRequestCount = requests.length;
+  for (const main of feishuExpansion.mainTasks) {
+    const injected = scheduler.applyCanvasScheduleV2Parameters(feishuGraph, feishuDefinition.parameters, main.parameterValues);
+    const outputs = await service.collectCanvasContent(injected.nodes[0], account);
+    const number = injected.nodes[0].config.sourceLink;
+    assert.equal(outputs.title.value, `title-${number}`);
+    assert.equal(outputs.body.value, `body-${number}`);
+    assert.equal(outputs.source.value, `rec-${number}`);
+    assert.deepEqual(outputs.images.items, [{ url: `/media/${number}.jpg` }]);
+    assert.deepEqual(outputs.videos.items, [{ url: `/media/${number}.mp4` }]);
+    const frozen = scheduler.createCanvasScheduleV2ChildGraph(injected, scheduler.extractCanvasScheduleV2SharedArtifacts({ source: outputs }, feishuDefinition.sharedOutputs));
+    assert.deepEqual(executors.resolveCanvasLiteralOutputs(frozen.nodes[0]), outputs);
+    assert.equal(ingests.at(-1).actor, account);
+    assert.equal(ingests.at(-1).query, feishuSource.config.projectName);
+    assert.equal(ingests.at(-1).items[0].taggingStatus, "skipped");
+  }
+  assert.equal(feishuRequests.length, 2);
+  assert.equal(tagRequests.length, 0);
+  assert.equal(requests.length, linkRequestCount, "Feishu must bypass platform-link services");
+  feishuSource.config.automaticTagging = true;
+  feishuSource.config.enableVideoTranscription = true;
+  feishuSource.config.videoFrameOriginalReference = false;
+  await service.collectCanvasContent(feishuSource, account);
+  assert.equal(tagRequests.length, 1);
+  assert.equal(ingests.at(-1).items[0].videoFrameOriginalReference, false);
+  assert.equal(feishuRequests.at(-1).options.enableVideoTranscription, true);
+  const ingestCount = ingests.length;
+  safetyFiltered = true;
+  await assert.rejects(service.collectCanvasContent(feishuSource, account), /安全过滤/);
+  safetyFiltered = false;
+  feishuFailure = "mock Feishu lookup failure";
+  await assert.rejects(service.collectCanvasContent(feishuSource, account), /mock Feishu lookup failure/);
+  feishuFailure = undefined;
+  for (const count of [0, 2]) {
+    feishuItemCount = count;
+    await assert.rejects(service.collectCanvasContent(feishuSource, account), /应返回一条内容/);
+  }
+  assert.equal(ingests.length, ingestCount, "failed/filtered lookups must not ingest");
+  feishuSource.config.sourceLink = "AI00001,AI00002";
+  const readCount = feishuRequests.length;
+  await assert.rejects(service.collectCanvasContent(feishuSource, account), /只能导入一个飞书编号/);
+  assert.equal(feishuRequests.length, readCount);
+  feishuSource.config.sourceLink = "";
+  assert.match(contract.validateCanvasCollectionConfig(feishuSource.config).join(" "), /测试飞书编号/);
+  feishuSource.config.links = "AI00001";
+  assert.equal(contract.canvasCollectionSourceLink(feishuSource.config), "AI00001");
+  console.log("Feishu collection: exact single-source dispatch, failures, safety, tagging, owner ingest, five outputs and batch snapshots passed.");
   console.log("Canvas collection: 20 isolated sources, vision/image outputs, tagging defaults, failures and retry contracts passed.");
 } finally {
   rmSync(temp, { recursive: true, force: true });

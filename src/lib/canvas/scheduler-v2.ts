@@ -63,11 +63,11 @@ export function validateCanvasScheduleV2Definition(graph: CanvasGraph, definitio
     if (!field) throw new Error(`${name}: bound node field is not batch-injectable.`);
     if (!field.parameterTypes.includes(parameter.valueType)) throw new Error(`${name}: parameter type is incompatible with ${field.label}.`);
     if (node.type === "input.content-collection") {
-      if (parameter.scope !== "main") throw new Error("采集链接必须绑定任务组参数，不能按图片重复采集。");
-      if (parameter.source.mode !== "manual-list" && parameter.source.mode !== "fixed") throw new Error("内容采集需要固定的来源链接列表。");
+      if (parameter.scope !== "main") throw new Error("采集来源必须绑定任务组参数，不能按图片重复采集。");
+      if (parameter.source.mode !== "manual-list" && parameter.source.mode !== "fixed") throw new Error("内容采集需要固定的来源列表。");
       const links = parameter.source.values;
-      if (!links.length || links.length > 200 || links.some((link) => typeof link !== "string" || !link.trim() || /[\r\n]/.test(link))) throw new Error("采集链接须为 1–200 条非空单行链接或 ID。");
-      if (new Set(links.map((link) => String(link).trim())).size !== links.length) throw new Error("采集链接列表包含重复项，请去重后重新预演。");
+      if (!links.length || links.length > 200 || links.some((link) => typeof link !== "string" || !link.trim() || /[\r\n]/.test(link))) throw new Error("采集来源须为 1–200 条非空单行链接、ID 或飞书编号。");
+      if (new Set(links.map((link) => String(link).trim())).size !== links.length) throw new Error("采集来源列表包含重复项，请去重后重新预演。");
     }
     const bindingKey = canvasBatchBindingKey(parameter.binding);
     if (bindings.has(bindingKey)) throw new Error(`${name}: another parameter already binds the same node field.`);

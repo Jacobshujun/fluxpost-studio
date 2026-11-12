@@ -11,11 +11,15 @@ from batch_create_browser_check import summary_result
 
 
 BASE_URL = os.environ.get("BROWSER_BASE_URL", "http://127.0.0.1:45678")
+target = urlparse(BASE_URL)
+if target.hostname not in ["127.0.0.1", "localhost", "::1"] or target.port == 3001:
+    raise RuntimeError("Browser checks require an isolated loopback server outside port 3001")
 NOW = "2026-09-09T00:00:00.000Z"
 LINKS = [f"https://www.xiaohongshu.com/explore/browser-{index}" for index in range(20)]
 
 
-async def check(browser, width):
+async def check(browser, width, feishu=False):
+    sources = [f"AI{index + 1:05d}" for index in range(20)] if feishu else LINKS
     page = await browser.new_page(viewport={"width": 1440, "height": 960})
     errors = []
     requests = []
@@ -27,7 +31,7 @@ async def check(browser, width):
         "graph": {"viewport": {"x": 0, "y": 0, "zoom": 1}, "nodes": [
             {"id": "collection", "type": "input.content-collection", "version": 1,
              "position": {"x": 40, "y": 40}, "executionMode": "enabled",
-             "config": {"links": "\n".join(LINKS), "sourceLink": "", "projectName": "浏览器采集",
+             "config": {"links": "\n".join(sources), "sourceLink": "", "projectName": "浏览器采集",
                         "platform": "auto", "automaticTagging": False,
                         "videoFrameOriginalReference": True, "enableVideoTranscription": False}},
             {"id": "vision", "type": "model.gpt-vision", "version": 1,
@@ -100,13 +104,18 @@ async def check(browser, width):
     await expect(tagging).to_be_checked()
     await tagging.uncheck()
     test_link = page.get_by_label("单条测试链接", exact=True)
-    await test_link.select_option(LINKS[1])
+    await test_link.select_option(sources[1])
+    if feishu:
+        await page.locator(".canvas-inspector-content label").filter(has=page.get_by_text("采集平台", exact=True)).locator("select").select_option("feishu")
+        test_link = page.get_by_label("单条测试飞书编号", exact=True)
+        await expect(test_link).to_have_value("")
+        await test_link.select_option(sources[1])
     Path("test-artifacts").mkdir(exist_ok=True)
-    await page.screenshot(path=f"test-artifacts/canvas-content-collection-panel-{width}.png", full_page=True)
-    await expect(test_link).to_have_value(LINKS[1])
-    await page.locator(".canvas-inspector-content textarea").fill("\n".join(LINKS + [LINKS[0]]))
+    await page.screenshot(path=f"test-artifacts/canvas-content-collection-panel-{width}-{'feishu' if feishu else 'links'}.png", full_page=True)
+    await expect(test_link).to_have_value(sources[1])
+    await page.locator(".canvas-inspector-content textarea").fill("\n".join(sources + [sources[0]]))
     await expect(test_link).to_have_value("")
-    await test_link.select_option(LINKS[1])
+    await test_link.select_option(sources[1])
     await page.get_by_role("button", name="批量调度", exact=True).click()
     dialog = page.get_by_role("dialog", name="Canvas 批量调度")
     await expect(dialog).to_be_visible()
@@ -118,18 +127,21 @@ async def check(browser, width):
     await page.set_viewport_size({"width": width, "height": 960})
     scalar_editor = dialog.locator(".canvas-schedule-parameter-values")
     values_input = scalar_editor.locator("textarea")
-    await values_input.fill(LINKS[0])
+    await expect(values_input).to_have_value("\n".join(sources))
+    if feishu:
+        await expect(dialog.get_by_label("参数名称", exact=True)).to_have_value("飞书编号")
+    await values_input.fill(sources[0])
     await values_input.press("End")
     await values_input.press("Enter")
-    await expect(values_input).to_have_value(LINKS[0] + "\n")
+    await expect(values_input).to_have_value(sources[0] + "\n")
     await values_input.press("Enter")
-    await expect(values_input).to_have_value(LINKS[0] + "\n\n")
+    await expect(values_input).to_have_value(sources[0] + "\n\n")
     await values_input.press("Space")
     await page.keyboard.insert_text("中文参数")
-    await expect(values_input).to_have_value(LINKS[0] + "\n\n 中文参数")
+    await expect(values_input).to_have_value(sources[0] + "\n\n 中文参数")
     await values_input.press("Control+Home")
     await values_input.press("Enter")
-    await expect(values_input).to_have_value("\n" + LINKS[0] + "\n\n 中文参数")
+    await expect(values_input).to_have_value("\n" + sources[0] + "\n\n 中文参数")
     await values_input.fill("前半后半")
     await values_input.press("Home")
     await values_input.press("ArrowRight")
@@ -143,20 +155,23 @@ async def check(browser, width):
     await expect(values_input).to_have_value("前半")
     await source_mode.select_option("manual-list")
     await expect(values_input).to_have_value("前半")
-    await values_input.fill("\n\n".join(LINKS) + "\n\n")
-    await expect(values_input).to_have_value("\n\n".join(LINKS) + "\n\n")
+    await values_input.fill("\n\n".join(sources) + "\n\n")
+    await expect(values_input).to_have_value("\n\n".join(sources) + "\n\n")
     await dialog.get_by_role("button", name=re.compile("预演")).click()
     await expect(dialog.get_by_text("展开预览 · 20 个任务组 · 20 个结果项", exact=True)).to_be_visible()
     await expect(dialog.get_by_role("button", name="确认并启动", exact=True)).to_be_visible()
     assert workflow["graph"]["nodes"][0]["config"]["automaticTagging"] is False
-    assert workflow["graph"]["nodes"][0]["config"]["sourceLink"] == LINKS[1]
+    assert workflow["graph"]["nodes"][0]["config"]["sourceLink"] == sources[1]
+    assert workflow["graph"]["nodes"][0]["config"]["platform"] == ("feishu" if feishu else "auto")
+    if feishu:
+        assert schedule["definition"]["parameters"][0]["name"] == "飞书编号"
     assert not errors, errors
     overflow = await page.evaluate("document.documentElement.scrollWidth > window.innerWidth + 1")
     assert not overflow, f"horizontal overflow at {width}px"
     Path("test-artifacts").mkdir(exist_ok=True)
-    await page.screenshot(path=f"test-artifacts/canvas-content-collection-{width}.png", full_page=True)
+    await page.screenshot(path=f"test-artifacts/canvas-content-collection-{width}-{'feishu' if feishu else 'links'}.png", full_page=True)
     await page.close()
-    print(json.dumps({"width": width, "requests": len(requests), "result": "passed"}), flush=True)
+    print(json.dumps({"width": width, "feishu": feishu, "requests": len(requests), "result": "passed"}), flush=True)
 
 
 async def main():
@@ -164,7 +179,8 @@ async def main():
         browser = await playwright.chromium.launch(channel="chrome", headless=True)
         try:
             for width in [1440, 390]:
-                await check(browser, width)
+                for feishu in [False, True]:
+                    await check(browser, width, feishu)
         except Exception:
             Path("test-artifacts").mkdir(exist_ok=True)
             for index, context in enumerate(browser.contexts):
