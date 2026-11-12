@@ -4,18 +4,18 @@ Last updated: 2026-11-12
 
 ## One-Line Status
 
-Local Feishu target verified; live publish pending. Identity: `/api/version`.
+Local Feishu targets verified; live acceptance pending. Identity: `/api/version`.
 
 ## Current Focus
 
-- G9L studio crops: 36 copies in child collection; 47 originals unchanged, 11 detail shots skipped; public hashes/service reads and baseline pass. Evidence: `archive/2026-11/11-12-g9l-studio-crop/verification.md`.
-- Gallery hierarchy/rename verified: `archive/2026-11/11-11-gallery-collection-hierarchy/verification.md`.
+- G9L: 36 crop copies, 47 originals retained, 11 details skipped; hashes/reads/baseline pass: `archive/2026-11/11-12-g9l-studio-crop/verification.md`.
+- Gallery hierarchy/rename pass: `archive/2026-11/11-11-gallery-collection-hierarchy/verification.md`.
 - Magpie: baseline/browser and LAN identity/HTTP pass; key/live pending. See `magpie_web_search.md`.
-- Feishu target/schema/dry-run/baseline pass; text tags supported, imports/audits preserved. Evidence: `archive/2026-11/11-11-feishu-publish-target/verification.md`.
-- High-resolution processing: 100 MP / 8K / LAN pass; `canvas_image_process.md`; evidence: `archive/2026-11/11-10-high-resolution-image-processing/verification.md`.
+- Feishu publish: `archive/2026-11/11-11-feishu-publish-target/verification.md`. Nov 12 local import: 优质内容库; schema/search/baseline pass; fields: 编号/标题/正文/素材/车型. Live import pending.
+- 100 MP / 8K / LAN pass: `canvas_image_process.md`; `archive/2026-11/11-10-high-resolution-image-processing/verification.md`.
 - Switch Any: six browser cases/baseline pass; operator acceptance pending. Contract: `canvas_switch_any.md`; evidence: `archive/2026-11/11-10-canvas-switch-any/verification.md`.
-- Gallery delete-next: baseline/browser pass (`11-11-gallery-delete-next`).
-- Canvas history: `11-09-canvas-schedule-history-fix` verified.
+- Gallery delete-next pass: `11-11-gallery-delete-next`.
+- Canvas history pass: `11-09-canvas-schedule-history-fix`.
 - Text concatenation: 16 inputs verified; operator pending. Archive: `11-06-canvas-text-concatenate`.
 - Library sorting/filter isolation verified; operator pending. Contract: `unified_library.md`; task: `11-06-canvas-library-sorting`.
 - Nov 5 startup: independent Jobs/24-GiB heap, baseline/LAN pass; archive: `11-05-local-independent-runtime`.
@@ -38,9 +38,9 @@ Local Feishu target verified; live publish pending. Identity: `/api/version`.
 
 ## Next Entry
 
-Content-pool performance: record authenticated 3001 timings for library create/add, desk filtering/load-more and crawl ingest. P2 item table/GIN replacement remains separate; 878 MB GIN and 222 MB JSON are unchanged.
+Content-pool: time authenticated 3001 library create/add, desk filters/paging and crawl ingest. P2 table/GIN work separate; GIN 878 MB, JSON 222 MB unchanged.
 
-OSS evidence: `.trellis/tasks/archive/2026-10/10-28-oss-acceptance-local-cutover/verification.md`. Local cutover complete; retain TOS >= Nov 4. Production and historical-link cleanup require separate scope. No generated-table recreation.
+OSS: `.trellis/tasks/archive/2026-10/10-28-oss-acceptance-local-cutover/verification.md`. Local cutover done; retain TOS >= Nov 4. Production/link cleanup separate. No generated-table recreation.
 
 ## Risks And Unknowns
 
