@@ -48,7 +48,7 @@ assertContains(contentPage, /params\.set\("descendants", includeDescendantsParam
 assertContains(contentPage, /采集到[\s\S]*ingestCollectionId/, "/content should choose an ingest target library.");
 assertContains(contentPage, /collectionId:\s*ingestCollectionId/, "crawl, link import and manual creation should forward the selected library target.");
 assertContains(contentPage, /fetch\("\/api\/crawl\/jobs"/, "/content should keep keyword crawl entry.");
-assertContains(contentPage, /fetch\("\/api\/crawl\/links"/, "/content should keep source-link import entry.");
+assertContains(contentPage, /fetch\(feishu \? "\/api\/crawl\/feishu" : "\/api\/crawl\/links"/, "/content should dispatch Feishu numbers and source links to their respective import APIs.");
 assertContains(contentPage, /fetch\("\/api\/simple\/runs"/, "/content should start simple-run secondary creation.");
 
 assertContains(contentPage, /sourceMode:\s*"pool"/, "Content-pool secondary creation should send sourceMode=pool.");

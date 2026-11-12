@@ -1,9 +1,7 @@
 import { getContentSafetyPolicy, normalizeContentSafetyPolicySnapshot } from "../content-safety-policy";
 import { importSourceLinks } from "../source-link-import";
-import { importFeishuContentByTaskNumbers, normalizeFeishuTaskNumberInput } from "../feishu-content-import";
-import { filterUnsafeSourceItems } from "../source-safety";
-import { markItemsAsSkippedTagging, tagSourceItems } from "../source-tagging";
-import { ingestCrawlItems } from "../content-pool";
+import { normalizeFeishuTaskNumberInput } from "../feishu-content-import";
+import { importFeishuContentToPool } from "../feishu-content-pool-import";
 import type { SourceLinkPlatform } from "../types";
 import type { WorkspaceAccessActor } from "../workspace-ownership";
 import { canvasCollectionSourceLabel, canvasCollectionSourceLink, validateCanvasCollectionConfig } from "./content-collection";
@@ -42,18 +40,11 @@ export async function collectCanvasContent(node: CanvasNode, account: WorkspaceA
 async function collectFeishuContent(node: CanvasNode, account: WorkspaceAccessActor, source: string) {
   const numbers = normalizeFeishuTaskNumberInput(source);
   if (numbers.length !== 1) throw new Error("每个内容任务只能导入一个飞书编号；多个编号请每行一条并使用批量调度。");
-  const imported = await importFeishuContentByTaskNumbers(numbers, {
+  return importFeishuContentToPool({
+    query: String(node.config.projectName).trim(), taskNumbers: numbers, owner: account, requireSingle: true,
+    collectionId: undefined,
+    skipTagging: node.config.automaticTagging !== true,
+    videoFrameOriginalReference: node.config.videoFrameOriginalReference !== false,
     enableVideoTranscription: node.config.enableVideoTranscription === true,
   });
-  if (imported.items.length !== 1) {
-    throw new Error(imported.results.find((result) => result.status !== "imported")?.error || `飞书编号应返回一条内容，实际返回 ${imported.items.length} 条。`);
-  }
-  const query = String(node.config.projectName).trim();
-  const safety = await filterUnsafeSourceItems(imported.items.map((item) => ({
-    ...item, videoFrameOriginalReference: node.config.videoFrameOriginalReference !== false,
-  })), { scope: "canvas/content-collection", query }, normalizeContentSafetyPolicySnapshot(await getContentSafetyPolicy()));
-  if (safety.items.length !== 1) throw new Error("飞书内容未通过来源安全过滤。");
-  const items = node.config.automaticTagging === true ? await tagSourceItems(safety.items) : markItemsAsSkippedTagging(safety.items);
-  await ingestCrawlItems(query, items, account);
-  return { items, results: imported.results };
 }

@@ -88,11 +88,11 @@ type ContentPoolDeskSource = NormalizedSourceItem & {
   projectId: string;
   projectName: string;
 };
-type CrawlInputMode = "keyword" | "links";
+type CrawlInputMode = "keyword" | "links" | "feishu";
 type LinkImportPlatform = SourceLinkPlatform | "auto";
 type BusyState = "load" | "crawl" | "source" | "batch" | "secondary" | "settings" | null;
 
-const crawlInputModeCodec = enumCodec(["keyword", "links"] as const, "keyword");
+const crawlInputModeCodec = enumCodec(["keyword", "links", "feishu"] as const, "keyword");
 const crawlPlatformCodec = enumCodec(["wechat_channels", "xiaohongshu", "douyin", "weibo"] as const, "xiaohongshu");
 const poolStatusCodec = enumCodec(["all", "new", "analyzed", "rewritten", "approved", "published"] as const, "all");
 const poolPlatformCodec = enumCodec(["all", "wechat_channels", "xiaohongshu", "douyin", "weibo", "xiaopeng_bbs", "dongchedi", "feishu", "original"] as const, "all");
@@ -323,6 +323,10 @@ export default function ContentDeskPage() {
   const [platform, setPlatform] = useUrlQueryState<CrawlPlatform>("crawlPlatform", "xiaohongshu", crawlPlatformCodec);
   const [linkImportPlatform, setLinkImportPlatform] = useState<LinkImportPlatform>("auto");
   const [linkImportText, setLinkImportText] = useState("");
+  const [feishuImportText, setFeishuImportText] = useState("");
+  const [feishuVideoFrameOriginalReference, setFeishuVideoFrameOriginalReference] = useState(true);
+  const [feishuEnableVideoTranscription, setFeishuEnableVideoTranscription] = useState(false);
+  const [feishuSkipTagging, setFeishuSkipTagging] = useState(true);
   const [linkImportResults, setLinkImportResults] = useState<LinkImportResult[]>([]);
   const [linkImportSummary, setLinkImportSummary] = useState<LinkImportSummary | null>(null);
   const [query, setQuery, queryHydrated] = useUrlQueryState("query", "", optionalStringCodec());
@@ -1056,23 +1060,33 @@ export default function ContentDeskPage() {
   }
 
   async function startLinkImport() {
-    const links = splitLines(linkImportText);
+    const feishu = crawlInputMode === "feishu";
+    const importLabel = feishu ? "飞书编号导入" : "链接导入";
+    const links = splitLines(feishu ? feishuImportText : linkImportText);
     if (!query.trim()) {
       setMessage("请输入归属关键词 / 内容池项目。");
       return;
     }
     if (!links.length) {
-      setMessage("请输入至少一条链接或 ID。");
+      setMessage(feishu ? "请输入至少一个飞书编号，每行一个。" : "请输入至少一条链接或 ID。");
       return;
     }
     setBusy("crawl");
     setMessage("");
-    setCrawlProgress({ title: "链接导入", label: "运行中", detail: `${links.length} 条来源`, value: 15, status: "running" });
+    setLinkImportResults([]);
+    setLinkImportSummary(null);
+    setCrawlProgress({ title: importLabel, label: "运行中", detail: `${links.length} 条来源`, value: 15, status: "running" });
     try {
-      const res = await fetch("/api/crawl/links", {
+      const res = await fetch(feishu ? "/api/crawl/feishu" : "/api/crawl/links", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({
+        body: JSON.stringify(feishu ? {
+          query, taskNumbers: links,
+          videoFrameOriginalReference: feishuVideoFrameOriginalReference,
+          enableVideoTranscription: feishuEnableVideoTranscription,
+          skipTagging: feishuSkipTagging,
+          collectionId: ingestCollectionId || undefined,
+        } : {
           query,
           links,
           platform: linkImportPlatform === "auto" ? undefined : linkImportPlatform,
@@ -1084,22 +1098,22 @@ export default function ContentDeskPage() {
         }),
       });
       const data = (await res.json()) as LinkImportResponse;
-      if (!res.ok) throw new Error(data.error || "链接导入失败");
+      if (!res.ok) throw new Error(data.error || `${importLabel}失败`);
       setLinkImportResults(data.results || []);
       setLinkImportSummary(data.summary || null);
       setCrawlProgress({
-        title: "链接导入",
-        label: "已完成",
+        title: importLabel,
+        label: feishu && !data.summary?.imported ? "未导入" : "已完成",
         detail: `成功 ${data.summary?.imported || data.items?.length || 0} 条，失败 ${data.summary?.failed || 0} 条`,
         value: 100,
-        status: "success",
+        status: feishu && !data.summary?.imported ? "error" : "success",
       });
       await refreshContentDesk({ query: data.query || query });
       await loadExecutionLogs();
-      setMessage(`链接导入完成：${data.summary?.imported || data.items?.length || 0} 条样本。`);
+      setMessage(`${importLabel}完成：成功 ${data.summary?.imported || data.items?.length || 0} 条，失败 ${data.summary?.failed || 0} 条，过滤 ${data.summary?.filteredUnsafe || 0} 条。`);
     } catch (error) {
-      setCrawlProgress({ title: "链接导入", label: "失败", detail: error instanceof Error ? error.message : "链接导入失败", value: 100, status: "error" });
-      setMessage(error instanceof Error ? error.message : "链接导入失败");
+      setCrawlProgress({ title: importLabel, label: "失败", detail: error instanceof Error ? error.message : `${importLabel}失败`, value: 100, status: "error" });
+      setMessage(error instanceof Error ? error.message : `${importLabel}失败`);
     } finally {
       setBusy(null);
     }
@@ -1525,22 +1539,34 @@ export default function ContentDeskPage() {
             <PanelTitle icon={<Radio className="h-4 w-4" />} title="采集入口" />
             <div className="mt-4 grid grid-cols-2 gap-2">
               <button
-                className={`soft-button flex h-10 items-center justify-center gap-2 text-xs font-semibold ${crawlInputMode === "keyword" ? "platform-card-active" : ""}`}
+                className={`soft-button flex h-10 min-w-0 items-center justify-center gap-1 whitespace-nowrap px-1 text-[11px] font-semibold ${crawlInputMode === "keyword" ? "platform-card-active" : ""}`}
                 type="button"
                 aria-pressed={crawlInputMode === "keyword"}
+                disabled={Boolean(busy)}
                 onClick={() => setCrawlInputMode("keyword")}
               >
                 <Search className="h-3.5 w-3.5" />
                 关键词
               </button>
               <button
-                className={`soft-button flex h-10 items-center justify-center gap-2 text-xs font-semibold ${crawlInputMode === "links" ? "platform-card-active" : ""}`}
+                className={`soft-button flex h-10 min-w-0 items-center justify-center gap-1 whitespace-nowrap px-1 text-[11px] font-semibold ${crawlInputMode === "links" ? "platform-card-active" : ""}`}
                 type="button"
                 aria-pressed={crawlInputMode === "links"}
+                disabled={Boolean(busy)}
                 onClick={() => setCrawlInputMode("links")}
               >
                 <UploadCloud className="h-3.5 w-3.5" />
                 链接
+              </button>
+              <button
+                className={`soft-button col-span-2 flex h-10 min-w-0 items-center justify-center gap-1 whitespace-nowrap px-1 text-[11px] font-semibold ${crawlInputMode === "feishu" ? "platform-card-active" : ""}`}
+                type="button"
+                aria-pressed={crawlInputMode === "feishu"}
+                disabled={Boolean(busy)}
+                onClick={() => setCrawlInputMode("feishu")}
+              >
+                <FileText className="h-3.5 w-3.5 shrink-0" />
+                飞书编号
               </button>
             </div>
 
@@ -1703,7 +1729,7 @@ export default function ContentDeskPage() {
                   <FieldLabel label="归属关键词 / 内容池项目" />
                   <input className="field" value={query} onChange={(event) => setQuery(event.target.value)} />
                 </label>
-                <label>
+                {crawlInputMode !== "feishu" ? <label>
                   <FieldLabel label="平台" />
                   <select className="field" value={linkImportPlatform} onChange={(event) => setLinkImportPlatform(event.target.value as LinkImportPlatform)}>
                     <option value="auto">自动识别</option>
@@ -1713,26 +1739,27 @@ export default function ContentDeskPage() {
                       </option>
                     ))}
                   </select>
-                </label>
+                </label> : null}
                 <label>
-                  <FieldLabel label="链接列表" />
+                  <FieldLabel label={crawlInputMode === "feishu" ? "飞书编号（每行一个，最多 200 个）" : "链接列表"} />
                   <textarea
                     className="field min-h-36 resize-y"
-                    value={linkImportText}
-                    onChange={(event) => setLinkImportText(event.target.value)}
-                    placeholder="https://... 或小鹏社区帖子 ID"
+                    aria-label={crawlInputMode === "feishu" ? "飞书编号（每行一个，最多 200 个）" : "链接列表"}
+                    value={crawlInputMode === "feishu" ? feishuImportText : linkImportText}
+                    onChange={(event) => crawlInputMode === "feishu" ? setFeishuImportText(event.target.value) : setLinkImportText(event.target.value)}
+                    placeholder={crawlInputMode === "feishu" ? "AI00001\nAI00002" : "https://... 或小鹏社区帖子 ID"}
                   />
                 </label>
-                <CheckRow checked={linkImportVideoFrameOriginalReference} disabled={Boolean(busy)} onChange={setLinkImportVideoFrameOriginalReference}>
+                <CheckRow checked={crawlInputMode === "feishu" ? feishuVideoFrameOriginalReference : linkImportVideoFrameOriginalReference} disabled={Boolean(busy)} onChange={crawlInputMode === "feishu" ? setFeishuVideoFrameOriginalReference : setLinkImportVideoFrameOriginalReference}>
                   视频高光帧原图引用
                 </CheckRow>
-                <CheckRow checked={linkImportEnableVideoTranscription} disabled={Boolean(busy)} onChange={setLinkImportEnableVideoTranscription}>
+                <CheckRow checked={crawlInputMode === "feishu" ? feishuEnableVideoTranscription : linkImportEnableVideoTranscription} disabled={Boolean(busy)} onChange={crawlInputMode === "feishu" ? setFeishuEnableVideoTranscription : setLinkImportEnableVideoTranscription}>
                   启用视频音频转文字
                 </CheckRow>
-                <CheckRow checked={linkImportSkipTagging} disabled={Boolean(busy)} onChange={setLinkImportSkipTagging}>
+                <CheckRow checked={crawlInputMode === "feishu" ? feishuSkipTagging : linkImportSkipTagging} disabled={Boolean(busy)} onChange={crawlInputMode === "feishu" ? setFeishuSkipTagging : setLinkImportSkipTagging}>
                   跳过自动打标
                 </CheckRow>
-                {linkImportPlatform === "douyin" || linkImportPlatform === "dongchedi" ? (
+                {crawlInputMode === "links" && (linkImportPlatform === "douyin" || linkImportPlatform === "dongchedi") ? (
                   <label>
                     <FieldLabel label="Cookie" />
                     <textarea className="field min-h-16 resize-none" value={cookie} onChange={(event) => setCookie(event.target.value)} />
@@ -1740,7 +1767,7 @@ export default function ContentDeskPage() {
                 ) : null}
                 <button className="primary-button flex h-11 w-full items-center justify-center gap-2" type="button" onClick={startLinkImport} disabled={Boolean(busy)}>
                   {busy === "crawl" ? <Loader2 className="h-4 w-4 animate-spin" /> : <UploadCloud className="h-4 w-4" />}
-                  导入链接
+                  {crawlInputMode === "feishu" ? "导入飞书编号" : "导入链接"}
                 </button>
               </div>
             )}

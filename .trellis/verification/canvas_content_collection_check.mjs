@@ -72,7 +72,7 @@ try {
   let feishuItemCount = 1;
   let safetyFiltered = false;
   let failLink;
-  const service = loadMocked("src/lib/canvas/content-collection-service.ts", {
+  const collectionDependencies = {
     "../content-safety-policy": { getContentSafetyPolicy: async () => ({ revision: 1 }), normalizeContentSafetyPolicySnapshot: (value) => value },
     "./content-collection": contract,
     "../feishu-content-import": {
@@ -84,7 +84,7 @@ try {
           sourceUrl: `rec-${numbers[0]}`, images: ["https://unused.example/remote.jpg"],
           downloadedImages: [`/media/${numbers[0]}.jpg`, `/media/${numbers[0]}.jpg`],
           downloadedVideoUrl: `/media/${numbers[0]}.mp4`,
-        })), results: [{ status: feishuFailure ? "not_found" : "imported", error: feishuFailure }] };
+        })), results: [{ taskNumber: numbers[0], itemId: feishuFailure ? undefined : numbers[0], status: feishuFailure ? "not_found" : "imported", error: feishuFailure }] };
       },
     },
     "../source-safety": { filterUnsafeSourceItems: async (items, context, policy) => {
@@ -106,7 +106,12 @@ try {
       const index = Number(link.split("-").at(-1));
       return { items: [{ id: `item-${index}`, title: `title-${index}`, contentText: `body-${index}`, sourceUrl: link, images: ["https://unused.example/remote.jpg"], downloadedImages: Array.from({ length: index % 3 + 1 }, (_, imageIndex) => `/media/${index}-${imageIndex}.jpg`), downloadedVideoUrl: index === 0 ? "/media/video.mp4" : undefined }], results: [{ status: "imported" }] };
     } },
+  };
+  collectionDependencies["../feishu-content-pool-import"] = loadMocked("src/lib/feishu-content-pool-import.ts", {
+    "./activity-log": { recordExecutionLog: async () => undefined },
+    ...Object.fromEntries(["content-safety-policy", "feishu-content-import", "source-safety", "source-tagging", "content-pool"].map((name) => [`./${name}`, collectionDependencies[`../${name}`]])),
   });
+  const service = loadMocked("src/lib/canvas/content-collection-service.ts", collectionDependencies);
   const account = { id: "owner-a", role: "operator", displayName: "Owner A" };
   const executorSource = read("src/lib/canvas/executors.ts");
   const imports = [...executorSource.matchAll(/from "([^"]+)"/g)].map((match) => match[1]);

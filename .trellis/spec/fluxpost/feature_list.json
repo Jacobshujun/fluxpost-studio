@@ -214,12 +214,13 @@
       "title": "Keyword crawl and content pool",
       "status": "ready_for_review",
       "definition_of_done": [
-        "Users can crawl supported platforms or import supported links into the owner-scoped content pool",
+        "Users crawl platforms or import links/Feishu numbers into the owner-scoped content pool",
         "Retained items expose normalized metrics, media, timestamps, and frozen safety assessment"
       ],
       "evidence": [
-        "Keyword/link import, content safety, persistence, platform mapping, and Dongchedi focused checks are in the offline baseline.",
-        "2026-08-27 owner-scoped manual tag suggestions, normalized search, separate category/custom-tag AND filters, single editing, and legacy compatibility passed focused, baseline, and mocked desktop/mobile checks."
+        "Baseline covers keyword/link import, safety, persistence, mappings and Dongchedi.",
+        "2026-08-27 owner tags/search/category filters, editing and legacy compatibility passed baseline/browser checks.",
+        "2026-11-12 Feishu API/shared-service, six browser cases and baseline pass: 11-12-content-pool-feishu-import."
       ],
       "notes": "Live provider/model behavior remains pending operator approval."
     },

@@ -317,10 +317,10 @@ def run_mobile_case(browser):
     context.close()
 
 
-with sync_playwright() as playwright:
-    browser = playwright.chromium.launch(executable_path=CHROME) if CHROME else playwright.chromium.launch()
-    run_case(browser, 1440, 900)
-    run_mobile_case(browser)
-    browser.close()
-
-print("Content-pool library browser check passed.")
+if __name__ == "__main__":
+    with sync_playwright() as playwright:
+        browser = playwright.chromium.launch(executable_path=CHROME) if CHROME else playwright.chromium.launch()
+        run_case(browser, 1440, 900)
+        run_mobile_case(browser)
+        browser.close()
+    print("Content-pool library browser check passed.")

@@ -11,7 +11,7 @@ Local Feishu targets verified; live acceptance pending. Identity: `/api/version`
 - G9L: 36 crop copies, 47 originals retained, 11 details skipped; hashes/reads/baseline pass: `archive/2026-11/11-12-g9l-studio-crop/verification.md`.
 - Gallery hierarchy/rename pass: `archive/2026-11/11-11-gallery-collection-hierarchy/verification.md`.
 - Magpie: baseline/browser and LAN identity/HTTP pass; key/live pending. See `magpie_web_search.md`.
-- Feishu: local/Canvas imports use 优质内容库; fields 编号/标题/正文/素材/车型. Offline/browser/baseline pass: `11-12-canvas-feishu-collection`. Prior publish: `11-11-feishu-publish-target`. Live import pending.
+- Feishu: simple/Canvas/content-pool entries use 优质内容库. Desk verification: `11-12-content-pool-feishu-import`; Canvas: `11-12-canvas-feishu-collection`; publish: `11-11-feishu-publish-target`. Live import pending.
 - 100 MP / 8K / LAN pass: `canvas_image_process.md`; `archive/2026-11/11-10-high-resolution-image-processing/verification.md`.
 - Switch Any: six browser cases/baseline pass; operator acceptance pending. Contract: `canvas_switch_any.md`; evidence: `archive/2026-11/11-10-canvas-switch-any/verification.md`.
 - Gallery delete-next pass: `11-11-gallery-delete-next`.
