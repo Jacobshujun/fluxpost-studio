@@ -1,6 +1,6 @@
 # FluxPost Current Status
 
-Last updated: 2026-11-11
+Last updated: 2026-11-12
 
 ## One-Line Status
 
@@ -8,6 +8,7 @@ Local Feishu target verified; live publish pending. Identity: `/api/version`.
 
 ## Current Focus
 
+- G9L studio crops: 36 copies in child collection; 47 originals unchanged, 11 detail shots skipped; public hashes/service reads and baseline pass. Evidence: `archive/2026-11/11-12-g9l-studio-crop/verification.md`.
 - Gallery hierarchy/rename verified: `archive/2026-11/11-11-gallery-collection-hierarchy/verification.md`.
 - Magpie: baseline/browser and LAN identity/HTTP pass; key/live pending. See `magpie_web_search.md`.
 - Feishu target/schema/dry-run/baseline pass; text tags supported, imports/audits preserved. Evidence: `archive/2026-11/11-11-feishu-publish-target/verification.md`.
