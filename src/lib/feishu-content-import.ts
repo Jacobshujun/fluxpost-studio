@@ -223,14 +223,18 @@ async function normalizeFeishuContentRecord(
   const materialRoot = path.join(process.cwd(), "public", "media", "crawl", "feishu", sanitizePathSegment(taskNumber));
   const publicRoot = `/media/crawl/feishu/${sanitizePathSegment(taskNumber)}`;
 
-  if (materialTokens.length) {
-    await mkdir(materialRoot, { recursive: true });
-    for (const token of materialTokens) {
-      await downloadFeishuAttachment(record.recordId, token, materialRoot);
-    }
+  const materialFiles: Array<{ url: string; kind: "image" | "video" }> = [];
+  for (const [index, token] of materialTokens.entries()) {
+    // Attachment names are not unique. Keep each token's files separate, and
+    // enumerate only current tokens so removed attachments cannot reappear.
+    const attachmentPath = `${hashString(record.recordId)}/${hashString(token)}`;
+    const attachmentRoot = path.join(materialRoot, attachmentPath);
+    await mkdir(attachmentRoot, { recursive: true });
+    await downloadFeishuAttachment(record.recordId, token, attachmentRoot);
+    const downloaded = await listDownloadedMaterialUrls(attachmentRoot, `${publicRoot}/${attachmentPath}`);
+    if (downloaded.length !== 1) throw new Error(`飞书第 ${index + 1} 个附件应下载一个有效图片或视频，实际得到 ${downloaded.length} 个。`);
+    materialFiles.push(...downloaded);
   }
-
-  const materialFiles = await listDownloadedMaterialUrls(materialRoot, publicRoot);
   const images = materialFiles.filter((item) => item.kind === "image").map((item) => item.url);
   const videos = materialFiles.filter((item) => item.kind === "video").map((item) => item.url);
   const now = new Date().toISOString();

@@ -4,6 +4,7 @@ Last updated: 2026-07-20
 
 ## Known Project Pitfalls
 
+- Feishu attachments can all have the same filename. Download into record/token-specific directories, collect only current tokens in source order, and fail on missing media. Shared `--overwrite` destinations silently lose images. Regression: `feishu_attachment_import_check.mjs`; evidence: `11-12-feishu-attachment-collision`.
 - Generated-library retirement (2026-10-27): ordinary list/tag/navigation queries
   in 72dca31 depend on generated tables. Never drop a shared query dependency
   while leaving dependent code active. Verify real authenticated reads, not just
