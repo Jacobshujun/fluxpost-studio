@@ -24,6 +24,8 @@ No authenticated operator latency measurement has been performed on the runtime 
 
 ## Remaining boundaries
 
+- LAN activation passed for implementation commit `5f15c7d2dcd978f7f15357d6ffb34a18c2c9e512` through `npm run local:lan`. Listener is `0.0.0.0:3001`; both loopback and `http://10.182.144.38:3001` returned the matching full SHA, and `/content`, `/canvas`, `/batch-create` each returned HTTP 200. The activation's candidate HTTP smoke passed. Documentation-only follow-up commits use the same activation command; `/api/version` remains authoritative for the final SHA. Authenticated operator timing remains pending.
+
 - User authorized committing and updating LAN on November 13. Activation uses the primary worktree and `npm run local:lan`; the verified previous candidate is `1cf2192effca0d4217e0970aca7eb2653bbf51d7`. Final running SHA is reported by `/api/version` and the ignored local candidate receipt. No GitHub push or remote production deployment was requested.
 - P2 item-table migration, project-JSON rewrite elimination and SQL-native pagination remain separate. Initial desk and summary still scan light rows separately. Random/each conditional preflight still resolves complete candidates to preserve existing sampling/freeze behavior; only fixed preflight was optimized here.
 - Candidate response fields retain the existing shape. Full item payload reduction, cross-tab invalidation notifications and editor/list component isolation were not added; memory-cache TTL and explicit refresh bound candidate staleness. Input-render performance requires profiling before further component changes.
