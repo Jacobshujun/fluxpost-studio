@@ -9,6 +9,7 @@ import { AlertTriangle, ArrowDown, BookOpenText, CheckCircle2, Download, FileTex
 import { useCallback, useEffect, useId, useLayoutEffect, useMemo, useRef, useState } from "react";
 import { ContentPoolCustomTagPicker } from "@/components/content-pool-custom-tag-picker";
 import { contentPoolCustomTagKey } from "@/lib/content-pool-tags";
+import { contentPoolBrowserScope, contentPoolChangedEvent, contentPoolSelectionUrl, readContentPoolBrowserMemory, readContentPoolBrowserPage, requestContentPoolBrowserPage, writeContentPoolBrowserMemory, writeContentPoolBrowserPage } from "@/lib/content-pool-browser-state";
 import { canvasBatchBindingKey, getCanvasBatchBindings, getCanvasBatchBindableFields, getCanvasNodeDefinition, getCanvasNodeExecutionMode } from "@/lib/canvas/registry";
 import { getCanvasIterationOutputPorts } from "@/lib/canvas/iteration";
 import { canvasCollectionScheduleDefinition } from "@/lib/canvas/content-collection-schedule";
@@ -32,7 +33,7 @@ export let canvasScheduleParameterSequence = 0;
 
 export const canvasScheduleParameterTypes = ["image", "image-group", "directory-group", "video", "source-video", "content-pool", "text", "copy", "number", "boolean", "enum"] as const satisfies readonly CanvasScheduleParameterType[];
 
-export function ContentPoolSelectionBrowser({ filter, selectedIds, mode, onFilterChange, onToggle, onSelectionChange, onPreviewImage }: {
+export function ContentPoolSelectionBrowser({ filter, selectedIds, mode, onFilterChange, onToggle, onSelectionChange, onPreviewImage, memoryKey, rememberFilter = false }: {
   filter: ContentPoolSelectionFilter;
   selectedIds: string[];
   mode: "single" | "manual" | "match";
@@ -40,60 +41,126 @@ export function ContentPoolSelectionBrowser({ filter, selectedIds, mode, onFilte
   onToggle: (item: ContentPoolSelectionItem) => void;
   onSelectionChange?: (ids: string[]) => void;
   onPreviewImage: (url: string, index: number) => void;
+  memoryKey?: string;
+  rememberFilter?: boolean;
 }) {
   const [page, setPage] = useState<ContentPoolSelectionPage>({ items: [], projects: [], collections: [], total: 0 });
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState("");
   const loadSequence = useRef(0);
+  const [scope, setScope] = useState("");
+  const [notice, setNotice] = useState("");
+  const [displayQuery, setDisplayQuery] = useState("");
+  const [selecting, setSelecting] = useState(false);
+  const requestRef = useRef<AbortController | null>(null);
+  const selectionRequestRef = useRef<AbortController | null>(null);
+  const resultsRef = useRef<HTMLDivElement>(null);
+  const pageRef = useRef(page);
+  const restoreScroll = useRef<number | undefined>(undefined);
+  const query = contentPoolSelectionUrl(filter);
+  const current = useRef({ query, mode, filter, onFilterChange, onSelectionChange });
+  useLayoutEffect(() => { current.current = { query, mode, filter, onFilterChange, onSelectionChange }; });
+  useEffect(() => {
+    let cancelled = false;
+    void contentPoolBrowserScope().then((nextScope) => {
+      if (cancelled) return;
+      if (memoryKey) {
+        const saved = readContentPoolBrowserMemory(nextScope, memoryKey);
+        setNotice(saved.notice);
+        if (saved.filter && rememberFilter) current.current.onFilterChange(saved.filter);
+      }
+      setScope(nextScope);
+    }).catch((loadError: unknown) => { if (!cancelled) setError(errorMessage(loadError)); });
+    return () => { cancelled = true; };
+  }, [memoryKey, rememberFilter]);
   const selected = useMemo(() => new Set(selectedIds), [selectedIds]);
-  const load = useCallback(async (append = false, cursor?: string) => {
+  const load = useCallback(async (append = false, cursor?: string, force = false) => {
+    if (!scope) return;
     const sequence = ++loadSequence.current;
+    requestRef.current?.abort();
+    const controller = new AbortController();
+    requestRef.current = controller;
+    if (!append && !force) {
+      const cached = readContentPoolBrowserPage(scope, query);
+      if (cached) {
+        pageRef.current = cached;
+        setPage(cached);
+        setDisplayQuery(query);
+        setBusy(false);
+        setError("");
+        return;
+      }
+    }
     setBusy(true);
     setError("");
     try {
-      const next = await api<ContentPoolSelectionPage>(contentPoolSelectionUrl(filter, cursor));
-      if (sequence !== loadSequence.current) return;
-      setPage((current) => ({ ...next, items: append ? uniqueContentPoolItems([...current.items, ...next.items]) : next.items }));
+      const url = cursor ? `${query}&cursor=${encodeURIComponent(cursor)}` : query;
+      const next = await requestContentPoolBrowserPage(scope, url, controller.signal);
+      if (sequence !== loadSequence.current || current.current.query !== query) return;
+      const result = { ...next, items: append ? uniqueContentPoolItems([...pageRef.current.items, ...next.items]) : next.items };
+      pageRef.current = result;
+      setPage(result);
+      setDisplayQuery(query);
+      writeContentPoolBrowserPage(scope, query, result);
     } catch (loadError) {
-      if (sequence === loadSequence.current) setError(errorMessage(loadError));
+      if (!controller.signal.aborted && sequence === loadSequence.current) setError(errorMessage(loadError));
     } finally {
       if (sequence === loadSequence.current) setBusy(false);
     }
-  }, [filter]);
+  }, [scope, query]);
   useEffect(() => {
-    const timer = setTimeout(() => void load(), filter.query ? 240 : 0);
-    return () => clearTimeout(timer);
-  }, [filter, load]);
+    if (!scope) return;
+    const saved = memoryKey ? readContentPoolBrowserMemory(scope, memoryKey) : undefined;
+    restoreScroll.current = saved?.filter && contentPoolSelectionUrl(saved.filter) === query ? saved.scrollTop : 0;
+    const timer = setTimeout(() => void load(), !readContentPoolBrowserPage(scope, query) && new URLSearchParams(query.split("?")[1]).get("q") ? 240 : 0);
+    return () => {
+      clearTimeout(timer);
+      loadSequence.current += 1;
+      requestRef.current?.abort();
+    };
+  }, [scope, query, load, memoryKey]);
+  useEffect(() => {
+    const refresh = () => { void load(false, undefined, true); };
+    window.addEventListener(contentPoolChangedEvent, refresh);
+    return () => window.removeEventListener(contentPoolChangedEvent, refresh);
+  }, [load]);
+  useEffect(() => () => selectionRequestRef.current?.abort(), [query, mode]);
+  useLayoutEffect(() => {
+    if (restoreScroll.current !== undefined && resultsRef.current && page.items.length) {
+      resultsRef.current.scrollTop = restoreScroll.current;
+      restoreScroll.current = undefined;
+    }
+  }, [page]);
+  useEffect(() => {
+    if (scope && memoryKey) setNotice(writeContentPoolBrowserMemory(scope, memoryKey, current.current.filter, restoreScroll.current ?? resultsRef.current?.scrollTop ?? 0));
+  }, [scope, memoryKey, query]);
   const setListFilter = <K extends "platforms" | "statuses" | "mediaTypes" | "contentTags">(key: K, value: ContentPoolSelectionFilter[K][number]) => {
     const values = filter[key] as string[];
     onFilterChange({ ...filter, [key]: values.includes(value) ? values.filter((item) => item !== value) : [...values, value] });
   };
   const activeAdvancedCount = filter.platforms.length + filter.statuses.length + filter.mediaTypes.length + filter.contentTags.length + filter.customTags.length + Number(filter.localMediaComplete);
   const selectAllMatching = async () => {
-    if (!onSelectionChange) return;
+    if (!onSelectionChange || mode !== "manual" || displayQuery !== query) return;
     if (page.total > 200) {
       setError("匹配结果超过 200 条，请缩小筛选范围后再全选。");
       return;
     }
-    setBusy(true);
+    setSelecting(true);
     setError("");
+    selectionRequestRef.current?.abort();
+    const controller = new AbortController();
+    selectionRequestRef.current = controller;
     try {
-      let cursor: string | undefined;
-      const items: ContentPoolSelectionItem[] = [];
-      do {
-        const next = await api<ContentPoolSelectionPage>(contentPoolSelectionUrl(filter, cursor, 100));
-        items.push(...next.items);
-        cursor = next.nextCursor;
-      } while (cursor && items.length < 200);
-      onSelectionChange(uniqueContentPoolItems(items).map((item) => item.id));
+      const result = await api<{ ids: string[] }>(`${query}&ids=1`, { signal: controller.signal });
+      if (!controller.signal.aborted && selectionRequestRef.current === controller && current.current.query === query && current.current.mode === "manual") current.current.onSelectionChange?.(result.ids);
     } catch (selectionError) {
-      setError(errorMessage(selectionError));
+      if (!controller.signal.aborted && current.current.query === query && current.current.mode === "manual") setError(errorMessage(selectionError));
     } finally {
-      setBusy(false);
+      if (selectionRequestRef.current === controller) setSelecting(false);
     }
   };
   return <div className="canvas-content-pool-browser">
-    <div className="canvas-picker-heading"><span>内容池素材</span><button type="button" onClick={() => void load()} disabled={busy} title="刷新列表" aria-label="刷新内容池列表"><RefreshCw className={busy ? "animate-spin" : ""} /></button></div>
+    <div className="canvas-picker-heading"><span>内容池素材</span><button type="button" onClick={() => void load(false, undefined, true)} disabled={busy || !scope} title="刷新列表" aria-label="刷新内容池列表"><RefreshCw className={busy ? "animate-spin" : ""} /></button></div>
     <div className="canvas-content-pool-primary-filters">
       <label className="canvas-picker-search"><Search /><input value={filter.query} onChange={(event) => onFilterChange({ ...filter, query: event.target.value })} placeholder="搜索标题、正文、作者或来源 ID" /></label>
       <label><span>项目</span><select value={filter.projectId || ""} onChange={(event) => onFilterChange({ ...filter, projectId: event.target.value || undefined })}><option value="">全部项目</option>{page.projects.map((project) => <option key={project.id} value={project.id}>{project.name} ({project.totalItems})</option>)}</select></label>
@@ -112,11 +179,11 @@ export function ContentPoolSelectionBrowser({ filter, selectedIds, mode, onFilte
     </details>
     <div className="canvas-content-pool-toolbar">
       <span>{page.total} 条匹配{mode === "manual" ? ` · 已选 ${selected.size}` : mode === "match" ? " · 预演时动态冻结" : ""}</span>
-      {mode === "manual" ? <div><button type="button" onClick={() => void selectAllMatching()} disabled={busy || !page.total}>选择全部匹配</button><button type="button" onClick={() => onSelectionChange?.([])} disabled={!selected.size}>清空</button></div> : null}
+      {mode === "manual" ? <div><button type="button" onClick={() => void selectAllMatching()} disabled={busy || selecting || displayQuery !== query || !page.total}>选择全部匹配</button><button type="button" onClick={() => onSelectionChange?.([])} disabled={!selected.size}>清空</button></div> : null}
     </div>
-    <div className={`canvas-content-pool-results${busy ? " is-loading" : ""}`} aria-busy={busy}>
+    <div ref={resultsRef} onScroll={() => { if (scope && memoryKey) { const nextNotice = writeContentPoolBrowserMemory(scope, memoryKey, current.current.filter, resultsRef.current?.scrollTop || 0); if (nextNotice) setNotice(nextNotice); } }} className={`canvas-content-pool-results${busy ? " is-loading" : ""}`} aria-busy={busy}>
       {page.items.length ? <div className="canvas-content-pool-list">{page.items.map((item) => <article key={item.id} className={selected.has(item.id) ? "is-selected" : ""}>
-        <button type="button" className="canvas-content-pool-select" aria-pressed={selected.has(item.id)} disabled={mode === "match" || (mode === "manual" && !selected.has(item.id) && selected.size >= 200)} onClick={() => onToggle(item)}>
+        <button type="button" className="canvas-content-pool-select" aria-pressed={selected.has(item.id)} disabled={displayQuery !== query || mode === "match" || (mode === "manual" && !selected.has(item.id) && selected.size >= 200)} onClick={() => onToggle(item)}>
           <span className="canvas-content-pool-thumbnail">{item.thumbnailUrl ? <Image src={item.thumbnailUrl} alt="" width={72} height={72} unoptimized referrerPolicy="no-referrer" /> : item.videoUrls.length ? <Video /> : <FileText />}</span>
           <span className="canvas-content-pool-copy"><strong>{item.title || item.body.slice(0, 48) || "未命名素材"}</strong><small>{item.platform} · {item.projectName} · {item.status}</small><small>热度 {item.hotScore} · {formatContentPoolSelectionTime(item)}</small>{item.contentTags.length ? <span className="canvas-content-pool-tags">{item.contentTags.slice(0, 2).map((tag) => <em key={tag}>{tag}</em>)}</span> : null}{item.customTags.length ? <span className="canvas-content-pool-tags is-custom">{item.customTags.slice(0, 2).map((tag) => <em key={tag}>{tag}</em>)}</span> : null}</span>
           {mode !== "match" ? <span className="canvas-content-pool-mark">{selected.has(item.id) ? <CheckCircle2 /> : mode === "single" ? <span /> : <Square />}</span> : null}
@@ -124,9 +191,10 @@ export function ContentPoolSelectionBrowser({ filter, selectedIds, mode, onFilte
         {item.thumbnailUrl ? <button type="button" className="canvas-content-pool-preview" onClick={() => onPreviewImage(item.thumbnailUrl!, 0)} title="预览图片" aria-label={`预览 ${item.title || item.id}`}><Eye /></button> : null}
       </article>)}</div> : !busy ? <div className="canvas-schedule-asset-state"><Layers3 /><span>没有符合当前条件的素材</span></div> : null}
       {busy && !page.items.length ? <div className="canvas-schedule-asset-state"><LoaderCircle className="animate-spin" /><span>正在加载内容池</span></div> : null}
-      {page.nextCursor ? <div className="canvas-schedule-asset-load-more"><button type="button" disabled={busy} onClick={() => void load(true, page.nextCursor)}>加载更多</button></div> : null}
+      {page.nextCursor ? <div className="canvas-schedule-asset-load-more"><button type="button" disabled={busy || displayQuery !== query} onClick={() => void load(true, page.nextCursor)}>加载更多</button></div> : null}
     </div>
     {error ? <p className="canvas-picker-error">{error}</p> : null}
+    {notice ? <p className="canvas-picker-error">{notice}</p> : null}
   </div>;
 }
 
@@ -307,6 +375,7 @@ export function CanvasScheduleV2Editor({ schedule, graph, busy, onDefinitionChan
       <div>{definition.parameters.filter((parameter) => parameter.scope === scope).map((parameter) => <CanvasScheduleParameterEditor
         key={parameter.id}
         parameter={parameter}
+        browserKey={`schedule:${schedule.id}:${parameter.id}`}
         graph={graph}
         onPreview={onPreview}
         onChange={(next) => patchParameter(parameter.id, () => next)}
@@ -322,7 +391,8 @@ export function CanvasScheduleV2Editor({ schedule, graph, busy, onDefinitionChan
   </div>;
 }
 
-export function CanvasScheduleParameterEditor({ parameter, graph, onChange, onRemove, onPreview }: {
+export function CanvasScheduleParameterEditor({ parameter, graph, onChange, onRemove, onPreview, browserKey }: {
+  browserKey: string;
   parameter: CanvasScheduleParameter;
   graph: CanvasGraph;
   onChange: (parameter: CanvasScheduleParameter) => void;
@@ -390,7 +460,7 @@ export function CanvasScheduleParameterEditor({ parameter, graph, onChange, onRe
       }}><option value={canvasBatchBindingKey({ nodeId: "", fieldKey: "" })}>未选择</option>{bindingOptions.map((option) => <option key={canvasBatchBindingKey(option.binding)} value={canvasBatchBindingKey(option.binding)}>{option.label}</option>)}</select></label>
     </div>
     {parameter.expansion === "random" ? <CanvasScheduleSampleCountEditor parameter={parameter} sampleCount={sampleCount} onChange={onChange} /> : null}
-    <CanvasScheduleParameterSourceEditor parameter={parameter} graph={graph} onChange={onChange} onPreview={onPreview} />
+    <CanvasScheduleParameterSourceEditor parameter={parameter} graph={graph} onChange={onChange} onPreview={onPreview} browserKey={browserKey} />
   </article>;
 }
 
@@ -419,7 +489,7 @@ export function CanvasScheduleSampleCountEditor({ parameter, sampleCount, onChan
   </div>;
 }
 
-export function CanvasScheduleParameterSourceEditor({ parameter, graph, onChange, onPreview }: { parameter: CanvasScheduleParameter; graph: CanvasGraph; onChange: (parameter: CanvasScheduleParameter) => void; onPreview: (preview: Extract<NonNullable<PreviewState>, { kind: "image" }>) => void }) {
+export function CanvasScheduleParameterSourceEditor({ parameter, graph, onChange, onPreview, browserKey }: { browserKey: string; parameter: CanvasScheduleParameter; graph: CanvasGraph; onChange: (parameter: CanvasScheduleParameter) => void; onPreview: (preview: Extract<NonNullable<PreviewState>, { kind: "image" }>) => void }) {
   if (parameter.source.mode === "competitor-workbook") {
     return <div className="canvas-schedule-parameter-source canvas-workbook-parameter-source"><Sheet /><span><strong>{parameter.source.field === "title" ? "标题" : parameter.source.field === "body" ? "正文" : "参数卡片"}</strong><small>预演时按工作簿行冻结，路径与行区间在上方统一配置</small></span></div>;
   }
@@ -445,7 +515,7 @@ export function CanvasScheduleParameterSourceEditor({ parameter, graph, onChange
     const source = parameter.source.mode === "content-pool-filter"
       ? parameter.source
       : defaultCanvasScheduleParameterSource("content-pool") as Extract<CanvasScheduleParameterSource, { mode: "content-pool-filter" }>;
-    return <ContentPoolScheduleSourceEditor parameter={parameter} source={source} onChange={onChange} onPreview={onPreview} />;
+    return <ContentPoolScheduleSourceEditor parameter={parameter} source={source} onChange={onChange} onPreview={onPreview} browserKey={browserKey} />;
   }
   if (parameter.valueType === "image" || parameter.valueType === "image-group") {
     const source = parameter.source.mode === "library-filter" ? parameter.source : defaultCanvasScheduleParameterSource(parameter.valueType) as Extract<CanvasScheduleParameterSource, { mode: "library-filter" }>;
@@ -580,12 +650,14 @@ export function CanvasScheduleMainImageDownload({ runId }: { runId: string }) {
   </div>;
 }
 
-export function ContentPoolScheduleSourceEditor({ parameter, source, onChange, onPreview }: {
+export function ContentPoolScheduleSourceEditor({ parameter, source, onChange, onPreview, browserKey }: {
+  browserKey: string;
   parameter: CanvasScheduleParameter;
   source: Extract<CanvasScheduleParameterSource, { mode: "content-pool-filter" }>;
   onChange: (parameter: CanvasScheduleParameter) => void;
   onPreview: (preview: Extract<NonNullable<PreviewState>, { kind: "image" }>) => void;
 }) {
+  const [browsing, setBrowsing] = useState(false);
   const filter = source.filter;
   const setFilter = (next: ContentPoolSelectionFilter) => onChange({ ...parameter, source: { ...source, filter: { ...filter, ...next } } });
   const setItemIds = (itemIds: string[]) => onChange({ ...parameter, source: { ...source, filter: { ...filter, itemIds: itemIds.slice(0, 200) } } });
@@ -601,7 +673,10 @@ export function ContentPoolScheduleSourceEditor({ parameter, source, onChange, o
       <button type="button" aria-pressed={filter.mode === "manual"} onClick={() => onChange({ ...parameter, source: { ...source, filter: { ...filter, mode: "manual" } } })}>手工选择</button>
       <button type="button" aria-pressed={filter.mode === "match"} onClick={() => onChange({ ...parameter, source: { ...source, filter: { ...filter, mode: "match" } } })}>条件匹配</button>
     </div>
-    <ContentPoolSelectionBrowser
+    <button type="button" onClick={() => setBrowsing((value) => !value)}>{browsing ? "收起筛选与选择" : "配置筛选与选择"}</button>
+    <small>{filter.mode === "manual" ? `已选 ${filter.itemIds.length} 条` : "按筛选条件匹配"}{filter.query ? ` · ${filter.query}` : ""}</small>
+    {browsing ? <ContentPoolSelectionBrowser
+      memoryKey={browserKey}
       filter={filter}
       selectedIds={filter.itemIds}
       mode={filter.mode}
@@ -609,7 +684,7 @@ export function ContentPoolScheduleSourceEditor({ parameter, source, onChange, o
       onToggle={toggleItem}
       onSelectionChange={setItemIds}
       onPreviewImage={(url, index) => onPreview({ kind: "image", url, index })}
-    />
+    /> : null}
   </div>;
 }
 
@@ -976,22 +1051,7 @@ export function emptyContentPoolSelectionFilter(): ContentPoolSelectionFilter {
   return { query: "", platforms: [], statuses: [], mediaTypes: [], contentTags: [], customTags: [], localMediaComplete: false, includeDescendants: true, sort: "hot-desc" };
 }
 
-export function contentPoolSelectionUrl(filter: ContentPoolSelectionFilter, cursor?: string, limit = 40) {
-  const search = new URLSearchParams({ q: filter.query, sort: filter.sort, limit: String(limit) });
-  if (filter.projectId) search.set("projectId", filter.projectId);
-  if (filter.collectionId) {
-    search.set("collectionId", filter.collectionId);
-    if (!filter.includeDescendants) search.set("descendants", "0");
-  }
-  if (filter.localMediaComplete) search.set("localMedia", "complete");
-  filter.platforms.forEach((value) => search.append("platform", value));
-  filter.statuses.forEach((value) => search.append("status", value));
-  filter.mediaTypes.forEach((value) => search.append("mediaType", value));
-  filter.contentTags.forEach((value) => search.append("contentTag", value));
-  filter.customTags.forEach((value) => search.append("customTag", value));
-  if (cursor) search.set("cursor", cursor);
-  return `/api/content-pool/selection?${search}`;
-}
+export { contentPoolSelectionUrl } from "@/lib/content-pool-browser-state";
 
 export function uniqueContentPoolItems(items: ContentPoolSelectionItem[]) {
   const seen = new Set<string>();

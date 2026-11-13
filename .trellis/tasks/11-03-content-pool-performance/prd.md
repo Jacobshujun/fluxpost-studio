@@ -2,6 +2,10 @@
 
 ## Goal
 
+### 2026-11-13 authorized continuation
+
+The user approved execution of `optimization-plan-2026-11-13.md`, including batch schedule content-pool configuration. Implement P0/P1: stable selection queries, scoped bounded browser restoration, save acknowledgement independent of refresh, light owner-scoped candidate reads and targeted snapshot refresh. Verify selected IDs/modes do not trigger candidate GETs, close/reopen restores browsing, old responses cannot overwrite current queries/drafts, and ownership/frozen snapshots remain intact. P2 remains a separately designed storage migration after measurements; no runtime data migration in this continuation.
+
 Make the `/content` harvesting and content-pool workspace respond quickly:
 
 - Creating, renaming, deleting a content library must update the UI immediately.

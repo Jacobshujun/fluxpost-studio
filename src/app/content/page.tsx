@@ -5,7 +5,8 @@ import { ContentSourceEditor, ContentSourceEditGuard } from "./content-source-ed
 import { ImagePreview } from "@/components/image-preview";
 import { ResizablePreviewPanel } from "@/components/resizable-preview-panel";
 import { applyManualSourceImages } from "@/lib/content-pool-edit";
-import { useCallback, useEffect, useMemo, useRef, useState, useSyncExternalStore, type ReactNode, type SetStateAction } from "react";
+import { invalidateContentPoolBrowserPages } from "@/lib/content-pool-browser-state";
+import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState, useSyncExternalStore, type ReactNode, type SetStateAction } from "react";
 import {
   BarChart3,
   Camera,
@@ -315,6 +316,7 @@ export default function ContentDeskPage() {
   const [deskSummary, setDeskSummary] = useState<Pick<ContentPoolDeskSummary, "libraryCounts" | "libraryStats"> | null>(null);
   const deskAbortRef = useRef<AbortController | null>(null);
   const deskSummaryAbortRef = useRef<AbortController | null>(null);
+  const [deskNeedsRefresh, setDeskNeedsRefresh] = useState(false);
   const deskSummaryQueryInitializedRef = useRef(false);
   const [selectedSourceId, setSelectedSourceIdRaw] = useUrlQueryState("sourceId", "", optionalStringCodec());
   const [selectedContentItemIds, setSelectedContentItemIds] = useState<string[]>([]);
@@ -431,7 +433,8 @@ export default function ContentDeskPage() {
     return collection?.relativePath || collection?.name || "内容库";
   }, [collections, libraryView]);
 
-  const sourceDirty = Boolean(sourceEditState.base && JSON.stringify(sourceEditState.form) !== JSON.stringify(makeSourceEditForm(sourceEditState.base)));
+  const sourceBaseSignature = useMemo(() => sourceEditState.base ? JSON.stringify(makeSourceEditForm(sourceEditState.base)) : undefined, [sourceEditState.base]);
+  const sourceDirty = Boolean(sourceBaseSignature && JSON.stringify(sourceEditState.form) !== sourceBaseSignature);
   const selectedSource = useMemo(
     () => (sourceDirty || imageUploading ? sourceEditState.base : null) || visibleSources.find((item) => item.id === selectedSourceId) || visibleSources[0] || null,
     [selectedSourceId, visibleSources, sourceDirty, imageUploading, sourceEditState.base],
@@ -484,7 +487,7 @@ export default function ContentDeskPage() {
   function discardSourceEdits() {
     if (selectedSource) setSourceEditState({ sourceId: selectedSource.id, base: selectedSource, form: makeSourceEditForm(selectedSource) });
   }
-  useEffect(() => {
+  useLayoutEffect(() => {
     if (!sourceDirty && !imageUploading) return;
     const entryUrl = window.location.href;
     const warn = (event: BeforeUnloadEvent) => { if (!leaveApprovedRef.current) { event.preventDefault(); event.returnValue = ""; } };
@@ -649,7 +652,8 @@ export default function ContentDeskPage() {
       const res = await fetch(`/api/content-pool/desk?${params.toString()}`, { signal: controller.signal });
       const data = (await res.json()) as ContentPoolDeskPage & { error?: string };
       if (!res.ok) throw new Error(data.error || "内容池读取失败");
-      if (deskAbortRef.current !== controller) return;
+      if (deskAbortRef.current !== controller || controller.signal.aborted) return;
+      if (reset) setDeskNeedsRefresh(false);
       const nextSources = (data.items || []).map((item) => ({ ...item, raw: undefined } as ContentPoolDeskSource));
       setDeskSources((current) => {
         if (reset) return nextSources;
@@ -696,7 +700,7 @@ export default function ContentDeskPage() {
       const res = await fetch(`/api/content-pool/desk/summary?${params.toString()}`, { signal: controller.signal });
       const data = (await res.json()) as ContentPoolDeskSummary & { error?: string };
       if (!res.ok) throw new Error(data.error || "内容池统计读取失败");
-      if (deskSummaryAbortRef.current !== controller) return;
+      if (deskSummaryAbortRef.current !== controller || controller.signal.aborted) return;
       setCollections(data.collections || []);
       setIngestCollections(data.ingestCollections || []);
       setProjects(data.projects || []);
@@ -715,6 +719,7 @@ export default function ContentDeskPage() {
   }
 
   async function refreshContentDesk(options: { reset?: boolean; query?: string } = {}) {
+    invalidateContentPoolBrowserPages();
     if (options.query !== undefined) setQuery(options.query);
     await Promise.all([
       loadContentDesk({ reset: options.reset !== false }),
@@ -723,6 +728,7 @@ export default function ContentDeskPage() {
   }
 
   async function loadMoreContentDesk() {
+    if (deskNeedsRefresh) return;
     await loadContentDesk({ reset: false });
   }
 
@@ -1126,6 +1132,9 @@ export default function ContentDeskPage() {
   async function saveSourceEdits() {
     if (!selectedSource || editorLockRef.current) return false;
     editorLockRef.current = true;
+    deskAbortRef.current?.abort();
+    deskSummaryAbortRef.current?.abort();
+    setDeskLoading(false);
     setBusy("source");
     try {
       const base = makeSourceEditForm(sourceEditState.sourceId === selectedSource.id ? sourceEditState.base || selectedSource : selectedSource);
@@ -1174,7 +1183,9 @@ export default function ContentDeskPage() {
       const saved = { ...selectedSource, ...data.item };
       setSourceEditState({ sourceId: saved.id, base: saved, form: makeSourceEditForm(saved) });
       setDeskSources((items) => items.map((item) => item.id === saved.id ? saved : item));
-      await refreshContentDesk();
+      invalidateContentPoolBrowserPages();
+      setDeskNeedsRefresh(true);
+      if (patch.poolStatus !== undefined || patch.customTags !== undefined || patch.contentTagging !== undefined || Boolean(saved.analysis) !== Boolean(selectedSource.analysis)) void loadContentDeskSummary();
       setMessage("样本已保存。");
       return true;
     } catch (error) {
@@ -1947,6 +1958,7 @@ export default function ContentDeskPage() {
             </div>
 
             <div className="content-desk-list thin-scrollbar">
+              {deskNeedsRefresh ? <div className="mb-3 flex items-center justify-between gap-2" role="status"><span className="text-xs text-[var(--text-muted)]">修改已保存，已保留当前位置。</span><button className="soft-button" type="button" onClick={() => guardSourceAction(() => { void refreshContentDesk(); })}>刷新列表和排序</button></div> : null}
               {visibleSources.length ? (
                 visibleSources.map((item) => (
                   <article key={item.id} className={`content-desk-source-card ${selectedSource?.id === item.id ? "content-desk-source-card-active" : ""}`}>
@@ -1993,7 +2005,7 @@ export default function ContentDeskPage() {
               )}
               {deskHasMore ? (
                 <div className="mt-3 flex justify-center">
-                  <button className="soft-button" type="button" disabled={deskLoading} onClick={() => void loadMoreContentDesk()}>
+                  <button className="soft-button" type="button" disabled={deskLoading || deskNeedsRefresh} onClick={() => void loadMoreContentDesk()}>
                     {deskLoading ? "加载中…" : "加载更多"}
                   </button>
                 </div>

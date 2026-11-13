@@ -304,6 +304,7 @@ try {
   assert.deepEqual(injectedContentPoolGraph.nodes[0].config, {
     ...contentPoolNode.config,
     sourceItemId: "source-1",
+    sourceProjectId: contentPoolSnapshot.projectId,
     snapshotAt: "2026-08-26T00:00:00.000Z",
     snapshotTitle: "冻结标题",
     snapshotBody: "冻结正文",

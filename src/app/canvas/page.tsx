@@ -1704,6 +1704,7 @@ export default function CanvasPage() {
           </div> : null}
           <NodeInspector
             key={`${activeWorkflow?.id}:${selectedCanvasNode.id}`}
+            browserKey={`canvas:${activeWorkflow?.id}:${selectedCanvasNode.id}`}
             node={selectedCanvasNode}
             onChange={updateSelectedConfig}
             onPatch={updateSelectedConfigPatch}
@@ -2883,6 +2884,7 @@ function CanvasResultVideoPreview({ items, onPreview }: { items: Extract<CanvasA
 }
 
 function NodeInspector({
+  browserKey,
   node,
   onChange,
   onPatch,
@@ -2907,6 +2909,7 @@ function NodeInspector({
   seedanceReferences,
   createSeedanceMentionId,
 }: {
+  browserKey: string;
   node: CanvasNode;
   onChange: (key: string, value: CanvasEditableConfigValue) => void;
   onPatch: (patch: CanvasNode["config"]) => void;
@@ -3044,7 +3047,7 @@ function NodeInspector({
         <small>{subtitleNodeRun?.internalMetadata?.subtitle ? "修改文字和时间轴" : subtitleNodeRun ? "该结果需重新运行一次后才能校对" : "首次生成字幕后可校对"}</small>
       </div>
       <CanvasSubtitleStyleEditor node={node} media={subtitlePreviewMedia} onPatch={onPatch} />
-    </> : <CanvasNodeFields node={node} onChange={onChange} onPatch={onPatch} onPreviewImage={onPreviewImage} />}
+    </> : <CanvasNodeFields node={node} onChange={onChange} onPatch={onPatch} onPreviewImage={onPreviewImage} browserKey={browserKey} />}
     {isGptImageV2 ? <CanvasGptImageDimensions node={node} /> : null}
     <div className="canvas-port-list"><span>输入</span>{definition.inputs.length ? getCanvasVisibleInputPorts(node, graph.edges.filter((edge) => edge.target === node.id).map((edge) => edge.targetPort)).map((port) => <small key={port.id}>{port.label} · {portKindLabel(port.kind)}{port.required ? " · 必填" : ""}</small>) : <small>无</small>}</div>
     <div className="canvas-port-list"><span>输出</span>{definition.outputs.length ? definition.outputs.map((port) => <small key={port.id}>{port.label} · {portKindLabel(port.kind)}</small>) : <small>无</small>}</div>
@@ -3081,12 +3084,15 @@ function CanvasSaveImageTextField({ label, value, placeholder, onChange }: {
     onChange={(event) => { setDraft(event.target.value); onChange(event.target.value); }} /></label>;
 }
 
-function CanvasNodeFields({ node, onChange, onPatch, onPreviewImage }: {
+function CanvasNodeFields({ node, onChange, onPatch, onPreviewImage, browserKey }: {
+  browserKey?: string;
   node: CanvasNode;
   onChange: (key: string, value: CanvasEditableConfigValue) => void;
   onPatch: (patch: CanvasNode["config"]) => void;
   onPreviewImage: (url: string, index: number) => void;
 }) {
+  const interaction = useContext(CanvasNodeInteractionContext);
+  const memoryKey = browserKey || `canvas:${interaction?.workflowId}:${interaction?.regionId || "main"}:${node.id}`;
   const definition = getCanvasNodeDefinition(node.type, node.version);
   if (!definition) return null;
   if (node.type === "utility.switch-any") return <p className="canvas-switch-inspector-hint">在节点底部调整 index（从 0 开始），或连接一条数字文本。连接后采用上游值。</p>;
@@ -3104,7 +3110,7 @@ function CanvasNodeFields({ node, onChange, onPatch, onPreviewImage }: {
       if (field.key === "timestamps" && node.config.mode !== "timestamps") return null;
       const value = field.key === "background" ? node.config.background ?? "auto" : node.config[field.key];
       const options = field.options;
-      if (field.kind === "content-pool-picker") return <ContentPoolSnapshotPicker key={field.key} node={node} onPatch={onPatch} onPreviewImage={onPreviewImage} />;
+      if (field.kind === "content-pool-picker") return <ContentPoolSnapshotPicker key={field.key} node={node} onPatch={onPatch} onPreviewImage={onPreviewImage} browserKey={memoryKey} />;
       if (field.kind === "library-image-picker") return <LibraryImageSnapshotPicker key={`${node.id}:${field.key}`} node={node} onPatch={onPatch} onPreviewImage={onPreviewImage} />;
       if (field.kind === "copy-library-picker") return <CopyLibrarySnapshotPicker key={field.key} node={node} onPatch={onPatch} />;
       return <label key={field.key} className={field.kind === "boolean" ? "canvas-inspector-toggle" : undefined}><span>{field.label}</span>
@@ -3917,7 +3923,8 @@ function insertSeedancePlainText(editor: HTMLDivElement, text: string) {
   selection.addRange(range);
 }
 
-function ContentPoolSnapshotPicker({ node, onPatch, onPreviewImage }: {
+function ContentPoolSnapshotPicker({ node, onPatch, onPreviewImage, browserKey }: {
+  browserKey: string;
   node: CanvasNode;
   onPatch: (patch: CanvasNode["config"]) => void;
   onPreviewImage: (url: string, index: number) => void;
@@ -3925,36 +3932,50 @@ function ContentPoolSnapshotPicker({ node, onPatch, onPreviewImage }: {
   const [filter, setFilter] = useState<ContentPoolSelectionFilter>(emptyContentPoolSelectionFilter);
   const [refreshing, setRefreshing] = useState(false);
   const [snapshotError, setSnapshotError] = useState("");
+  const [choosing, setChoosing] = useState(!node.config.sourceItemId);
+  const snapshotRequest = useRef<AbortController | null>(null);
+  useEffect(() => () => snapshotRequest.current?.abort(), []);
   const selectedId = String(node.config.sourceItemId || "");
-  const refreshSnapshot = async () => {
-    if (!selectedId) return;
+  const refreshSnapshot = async (itemId = selectedId, projectId = String(node.config.sourceProjectId || "")) => {
+    if (!itemId) return;
+    snapshotRequest.current?.abort();
+    const controller = new AbortController();
+    snapshotRequest.current = controller;
     setRefreshing(true);
     setSnapshotError("");
     try {
-      const page = await api<ContentPoolSelectionPage>(`/api/content-pool/selection?itemId=${encodeURIComponent(selectedId)}`);
+      const params = new URLSearchParams({ itemId });
+      if (projectId) params.set("projectId", projectId);
+      const page = await api<ContentPoolSelectionPage>(`/api/content-pool/selection?${params}`, { signal: controller.signal });
+      if (snapshotRequest.current !== controller) return;
       const item = page.items[0];
       if (!item) throw new Error("原内容池素材已删除或无权访问，当前节点继续使用已冻结快照。");
       onPatch(contentPoolSnapshotConfig(item));
+      setChoosing(false);
     } catch (refreshError) {
-      setSnapshotError(errorMessage(refreshError));
+      if (!controller.signal.aborted) setSnapshotError(errorMessage(refreshError));
     } finally {
-      setRefreshing(false);
+      if (snapshotRequest.current === controller) setRefreshing(false);
     }
   };
   return <div className="canvas-snapshot-picker canvas-content-pool-picker">
-    <ContentPoolSelectionBrowser
-      filter={filter}
-      selectedIds={selectedId ? [selectedId] : []}
-      mode="single"
-      onFilterChange={setFilter}
-      onToggle={(item) => onPatch(contentPoolSnapshotConfig(item))}
-      onPreviewImage={onPreviewImage}
-    />
     {selectedId ? <div className="canvas-snapshot-meta">
       <span>{String(node.config.snapshotTitle || "未命名素材")}</span>
       <small>{normalizeConfigUrls(node.config.snapshotImageUrls).length} 图 · {normalizeConfigUrls(node.config.snapshotVideoUrls).length} 视频 · {formatSnapshotTime(node.config.snapshotAt)}</small>
       <button type="button" onClick={() => void refreshSnapshot()} disabled={refreshing}><RotateCcw className={refreshing ? "animate-spin" : ""} />刷新当前快照</button>
+      <button type="button" onClick={() => setChoosing((value) => !value)} disabled={refreshing}>{choosing ? "收起素材列表" : "更换素材"}</button>
     </div> : null}
+    {choosing ? <ContentPoolSelectionBrowser
+      memoryKey={browserKey}
+      rememberFilter
+      filter={filter}
+      selectedIds={selectedId ? [selectedId] : []}
+      mode="single"
+      onFilterChange={setFilter}
+      onToggle={(item) => void refreshSnapshot(item.id, item.projectId)}
+      onPreviewImage={onPreviewImage}
+    /> : null}
+    {refreshing ? <small>正在读取素材快照…</small> : null}
     {snapshotError ? <p className="canvas-picker-error">{snapshotError}</p> : null}
   </div>;
 }
@@ -5087,6 +5108,7 @@ function configStringList(value: CanvasNode["config"][string]) {
 function contentPoolSnapshotConfig(item: ContentPoolSelectionItem): CanvasNode["config"] {
   return {
     sourceItemId: item.id,
+    sourceProjectId: item.projectId,
     snapshotAt: new Date().toISOString(),
     snapshotTitle: item.title,
     snapshotBody: item.body,

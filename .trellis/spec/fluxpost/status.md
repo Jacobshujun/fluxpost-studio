@@ -38,7 +38,7 @@ Local Feishu targets verified; live acceptance pending. Identity: `/api/version`
 
 ## Next Entry
 
-Content-pool: time authenticated 3001 library create/add, desk filters/paging and crawl ingest. P2 table/GIN work separate; GIN 878 MB, JSON 222 MB unchanged.
+Pool: initial optimizations verified; commit/3001 pending. `11-03-content-pool-performance/verification-2026-11-13.md`. P2 separate.
 
 OSS: `.trellis/tasks/archive/2026-10/10-28-oss-acceptance-local-cutover/verification.md`. Local cutover done; retain TOS >= Nov 4. Production/link cleanup separate. No generated-table recreation.
 

@@ -18,7 +18,7 @@ import { getGeneratedPost, updateGeneratedPost } from "../generated-posts";
 import { freezeCompetitorWorkbook } from "../competitor-workbook";
 import { listCopyLibraryEntries } from "../copy-library";
 import { listLibraryAssets } from "../library-assets";
-import { freezeContentPoolItemsByIds, getSourceItemsByIds, resolveContentPoolSelection } from "../content-pool";
+import { freezeContentPoolItemsByIds, getContentPoolSelectionItem, getSourceItemsByIds, listContentPoolSelection, resolveContentPoolSelection } from "../content-pool";
 import { freezeContentPoolSelectionItem, normalizeContentPoolSelectionFilter } from "../content-pool-selection";
 import type { CopyLibraryEntry, LibraryAsset } from "../types";
 import {
@@ -1838,6 +1838,14 @@ async function resolveScheduleContentPool(
   filter: CanvasScheduleContentPoolFilter,
 ): Promise<CanvasScheduleParameterValue[]> {
   const snapshotAt = new Date().toISOString();
+  if (filter.mode === "match" && parameter.expansion === "fixed") {
+    const page = await listContentPoolSelection(normalizeContentPoolSelectionFilter(filter), account, undefined, 1);
+    const selected = page.items[0];
+    if (!selected) throw new Error(`${parameter.name}: no content-pool items match the current source.`);
+    const item = await getContentPoolSelectionItem(selected.id, account, selected.projectId);
+    if (!item) throw new Error(`${parameter.name}: content-pool item was deleted or is not accessible.`);
+    return [freezeContentPoolSelectionItem(item, snapshotAt)];
+  }
   const resolved = filter.mode === "manual"
     ? await freezeContentPoolItemsByIds(filter.itemIds, account, snapshotAt)
     : {

@@ -25,7 +25,7 @@ def case(browser, theme, width):
     errors = []; page.on('pageerror', lambda e: errors.append(str(e)))
     items = [dict(id=f's-{i}', sourceId=f's-{i}', ownerUserId='owner', platform='xiaohongshu', title=f'Sample {i}', contentText=f'Body {i}', images=[f'/generated/image-{j}.png' for j in range(15)] if i == 0 else [], mediaUrls=[], metrics={}, raw=None, sourceUrl='https://example.test/source', poolStatus='new', projectId='p', projectName='Project', customTags=[]) for i in range(3)]
     items[2].update(mediaType='video', videoUrl='/media/clip.mp4', videoFrames=[{'id':'frame', 'url':'/generated/frame.png', 'score':90, 'type':'highlight', 'reason':'fixture', 'timestamp':1}])
-    state = {'fail_save': False, 'fail_upload': False, 'upload': 0, 'patches': [], 'hold_upload': False, 'pending_upload': None}
+    state = {'fail_save': False, 'fail_upload': False, 'upload': 0, 'patches': [], 'hold_upload': False, 'pending_upload': None, 'desk_reads': 0, 'summary_reads': 0}
     def handler(route):
         request = route.request; u = urlparse(request.url); path = u.path; params = parse_qs(u.query)
         if path == '/api/content/items/images':
@@ -38,9 +38,11 @@ def case(browser, theme, width):
             if state['fail_save']: route.fulfill(status=500, json={'error': 'Save failed fixture'}); return
             item = next(i for i in items if i['id'] == body['id']); item.update(body['patch']); route.fulfill(json={'item': item})
         elif path == '/api/content-pool/desk':
+            state['desk_reads'] += 1
             chosen = [i for i in items if params.get('q', [''])[0] in i['title']]
             route.fulfill(json={'items': chosen[:2] if 'cursor' not in params else chosen[2:], 'memberships': [], 'total': len(chosen), 'hasMore': 'cursor' not in params and len(chosen) > 2, 'nextCursor': 'next' if 'cursor' not in params and len(chosen) > 2 else None})
         elif path == '/api/content-pool/desk/summary':
+            state['summary_reads'] += 1
             route.fulfill(json={'projects': [], 'collections': [], 'tags': [], 'libraryCounts': {'all': 3, 'default': 3, 'byCollection': {}}, 'libraryStats': {'total': 3, 'analyzed': 0, 'rewritten': 0}})
         elif path == '/api/workspace/settings':
             route.fulfill(json={'settings': {'simpleRunMediaSettings': {'generateImages': False, 'useComfyUiKlein': False, 'directOriginalReference': False, 'includeSourceVideo': False, 'enableVideoTranscription': False}, 'platformCrawlSettings': {}}})
@@ -148,8 +150,10 @@ def case(browser, theme, width):
     editor.get_by_role('button', name='保存修改', exact=True).click()
     expect(page.get_by_text('Save failed fixture', exact=True)).to_be_visible(); expect(editor.locator('article')).to_have_count(17)
     state['fail_save'] = False
+    reads_before_save = (state['desk_reads'], state['summary_reads'])
     editor.get_by_role('button', name='保存修改', exact=True).click()
     expect(editor.get_by_role('button', name='保存修改', exact=True)).to_be_disabled()
+    assert (state['desk_reads'], state['summary_reads']) == reads_before_save, 'Text/image saves must not wait for or request list/statistics reloads'
     assert items[0]['title'] == 'Edited title' and len(items[0]['images']) == 17
     assert 'metrics' not in state['patches'][-1]['patch']
     page.reload(wait_until='networkidle'); expect(editor.locator('article')).to_have_count(17)
@@ -181,6 +185,7 @@ def case(browser, theme, width):
     dialog.get_by_role('button', name='保存并继续').click()
     expect(dialog).not_to_be_visible()
     expect(editor.get_by_label('标题', exact=True)).to_have_value('Edited title')
+    expect(page.locator('.content-desk-source-card')).to_have_count(3)
     assert items[1]['title'] == 'Saved on switch'
     while editor.locator('article').count():
         editor.get_by_role('button', name='删除配图 1', exact=True).click()

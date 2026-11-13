@@ -531,8 +531,8 @@ export async function listContentPoolTagSuggestions(
   account?: WorkspaceAccessActor,
   options: { query?: string; limit?: number } = {},
 ): Promise<ContentPoolTagSuggestion[]> {
-  const [pool, tagRows] = await Promise.all([readPool(), listContentPoolTagsFromDb()]);
-  const projects = filterWorkspaceOwnedRecords(pool.projects.map(refreshProjectStats), account);
+  const [sourceProjects, tagRows] = await Promise.all([readContentPoolSelectionProjects(account), listContentPoolTagsFromDb()]);
+  const projects = filterWorkspaceOwnedRecords(sourceProjects, account);
   return buildContentPoolTagSuggestions(projects, tagRows, {
     ...options,
     ownerUserId: account && !isWorkspaceAdmin(account) ? account.id : undefined,
@@ -603,10 +603,28 @@ export async function resolveContentPoolSelection(
   input: Partial<ContentPoolSelectionFilter>,
   account?: WorkspaceAccessActor,
 ) {
-  const { projects, collections, memberships } = await contentPoolSelectionContext(account);
+  const { projects, collections, memberships } = await contentPoolSelectionContext(account, true);
   const filter = normalizeContentPoolSelectionFilter(input);
   const scopedProjects = scopeContentPoolProjectsByCollection(projects, filter, collections, memberships);
   return selectContentPoolItems(scopedProjects, filter);
+}
+
+export async function getContentPoolSelectionItem(sourceItemId: string, account: WorkspaceAccessActor, projectId?: string) {
+  const projects = filterWorkspaceOwnedRecords(
+    (await readContentProjectsForItemIdsFromDb([sourceItemId]))
+      .filter((project) => !projectId || project.id === projectId).map(refreshProjectStats),
+    account,
+  );
+  return selectContentPoolItems(projects).find((item) => item.id === sourceItemId);
+}
+
+export async function getContentPoolSelectionIds(input: Partial<ContentPoolSelectionFilter>, account: WorkspaceAccessActor) {
+  const { projects, collections, memberships } = await contentPoolSelectionContext(account);
+  const filter = normalizeContentPoolSelectionFilter(input);
+  const scoped = scopeContentPoolProjectsByCollection(projects, filter, collections, memberships);
+  const items = selectContentPoolItems(scoped, filter);
+  if (items.length > 200) throw new ContentPoolCollectionValidationError("匹配结果超过 200 条，请缩小筛选范围后再全选。");
+  return { ids: items.map((item) => item.id), total: items.length };
 }
 
 export async function freezeContentPoolItemsByIds(
@@ -1170,17 +1188,37 @@ function makeUniqueIds(values: string[]) {
   return Array.from(new Set(values.map((value) => value.trim()).filter(Boolean)));
 }
 
-async function contentPoolSelectionContext(account?: WorkspaceAccessActor) {
-  const [pool, collections, memberships] = await Promise.all([
-    readPool(),
+async function contentPoolSelectionContext(account?: WorkspaceAccessActor, full = false) {
+  const [sourceProjects, collections, memberships] = await Promise.all([
+    full ? readContentProjectsFromDb() : readContentPoolSelectionProjects(account),
     listContentPoolCollectionsFromDb(),
     listContentPoolCollectionItemsFromDb(),
   ]);
-  const projects = filterWorkspaceOwnedRecords(pool.projects.map(refreshProjectStats), account);
+  const projects = filterWorkspaceOwnedRecords(sourceProjects.map(refreshProjectStats), account);
   const visibleCollections = account
     ? collections.filter((collection) => canAccessWorkspaceOwner(account, collection.ownerUserId))
     : collections;
   return { projects, collections: visibleCollections, memberships };
+}
+
+async function readContentPoolSelectionProjects(account?: WorkspaceAccessActor): Promise<ContentProject[]> {
+  const rows = await readContentPoolDeskRowsFromDb(account && !isWorkspaceAdmin(account) ? account.id : undefined);
+  const projects = new Map<string, ContentProject>();
+  for (const row of rows) {
+    let project = projects.get(row.projectId);
+    if (!project) {
+      project = {
+        ...createContentProject(row.projectName, row.normalizedQuery, row.createdAt),
+        id: row.projectId,
+        ownerUserId: row.ownerUserId,
+        updatedAt: row.projectUpdatedAt,
+        lastCrawledAt: row.projectLastCrawledAt,
+      };
+      projects.set(project.id, project);
+    }
+    project.items.push(row.item as NormalizedSourceItem);
+  }
+  return [...projects.values()].sort((left, right) => right.updatedAt.localeCompare(left.updatedAt) || left.id.localeCompare(right.id));
 }
 
 function scopeContentPoolProjectsByCollection(

@@ -1,5 +1,6 @@
 import { NextResponse } from "next/server";
-import { listContentPoolSelection, resolveContentPoolSelection } from "@/lib/content-pool";
+import { getContentPoolSelectionIds, getContentPoolSelectionItem, listContentPoolSelection } from "@/lib/content-pool";
+import { ContentPoolCollectionValidationError } from "@/lib/content-pool-collections";
 import type { ContentPoolSelectionFilter, ContentTag, Platform, SourceMediaType, SourceUsageStatus } from "@/lib/types";
 import { isWorkspaceSignInError, requireWorkspaceAccount } from "@/lib/workspace-accounts";
 
@@ -24,9 +25,10 @@ export async function GET(request: Request) {
     };
     const itemId = searchParams.get("itemId")?.trim();
     if (itemId) {
-      const item = (await resolveContentPoolSelection({}, account)).find((candidate) => candidate.id === itemId);
+      const item = await getContentPoolSelectionItem(itemId, account, filter.projectId);
       return NextResponse.json({ items: item ? [item] : [], projects: [], collections: [], total: item ? 1 : 0 });
     }
+    if (searchParams.get("ids") === "1") return NextResponse.json(await getContentPoolSelectionIds(filter, account));
     const page = await listContentPoolSelection(
       filter,
       account,
@@ -36,6 +38,6 @@ export async function GET(request: Request) {
     return NextResponse.json(page);
   } catch (error) {
     const message = error instanceof Error ? error.message : "Failed to read content-pool selection";
-    return NextResponse.json({ error: message }, { status: isWorkspaceSignInError(error) ? 401 : 500 });
+    return NextResponse.json({ error: message }, { status: isWorkspaceSignInError(error) ? 401 : error instanceof ContentPoolCollectionValidationError ? 400 : 500 });
   }
 }

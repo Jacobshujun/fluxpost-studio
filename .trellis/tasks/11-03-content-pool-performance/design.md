@@ -1,5 +1,9 @@
 # Design: content-pool performance
 
+## 2026-11-13 continuation
+
+The reviewed continuation is `optimization-plan-2026-11-13.md`. Its P0/P1 selection improvements supersede the original exclusion of Canvas list optimization below. Keep the existing response shape and normalization: light owner-scoped rows for browsing, full targeted rows for explicit snapshot reads. Client queries depend on serialized query fields, never selection IDs/mode. Browser caches are bounded, session-account scoped and expiring; filter/scroll preferences contain no content payload. Explicit refresh bypasses cached results. Save acknowledges the returned item without awaiting summary; cancel earlier desk reads before mutation and preserve editing state. P2 schema changes remain separate.
+
 ## 1. Measured root cause
 
 Local PostgreSQL `content_projects` (2026-11-03):

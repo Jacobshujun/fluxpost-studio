@@ -543,6 +543,7 @@ function applyCanvasParameterValue(node: CanvasNode, parameter: CanvasSchedulePa
       config: {
         ...node.config,
         sourceItemId: value.id,
+        sourceProjectId: value.projectId,
         snapshotAt: value.snapshotAt,
         snapshotTitle: value.title,
         snapshotBody: value.body,

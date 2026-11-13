@@ -253,6 +253,21 @@ async function main() {
   assert.deepEqual(tagBatch.items[0]?.customTags, ["夜景", "重点"], "Batch custom tags should be appended without dropping existing tags.");
 
   const scopedItems = await contentPool.getSourceItemsByIds(["a1", "b1"], ownerA);
+  const selectedItem = await contentPool.getContentPoolSelectionItem("a1", ownerA);
+  assert.equal(selectedItem?.title, "更新后的标题");
+  assert.equal(await contentPool.getContentPoolSelectionItem("b1", ownerA), undefined);
+  assert.equal(await contentPool.getContentPoolSelectionItem("a1", ownerA, "project-b"), undefined, "Snapshot refresh must honor the selected project");
+  const candidatePage = await contentPool.listContentPoolSelection({}, ownerA, undefined, 2);
+  const candidateNext = await contentPool.listContentPoolSelection({}, ownerA, candidatePage.nextCursor, 2);
+  assert.equal(candidatePage.items.length, 2);
+  assert.ok(candidatePage.items.every((item) => item.id.startsWith("a")));
+  assert.ok(candidateNext.items.every((item) => !candidatePage.items.some((first) => first.id === item.id)));
+  const allCandidates = await contentPool.getContentPoolSelectionIds({}, ownerA);
+  assert.equal(allCandidates.total, candidatePage.total);
+  assert.ok(allCandidates.ids.every((id) => id.startsWith("a")));
+  assert.ok(!JSON.stringify(candidatePage).includes('"raw"'));
+  const suggestedTags = await contentPool.listContentPoolTagSuggestions(ownerA, { query: "新标签" });
+  assert.equal(suggestedTags[0]?.label, "新标签", "Light tag reads retain counts and search semantics");
   assert.deepEqual(scopedItems.map((item) => item.id), ["a1"], "Item-id reads must be owner scoped.");
   const frozen = await contentPool.freezeContentPoolItemsByIds(["a1", "b1"], ownerA);
   assert.deepEqual(frozen.values.map((item) => item.id), ["a1"], "Canvas freezing must be owner scoped.");
@@ -271,6 +286,17 @@ async function main() {
   const storedProjects = await database.readContentProjectsFromDb();
   assert.equal(storedProjects.some((project) => project.id === newProject.id && project.items.some((item) => item.id === "b3")), true, "New project ingest should persist.");
   assert.equal(JSON.stringify(storedProjects.find((project) => project.id === "project-b")), projectBSnapshot, "Row-level writes must not touch unrelated projects.");
+
+  const originalItem = storedProjects.find((entry) => entry.id === "project-a")!.items.find((entry) => entry.id === "a1")!;
+  const duplicateProject = {
+    ...project("duplicate-project", ownerA.id, []),
+    normalizedQuery: "duplicate-project-owner-a",
+    updatedAt: "2099-01-01T00:00:00.000Z",
+    items: [{ ...originalItem, title: "同 ID 的其他项目" }],
+  };
+  await database.writeContentProjectsToDb([...storedProjects, duplicateProject]);
+  assert.equal((await contentPool.getContentPoolSelectionItem("a1", ownerA))?.title, "同 ID 的其他项目");
+  assert.equal((await contentPool.getContentPoolSelectionItem("a1", ownerA, "project-a"))?.title, "更新后的标题", "Selected project identity must survive duplicate IDs");
 
   console.log("Content-pool desk runtime contracts passed.");
 }

@@ -144,3 +144,12 @@
 - `content_pool_items` table / GIN replacement / backfill (P2).
 - Canvas `listContentPoolSelection` pagination.
 - Provider calls, Feishu writes, production deployment.
+
+## 2026-11-13 continuation checklist
+
+- [x] Remove selection/mode-triggered queries; cancel stale requests and stale select-all commits.
+- [x] Restore node filters and bounded candidate pages/scroll by account and instance.
+- [x] Read light owner-scoped candidates and targeted full snapshots; retain frozen-run semantics.
+- [x] Acknowledge successful edits independently of summary and preserve current list/draft.
+- [x] Add isolated behavior regressions, run targeted checks, browser checks and full baseline.
+- [x] Record measured evidence and remaining P2/operator gates without claiming unmeasured speedups.

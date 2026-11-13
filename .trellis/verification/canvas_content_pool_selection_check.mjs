@@ -24,6 +24,7 @@ const schedulerSource = read("src/lib/canvas/scheduler.ts");
 const schedulerV2Source = read("src/lib/canvas/scheduler-v2.ts");
 const pageSource = (read("src/app/canvas/page.tsx") + "\n" + read("src/components/canvas-schedule/shared.tsx"));
 const contentPoolSource = read("src/lib/content-pool.ts");
+const browserSource = read("src/lib/content-pool-browser-state.ts");
 
 assert.match(selectionSource, /export function normalizeContentPoolSelectionFilter/);
 assert.match(selectionSource, /export function selectContentPoolItems/);
@@ -65,9 +66,8 @@ assert.match(schedulerV2Source, /snapshotVideoUrls/);
 assert.match(pageSource, /function ContentPoolSelectionBrowser/);
 assert.match(pageSource, /\/api\/content-pool\/selection/);
 assert.match(pageSource, /ContentPoolCustomTagPicker/, "Canvas should reuse the shared custom-tag picker");
-assert.match(pageSource, /search\.append\("customTag", value\)/, "Canvas should send custom-tag filters to the selection API");
-assert.match(pageSource, /search\.set\("collectionId", filter\.collectionId\)/, "Canvas should send collection filters to the selection API");
-assert.match(pageSource, /search\.set\("descendants", "0"\)/, "Canvas should send the descendants toggle to the selection API");
+assert.match(browserSource, /search\.set\("collectionId", filter\.collectionId\)/, "Canvas should send collection filters to the selection API");
+assert.match(browserSource, /search\.set\("descendants", "0"\)/, "Canvas should send the descendants toggle to the selection API");
 assert.match(pageSource, /包含子集/, "Canvas should expose the include-descendants toggle");
 assert.match(pageSource, /function ContentPoolScheduleSourceEditor/);
 assert.doesNotMatch(
@@ -91,6 +91,60 @@ try {
     fileName: "content-pool-selection.ts",
   }).outputText, "utf8");
   const selection = createRequire(import.meta.url)(path.join(temp, "content-pool-selection.js"));
+  writeFileSync(path.join(temp, "content-pool-browser-state.js"), ts.transpileModule(browserSource, {
+    compilerOptions: { module: ts.ModuleKind.CommonJS, target: ts.ScriptTarget.ES2022 },
+    fileName: "content-pool-browser-state.ts",
+  }).outputText, "utf8");
+  const browserState = createRequire(import.meta.url)(path.join(temp, "content-pool-browser-state.js"));
+  const queryFilter = selection.normalizeContentPoolSelectionFilter({ query: "标题", collectionId: "library", includeDescendants: false, customTags: ["标签B", "标签A"] });
+  const queryUrl = browserState.contentPoolSelectionUrl(queryFilter);
+  const queryParams = new URL(queryUrl, "http://fixture").searchParams;
+  assert.deepEqual(queryParams.getAll("customTag"), ["标签A", "标签B"]);
+  assert.equal(queryParams.get("collectionId"), "library");
+  assert.equal(queryParams.get("descendants"), "0");
+  assert.equal(browserState.contentPoolSelectionUrl({ ...queryFilter, mode: "manual", itemIds: ["one"] }), queryUrl);
+  assert.equal(browserState.contentPoolSelectionUrl({ ...queryFilter, mode: "match", itemIds: ["two"] }), queryUrl);
+  assert.equal(browserState.contentPoolSelectionUrl({ ...queryFilter, customTags: ["标签A", "标签B"] }), queryUrl);
+  const originalFetch = globalThis.fetch;
+  let candidateRequests = 0;
+  let currentAccount = "one";
+  let finishRequest;
+  const emptyPage = { items: [], projects: [], collections: [], total: 0 };
+  globalThis.fetch = async (url, init) => {
+    if (url === "/api/accounts/session") return Response.json({ account: { id: currentAccount, role: "operator" } });
+    candidateRequests += 1;
+    return new Promise((resolve, reject) => {
+      finishRequest = () => resolve(Response.json(emptyPage));
+      init.signal.addEventListener("abort", () => reject(new DOMException("Aborted", "AbortError")), { once: true });
+    });
+  };
+  try {
+    const scope = await browserState.contentPoolBrowserScope();
+    const firstController = new AbortController();
+    const secondController = new AbortController();
+    const firstRequest = browserState.requestContentPoolBrowserPage(scope, queryUrl, firstController.signal);
+    const firstResult = assert.rejects(firstRequest, { name: "AbortError" });
+    const secondRequest = browserState.requestContentPoolBrowserPage(scope, queryUrl, secondController.signal);
+    assert.equal(candidateRequests, 1, "Concurrent equal queries must share a request");
+    firstController.abort();
+    finishRequest();
+    await firstResult;
+    assert.deepEqual(await secondRequest, emptyPage, "Aborting one subscriber must preserve the other");
+    browserState.writeContentPoolBrowserPage(scope, queryUrl, emptyPage);
+    assert.deepEqual(browserState.readContentPoolBrowserPage(scope, queryUrl), emptyPage);
+    assert.equal(browserState.readContentPoolBrowserPage("other:operator", queryUrl), undefined);
+    const realNow = Date.now;
+    try {
+      const expiredAt = realNow() + 60_001;
+      Date.now = () => expiredAt;
+      assert.equal(browserState.readContentPoolBrowserPage(scope, queryUrl), undefined, "Expired entries must reload");
+    } finally { Date.now = realNow; }
+    for (let index = 0; index < 11; index++) browserState.writeContentPoolBrowserPage(scope, `query-${index}`, emptyPage);
+    assert.equal(browserState.readContentPoolBrowserPage(scope, "query-0"), undefined, "Cache must be bounded");
+    currentAccount = "two";
+    await browserState.contentPoolBrowserScope();
+    assert.equal(browserState.readContentPoolBrowserPage(scope, "query-10"), undefined, "Account switch must clear content");
+  } finally { globalThis.fetch = originalFetch; browserState.clearContentPoolBrowserPages(); }
   const projects = [
     project("project-b", "项目 B", [
       item("item-2", { title: "普通标题", hotScore: 20, publishedAt: "2026-08-20T00:00:00.000Z", contentTagging: tagging(["tag-a"]) }),

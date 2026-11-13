@@ -67,7 +67,7 @@ export function DefinitionEditor({ schedule, graph, stage, busy, onChange, onPre
             }}><option value="">请选择使用位置</option>{compatible.map((item, i) => <option key={canvasBatchBindingKey(item.binding)} value={canvasBatchBindingKey(item.binding)}>{item.region ? `${canvasNodeDisplayName(item.region)} / ` : ""}{canvasNodeDisplayName(item.node)} · {item.field.label}（{i + 1}）</option>)}</select></label>
           </div>
           {!selected ? <p className="batch-field-error">请选择兼容的使用位置。原位置可能已被移除。</p> : null}
-          {parameter.source.mode === "competitor-workbook" ? <p>从 Excel 读取：{({ title: "标题", body: "正文", card: "参数卡片" })[parameter.source.field]}，工作表设置见下方。</p> : parameter.valueType === "directory-group" ? <DirectoryGroupInput key={canvasBatchBindingKey(parameter.binding)} parameter={parameter} snapshotId={String(selected?.node.config.snapshotId || "")} onChange={update} /> : <CanvasScheduleParameterSourceEditor parameter={parameter} graph={graph} onChange={update} onPreview={onPreview} />}
+          {parameter.source.mode === "competitor-workbook" ? <p>从 Excel 读取：{({ title: "标题", body: "正文", card: "参数卡片" })[parameter.source.field]}，工作表设置见下方。</p> : parameter.valueType === "directory-group" ? <DirectoryGroupInput key={canvasBatchBindingKey(parameter.binding)} parameter={parameter} snapshotId={String(selected?.node.config.snapshotId || "")} onChange={update} /> : <CanvasScheduleParameterSourceEditor parameter={parameter} graph={graph} onChange={update} onPreview={onPreview} browserKey={`schedule:${schedule.id}:${parameter.id}`} />}
         </section>;
       })}
       {!definition.parameters.length ? <p className="batch-empty">添加需要变化的内容，例如多段文案或一组参考图片。无需变化的内容沿用工作流设置。</p> : null}
