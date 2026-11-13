@@ -109,6 +109,8 @@ def summary_response(params, project, memberships, collections, tags):
         "projects": [summary],
         "activeProject": summary,
         "collections": [{**collection, "itemCount": counts.get(collection["id"], 0)} for collection in collections],
+        "ingestCollections": [{key: collection[key] for key in ["id", "name", "relativePath", "ownerDisplayName"]} for collection in collections]
+            + [{"id": "other-member-library", "name": "小鹏用车技巧", "relativePath": "小鹏用车技巧", "ownerDisplayName": "Other Member"}],
         "libraryCounts": {"all": len(project["items"]), "default": default_count, "byCollection": counts},
         "libraryStats": {"total": len(scoped_items), "analyzed": 0, "rewritten": 0},
         "tags": [dict(tag) for tag in tags],

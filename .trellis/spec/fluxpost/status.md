@@ -1,6 +1,6 @@
 # FluxPost Current Status
 
-Last updated: 2026-11-12
+Last updated: 2026-11-13
 
 ## One-Line Status
 
@@ -28,7 +28,7 @@ Local Feishu targets verified; live acceptance pending. Identity: `/api/version`
 - Nov 4 OOM: SQL history/reuse verified on SQLite/PG (`514bf40`, `canvas_history.md`). Prior fatal request unproven; heap: `local_diagnostics.md`.
 - Feishu: eight reproduced risks (media omission, edit overwrite, path escape, deleted-post revival, record/lease persistence); fixes/live acceptance pending. Evidence: `11-03-feishu-publish-owner-recovery/code-review-2026-11-03.md`.
 - Content pool LAN: desk 960ms, summary 898ms; authenticated timing pending.
-- Content libraries: owner/subsets/default/tags/Canvas filters pass; PostgreSQL review pending.
+- Library contributions: baseline/browser pass: `11-13-content-library-cross-account-import`. Identity: `/api/version`.
 - Review LAN: dialog/drag/ratios verified; archives: `11-02-review-gallery-drag-regression`, `11-02-review-image-preview-3-4`.
 - Review layout/order/time verified: archived `10-30-review-desk-usability`.
 - Iteration/modes verified on LAN; archives: `canvas-iteration-batch-params`, `canvas-universal-modes`.

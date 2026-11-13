@@ -15,7 +15,8 @@ Last updated: 2026-08-28
 - Default workspace access is small-team whitelist mode for up to a few local operators. Configure it with `WORKSPACE_AUTH_MODE=whitelist`, `WORKSPACE_ALLOWED_USERS`, `WORKSPACE_ADMIN_USERS`, and `WORKSPACE_ACCESS_PASSWORD`.
 - `WORKSPACE_ALLOWED_USERS` is the allow-list for account usernames. `WORKSPACE_ADMIN_USERS` is a subset of allowed usernames that may bootstrap or always receive the admin role in whitelist mode; existing admins can also assign admin role from the account menu.
 - `WORKSPACE_ACCESS_PASSWORD` is only the first-admin setup key in whitelist mode. Daily sign-in uses the per-user password hash stored in `workspace_accounts`.
-- Normal members can access only records stamped with their `ownerUserId`; admins can access all workspace records. Unowned legacy records are effectively admin-only because member filters require an owner match.
+- Members access `ownerUserId`-matched records; admins access all, including unowned legacy records.
+- Members may import into others' content libraries; projects/items use the destination owner. Destination names are shared; content/management stay owner/admin scoped.
 - Mutating workspace API routes require a signed-in workspace account before local writes, queue creation, or external provider calls. Read-only local diagnostics remain available without a browser session where explicitly supported.
 
 

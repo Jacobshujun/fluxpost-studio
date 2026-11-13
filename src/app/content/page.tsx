@@ -358,6 +358,7 @@ export default function ContentDeskPage() {
   const [includeDescendantsParam, setIncludeDescendantsParamRaw] = useUrlQueryState<"1" | "0">("descendants", "1", includeDescendantsCodec);
   const [poolProjectFilter, setPoolProjectFilterRaw] = useUrlQueryState("poolProject", "all", optionalStringCodec("all"));
   const [collections, setCollections] = useState<ContentPoolCollection[]>([]);
+  const [ingestCollections, setIngestCollections] = useState<ContentPoolDeskSummary["ingestCollections"]>([]);
   const [memberships, setMemberships] = useState<ContentPoolCollectionMembership[]>([]);
   const [poolTags, setPoolTags] = useState<ContentPoolTagSuggestion[]>([]);
   const [libraryRailOpen, setLibraryRailOpen] = useState(false);
@@ -697,6 +698,7 @@ export default function ContentDeskPage() {
       if (!res.ok) throw new Error(data.error || "内容池统计读取失败");
       if (deskSummaryAbortRef.current !== controller) return;
       setCollections(data.collections || []);
+      setIngestCollections(data.ingestCollections || []);
       setProjects(data.projects || []);
       setActiveProject(data.activeProject || null);
       setPoolTags(data.tags || []);
@@ -779,6 +781,7 @@ export default function ContentDeskPage() {
     setCollectionDialog(null);
     if (data.collections) setCollections(data.collections);
     else setCollections((current) => mergeCollectionList(current, data.collection as ContentPoolCollection));
+    void loadContentDeskSummary(activeProject?.query || query);
     setMessage(wasRename ? "内容库已重命名。" : "内容库已创建。");
   }
 
@@ -789,6 +792,7 @@ export default function ContentDeskPage() {
     if (data.collections) setCollections(data.collections);
     else setCollections((current) => current.filter((candidate) => candidate.id !== collection.id));
     setMemberships((current) => current.filter((membership) => membership.collectionId !== collection.id));
+    setIngestCollections((current) => current.filter((candidate) => candidate.id !== collection.id));
     const deletedActiveLibrary = libraryView.kind === "collection" && libraryView.id === collection.id;
     if (deletedActiveLibrary) setLibraryParam("all");
     if (ingestCollectionId === collection.id) setIngestCollectionOverride(null);
@@ -1776,10 +1780,11 @@ export default function ContentDeskPage() {
               <FieldLabel label="采集到" />
               <select className="field h-10" value={ingestCollectionId} onChange={(event) => setIngestCollectionOverride(event.target.value)}>
                 <option value="">默认库</option>
-                {collections.filter((collection) => collection.canEdit).map((collection) => (
-                  <option key={collection.id} value={collection.id}>{collection.relativePath || collection.name}</option>
+                {ingestCollections.map((collection) => (
+                  <option key={collection.id} value={collection.id}>{collection.relativePath || collection.name}{collection.ownerDisplayName ? ` · ${collection.ownerDisplayName}` : ""}</option>
                 ))}
               </select>
+              <p className="muted-text mt-2 text-xs">可为其他成员的内容库采集导入，内容归属所选库。</p>
             </div>
 
             {crawlProgress ? <TaskProgressCard progress={crawlProgress} /> : null}

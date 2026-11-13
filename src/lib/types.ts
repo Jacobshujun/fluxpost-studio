@@ -633,6 +633,7 @@ export type ContentPoolDeskSummary = {
   projects: ContentPoolProjectSummary[];
   activeProject?: ContentPoolProjectSummary;
   collections: ContentPoolCollection[];
+  ingestCollections: Pick<ContentPoolCollection, "id" | "name" | "relativePath" | "ownerDisplayName">[];
   libraryCounts: { all: number; default: number; byCollection: Record<string, number> };
   libraryStats: { total: number; analyzed: number; rewritten: number };
   tags: ContentPoolTagSuggestion[];

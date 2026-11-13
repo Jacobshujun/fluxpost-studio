@@ -187,6 +187,10 @@ export async function getContentPoolDeskSummary(
     projects,
     activeProject,
     collections,
+    ingestCollections: [...context.collections]
+      .sort((left, right) => (left.relativePath || left.name).localeCompare(right.relativePath || right.name, "zh-CN")
+        || left.id.localeCompare(right.id))
+      .map(({ id, name, relativePath, ownerDisplayName }) => ({ id, name, relativePath, ownerDisplayName })),
     libraryCounts: {
       all: context.entries.length,
       default: context.entries.filter((entry) => contentPoolItemCollectionIds(context.membershipIndex, entry.item).size === 0).length,
@@ -626,9 +630,13 @@ export async function ingestCrawlItems(
   account?: WorkspaceAccessActor,
   options: { collectionId?: string } = {},
 ) {
-  if (options.collectionId && account) await requireContentPoolCollectionWriteTarget(account, options.collectionId);
+  const collection = options.collectionId && account
+    ? await requireContentPoolCollectionWriteTarget(account, options.collectionId)
+    : undefined;
   const now = new Date().toISOString();
-  const owner = account ? scopeWorkspaceOwner(account) : undefined;
+  const owner = collection
+    ? { ownerUserId: collection.ownerUserId, ownerDisplayName: collection.ownerDisplayName }
+    : account ? scopeWorkspaceOwner(account) : undefined;
   const normalizedQuery = normalizeProjectKey(query, owner?.ownerUserId);
   const project = await mutateContentProjectByNormalizedQueryInDb(
     normalizedQuery,
@@ -641,7 +649,7 @@ export async function ingestCrawlItems(
 
       const existing = new Map(current.items.map((item) => [item.id, item]));
       for (const item of items) {
-        const enrichedItem = applyWorkspaceOwner(enrichSourceTimestamps(item, now), account, item);
+        const enrichedItem = applyWorkspaceOwner(enrichSourceTimestamps(item, now), undefined, owner || item);
         const previous = existing.get(enrichedItem.id);
         if (previous) {
           const downloadedImages = enrichedItem.downloadedImages?.length ? enrichedItem.downloadedImages : previous.downloadedImages;
@@ -729,9 +737,13 @@ export async function createSourceItem(query: string, item: Omit<NormalizedSourc
   sourceId?: string;
   poolStatus?: SourceUsageStatus;
 }, account?: WorkspaceAccessActor, options: { collectionId?: string } = {}) {
-  if (options.collectionId && account) await requireContentPoolCollectionWriteTarget(account, options.collectionId);
+  const collection = options.collectionId && account
+    ? await requireContentPoolCollectionWriteTarget(account, options.collectionId)
+    : undefined;
   const now = new Date().toISOString();
-  const owner = account ? scopeWorkspaceOwner(account) : undefined;
+  const owner = collection
+    ? { ownerUserId: collection.ownerUserId, ownerDisplayName: collection.ownerDisplayName }
+    : account ? scopeWorkspaceOwner(account) : undefined;
   const normalizedQuery = normalizeProjectKey(query, owner?.ownerUserId);
   let createdItem: NormalizedSourceItem | undefined;
   const project = await mutateContentProjectByNormalizedQueryInDb(
@@ -739,11 +751,16 @@ export async function createSourceItem(query: string, item: Omit<NormalizedSourc
     () => createContentProject(query, normalizedQuery, now, owner),
     (current) => {
       const sourceId = item.sourceId || `manual-${Date.now()}`;
+      const itemId = item.id || `${item.platform}-${sourceId}`;
+      if (account && !canAccessWorkspaceOwner(account, current.ownerUserId)
+        && current.items.some((existing) => existing.id === itemId)) {
+        throw new ContentPoolCollectionValidationError("目标内容库已有这条内容，不能通过手动添加覆盖。");
+      }
       const videoFrames = normalizeVideoFrames(item.videoFrames);
       const sourceItem: NormalizedSourceItem = {
         ...item,
         ...owner,
-        id: item.id || `${item.platform}-${sourceId}`,
+        id: itemId,
         sourceId,
         customTags: normalizeContentPoolCustomTags(item.customTags),
         images: normalizeContentImageUrls(item.images || []),

@@ -316,10 +316,10 @@ export async function assertContentPoolCollectionTarget(account: WorkspaceAccess
 }
 
 export async function requireContentPoolCollectionWriteTarget(account: WorkspaceAccessActor, collectionId: string) {
-  const collection = await assertContentPoolCollectionTarget(account, collectionId);
-  const owner = scopeWorkspaceOwner(account);
-  if (collection.ownerUserId !== owner.ownerUserId) {
-    throw new ContentPoolCollectionValidationError("只能采集到当前账号自己的内容库。");
+  const collections = await listContentPoolCollectionsFromDb();
+  const collection = collections.find((candidate) => candidate.id === collectionId);
+  if (!account.id || !collection) {
+    throw new ContentPoolCollectionValidationError("目标内容库不存在。");
   }
   return collection;
 }

@@ -229,15 +229,13 @@
       "title": "Content-pool libraries, subsets and tags",
       "status": "ready_for_review",
       "definition_of_done": [
-        "Users create and manage owner-scoped content libraries and nested subsets",
-        "Items use multi-collection membership with an implicit default library",
-        "Free tags support colors, rename, merge, delete and batch edits",
-        "Canvas selection filters by library and descendants"
+        "Owner-scoped libraries/subsets; signed-in members can import with destination ownership",
+        "Multi-library/default membership; colored tags with rename/merge/delete/batch edits; Canvas subtree filters"
       ],
       "evidence": [
-        "2026-11-02 isolated SQLite, mocked desktop/mobile, types, lint, build and full baseline passed."
+        "Nov 2 library checks; Nov 13 contribution baseline/browser pass: 11-13-content-library-cross-account-import."
       ],
-      "notes": "Real authenticated PostgreSQL review remains; image-library data stays independent."
+      "notes": "Authenticated PostgreSQL review pending; image library separate."
     },
     {
       "id": "media-cache-video-frames",

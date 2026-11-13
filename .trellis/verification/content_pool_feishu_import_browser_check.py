@@ -127,6 +127,14 @@ def check(browser, theme, width):
     import_button.click()
     expect(page.get_by_text("飞书读取失败测试", exact=True).first).to_be_visible()
     expect(import_button).to_be_enabled()
+    state["failure"] = False
+    destination_select = capture.get_by_text("采集到", exact=True).locator("..").locator("select")
+    expect(destination_select.locator("option[value='other-member-library']")).to_have_text("小鹏用车技巧 · Other Member")
+    destination_select.select_option("other-member-library")
+    import_button.click()
+    expect(page.get_by_text("飞书编号导入完成：成功 0 条，失败 2 条，过滤 1 条。", exact=True)).to_be_visible()
+    assert requests[-1]["collectionId"] == "other-member-library", "Members must be able to import into another member's destination"
+    expect(page.get_by_label("内容库导航", exact=True).get_by_text("小鹏用车技巧", exact=True)).to_have_count(0)
     page.reload(wait_until="networkidle")
     expect(capture.get_by_role("button", name="飞书编号", exact=True)).to_have_attribute("aria-pressed", "true")
     assert not errors, errors
