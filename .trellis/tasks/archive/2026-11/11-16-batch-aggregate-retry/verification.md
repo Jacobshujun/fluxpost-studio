@@ -29,3 +29,9 @@ Final read-only verification: all ten groups and batch are completed; group 4 ke
 - Trellis-check review covered storage/service/API/UI propagation, immutable identities, preserved child output, no unrelated refactoring, failure-only native retry, unpublished/external-write guards and explicit operation feedback. `git diff --check` passes. Stable contract updated in `batch_iteration.md`.
 
 Local activation requires a verified clean commit and a fresh active-work check. Remote production and GitHub push are not part of this task.
+
+## Local activation deferred
+
+The implementation commit is `823d537`; task archive/journal commits follow it. The guarded activation attempt stopped before building or replacing port 3001 because new operator batches had started during verification: initially 45 live leases/four active schedules, then 32 leases/three schedules in the bounded follow-up. These schedules were created/launched around 17:10–17:14 on November 16. No active generation was interrupted and no background activation was installed. Port 3001 therefore still reports the earlier `d2abad0` candidate; the aggregate retry button is not yet live. The named 16:57:58 batch is already completed through the authorized native recovery above.
+
+Next entry: check actual live leases and recently active schedule/run statuses, then run `npm run local:lan` from clean primary HEAD when idle and verify loopback/LAN `/api/version`. Do not count stale earlier node attempts as active jobs or force a restart while leases remain. No additional model call is needed for the repaired group.
