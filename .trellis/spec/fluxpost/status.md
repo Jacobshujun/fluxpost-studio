@@ -8,6 +8,7 @@ MONA L05: 189 imported/tagged; 1,637 intact. Task: `11-16-mona-l05-copy-import`.
 
 ## Current Focus
 
+- GitHub sync: 78 commits through `1e12fe8`; Chinese notes: `docs/releases/2026-11-16-github-sync.md`. Baseline pass (0 lint errors/15 warnings); evidence: `archive/2026-11/11-16-github-sync-notes/verification.md`. Local activation remains separate.
 - Batch retries: `batch_iteration.md` (LAN pending).
 - G9L: 36 crop copies, 47 originals retained, 11 details skipped; hashes/reads/baseline pass: `archive/2026-11/11-12-g9l-studio-crop/verification.md`.
 - Gallery hierarchy/rename pass: `archive/2026-11/11-11-gallery-collection-hierarchy/verification.md`.
