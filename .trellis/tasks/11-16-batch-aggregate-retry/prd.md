@@ -1,0 +1,5 @@
+# Aggregate-stage image failure recovery
+
+The user explicitly requests repairing the failed image in the named November 16 16:57:58 batch and the missing retry button. Read-only inspection confirms group 4 has completed child results but its aggregate run is partial: one GPT image failed with HTTP 400 invalid_prompt; the existing unpublished draft has three other images. No prompt edits are authorized by diagnosis; allow one explicit unchanged-input retry and report the actual outcome.
+
+Requirements: project aggregate retryability and failed-node label in both batch result views; offer scoped and bulk retry; preserve main run/draft/children and reuse all successful outputs; no accidental publish or published-post overwrite; revision-fenced retry intent before dispatch; reject duplicate/running/mismatched runs. Extend isolated scheduler/browser tests and run baseline. Existing operator task recovery is separate from baseline and may invoke only the failed node plus necessary descendants once.

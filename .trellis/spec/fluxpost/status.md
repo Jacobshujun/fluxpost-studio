@@ -8,7 +8,7 @@ Local Feishu targets verified; live acceptance pending. Identity: `/api/version`
 
 ## Current Focus
 
-- Batch failures: `batch_iteration.md`.
+- Batch retries: `batch_iteration.md`.
 - G9L: 36 crop copies, 47 originals retained, 11 details skipped; hashes/reads/baseline pass: `archive/2026-11/11-12-g9l-studio-crop/verification.md`.
 - Gallery hierarchy/rename pass: `archive/2026-11/11-11-gallery-collection-hierarchy/verification.md`.
 - Magpie: baseline/browser and LAN identity/HTTP pass; key/live pending. See `magpie_web_search.md`.

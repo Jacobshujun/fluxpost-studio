@@ -1,0 +1,7 @@
+# Design
+
+Add aggregateRetryable/aggregateFailedNodeLabel and aggregateRetryPending to main tasks. Terminal reconciliation derives retryability from latest node attempts, checks a retryable failed node, an unpublished existing post and a plan free of external writes. Add retry-main action persisting pending intent; main run identity and result artifacts stay intact. Reconcile activates pending intents via existing retryCanvasNode, which reuses successes and executes descendants; composition already updates its previous post artifact rather than creating another draft. Bulk retry includes eligible aggregate stages. Child/shared policy and retry behavior are unchanged.
+
+Display aggregate failure separately from result-item failures in batch-create and Canvas runtime tree. For the authorized live repair, use the native domain retry with the stored owner actor; do not create sessions, edit database status by hand or alter prompts. Confirm the draft ID and all other groups stay unchanged. Do not restart the listener while the repair is in flight.
+
+During authorized repair, the provider retry produced valid image bytes but the operator helper inherited a TLS-disabling environment variable and OSS retained the file after refusing upload. Recovery must match managed-runtime TLS, back up and hash-verify that exact image, record only its verified output via native persistence, and resume composition only. This is recovery of an actual paid result; never mark success without the artifact or regenerate to conceal a storage failure.

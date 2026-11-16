@@ -1832,6 +1832,63 @@ try {
   assert.equal(activatedRegion.mainTasks[0].childTasks[0].iterationSummary.length, 2);
   listedSchedules = [];
 
+  const aggregateFixture = structuredClone(v2RetryFixture);
+  aggregateFixture.mainTasks[0].childTasks[0].status = "completed";
+  aggregateFixture.mainTasks[0].childTasks[0].resultArtifacts = [{ kind: "images", items: [{ url: "/kept-child.jpg" }] }];
+  const aggregateGraph = { nodes: [registry.createCanvasNode("model.gpt-image", "aggregate-image", { x: 0, y: 0 }), registry.createCanvasNode("compose.social-post", v2Definition.mainTargetNodeId, { x: 400, y: 0 })], edges: [{ id: "image-post", source: "aggregate-image", sourcePort: "images", target: v2Definition.mainTargetNodeId, targetPort: "images" }] };
+  aggregateGraph.nodes[0].label = "Aggregate image";
+  const aggregateText = registry.createCanvasNode("input.text", "aggregate-text", { x: -300, y: 0 });
+  aggregateText.config.text = "Fixture prompt and body";
+  aggregateGraph.nodes.push(aggregateText);
+  aggregateGraph.edges.push({ id: "text-image", source: aggregateText.id, sourcePort: "text", target: "aggregate-image", targetPort: "prompt" }, { id: "text-post", source: aggregateText.id, sourcePort: "text", target: v2Definition.mainTargetNodeId, targetPort: "body" });
+  const aggregateRun = { id: "aggregate-run-1", status: "partial", ownerUserId: account.id, graphSnapshot: aggregateGraph, targetNodeIds: [v2Definition.mainTargetNodeId], steps: [{ nodeId: "aggregate-image" }, { nodeId: v2Definition.mainTargetNodeId }], batchContext: { schemaVersion: 2, phase: "aggregate", scheduleId: aggregateFixture.id, mainTaskId: "main-1" } };
+  generatedPosts.set(postId, { ...generatedPosts.get(postId), status: "draft" });
+  const aggregateNodes = [{ nodeId: "aggregate-image", nodeType: "model.gpt-image", attempt: 1, status: "failed", error: "HTTP 400 invalid_prompt", outputs: {} }, { nodeId: v2Definition.mainTargetNodeId, nodeType: "compose.social-post", attempt: 1, status: "completed", outputs: { post: { kind: "socialPost", postId, post: structuredClone(generatedPosts.get(postId)) } } }];
+  canvasRunFixture = { run: aggregateRun, nodeRuns: aggregateNodes };
+  storedSchedule = structuredClone(aggregateFixture);
+  listedSchedules = [structuredClone(storedSchedule)];
+  canvasRunsById.set("aggregate-run-1", aggregateRun);
+  nodeRunsByRunId.set("aggregate-run-1", aggregateNodes);
+  canvasRunsById.set("child-run-1", { id: "child-run-1", status: "completed" });
+  nodeRunsByRunId.set("child-run-1", [{ nodeId: v2Definition.childResult.nodeId, attempt: 1, status: "completed", outputs: { [v2Definition.childResult.outputPort]: { kind: "images", items: [{ url: "/kept-child.jpg" }] } } }]);
+  const projectedAggregate = await scheduler.getCanvasSchedule(storedSchedule.id, account);
+  assert.equal(projectedAggregate.mainTasks[0].aggregateRetryable, true, "Completed children must not hide an aggregate image failure");
+  assert.equal(projectedAggregate.mainTasks[0].aggregateFailedNodeLabel, "Aggregate image");
+  const childrenBeforeAggregateRetry = structuredClone(projectedAggregate.mainTasks[0].childTasks);
+  retriedNode = undefined;
+  const aggregateRetry = await scheduler.retryCanvasScheduleV2AggregateTask(storedSchedule.id, account, { mainTaskId: "main-1" });
+  assert.equal(retriedNode, undefined, "Aggregate retry intent must be durable before dispatch");
+  assert.equal(aggregateRetry.mainTasks[0].aggregateRetryPending, true);
+  assert.equal(aggregateRetry.mainTasks[0].mainRunId, "aggregate-run-1");
+  assert.equal(aggregateRetry.mainTasks[0].generatedPostId, postId);
+  assert.deepEqual(aggregateRetry.mainTasks[0].childTasks, childrenBeforeAggregateRetry);
+  await assert.rejects(scheduler.retryCanvasScheduleV2AggregateTask(storedSchedule.id, account, { mainTaskId: "main-1" }), /already pending/);
+  listedSchedules = [structuredClone(storedSchedule)];
+  const aggregateActivated = await scheduler.getCanvasSchedule(storedSchedule.id, account);
+  assert.deepEqual(retriedNode, { runId: "aggregate-run-1", nodeId: "aggregate-image" });
+  assert.equal(aggregateActivated.mainTasks[0].aggregateRetryPending, false);
+  assert.equal(aggregateActivated.mainTasks[0].status, "queued");
+  storedSchedule = structuredClone(aggregateFixture);
+  const aggregateBulk = await scheduler.retryCanvasScheduleFailedTasks(storedSchedule.id, account);
+  assert.equal(aggregateBulk.mainTasks[0].aggregateRetryPending, true, "Bulk retry must include aggregate-only failures");
+  assert.equal(aggregateBulk.mainTasks[0].childTasks[0].retryPending, undefined);
+  storedSchedule = structuredClone(aggregateFixture);
+  generatedPosts.get(postId).status = "published";
+  await assert.rejects(scheduler.retryCanvasScheduleV2AggregateTask(storedSchedule.id, account, { mainTaskId: "main-1" }), /no safe failed/);
+  generatedPosts.get(postId).status = "draft";
+  aggregateRun.status = "running";
+  await assert.rejects(scheduler.retryCanvasScheduleV2AggregateTask(storedSchedule.id, account, { mainTaskId: "main-1" }), /no safe failed/);
+  aggregateRun.status = "partial";
+  aggregateRun.batchContext.mainTaskId = "wrong";
+  await assert.rejects(scheduler.retryCanvasScheduleV2AggregateTask(storedSchedule.id, account, { mainTaskId: "main-1" }), /no safe failed/);
+  aggregateRun.batchContext.mainTaskId = "main-1";
+  const publishNode = registry.createCanvasNode("publish.feishu", "publish-aggregate", { x: 800, y: 0 });
+  aggregateGraph.nodes.push(publishNode);
+  aggregateGraph.edges.push({ id: "post-publish", source: v2Definition.mainTargetNodeId, sourcePort: "post", target: publishNode.id, targetPort: "post" });
+  aggregateRun.targetNodeIds = [publishNode.id];
+  await assert.rejects(scheduler.retryCanvasScheduleV2AggregateTask(storedSchedule.id, account, { mainTaskId: "main-1" }), /no safe failed/);
+  listedSchedules = [];
+
   assert.match(
     schedulerSource,
     /function findFailedCanvasNode[\s\S]*orderedAttempts[\s\S]*\["failed", "blocked", "needs_config"\]/,

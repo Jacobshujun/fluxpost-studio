@@ -855,6 +855,52 @@ export async function retryCanvasScheduleV2SharedTask(
   return next;
 }
 
+export async function retryCanvasScheduleV2AggregateTask(
+  scheduleId: string,
+  account: WorkspaceAccessActor,
+  input: { mainTaskId: string },
+) {
+  const current = await requireSchedule(scheduleId, account);
+  if (!isCanvasScheduleV2(current)) throw new Error("V2 schedule not found");
+  const main = current.mainTasks.find((item) => item.id === input.mainTaskId);
+  if (!main?.mainRunId || main.aggregateRetryPending) throw new Error("Aggregate task not found or already pending retry.");
+  const run = await getCanvasRun(main.mainRunId, account);
+  if (!run || !await canRetryCanvasScheduleAggregate(current, main, run.run, run.nodeRuns, account)) {
+    throw new Error("This aggregate has no safe failed node to retry. Running, published and publishing results cannot be retried here.");
+  }
+  const now = new Date().toISOString();
+  const next = structuredClone(current);
+  prepareCanvasScheduleAggregateRetry(next.mainTasks!.find((item) => item.id === main.id)!, now);
+  next.status = current.status === "paused" ? "paused" : "running";
+  next.completedAt = undefined;
+  next.revision += 1;
+  next.updatedAt = now;
+  await saveUpdatedSchedule(next, current.revision, { resetCancellation: current.status === "cancelled" });
+  kickCanvasSchedulerWorker();
+  return next;
+}
+
+async function canRetryCanvasScheduleAggregate(schedule: CanvasSchedule, main: CanvasScheduleV2MainTask, run: CanvasRun, nodeRuns: CanvasNodeRun[], account: WorkspaceAccessActor) {
+  const context = run.batchContext;
+  if (!["failed", "partial"].includes(run.status) || run.id !== main.mainRunId || run.ownerUserId !== schedule.ownerUserId
+    || context?.schemaVersion !== 2 || context.phase !== "aggregate" || context.scheduleId !== schedule.id || context.mainTaskId !== main.id
+    || !findRetryableCanvasNode(run, nodeRuns)) return false;
+  if (buildCanvasRunPlan(run.graphSnapshot, run.targetNodeIds).capabilities.includes("external_write")) return false;
+  if (main.generatedPostId) {
+    const post = await getGeneratedPost(main.generatedPostId, account);
+    if (!post || post.status === "published") return false;
+  }
+  return true;
+}
+
+function prepareCanvasScheduleAggregateRetry(main: CanvasScheduleV2MainTask, now: string) {
+  main.aggregateRetryPending = true;
+  main.aggregateRetryable = false;
+  main.status = "queued";
+  main.error = undefined;
+  main.updatedAt = now;
+}
+
 export async function retryCanvasScheduleFailedTasks(scheduleId: string, account: WorkspaceAccessActor) {
   const current = await requireSchedule(scheduleId, account);
   const now = new Date().toISOString();
@@ -862,6 +908,13 @@ export async function retryCanvasScheduleFailedTasks(scheduleId: string, account
   let retryCount = 0;
   if (isCanvasScheduleV2(next)) {
     for (const main of next.mainTasks) {
+      if (main.mainRunId && !main.aggregateRetryPending && ["failed", "partial"].includes(main.status)) {
+        const run = await getCanvasRun(main.mainRunId, account);
+        if (run && await canRetryCanvasScheduleAggregate(next, main, run.run, run.nodeRuns, account)) {
+          prepareCanvasScheduleAggregateRetry(main, now);
+          retryCount += 1;
+        }
+      }
       if (next.definition.sharedOutputs?.length && main.sharedStatus === "failed" && main.sharedRunId && !(main.sharedArtifacts || []).length && !main.childTasks.some((child) => child.runId)) {
         const run = await getCanvasRun(main.sharedRunId, account);
         const failedNode = run && findFailedCanvasNode(run.run, run.nodeRuns);
@@ -1585,6 +1638,15 @@ async function reconcileCanvasScheduleV2(current: CanvasSchedule) {
       continue;
     }
     const mainNodeRuns = await listCanvasNodeRunsFromDb(mainRun.id);
+    const aggregateRetryable = !main.aggregateRetryPending && await canRetryCanvasScheduleAggregate(next, main, mainRun, mainNodeRuns, ownerActor(next));
+    const failedAggregateNode = findRetryableCanvasNode(mainRun, mainNodeRuns);
+    const failedGraphNode = failedAggregateNode && mainRun.graphSnapshot?.nodes.find((node) => node.id === failedAggregateNode.nodeId);
+    const aggregateFailedNodeLabel = failedGraphNode ? failedGraphNode.label || getCanvasNodeDefinition(failedGraphNode.type, failedGraphNode.version)?.label : undefined;
+    if (main.aggregateRetryable !== aggregateRetryable || main.aggregateFailedNodeLabel !== aggregateFailedNodeLabel) {
+      main.aggregateRetryable = aggregateRetryable;
+      main.aggregateFailedNodeLabel = aggregateFailedNodeLabel;
+      changed = true;
+    }
     const outputs = Object.values(latestNodeAttempts(mainNodeRuns).get(definition.mainTargetNodeId)?.outputs || {});
     const postArtifact = outputs.find((artifact): artifact is Extract<CanvasArtifact, { kind: "socialPost" }> => artifact.kind === "socialPost");
     if (postArtifact) {
@@ -1619,6 +1681,26 @@ async function reconcileCanvasScheduleV2(current: CanvasSchedule) {
     }
   }
   if (current.status !== "paused") {
+    for (const main of next.mainTasks!) {
+      if (!main.aggregateRetryPending || !main.mainRunId) continue;
+      try {
+        const run = await getCanvasRun(main.mainRunId, ownerActor(next));
+        if (!run || !await canRetryCanvasScheduleAggregate(next, main, run.run, run.nodeRuns, ownerActor(next))) {
+          throw new Error("Aggregate retry is no longer safe. Refresh the schedule.");
+        }
+        const node = findRetryableCanvasNode(run.run, run.nodeRuns)!;
+        await retryCanvasNode(run.run.id, node.nodeId, ownerActor(next));
+        main.status = "queued";
+        main.error = undefined;
+      } catch (error) {
+        main.status = "failed";
+        main.error = error instanceof Error ? error.message : "Aggregate retry failed.";
+      }
+      main.aggregateRetryPending = false;
+      main.aggregateRetryable = false;
+      main.updatedAt = now;
+      changed = true;
+    }
     if (await activateCanvasScheduleV2Retries(next, now)) changed = true;
     const admissionRuns = prepareCanvasScheduleV2PendingChildRuns(next, now);
     if (admissionRuns.length) {

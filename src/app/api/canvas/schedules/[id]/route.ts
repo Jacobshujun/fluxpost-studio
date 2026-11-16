@@ -17,6 +17,7 @@ import {
   retryCanvasScheduleV2ChildTask,
   retryCanvasScheduleV2MainTask,
   retryCanvasScheduleV2SharedTask,
+  retryCanvasScheduleV2AggregateTask,
   setCanvasSchedulePaused,
   updateCanvasScheduleDraft,
 } from "@/lib/canvas/scheduler";
@@ -26,7 +27,7 @@ import { canvasScheduleResponse } from "@/lib/canvas/schedule-response";
 
 export const runtime = "nodejs";
 type RouteContext = { params: Promise<{ id: string }> };
-type ScheduleAction = "save" | "preflight" | "resample" | "launch" | "duplicate" | "convert-v2" | "pause" | "resume" | "cancel" | "retry" | "retry-content" | "retry-row" | "retry-shared" | "retry-all" | "accept-candidates";
+type ScheduleAction = "save" | "preflight" | "resample" | "launch" | "duplicate" | "convert-v2" | "pause" | "resume" | "cancel" | "retry" | "retry-content" | "retry-row" | "retry-shared" | "retry-main" | "retry-all" | "accept-candidates";
 
 export async function GET(request: Request, context: RouteContext) {
   try {
@@ -104,6 +105,9 @@ export async function PATCH(request: Request, context: RouteContext) {
     } else if (action === "retry-shared") {
       if (!body.mainTaskId) return badRequest("mainTaskId is required.");
       schedule = await retryCanvasScheduleV2SharedTask(scheduleId, account, { mainTaskId: body.mainTaskId, iterationNodeId: body.iterationNodeId });
+    } else if (action === "retry-main") {
+      if (!body.mainTaskId) return badRequest("mainTaskId is required.");
+      schedule = await retryCanvasScheduleV2AggregateTask(scheduleId, account, { mainTaskId: body.mainTaskId });
     } else if (action === "retry-content") {
       if (!body.batchId || !body.contentTaskId) return badRequest("batchId and contentTaskId are required.");
       schedule = await retryCanvasScheduleContentTask(scheduleId, account, { batchId: body.batchId, contentTaskId: body.contentTaskId });

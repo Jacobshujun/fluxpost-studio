@@ -889,6 +889,9 @@ export type CanvasScheduleV2ChildTask = {
 };
 
 export type CanvasScheduleV2MainTask = {
+  aggregateRetryable?: boolean;
+  aggregateRetryPending?: boolean;
+  aggregateFailedNodeLabel?: string;
   sharedIterationSummary?: CanvasScheduleIterationSummary[];
   id: string;
   parameterValues: Record<string, CanvasScheduleParameterValue>;

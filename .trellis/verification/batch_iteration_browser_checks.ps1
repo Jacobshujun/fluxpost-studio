@@ -21,6 +21,8 @@ try {
     }
   }
   if (-not $ready) { throw 'Isolated browser server did not become ready.' }
+  python .trellis/verification/batch_aggregate_retry_browser_check.py
+  if ($LASTEXITCODE -ne 0) { throw 'Batch aggregate retry browser checks failed.' }
   python .trellis/verification/batch_iteration_failures_browser_check.py
   if ($LASTEXITCODE -ne 0) { throw 'Batch iteration failure browser checks failed.' }
   python .trellis/verification/batch_create_browser_check.py

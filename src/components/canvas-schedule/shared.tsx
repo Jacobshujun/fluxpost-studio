@@ -5,6 +5,7 @@ import type { LibraryAssetOrder } from "@/lib/types";
 import { LibraryColorFilter, LibraryPalette } from "@/components/library-colors";
 import Link from "next/link";
 import { ScheduleIterationFailures } from "./IterationFailures";
+import { ScheduleAggregateFailure } from "./AggregateFailure";
 import Image from "next/image";
 import { AlertTriangle, ArrowDown, BookOpenText, CheckCircle2, Download, FileText, FileVideo2, ImageOff, Images, Layers3, LoaderCircle, Eye, Play, Plus, RefreshCw, RotateCcw, Sheet, Search, Share2, Square, Trash2, Video, X } from "lucide-react";
 import { useCallback, useEffect, useId, useLayoutEffect, useMemo, useRef, useState } from "react";
@@ -591,8 +592,8 @@ export function ScheduleV2PreviewImages({ values, label, onPreview }: {
 export function ScheduleV2RuntimeTree({ schedule, busy, onAction }: { schedule: CanvasSchedule; busy: boolean; onAction: (action: string, payload?: Record<string, unknown>) => void }) {
   const mainTasks = schedule.mainTasks || [];
   const completed = mainTasks.filter((main) => ["completed", "partial"].includes(main.status)).length;
-  const retryableCount = mainTasks.reduce((count, main) => count + main.childTasks.filter(isCanvasScheduleV2ChildRetryable).length + (main.sharedStatus === "failed" ? 1 : 0), 0);
-  const failedCount = mainTasks.reduce((count, main) => count + main.childTasks.filter((child) => child.status === "failed").length + (main.sharedStatus === "failed" ? 1 : 0), 0);
+  const retryableCount = mainTasks.reduce((count, main) => count + main.childTasks.filter(isCanvasScheduleV2ChildRetryable).length + (main.sharedStatus === "failed" ? 1 : 0) + (main.aggregateRetryable ? 1 : 0), 0);
+  const failedCount = mainTasks.reduce((count, main) => count + main.childTasks.filter((child) => child.status === "failed").length + (main.sharedStatus === "failed" ? 1 : 0) + (main.aggregateRetryable ? 1 : 0), 0);
   return <div className="canvas-schedule-runtime">
     <div className="canvas-schedule-runtime-actions">
       {["queued", "running"].includes(schedule.status) ? <button type="button" onClick={() => onAction("pause")} disabled={busy}><Square />暂停</button> : null}
@@ -609,6 +610,7 @@ export function ScheduleV2RuntimeTree({ schedule, busy, onAction }: { schedule: 
       {main.pendingCandidateSync ? <button type="button" onClick={() => onAction("accept-candidates", { mainTaskId: main.id })} disabled={busy}>接受新增候选图</button> : null}
       {main.childTasks.some(isCanvasScheduleV2ChildRetryable) ? <button type="button" onClick={() => onAction("retry-row", { mainTaskId: main.id })} disabled={busy}><RotateCcw />重试本组失败项（{main.childTasks.filter(isCanvasScheduleV2ChildRetryable).length}）</button> : null}
       {main.error ? <p>{main.error}</p> : null}
+      <ScheduleAggregateFailure main={main} busy={busy} onAction={onAction} />
       <ScheduleIterationFailures key={`${schedule.id}:${main.id}:shared:${main.sharedStatus}`} scheduleId={schedule.id} mainTaskId={main.id} label={`任务组 ${index + 1} · 共享处理`} status={main.sharedStatus || "pending"} runId={main.sharedRunId} summaries={main.sharedIterationSummary} busy={busy} frozen={Boolean(main.sharedArtifacts?.length || main.childTasks.some((child) => child.runId))} onAction={onAction} />
       <ul>{main.childTasks.map((child, childIndex) => <li key={child.id}><StatusIcon status={child.status} /><span>{child.workbookCard ? `参数卡片 ${child.workbookCard.cardIndex} · ${child.workbookCard.text}` : `结果项 ${childIndex + 1} · ${formatCanvasScheduleParameterValues(child.parameterValues)}`}</span><em>{canvasScheduleStatusLabel(child.status)}</em>{child.resultSummary && (child.resultSummary.produced || child.resultSummary.failed) ? <small>已生成 {child.resultSummary.produced}，失败 {child.resultSummary.failed}</small> : null}{child.error ? <small>{child.error}</small> : null}<ScheduleIterationFailures key={`${schedule.id}:${child.id}:${child.status}`} scheduleId={schedule.id} mainTaskId={main.id} childTaskId={child.id} label={`任务组 ${index + 1} · 结果项 ${childIndex + 1}`} status={child.status} runId={child.runId} summaries={child.iterationSummary} busy={busy} onAction={onAction} />{isCanvasScheduleV2ChildRetryable(child) ? <button type="button" onClick={() => onAction("retry", { mainTaskId: main.id, childTaskId: child.id })} disabled={busy}><RotateCcw />{child.resultSummary?.failed ? "重试失败项" : "重试"}</button> : null}</li>)}</ul>
     </div></details>)}
