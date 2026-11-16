@@ -1072,3 +1072,36 @@ Added V2 batch group/result/image failure attribution, lazy authorized details a
 ### Next Steps
 
 - None - task complete
+
+
+## Session 91: Aggregate batch retry and verified operator image recovery
+
+**Date**: 2026-11-16
+**Task**: Aggregate batch retry and verified operator image recovery
+**Branch**: `local`
+
+### Summary
+
+Fixed aggregate-only failure retryability/buttons/bulk admission with run/post/child preservation and published/external-write guards. Baseline and 24 browser scenarios pass. Authorized group-4 image retry generated retained bytes; verified TLS storage recovery and composition-only replay completed the batch with the same post, four images and nine unchanged groups. No additional generation for storage recovery.
+
+### Main Changes
+
+(Add details)
+
+### Git Commits
+
+| Hash | Message |
+|------|---------|
+| `823d537` | (see git log) |
+
+### Testing
+
+- [OK] (Add test results)
+
+### Status
+
+[OK] **Completed**
+
+### Next Steps
+
+- None - task complete
