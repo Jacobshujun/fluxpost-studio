@@ -1039,3 +1039,36 @@ Parent-ID traversal groups children with their actual parents; explicit child cr
 ### Next Steps
 
 - Activate on port 3001 only after unrelated work is resolved and the primary worktree is clean. Operator acceptance remains pending.
+
+
+## Session 90: Batch iteration diagnostics and scoped recovery
+
+**Date**: 2026-11-16
+**Task**: Batch iteration diagnostics and scoped recovery
+**Branch**: `local`
+
+### Summary
+
+Added V2 batch group/result/image failure attribution, lazy authorized details and region-targeted failure-only retry; 50-group desktop/mobile and shared-stage coverage plus baseline pass. Strict/partial policies unchanged; no live provider replay. Local activation follows clean HEAD and fresh-work guard.
+
+### Main Changes
+
+(Add details)
+
+### Git Commits
+
+| Hash | Message |
+|------|---------|
+| `0f6cac4` | (see git log) |
+
+### Testing
+
+- [OK] (Add test results)
+
+### Status
+
+[OK] **Completed**
+
+### Next Steps
+
+- None - task complete

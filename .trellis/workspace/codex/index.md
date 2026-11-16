@@ -8,8 +8,8 @@
 
 <!-- @@@auto:current-status -->
 - **Active File**: `journal-2.md`
-- **Total Sessions**: 89
-- **Last Active**: 2026-11-11
+- **Total Sessions**: 90
+- **Last Active**: 2026-11-16
 <!-- @@@/auto:current-status -->
 
 ---
@@ -19,7 +19,7 @@
 <!-- @@@auto:active-documents -->
 | File | Lines | Status |
 |------|-------|--------|
-| `journal-2.md` | ~1040 | Active |
+| `journal-2.md` | ~1074 | Active |
 | `journal-1.md` | ~1967 | Archived |
 <!-- @@@/auto:active-documents -->
 
@@ -30,6 +30,7 @@
 <!-- @@@auto:session-history -->
 | # | Date | Title | Commits | Branch |
 |---|------|-------|---------|--------|
+| 90 | 2026-11-16 | Batch iteration diagnostics and scoped recovery | `0f6cac4` | `local` |
 | 89 | 2026-11-11 | Gallery collection hierarchy and rename repair | `b35d22b` | `local` |
 | 88 | 2026-11-10 | Canvas Switch Any verification | `3cfd902` | `local` |
 | 87 | 2026-11-06 | Canvas library ordering and filter isolation | `25a51d2` | `local` |
