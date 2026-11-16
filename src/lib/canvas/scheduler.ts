@@ -87,6 +87,8 @@ import type {
 } from "./types";
 import { CANVAS_REQUIRED_SCHEDULER_ROLES, CANVAS_SCHEDULER_ROLES, CANVAS_SCHEDULER_ROLE_LABELS } from "./types";
 import { getCanvasWorkflow } from "./workflows";
+import { canvasScheduleIterationSummary, requireFailedIterationNode } from "./iteration-summary";
+import type { CanvasScheduleIterationDetails } from "./types";
 
 const maxScheduleBatches = 20;
 const maxImageTasks = 2_000;
@@ -125,6 +127,55 @@ export async function getCanvasSchedule(scheduleId: string, account: WorkspaceAc
   if (!schedule || !canAccessWorkspaceOwner(account, schedule.ownerUserId)) return undefined;
   assertNoRetiredGeneratedImageFilters(schedule);
   return normalizeStoredSchedule(schedule);
+}
+
+export async function getCanvasScheduleIterationDetails(
+  scheduleId: string,
+  account: WorkspaceAccessActor,
+  input: { mainTaskId: string; childTaskId?: string; phase: "child" | "shared" },
+): Promise<CanvasScheduleIterationDetails> {
+  const schedule = await requireSchedule(scheduleId, account);
+  if (!isCanvasScheduleV2(schedule)) throw new Error("V2 schedule not found");
+  const main = schedule.mainTasks.find((entry) => entry.id === input.mainTaskId);
+  const child = main?.childTasks.find((entry) => entry.id === input.childTaskId);
+  const runId = input.phase === "shared" ? main?.sharedRunId : child?.runId;
+  if (!runId) throw new Error("Schedule iteration task not found");
+  const current = await getCanvasRun(runId, account);
+  if (!current || current.run.ownerUserId !== schedule.ownerUserId) throw new Error("Schedule iteration run not found");
+  const batch = current.run.batchContext;
+  if (batch?.schemaVersion !== 2 || batch.scheduleId !== schedule.id || batch.mainTaskId !== main!.id
+    || batch.phase !== input.phase || (input.phase === "child" && batch.childTaskId !== child!.id)) {
+    throw new Error("Schedule iteration run identity mismatch.");
+  }
+  const attempts = latestNodeAttempts(current.nodeRuns);
+  const summaries = canvasScheduleIterationSummary(current.run.graphSnapshot, current.nodeRuns);
+  const regions: CanvasScheduleIterationDetails["regions"] = [];
+  for (const summary of summaries) {
+    const metadata = attempts.get(summary.nodeId)!.internalMetadata!.iteration!;
+    const items: CanvasScheduleIterationDetails["regions"][number]["items"] = [];
+    for (const item of metadata.items) {
+      const imageRun = await getCanvasRunFromDb(item.runId);
+      if (imageRun && (imageRun.ownerUserId !== current.run.ownerUserId
+        || imageRun.iterationContext?.parentRunId !== current.run.id
+        || imageRun.iterationContext.regionNodeId !== summary.nodeId
+        || imageRun.iterationContext.itemId !== item.id)) throw new Error("Iteration child identity mismatch.");
+      const status = imageRun?.status || item.status;
+      const failure = imageRun && ["failed", "partial", "cancelled"].includes(status)
+        ? findFailedCanvasNode(imageRun, await listCanvasNodeRunsFromDb(imageRun.id)) : undefined;
+      const failedNode = failure && imageRun?.graphSnapshot.nodes.find((node) => node.id === failure.nodeId);
+      items.push({ index: item.index + 1, status, sourceUrl: item.source.url,
+        error: imageRun ? imageRun.error : item.error,
+        failedNodeLabel: failedNode ? failedNode.label || getCanvasNodeDefinition(failedNode.type, failedNode.version)?.label : undefined });
+    }
+    const failures = items.filter((item) => ["failed", "partial", "cancelled"].includes(item.status));
+    regions.push({ ...summary, items,
+      completed: items.filter((item) => item.status === "completed").length,
+      failed: failures.length,
+      pending: items.filter((item) => ["queued", "running"].includes(item.status)).length,
+      failures: failures.map((item) => ({ index: item.index, ...(item.error ? { error: item.error } : {}) })),
+    });
+  }
+  return { runId, runStatus: current.run.status, regions };
 }
 
 export async function createCanvasSchedule(account: WorkspaceAccessActor, input: { workflowId: string; name?: string; schemaVersion?: 1 | 2 }) {
@@ -616,7 +667,7 @@ export async function retryCanvasScheduleImageTask(
 export async function retryCanvasScheduleV2ChildTask(
   scheduleId: string,
   account: WorkspaceAccessActor,
-  input: { mainTaskId: string; childTaskId: string },
+  input: { mainTaskId: string; childTaskId: string; iterationNodeId?: string },
 ) {
   const current = await requireSchedule(scheduleId, account);
   if (!isCanvasScheduleV2(current)) throw new Error("V2 child task not found");
@@ -626,6 +677,11 @@ export async function retryCanvasScheduleV2ChildTask(
   const childStatus = String(child.status);
   if (childStatus !== "failed" && childStatus !== "partial") throw new Error("Only failed result items can be retried.");
   await requireRetryableCanvasScheduleRun(child.runId, account);
+  if (input.iterationNodeId) {
+    const run = await getCanvasRun(child.runId, account);
+    if (!run) throw new Error("Canvas child run not found");
+    requireFailedIterationNode(run.run.graphSnapshot, run.nodeRuns, input.iterationNodeId);
+  }
   const now = new Date().toISOString();
   const preserveGeneratedPost = current.definition.childResult.artifactKind === "images"
     && Boolean(main.generatedPostId || main.resultArtifacts.some((artifact) => artifact.kind === "socialPost"));
@@ -644,6 +700,7 @@ export async function retryCanvasScheduleV2ChildTask(
         status: "pending",
         retryable: false,
         retryPending: true,
+        retryIterationNodeId: input.iterationNodeId,
         resultArtifacts: [],
         error: undefined,
         updatedAt: now,
@@ -758,7 +815,7 @@ export async function retryCanvasScheduleV2MainTask(
 export async function retryCanvasScheduleV2SharedTask(
   scheduleId: string,
   account: WorkspaceAccessActor,
-  input: { mainTaskId: string },
+  input: { mainTaskId: string; iterationNodeId?: string },
 ) {
   const current = await requireSchedule(scheduleId, account);
   if (!isCanvasScheduleV2(current)) throw new Error("V2 shared task not found");
@@ -772,7 +829,9 @@ export async function retryCanvasScheduleV2SharedTask(
   }
   const run = await getCanvasRun(main.sharedRunId, account);
   if (!run) throw new Error("Canvas shared run not found");
-  const failedNode = findFailedCanvasNode(run.run, run.nodeRuns);
+  const failedNode = input.iterationNodeId
+    ? { nodeId: requireFailedIterationNode(run.run.graphSnapshot, run.nodeRuns, input.iterationNodeId) }
+    : findFailedCanvasNode(run.run, run.nodeRuns);
   if (!failedNode) throw new Error("No failed Canvas node is available to retry.");
   await retryCanvasNode(run.run.id, failedNode.nodeId, account, { allowScheduledSharedRetry: true });
   const now = new Date().toISOString();
@@ -1402,9 +1461,11 @@ async function reconcileCanvasScheduleV2(current: CanvasSchedule) {
       }
       let sharedArtifacts = main.sharedArtifacts || [];
       let extractionError: string | undefined;
+      const sharedNodeRuns = terminalRunStatuses.has(sharedRun.status) ? await listCanvasNodeRunsFromDb(sharedRun.id) : [];
+      const sharedIterationSummary = sharedNodeRuns.length ? canvasScheduleIterationSummary(sharedRun.graphSnapshot, sharedNodeRuns) : main.sharedIterationSummary;
       if (sharedRun.status === "completed") {
         try {
-          const latest = latestNodeAttempts(await listCanvasNodeRunsFromDb(sharedRun.id));
+          const latest = latestNodeAttempts(sharedNodeRuns);
           sharedArtifacts = extractCanvasScheduleV2SharedArtifacts(
             Object.fromEntries(sharedOutputs.map((output) => [output.nodeId, latest.get(output.nodeId)?.outputs])),
             sharedOutputs,
@@ -1426,10 +1487,12 @@ async function reconcileCanvasScheduleV2(current: CanvasSchedule) {
       const sharedError = sharedProjection.error;
       if (main.sharedStatus !== effectiveSharedStatus
         || stableSerialize(main.sharedArtifacts || []) !== stableSerialize(sharedArtifacts)
-        || main.sharedError !== sharedError) {
+        || main.sharedError !== sharedError
+        || stableSerialize(main.sharedIterationSummary) !== stableSerialize(sharedIterationSummary)) {
         main.sharedStatus = effectiveSharedStatus;
         main.sharedArtifacts = sharedArtifacts;
         main.sharedError = sharedError;
+        main.sharedIterationSummary = sharedIterationSummary;
         main.updatedAt = now;
         changed = true;
       }
@@ -1453,6 +1516,7 @@ async function reconcileCanvasScheduleV2(current: CanvasSchedule) {
       if (run.iterationRepairing) continue;
       const nodeRuns = terminalRunStatuses.has(run.status) ? await listCanvasNodeRunsFromDb(run.id) : [];
       const latest = latestNodeAttempts(nodeRuns).get(definition.childResult.nodeId);
+      const iterationSummary = nodeRuns.length ? canvasScheduleIterationSummary(run.graphSnapshot, nodeRuns) : child.iterationSummary;
       const resultArtifacts = terminalRunStatuses.has(run.status)
         ? extractCanvasScheduleV2Artifacts(latest?.outputs, definition.childResult.outputPort, definition.childResult.artifactKind)
         : [];
@@ -1467,12 +1531,13 @@ async function reconcileCanvasScheduleV2(current: CanvasSchedule) {
       const status = projection.status;
       const error = projection.error;
       const retryable = status === "failed" ? Boolean(findRetryableCanvasNode(run, nodeRuns)) : false;
-      if (child.status !== status || stableSerialize(child.resultArtifacts) !== stableSerialize(resultArtifacts) || stableSerialize(child.resultSummary) !== stableSerialize(resultSummary) || child.error !== error || child.retryable !== retryable) {
+      if (child.status !== status || stableSerialize(child.resultArtifacts) !== stableSerialize(resultArtifacts) || stableSerialize(child.resultSummary) !== stableSerialize(resultSummary) || child.error !== error || child.retryable !== retryable || stableSerialize(child.iterationSummary) !== stableSerialize(iterationSummary)) {
         child.status = status;
         child.resultArtifacts = resultArtifacts;
         child.resultSummary = resultSummary;
         child.error = error;
         child.retryable = retryable;
+        child.iterationSummary = iterationSummary;
         child.updatedAt = now;
         changed = true;
       }
@@ -2207,12 +2272,15 @@ async function activateCanvasScheduleV2Retries(schedule: CanvasSchedule, now: st
       try {
         const run = await getCanvasRun(child.runId, ownerActor(schedule));
         if (!run) throw new Error("Canvas child run not found");
-        const retryableNode = findRetryableCanvasNode(run.run, run.nodeRuns);
+        const retryableNode = child.retryIterationNodeId
+          ? { nodeId: requireFailedIterationNode(run.run.graphSnapshot, run.nodeRuns, child.retryIterationNodeId) }
+          : findRetryableCanvasNode(run.run, run.nodeRuns);
         if (!retryableNode) throw new Error("No retryable Canvas node is available.");
         await retryCanvasNode(run.run.id, retryableNode.nodeId, ownerActor(schedule));
         child.status = "queued";
         child.retryable = false;
         child.retryPending = false;
+        child.retryIterationNodeId = undefined;
         child.error = undefined;
         child.updatedAt = now;
         main.status = "running";
@@ -2222,6 +2290,7 @@ async function activateCanvasScheduleV2Retries(schedule: CanvasSchedule, now: st
         child.status = "failed";
         child.retryable = false;
         child.retryPending = false;
+        child.retryIterationNodeId = undefined;
         child.error = error instanceof Error ? error.message : "Card retry failed.";
         child.updatedAt = now;
         changed = true;

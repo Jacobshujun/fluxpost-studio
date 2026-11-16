@@ -870,6 +870,8 @@ export type CanvasScheduleV2SharedArtifact = CanvasScheduleV2SharedOutput & {
 };
 
 export type CanvasScheduleV2ChildTask = {
+  iterationSummary?: CanvasScheduleIterationSummary[];
+  retryIterationNodeId?: string;
   iterationDeliveredRevisions?: Record<string, number>;
   id: string;
   parameterValues: Record<string, CanvasScheduleParameterValue>;
@@ -887,6 +889,7 @@ export type CanvasScheduleV2ChildTask = {
 };
 
 export type CanvasScheduleV2MainTask = {
+  sharedIterationSummary?: CanvasScheduleIterationSummary[];
   id: string;
   parameterValues: Record<string, CanvasScheduleParameterValue>;
   childTasks: CanvasScheduleV2ChildTask[];
@@ -905,6 +908,25 @@ export type CanvasScheduleV2MainTask = {
   createdAt: string;
   updatedAt: string;
   workbookRow?: CompetitorWorkbookRowSnapshot;
+};
+
+export type CanvasScheduleIterationSummary = {
+  nodeId: string;
+  label: string;
+  policy: "all" | "at-least-one";
+  total: number;
+  completed: number;
+  failed: number;
+  pending: number;
+  failures: Array<{ index: number; error?: string }>;
+};
+
+export type CanvasScheduleIterationDetails = {
+  runId: string;
+  runStatus: CanvasRunStatus;
+  regions: Array<CanvasScheduleIterationSummary & {
+    items: Array<{ index: number; status: CanvasRunStatus; sourceUrl: string; error?: string; failedNodeLabel?: string }>;
+  }>;
 };
 
 export type CanvasBatchBindingAdapter = "config-value" | "image-input" | "video-input" | "copy-input" | "source-video-input" | "content-pool-input" | "directory-group-input";

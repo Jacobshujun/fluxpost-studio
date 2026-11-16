@@ -1,0 +1,2 @@
+{"file": ".trellis/spec/fluxpost/batch_iteration.md", "reason": "Batch diagnostics and region-scoped recovery contracts"}
+{"file": ".trellis/spec/frontend/state-management.md", "reason": "Server-owned execution state and explicit API mutations"}

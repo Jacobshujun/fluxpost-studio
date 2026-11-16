@@ -55,6 +55,7 @@ export async function PATCH(request: Request, context: RouteContext) {
       imageTaskId?: string;
       mainTaskId?: string;
       childTaskId?: string;
+      iterationNodeId?: string;
     };
     const action = body.action || "save";
     let schedule;
@@ -91,7 +92,7 @@ export async function PATCH(request: Request, context: RouteContext) {
     } else if (action === "retry") {
       if (body.mainTaskId || body.childTaskId) {
         if (!body.mainTaskId || !body.childTaskId) return badRequest("mainTaskId and childTaskId are required.");
-        schedule = await retryCanvasScheduleV2ChildTask(scheduleId, account, { mainTaskId: body.mainTaskId, childTaskId: body.childTaskId });
+        schedule = await retryCanvasScheduleV2ChildTask(scheduleId, account, { mainTaskId: body.mainTaskId, childTaskId: body.childTaskId, iterationNodeId: body.iterationNodeId });
       } else {
         if (!body.batchId || !body.contentTaskId || !body.imageTaskId) return badRequest("batchId, contentTaskId, and imageTaskId are required.");
         schedule = await retryCanvasScheduleImageTask(scheduleId, account, {
@@ -102,7 +103,7 @@ export async function PATCH(request: Request, context: RouteContext) {
       }
     } else if (action === "retry-shared") {
       if (!body.mainTaskId) return badRequest("mainTaskId is required.");
-      schedule = await retryCanvasScheduleV2SharedTask(scheduleId, account, { mainTaskId: body.mainTaskId });
+      schedule = await retryCanvasScheduleV2SharedTask(scheduleId, account, { mainTaskId: body.mainTaskId, iterationNodeId: body.iterationNodeId });
     } else if (action === "retry-content") {
       if (!body.batchId || !body.contentTaskId) return badRequest("batchId and contentTaskId are required.");
       schedule = await retryCanvasScheduleContentTask(scheduleId, account, { batchId: body.batchId, contentTaskId: body.contentTaskId });

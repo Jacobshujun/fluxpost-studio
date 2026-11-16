@@ -35,6 +35,7 @@ const nodeChecks = [
   ["Canvas iteration runs", "canvas_iteration_runs_check.mjs"],
   ["Canvas iteration queue", "canvas_iteration_queue_check.mjs"],
   ["Canvas iteration actions", "canvas_iteration_actions_check.mjs"],
+  ["Batch iteration diagnostics", "canvas_schedule_iterations_check.mjs"],
   ["Canvas cancellation persistence", "canvas_cancellation_store_check.mjs"],
   ["Canvas cancellation runtime", "canvas_cancellation_runtime_check.mjs"],
   ["Canvas cancellation scoped recovery", "canvas_cancellation_recovery_check.mjs"],

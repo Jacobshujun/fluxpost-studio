@@ -1,0 +1,2 @@
+{"file": ".trellis/spec/fluxpost/batch_iteration.md", "reason": "Diagnostic scope, identity, lazy reads, explicit retry and unchanged success policies"}
+{"file": ".trellis/spec/fluxpost/verification.md", "reason": "Required deterministic baseline and external-provider boundaries"}

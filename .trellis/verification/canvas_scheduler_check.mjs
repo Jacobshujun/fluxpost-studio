@@ -36,7 +36,7 @@ try {
   writeFileSync(path.join(temp, "toapis-image-api.js"), "exports.toApisImageResolutions=['1k','2k','4k'];exports.toApisImageRatios=['1:1'];exports.toApis4kImageRatios=['16:9'];", "utf8");
   writeFileSync(path.join(temp, "feishu-publish-mode.js"), "exports.feishuPublishModeOptions=[{value:'full',label:'full'},{value:'text',label:'text'},{value:'media',label:'media'}];exports.normalizeFeishuPublishMode=(value)=>value===undefined?'full':['full','text','media'].includes(value)?value:(()=>{throw new Error('invalid mode')})();", "utf8");
   writeFileSync(path.join(temp, "wonder-image-contract.js"), ts.transpileModule(read("src/lib/wonder-image-contract.ts"), { compilerOptions: { module: ts.ModuleKind.CommonJS, target: ts.ScriptTarget.ES2022 } }).outputText);
-  for (const name of ["layer-compose-contract", "image-process-contract", "types", "node-utils", "source-video-contract", "video-loader", "content-collection", "content-collection-schedule", "save-images", "seedance-references", "subtitle-style", "subtitle-editor", "switch-any", "input-validation", "registry", "graph", "iteration", "scheduler-skeleton", "scheduler-v2"]) {
+  for (const name of ["layer-compose-contract", "image-process-contract", "types", "node-utils", "source-video-contract", "video-loader", "content-collection", "content-collection-schedule", "save-images", "seedance-references", "subtitle-style", "subtitle-editor", "switch-any", "input-validation", "registry", "graph", "iteration", "scheduler-skeleton", "scheduler-v2", "iteration-summary"]) {
     writeFileSync(path.join(temp, "image-model-options.js"), ts.transpileModule(read("src/lib/image-model-options.ts"), { compilerOptions: { module: ts.ModuleKind.CommonJS, target: ts.ScriptTarget.ES2022 } }).outputText);
     const source = read(`src/lib/canvas/${name}.ts`).replace('"../toapis-image-api"', '"./toapis-image-api"').replace('"../feishu-publish-mode"', '"./feishu-publish-mode"').replace('"../image-model-options"', '"./image-model-options"').replace('"../wonder-image-contract"', '"./wonder-image-contract"');
     writeFileSync(path.join(temp, `${name}.js`), ts.transpileModule(source, {
@@ -151,6 +151,7 @@ try {
       retryCanvasNode: async (runId, nodeId) => { retriedNode = { runId, nodeId }; },
     }, { get: (target, key) => target[key] || emptyAsync }),
     "./scheduler-v2": schedulerV2,
+    "./iteration-summary": require(path.join(temp, "iteration-summary.js")),
     "./content-collection-schedule": require(path.join(temp, "content-collection-schedule.js")),
     "./source-video-contract": require(path.join(temp, "source-video-contract.js")),
     "./video-loader": require(path.join(temp, "video-loader.js")),
@@ -1806,6 +1807,31 @@ try {
     /completed shared result cannot be rerun/,
     "a shared stage must not rerun after child fan-out starts",
   );
+  // Region-targeted retries persist across the schedule save/admission boundary.
+  storedSchedule = structuredClone(rowRetrySchedule);
+  storedSchedule.mainTasks[0].childTasks = [storedSchedule.mainTasks[0].childTasks[0]];
+  storedSchedule.mainTasks[0].childTasks[0].status = "failed";
+  const failedRegions = ["region-a", "region-b"].map((nodeId) => ({
+    nodeId, nodeType: "utility.image-iterate", attempt: 1, status: "failed",
+    internalMetadata: { iteration: { items: [{ index: 0, status: "completed" }, { index: 1, status: "failed", error: "503 busy" }] } },
+  }));
+  const regionGraph = { nodes: ["region-a", "region-b"].map((id) => ({ id, config: { failurePolicy: "all" }, label: id })), edges: [] };
+  canvasRunFixture = { run: { id: "child-run-1", status: "partial", graphSnapshot: regionGraph, steps: [] }, nodeRuns: failedRegions };
+  await assert.rejects(scheduler.retryCanvasScheduleV2ChildTask(storedSchedule.id, account, { mainTaskId: "main-1", childTaskId: "child-1", iterationNodeId: "not-a-region" }), /no finished failed/);
+  const regionRetry = await scheduler.retryCanvasScheduleV2ChildTask(storedSchedule.id, account, { mainTaskId: "main-1", childTaskId: "child-1", iterationNodeId: "region-b" });
+  assert.equal(regionRetry.mainTasks[0].childTasks[0].retryIterationNodeId, "region-b");
+  storedSchedule = regionRetry;
+  listedSchedules = [structuredClone(regionRetry)];
+  canvasRunsById.set("child-run-1", canvasRunFixture.run);
+  nodeRunsByRunId.set("child-run-1", failedRegions);
+  retriedNode = undefined;
+  const activatedRegion = await scheduler.getCanvasSchedule(storedSchedule.id, account);
+  assert.deepEqual(retriedNode, { runId: "child-run-1", nodeId: "region-b" }, "Selected iteration region must survive deferred retry; other regions are untouched");
+  assert.equal(activatedRegion.mainTasks[0].childTasks[0].retryIterationNodeId, undefined);
+  assert.equal(activatedRegion.mainTasks[0].childTasks[0].iterationSummary[0].failures[0].index, 2);
+  assert.equal(activatedRegion.mainTasks[0].childTasks[0].iterationSummary.length, 2);
+  listedSchedules = [];
+
   assert.match(
     schedulerSource,
     /function findFailedCanvasNode[\s\S]*orderedAttempts[\s\S]*\["failed", "blocked", "needs_config"\]/,
