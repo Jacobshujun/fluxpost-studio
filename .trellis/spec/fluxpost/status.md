@@ -4,7 +4,7 @@ Last updated: 2026-11-16
 
 ## One-Line Status
 
-Local Feishu targets verified; live acceptance pending. Identity: `/api/version`.
+MONA L05: 189 imported/tagged; 1,637 intact. Task: `11-16-mona-l05-copy-import`.
 
 ## Current Focus
 
