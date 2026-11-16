@@ -298,6 +298,31 @@ async function main() {
   assert.equal((await contentPool.getContentPoolSelectionItem("a1", ownerA))?.title, "同 ID 的其他项目");
   assert.equal((await contentPool.getContentPoolSelectionItem("a1", ownerA, "project-a"))?.title, "更新后的标题", "Selected project identity must survive duplicate IDs");
 
+  const selectedRoot = await contentPool.listContentPoolSelection({ collectionId: rootCollection.id }, ownerA, undefined, 1);
+  assert.equal(selectedRoot.total, 3, "Candidate collection scope must include descendants");
+  assert.equal(selectedRoot.projects.find((entry) => entry.id === "project-a")?.totalItems, 6, "Project dropdown counts must describe the whole project, not the selected collection/page");
+  const directRoot = await contentPool.listContentPoolSelection({ collectionId: rootCollection.id, includeDescendants: false }, ownerA);
+  assert.equal(directRoot.total, 2);
+  await assert.rejects(() => contentPool.listContentPoolSelection({ collectionId: otherCollection.id }, ownerA), /not found/, "Inaccessible collections must remain errors");
+  const matched = await contentPool.resolveContentPoolSelection({ collectionId: rootCollection.id }, ownerA);
+  assert.equal(matched.length, 3, "Match preflight must use the same owner-aware descendant scope");
+
+  const batchItems = Array.from({ length: 205 }, (_, index) => sourceItem({ id: `batch-${index}`, ownerUserId: ownerA.id, title: `批量 ${index}`, platform: "xiaohongshu", mediaType: "image", status: "new", hotScore: index, crawledAt: now }));
+  await database.writeContentProjectsToDb([...await database.readContentProjectsFromDb(), project("batch-project", ownerA.id, batchItems)]);
+  for (const count of [50, 95, 200]) {
+    const ids = batchItems.slice(0, count).map((item) => item.id);
+    const rows = await database.readContentPoolItemRowsFromDb(ids, ownerA.id);
+    assert.equal(rows.length, count, "Batch source reads must not load unrelated items");
+    const snapshots = await contentPool.freezeContentPoolItemsByIds([...ids, "not-found", "b1"], ownerA, now);
+    assert.deepEqual(snapshots.values.map((item) => item.id), ids, "Batch snapshot order must follow the selected IDs");
+    assert.deepEqual(snapshots.missingIds, ["not-found", "b1"]);
+    assert.ok(snapshots.values.every((item) => item.snapshotAt === now));
+  }
+  await assert.rejects(() => contentPool.getContentPoolSelectionIds({ projectId: "batch-project" }, ownerA), /200/, "Select-all must retain its 200-item cap");
+  const snapshotBeforeEdit = await contentPool.freezeContentPoolItemsByIds(["batch-0"], ownerA, now);
+  await contentPool.updateSourceItem("batch-0", { title: "更新后" }, ownerA);
+  assert.equal(snapshotBeforeEdit.values[0].title, "批量 0", "Existing frozen values must not change after a source edit");
+
   console.log("Content-pool desk runtime contracts passed.");
 }
 

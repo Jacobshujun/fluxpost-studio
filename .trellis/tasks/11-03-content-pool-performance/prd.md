@@ -2,6 +2,10 @@
 
 ## Goal
 
+### 2026-11-16 authorized repair
+
+The user requested implementation after the measured batch diagnosis and explicitly requires a general repair for future 50-item batches, not a special case for the reported schedule. Repair candidate browsing and source snapshot preparation for any account/collection and 1–200 selected items. Keep existing ownership, duplicate-ID/project precedence, dropdown counts, sorting/cursors, normalization, random sampling, frozen snapshots and preview revisions. Verify 50/95/200-item cases; no schema migration or provider replay. Evidence and measurements belong in this existing task. Local activation must follow verification and commit, and account for the currently running operator tasks.
+
 ### 2026-11-13 authorized continuation
 
 The user approved execution of `optimization-plan-2026-11-13.md`, including batch schedule content-pool configuration. Implement P0/P1: stable selection queries, scoped bounded browser restoration, save acknowledgement independent of refresh, light owner-scoped candidate reads and targeted snapshot refresh. Verify selected IDs/modes do not trigger candidate GETs, close/reopen restores browsing, old responses cannot overwrite current queries/drafts, and ownership/frozen snapshots remain intact. P2 remains a separately designed storage migration after measurements; no runtime data migration in this continuation.

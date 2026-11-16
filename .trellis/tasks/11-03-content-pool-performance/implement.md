@@ -1,5 +1,14 @@
 # Implement: content-pool performance
 
+## 2026-11-16 repair checklist
+
+- [x] Add compact selection rows and single-query full selected-item reads on PostgreSQL/SQLite.
+- [x] Scope before expensive normalization; preserve dropdown counts, duplicate precedence and raw-derived snapshot repair.
+- [x] Route source reads/refresh/manual freeze and match preview through bounded selected-item reads.
+- [x] Extend isolated correctness and 50/95/200-item regression coverage, including PostgreSQL.
+- [x] Run existing focused checks, responsiveness browser checks and full baseline; measure read-only runtime before/after.
+- [x] Review with trellis-check and record evidence/status. Commit this verified change, then inspect fresh work and use the managed candidate entry; activation SHA/receipt is authoritative at `/api/version`.
+
 ## Phase 0 — task setup
 
 - [x] Create Trellis task `11-03-content-pool-performance`.

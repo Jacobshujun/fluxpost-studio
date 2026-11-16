@@ -1,6 +1,6 @@
 # FluxPost Current Status
 
-Last updated: 2026-11-13
+Last updated: 2026-11-16
 
 ## One-Line Status
 
@@ -38,7 +38,7 @@ Local Feishu targets verified; live acceptance pending. Identity: `/api/version`
 
 ## Next Entry
 
-Pool: initial optimizations LAN verified. `11-03-content-pool-performance/verification-2026-11-13.md`. Identity: `/api/version`; P2 separate.
+Pool: batch read repair verified. `11-03-content-pool-performance/verification-2026-11-16.md`. Runtime identity: `/api/version`.
 
 OSS: `.trellis/tasks/archive/2026-10/10-28-oss-acceptance-local-cutover/verification.md`. Local cutover done; retain TOS >= Nov 4. Production/link cleanup separate. No generated-table recreation.
 

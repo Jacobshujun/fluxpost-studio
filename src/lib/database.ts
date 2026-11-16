@@ -1,5 +1,6 @@
 import { libraryAssetOrderDescending, normalizeLibraryRandomSeed } from "./library-asset-order";
 import { canvasScheduleFavoriteSchemaSql } from "./canvas/schedule-favorite-schema";
+import { contentPoolReadQuery } from "./content-pool-read-query";
 import { canvasScheduleListSql } from "./canvas/schedule-list-query";
 import type { CanvasScheduleFavorite, CanvasScheduleListQuery, CanvasScheduleListResult, CanvasScheduleSummary } from "./canvas/types";
 import { canvasHistoryPageSize, canvasHistoryQuery, type CanvasHistoryCursor } from "./canvas/history-query";
@@ -1533,6 +1534,37 @@ export type ContentPoolDeskLightRow = {
   createdAt: string;
   item: unknown;
 };
+
+export async function readContentPoolSelectionRowsFromDb(ownerUserId?: string): Promise<ContentPoolDeskLightRow[]> {
+  return readContentPoolRowsFromDb({ projection: "selection", ownerUserId });
+}
+
+export async function readContentPoolItemRowsFromDb(itemIds: string[] | undefined, ownerUserId?: string, projectId?: string): Promise<ContentPoolDeskLightRow[]> {
+  if (itemIds && !itemIds.length) return [];
+  return readContentPoolRowsFromDb({ projection: "items", itemIds, ownerUserId, projectId });
+}
+
+async function readContentPoolRowsFromDb(input: Omit<Parameters<typeof contentPoolReadQuery>[0], "backend">): Promise<ContentPoolDeskLightRow[]> {
+  await ensureDatabaseReady();
+  const { sql, values } = contentPoolReadQuery({ ...input, backend: getDatabaseBackend() });
+  const rows = getDatabaseBackend() === "postgres"
+    ? (await getPostgresPool().query(sql, values)).rows
+    : getSqliteDatabase().prepare(sql).all(...values);
+  return (rows as Array<{
+    project_id: string; project_name: string; project_updated_at: unknown;
+    project_last_crawled_at: unknown; owner_user_id?: string | null;
+    normalized_query: string; created_at: unknown; item: unknown;
+  }>).map((row) => ({
+    projectId: row.project_id,
+    projectName: row.project_name,
+    projectUpdatedAt: toIsoTimestamp(row.project_updated_at),
+    projectLastCrawledAt: row.project_last_crawled_at ? toIsoTimestamp(row.project_last_crawled_at) : undefined,
+    ownerUserId: row.owner_user_id || undefined,
+    normalizedQuery: row.normalized_query,
+    createdAt: toIsoTimestamp(row.created_at),
+    item: fromJson<unknown>(row.item),
+  }));
+}
 
 export async function readContentPoolDeskRowsFromDb(ownerUserId?: string): Promise<ContentPoolDeskLightRow[]> {
   await ensureDatabaseReady();

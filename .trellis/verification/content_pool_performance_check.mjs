@@ -82,8 +82,8 @@ assertContains(deleteItem, /mutateContentProjectsForItemIdsInDb\(/, "Single-item
 assertContains(batchStatus, /mutateContentProjectsForItemIdsInDb\(/, "Batch status updates must write only containing projects.");
 assertContains(batchDelete, /mutateContentProjectsForItemIdsInDb\(/, "Batch deletion must write only containing projects.");
 assertContains(batchTags, /mutateContentProjectsForItemIdsInDb\(/, "Batch tag updates must write only containing projects.");
-assertContains(getByIds, /readContentProjectsForItemIdsFromDb\(/, "Pool source reads must use item-scoped project lookup.");
-assertContains(freezeByIds, /readContentProjectsForItemIdsFromDb\(/, "Canvas freezing must use item-scoped project lookup.");
+assertContains(getByIds, /readSelectedContentPoolProjects\(/, "Pool source reads must load only the selected items.");
+assertContains(freezeByIds, /readSelectedContentPoolProjects\(/, "Canvas freezing must load only the selected items.");
 
 const membershipMutation = sliceFunction(collections, "updateContentPoolCollectionItems", "assertContentPoolCollectionTarget");
 assertContains(membershipMutation, /getContentPoolItemOwnersByIdsFromDb\(/, "Membership writes must validate owners through item-scoped lookup.");

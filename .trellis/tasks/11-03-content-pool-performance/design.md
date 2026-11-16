@@ -1,5 +1,13 @@
 # Design: content-pool performance
 
+## 2026-11-16 general batch repair
+
+- Candidate SQL expands each project once with `jsonb_to_recordset`, projecting only fields consumed by candidate normalization/selection. It avoids transferring unused analysis/visual/provider metadata. SQLite uses the same explicit projection. Keep project ownership restrictions in SQL.
+- Build project dropdown counts from valid candidate items before scoping. Count validity requires only the original content-presence predicate and cleaned images; unrelated items need no timestamp/media-cache normalization. Apply project and owner-aware collection/descendant scope before `refreshProjectStats`, then use the existing selector/sorter/cursor code.
+- Add an item-scoped read returning project metadata plus only requested full items. PostgreSQL uses parameterized `jsonb_path_query` with a single ID array, expanding each project once; SQLite filters `json_each`. This replaces per-ID project lookup plus full-project reads in source reads, explicit snapshot refresh and manual freezing. Preserve full raw for normalization on this server-only path. Browser candidates retain newest-project ordering; full snapshot reads retain existing database traversal precedence and explicit project identity. No planner configuration changes.
+- Match-mode preview resolves collection/descendant membership IDs before reading full items, then applies owner-aware membership, normalization and the existing matching/sorting code. Full items retain raw-derived repairs before matching. Without a collection restriction this path must still consider the full accessible candidate set. Keep sampling/freeze contracts unchanged; do not sample from a browser page.
+- Verify semantic fixtures on SQLite and isolated PostgreSQL, compare runtime read-only results to the old implementation, and profile 50/95/200-item groups with bounded query counts. No schedule/user-content mutation in measurements.
+
 ## 2026-11-13 continuation
 
 The reviewed continuation is `optimization-plan-2026-11-13.md`. Its P0/P1 selection improvements supersede the original exclusion of Canvas list optimization below. Keep the existing response shape and normalization: light owner-scoped rows for browsing, full targeted rows for explicit snapshot reads. Client queries depend on serialized query fields, never selection IDs/mode. Browser caches are bounded, session-account scoped and expiring; filter/scroll preferences contain no content payload. Explicit refresh bypasses cached results. Save acknowledges the returned item without awaiting summary; cancel earlier desk reads before mutation and preserve editing state. P2 schema changes remain separate.

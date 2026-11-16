@@ -196,6 +196,7 @@ Last updated: 2026-07-20
 
 - `content_projects.data_json` is ~222 MB across 88 rows. Never expose `raw` to the browser or read/write the whole table on hot paths; use the desk light-row reader or item-scoped helpers.
 - PostgreSQL re-detosted the project JSON per item row when item predicates or window functions followed LATERAL expansion, producing 63-second desk queries. Extract project metadata in a `MATERIALIZED` CTE, strip `raw` once, and do dedupe/filter/sort/keyset pagination in Node until the P2 item table exists.
+- A valid GIN index does not guarantee fast JSON containment lookups: Nov 16 sampled ID queries chose sequential scans (~275–301 ms each). Batch source reads/freezing use one parameterized JSONPath ID-array traversal and return only selected full items; keep raw repair on that server-only path. Browsing uses `jsonb_to_recordset` projection and scopes before media normalization. Extend projection fields when adding selection consumers; verify 50/95/200-item batches on SQLite and isolated PostgreSQL. Request-count tests alone are not runtime latency evidence.
 - Item IDs may repeat across owners or projects. Key membership merges by `(ownerUserId, itemId)` and keep newest-project-wins for item lookups.
 
 ## Verification Pitfalls
